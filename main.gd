@@ -1,6 +1,7 @@
 extends Control
 
 var game_state = "menu"
+var turn = 1
 
 func _ready():
 	$VBoxContainer/ButtonContainer/StartButton.pressed.connect(_on_start_button_pressed)
