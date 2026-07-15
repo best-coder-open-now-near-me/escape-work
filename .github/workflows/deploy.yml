@@ -20,12 +20,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Download Godot
-        run: |
-          curl -L -o godot.zip https://github.com/godotengine/godot-releases/releases/download/4.5.1-stable/Godot_v4.5.1-stable_linux.x86_64.zip
-          unzip -q godot.zip
-          chmod +x Godot_v4.5.1-stable_linux.x86_64
-          mv Godot_v4.5.1-stable_linux.x86_64 godot
+      - name: Setup Godot
+        uses: crystal-bit/setup-godot@v1
+        with:
+          godot-version: 4.5.1
 
       - name: Export game to Web
         run: |
