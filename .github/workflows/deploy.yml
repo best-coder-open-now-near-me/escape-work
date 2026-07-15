@@ -22,14 +22,15 @@ jobs:
 
       - name: Download Godot
         run: |
-          wget -q https://github.com/godotengine/godot-releases/releases/download/4.5.1-stable/Godot_v4.5.1-stable_linux.x86_64.zip
-          unzip -q Godot_v4.5.1-stable_linux.x86_64.zip
+          curl -L -o godot.zip https://github.com/godotengine/godot-releases/releases/download/4.5.1-stable/Godot_v4.5.1-stable_linux.x86_64.zip
+          unzip -q godot.zip
           chmod +x Godot_v4.5.1-stable_linux.x86_64
+          mv Godot_v4.5.1-stable_linux.x86_64 godot
 
       - name: Export game to Web
         run: |
           mkdir -p build/web
-          ./Godot_v4.5.1-stable_linux.x86_64 --headless --export-release "Web" build/web/index.html
+          ./godot --headless --export-release "Web" build/web/index.html
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
