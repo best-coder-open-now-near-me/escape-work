@@ -1,0 +1,18 @@
+# Godot-specific ignores
+.godot/
+export.json
+*.import
+
+# Build outputs
+build/
+dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

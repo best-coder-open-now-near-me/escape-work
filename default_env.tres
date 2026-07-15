@@ -1,0 +1,7 @@
+[gd_resource type="Environment" format=3 uid="uid://da46yrxrbn3y3"]
+
+ambient_light_source = 1
+ambient_light_intensity = 1.0
+ambient_light_sky_contribution = 0.0
+background_mode = 0
+background_color = Color(0.1, 0.1, 0.15, 1)
