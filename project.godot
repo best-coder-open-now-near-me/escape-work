@@ -1,7 +1,5 @@
 ; Engine configuration file.
-; It's best edited using the editor UI and not directly,
-; since the parameters that go here are just too many and would
-; make the file too hard to read at first sight.
+; It's best edited using the editor UI and not directly.
 
 config_version=5
 
@@ -11,10 +9,14 @@ config/name="Escape Work"
 config/description="A turn-based RPG"
 config/version="0.1.0"
 run/main_scene="res://main.tscn"
-config/features=PackedStringArray("4.5", "forward_plus")
+config/features=PackedStringArray("4.5")
+
+[display]
+
+window/size/viewport_width=1152
+window/size/viewport_height=648
+window/stretch/mode="canvas_items"
 
 [rendering]
 
-textures/canvas_textures/default_canvas_texture=SubResource("CanvasTexture_rjin2")
 environment/defaults/default_clear_color=Color(0.1, 0.1, 0.15, 1)
-environment/defaults/default_environment="res://default_env.tres"

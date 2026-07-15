@@ -1,44 +1,76 @@
-name: Build and Deploy to GitHub Pages
+name: Build and Deploy to itch.io
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
+  workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
+env:
+  GODOT_VERSION: 4.5.1
+  # NB: the itch username ("nr") differs from the GitHub org ("near").
+  ITCH_USER: best-coder-open-now-nr-me
+  ITCH_GAME: escape-work
+  ITCH_CHANNEL: html5
 
 jobs:
+  # Build runs inside the Godot image. This is the NON-mono image on purpose:
+  # Godot 4 cannot export to Web from a C#/.NET editor build.
   build:
     runs-on: ubuntu-latest
     container:
-      image: abarichello/godot-ci:4.5.1
+      image: barichello/godot-ci:4.5.1
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Export game to Web
+      # The image ships export templates under /root, but the job does not run
+      # as root, so Godot cannot find them until they are moved into HOME.
+      - name: Install export templates
         run: |
-          mkdir -p build/web
-          godot --headless --export-release "Web" build/web/index.html
+          mkdir -v -p ~/.local/share/godot/export_templates/
+          mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable \
+             ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+      # .godot/ is gitignored, so a fresh checkout has no import cache.
+      - name: Import resources
+        run: godot --headless --import --quit
+
+      - name: Export web build
+        run: |
+          mkdir -v -p build/web
+          godot --headless --verbose --export-release "Web" build/web/index.html
+
+      - name: Fail early if the export produced nothing
+        run: test -s build/web/index.html || { echo "Web export produced no index.html"; exit 1; }
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
         with:
-          path: 'build/web'
+          name: web-build
+          path: build/web
 
+  # Deploy runs on a plain runner rather than the Godot container, so we are not
+  # relying on that image happening to ship curl/unzip.
   deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
     needs: build
+    runs-on: ubuntu-latest
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Download build
+        uses: actions/download-artifact@v4
+        with:
+          name: web-build
+          path: build/web
+
+      - name: Install butler
+        run: |
+          curl -sL -o butler.zip https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default
+          unzip -q butler.zip -d butler-bin
+          chmod +x butler-bin/butler
+          ./butler-bin/butler -V
+
+      - name: Push to itch.io
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          ./butler-bin/butler push build/web \
+            "${ITCH_USER}/${ITCH_GAME}:${ITCH_CHANNEL}"

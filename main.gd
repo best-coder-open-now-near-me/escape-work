@@ -1,11 +1,14 @@
 extends Control
 
-var game_state = "menu"
-var turn = 1
+var turn := 1
 
-func _ready():
-	$VBoxContainer/ButtonContainer/StartButton.pressed.connect(_on_start_button_pressed)
+@onready var status: Label = $VBoxContainer/Status
+@onready var start_button: Button = $VBoxContainer/StartButton
 
-func _on_start_button_pressed():
-	game_state = "playing"
-	$VBoxContainer/GameContent/Status.text = "Game Started - Turn 1"
+
+func _ready() -> void:
+	start_button.pressed.connect(_on_start_pressed)
+
+
+func _on_start_pressed() -> void:
+	status.text = "Game Started - Turn %d" % turn

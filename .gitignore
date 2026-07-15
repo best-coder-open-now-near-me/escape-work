@@ -1,7 +1,11 @@
-# Godot-specific ignores
+# Godot 4+ specific ignores
 .godot/
-export.json
-*.import
+/android/
+
+# Mono/.NET build artifacts (local editor is a mono build)
+.mono/
+data_*/
+*.csproj.old
 
 # Build outputs
 build/
