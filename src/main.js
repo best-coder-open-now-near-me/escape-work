@@ -8,6 +8,8 @@
 import level from '../levels/level1.json';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { TILE_TYPES } from './data/tiles.js';
+import { CLASSES } from './data/classes.js';
+import { ACTIONS } from './data/actions.js';
 import { parseLevel } from './grid.js';
 import { findPath, DIRS8 } from './pathfinding.js';
 import { createSheet, gainXp, applyDamage } from './stats.js';
@@ -22,7 +24,9 @@ const app = createApp(document.getElementById('app'));
 const grid = parseLevel(level);
 const { walls, updateWallFade, floorHeight } = buildLevel(app, grid);
 
-const sheet = createSheet('office-drone');
+// The sheet (and the player's model) only exist once a class is picked - the
+// picker overlay is the first thing the player sees.
+let sheet = null;
 const player = new PlayerActor(grid.playerSpawn.x, grid.playerSpawn.z);
 const enemies = grid.enemySpawns.map((s) => new EnemyActor(s.x, s.z, s.type, ENEMY_TYPES[s.type]));
 
@@ -36,9 +40,6 @@ const isHazard = (x, z) => grid.defAt(x, z).onEnter?.effect === 'damage';
 
 // --- populate the scene -------------------------------------------------------
 const lift = floorHeight / 2;
-placeModel(app, 'assets/characters/worker.glb', player.x, player.z, {
-  lift, rotY: 90, onReady: (e) => player.attach(e),
-});
 for (const en of enemies) {
   placeModel(app, `assets/characters/${en.def.model}.glb`, en.x, en.z, {
     lift, rotY: -90, onReady: (e) => en.attach(e),
@@ -51,8 +52,17 @@ placeModel(app, 'assets/furniture/cabinet.glb', 9, 3, { scale: 0.5, lift });
 placeModel(app, 'assets/furniture/plant.glb', 10, 3, { scale: 0.9, lift });
 
 // --- game flow ----------------------------------------------------------------
+function onClassPicked(classId) {
+  sheet = createSheet(classId);
+  placeModel(app, `assets/characters/${sheet.model}.glb`, player.x, player.z, {
+    lift, rotY: 90, onReady: (e) => player.attach(e),
+  });
+  ui.updateStatsHud(sheet);
+  ui.say(`${sheet.className}. Now get out of here.`);
+}
+
 function moveTo(tile) {
-  if (!tile || inCombat || gameOver || !isWalkable(tile.x, tile.z)) return;
+  if (!tile || !sheet || inCombat || gameOver || !isWalkable(tile.x, tile.z)) return;
   const p = findPath(isWalkable, player.x, player.z, tile.x, tile.z);
   if (p && p.length > 1) {
     player.setPath(p);
@@ -85,7 +95,7 @@ const adjacentEnemy = () =>
   enemies.find((e) => e.alive && Math.abs(player.x - e.x) <= 1 && Math.abs(player.z - e.z) <= 1) || null;
 
 function checkCombatTrigger() {
-  if (inCombat || gameOver || !player.entity) return;
+  if (!sheet || inCombat || gameOver || !player.entity) return;
   const en = adjacentEnemy();
   if (!en) return;
   player.clearPath();
@@ -148,13 +158,13 @@ const controls = createControls({
   focus: grid.playerSpawn,
   onAnyLeftPress: () => ui.hideMenu(),
   onLeftClickTile: (tile) => {
-    if (!tile || inCombat || gameOver) return;
+    if (!tile || !sheet || inCombat || gameOver) return;
     const en = enemyAt(tile.x, tile.z);
     if (en) confront(en);
     else moveTo(tile);
   },
   onRightClickTile: (tile, sx, sy) => {
-    if (!tile || inCombat || gameOver) return;
+    if (!tile || !sheet || inCombat || gameOver) return;
     const en = enemyAt(tile.x, tile.z);
     if (en) {
       ui.showMenu(sx, sy, [
@@ -200,9 +210,9 @@ app.on('update', (dt) => {
   updateWallFade(controls.cameraEntity, player.entity ? player.entity.getPosition() : null);
 });
 
-// --- HUD ------------------------------------------------------------------------
+// --- boot ---------------------------------------------------------------------
 ui.say(grid.name);
-ui.updateStatsHud(sheet);
+ui.showClassPicker(CLASSES, ACTIONS, onClassPicked);
 
 // Small read-only handle for tests and console poking.
 window.__game = {
@@ -211,7 +221,7 @@ window.__game = {
   get gameOver() { return gameOver; },
   get lastPath() { return lastPath; },
   get fadedWallCount() { return walls.filter((w) => w.faded).length; },
-  get stats() { return { ...sheet }; },
+  get stats() { return sheet ? { ...sheet } : null; },
   get enemies() { return enemies.map((e) => ({ name: e.def.name, x: e.x, z: e.z, alive: e.alive })); },
 };
 

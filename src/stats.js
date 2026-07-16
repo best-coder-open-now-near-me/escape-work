@@ -9,6 +9,7 @@ export function createSheet(classId) {
   return {
     classId,
     className: cls.name,
+    model: cls.model,
     hp: cls.maxHp,
     maxHp: cls.maxHp,
     level: 1,

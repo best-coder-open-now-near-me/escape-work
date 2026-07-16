@@ -68,7 +68,8 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - **New hazard/tile**: entry in `data/tiles.js` + character in `tiles` legend.
 - **Weapons/items**: extend `data/actions.js`; equipping = swapping ids in
   `sheet.actions` (see `stats.js`).
-- **New class**: entry in `data/classes.js`; a class picker would call
-  `createSheet(classId)`.
+- **New class**: entry in `data/classes.js` (stats, model, action ids) - the
+  boot-time class picker (`ui.showClassPicker`) renders cards straight from the
+  registry, so new classes appear automatically.
 - **New level**: another JSON in `levels/` + a loader/transition in `main.js`
   (currently hardwired to level1).

@@ -89,3 +89,29 @@ export function showLoseScreen(message) {
     ${button('restart', 'Try Again')}`);
   div.querySelector('#restart').onclick = () => location.reload();
 }
+
+// --- class picker -------------------------------------------------------------
+// Shown once at boot. Cards are generated from the class registry plus the
+// action registry, so new classes appear here automatically.
+export function showClassPicker(classes, actions, onPick) {
+  const cards = Object.entries(classes).map(([id, cls]) => `
+    <button id="pick-${id}" data-class="${id}" style="flex:1; min-width:190px; text-align:left;
+      background:#2a2a40; border:1px solid #3a3a52; border-radius:10px; padding:16px;
+      color:#f0f0f5; font:inherit; cursor:pointer;">
+      <div style="font-size:16px; font-weight:700; margin-bottom:6px;">${cls.name}</div>
+      <div style="opacity:.75; min-height:44px; margin-bottom:10px;">${cls.tagline}</div>
+      <div style="opacity:.9; font-size:12px;">HP ${cls.maxHp}</div>
+      <div style="opacity:.65; font-size:12px; margin-top:4px;">
+        ${cls.actions.map((a) => actions[a].label).join(' · ')}
+      </div>
+    </button>`).join('');
+  const div = overlay('class-picker', `
+    <div style="font-size:22px; font-weight:800; letter-spacing:2px; margin-bottom:6px;">CHOOSE YOUR CAREER MISTAKE</div>
+    <div style="opacity:.8; margin-bottom:18px;">Every escape starts with a bad job title.</div>
+    <div style="display:flex; gap:12px; flex-wrap:wrap; max-width:680px;">${cards}</div>`);
+  for (const card of div.querySelectorAll('button[data-class]')) {
+    card.onmouseenter = () => { card.style.borderColor = '#7a7ab8'; };
+    card.onmouseleave = () => { card.style.borderColor = '#3a3a52'; };
+    card.onclick = () => { div.remove(); onPick(card.dataset.class); };
+  }
+}
