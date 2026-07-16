@@ -9,6 +9,7 @@
 // (its prebuilt UMD build) which exposes a global `pc`; we only bundle our own
 // code + the level data here.
 import level from '../levels/level1.json';
+import { startCombat } from './combat.js';
 
 const pc = window.pc;
 
@@ -58,6 +59,14 @@ function makeMaterial(color) {
 const materials = {};
 for (const ch of Object.keys(TILE)) materials[ch] = makeMaterial(TILE[ch].color);
 
+// Ghost material for walls that stand between the camera and the player -
+// classic CRPG occlusion fade so you never lose sight of your character.
+const wallFadeMaterial = makeMaterial(TILE['#'].color);
+wallFadeMaterial.opacity = 0.22;
+wallFadeMaterial.blendType = pc.BLEND_NORMAL;
+wallFadeMaterial.depthWrite = false;
+wallFadeMaterial.update();
+
 function addBox(material, x, y, z, sx, sy, sz) {
   const e = new pc.Entity();
   e.addComponent('render', { type: 'box', material });
@@ -71,6 +80,7 @@ let playerX = (width - 1) / 2;
 let playerZ = (height - 1) / 2;
 let enemyX = null;
 let enemyZ = null;
+const walls = []; // wall entities + tile coords, for the occlusion fade
 
 for (let z = 0; z < height; z++) {
   for (let x = 0; x < rows[z].length; x++) {
@@ -82,7 +92,8 @@ for (let z = 0; z < height; z++) {
     // '@' and 'E' are drawn as character models (below), so skip their markers.
     if (ch !== '.' && ch !== '@' && ch !== 'E' && TILE[ch]) {
       const t = TILE[ch];
-      addBox(materials[ch], x, t.height / 2, z, 0.78, t.height, 0.78);
+      const box = addBox(materials[ch], x, t.height / 2, z, 0.78, t.height, 0.78);
+      if (ch === '#') walls.push({ entity: box, x, z, faded: false });
     }
   }
 }
@@ -113,8 +124,14 @@ placeModel('assets/furniture/cabinet.glb', 9, 3, { scale: 0.5 });
 placeModel('assets/furniture/plant.glb', 10, 3, { scale: 0.9 });
 
 // Characters: Kenney Mini Characters.
+let managerEntity = null;
+let enemyAlive = enemyX !== null;
 if (enemyX !== null) {
-  placeModel('assets/characters/manager.glb', enemyX, enemyZ, { scale: 1, rotY: -90 });
+  placeModel('assets/characters/manager.glb', enemyX, enemyZ, {
+    scale: 1,
+    rotY: -90,
+    onReady: (e) => { managerEntity = e; },
+  });
 }
 let player = null;
 const playerTile = { x: playerX, z: playerZ };
@@ -203,33 +220,48 @@ function screenToTile(sx, sy) {
 const MOVE_SPEED = 3.5; // tiles per second
 let path = null;
 let pathIndex = 0;
+let lastPath = null; // kept for debugging/tests
+let inCombat = false;
 
-// Shortest 4-directional path around walls (BFS - uniform cost, small grid).
+// Shortest 8-directional path around walls (Dijkstra: diagonals cost sqrt(2)).
+// A diagonal step is only allowed when both adjacent orthogonal tiles are open,
+// so the character never clips a wall corner.
+const DIRS8 = [
+  [1, 0], [-1, 0], [0, 1], [0, -1],
+  [1, 1], [1, -1], [-1, 1], [-1, -1],
+];
 function findPath(sx, sz, tx, tz) {
   if (!isWalkable(tx, tz)) return null;
   const key = (x, z) => x + ',' + z;
-  const prev = new Map([[key(sx, sz), null]]);
-  const queue = [[sx, sz]];
-  const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  while (queue.length) {
-    const [x, z] = queue.shift();
+  const dist = new Map([[key(sx, sz), 0]]);
+  const prev = new Map();
+  const open = [[0, sx, sz]];
+  while (open.length) {
+    open.sort((a, b) => a[0] - b[0]); // tiny grid; a heap would be overkill
+    const [d, x, z] = open.shift();
     if (x === tx && z === tz) break;
-    for (const [dx, dz] of dirs) {
+    if (d > dist.get(key(x, z))) continue; // stale queue entry
+    for (const [dx, dz] of DIRS8) {
       const nx = x + dx;
       const nz = z + dz;
+      if (!isWalkable(nx, nz)) continue;
+      if (dx !== 0 && dz !== 0 && !(isWalkable(x + dx, z) && isWalkable(x, z + dz))) continue;
+      const nd = d + (dx !== 0 && dz !== 0 ? Math.SQRT2 : 1);
       const k = key(nx, nz);
-      if (!prev.has(k) && isWalkable(nx, nz)) {
+      if (nd < (dist.get(k) ?? Infinity)) {
+        dist.set(k, nd);
         prev.set(k, [x, z]);
-        queue.push([nx, nz]);
+        open.push([nd, nx, nz]);
       }
     }
   }
-  if (!prev.has(key(tx, tz))) return null;
+  if (!dist.has(key(tx, tz))) return null;
   const out = [];
   let cur = [tx, tz];
   while (cur) {
     out.unshift(cur);
-    cur = prev.get(key(cur[0], cur[1]));
+    cur = prev.get(key(cur[0], cur[1])) ?? null;
+    if (cur && cur[0] === sx && cur[1] === sz) { out.unshift(cur); break; }
   }
   return out; // includes the start tile at index 0
 }
@@ -239,12 +271,65 @@ function moveTo(tile) {
   const p = findPath(playerTile.x, playerTile.z, tile.x, tile.z);
   if (p && p.length > 1) {
     path = p;
+    lastPath = p;
     pathIndex = 1; // index 0 is where we already stand
   }
 }
 
+// Walk to the open tile nearest the Manager; combat starts on arrival (the
+// adjacency check in updateMovement fires it).
+function confront() {
+  if (!player || !enemyAlive) return;
+  let best = null;
+  for (const [dx, dz] of DIRS8) {
+    const ax = enemyX + dx;
+    const az = enemyZ + dz;
+    if (!isWalkable(ax, az)) continue;
+    const p = findPath(playerTile.x, playerTile.z, ax, az);
+    if (p && (!best || p.length < best.length)) best = p;
+  }
+  if (!best) return;
+  if (best.length > 1) {
+    path = best;
+    lastPath = best;
+    pathIndex = 1;
+  } else {
+    checkCombatTrigger(); // already standing next to them
+  }
+}
+
+function checkCombatTrigger() {
+  if (inCombat || !enemyAlive || !player) return;
+  if (Math.abs(playerTile.x - enemyX) <= 1 && Math.abs(playerTile.z - enemyZ) <= 1) {
+    path = null;
+    inCombat = true;
+    hideMenu();
+    player.setEulerAngles(0, Math.atan2(enemyX - playerTile.x, enemyZ - playerTile.z) * pc.math.RAD_TO_DEG, 0);
+    say('The Manager has noticed you.');
+    startCombat({
+      enemyName: 'The Manager',
+      onWin: () => {
+        inCombat = false;
+        enemyAlive = false;
+        if (managerEntity) managerEntity.destroy();
+        // Open up the tile they were guarding.
+        rows[enemyZ] = rows[enemyZ].slice(0, enemyX) + '.' + rows[enemyZ].slice(enemyX + 1);
+        say('The way is clear. Head for the exit.');
+      },
+      onLose: () => { inCombat = false; },
+    });
+  }
+}
+
 function onLeftClick(sx, sy) {
-  moveTo(screenToTile(sx, sy));
+  if (inCombat) return;
+  const tile = screenToTile(sx, sy);
+  if (!tile) return;
+  if (enemyAlive && tile.x === enemyX && tile.z === enemyZ) {
+    confront();
+    return;
+  }
+  moveTo(tile);
 }
 
 function updateMovement(dt) {
@@ -259,11 +344,39 @@ function updateMovement(dt) {
     player.setPosition(target);
     playerTile.x = tx;
     playerTile.z = tz;
-    if (++pathIndex >= path.length) path = null;
+    if (++pathIndex >= path.length) {
+      path = null;
+      if (cellAt(tx, tz) === '>') say('You reach the exit. Freedom smells like the parking garage.');
+    }
+    checkCombatTrigger();
   } else {
     to.normalize();
     player.setPosition(pos.add(to.scale(step)));
     player.setEulerAngles(0, Math.atan2(to.x, to.z) * pc.math.RAD_TO_DEG, 0);
+  }
+}
+
+// Fade walls that sit between the camera and the player (CRPG occlusion).
+// With an orthographic camera every point looks along the same direction, so
+// "toward the camera" is one fixed axis: walk it from the player and fade any
+// wall close to that line.
+const _fadeDir = new pc.Vec3();
+function updateWallFade() {
+  if (!player) return;
+  const fwd = cameraEntity.forward;
+  _fadeDir.set(-fwd.x, 0, -fwd.z).normalize();
+  const pos = player.getPosition();
+  for (const w of walls) {
+    const vx = w.x - pos.x;
+    const vz = w.z - pos.z;
+    const t = vx * _fadeDir.x + vz * _fadeDir.z;
+    const px = vx - t * _fadeDir.x;
+    const pz = vz - t * _fadeDir.z;
+    const shouldFade = t > 0.3 && Math.hypot(px, pz) < 1.05;
+    if (shouldFade !== w.faded) {
+      w.faded = shouldFade;
+      w.entity.render.meshInstances[0].material = shouldFade ? wallFadeMaterial : materials['#'];
+    }
   }
 }
 
@@ -278,6 +391,7 @@ function updateCamera() {
 app.on('update', (dt) => {
   updateMovement(dt);
   updateCamera();
+  updateWallFade();
 });
 
 // --- right-click context menu (HTML overlay) -----------------------------
@@ -326,11 +440,12 @@ function say(text) {
 
 // Context-sensitive actions, office-CRPG flavoured.
 function onRightClick(sx, sy) {
+  if (inCombat) return;
   const tile = screenToTile(sx, sy);
   if (!tile) return;
-  if (enemyX !== null && tile.x === enemyX && tile.z === enemyZ) {
+  if (enemyAlive && tile.x === enemyX && tile.z === enemyZ) {
     showMenu(sx, sy, [
-      { label: 'Confront the Manager', action: () => say('"Do you have a minute?" Never a good sign.') },
+      { label: 'Confront the Manager', action: () => confront() },
       { label: 'Avoid eye contact', action: () => say('You study your shoes intently.') },
       { label: 'Examine', action: () => say('The Manager: radiates unread-email energy.') },
     ]);
@@ -348,5 +463,14 @@ function onRightClick(sx, sy) {
 
 // --- HUD ------------------------------------------------------------------
 say(level.name || '');
+
+// Small read-only handle for tests and console poking.
+window.__game = {
+  get playerTile() { return { ...playerTile }; },
+  get inCombat() { return inCombat; },
+  get enemyAlive() { return enemyAlive; },
+  get lastPath() { return lastPath; },
+  get fadedWallCount() { return walls.filter((w) => w.faded).length; },
+};
 
 app.start();
