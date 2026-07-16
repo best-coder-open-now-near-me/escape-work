@@ -6,7 +6,7 @@
 // The PlayCanvas engine is loaded separately via a <script> tag in index.html
 // (its prebuilt UMD build), which exposes a global `pc`. We only bundle our own
 // code + the level data here, which keeps esbuild away from the engine's
-// internals. The level is plain JSON you can hand-edit.
+// internals.
 import level from '../levels/level1.json';
 
 const pc = window.pc;
@@ -20,8 +20,13 @@ app.setCanvasFillMode(pc.FILLMODE_FILL_WINDOW);
 app.setCanvasResolution(pc.RESOLUTION_AUTO);
 window.addEventListener('resize', () => app.resizeCanvas());
 
-// Fully-lit ambient so flat material colours show without placing lights.
-app.scene.ambientLight = new pc.Color(1, 1, 1);
+// Ambient fills the shadows; a directional light gives real shading so imported
+// models (like the duck's PBR material) are actually lit, not black.
+app.scene.ambientLight = new pc.Color(0.55, 0.55, 0.62);
+const sun = new pc.Entity('sun');
+sun.addComponent('light', { type: 'directional', intensity: 1.4 });
+sun.setEulerAngles(55, 35, 0);
+app.root.addChild(sun);
 
 // --- level -> tiles -------------------------------------------------------
 // One colour per legend character. Tweaking these (or the map) is all it takes
@@ -57,14 +62,19 @@ const rows = level.map;
 const height = rows.length;
 const width = Math.max(...rows.map((r) => r.length));
 
+let playerX = (width - 1) / 2;
+let playerZ = (height - 1) / 2;
+
 for (let z = 0; z < height; z++) {
   for (let x = 0; x < rows[z].length; x++) {
     const ch = rows[z][x];
     if (ch === ' ') continue;
+    if (ch === '@') { playerX = x; playerZ = z; }
     // Every walkable/occupied cell gets a floor tile...
     addBox(materials['.'], x, 0, z, 0.96, FLOOR.height, 0.96);
-    // ...and non-floor cells get a coloured marker sitting on top.
-    if (ch !== '.' && TILE[ch]) {
+    // ...and non-floor cells get a coloured marker sitting on top. '@' is drawn
+    // as the loaded 3D model instead (below), so skip its marker here.
+    if (ch !== '.' && ch !== '@' && TILE[ch]) {
       const t = TILE[ch];
       addBox(materials[ch], x, t.height / 2, z, 0.78, t.height, 0.78);
     }
@@ -85,6 +95,33 @@ camera.addComponent('camera', {
 camera.setPosition(cx, 20, cz + 3.5);
 camera.lookAt(cx, 0, cz);
 app.root.addChild(camera);
+
+// --- a loaded 3D model (assets/duck.glb) ----------------------------------
+// Proof the asset pipeline works: a .glb file lives in assets/, gets loaded by
+// URL at runtime, and dropped into the scene. Swap this for real office props
+// later - the loading code stays the same.
+// The duck's natural size is ~2 units; scale it to roughly fill a tile. Tweak
+// MODEL_SCALE (and MODEL_LIFT, which rests it on the floor) for other assets.
+const MODEL_SCALE = 0.6;
+const MODEL_LIFT = 0.3;
+let model = null;
+const modelAsset = new pc.Asset('duck', 'container', { url: 'assets/duck.glb' });
+app.assets.add(modelAsset);
+modelAsset.ready(() => {
+  const visual = modelAsset.resource.instantiateRenderEntity();
+  model = new pc.Entity('duck');
+  model.addChild(visual);
+  model.setLocalScale(MODEL_SCALE, MODEL_SCALE, MODEL_SCALE);
+  model.setPosition(playerX, MODEL_LIFT, playerZ);
+  app.root.addChild(model);
+});
+modelAsset.on('error', (err) => console.warn('asset load failed:', err));
+app.assets.load(modelAsset);
+
+// Spin it in place so it clearly reads as a live 3D object, not a flat picture.
+app.on('update', (dt) => {
+  if (model) model.rotate(0, 40 * dt, 0);
+});
 
 // --- HUD ------------------------------------------------------------------
 const subtitle = document.getElementById('subtitle');

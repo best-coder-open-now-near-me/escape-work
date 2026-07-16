@@ -3,7 +3,7 @@
 // copies the HTML shell alongside it. No PlayCanvas cloud involved: everything
 // that makes the game is in this repo.
 import * as esbuild from 'esbuild';
-import { cpSync, mkdirSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 
 const OUT = 'build/web';
 // PlayCanvas's prebuilt UMD engine build. We ship it as-is (a <script> tag in
@@ -26,5 +26,11 @@ await esbuild.build({
 
 cpSync('src/index.html', `${OUT}/index.html`);
 cpSync(ENGINE, `${OUT}/playcanvas.min.js`);
+
+// Ship everything in assets/ (models, textures, audio) as static files. Drop a
+// file in assets/ and it deploys automatically - no build change needed.
+if (existsSync('assets')) {
+  cpSync('assets', `${OUT}/assets`, { recursive: true });
+}
 
 console.log(`Build complete -> ${OUT}/`);
