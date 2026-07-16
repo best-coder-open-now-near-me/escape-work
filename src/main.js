@@ -176,6 +176,9 @@ app.mouse.disableContextMenu(); // we draw our own right-click menu
 // Chromium starts autoscroll on middle-press; suppress just the default action
 // (preventDefault, not pointerdown, so PlayCanvas still gets the mousedown).
 canvas.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
+// Keep wheel events inside the game: without this the browser (or the itch.io
+// page hosting the iframe) scrolls instead of zooming.
+canvas.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
 
 let orbiting = false;
 app.mouse.on(pc.EVENT_MOUSEDOWN, (e) => {
@@ -198,7 +201,9 @@ app.mouse.on(pc.EVENT_MOUSEMOVE, (e) => {
   applyCamera();
 });
 app.mouse.on(pc.EVENT_MOUSEWHEEL, (e) => {
-  CAM.zoom = pc.math.clamp(CAM.zoom - e.wheelDelta * 0.6, CAM.minZoom, CAM.maxZoom);
+  // Scroll up (away from you) zooms in - wheelDelta is negative for scroll-up,
+  // so adding it shrinks the ortho height.
+  CAM.zoom = pc.math.clamp(CAM.zoom + e.wheelDelta * 0.6, CAM.minZoom, CAM.maxZoom);
   applyCamera();
 });
 
