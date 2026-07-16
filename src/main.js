@@ -96,31 +96,39 @@ camera.setPosition(cx, 20, cz + 3.5);
 camera.lookAt(cx, 0, cz);
 app.root.addChild(camera);
 
-// --- a loaded 3D model (assets/duck.glb) ----------------------------------
-// Proof the asset pipeline works: a .glb file lives in assets/, gets loaded by
-// URL at runtime, and dropped into the scene. Swap this for real office props
-// later - the loading code stays the same.
-// The duck's natural size is ~2 units; scale it to roughly fill a tile. Tweak
-// MODEL_SCALE (and MODEL_LIFT, which rests it on the floor) for other assets.
-const MODEL_SCALE = 0.6;
-const MODEL_LIFT = 0.3;
-let model = null;
-const modelAsset = new pc.Asset('duck', 'container', { url: 'assets/duck.glb' });
-app.assets.add(modelAsset);
-modelAsset.ready(() => {
-  const visual = modelAsset.resource.instantiateRenderEntity();
-  model = new pc.Entity('duck');
-  model.addChild(visual);
-  model.setLocalScale(MODEL_SCALE, MODEL_SCALE, MODEL_SCALE);
-  model.setPosition(playerX, MODEL_LIFT, playerZ);
-  app.root.addChild(model);
-});
-modelAsset.on('error', (err) => console.warn('asset load failed:', err));
-app.assets.load(modelAsset);
+// --- models ---------------------------------------------------------------
+// Load a .glb, wrap it in a holder (so scaling/rotating is predictable), and
+// drop it on a tile. This is the reusable way we place every prop and
+// character. Models vary in scale, so `scale` is per-asset (KayKit furniture is
+// about tile-sized at 1; the placeholder duck needs 0.6).
+const spinners = [];
+function placeModel(url, tileX, tileZ, { scale = 1, lift = FLOOR.height / 2, rotY = 0, spin = false } = {}) {
+  const asset = new pc.Asset(url, 'container', { url });
+  app.assets.add(asset);
+  asset.ready(() => {
+    const holder = new pc.Entity(url);
+    holder.addChild(asset.resource.instantiateRenderEntity());
+    holder.setLocalScale(scale, scale, scale);
+    holder.setEulerAngles(0, rotY, 0);
+    holder.setPosition(tileX, lift, tileZ);
+    app.root.addChild(holder);
+    if (spin) spinners.push(holder);
+  });
+  asset.on('error', (err) => console.warn('asset load failed:', url, err));
+  app.assets.load(asset);
+}
 
-// Spin it in place so it clearly reads as a live 3D object, not a flat picture.
+// Environment: KayKit office furniture. Character: a placeholder duck for now
+// (swap for a real character once we have one).
+placeModel('assets/furniture/desk.glb', 3, 1, { scale: 0.5 });
+placeModel('assets/furniture/chair.glb', 2, 1, { scale: 0.55, rotY: 90 });
+placeModel('assets/furniture/cabinet.glb', 9, 3, { scale: 0.5 });
+placeModel('assets/furniture/plant.glb', 10, 3, { scale: 0.9 });
+placeModel('assets/duck.glb', playerX, playerZ, { scale: 0.6, lift: 0.3, spin: true });
+
+// Spin any model flagged for it (just the placeholder character right now).
 app.on('update', (dt) => {
-  if (model) model.rotate(0, 40 * dt, 0);
+  for (const e of spinners) e.rotate(0, 40 * dt, 0);
 });
 
 // --- HUD ------------------------------------------------------------------
