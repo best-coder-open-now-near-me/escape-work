@@ -64,17 +64,20 @@ const width = Math.max(...rows.map((r) => r.length));
 
 let playerX = (width - 1) / 2;
 let playerZ = (height - 1) / 2;
+let enemyX = null;
+let enemyZ = null;
 
 for (let z = 0; z < height; z++) {
   for (let x = 0; x < rows[z].length; x++) {
     const ch = rows[z][x];
     if (ch === ' ') continue;
     if (ch === '@') { playerX = x; playerZ = z; }
+    if (ch === 'E') { enemyX = x; enemyZ = z; }
     // Every walkable/occupied cell gets a floor tile...
     addBox(materials['.'], x, 0, z, 0.96, FLOOR.height, 0.96);
-    // ...and non-floor cells get a coloured marker sitting on top. '@' is drawn
-    // as the loaded 3D model instead (below), so skip its marker here.
-    if (ch !== '.' && ch !== '@' && TILE[ch]) {
+    // ...and non-floor cells get a coloured marker on top. '@' and 'E' are drawn
+    // as character models instead (below), so skip their markers here.
+    if (ch !== '.' && ch !== '@' && ch !== 'E' && TILE[ch]) {
       const t = TILE[ch];
       addBox(materials[ch], x, t.height / 2, z, 0.78, t.height, 0.78);
     }
@@ -98,11 +101,9 @@ app.root.addChild(camera);
 
 // --- models ---------------------------------------------------------------
 // Load a .glb, wrap it in a holder (so scaling/rotating is predictable), and
-// drop it on a tile. This is the reusable way we place every prop and
-// character. Models vary in scale, so `scale` is per-asset (KayKit furniture is
-// about tile-sized at 1; the placeholder duck needs 0.6).
-const spinners = [];
-function placeModel(url, tileX, tileZ, { scale = 1, lift = FLOOR.height / 2, rotY = 0, spin = false } = {}) {
+// drop it on a tile. Reusable for every prop and character. Models vary in
+// scale, so `scale` is per-asset.
+function placeModel(url, tileX, tileZ, { scale = 1, lift = FLOOR.height / 2, rotY = 0 } = {}) {
   const asset = new pc.Asset(url, 'container', { url });
   app.assets.add(asset);
   asset.ready(() => {
@@ -112,24 +113,22 @@ function placeModel(url, tileX, tileZ, { scale = 1, lift = FLOOR.height / 2, rot
     holder.setEulerAngles(0, rotY, 0);
     holder.setPosition(tileX, lift, tileZ);
     app.root.addChild(holder);
-    if (spin) spinners.push(holder);
   });
   asset.on('error', (err) => console.warn('asset load failed:', url, err));
   app.assets.load(asset);
 }
 
-// Environment: KayKit office furniture. Character: a placeholder duck for now
-// (swap for a real character once we have one).
+// Environment: KayKit office furniture.
 placeModel('assets/furniture/desk.glb', 3, 1, { scale: 0.5 });
 placeModel('assets/furniture/chair.glb', 2, 1, { scale: 0.55, rotY: 90 });
 placeModel('assets/furniture/cabinet.glb', 9, 3, { scale: 0.5 });
 placeModel('assets/furniture/plant.glb', 10, 3, { scale: 0.9 });
-placeModel('assets/duck.glb', playerX, playerZ, { scale: 0.6, lift: 0.3, spin: true });
 
-// Spin any model flagged for it (just the placeholder character right now).
-app.on('update', (dt) => {
-  for (const e of spinners) e.rotate(0, 40 * dt, 0);
-});
+// Characters: Kenney Mini Characters - you at '@', an enemy at 'E'.
+placeModel('assets/characters/worker.glb', playerX, playerZ, { scale: 1, rotY: 90 });
+if (enemyX !== null) {
+  placeModel('assets/characters/manager.glb', enemyX, enemyZ, { scale: 1, rotY: -90 });
+}
 
 // --- HUD ------------------------------------------------------------------
 const subtitle = document.getElementById('subtitle');

@@ -8,6 +8,7 @@ All third-party assets here are CC0 (public domain), free for commercial use.
   to self-contained `.glb` for this project. Files: `furniture/desk.glb` (table),
   `furniture/chair.glb`, `furniture/cabinet.glb`, `furniture/plant.glb` (cactus).
 
-## Placeholder character
-- **duck.glb** — Khronos glTF Sample Assets (public-domain sample model). Temporary
-  stand-in for the player; to be replaced with a proper character.
+## Characters
+- **Mini Characters (1.0)** by **Kenney** — https://www.kenney.nl. License: CC0.
+  Files: `characters/worker.glb` (character-male-a), `characters/manager.glb`
+  (character-female-c). Shipped as GLB, used as-is.
