@@ -6,10 +6,11 @@ on:
   workflow_dispatch:
 
 env:
-  # The project id is shown on the project's page in PlayCanvas (and in the
-  # editor URL). Scenes are resolved from it at build time, so only this is
-  # needed here.
-  PC_PROJECT_ID: ""
+  # NB: these are different id spaces and are easy to confuse. The editor URL
+  # (/editor/scene/<id>) shows the SCENE id; the project id is in the project
+  # page URL (/project/<id>).
+  PC_PROJECT_ID: "1564889"
+  PC_SCENE_ID: "2549298"
   PC_APP_NAME: "Escape Work"
   # NB: the itch username ("nr") differs from the GitHub org ("near").
   ITCH_USER: best-coder-open-now-nr-me
@@ -24,18 +25,21 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Resolve scene id
+      - name: Check the scene belongs to the project
         env:
           PC_TOKEN: ${{ secrets.PLAYCANVAS_API_TOKEN }}
         run: |
+          # Guards against transposing the two ids, which otherwise surfaces as
+          # an opaque export failure much later. Also doubles as an early check
+          # that the token is valid.
           test -n "${PC_PROJECT_ID}" || { echo "PC_PROJECT_ID is not set"; exit 1; }
           scenes=$(curl -sfS -H "Authorization: Bearer ${PC_TOKEN}" \
             "https://playcanvas.com/api/projects/${PC_PROJECT_ID}/scenes")
-          scene_id=$(echo "${scenes}" | jq -r '.result[0].id')
-          test -n "${scene_id}" && test "${scene_id}" != "null" || {
-            echo "No scenes on project ${PC_PROJECT_ID}: ${scenes}"; exit 1; }
-          echo "SCENE_ID=${scene_id}" >> "$GITHUB_ENV"
-          echo "Building scene ${scene_id}"
+          echo "${scenes}" | jq -e --argjson id "${PC_SCENE_ID}" \
+            '.result | map(.id) | index($id)' >/dev/null || {
+              echo "Scene ${PC_SCENE_ID} is not in project ${PC_PROJECT_ID}."
+              echo "Scenes in that project: $(echo "${scenes}" | jq -c '[.result[] | {id, name}]')"
+              exit 1; }
 
       - name: Request web build
         env:
@@ -48,7 +52,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d "$(jq -nc \
                   --argjson project_id "${PC_PROJECT_ID}" \
-                  --argjson scenes "[${SCENE_ID}]" \
+                  --argjson scenes "[${PC_SCENE_ID}]" \
                   --arg name "${PC_APP_NAME}" \
                   '{project_id: $project_id, name: $name, scenes: $scenes,
                     scripts_minify: true, optimize_scene_format: true}')" \
