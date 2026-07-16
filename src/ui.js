@@ -91,27 +91,41 @@ export function showLoseScreen(message) {
 }
 
 // --- class picker -------------------------------------------------------------
-// Shown once at boot. Cards are generated from the class registry plus the
-// action registry, so new classes appear here automatically.
+// Shown once at boot, styled as a stack of resumes on the hiring desk. Cards
+// are generated from the class registry plus the action registry, so new
+// classes appear here automatically.
 export function showClassPicker(classes, actions, onPick) {
+  const section = (title) =>
+    `<div style="font:700 10px system-ui, sans-serif; letter-spacing:2px; color:#8a8577;
+      border-bottom:1px solid #d8d2c2; padding-bottom:2px; margin:10px 0 5px;">${title}</div>`;
   const cards = Object.entries(classes).map(([id, cls]) => `
-    <button id="pick-${id}" data-class="${id}" style="flex:1; min-width:190px; text-align:left;
-      background:#2a2a40; border:1px solid #3a3a52; border-radius:10px; padding:16px;
-      color:#f0f0f5; font:inherit; cursor:pointer;">
-      <div style="font-size:16px; font-weight:700; margin-bottom:6px;">${cls.name}</div>
-      <div style="opacity:.75; min-height:44px; margin-bottom:10px;">${cls.tagline}</div>
-      <div style="opacity:.9; font-size:12px;">HP ${cls.maxHp}</div>
-      <div style="opacity:.65; font-size:12px; margin-top:4px;">
-        ${cls.actions.map((a) => actions[a].label).join(' · ')}
+    <button id="pick-${id}" data-class="${id}" style="flex:1; min-width:210px; max-width:240px;
+      text-align:left; background:#f6f3ea; border:1px solid #d8d2c2; border-radius:3px;
+      padding:18px 16px 14px; color:#2b2a26; font:13px Georgia, 'Times New Roman', serif;
+      cursor:pointer; box-shadow:0 6px 18px rgba(0,0,0,.45); position:relative;">
+      <div style="font-size:17px; font-weight:700; letter-spacing:.5px;">${cls.name}</div>
+      <div style="font-size:11px; color:#8a8577; margin-top:2px;">Applying for: Former Employee</div>
+      ${section('OBJECTIVE')}
+      <div style="font-style:italic; min-height:44px;">${cls.objective}</div>
+      ${section('EXPERIENCE')}
+      <div style="min-height:34px;">${cls.experience}</div>
+      ${section('SKILLS')}
+      <div style="line-height:1.55;">
+        ${cls.actions.map((a) => '&bull; ' + actions[a].label).join('<br>')}
       </div>
+      ${section('BENEFITS BALANCE')}
+      <div>Sick days remaining: <b>${cls.maxHp}</b></div>
+      <div style="position:absolute; top:10px; right:12px; font:700 9px system-ui, sans-serif;
+        letter-spacing:1px; color:#b0392e; border:1px solid #b0392e; border-radius:2px;
+        padding:2px 5px; transform:rotate(6deg); opacity:.85;">CONFIDENTIAL</div>
     </button>`).join('');
   const div = overlay('class-picker', `
     <div style="font-size:22px; font-weight:800; letter-spacing:2px; margin-bottom:6px;">CHOOSE YOUR CAREER MISTAKE</div>
-    <div style="opacity:.8; margin-bottom:18px;">Every escape starts with a bad job title.</div>
-    <div style="display:flex; gap:12px; flex-wrap:wrap; max-width:680px;">${cards}</div>`);
+    <div style="opacity:.8; margin-bottom:18px;">Three r&eacute;sum&eacute;s on the desk. You will be living one of them.</div>
+    <div style="display:flex; gap:14px; flex-wrap:wrap; justify-content:center; max-width:800px;">${cards}</div>`);
   for (const card of div.querySelectorAll('button[data-class]')) {
-    card.onmouseenter = () => { card.style.borderColor = '#7a7ab8'; };
-    card.onmouseleave = () => { card.style.borderColor = '#3a3a52'; };
+    card.onmouseenter = () => { card.style.boxShadow = '0 10px 26px rgba(0,0,0,.6)'; card.style.transform = 'translateY(-3px)'; };
+    card.onmouseleave = () => { card.style.boxShadow = '0 6px 18px rgba(0,0,0,.45)'; card.style.transform = 'none'; };
     card.onclick = () => { div.remove(); onPick(card.dataset.class); };
   }
 }
