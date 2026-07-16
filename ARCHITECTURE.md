@@ -29,7 +29,8 @@ src/
   controls.js        Camera rig + mouse -> semantic input (click tile, menu)
   combat.js          Turn-based encounter runner, fully data-driven
   ui.js              All DOM: HUD, context menu, win/lose overlays
-  main.js            Entry point: wires modules, owns game flow only
+  editor.js          In-browser level editor (paint/erase, export, playtest)
+  main.js            Entry point: routes game vs #editor, owns game flow
   index.html         Shell; loads engine + bundle
 build.mjs            esbuild bundle + static copies -> build/web/
 assets/              .glb models + shared textures (CC0, see CREDITS.md)
@@ -71,5 +72,9 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - **New class**: entry in `data/classes.js` (stats, model, action ids) - the
   boot-time class picker (`ui.showClassPicker`) renders cards straight from the
   registry, so new classes appear automatically.
-- **New level**: another JSON in `levels/` + a loader/transition in `main.js`
+- **New level**: paint it in the built-in editor (link on the class picker, or
+  `#editor`) and Export the JSON into `levels/`; playtest instantly via the
+  localStorage stash. Registries drive the editor palette, so new tile/enemy
+  types are paintable automatically (each registry entry carries its canonical
+  map `char`). Multi-level transitions still need a loader in `main.js`
   (currently hardwired to level1).

@@ -94,7 +94,7 @@ export function showLoseScreen(message) {
 // Shown once at boot, styled as a stack of resumes on the hiring desk. Cards
 // are generated from the class registry plus the action registry, so new
 // classes appear here automatically.
-export function showClassPicker(classes, actions, onPick) {
+export function showClassPicker(classes, actions, onPick, onEditor) {
   const section = (title) =>
     `<div style="font:700 10px system-ui, sans-serif; letter-spacing:2px; color:#8a8577;
       border-bottom:1px solid #d8d2c2; padding-bottom:2px; margin:10px 0 5px;">${title}</div>`;
@@ -122,10 +122,29 @@ export function showClassPicker(classes, actions, onPick) {
   const div = overlay('class-picker', `
     <div style="font-size:22px; font-weight:800; letter-spacing:2px; margin-bottom:6px;">CHOOSE YOUR CAREER MISTAKE</div>
     <div style="opacity:.8; margin-bottom:18px;">Three r&eacute;sum&eacute;s on the desk. You will be living one of them.</div>
-    <div style="display:flex; gap:14px; flex-wrap:wrap; justify-content:center; max-width:800px;">${cards}</div>`);
+    <div style="display:flex; gap:14px; flex-wrap:wrap; justify-content:center; max-width:800px;">${cards}</div>
+    ${onEditor ? `<div style="margin-top:16px;"><button id="open-editor" style="background:none; border:none;
+      color:#8a8ac0; font:12px system-ui, sans-serif; cursor:pointer; text-decoration:underline;">
+      or open the level editor</button></div>` : ''}`);
   for (const card of div.querySelectorAll('button[data-class]')) {
     card.onmouseenter = () => { card.style.boxShadow = '0 10px 26px rgba(0,0,0,.6)'; card.style.transform = 'translateY(-3px)'; };
     card.onmouseleave = () => { card.style.boxShadow = '0 6px 18px rgba(0,0,0,.45)'; card.style.transform = 'none'; };
     card.onclick = () => { div.remove(); onPick(card.dataset.class); };
   }
+  if (onEditor) div.querySelector('#open-editor').onclick = () => { div.remove(); onEditor(); };
+}
+
+// Small corner badge shown while playtesting an editor level.
+export function showPlaytestBadge(onBack) {
+  const b = document.createElement('button');
+  b.id = 'playtest-badge';
+  b.textContent = '⏸ PLAYTEST — back to editor';
+  Object.assign(b.style, {
+    position: 'fixed', top: '12px', right: '12px', zIndex: '25',
+    background: '#3a2e46', color: '#e8d8f5', border: '1px solid #6a5a80',
+    borderRadius: '7px', padding: '7px 11px', font: '12px system-ui, sans-serif',
+    cursor: 'pointer',
+  });
+  b.onclick = onBack;
+  document.body.appendChild(b);
 }

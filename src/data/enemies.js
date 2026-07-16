@@ -4,6 +4,7 @@
 // line gets the rolled damage appended.
 export const ENEMY_TYPES = {
   manager: {
+    char: 'M',
     name: 'The Manager',
     model: 'manager',
     hp: 16,
@@ -17,6 +18,7 @@ export const ENEMY_TYPES = {
     ],
   },
   hr: {
+    char: 'H',
     name: 'HR Representative',
     model: 'hr',
     hp: 12,
