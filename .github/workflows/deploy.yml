@@ -6,102 +6,35 @@ on:
   workflow_dispatch:
 
 env:
-  # NB: these are different id spaces and are easy to confuse. The editor URL
-  # (/editor/scene/<id>) shows the SCENE id; the project id is in the project
-  # page URL (/project/<id>).
-  PC_PROJECT_ID: "1564889"
-  PC_SCENE_ID: "2549298"
-  PC_APP_NAME: "Escape Work"
   # NB: the itch username ("nr") differs from the GitHub org ("near").
   ITCH_USER: best-coder-open-now-nr-me
   ITCH_GAME: escape-work
   ITCH_CHANNEL: html5
 
 jobs:
-  # Scenes and scripts live in PlayCanvas's cloud, not in this repo, so there is
-  # nothing here to compile. This job asks PlayCanvas to export a self-hosted
-  # web build and hands the files to deploy, which is unchanged from the Godot
-  # pipeline: butler pushes a directory and does not care what produced it.
+  # The whole game is in this repo now (code-first PlayCanvas), so CI just
+  # installs deps and bundles it into build/web. Nothing talks to PlayCanvas's
+  # cloud anymore.
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Check the scene belongs to the project
-        env:
-          PC_TOKEN: ${{ secrets.PLAYCANVAS_API_TOKEN }}
-        run: |
-          # Guards against transposing the two ids, which otherwise surfaces as
-          # an opaque export failure much later. Also doubles as an early check
-          # that the token is valid.
-          test -n "${PC_PROJECT_ID}" || { echo "PC_PROJECT_ID is not set"; exit 1; }
-          scenes=$(curl -sfS -H "Authorization: Bearer ${PC_TOKEN}" \
-            "https://playcanvas.com/api/projects/${PC_PROJECT_ID}/scenes")
-          echo "${scenes}" | jq -e --argjson id "${PC_SCENE_ID}" \
-            '.result | map(.id) | index($id)' >/dev/null || {
-              echo "Scene ${PC_SCENE_ID} is not in project ${PC_PROJECT_ID}."
-              echo "Scenes in that project: $(echo "${scenes}" | jq -c '[.result[] | {id, name}]')"
-              exit 1; }
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Request web build
-        env:
-          PC_TOKEN: ${{ secrets.PLAYCANVAS_API_TOKEN }}
-        run: |
-          # Returns 201 with a job object; the export itself runs async.
-          # The first scene in the list becomes the initial scene.
-          job=$(curl -sfS -X POST \
-            -H "Authorization: Bearer ${PC_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d "$(jq -nc \
-                  --argjson project_id "${PC_PROJECT_ID}" \
-                  --argjson scenes "[${PC_SCENE_ID}]" \
-                  --arg name "${PC_APP_NAME}" \
-                  '{project_id: $project_id, name: $name, scenes: $scenes,
-                    scripts_minify: true, optimize_scene_format: true}')" \
-            "https://playcanvas.com/api/apps/download")
-          job_id=$(echo "${job}" | jq -r '.id')
-          test -n "${job_id}" && test "${job_id}" != "null" || {
-            echo "No job id in response: ${job}"; exit 1; }
-          echo "JOB_ID=${job_id}" >> "$GITHUB_ENV"
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
 
-      - name: Wait for the export to finish
-        env:
-          PC_TOKEN: ${{ secrets.PLAYCANVAS_API_TOKEN }}
-        run: |
-          # PlayCanvas's own tools poll at 1s, but free accounts are rate
-          # limited to as little as 5 req/min on strict endpoints, so back off.
-          for _ in $(seq 1 60); do
-            resp=$(curl -sfS -H "Authorization: Bearer ${PC_TOKEN}" \
-              "https://playcanvas.com/api/jobs/${JOB_ID}")
-            case "$(echo "${resp}" | jq -r '.status')" in
-              complete)
-                # apps/download exposes the zip at .data.download_url.
-                # projects/:id/export uses .data.url instead - same job shape,
-                # different key. Do not swap these.
-                echo "DOWNLOAD_URL=$(echo "${resp}" | jq -r '.data.download_url')" \
-                  >> "$GITHUB_ENV"
-                exit 0 ;;
-              error)
-                echo "Export failed:"; echo "${resp}" | jq -r '.messages[]?'; exit 1 ;;
-            esac
-            sleep 5
-          done
-          echo "Export job ${JOB_ID} did not finish within 5 minutes"; exit 1
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Download and unpack the build
-        run: |
-          curl -sfSL -o app.zip "${DOWNLOAD_URL}"
-          mkdir -v -p build/web
-          unzip -q app.zip -d build/web
-          # The zip may nest the app under a folder; flatten so index.html is at
-          # the root of what butler pushes, or itch serves a blank page.
-          idx=$(find build/web -maxdepth 3 -name index.html | head -1)
-          test -n "${idx}" || { echo "No index.html in the exported build"; exit 1; }
-          dir=$(dirname "${idx}")
-          if [ "${dir}" != "build/web" ]; then
-            mv "${dir}"/* build/web/
-          fi
+      - name: Build web bundle
+        run: npm run build
 
-      - name: Fail early if the export produced nothing
-        run: test -s build/web/index.html || { echo "Export produced no index.html"; exit 1; }
+      - name: Fail early if the build produced nothing
+        run: test -s build/web/index.html || { echo "Build produced no index.html"; exit 1; }
 
       - name: Upload build
         uses: actions/upload-artifact@v4
@@ -109,7 +42,7 @@ jobs:
           name: web-build
           path: build/web
 
-  # Unchanged from the Godot pipeline.
+  # Unchanged: butler pushes a directory and does not care what produced it.
   deploy:
     needs: build
     runs-on: ubuntu-latest

@@ -1,4 +1,7 @@
-# Build outputs (the CI unpacks the PlayCanvas export into build/web)
+# Dependencies
+node_modules/
+
+# Build outputs (CI runs `npm run build` into build/web)
 build/
 dist/
 

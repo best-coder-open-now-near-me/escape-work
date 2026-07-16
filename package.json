@@ -1,0 +1,17 @@
+{
+  "name": "escape-work",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Escape Work - a turn-based RPG about escaping the office. Code-first PlayCanvas.",
+  "scripts": {
+    "build": "node build.mjs",
+    "serve": "node build.mjs && python3 -m http.server 8000 --directory build/web"
+  },
+  "dependencies": {
+    "playcanvas": "2.20.6"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}
