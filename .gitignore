@@ -1,13 +1,4 @@
-# Godot 4+ specific ignores
-.godot/
-/android/
-
-# Mono/.NET build artifacts (local editor is a mono build)
-.mono/
-data_*/
-*.csproj.old
-
-# Build outputs
+# Build outputs (the CI unpacks the PlayCanvas export into build/web)
 build/
 dist/
 
