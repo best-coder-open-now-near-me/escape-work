@@ -1,27 +1,25 @@
 {
   "name": "Cubicle Row",
-  "legend": {
+  "tiles": {
     "#": "wall",
     ".": "floor",
-    "@": "you",
-    "E": "enemy",
-    ">": "exit"
+    ">": "exit",
+    "~": "wet-floor"
+  },
+  "actors": {
+    "@": "player",
+    "M": "manager",
+    "H": "hr"
   },
   "map": [
     "############",
     "#@...#.....#",
     "#.##.#.###.#",
     "#.#....#...#",
-    "#.#.##.#.#E#",
-    "#...#....#.#",
-    "###.#..E.#.#",
-    "#.....#...>#",
+    "#.#.##.#.#M#",
+    "#...#.~..#.#",
+    "###.#..H.#.#",
+    "#.....#.~.>#",
     "############"
-  ],
-  "enemies": [
-    { "name": "The Manager", "model": "manager", "hp": 16, "xp": 8,
-      "examine": "The Manager: radiates unread-email energy." },
-    { "name": "HR Representative", "model": "hr", "hp": 12, "xp": 6,
-      "examine": "HR: smiles warmly. Never stops taking notes." }
   ]
 }
