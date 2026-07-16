@@ -47,8 +47,12 @@ const height = rows.length;
 const width = Math.max(...rows.map((r) => r.length));
 const cellAt = (x, z) =>
   z >= 0 && z < height && x >= 0 && x < rows[z].length ? rows[z][x] : '#';
-// Floor-like cells you can stand on. Walls and the enemy tile block movement.
-const isWalkable = (x, z) => '.@>'.includes(cellAt(x, z));
+// Terrain vs. dynamic blockers: '@' and 'E' tiles are ordinary floor - what
+// blocks you is the living enemy standing there (enemies move, and dead ones
+// stop blocking).
+const terrainOpen = (x, z) => '.@>E'.includes(cellAt(x, z));
+const enemyAt = (x, z) => enemies.find((e) => e.alive && e.x === x && e.z === z) || null;
+const isWalkable = (x, z) => terrainOpen(x, z) && !enemyAt(x, z);
 
 function makeMaterial(color) {
   const m = new pc.StandardMaterial();
@@ -78,16 +82,27 @@ function addBox(material, x, y, z, sx, sy, sz) {
 
 let playerX = (width - 1) / 2;
 let playerZ = (height - 1) / 2;
-let enemyX = null;
-let enemyZ = null;
 const walls = []; // wall entities + tile coords, for the occlusion fade
+// Every 'E' tile becomes an enemy; level.enemies supplies name/model/stats in
+// reading order (top-to-bottom, left-to-right).
+const enemies = [];
 
 for (let z = 0; z < height; z++) {
   for (let x = 0; x < rows[z].length; x++) {
     const ch = rows[z][x];
     if (ch === ' ') continue;
     if (ch === '@') { playerX = x; playerZ = z; }
-    if (ch === 'E') { enemyX = x; enemyZ = z; }
+    if (ch === 'E') {
+      const meta = (level.enemies || [])[enemies.length] || {};
+      enemies.push({
+        x, z, spawnX: x, spawnZ: z, alive: true, entity: null,
+        name: meta.name || 'Coworker',
+        model: meta.model || 'manager',
+        hp: meta.hp || 12,
+        xp: meta.xp || 6,
+        examine: meta.examine || 'A coworker. Best not to make eye contact.',
+      });
+    }
     addBox(materials['.'], x, 0, z, 0.96, FLOOR.height, 0.96);
     // '@' and 'E' are drawn as character models (below), so skip their markers.
     if (ch !== '.' && ch !== '@' && ch !== 'E' && TILE[ch]) {
@@ -124,13 +139,11 @@ placeModel('assets/furniture/cabinet.glb', 9, 3, { scale: 0.5 });
 placeModel('assets/furniture/plant.glb', 10, 3, { scale: 0.9 });
 
 // Characters: Kenney Mini Characters.
-let managerEntity = null;
-let enemyAlive = enemyX !== null;
-if (enemyX !== null) {
-  placeModel('assets/characters/manager.glb', enemyX, enemyZ, {
+for (const en of enemies) {
+  placeModel(`assets/characters/${en.model}.glb`, en.x, en.z, {
     scale: 1,
     rotY: -90,
-    onReady: (e) => { managerEntity = e; },
+    onReady: (e) => { en.entity = e; },
   });
 }
 let player = null;
@@ -227,6 +240,33 @@ let path = null;
 let pathIndex = 0;
 let lastPath = null; // kept for debugging/tests
 let inCombat = false;
+let gameOver = false;
+
+// The persistent character sheet. Combat mutates hp in place, so wounds carry
+// between fights; levelling up heals and adds damage.
+const playerState = { hp: 22, maxHp: 22, level: 1, xp: 0, xpNext: 10, bonusDmg: 0 };
+
+function updateStatsHud() {
+  const el = document.getElementById('stats');
+  if (el) el.textContent = `Lv ${playerState.level} · HP ${playerState.hp}/${playerState.maxHp} · XP ${playerState.xp}/${playerState.xpNext}`;
+}
+
+function gainXp(amount) {
+  playerState.xp += amount;
+  let promoted = false;
+  while (playerState.xp >= playerState.xpNext) {
+    playerState.xp -= playerState.xpNext;
+    playerState.xpNext = Math.round(playerState.xpNext * 1.5);
+    playerState.level += 1;
+    playerState.bonusDmg += 1;
+    playerState.hp = playerState.maxHp;
+    promoted = true;
+  }
+  say(promoted
+    ? `Promotion! Level ${playerState.level}: fully rested, +1 damage.`
+    : `+${amount} XP.`);
+  updateStatsHud();
+}
 
 // Shortest 8-directional path around walls (Dijkstra: diagonals cost sqrt(2)).
 // A diagonal step is only allowed when both adjacent orthogonal tiles are open,
@@ -281,14 +321,14 @@ function moveTo(tile) {
   }
 }
 
-// Walk to the open tile nearest the Manager; combat starts on arrival (the
+// Walk to the open tile nearest an enemy; combat starts on arrival (the
 // adjacency check in updateMovement fires it).
-function confront() {
-  if (!player || !enemyAlive) return;
+function confront(en) {
+  if (!player || !en || !en.alive) return;
   let best = null;
   for (const [dx, dz] of DIRS8) {
-    const ax = enemyX + dx;
-    const az = enemyZ + dz;
+    const ax = en.x + dx;
+    const az = en.z + dz;
     if (!isWalkable(ax, az)) continue;
     const p = findPath(playerTile.x, playerTile.z, ax, az);
     if (p && (!best || p.length < best.length)) best = p;
@@ -303,35 +343,48 @@ function confront() {
   }
 }
 
+function adjacentEnemy() {
+  return enemies.find((e) =>
+    e.alive && Math.abs(playerTile.x - e.x) <= 1 && Math.abs(playerTile.z - e.z) <= 1) || null;
+}
+
 function checkCombatTrigger() {
-  if (inCombat || !enemyAlive || !player) return;
-  if (Math.abs(playerTile.x - enemyX) <= 1 && Math.abs(playerTile.z - enemyZ) <= 1) {
-    path = null;
-    inCombat = true;
-    hideMenu();
-    player.setEulerAngles(0, Math.atan2(enemyX - playerTile.x, enemyZ - playerTile.z) * pc.math.RAD_TO_DEG, 0);
-    say('The Manager has noticed you.');
-    startCombat({
-      enemyName: 'The Manager',
-      onWin: () => {
-        inCombat = false;
-        enemyAlive = false;
-        if (managerEntity) managerEntity.destroy();
-        // Open up the tile they were guarding.
-        rows[enemyZ] = rows[enemyZ].slice(0, enemyX) + '.' + rows[enemyZ].slice(enemyX + 1);
-        say('The way is clear. Head for the exit.');
-      },
-      onLose: () => { inCombat = false; },
-    });
+  if (inCombat || gameOver || !player) return;
+  const en = adjacentEnemy();
+  if (!en) return;
+  path = null;
+  inCombat = true;
+  hideMenu();
+  player.setEulerAngles(0, Math.atan2(en.x - playerTile.x, en.z - playerTile.z) * pc.math.RAD_TO_DEG, 0);
+  if (en.entity) {
+    en.entity.setEulerAngles(0, Math.atan2(playerTile.x - en.x, playerTile.z - en.z) * pc.math.RAD_TO_DEG, 0);
   }
+  say(`${en.name} has noticed you.`);
+  startCombat({
+    enemyName: en.name,
+    enemyHp: en.hp,
+    playerState,
+    onChange: updateStatsHud,
+    onWin: () => {
+      inCombat = false;
+      en.alive = false;
+      if (en.entity) en.entity.destroy();
+      // A breather after every victory, so back-to-back fights aren't a death
+      // spiral - wounds still carry over, just less brutally.
+      playerState.hp = Math.min(playerState.maxHp, playerState.hp + 5);
+      gainXp(en.xp);
+    },
+    onLose: () => { inCombat = false; gameOver = true; },
+  });
 }
 
 function onLeftClick(sx, sy) {
-  if (inCombat) return;
+  if (inCombat || gameOver) return;
   const tile = screenToTile(sx, sy);
   if (!tile) return;
-  if (enemyAlive && tile.x === enemyX && tile.z === enemyZ) {
-    confront();
+  const en = enemyAt(tile.x, tile.z);
+  if (en) {
+    confront(en);
     return;
   }
   moveTo(tile);
@@ -351,7 +404,7 @@ function updateMovement(dt) {
     playerTile.z = tz;
     if (++pathIndex >= path.length) {
       path = null;
-      if (cellAt(tx, tz) === '>') say('You reach the exit. Freedom smells like the parking garage.');
+      if (cellAt(tx, tz) === '>') showWinScreen();
     }
     checkCombatTrigger();
   } else {
@@ -385,6 +438,84 @@ function updateWallFade() {
   }
 }
 
+// --- enemy AI ---------------------------------------------------------------
+// Enemies wander: every couple of seconds each may step to a random adjacent
+// open tile, leashed near their spawn so they patrol their own area. If one
+// ends up next to you, they engage. Their models slide smoothly to their tile.
+const WANDER_INTERVAL = 1.8;
+const WANDER_LEASH = 2;
+const ENEMY_SPEED = 2.2;
+let wanderTimer = WANDER_INTERVAL;
+
+function updateEnemies(dt) {
+  for (const en of enemies) {
+    if (!en.alive || !en.entity) continue;
+    const pos = en.entity.getPosition();
+    const target = new pc.Vec3(en.x, pos.y, en.z);
+    const to = target.clone().sub(pos);
+    const d = to.length();
+    if (d > 0.001) {
+      const step = ENEMY_SPEED * dt;
+      if (d <= step) {
+        en.entity.setPosition(target);
+      } else {
+        to.normalize();
+        en.entity.setPosition(pos.add(to.scale(step)));
+        en.entity.setEulerAngles(0, Math.atan2(to.x, to.z) * pc.math.RAD_TO_DEG, 0);
+      }
+    }
+  }
+  if (inCombat || gameOver) return; // the world holds its breath during a fight
+  wanderTimer -= dt;
+  if (wanderTimer > 0) return;
+  wanderTimer = WANDER_INTERVAL;
+  for (const en of enemies) {
+    if (!en.alive || !en.entity) continue;
+    if (Math.random() < 0.45) continue; // sometimes they just stand around
+    const options = DIRS8.filter(([dx, dz]) => {
+      const nx = en.x + dx;
+      const nz = en.z + dz;
+      if (Math.abs(nx - en.spawnX) > WANDER_LEASH || Math.abs(nz - en.spawnZ) > WANDER_LEASH) return false;
+      if (dx !== 0 && dz !== 0 && !(terrainOpen(en.x + dx, en.z) && terrainOpen(en.x, en.z + dz))) return false;
+      if (!isWalkable(nx, nz)) return false;
+      if (nx === playerTile.x && nz === playerTile.z) return false;
+      return true;
+    });
+    if (!options.length) continue;
+    const [dx, dz] = options[Math.floor(Math.random() * options.length)];
+    en.x += dx;
+    en.z += dz;
+  }
+  checkCombatTrigger(); // did anyone just corner the player?
+}
+
+// --- win screen -------------------------------------------------------------
+function showWinScreen() {
+  if (gameOver) return;
+  gameOver = true;
+  path = null;
+  const defeated = enemies.filter((e) => !e.alive).length;
+  const div = document.createElement('div');
+  div.id = 'win-screen';
+  Object.assign(div.style, {
+    position: 'fixed', inset: '0', zIndex: '40', display: 'flex',
+    alignItems: 'center', justifyContent: 'center',
+    background: 'rgba(10, 10, 18, 0.82)', color: '#f0f0f5',
+    font: '15px system-ui, sans-serif', textAlign: 'center',
+  });
+  div.innerHTML = `
+    <div style="background:#232334; border:1px solid #3a3a52; border-radius:12px;
+      padding:28px 40px; box-shadow:0 12px 40px rgba(0,0,0,.6);">
+      <div style="font-size:26px; font-weight:800; letter-spacing:2px; margin-bottom:8px;">YOU ESCAPED WORK</div>
+      <div style="opacity:.85; margin-bottom:4px;">The parking garage has never smelled sweeter.</div>
+      <div style="opacity:.7; margin-bottom:18px;">Level ${playerState.level} &middot; ${defeated} coworker${defeated === 1 ? '' : 's'} out-officed</div>
+      <button id="again" style="padding:10px 26px; border-radius:8px; border:1px solid #3a3a52;
+        background:#2e2e46; color:#f0f0f5; font:inherit; cursor:pointer;">Clock In Again</button>
+    </div>`;
+  document.body.appendChild(div);
+  div.querySelector('#again').onclick = () => location.reload();
+}
+
 // Camera eases toward the player so it stays centred as you move.
 function updateCamera() {
   if (!player) return;
@@ -395,6 +526,7 @@ function updateCamera() {
 
 app.on('update', (dt) => {
   updateMovement(dt);
+  updateEnemies(dt);
   updateCamera();
   updateWallFade();
 });
@@ -445,14 +577,15 @@ function say(text) {
 
 // Context-sensitive actions, office-CRPG flavoured.
 function onRightClick(sx, sy) {
-  if (inCombat) return;
+  if (inCombat || gameOver) return;
   const tile = screenToTile(sx, sy);
   if (!tile) return;
-  if (enemyAlive && tile.x === enemyX && tile.z === enemyZ) {
+  const en = enemyAt(tile.x, tile.z);
+  if (en) {
     showMenu(sx, sy, [
-      { label: 'Confront the Manager', action: () => confront() },
+      { label: `Confront ${en.name}`, action: () => confront(en) },
       { label: 'Avoid eye contact', action: () => say('You study your shoes intently.') },
-      { label: 'Examine', action: () => say('The Manager: radiates unread-email energy.') },
+      { label: 'Examine', action: () => say(en.examine) },
     ]);
   } else if (isWalkable(tile.x, tile.z)) {
     showMenu(sx, sy, [
@@ -468,14 +601,17 @@ function onRightClick(sx, sy) {
 
 // --- HUD ------------------------------------------------------------------
 say(level.name || '');
+updateStatsHud();
 
 // Small read-only handle for tests and console poking.
 window.__game = {
   get playerTile() { return { ...playerTile }; },
   get inCombat() { return inCombat; },
-  get enemyAlive() { return enemyAlive; },
+  get gameOver() { return gameOver; },
   get lastPath() { return lastPath; },
   get fadedWallCount() { return walls.filter((w) => w.faded).length; },
+  get stats() { return { ...playerState }; },
+  get enemies() { return enemies.map((e) => ({ name: e.name, x: e.x, z: e.z, alive: e.alive })); },
 };
 
 app.start();
