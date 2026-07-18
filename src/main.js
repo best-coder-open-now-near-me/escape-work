@@ -1,481 +1,517 @@
-// Escape Work - code-first PlayCanvas entry point.
+// Escape Work - entry point and game flow. A Baldur's Gate / Divinity-style
+// CRPG reskinned for office life.
 //
-// A Baldur's Gate / Divinity-style CRPG, reskinned for office life. The whole
-// game lives in this repo. This file reads a level (plain JSON you can hand-edit
-// in levels/level1.json), draws it as a grid, loads models, and wires up the
-// isometric camera + point-and-click controls.
-//
-// The PlayCanvas engine is loaded separately via a <script> tag in index.html
-// (its prebuilt UMD build) which exposes a global `pc`; we only bundle our own
-// code + the level data here.
-import level from '../levels/level1.json';
+// This file only wires the pieces together and owns the game flow (what
+// happens on a click, when combat starts, when you win). The pieces live in
+// focused modules - see ARCHITECTURE.md for the map. Content (tiles, enemies,
+// classes, actions) is data in src/data/; levels are hand-editable JSON - or
+// paintable in the built-in editor (#editor / the link on the class picker).
+import { LEVELS, FIRST_LEVEL } from './data/levels.js';
+import { SURFACES, ELECTRIFIED, FIRE } from './data/surfaces.js';
+import { createSurfaceRuntime } from './surfaces-runtime.js';
+import { ENEMY_TYPES } from './data/enemies.js';
+import { CLASSES } from './data/classes.js';
+import { ACTIONS } from './data/actions.js';
+import { parseLevel } from './grid.js';
+import { findPath, smoothPath, DIRS8 } from './pathfinding.js';
+import { createSheet, gainXp, applyDamage } from './stats.js';
+import { PlayerActor, EnemyActor } from './actors.js';
+import { createApp, buildLevel, placeModel } from './scene.js';
+import { createControls } from './controls.js';
 import { startCombat } from './combat.js';
+import { startEditor } from './editor.js';
+import * as ui from './ui.js';
 
-const pc = window.pc;
+const STASH_KEY = 'escape-work.playtest';
+const PROGRESS_KEY = 'escape-work.progress';
+const app = createApp(document.getElementById('app'));
 
-// --- boot the engine ------------------------------------------------------
-const canvas = document.getElementById('app');
-const app = new pc.Application(canvas, {
-  mouse: new pc.Mouse(canvas),
-  keyboard: new pc.Keyboard(window),
-  graphicsDeviceOptions: { antialias: true, alpha: false },
-});
-app.setCanvasFillMode(pc.FILLMODE_FILL_WINDOW);
-app.setCanvasResolution(pc.RESOLUTION_AUTO);
-window.addEventListener('resize', () => app.resizeCanvas());
-
-// Ambient fills the shadows; a directional light gives real shading so imported
-// models are actually lit, not black.
-app.scene.ambientLight = new pc.Color(0.55, 0.55, 0.62);
-const sun = new pc.Entity('sun');
-sun.addComponent('light', { type: 'directional', intensity: 1.4 });
-sun.setEulerAngles(55, 35, 0);
-app.root.addChild(sun);
-
-// --- level -> grid + tiles ------------------------------------------------
-const TILE = {
-  '#': { color: new pc.Color(0.22, 0.22, 0.30), height: 0.6 }, // wall
-  '.': { color: new pc.Color(0.82, 0.82, 0.88), height: 0.2 }, // floor
-  '@': { color: new pc.Color(0.30, 0.80, 0.45), height: 0.5 }, // you
-  'E': { color: new pc.Color(0.88, 0.32, 0.32), height: 0.5 }, // enemy
-  '>': { color: new pc.Color(0.96, 0.80, 0.26), height: 0.3 }, // exit
-};
-const FLOOR = TILE['.'];
-
-const rows = level.map;
-const height = rows.length;
-const width = Math.max(...rows.map((r) => r.length));
-const cellAt = (x, z) =>
-  z >= 0 && z < height && x >= 0 && x < rows[z].length ? rows[z][x] : '#';
-// Floor-like cells you can stand on. Walls and the enemy tile block movement.
-const isWalkable = (x, z) => '.@>'.includes(cellAt(x, z));
-
-function makeMaterial(color) {
-  const m = new pc.StandardMaterial();
-  m.diffuse = color;
-  m.update();
-  return m;
-}
-const materials = {};
-for (const ch of Object.keys(TILE)) materials[ch] = makeMaterial(TILE[ch].color);
-
-// Ghost material for walls that stand between the camera and the player -
-// classic CRPG occlusion fade so you never lose sight of your character.
-const wallFadeMaterial = makeMaterial(TILE['#'].color);
-wallFadeMaterial.opacity = 0.22;
-wallFadeMaterial.blendType = pc.BLEND_NORMAL;
-wallFadeMaterial.depthWrite = false;
-wallFadeMaterial.update();
-
-function addBox(material, x, y, z, sx, sy, sz) {
-  const e = new pc.Entity();
-  e.addComponent('render', { type: 'box', material });
-  e.setLocalScale(sx, sy, sz);
-  e.setPosition(x, y, z);
-  app.root.addChild(e);
-  return e;
-}
-
-let playerX = (width - 1) / 2;
-let playerZ = (height - 1) / 2;
-let enemyX = null;
-let enemyZ = null;
-const walls = []; // wall entities + tile coords, for the occlusion fade
-
-for (let z = 0; z < height; z++) {
-  for (let x = 0; x < rows[z].length; x++) {
-    const ch = rows[z][x];
-    if (ch === ' ') continue;
-    if (ch === '@') { playerX = x; playerZ = z; }
-    if (ch === 'E') { enemyX = x; enemyZ = z; }
-    addBox(materials['.'], x, 0, z, 0.96, FLOOR.height, 0.96);
-    // '@' and 'E' are drawn as character models (below), so skip their markers.
-    if (ch !== '.' && ch !== '@' && ch !== 'E' && TILE[ch]) {
-      const t = TILE[ch];
-      const box = addBox(materials[ch], x, t.height / 2, z, 0.78, t.height, 0.78);
-      if (ch === '#') walls.push({ entity: box, x, z, faded: false });
+// Level resolution, in priority order:
+// 1. a playtest level stashed by the editor (standalone - no campaign)
+// 2. campaign progress (mid-run floor + character sheet, saved on floor clear)
+// 3. the first shipped level
+let activeLevel = LEVELS[FIRST_LEVEL];
+let activeLevelId = FIRST_LEVEL;
+let playtesting = false;
+let restoredSheet = null;
+try {
+  const stash = localStorage.getItem(STASH_KEY);
+  const progress = localStorage.getItem(PROGRESS_KEY);
+  if (stash) {
+    activeLevel = JSON.parse(stash);
+    activeLevelId = null;
+    playtesting = true;
+  } else if (progress) {
+    const p = JSON.parse(progress);
+    if (LEVELS[p.levelId]) {
+      activeLevel = LEVELS[p.levelId];
+      activeLevelId = p.levelId;
+      restoredSheet = p.sheet || null;
     }
   }
-}
+} catch { /* corrupted storage - fall back to the shipped level */ }
 
-// --- models ---------------------------------------------------------------
-// Load a .glb, wrap it in a holder (so scaling/rotating is predictable), and
-// drop it on a tile. Reusable for every prop and character.
-function placeModel(url, tileX, tileZ, { scale = 1, lift = FLOOR.height / 2, rotY = 0, onReady = null } = {}) {
-  const asset = new pc.Asset(url, 'container', { url });
-  app.assets.add(asset);
-  asset.ready(() => {
-    const holder = new pc.Entity(url);
-    holder.addChild(asset.resource.instantiateRenderEntity());
-    holder.setLocalScale(scale, scale, scale);
-    holder.setEulerAngles(0, rotY, 0);
-    holder.setPosition(tileX, lift, tileZ);
-    app.root.addChild(holder);
-    if (onReady) onReady(holder);
+const clearProgress = () => localStorage.removeItem(PROGRESS_KEY);
+
+if (location.hash.includes('editor')) {
+  startEditor(app, activeLevel, STASH_KEY);
+} else {
+  startGame(activeLevel);
+}
+app.start();
+
+// ---------------------------------------------------------------------------------
+function startGame(level) {
+  const grid = parseLevel(level);
+  const scene = buildLevel(app, grid);
+  const { walls, updateWallFade, animateSurfaces, floorHeight } = scene;
+  // Fire and its consequences live in the surface runtime; handleExplosion is
+  // hoisted from below.
+  const runtime = createSurfaceRuntime({
+    grid,
+    hooks: { addFlame: scene.addFlame, hideSurfaceVisual: scene.hideSurfaceVisual },
+    onExplosion: handleExplosion,
   });
-  asset.on('error', (err) => console.warn('asset load failed:', url, err));
-  app.assets.load(asset);
-}
 
-// Environment: KayKit office furniture.
-placeModel('assets/furniture/desk.glb', 3, 1, { scale: 0.5 });
-placeModel('assets/furniture/chair.glb', 2, 1, { scale: 0.55, rotY: 90 });
-placeModel('assets/furniture/cabinet.glb', 9, 3, { scale: 0.5 });
-placeModel('assets/furniture/plant.glb', 10, 3, { scale: 0.9 });
+  // The sheet (and the player's model) only exist once a class is picked - the
+  // picker overlay is the first thing the player sees.
+  let sheet = null;
+  const player = new PlayerActor(grid.playerSpawn.x, grid.playerSpawn.z);
+  const enemies = grid.enemySpawns.map((s) => new EnemyActor(s.x, s.z, s.type, ENEMY_TYPES[s.type]));
 
-// Characters: Kenney Mini Characters.
-let managerEntity = null;
-let enemyAlive = enemyX !== null;
-if (enemyX !== null) {
-  placeModel('assets/characters/manager.glb', enemyX, enemyZ, {
-    scale: 1,
-    rotY: -90,
-    onReady: (e) => { managerEntity = e; },
-  });
-}
-let player = null;
-const playerTile = { x: playerX, z: playerZ };
-placeModel('assets/characters/worker.glb', playerX, playerZ, {
-  scale: 1,
-  rotY: 90,
-  onReady: (e) => { player = e; },
-});
+  let inCombat = false;
+  let gameOver = false;
+  let lastPath = null; // kept for debugging/tests
+  let pendingAction = null; // walk-up interaction, runs on arrival
 
-// --- isometric orbit camera ----------------------------------------------
-// A camera rig: camYaw (spins around the focus) -> camPitch (tilts) -> camera
-// (sits back at a fixed distance, looking at the focus). Middle-drag turns it,
-// the wheel zooms, and it follows the player.
-const camYaw = new pc.Entity('camYaw');
-const camPitch = new pc.Entity('camPitch');
-const cameraEntity = new pc.Entity('camera');
-camYaw.addChild(camPitch);
-camPitch.addChild(cameraEntity);
-app.root.addChild(camYaw);
-cameraEntity.addComponent('camera', {
-  projection: pc.PROJECTION_ORTHOGRAPHIC,
-  clearColor: new pc.Color(0.1, 0.1, 0.15),
-  nearClip: 0.1,
-  farClip: 1000,
-});
-
-const CAM = {
-  yaw: 45, pitch: 34, zoom: 6, dist: 60,
-  minZoom: 2.5, maxZoom: 11, minPitch: 12, maxPitch: 72,
-};
-cameraEntity.setLocalPosition(0, 0, CAM.dist);
-function applyCamera() {
-  camYaw.setLocalEulerAngles(0, CAM.yaw, 0);
-  camPitch.setLocalEulerAngles(-CAM.pitch, 0, 0); // negative tilts the camera up-and-over
-  cameraEntity.camera.orthoHeight = CAM.zoom;
-}
-applyCamera();
-camYaw.setPosition(playerX, 0.3, playerZ);
-
-// --- input ----------------------------------------------------------------
-app.mouse.disableContextMenu(); // we draw our own right-click menu
-// Chromium starts autoscroll on middle-press; suppress just the default action
-// (preventDefault, not pointerdown, so PlayCanvas still gets the mousedown).
-canvas.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
-// Keep wheel events inside the game: without this the browser (or the itch.io
-// page hosting the iframe) scrolls instead of zooming.
-canvas.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
-
-let orbiting = false;
-app.mouse.on(pc.EVENT_MOUSEDOWN, (e) => {
-  if (e.button === pc.MOUSEBUTTON_MIDDLE) {
-    orbiting = true;
-  } else if (e.button === pc.MOUSEBUTTON_LEFT) {
-    hideMenu();
-    onLeftClick(e.x, e.y);
-  } else if (e.button === pc.MOUSEBUTTON_RIGHT) {
-    onRightClick(e.x, e.y);
-  }
-});
-app.mouse.on(pc.EVENT_MOUSEUP, (e) => {
-  if (e.button === pc.MOUSEBUTTON_MIDDLE) orbiting = false;
-});
-app.mouse.on(pc.EVENT_MOUSEMOVE, (e) => {
-  if (!orbiting) return;
-  CAM.yaw -= e.dx * 0.3;
-  CAM.pitch = pc.math.clamp(CAM.pitch + e.dy * 0.3, CAM.minPitch, CAM.maxPitch);
-  applyCamera();
-});
-app.mouse.on(pc.EVENT_MOUSEWHEEL, (e) => {
-  // Scroll up (away from you) zooms in - wheelDelta is negative for scroll-up,
-  // so adding it shrinks the ortho height.
-  CAM.zoom = pc.math.clamp(CAM.zoom + e.wheelDelta * 0.6, CAM.minZoom, CAM.maxZoom);
-  applyCamera();
-});
-
-// Turn a screen pixel into the grid tile under it (ray from camera -> ground).
-const _near = new pc.Vec3();
-const _far = new pc.Vec3();
-function screenToTile(sx, sy) {
-  cameraEntity.camera.screenToWorld(sx, sy, cameraEntity.camera.nearClip, _near);
-  cameraEntity.camera.screenToWorld(sx, sy, cameraEntity.camera.farClip, _far);
-  const dir = _far.clone().sub(_near);
-  if (Math.abs(dir.y) < 1e-6) return null;
-  const t = (0 - _near.y) / dir.y; // intersect ground plane y = 0
-  if (t < 0) return null;
-  const p = _near.add(dir.scale(t));
-  return { x: Math.round(p.x), z: Math.round(p.z) };
-}
-
-// --- movement + pathfinding ----------------------------------------------
-const MOVE_SPEED = 3.5; // tiles per second
-let path = null;
-let pathIndex = 0;
-let lastPath = null; // kept for debugging/tests
-let inCombat = false;
-
-// Shortest 8-directional path around walls (Dijkstra: diagonals cost sqrt(2)).
-// A diagonal step is only allowed when both adjacent orthogonal tiles are open,
-// so the character never clips a wall corner.
-const DIRS8 = [
-  [1, 0], [-1, 0], [0, 1], [0, -1],
-  [1, 1], [1, -1], [-1, 1], [-1, -1],
-];
-function findPath(sx, sz, tx, tz) {
-  if (!isWalkable(tx, tz)) return null;
-  const key = (x, z) => x + ',' + z;
-  const dist = new Map([[key(sx, sz), 0]]);
-  const prev = new Map();
-  const open = [[0, sx, sz]];
-  while (open.length) {
-    open.sort((a, b) => a[0] - b[0]); // tiny grid; a heap would be overkill
-    const [d, x, z] = open.shift();
-    if (x === tx && z === tz) break;
-    if (d > dist.get(key(x, z))) continue; // stale queue entry
-    for (const [dx, dz] of DIRS8) {
-      const nx = x + dx;
-      const nz = z + dz;
-      if (!isWalkable(nx, nz)) continue;
-      if (dx !== 0 && dz !== 0 && !(isWalkable(x + dx, z) && isWalkable(x, z + dz))) continue;
-      const nd = d + (dx !== 0 && dz !== 0 ? Math.SQRT2 : 1);
-      const k = key(nx, nz);
-      if (nd < (dist.get(k) ?? Infinity)) {
-        dist.set(k, nd);
-        prev.set(k, [x, z]);
-        open.push([nd, nx, nz]);
-      }
+  const enemyAt = (x, z) => enemies.find((e) => e.alive && e.x === x && e.z === z) || null;
+  const isWalkable = (x, z) => grid.terrainOpen(x, z) && !enemyAt(x, z);
+  // Surface queries, consulting the runtime (fire) before static state.
+  const surfEffect = (x, z) => {
+    if (runtime.isBurning(x, z)) return FIRE.onEnter;
+    if (grid.isElectrified(x, z)) return ELECTRIFIED.onEnter;
+    return SURFACES[runtime.surfaceAt(x, z)]?.onEnter || null;
+  };
+  // What a step actually costs THIS character, after talents (Teflon Coating,
+  // Rubber-Soled Shoes).
+  const effectiveSurfDamage = (x, z) => {
+    const fx = surfEffect(x, z);
+    if (!fx || !fx.amount) return 0;
+    const t = sheet?.talent?.effects || {};
+    if (t.shockImmune && grid.isElectrified(x, z) && !runtime.isBurning(x, z)) return 0;
+    if (t.paperCutImmune && runtime.surfaceAt(x, z) === 'paper' && !runtime.isBurning(x, z)) return 0;
+    return Math.max(0, fx.amount - (t.surfaceDamageResist || 0));
+  };
+  const isHazard = (x, z) => effectiveSurfDamage(x, z) > 0;
+  // Dangerous/uncomfortable surfaces cost extra to path through, so
+  // characters route around them unless told otherwise or there is no other
+  // way; smoothing must never straighten a route through a damaging cell the
+  // route avoided.
+  const hazardCost = (x, z) => {
+    if (runtime.isBurning(x, z)) return FIRE.pathCost;
+    if (grid.isElectrified(x, z)) {
+      return sheet?.talent?.effects?.shockImmune ? 1 : ELECTRIFIED.pathCost;
     }
-  }
-  if (!dist.has(key(tx, tz))) return null;
-  const out = [];
-  let cur = [tx, tz];
-  while (cur) {
-    out.unshift(cur);
-    cur = prev.get(key(cur[0], cur[1])) ?? null;
-    if (cur && cur[0] === sx && cur[1] === sz) { out.unshift(cur); break; }
-  }
-  return out; // includes the start tile at index 0
-}
+    return SURFACES[runtime.surfaceAt(x, z)]?.pathCost || 0;
+  };
+  const clearOfHazards = (x, z) => isWalkable(x, z) && !isHazard(x, z);
 
-function moveTo(tile) {
-  if (!player || !tile || !isWalkable(tile.x, tile.z)) return;
-  const p = findPath(playerTile.x, playerTile.z, tile.x, tile.z);
-  if (p && p.length > 1) {
-    path = p;
-    lastPath = p;
-    pathIndex = 1; // index 0 is where we already stand
-  }
-}
-
-// Walk to the open tile nearest the Manager; combat starts on arrival (the
-// adjacency check in updateMovement fires it).
-function confront() {
-  if (!player || !enemyAlive) return;
-  let best = null;
-  for (const [dx, dz] of DIRS8) {
-    const ax = enemyX + dx;
-    const az = enemyZ + dz;
-    if (!isWalkable(ax, az)) continue;
-    const p = findPath(playerTile.x, playerTile.z, ax, az);
-    if (p && (!best || p.length < best.length)) best = p;
-  }
-  if (!best) return;
-  if (best.length > 1) {
-    path = best;
-    lastPath = best;
-    pathIndex = 1;
-  } else {
-    checkCombatTrigger(); // already standing next to them
-  }
-}
-
-function checkCombatTrigger() {
-  if (inCombat || !enemyAlive || !player) return;
-  if (Math.abs(playerTile.x - enemyX) <= 1 && Math.abs(playerTile.z - enemyZ) <= 1) {
-    path = null;
-    inCombat = true;
-    hideMenu();
-    player.setEulerAngles(0, Math.atan2(enemyX - playerTile.x, enemyZ - playerTile.z) * pc.math.RAD_TO_DEG, 0);
-    say('The Manager has noticed you.');
-    startCombat({
-      enemyName: 'The Manager',
-      onWin: () => {
-        inCombat = false;
-        enemyAlive = false;
-        if (managerEntity) managerEntity.destroy();
-        // Open up the tile they were guarding.
-        rows[enemyZ] = rows[enemyZ].slice(0, enemyX) + '.' + rows[enemyZ].slice(enemyX + 1);
-        say('The way is clear. Head for the exit.');
-      },
-      onLose: () => { inCombat = false; },
+  // --- populate the scene -----------------------------------------------------
+  const lift = floorHeight / 2;
+  for (const en of enemies) {
+    placeModel(app, `assets/characters/${en.def.model}.glb`, en.x, en.z, {
+      lift, rotY: -90, onReady: (e) => en.attach(e),
     });
   }
-}
+  // (Furniture is no longer set dressing here - props are solid tiles in the
+  // level data, rendered by buildLevel and respected by pathfinding.)
 
-function onLeftClick(sx, sy) {
-  if (inCombat) return;
-  const tile = screenToTile(sx, sy);
-  if (!tile) return;
-  if (enemyAlive && tile.x === enemyX && tile.z === enemyZ) {
-    confront();
-    return;
+  // --- game flow ----------------------------------------------------------------
+  function spawnPlayerModel() {
+    placeModel(app, `assets/characters/${sheet.model}.glb`, player.x, player.z, {
+      lift, rotY: 90, onReady: (e) => player.attach(e),
+    });
+    ui.updateStatsHud(sheet);
   }
-  moveTo(tile);
-}
 
-function updateMovement(dt) {
-  if (!player || !path) return;
-  const [tx, tz] = path[pathIndex];
-  const pos = player.getPosition();
-  const target = new pc.Vec3(tx, pos.y, tz);
-  const to = target.clone().sub(pos);
-  const dist = to.length();
-  const step = MOVE_SPEED * dt;
-  if (dist <= step) {
-    player.setPosition(target);
-    playerTile.x = tx;
-    playerTile.z = tz;
-    if (++pathIndex >= path.length) {
-      path = null;
-      if (cellAt(tx, tz) === '>') say('You reach the exit. Freedom smells like the parking garage.');
+  function onClassPicked(classId) {
+    sheet = createSheet(classId);
+    spawnPlayerModel();
+    ui.say(`${sheet.className}. Now get out of here.`);
+  }
+
+  // Blowing up a printer: flash, clear the tile, flatten anyone beside it.
+  function handleExplosion(x, z) {
+    scene.explosionFlash(x, z);
+    grid.setType(x, z, 'floor');
+    scene.removePropVisual(x, z);
+    let slain = 0;
+    for (const en of enemies) {
+      if (en.alive && Math.abs(en.x - x) <= 1 && Math.abs(en.z - z) <= 1) {
+        en.die();
+        slain += 1;
+        if (sheet) gainXp(sheet, en.def.xp);
+      }
+    }
+    let msg = 'The printer detonates in a cloud of toner.';
+    if (slain) msg += ` ${slain} coworker${slain === 1 ? '' : 's'} caught in the blast (+XP).`;
+    if (sheet && player.entity && Math.abs(player.x - x) <= 1 && Math.abs(player.z - z) <= 1) {
+      const dead = applyDamage(sheet, 8);
+      msg += ' You catch shrapnel. -8 HP.';
+      if (dead) {
+        gameOver = true;
+        player.clearPath();
+        clearProgress();
+        ui.say(msg);
+        ui.showLoseScreen('PC LOAD LETTER. Fatal.');
+        return;
+      }
+    }
+    ui.say(msg);
+    if (sheet) ui.updateStatsHud(sheet);
+  }
+
+  function igniteAt(x, z) {
+    const wasProp = !!grid.defAt(x, z).ignitable;
+    if (runtime.ignite(x, z)) {
+      ui.say(wasProp
+        ? 'You introduce the trash can to fire. It goes about as expected.'
+        : 'A flick of the lighter. The paperwork ascends.');
+    }
+  }
+
+  // Walk within reach of (x, z), then run the interaction.
+  function approachAndDo(x, z, run) {
+    if (!sheet || inCombat || gameOver) return;
+    if (Math.abs(player.x - x) <= 1 && Math.abs(player.z - z) <= 1) {
+      run();
+      return;
+    }
+    let best = null;
+    for (const [dx, dz] of DIRS8) {
+      const ax = x + dx;
+      const az = z + dz;
+      if (!isWalkable(ax, az)) continue;
+      const p = findPath(isWalkable, player.x, player.z, ax, az, hazardCost);
+      if (p && (!best || p.length < best.length)) best = p;
+    }
+    if (!best || best.length < 2) return;
+    pendingAction = { x, z, run };
+    const s = smoothPath(clearOfHazards, best);
+    player.setPath(s);
+    lastPath = s;
+  }
+
+  function moveTo(tile) {
+    if (!tile || !sheet || inCombat || gameOver || !isWalkable(tile.x, tile.z)) return;
+    pendingAction = null;
+    const p = findPath(isWalkable, player.x, player.z, tile.x, tile.z, hazardCost);
+    if (p && p.length > 1) {
+      // Smoothed: straight any-angle runs wherever line of sight is clear.
+      const s = smoothPath(clearOfHazards, p);
+      player.setPath(s);
+      lastPath = s;
+    }
+  }
+
+  // Walk to the open tile nearest an enemy; combat starts on arrival via the
+  // adjacency check in onPlayerStep.
+  function confront(en) {
+    if (!en || !en.alive || inCombat || gameOver) return;
+    pendingAction = null;
+    let best = null;
+    for (const [dx, dz] of DIRS8) {
+      const ax = en.x + dx;
+      const az = en.z + dz;
+      if (!isWalkable(ax, az)) continue;
+      const p = findPath(isWalkable, player.x, player.z, ax, az, hazardCost);
+      if (p && (!best || p.length < best.length)) best = p;
+    }
+    if (!best) return;
+    if (best.length > 1) {
+      const s = smoothPath(clearOfHazards, best);
+      player.setPath(s);
+      lastPath = s;
+    } else {
+      checkCombatTrigger();
+    }
+  }
+
+  const adjacentEnemy = () =>
+    enemies.find((e) => e.alive && Math.abs(player.x - e.x) <= 1 && Math.abs(player.z - e.z) <= 1) || null;
+
+  function checkCombatTrigger() {
+    if (!sheet || inCombat || gameOver || !player.entity) return;
+    const en = adjacentEnemy();
+    if (!en) return;
+    player.clearPath();
+    inCombat = true;
+    ui.hideMenu();
+    player.faceToward(en.x, en.z);
+    en.faceToward(player.x, player.z);
+    ui.say(`${en.def.name} has noticed you.`);
+    startCombat({
+      enemyDef: en.def,
+      sheet,
+      onChange: () => ui.updateStatsHud(sheet),
+      onWin: () => {
+        inCombat = false;
+        en.die();
+        // A breather after every victory, so back-to-back fights aren't a death
+        // spiral - wounds still carry over, just less brutally.
+        sheet.hp = Math.min(sheet.maxHp, sheet.hp + 5);
+        const promoted = gainXp(sheet, en.def.xp);
+        ui.say(promoted
+          ? `Promotion! Level ${sheet.level}: fully rested, +1 damage.`
+          : `+${en.def.xp} XP.`);
+        ui.updateStatsHud(sheet);
+      },
+      onLose: () => { inCombat = false; gameOver = true; clearProgress(); },
+    });
+  }
+
+  // Tile effects (data-driven from TILE_TYPES[..].onEnter) fire per step.
+  // Hazards hit on any step; the exit only fires when it's the destination, so
+  // pathing past it doesn't end the level by accident.
+  function onPlayerStep(x, z, pathDone, changed = true) {
+    const fx = grid.defAt(x, z).onEnter;
+    if (fx) {
+      if (fx.effect === 'exit' && pathDone) {
+        gameOver = true;
+        player.clearPath();
+        // Mid-campaign exits lead to the next floor (the sheet - wounds, XP,
+        // coffee habits - carries over via saved progress). The last floor,
+        // and any playtest level, ends the run.
+        if (!playtesting && level.next && LEVELS[level.next]) {
+          // A breather in the stairwell, so you never start a floor one
+          // puddle away from death.
+          sheet.hp = Math.min(sheet.maxHp, sheet.hp + 6);
+          localStorage.setItem(PROGRESS_KEY, JSON.stringify({ levelId: level.next, sheet }));
+          ui.showFloorClear({ nextName: LEVELS[level.next].name }, () => location.reload());
+        } else {
+          clearProgress();
+          ui.showWinScreen({ level: sheet.level, defeated: enemies.filter((e) => !e.alive).length });
+        }
+        return;
+      }
+      if (fx.effect === 'damage' && changed) {
+        const dead = applyDamage(sheet, fx.amount);
+        ui.say(fx.message);
+        ui.updateStatsHud(sheet);
+        if (dead) {
+          gameOver = true;
+          player.clearPath();
+          clearProgress();
+          ui.showLoseScreen('Done in by the office itself. The floor was, in fact, wet.');
+          return;
+        }
+      }
+    }
+    // Paper-cut bleeding drips on every tile entered while it lasts.
+    if (changed && sheet.bleed > 0) {
+      sheet.bleed -= 1;
+      const bled = applyDamage(sheet, 1);
+      ui.say('You drip on the carpet. -1 HP.');
+      ui.updateStatsHud(sheet);
+      if (bled) {
+        gameOver = true;
+        player.clearPath();
+        clearProgress();
+        ui.showLoseScreen('Death by a thousand paper cuts. Well - several.');
+        return;
+      }
+    }
+    // Surface effects (data/surfaces.js): fire and electrified pools hurt,
+    // paper cuts (and arms you), water and coffee editorialize. Talents can
+    // shrug damage off. Only on genuine tile entry.
+    const sfx = changed ? surfEffect(x, z) : null;
+    if (sfx) {
+      if (sfx.ammo) {
+        sheet.paper = Math.min(8, sheet.paper + sfx.ammo);
+      }
+      const amount = effectiveSurfDamage(x, z);
+      if (amount > 0) {
+        if (sfx.bleed) sheet.bleed = Math.max(sheet.bleed, sfx.bleed);
+        const dead = applyDamage(sheet, amount);
+        ui.say(sfx.message);
+        ui.updateStatsHud(sheet);
+        if (dead) {
+          gameOver = true;
+          player.clearPath();
+          clearProgress();
+          ui.showLoseScreen('Done in by the office itself. Facilities sends their regards.');
+          return;
+        }
+      } else if (sfx.amount) {
+        ui.say(sheet.talent?.effects?.shockImmune && grid.isElectrified(x, z)
+          ? 'The water crackles. Your rubber soles hum smugly. 0 damage.'
+          : 'You glide across the drift, harvesting ammunition. The edges respect a master. (+1 paper)');
+        ui.updateStatsHud(sheet);
+      } else if (sfx.message) {
+        ui.say(sfx.message);
+      }
+    }
+    // Walk-up interactions (lighting trash cans) fire on deliberate arrival.
+    if (pendingAction && pathDone
+      && Math.abs(x - pendingAction.x) <= 1 && Math.abs(z - pendingAction.z) <= 1) {
+      const act = pendingAction;
+      pendingAction = null;
+      act.run();
     }
     checkCombatTrigger();
-  } else {
-    to.normalize();
-    player.setPosition(pos.add(to.scale(step)));
-    player.setEulerAngles(0, Math.atan2(to.x, to.z) * pc.math.RAD_TO_DEG, 0);
   }
-}
 
-// Fade walls that sit between the camera and the player (CRPG occlusion).
-// With an orthographic camera every point looks along the same direction, so
-// "toward the camera" is one fixed axis: walk it from the player and fade any
-// wall close to that line.
-const _fadeDir = new pc.Vec3();
-function updateWallFade() {
-  if (!player) return;
-  const fwd = cameraEntity.forward;
-  _fadeDir.set(-fwd.x, 0, -fwd.z).normalize();
-  const pos = player.getPosition();
-  for (const w of walls) {
-    const vx = w.x - pos.x;
-    const vz = w.z - pos.z;
-    const t = vx * _fadeDir.x + vz * _fadeDir.z;
-    const px = vx - t * _fadeDir.x;
-    const pz = vz - t * _fadeDir.z;
-    const shouldFade = t > 0.3 && Math.hypot(px, pz) < 1.05;
-    if (shouldFade !== w.faded) {
-      w.faded = shouldFade;
-      w.entity.render.meshInstances[0].material = shouldFade ? wallFadeMaterial : materials['#'];
-    }
-  }
-}
-
-// Camera eases toward the player so it stays centred as you move.
-function updateCamera() {
-  if (!player) return;
-  const p = player.getPosition();
-  const c = camYaw.getPosition();
-  camYaw.setPosition(pc.math.lerp(c.x, p.x, 0.15), 0.3, pc.math.lerp(c.z, p.z, 0.15));
-}
-
-app.on('update', (dt) => {
-  updateMovement(dt);
-  updateCamera();
-  updateWallFade();
-});
-
-// --- right-click context menu (HTML overlay) -----------------------------
-let menuEl = null;
-function ensureMenu() {
-  if (menuEl) return menuEl;
-  menuEl = document.createElement('div');
-  menuEl.id = 'context-menu';
-  Object.assign(menuEl.style, {
-    position: 'fixed', zIndex: '20', minWidth: '170px', display: 'none',
-    background: '#232334', color: '#f0f0f5', border: '1px solid #3a3a52',
-    borderRadius: '7px', padding: '5px', boxShadow: '0 8px 24px rgba(0,0,0,.45)',
-    font: '13px system-ui, sans-serif', userSelect: 'none',
+  // --- input --------------------------------------------------------------------
+  const controls = createControls({
+    app,
+    canvas: document.getElementById('app'),
+    focus: grid.playerSpawn,
+    onAnyLeftPress: () => ui.hideMenu(),
+    onLeftClickTile: (tile) => {
+      if (!tile || !sheet || inCombat || gameOver) return;
+      const en = enemyAt(tile.x, tile.z);
+      if (en) confront(en);
+      else moveTo(tile);
+    },
+    onRightClickTile: (tile, sx, sy) => {
+      if (!tile || !sheet || inCombat || gameOver) return;
+      const en = enemyAt(tile.x, tile.z);
+      if (en) {
+        ui.showMenu(sx, sy, [
+          { label: `Confront ${en.def.name}`, action: () => confront(en) },
+          { label: 'Avoid eye contact', action: () => ui.say('You study your shoes intently.') },
+          { label: 'Examine', action: () => ui.say(en.def.examine) },
+        ]);
+      } else if (isWalkable(tile.x, tile.z)) {
+        const surfId = runtime.surfaceAt(tile.x, tile.z);
+        const flavor = runtime.isBurning(tile.x, tile.z)
+          ? FIRE.examine
+          : grid.isElectrified(tile.x, tile.z)
+            ? ELECTRIFIED.examine
+            : (surfId && SURFACES[surfId].examine) || 'Standard-issue office carpet. Faintly damp.';
+        const items = [
+          { label: 'Walk here', action: () => moveTo(tile) },
+          { label: 'Examine', action: () => ui.say(flavor) },
+        ];
+        // The Smoker's lighter turns any flammable surface into an option.
+        if (sheet?.talent?.effects?.hasLighter
+          && surfId && SURFACES[surfId].flammable && !runtime.isBurning(tile.x, tile.z)) {
+          items.unshift({
+            label: 'Flick the lighter',
+            action: () => approachAndDo(tile.x, tile.z, () => igniteAt(tile.x, tile.z)),
+          });
+        }
+        ui.showMenu(sx, sy, items);
+      } else if (grid.defAt(tile.x, tile.z).ignitable) {
+        const items = [{
+          label: 'Examine',
+          action: () => ui.say(runtime.isBurning(tile.x, tile.z)
+            ? 'The trash can is thoroughly on fire. Somewhere, an alarm should be going off.'
+            : 'A trash can. Sixty percent paper, forty percent regret.'),
+        }];
+        if (runtime.ignitable(tile.x, tile.z)) {
+          items.unshift({
+            label: 'Set it on fire (why not)',
+            action: () => approachAndDo(tile.x, tile.z, () => igniteAt(tile.x, tile.z)),
+          });
+        }
+        ui.showMenu(sx, sy, items);
+      } else if (grid.defAt(tile.x, tile.z).explosive) {
+        ui.showMenu(sx, sy, [
+          { label: 'Examine', action: () => ui.say('The printer. It has jammed 4 times today. It is waiting.') },
+        ]);
+      } else {
+        ui.showMenu(sx, sy, [
+          { label: 'Examine', action: () => ui.say('A cubicle wall. It has seen things.') },
+        ]);
+      }
+    },
   });
-  document.body.appendChild(menuEl);
-  return menuEl;
-}
-function showMenu(x, y, items) {
-  const el = ensureMenu();
-  el.innerHTML = '';
-  for (const it of items) {
-    const row = document.createElement('div');
-    row.textContent = it.label;
-    Object.assign(row.style, { padding: '7px 11px', borderRadius: '5px', cursor: 'pointer' });
-    row.onmouseenter = () => { row.style.background = '#34344f'; };
-    row.onmouseleave = () => { row.style.background = 'transparent'; };
-    row.onclick = () => { hideMenu(); it.action && it.action(); };
-    el.appendChild(row);
-  }
-  el.style.left = Math.min(x, window.innerWidth - 190) + 'px';
-  el.style.top = Math.min(y, window.innerHeight - items.length * 34 - 12) + 'px';
-  el.style.display = 'block';
-}
-function hideMenu() { if (menuEl) menuEl.style.display = 'none'; }
-// A left-press outside the menu closes it. Right-presses are ignored here so the
-// very click that opens the menu doesn't also close it (and so a right-click
-// elsewhere just repositions it).
-window.addEventListener('mousedown', (e) => {
-  if (e.button === 0 && menuEl && !menuEl.contains(e.target)) hideMenu();
-});
 
-function say(text) {
-  const el = document.getElementById('subtitle');
-  if (el) el.textContent = text;
-}
+  // --- main loop ------------------------------------------------------------------
+  const BASE_SPEED = 4;
+  app.on('update', (dt) => {
+    // Sticky surfaces (coffee) slow you while you're on them.
+    player.speed = BASE_SPEED * (SURFACES[grid.surfaceAt(player.x, player.z)]?.slow || 1);
+    player.update(dt, onPlayerStep);
+    const world = {
+      paused: inCombat || gameOver,
+      terrainOpen: grid.terrainOpen,
+      isWalkable,
+      isHazard,
+      playerTile: player,
+    };
+    let anyoneMoved = false;
+    for (const en of enemies) {
+      const beforeX = en.x;
+      const beforeZ = en.z;
+      en.update(dt, world);
+      if (en.x !== beforeX || en.z !== beforeZ) anyoneMoved = true;
+    }
+    if (anyoneMoved) checkCombatTrigger(); // did someone just corner the player?
+    if (!inCombat && !gameOver) runtime.tick(dt); // fire waits for no meeting - except yours
+    animateSurfaces(dt);
+    // Follow the player, gently biased toward the map centre so corner spawns
+    // don't leave half the frame empty.
+    controls.follow({
+      x: player.x * 0.82 + ((grid.width - 1) / 2) * 0.18,
+      z: player.z * 0.82 + ((grid.height - 1) / 2) * 0.18,
+    });
+    updateWallFade(controls.cameraEntity, player.entity ? player.entity.getPosition() : null);
+  });
 
-// Context-sensitive actions, office-CRPG flavoured.
-function onRightClick(sx, sy) {
-  if (inCombat) return;
-  const tile = screenToTile(sx, sy);
-  if (!tile) return;
-  if (enemyAlive && tile.x === enemyX && tile.z === enemyZ) {
-    showMenu(sx, sy, [
-      { label: 'Confront the Manager', action: () => confront() },
-      { label: 'Avoid eye contact', action: () => say('You study your shoes intently.') },
-      { label: 'Examine', action: () => say('The Manager: radiates unread-email energy.') },
-    ]);
-  } else if (isWalkable(tile.x, tile.z)) {
-    showMenu(sx, sy, [
-      { label: 'Walk here', action: () => moveTo(tile) },
-      { label: 'Examine', action: () => say('Standard-issue office carpet. Faintly damp.') },
-    ]);
+  // --- boot -------------------------------------------------------------------------
+  ui.say(grid.name);
+  // The escape hatches live here (not only on the class picker) because a
+  // mid-campaign reload skips the picker entirely.
+  ui.showGameMenu([
+    {
+      id: 'menu-restart',
+      label: 'Restart run',
+      action: () => {
+        clearProgress();
+        localStorage.removeItem(STASH_KEY);
+        location.hash = '';
+        location.reload();
+      },
+    },
+    {
+      id: 'menu-editor',
+      label: 'Level editor',
+      action: () => {
+        location.hash = '#editor';
+        location.reload();
+      },
+    },
+  ]);
+  if (restoredSheet) {
+    // Continuing a campaign run: same character, next floor - no picker.
+    sheet = restoredSheet;
+    spawnPlayerModel();
+    ui.say(`${grid.name}. Keep going.`);
   } else {
-    showMenu(sx, sy, [
-      { label: 'Examine', action: () => say('A cubicle wall. It has seen things.') },
-    ]);
+    ui.showClassPicker(CLASSES, ACTIONS, onClassPicked, () => {
+      location.hash = '#editor';
+      location.reload();
+    });
   }
+  if (playtesting) {
+    ui.showPlaytestBadge(() => {
+      location.hash = '#editor';
+      location.reload();
+    });
+  }
+
+  // Small read-only handle for tests and console poking.
+  window.__game = {
+    get playerTile() { return { x: player.x, z: player.z }; },
+    get inCombat() { return inCombat; },
+    get gameOver() { return gameOver; },
+    get lastPath() { return lastPath; },
+    get fadedWallCount() { return walls.filter((w) => w.faded).length; },
+    get stats() { return sheet ? { ...sheet } : null; },
+    get playerSpeed() { return player.speed; },
+    get burning() { return runtime.burningCount; },
+    get enemies() { return enemies.map((e) => ({ name: e.def.name, x: e.x, z: e.z, alive: e.alive })); },
+  };
 }
-
-// --- HUD ------------------------------------------------------------------
-say(level.name || '');
-
-// Small read-only handle for tests and console poking.
-window.__game = {
-  get playerTile() { return { ...playerTile }; },
-  get inCombat() { return inCombat; },
-  get enemyAlive() { return enemyAlive; },
-  get lastPath() { return lastPath; },
-  get fadedWallCount() { return walls.filter((w) => w.faded).length; },
-};
-
-app.start();
