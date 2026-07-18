@@ -10,6 +10,7 @@ export const ACTIONS = {
   // --- Office Drone -----------------------------------------------------------
   attack: {
     type: 'attack',
+    ap: 3,
     label: 'Passive-Aggressive Email',
     min: 3,
     max: 5,
@@ -17,11 +18,13 @@ export const ACTIONS = {
   },
   defend: {
     type: 'defend',
+    ap: 2,
     label: 'Deflect Blame',
     log: 'You pre-emptively deflect blame. Incoming damage halved.',
   },
   coffee: {
     type: 'heal',
+    ap: 2,
     label: 'Coffee Break',
     amount: 6,
     uses: 3,
@@ -31,6 +34,7 @@ export const ACTIONS = {
   // --- Middle Manager ---------------------------------------------------------
   delegate: {
     type: 'attack',
+    ap: 3,
     label: 'Delegate Ruthlessly',
     min: 2,
     max: 4,
@@ -38,11 +42,13 @@ export const ACTIONS = {
   },
   'own-calendar': {
     type: 'defend',
+    ap: 2,
     label: 'Decline the Invite',
     log: 'You decline their meeting invite. Incoming damage halved.',
   },
   espresso: {
     type: 'heal',
+    ap: 2,
     label: 'Executive Espresso',
     amount: 8,
     uses: 2,
@@ -52,6 +58,7 @@ export const ACTIONS = {
   // --- IT Support ---------------------------------------------------------------
   reboot: {
     type: 'attack',
+    ap: 3,
     label: 'Turn It Off And On Again',
     min: 4,
     max: 7,
@@ -59,11 +66,13 @@ export const ACTIONS = {
   },
   firewall: {
     type: 'defend',
+    ap: 2,
     label: 'Blame the Firewall',
     log: '"That\'s a firewall issue." Incoming damage halved.',
   },
   'energy-drink': {
     type: 'heal',
+    ap: 2,
     label: 'Energy Drink',
     amount: 4,
     uses: 4,
@@ -73,6 +82,7 @@ export const ACTIONS = {
   // --- talent-granted -----------------------------------------------------------
   cigarette: {
     type: 'heal',
+    ap: 2,
     label: 'Smoke Break',
     amount: 3,
     uses: 2,
@@ -83,6 +93,7 @@ export const ACTIONS = {
   // spills; see sheet.paper) -----------------------------------------------------
   'paper-ball': {
     type: 'attack',
+    ap: 2,
     ammoCost: 1,
     label: 'Paper Ball',
     min: 2,
@@ -91,6 +102,7 @@ export const ACTIONS = {
   },
   'paper-airplane': {
     type: 'attack',
+    ap: 2,
     ammoCost: 2,
     label: 'Paper Airplane',
     min: 4,

@@ -9,6 +9,7 @@ export const CLASSES = {
     objective: 'To occupy a chair with minimal supervision until something better comes along.',
     experience: 'Cubicle Occupant, 2019–present. Duties: unclear.',
     maxHp: 22,
+    ap: 6,
     bonusDmg: 0,
     actions: ['attack', 'defend', 'coffee'],
     talent: {
@@ -24,6 +25,7 @@ export const CLASSES = {
     objective: 'Seeking synergies. Comfortable owning outcomes I did not cause.',
     experience: 'VP of Alignment (self-described), 6 yrs. Survived 4 reorgs.',
     maxHp: 28,
+    ap: 5,
     bonusDmg: 0,
     actions: ['delegate', 'own-calendar', 'espresso'],
     talent: {
@@ -39,6 +41,7 @@ export const CLASSES = {
     objective: 'To close tickets. All of them. Forever.',
     experience: '"Have you tried turning it off and on again," 10 yrs.',
     maxHp: 17,
+    ap: 7,
     bonusDmg: 0,
     actions: ['reboot', 'firewall', 'energy-drink'],
     talent: {

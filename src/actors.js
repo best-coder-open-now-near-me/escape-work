@@ -132,12 +132,22 @@ export class EnemyActor extends GridActor {
     super(x, z, { speed: 2.2, ...opts });
     this.typeId = typeId;
     this.def = def;
+    this.hp = def.hp; // map HP - damage persists outside combat too
     this.spawnX = x;
     this.spawnZ = z;
     this.alive = true;
     this.leash = 2;
     // Stagger decisions so enemies don't all step in lockstep.
     this.wanderTimer = 1 + Math.random() * 1.5;
+  }
+
+  takeDamage(amount) {
+    this.hp = Math.max(0, this.hp - amount);
+    if (this.hp <= 0) {
+      this.die();
+      return true;
+    }
+    return false;
   }
 
   die() {

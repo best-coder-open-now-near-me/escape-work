@@ -13,7 +13,7 @@ import { ENEMY_TYPES } from './data/enemies.js';
 import { CLASSES } from './data/classes.js';
 import { ACTIONS } from './data/actions.js';
 import { parseLevel } from './grid.js';
-import { findPath, smoothPath, DIRS8 } from './pathfinding.js';
+import { findPath, smoothPath, segmentClear, DIRS8 } from './pathfinding.js';
 import { createSheet, gainXp, applyDamage } from './stats.js';
 import { PlayerActor, EnemyActor } from './actors.js';
 import { createApp, buildLevel, placeModel } from './scene.js';
@@ -80,9 +80,18 @@ function startGame(level) {
   const enemies = grid.enemySpawns.map((s) => new EnemyActor(s.x, s.z, s.type, ENEMY_TYPES[s.type]));
 
   let inCombat = false;
+  let combat = null; // active tactical-combat controller
   let gameOver = false;
   let lastPath = null; // kept for debugging/tests
   let pendingAction = null; // walk-up interaction, runs on arrival
+
+  function abortCombat() {
+    if (combat) {
+      combat.abort();
+      combat = null;
+    }
+    inCombat = false;
+  }
 
   const enemyAt = (x, z) => enemies.find((e) => e.alive && e.x === x && e.z === z) || null;
   const isWalkable = (x, z) => grid.terrainOpen(x, z) && !enemyAt(x, z);
@@ -161,6 +170,7 @@ function startGame(level) {
       if (dead) {
         gameOver = true;
         player.clearPath();
+        abortCombat();
         clearProgress();
         ui.say(msg);
         ui.showLoseScreen('PC LOAD LETTER. Fatal.');
@@ -245,28 +255,55 @@ function startGame(level) {
     const en = adjacentEnemy();
     if (!en) return;
     player.clearPath();
+    pendingAction = null;
     inCombat = true;
     ui.hideMenu();
+    // Everyone close enough joins the brawl (those further than 2 tiles are
+    // surprised and lose their first turn - see combat.js).
+    const engaged = enemies.filter((e) =>
+      e.alive && Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= 4);
     player.faceToward(en.x, en.z);
     en.faceToward(player.x, player.z);
-    ui.say(`${en.def.name} has noticed you.`);
-    startCombat({
-      enemyDef: en.def,
+    ui.say(engaged.length > 1
+      ? `${en.def.name} has noticed you. So have ${engaged.length - 1} other${engaged.length > 2 ? 's' : ''}.`
+      : `${en.def.name} has noticed you.`);
+    combat = startCombat({
+      app,
       sheet,
-      onChange: () => ui.updateStatsHud(sheet),
-      onWin: () => {
-        inCombat = false;
-        en.die();
-        // A breather after every victory, so back-to-back fights aren't a death
-        // spiral - wounds still carry over, just less brutally.
-        sheet.hp = Math.min(sheet.maxHp, sheet.hp + 5);
-        const promoted = gainXp(sheet, en.def.xp);
-        ui.say(promoted
-          ? `Promotion! Level ${sheet.level}: fully rested, +1 damage.`
-          : `+${en.def.xp} XP.`);
-        ui.updateStatsHud(sheet);
+      player,
+      engaged,
+      world: {
+        isWalkable,
+        findPath: (sx, sz, tx, tz) => findPath(isWalkable, sx, sz, tx, tz, hazardCost),
+        hasLos: (ax, az, bx, bz) => segmentClear(grid.terrainOpen, ax, az, bx, bz),
+        surfaceIdAt: (x, z) => runtime.surfaceAt(x, z),
+        enemySurfDamage: (x, z) => surfEffect(x, z)?.amount || 0,
       },
-      onLose: () => { inCombat = false; gameOver = true; clearProgress(); },
+      callbacks: {
+        say: ui.say,
+        updateHud: () => ui.updateStatsHud(sheet),
+        onEnemyKilled: (dead) => {
+          const promoted = gainXp(sheet, dead.def.xp);
+          if (promoted) ui.say(`Promotion! Level ${sheet.level}: fully rested, +1 damage.`);
+          ui.updateStatsHud(sheet);
+        },
+        onWin: () => {
+          inCombat = false;
+          combat = null;
+          // A breather after every victory, so back-to-back fights aren't a
+          // death spiral - wounds still carry over, just less brutally.
+          sheet.hp = Math.min(sheet.maxHp, sheet.hp + 5);
+          ui.say('The floor is yours. You catch your breath. (+5 HP)');
+          ui.updateStatsHud(sheet);
+        },
+        onLose: () => {
+          inCombat = false;
+          combat = null;
+          gameOver = true;
+          clearProgress();
+          ui.showLoseScreen('The office wins this round. Darkness falls between the cubicles.');
+        },
+      },
     });
   }
 
@@ -276,7 +313,7 @@ function startGame(level) {
   function onPlayerStep(x, z, pathDone, changed = true) {
     const fx = grid.defAt(x, z).onEnter;
     if (fx) {
-      if (fx.effect === 'exit' && pathDone) {
+      if (fx.effect === 'exit' && pathDone && !inCombat) {
         gameOver = true;
         player.clearPath();
         // Mid-campaign exits lead to the next floor (the sheet - wounds, XP,
@@ -316,6 +353,7 @@ function startGame(level) {
       if (bled) {
         gameOver = true;
         player.clearPath();
+        abortCombat();
         clearProgress();
         ui.showLoseScreen('Death by a thousand paper cuts. Well - several.');
         return;
@@ -338,6 +376,7 @@ function startGame(level) {
         if (dead) {
           gameOver = true;
           player.clearPath();
+          abortCombat();
           clearProgress();
           ui.showLoseScreen('Done in by the office itself. Facilities sends their regards.');
           return;
@@ -368,7 +407,13 @@ function startGame(level) {
     focus: grid.playerSpawn,
     onAnyLeftPress: () => ui.hideMenu(),
     onLeftClickTile: (tile) => {
-      if (!tile || !sheet || inCombat || gameOver) return;
+      if (!tile || !sheet || gameOver) return;
+      if (inCombat) {
+        const en = enemyAt(tile.x, tile.z);
+        if (en) combat?.handleEnemyClick(en);
+        else combat?.handleTileClick(tile);
+        return;
+      }
       const en = enemyAt(tile.x, tile.z);
       if (en) confront(en);
       else moveTo(tile);
@@ -449,7 +494,7 @@ function startGame(level) {
       if (en.x !== beforeX || en.z !== beforeZ) anyoneMoved = true;
     }
     if (anyoneMoved) checkCombatTrigger(); // did someone just corner the player?
-    if (!inCombat && !gameOver) runtime.tick(dt); // fire waits for no meeting - except yours
+    if (!gameOver) runtime.tick(dt); // fire waits for no one, combat included
     animateSurfaces(dt);
     // Follow the player, gently biased toward the map centre so corner spawns
     // don't leave half the frame empty.
