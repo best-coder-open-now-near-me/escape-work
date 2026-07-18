@@ -67,6 +67,13 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - **New enemy**: entry in `data/enemies.js` + character in a level's `actors`
   legend + a .glb in `assets/characters/`.
 - **New hazard/tile**: entry in `data/tiles.js` + character in `tiles` legend.
+- **New furniture/prop**: a tile entry with `model` (a .glb under `assets/`) and
+  `solid: true` - it blocks movement and renders as the model in both game and
+  editor. Props are level data, never hardcoded set dressing.
+- **New floor**: another JSON in `levels/` registered in `data/levels.js`; set
+  the previous floor's `next` to its id. Exits mid-campaign show FLOOR CLEAR
+  and carry the character sheet to the next floor (progress persists in
+  localStorage); the last floor's exit wins the run.
 - **Weapons/items**: extend `data/actions.js`; equipping = swapping ids in
   `sheet.actions` (see `stats.js`).
 - **New class**: entry in `data/classes.js` (stats, model, action ids) - the

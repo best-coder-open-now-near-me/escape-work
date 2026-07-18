@@ -82,6 +82,15 @@ export function showWinScreen({ level, defeated }) {
   div.querySelector('#again').onclick = () => location.reload();
 }
 
+export function showFloorClear({ nextName }, onNext) {
+  const div = overlay('floor-clear', `
+    <div style="font-size:24px; font-weight:800; letter-spacing:2px; margin-bottom:8px;">FLOOR CLEAR</div>
+    <div style="opacity:.85; margin-bottom:4px;">You take the stairs. Nobody takes the stairs. Smart.</div>
+    <div style="opacity:.7; margin-bottom:18px;">Next: ${nextName}</div>
+    ${button('next-floor', 'Keep Climbing')}`);
+  div.querySelector('#next-floor').onclick = onNext;
+}
+
 export function showLoseScreen(message) {
   const div = overlay('lose-screen', `
     <div style="font-size:22px; font-weight:800; letter-spacing:2px; margin-bottom:8px;">STUCK AT WORK</div>

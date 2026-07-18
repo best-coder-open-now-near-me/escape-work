@@ -6,7 +6,7 @@
 // focused modules - see ARCHITECTURE.md for the map. Content (tiles, enemies,
 // classes, actions) is data in src/data/; levels are hand-editable JSON - or
 // paintable in the built-in editor (#editor / the link on the class picker).
-import shippedLevel from '../levels/level1.json';
+import { LEVELS, FIRST_LEVEL } from './data/levels.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { CLASSES } from './data/classes.js';
 import { ACTIONS } from './data/actions.js';
@@ -21,18 +21,35 @@ import { startEditor } from './editor.js';
 import * as ui from './ui.js';
 
 const STASH_KEY = 'escape-work.playtest';
+const PROGRESS_KEY = 'escape-work.progress';
 const app = createApp(document.getElementById('app'));
 
-// A playtest level stashed by the editor takes priority over the shipped one.
-let activeLevel = shippedLevel;
+// Level resolution, in priority order:
+// 1. a playtest level stashed by the editor (standalone - no campaign)
+// 2. campaign progress (mid-run floor + character sheet, saved on floor clear)
+// 3. the first shipped level
+let activeLevel = LEVELS[FIRST_LEVEL];
+let activeLevelId = FIRST_LEVEL;
 let playtesting = false;
+let restoredSheet = null;
 try {
   const stash = localStorage.getItem(STASH_KEY);
+  const progress = localStorage.getItem(PROGRESS_KEY);
   if (stash) {
     activeLevel = JSON.parse(stash);
+    activeLevelId = null;
     playtesting = true;
+  } else if (progress) {
+    const p = JSON.parse(progress);
+    if (LEVELS[p.levelId]) {
+      activeLevel = LEVELS[p.levelId];
+      activeLevelId = p.levelId;
+      restoredSheet = p.sheet || null;
+    }
   }
-} catch { /* corrupted stash - fall back to the shipped level */ }
+} catch { /* corrupted storage - fall back to the shipped level */ }
+
+const clearProgress = () => localStorage.removeItem(PROGRESS_KEY);
 
 if (location.hash.includes('editor')) {
   startEditor(app, activeLevel, STASH_KEY);
@@ -67,19 +84,20 @@ function startGame(level) {
       lift, rotY: -90, onReady: (e) => en.attach(e),
     });
   }
-  // Set dressing. Like everything else, placement is one line per prop.
-  placeModel(app, 'assets/furniture/desk.glb', 3, 1, { scale: 0.5, lift });
-  placeModel(app, 'assets/furniture/chair.glb', 2, 1, { scale: 0.55, rotY: 90, lift });
-  placeModel(app, 'assets/furniture/cabinet.glb', 9, 3, { scale: 0.5, lift });
-  placeModel(app, 'assets/furniture/plant.glb', 10, 3, { scale: 0.9, lift });
+  // (Furniture is no longer set dressing here - props are solid tiles in the
+  // level data, rendered by buildLevel and respected by pathfinding.)
 
   // --- game flow ----------------------------------------------------------------
-  function onClassPicked(classId) {
-    sheet = createSheet(classId);
+  function spawnPlayerModel() {
     placeModel(app, `assets/characters/${sheet.model}.glb`, player.x, player.z, {
       lift, rotY: 90, onReady: (e) => player.attach(e),
     });
     ui.updateStatsHud(sheet);
+  }
+
+  function onClassPicked(classId) {
+    sheet = createSheet(classId);
+    spawnPlayerModel();
     ui.say(`${sheet.className}. Now get out of here.`);
   }
 
@@ -142,7 +160,7 @@ function startGame(level) {
           : `+${en.def.xp} XP.`);
         ui.updateStatsHud(sheet);
       },
-      onLose: () => { inCombat = false; gameOver = true; },
+      onLose: () => { inCombat = false; gameOver = true; clearProgress(); },
     });
   }
 
@@ -155,7 +173,16 @@ function startGame(level) {
       if (fx.effect === 'exit' && pathDone) {
         gameOver = true;
         player.clearPath();
-        ui.showWinScreen({ level: sheet.level, defeated: enemies.filter((e) => !e.alive).length });
+        // Mid-campaign exits lead to the next floor (the sheet - wounds, XP,
+        // coffee habits - carries over via saved progress). The last floor,
+        // and any playtest level, ends the run.
+        if (!playtesting && level.next && LEVELS[level.next]) {
+          localStorage.setItem(PROGRESS_KEY, JSON.stringify({ levelId: level.next, sheet }));
+          ui.showFloorClear({ nextName: LEVELS[level.next].name }, () => location.reload());
+        } else {
+          clearProgress();
+          ui.showWinScreen({ level: sheet.level, defeated: enemies.filter((e) => !e.alive).length });
+        }
         return;
       }
       if (fx.effect === 'damage') {
@@ -165,6 +192,7 @@ function startGame(level) {
         if (dead) {
           gameOver = true;
           player.clearPath();
+          clearProgress();
           ui.showLoseScreen('Done in by the office itself. The floor was, in fact, wet.');
           return;
         }
@@ -234,10 +262,17 @@ function startGame(level) {
 
   // --- boot -------------------------------------------------------------------------
   ui.say(grid.name);
-  ui.showClassPicker(CLASSES, ACTIONS, onClassPicked, () => {
-    location.hash = '#editor';
-    location.reload();
-  });
+  if (restoredSheet) {
+    // Continuing a campaign run: same character, next floor - no picker.
+    sheet = restoredSheet;
+    spawnPlayerModel();
+    ui.say(`${grid.name}. Keep going.`);
+  } else {
+    ui.showClassPicker(CLASSES, ACTIONS, onClassPicked, () => {
+      location.hash = '#editor';
+      location.reload();
+    });
+  }
   if (playtesting) {
     ui.showPlaytestBadge(() => {
       location.hash = '#editor';

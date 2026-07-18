@@ -4,24 +4,27 @@
 //
 // Enter via the link on the class picker (or #editor in the URL). "Playtest"
 // stashes the level in localStorage and reloads into the real game; the game
-// shows a badge to jump back here.
+// shows a badge to jump back here. Any shipped level can be loaded as a base,
+// and the grid can be grown/shrunk from the right/bottom edges.
 import { TILE_TYPES } from './data/tiles.js';
 import { ENEMY_TYPES } from './data/enemies.js';
+import { LEVELS } from './data/levels.js';
 import { createControls } from './controls.js';
+import { placeModel } from './scene.js';
 import { say } from './ui.js';
 
 const pc = window.pc;
 const PLAYER_CHAR = '@';
+const MIN_SIZE = 4;
+const MAX_SIZE = 40;
 
 export function startEditor(app, levelData, stashKey) {
-  // --- editable character grid ------------------------------------------------
-  const height = levelData.map.length;
-  const width = Math.max(...levelData.map.map((r) => r.length));
-  const rows = levelData.map.map((r) => {
-    const a = r.split('');
-    while (a.length < width) a.push(' ');
-    return a;
-  });
+  // --- editable state ---------------------------------------------------------
+  let rows = [];
+  let width = 0;
+  let height = 0;
+  let levelName = '';
+  let levelNext; // preserved through export so campaigns survive editing
 
   // char <-> meaning, from the registries (single source of truth for export)
   const tileByChar = {};
@@ -45,6 +48,7 @@ export function startEditor(app, levelData, stashKey) {
 
   // --- per-cell rendering --------------------------------------------------------
   const cellEntities = new Map(); // "x,z" -> [entities]
+  const cellVersion = new Map(); // guards async model loads against repaints
   const addBox = (material, x, y, z, sx, sy, sz) => {
     const e = new pc.Entity();
     e.addComponent('render', { type: 'box', material });
@@ -56,27 +60,57 @@ export function startEditor(app, levelData, stashKey) {
 
   function renderCell(x, z) {
     const key = x + ',' + z;
+    const version = (cellVersion.get(key) || 0) + 1;
+    cellVersion.set(key, version);
     for (const e of cellEntities.get(key) || []) e.destroy();
     const out = [];
+    cellEntities.set(key, out);
     const ch = rows[z][x];
-    if (ch !== ' ') {
-      out.push(addBox(materials.floor, x, 0, z, 0.96, TILE_TYPES.floor.height, 0.96));
-      if (ch === PLAYER_CHAR) {
-        out.push(addBox(playerMat, x, 0.35, z, 0.55, 0.5, 0.55));
-      } else if (enemyByChar[ch]) {
-        out.push(addBox(enemyMats[enemyByChar[ch]], x, 0.35, z, 0.55, 0.5, 0.55));
+    if (ch === ' ') return;
+    out.push(addBox(materials.floor, x, 0, z, 0.96, TILE_TYPES.floor.height, 0.96));
+    if (ch === PLAYER_CHAR) {
+      out.push(addBox(playerMat, x, 0.35, z, 0.55, 0.5, 0.55));
+    } else if (enemyByChar[ch]) {
+      out.push(addBox(enemyMats[enemyByChar[ch]], x, 0.35, z, 0.55, 0.5, 0.55));
+    } else {
+      const type = tileByChar[ch] || 'floor';
+      const def = TILE_TYPES[type];
+      if (type === 'floor') return;
+      if (def.model) {
+        placeModel(app, `assets/${def.model}.glb`, x, z, {
+          scale: def.scale || 1, rotY: def.rotY || 0, lift: TILE_TYPES.floor.height / 2,
+          onReady: (holder) => {
+            // The cell may have been repainted while the model loaded.
+            if (cellVersion.get(key) !== version) holder.destroy();
+            else out.push(holder);
+          },
+        });
       } else {
-        const type = tileByChar[ch] || 'floor';
-        if (type !== 'floor') {
-          const def = TILE_TYPES[type];
-          out.push(addBox(materials[type], x, def.height / 2, z, 0.78, def.height, 0.78));
-        }
+        out.push(addBox(materials[type], x, def.height / 2, z, 0.78, def.height, 0.78));
       }
     }
-    cellEntities.set(key, out);
   }
 
-  for (let z = 0; z < height; z++) for (let x = 0; x < width; x++) renderCell(x, z);
+  function renderAll() {
+    for (const list of cellEntities.values()) for (const e of list) e.destroy();
+    cellEntities.clear();
+    cellVersion.clear();
+    for (let z = 0; z < height; z++) for (let x = 0; x < width; x++) renderCell(x, z);
+    updateSizeLabel();
+  }
+
+  function loadLevel(data) {
+    height = data.map.length;
+    width = Math.max(...data.map.map((r) => r.length));
+    rows = data.map.map((r) => {
+      const a = r.split('');
+      while (a.length < width) a.push(' ');
+      return a;
+    });
+    levelName = data.name || 'Untitled Floor';
+    levelNext = data.next;
+    renderAll();
+  }
 
   // --- painting -------------------------------------------------------------------
   let brush = 'wall'; // a tile type id, 'player', or 'enemy:<typeId>'
@@ -102,16 +136,31 @@ export function startEditor(app, levelData, stashKey) {
     renderCell(x, z);
   }
 
+  // --- resizing (right/bottom edges; new cells are walls to keep maps sealed) ---
+  function resize(dw, dh) {
+    const nw = Math.min(MAX_SIZE, Math.max(MIN_SIZE, width + dw));
+    const nh = Math.min(MAX_SIZE, Math.max(MIN_SIZE, height + dh));
+    if (nw === width && nh === height) return;
+    while (rows.length < nh) rows.push(new Array(width).fill(TILE_TYPES.wall.char));
+    while (rows.length > nh) rows.pop();
+    for (const row of rows) {
+      while (row.length < nw) row.push(TILE_TYPES.wall.char);
+      while (row.length > nw) row.pop();
+    }
+    width = nw;
+    height = nh;
+    renderAll();
+  }
+
   // --- camera / input ----------------------------------------------------------------
-  const controls = createControls({
+  createControls({
     app,
     canvas: document.getElementById('app'),
-    focus: { x: (width - 1) / 2, z: (height - 1) / 2 },
+    focus: { x: (levelData.map[0].length - 1) / 2, z: (levelData.map.length - 1) / 2 },
     onLeftClickTile: (t) => paint(t),
     onLeftDragTile: (t) => paint(t),
     onRightClickTile: (t) => paint(t, TILE_TYPES.floor.char), // quick-erase
   });
-  void controls;
 
   // --- level JSON in/out -----------------------------------------------------------
   function toJson() {
@@ -119,10 +168,9 @@ export function startEditor(app, levelData, stashKey) {
     for (const [id, def] of Object.entries(TILE_TYPES)) tiles[def.char] = id;
     const actors = { [PLAYER_CHAR]: 'player' };
     for (const [id, def] of Object.entries(ENEMY_TYPES)) actors[def.char] = id;
-    return JSON.stringify(
-      { name: levelData.name || 'Untitled Floor', tiles, actors, map: rows.map((r) => r.join('')) },
-      null, 2,
-    );
+    const out = { name: levelName, tiles, actors, map: rows.map((r) => r.join('')) };
+    if (levelNext) out.next = levelNext;
+    return JSON.stringify(out, null, 2);
   }
 
   // --- editor UI ----------------------------------------------------------------------
@@ -133,7 +181,7 @@ export function startEditor(app, levelData, stashKey) {
     zIndex: '30', display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'center',
     maxWidth: '96vw', background: '#232334', border: '1px solid #3a3a52',
     borderRadius: '10px', padding: '9px', font: '12px system-ui, sans-serif',
-    color: '#f0f0f5', boxShadow: '0 10px 30px rgba(0,0,0,.5)',
+    color: '#f0f0f5', boxShadow: '0 10px 30px rgba(0,0,0,.5)', alignItems: 'center',
   });
   const btn = (id, label) => {
     const b = document.createElement('button');
@@ -145,6 +193,11 @@ export function startEditor(app, levelData, stashKey) {
     });
     bar.appendChild(b);
     return b;
+  };
+  const divider = () => {
+    const s = document.createElement('div');
+    Object.assign(s.style, { width: '1px', alignSelf: 'stretch', background: '#3a3a52', margin: '0 4px' });
+    bar.appendChild(s);
   };
 
   const brushButtons = [];
@@ -170,9 +223,35 @@ export function startEditor(app, levelData, stashKey) {
     brushButtons.push(b);
   }
 
-  const sep = document.createElement('div');
-  Object.assign(sep.style, { width: '1px', background: '#3a3a52', margin: '0 4px' });
-  bar.appendChild(sep);
+  divider();
+
+  // size controls
+  const sizeLabel = document.createElement('span');
+  sizeLabel.id = 'ed-size';
+  Object.assign(sizeLabel.style, { padding: '0 4px', opacity: '.8' });
+  function updateSizeLabel() { sizeLabel.textContent = `${width}×${height}`; }
+  btn('ed-shrink-w', '−col').onclick = () => resize(-1, 0);
+  btn('ed-grow-w', '+col').onclick = () => resize(1, 0);
+  btn('ed-shrink-h', '−row').onclick = () => resize(0, -1);
+  btn('ed-grow-h', '+row').onclick = () => resize(0, 1);
+  bar.appendChild(sizeLabel);
+
+  divider();
+
+  // load a shipped level as a base
+  const select = document.createElement('select');
+  select.id = 'ed-level';
+  Object.assign(select.style, {
+    padding: '6px', borderRadius: '7px', border: '1px solid #3a3a52',
+    background: '#2e2e46', color: '#f0f0f5', font: 'inherit',
+  });
+  select.innerHTML = `<option value="">load level…</option>` +
+    Object.entries(LEVELS).map(([id, l]) => `<option value="${id}">${l.name || id}</option>`).join('');
+  select.onchange = () => {
+    if (LEVELS[select.value]) loadLevel(LEVELS[select.value]);
+    select.value = '';
+  };
+  bar.appendChild(select);
 
   btn('ed-playtest', '▶ Playtest').onclick = () => {
     localStorage.setItem(stashKey, toJson());
@@ -201,7 +280,7 @@ export function startEditor(app, levelData, stashKey) {
     });
     div.innerHTML = `
       <div style="background:#232334; border:1px solid #3a3a52; border-radius:12px; padding:18px; width:min(640px,92vw);">
-        <div style="font-weight:700; margin-bottom:8px;">Level JSON — paste into levels/level1.json (or hand it to Claude)</div>
+        <div style="font-weight:700; margin-bottom:8px;">Level JSON — paste into levels/ (or hand it to Claude)</div>
         <textarea id="export-json" readonly style="width:100%; height:300px; background:#171722; color:#c9e4a5;
           border:1px solid #3a3a52; border-radius:8px; padding:10px; font:12px monospace; white-space:pre;"></textarea>
         <div style="display:flex; gap:8px; margin-top:10px; justify-content:flex-end;">
@@ -216,11 +295,13 @@ export function startEditor(app, levelData, stashKey) {
     div.querySelector('#export-close').onclick = () => div.remove();
   }
 
+  loadLevel(levelData);
   say('LEVEL EDITOR — left-click paints, right-click erases, middle-drag orbits');
 
   // Read-only handle for tests and console poking.
   window.__editor = {
     get map() { return rows.map((r) => r.join('')); },
+    get size() { return { width, height }; },
     get brush() { return brush; },
     charAt: (x, z) => rows[z]?.[x],
     toJson,

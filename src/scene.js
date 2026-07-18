@@ -59,12 +59,20 @@ export function buildLevel(app, grid) {
     for (let x = 0; x < grid.width; x++) {
       const type = grid.typeAt(x, z);
       if (type === null) continue;
-      // Every cell gets a floor slab; non-floor types get a marker box on top.
+      // Every cell gets a floor slab; non-floor types get a marker box (or a
+      // prop model) on top.
       addBox(materials.floor, x, 0, z, 0.96, floorDef.height, 0.96);
       if (type !== 'floor') {
         const def = TILE_TYPES[type];
-        const box = addBox(materials[type], x, def.height / 2, z, def.solid ? 0.78 : 0.8, def.height, def.solid ? 0.78 : 0.8);
-        if (def.solid) walls.push({ entity: box, x, z, faded: false });
+        if (def.model) {
+          placeModel(app, `assets/${def.model}.glb`, x, z, {
+            scale: def.scale || 1, rotY: def.rotY || 0, lift: floorDef.height / 2,
+          });
+        } else {
+          const box = addBox(materials[type], x, def.height / 2, z, def.solid ? 0.78 : 0.8, def.height, def.solid ? 0.78 : 0.8);
+          // Only wall-style boxes join the occlusion fade; props stay visible.
+          if (def.solid) walls.push({ entity: box, x, z, faded: false });
+        }
       }
     }
   }
@@ -97,8 +105,13 @@ export function buildLevel(app, grid) {
 // Load a .glb, wrap it in a holder (so scaling/rotating is predictable), and
 // drop it on a tile. Reusable for every prop and character.
 export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY = 0, onReady = null } = {}) {
-  const asset = new pc.Asset(url, 'container', { url });
-  app.assets.add(asset);
+  // Reuse the asset if this .glb was already requested (props repeat a lot,
+  // and the editor repaints cells constantly).
+  let asset = app.assets.find(url);
+  if (!asset) {
+    asset = new pc.Asset(url, 'container', { url });
+    app.assets.add(asset);
+  }
   asset.ready(() => {
     const holder = new pc.Entity(url);
     holder.addChild(asset.resource.instantiateRenderEntity());
