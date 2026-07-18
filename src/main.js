@@ -7,7 +7,8 @@
 // classes, actions) is data in src/data/; levels are hand-editable JSON - or
 // paintable in the built-in editor (#editor / the link on the class picker).
 import { LEVELS, FIRST_LEVEL } from './data/levels.js';
-import { SURFACES, ELECTRIFIED } from './data/surfaces.js';
+import { SURFACES, ELECTRIFIED, FIRE } from './data/surfaces.js';
+import { createSurfaceRuntime } from './surfaces-runtime.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { CLASSES } from './data/classes.js';
 import { ACTIONS } from './data/actions.js';
@@ -62,7 +63,15 @@ app.start();
 // ---------------------------------------------------------------------------------
 function startGame(level) {
   const grid = parseLevel(level);
-  const { walls, updateWallFade, animateSurfaces, floorHeight } = buildLevel(app, grid);
+  const scene = buildLevel(app, grid);
+  const { walls, updateWallFade, animateSurfaces, floorHeight } = scene;
+  // Fire and its consequences live in the surface runtime; handleExplosion is
+  // hoisted from below.
+  const runtime = createSurfaceRuntime({
+    grid,
+    hooks: { addFlame: scene.addFlame, hideSurfaceVisual: scene.hideSurfaceVisual },
+    onExplosion: handleExplosion,
+  });
 
   // The sheet (and the player's model) only exist once a class is picked - the
   // picker overlay is the first thing the player sees.
@@ -73,22 +82,37 @@ function startGame(level) {
   let inCombat = false;
   let gameOver = false;
   let lastPath = null; // kept for debugging/tests
+  let pendingAction = null; // walk-up interaction, runs on arrival
 
   const enemyAt = (x, z) => enemies.find((e) => e.alive && e.x === x && e.z === z) || null;
   const isWalkable = (x, z) => grid.terrainOpen(x, z) && !enemyAt(x, z);
-  // Surface queries. A cell is dangerous when stepping on it costs HP -
-  // electrified pools and live cables; plain water and coffee are just
-  // uncomfortable.
-  const surfEffect = (x, z) =>
-    grid.isElectrified(x, z) ? ELECTRIFIED.onEnter : SURFACES[grid.surfaceAt(x, z)]?.onEnter || null;
-  const isHazard = (x, z) => (surfEffect(x, z)?.amount || 0) > 0;
+  // Surface queries, consulting the runtime (fire) before static state.
+  const surfEffect = (x, z) => {
+    if (runtime.isBurning(x, z)) return FIRE.onEnter;
+    if (grid.isElectrified(x, z)) return ELECTRIFIED.onEnter;
+    return SURFACES[runtime.surfaceAt(x, z)]?.onEnter || null;
+  };
+  // What a step actually costs THIS character, after talents (Teflon Coating,
+  // Rubber-Soled Shoes).
+  const effectiveSurfDamage = (x, z) => {
+    const fx = surfEffect(x, z);
+    if (!fx || !fx.amount) return 0;
+    const t = sheet?.talent?.effects || {};
+    if (t.shockImmune && grid.isElectrified(x, z) && !runtime.isBurning(x, z)) return 0;
+    if (t.paperCutImmune && runtime.surfaceAt(x, z) === 'paper' && !runtime.isBurning(x, z)) return 0;
+    return Math.max(0, fx.amount - (t.surfaceDamageResist || 0));
+  };
+  const isHazard = (x, z) => effectiveSurfDamage(x, z) > 0;
   // Dangerous/uncomfortable surfaces cost extra to path through, so
   // characters route around them unless told otherwise or there is no other
   // way; smoothing must never straighten a route through a damaging cell the
   // route avoided.
   const hazardCost = (x, z) => {
-    if (grid.isElectrified(x, z)) return ELECTRIFIED.pathCost;
-    return SURFACES[grid.surfaceAt(x, z)]?.pathCost || 0;
+    if (runtime.isBurning(x, z)) return FIRE.pathCost;
+    if (grid.isElectrified(x, z)) {
+      return sheet?.talent?.effects?.shockImmune ? 1 : ELECTRIFIED.pathCost;
+    }
+    return SURFACES[runtime.surfaceAt(x, z)]?.pathCost || 0;
   };
   const clearOfHazards = (x, z) => isWalkable(x, z) && !isHazard(x, z);
 
@@ -116,8 +140,71 @@ function startGame(level) {
     ui.say(`${sheet.className}. Now get out of here.`);
   }
 
+  // Blowing up a printer: flash, clear the tile, flatten anyone beside it.
+  function handleExplosion(x, z) {
+    scene.explosionFlash(x, z);
+    grid.setType(x, z, 'floor');
+    scene.removePropVisual(x, z);
+    let slain = 0;
+    for (const en of enemies) {
+      if (en.alive && Math.abs(en.x - x) <= 1 && Math.abs(en.z - z) <= 1) {
+        en.die();
+        slain += 1;
+        if (sheet) gainXp(sheet, en.def.xp);
+      }
+    }
+    let msg = 'The printer detonates in a cloud of toner.';
+    if (slain) msg += ` ${slain} coworker${slain === 1 ? '' : 's'} caught in the blast (+XP).`;
+    if (sheet && player.entity && Math.abs(player.x - x) <= 1 && Math.abs(player.z - z) <= 1) {
+      const dead = applyDamage(sheet, 8);
+      msg += ' You catch shrapnel. -8 HP.';
+      if (dead) {
+        gameOver = true;
+        player.clearPath();
+        clearProgress();
+        ui.say(msg);
+        ui.showLoseScreen('PC LOAD LETTER. Fatal.');
+        return;
+      }
+    }
+    ui.say(msg);
+    if (sheet) ui.updateStatsHud(sheet);
+  }
+
+  function igniteAt(x, z) {
+    const wasProp = !!grid.defAt(x, z).ignitable;
+    if (runtime.ignite(x, z)) {
+      ui.say(wasProp
+        ? 'You introduce the trash can to fire. It goes about as expected.'
+        : 'A flick of the lighter. The paperwork ascends.');
+    }
+  }
+
+  // Walk within reach of (x, z), then run the interaction.
+  function approachAndDo(x, z, run) {
+    if (!sheet || inCombat || gameOver) return;
+    if (Math.abs(player.x - x) <= 1 && Math.abs(player.z - z) <= 1) {
+      run();
+      return;
+    }
+    let best = null;
+    for (const [dx, dz] of DIRS8) {
+      const ax = x + dx;
+      const az = z + dz;
+      if (!isWalkable(ax, az)) continue;
+      const p = findPath(isWalkable, player.x, player.z, ax, az, hazardCost);
+      if (p && (!best || p.length < best.length)) best = p;
+    }
+    if (!best || best.length < 2) return;
+    pendingAction = { x, z, run };
+    const s = smoothPath(clearOfHazards, best);
+    player.setPath(s);
+    lastPath = s;
+  }
+
   function moveTo(tile) {
     if (!tile || !sheet || inCombat || gameOver || !isWalkable(tile.x, tile.z)) return;
+    pendingAction = null;
     const p = findPath(isWalkable, player.x, player.z, tile.x, tile.z, hazardCost);
     if (p && p.length > 1) {
       // Smoothed: straight any-angle runs wherever line of sight is clear.
@@ -131,6 +218,7 @@ function startGame(level) {
   // adjacency check in onPlayerStep.
   function confront(en) {
     if (!en || !en.alive || inCombat || gameOver) return;
+    pendingAction = null;
     let best = null;
     for (const [dx, dz] of DIRS8) {
       const ax = en.x + dx;
@@ -219,24 +307,56 @@ function startGame(level) {
         }
       }
     }
-    // Surface effects (data/surfaces.js): electrified pools and cables hurt,
-    // water and coffee just editorialize. Only on genuine tile entry.
+    // Paper-cut bleeding drips on every tile entered while it lasts.
+    if (changed && sheet.bleed > 0) {
+      sheet.bleed -= 1;
+      const bled = applyDamage(sheet, 1);
+      ui.say('You drip on the carpet. -1 HP.');
+      ui.updateStatsHud(sheet);
+      if (bled) {
+        gameOver = true;
+        player.clearPath();
+        clearProgress();
+        ui.showLoseScreen('Death by a thousand paper cuts. Well - several.');
+        return;
+      }
+    }
+    // Surface effects (data/surfaces.js): fire and electrified pools hurt,
+    // paper cuts (and arms you), water and coffee editorialize. Talents can
+    // shrug damage off. Only on genuine tile entry.
     const sfx = changed ? surfEffect(x, z) : null;
     if (sfx) {
-      if (sfx.amount) {
-        const dead = applyDamage(sheet, sfx.amount);
+      if (sfx.ammo) {
+        sheet.paper = Math.min(8, sheet.paper + sfx.ammo);
+      }
+      const amount = effectiveSurfDamage(x, z);
+      if (amount > 0) {
+        if (sfx.bleed) sheet.bleed = Math.max(sheet.bleed, sfx.bleed);
+        const dead = applyDamage(sheet, amount);
         ui.say(sfx.message);
         ui.updateStatsHud(sheet);
         if (dead) {
           gameOver = true;
           player.clearPath();
           clearProgress();
-          ui.showLoseScreen('Done in by the office itself. Electricity and water: still a bad mix.');
+          ui.showLoseScreen('Done in by the office itself. Facilities sends their regards.');
           return;
         }
+      } else if (sfx.amount) {
+        ui.say(sheet.talent?.effects?.shockImmune && grid.isElectrified(x, z)
+          ? 'The water crackles. Your rubber soles hum smugly. 0 damage.'
+          : 'You glide across the drift, harvesting ammunition. The edges respect a master. (+1 paper)');
+        ui.updateStatsHud(sheet);
       } else if (sfx.message) {
         ui.say(sfx.message);
       }
+    }
+    // Walk-up interactions (lighting trash cans) fire on deliberate arrival.
+    if (pendingAction && pathDone
+      && Math.abs(x - pendingAction.x) <= 1 && Math.abs(z - pendingAction.z) <= 1) {
+      const act = pendingAction;
+      pendingAction = null;
+      act.run();
     }
     checkCombatTrigger();
   }
@@ -263,13 +383,42 @@ function startGame(level) {
           { label: 'Examine', action: () => ui.say(en.def.examine) },
         ]);
       } else if (isWalkable(tile.x, tile.z)) {
-        const surfId = grid.surfaceAt(tile.x, tile.z);
-        const flavor = grid.isElectrified(tile.x, tile.z)
-          ? ELECTRIFIED.examine
-          : (surfId && SURFACES[surfId].examine) || 'Standard-issue office carpet. Faintly damp.';
-        ui.showMenu(sx, sy, [
+        const surfId = runtime.surfaceAt(tile.x, tile.z);
+        const flavor = runtime.isBurning(tile.x, tile.z)
+          ? FIRE.examine
+          : grid.isElectrified(tile.x, tile.z)
+            ? ELECTRIFIED.examine
+            : (surfId && SURFACES[surfId].examine) || 'Standard-issue office carpet. Faintly damp.';
+        const items = [
           { label: 'Walk here', action: () => moveTo(tile) },
           { label: 'Examine', action: () => ui.say(flavor) },
+        ];
+        // The Smoker's lighter turns any flammable surface into an option.
+        if (sheet?.talent?.effects?.hasLighter
+          && surfId && SURFACES[surfId].flammable && !runtime.isBurning(tile.x, tile.z)) {
+          items.unshift({
+            label: 'Flick the lighter',
+            action: () => approachAndDo(tile.x, tile.z, () => igniteAt(tile.x, tile.z)),
+          });
+        }
+        ui.showMenu(sx, sy, items);
+      } else if (grid.defAt(tile.x, tile.z).ignitable) {
+        const items = [{
+          label: 'Examine',
+          action: () => ui.say(runtime.isBurning(tile.x, tile.z)
+            ? 'The trash can is thoroughly on fire. Somewhere, an alarm should be going off.'
+            : 'A trash can. Sixty percent paper, forty percent regret.'),
+        }];
+        if (runtime.ignitable(tile.x, tile.z)) {
+          items.unshift({
+            label: 'Set it on fire (why not)',
+            action: () => approachAndDo(tile.x, tile.z, () => igniteAt(tile.x, tile.z)),
+          });
+        }
+        ui.showMenu(sx, sy, items);
+      } else if (grid.defAt(tile.x, tile.z).explosive) {
+        ui.showMenu(sx, sy, [
+          { label: 'Examine', action: () => ui.say('The printer. It has jammed 4 times today. It is waiting.') },
         ]);
       } else {
         ui.showMenu(sx, sy, [
@@ -300,6 +449,7 @@ function startGame(level) {
       if (en.x !== beforeX || en.z !== beforeZ) anyoneMoved = true;
     }
     if (anyoneMoved) checkCombatTrigger(); // did someone just corner the player?
+    if (!inCombat && !gameOver) runtime.tick(dt); // fire waits for no meeting - except yours
     animateSurfaces(dt);
     // Follow the player, gently biased toward the map centre so corner spawns
     // don't leave half the frame empty.
@@ -361,6 +511,7 @@ function startGame(level) {
     get fadedWallCount() { return walls.filter((w) => w.faded).length; },
     get stats() { return sheet ? { ...sheet } : null; },
     get playerSpeed() { return player.speed; },
+    get burning() { return runtime.burningCount; },
     get enemies() { return enemies.map((e) => ({ name: e.def.name, x: e.x, z: e.z, alive: e.alive })); },
   };
 }

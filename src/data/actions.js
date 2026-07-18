@@ -69,4 +69,32 @@ export const ACTIONS = {
     uses: 4,
     log: 'You crack open something neon. +4 HP.',
   },
+
+  // --- talent-granted -----------------------------------------------------------
+  cigarette: {
+    type: 'heal',
+    label: 'Smoke Break',
+    amount: 3,
+    uses: 2,
+    log: 'You step "outside" without going anywhere. Nerves steadied. +3 HP.',
+  },
+
+  // --- thrown weapons (any class; consume paper ammo picked up from paper
+  // spills; see sheet.paper) -----------------------------------------------------
+  'paper-ball': {
+    type: 'attack',
+    ammoCost: 1,
+    label: 'Paper Ball',
+    min: 2,
+    max: 4,
+    log: 'You wad up a TPS report and bean them.',
+  },
+  'paper-airplane': {
+    type: 'attack',
+    ammoCost: 2,
+    label: 'Paper Airplane',
+    min: 4,
+    max: 6,
+    log: 'You fold a dart and send it. Right in the lanyard.',
+  },
 };

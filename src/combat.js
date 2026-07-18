@@ -16,6 +16,16 @@ export function startCombat({ enemyDef, sheet, onChange, onWin, onLose }) {
   let defending = false;
   let over = false;
 
+  // Thrown weapons: any action with ammoCost joins the bar when the sheet
+  // carries paper. Talents modify cost/damage (Origami Specialist).
+  const talentFx = sheet.talent?.effects || {};
+  const throwableIds = Object.keys(ACTIONS).filter((id) => ACTIONS[id].ammoCost);
+  const allActionIds = [...sheet.actions, ...throwableIds];
+  const ammoCostOf = (id) => {
+    const base = ACTIONS[id].ammoCost || 0;
+    return base > 1 ? Math.max(1, base - (talentFx.paperAmmoDiscount || 0)) : base;
+  };
+
   const panel = document.createElement('div');
   panel.id = 'combat-panel';
   Object.assign(panel.style, {
@@ -25,7 +35,7 @@ export function startCombat({ enemyDef, sheet, onChange, onWin, onLose }) {
     color: '#f0f0f5', font: '13px system-ui, sans-serif', userSelect: 'none',
     boxShadow: '0 10px 30px rgba(0,0,0,.5)',
   });
-  const actionButtons = sheet.actions
+  const actionButtons = allActionIds
     .map((id) => `<button id="act-${id}" data-action="${id}">${ACTIONS[id].label}</button>`)
     .join('');
   panel.innerHTML = `
@@ -63,6 +73,7 @@ export function startCombat({ enemyDef, sheet, onChange, onWin, onLose }) {
     for (const b of buttons) {
       const id = b.dataset.action;
       if (ACTIONS[id].uses) b.textContent = `${ACTIONS[id].label} (${usesLeft[id]})`;
+      if (ACTIONS[id].ammoCost) b.textContent = `${ACTIONS[id].label} (${sheet.paper}·-${ammoCostOf(id)})`;
     }
     onChange && onChange();
   }
@@ -71,7 +82,8 @@ export function startCombat({ enemyDef, sheet, onChange, onWin, onLose }) {
     for (const b of buttons) {
       const id = b.dataset.action;
       const spent = ACTIONS[id].uses && usesLeft[id] <= 0;
-      const enabled = on && !spent;
+      const noAmmo = ACTIONS[id].ammoCost && sheet.paper < ammoCostOf(id);
+      const enabled = on && !spent && !noAmmo;
       b.disabled = !enabled;
       b.style.opacity = enabled ? '1' : '.45';
       b.style.cursor = enabled ? 'pointer' : 'default';
@@ -117,7 +129,12 @@ export function startCombat({ enemyDef, sheet, onChange, onWin, onLose }) {
     if (over) return;
     const def = ACTIONS[id];
     if (def.type === 'attack') {
-      const dmg = rand(def.min, def.max) + (sheet.bonusDmg || 0);
+      let dmg = rand(def.min, def.max) + (sheet.bonusDmg || 0);
+      if (def.ammoCost) {
+        if (sheet.paper < ammoCostOf(id)) return;
+        sheet.paper -= ammoCostOf(id);
+        dmg += talentFx.paperDamageBonus || 0;
+      }
       enemy.hp = Math.max(0, enemy.hp - dmg);
       refresh();
       log(`${def.log} ${dmg} damage!`);

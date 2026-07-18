@@ -6,6 +6,9 @@ import { CLASSES } from './data/classes.js';
 export function createSheet(classId) {
   const cls = CLASSES[classId];
   if (!cls) throw new Error(`Unknown class "${classId}"`);
+  const actions = [...cls.actions];
+  // Talents can grant an extra combat action (Smoker's cigarette).
+  if (cls.talent?.effects?.grantsAction) actions.push(cls.talent.effects.grantsAction);
   return {
     classId,
     className: cls.name,
@@ -16,7 +19,10 @@ export function createSheet(classId) {
     xp: 0,
     xpNext: 10,
     bonusDmg: cls.bonusDmg,
-    actions: [...cls.actions],
+    actions,
+    talent: cls.talent || null,
+    paper: 0, // thrown-weapon ammo, picked up from paper spills
+    bleed: 0, // paper-cut bleeding: lose 1 HP for this many more tiles
   };
 }
 

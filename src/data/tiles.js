@@ -49,6 +49,32 @@ export const TILE_TYPES = {
     color: [0.2, 0.2, 0.24],
     surface: 'cable',
   },
+  paper: {
+    char: 'p',
+    height: 0.22,
+    color: [0.93, 0.91, 0.83],
+    surface: 'paper',
+  },
+
+  // Interactive props built from primitives (no .glb needed). Solid like
+  // furniture; `ignitable` offers "set it on fire" on right-click, and
+  // printers explode when fire reaches them.
+  trash: {
+    char: 'T',
+    solid: true,
+    height: 0.55,
+    color: [0.3, 0.32, 0.35],
+    primitive: 'trash',
+    ignitable: true,
+  },
+  printer: {
+    char: 'R',
+    solid: true,
+    height: 0.5,
+    color: [0.56, 0.56, 0.6],
+    primitive: 'printer',
+    explosive: true,
+  },
 
   // Furniture props: solid (they block movement and pathfinding) and rendered
   // as models. Paintable in the editor like any other tile.

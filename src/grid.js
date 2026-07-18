@@ -90,9 +90,14 @@ export function parseLevel(level) {
   }
   const isElectrified = (x, z) => electrified.has(x + ',' + z);
 
+  // Destructible props (exploding printers) mutate the grid at runtime.
+  const setType = (x, z, type) => {
+    if (z >= 0 && z < height && x >= 0 && x < width) typeGrid[z][x] = type;
+  };
+
   return {
     name: level.name || '', width, height,
-    typeAt, defAt, terrainOpen, surfaceAt, isElectrified,
+    typeAt, defAt, terrainOpen, surfaceAt, isElectrified, setType,
     playerSpawn, enemySpawns,
   };
 }

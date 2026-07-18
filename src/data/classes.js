@@ -11,6 +11,11 @@ export const CLASSES = {
     maxHp: 22,
     bonusDmg: 0,
     actions: ['attack', 'defend', 'coffee'],
+    talent: {
+      name: 'Origami Specialist',
+      blurb: 'Immune to paper cuts. Projectiles +2 damage; airplanes fold for 1 sheet.',
+      effects: { paperDamageBonus: 2, paperAmmoDiscount: 1, paperCutImmune: true },
+    },
   },
   'middle-manager': {
     name: 'Middle Manager',
@@ -21,6 +26,11 @@ export const CLASSES = {
     maxHp: 28,
     bonusDmg: 0,
     actions: ['delegate', 'own-calendar', 'espresso'],
+    talent: {
+      name: 'Smoker',
+      blurb: 'A lighter, always. Ignite anything flammable. Smoke breaks steady the nerves in combat.',
+      effects: { hasLighter: true, grantsAction: 'cigarette' },
+    },
   },
   'it-support': {
     name: 'IT Support',
@@ -31,5 +41,10 @@ export const CLASSES = {
     maxHp: 17,
     bonusDmg: 0,
     actions: ['reboot', 'firewall', 'energy-drink'],
+    talent: {
+      name: 'Rubber-Soled Shoes',
+      blurb: 'Immune to electrified water. You know better.',
+      effects: { shockImmune: true },
+    },
   },
 };

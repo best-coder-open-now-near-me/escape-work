@@ -70,10 +70,21 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   legend + a .glb in `assets/characters/`.
 - **New hazard/tile**: entry in `data/tiles.js` + character in `tiles` legend.
 - **New surface** (the Divinity layer): entry in `data/surfaces.js` + a tile
-  type carrying it. Surfaces slow, damage, editorialize - and interact:
-  `conducts` surfaces pool via flood fill (grid.js) and a pool touching a
-  `powers` surface is electrified. Characters path around expensive surfaces
-  (per-surface `pathCost`); smoothing never cuts through damaging cells.
+  type carrying it. Surfaces slow, damage, bleed, arm you, editorialize - and
+  interact: `conducts` surfaces pool via flood fill (grid.js) and a pool
+  touching a `powers` surface is electrified; `flammable` surfaces burn.
+  Characters path around expensive surfaces (per-surface `pathCost`);
+  smoothing never cuts through damaging cells.
+- **Fire** (`surfaces-runtime.js`): the dynamic layer. Ignitable props (trash
+  cans, via right-click; the Smoker talent can light any flammable surface)
+  start fires that spread through flammables, burn out, and detonate
+  `explosive` props (printers) - explosions damage the player, kill adjacent
+  enemies for XP, and destroy the prop (grid.setType).
+- **Talents**: per-class in `data/classes.js` (shown on the resume cards).
+  Effects the code understands: paperDamageBonus, paperAmmoDiscount,
+  paperCutImmune, shockImmune, surfaceDamageResist, hasLighter, grantsAction.
+- **Thrown weapons**: actions with `ammoCost` (paper balls/airplanes) join the
+  combat bar automatically; ammo (sheet.paper) is picked up from paper spills.
 - **New furniture/prop**: a tile entry with `model` (a .glb under `assets/`) and
   `solid: true` - it blocks movement and renders as the model in both game and
   editor. Props are level data, never hardcoded set dressing.

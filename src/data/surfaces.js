@@ -37,6 +37,16 @@ export const SURFACES = {
     onEnter: { amount: 2, message: 'You step on a frayed power cable. -2 HP.' },
     examine: 'A frayed power strip, daisy-chained six deep. OSHA would like a word.',
   },
+  paper: {
+    style: 'paper',
+    flammable: true,
+    color: [0.93, 0.91, 0.83],
+    pathCost: 2,
+    // bleed: keep taking 1 damage for the next N tiles entered.
+    // ammo: pocket paper projectiles for combat throws.
+    onEnter: { amount: 1, bleed: 2, ammo: 1, message: 'Paper cuts! -1 HP. You pocket some ammunition. (+1 paper)' },
+    examine: 'A drift of shredded TPS reports. Sharp edges. Free ammo?',
+  },
 };
 
 // Derived state for conduction pools touching a power source - not painted
@@ -46,4 +56,13 @@ export const ELECTRIFIED = {
   onEnter: { amount: 6, message: 'ZAP! The water is LIVE! -6 HP.' },
   examine: 'The water is humming faintly. That seems bad.',
   color: [0.55, 0.85, 1.0],
+};
+
+// Runtime state for burning cells (see surfaces-runtime.js) - fire spreads
+// through `flammable` surfaces from ignited trash cans, then burns out.
+export const FIRE = {
+  pathCost: 10,
+  onEnter: { amount: 4, message: 'You stride through open flame. Bold. -4 HP.' },
+  examine: 'That is on fire. This is fine.',
+  color: [1.0, 0.45, 0.1],
 };
