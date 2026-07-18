@@ -519,11 +519,14 @@ function startGame(level) {
     if (!gameOver) runtime.tick(dt); // fire waits for no one, combat included
     animateSurfaces(dt);
     // Follow the player, gently biased toward the map centre so corner spawns
-    // don't leave half the frame empty.
+    // don't leave half the frame empty. Track the entity's CONTINUOUS position
+    // (player.x/z is the logical tile, which jumps a whole tile at a time and
+    // makes the camera step along with the walk).
+    const pp = player.entity ? player.entity.getPosition() : player;
     controls.follow({
-      x: player.x * 0.82 + ((grid.width - 1) / 2) * 0.18,
-      z: player.z * 0.82 + ((grid.height - 1) / 2) * 0.18,
-    });
+      x: pp.x * 0.82 + ((grid.width - 1) / 2) * 0.18,
+      z: pp.z * 0.82 + ((grid.height - 1) / 2) * 0.18,
+    }, dt);
     updateWallFade(controls.cameraEntity, player.entity ? player.entity.getPosition() : null);
   });
 

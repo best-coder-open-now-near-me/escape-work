@@ -41,9 +41,16 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   // itch.io page hosting the iframe) scrolls instead of zooming.
   canvas.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
 
+  // PlayCanvas attaches its mouse listeners to WINDOW, so clicks on DOM UI
+  // (combat buttons, menus, the editor bar) also arrive here - mousedown even
+  // fires BEFORE the button's own click event. Only events that actually
+  // start on the canvas may begin a game interaction.
+  const onCanvas = (e) => !e.event || e.event.target === canvas;
+
   let orbiting = false;
   let leftHeld = false; // for drag-painting in the editor
   app.mouse.on(pc.EVENT_MOUSEDOWN, (e) => {
+    if (!onCanvas(e)) return;
     if (e.button === pc.MOUSEBUTTON_MIDDLE) {
       orbiting = true;
     } else if (e.button === pc.MOUSEBUTTON_LEFT) {
@@ -54,20 +61,23 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
       onRightClickTile && onRightClickTile(screenToTile(e.x, e.y), e.x, e.y, screenToGround(e.x, e.y));
     }
   });
+  // Releases are never filtered - an orbit/drag must end even over UI.
   app.mouse.on(pc.EVENT_MOUSEUP, (e) => {
     if (e.button === pc.MOUSEBUTTON_MIDDLE) orbiting = false;
     if (e.button === pc.MOUSEBUTTON_LEFT) leftHeld = false;
   });
   app.mouse.on(pc.EVENT_MOUSEMOVE, (e) => {
     if (orbiting) {
+      // an orbit in progress keeps tracking even across UI
       CAM.yaw -= e.dx * 0.3;
       CAM.pitch = pc.math.clamp(CAM.pitch + e.dy * 0.3, CAM.minPitch, CAM.maxPitch);
       apply();
-    } else if (leftHeld && onLeftDragTile) {
+    } else if (leftHeld && onLeftDragTile && onCanvas(e)) {
       onLeftDragTile(screenToTile(e.x, e.y), screenToGround(e.x, e.y));
     }
   });
   app.mouse.on(pc.EVENT_MOUSEWHEEL, (e) => {
+    if (!onCanvas(e)) return; // scrolling over a panel must not zoom
     // Scroll up (away from you) zooms in - wheelDelta is negative for
     // scroll-up, so adding it pulls the camera closer.
     CAM.dist = pc.math.clamp(CAM.dist + e.wheelDelta * 2.4, CAM.minDist, CAM.maxDist);
@@ -95,9 +105,11 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   }
 
   // Ease the rig toward the target each frame so the camera trails the player.
-  function follow(target) {
+  // Time-based smoothing, so the trailing speed is framerate-independent.
+  function follow(target, dt = 1 / 60) {
+    const k = 1 - Math.exp(-dt * 7);
     const c = camYaw.getPosition();
-    camYaw.setPosition(pc.math.lerp(c.x, target.x, 0.15), 0.3, pc.math.lerp(c.z, target.z, 0.15));
+    camYaw.setPosition(pc.math.lerp(c.x, target.x, k), 0.3, pc.math.lerp(c.z, target.z, k));
   }
 
   return { cameraEntity, screenToTile, screenToGround, follow };
