@@ -2,6 +2,7 @@
 // tile/wall meshes, the occlusion fade, and model loading. Game logic lives
 // elsewhere and talks to this through plain data.
 import { TILE_TYPES } from './data/tiles.js';
+import { SURFACES, ELECTRIFIED } from './data/surfaces.js';
 
 const pc = window.pc;
 
@@ -71,13 +72,65 @@ export function buildLevel(app, grid) {
     return e;
   };
 
+  // Surface materials. All electrified pools share one pulsing material.
+  const surfaceMat = (rgb, { gloss = 0.85, opacity = 0.88, emissive = null } = {}) => {
+    const m = new pc.StandardMaterial();
+    m.diffuse = new pc.Color(rgb[0], rgb[1], rgb[2]);
+    m.gloss = gloss;
+    m.opacity = opacity;
+    m.blendType = pc.BLEND_NORMAL;
+    if (emissive) m.emissive = new pc.Color(emissive[0], emissive[1], emissive[2]);
+    m.update();
+    return m;
+  };
+  const surfaceMats = {};
+  for (const [id, def] of Object.entries(SURFACES)) surfaceMats[id] = surfaceMat(def.color);
+  const electricMat = surfaceMat(ELECTRIFIED.color, {
+    opacity: 0.92, emissive: [0.25, 0.5, 0.65],
+  });
+
+  const surfaceTop = floorDef.height / 2 + 0.02;
+  // Irregular overlapping blobs so spills read as liquid, not tiles. Rotated
+  // per-cell so no two puddles look alike.
+  function addPuddle(x, z, material) {
+    const holder = new pc.Entity();
+    for (const [ox, oz, sx, sz] of [[0, 0, 0.85, 0.62], [0.17, -0.15, 0.5, 0.44], [-0.2, 0.14, 0.42, 0.5]]) {
+      const e = new pc.Entity();
+      e.addComponent('render', { type: 'cylinder', material });
+      e.setLocalScale(sx, 0.045, sz);
+      e.setLocalPosition(ox, 0, oz);
+      holder.addChild(e);
+    }
+    holder.setEulerAngles(0, ((x * 73 + z * 131) % 8) * 45, 0);
+    holder.setPosition(x, surfaceTop, z);
+    app.root.addChild(holder);
+    return holder;
+  }
+  // A frayed power strip: dark bar plus a glowing live end.
+  function addCable(x, z) {
+    const holder = new pc.Entity();
+    const bar = new pc.Entity();
+    bar.addComponent('render', { type: 'box', material: surfaceMats.cable });
+    bar.setLocalScale(0.85, 0.07, 0.2);
+    holder.addChild(bar);
+    const tip = new pc.Entity();
+    tip.addComponent('render', { type: 'box', material: electricMat });
+    tip.setLocalScale(0.14, 0.09, 0.14);
+    tip.setLocalPosition(0.38, 0.01, 0);
+    holder.addChild(tip);
+    holder.setEulerAngles(0, ((x * 53 + z * 97) % 4) * 45 + 20, 0);
+    holder.setPosition(x, surfaceTop, z);
+    app.root.addChild(holder);
+    return holder;
+  }
+
   const walls = [];
   for (let z = 0; z < grid.height; z++) {
     for (let x = 0; x < grid.width; x++) {
       const type = grid.typeAt(x, z);
       if (type === null) continue;
       // Every cell gets a seamless floor slab; non-floor types get a marker
-      // box (or a prop model) on top.
+      // box, a prop model, or a surface visual on top.
       addBox(floorMats[(x * 31 + z * 17) % 3], x, 0, z, 1, floorDef.height, 1);
       if (type !== 'floor') {
         const def = TILE_TYPES[type];
@@ -85,6 +138,10 @@ export function buildLevel(app, grid) {
           placeModel(app, `assets/${def.model}.glb`, x, z, {
             scale: def.scale || 1, rotY: def.rotY || 0, lift: floorDef.height / 2,
           });
+        } else if (def.surface) {
+          const surf = SURFACES[def.surface];
+          if (surf.style === 'cable') addCable(x, z);
+          else addPuddle(x, z, grid.isElectrified(x, z) ? electricMat : surfaceMats[def.surface]);
         } else if (def.solid) {
           // Full-size so adjacent walls merge into continuous surfaces.
           const box = addBox(materials[type], x, def.height / 2, z, 1, def.height, 1);
@@ -94,6 +151,14 @@ export function buildLevel(app, grid) {
         }
       }
     }
+  }
+
+  // Live water crackles: pulse the shared electrified material.
+  let surfaceClock = 0;
+  function animateSurfaces(dt) {
+    surfaceClock += dt;
+    const pulse = 0.45 + 0.35 * Math.sin(surfaceClock * 7) + 0.12 * Math.sin(surfaceClock * 23);
+    electricMat.emissiveIntensity = Math.max(0.15, pulse);
   }
 
   // Fade walls sitting between the camera and the player. With a perspective
@@ -120,7 +185,7 @@ export function buildLevel(app, grid) {
     }
   }
 
-  return { walls, updateWallFade, floorHeight: floorDef.height };
+  return { walls, updateWallFade, animateSurfaces, floorHeight: floorDef.height };
 }
 
 // Load a .glb, wrap it in a holder (so scaling/rotating is predictable), and

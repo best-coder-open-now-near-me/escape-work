@@ -18,6 +18,8 @@ levels/*.json        Hand-editable levels: tile legend, actor legend, ASCII map
 src/
   data/              CONTENT registries (pure data)
     tiles.js           tile types: solidity, size, color, onEnter effects
+    surfaces.js        surface layer (water/coffee/cable): effects, slow,
+                       conduction pools + electrification interactions
     enemies.js         enemy types: stats, model, attack sets, flavor
     classes.js         player classes: base stats + action ids
     actions.js         combat actions: attack/defend/heal definitions
@@ -67,6 +69,11 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - **New enemy**: entry in `data/enemies.js` + character in a level's `actors`
   legend + a .glb in `assets/characters/`.
 - **New hazard/tile**: entry in `data/tiles.js` + character in `tiles` legend.
+- **New surface** (the Divinity layer): entry in `data/surfaces.js` + a tile
+  type carrying it. Surfaces slow, damage, editorialize - and interact:
+  `conducts` surfaces pool via flood fill (grid.js) and a pool touching a
+  `powers` surface is electrified. Characters path around expensive surfaces
+  (per-surface `pathCost`); smoothing never cuts through damaging cells.
 - **New furniture/prop**: a tile entry with `model` (a .glb under `assets/`) and
   `solid: true` - it blocks movement and renders as the model in both game and
   editor. Props are level data, never hardcoded set dressing.

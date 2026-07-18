@@ -4,6 +4,10 @@
 // an "actors" legend (char -> 'player' or an enemy type id from
 // data/enemies.js), and an ASCII "map". Actor tiles stand on plain floor.
 import { TILE_TYPES } from './data/tiles.js';
+import { SURFACES } from './data/surfaces.js';
+
+// Old saves/exports may reference renamed tile types.
+const TYPE_ALIASES = { 'wet-floor': 'water' };
 
 export function parseLevel(level) {
   const rows = level.map;
@@ -32,7 +36,8 @@ export function parseLevel(level) {
         row.push('floor');
         continue;
       }
-      const type = tilesLegend[ch] || 'floor';
+      const raw = tilesLegend[ch] || 'floor';
+      const type = TYPE_ALIASES[raw] || raw;
       if (!TILE_TYPES[type]) throw new Error(`Level "${level.name}": unknown tile type "${type}" for char "${ch}"`);
       row.push(type);
     }
@@ -48,6 +53,46 @@ export function parseLevel(level) {
     const t = typeAt(x, z);
     return t !== null && !TILE_TYPES[t].solid;
   };
+  const surfaceAt = (x, z) => defAt(x, z).surface || null;
 
-  return { name: level.name || '', width, height, typeAt, defAt, terrainOpen, playerSpawn, enemySpawns };
+  // Conduction: flood-fill pools of `conducts` surfaces (4-connected); a pool
+  // with a `powers` surface on any 4-neighbour is electrified. Computed once -
+  // cables don't move (yet).
+  const electrified = new Set();
+  {
+    const seen = new Set();
+    const conducts = (x, z) => SURFACES[surfaceAt(x, z)]?.conducts;
+    const powers = (x, z) => SURFACES[surfaceAt(x, z)]?.powers;
+    const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    for (let z = 0; z < height; z++) {
+      for (let x = 0; x < width; x++) {
+        if (!conducts(x, z) || seen.has(x + ',' + z)) continue;
+        const pool = [];
+        const queue = [[x, z]];
+        seen.add(x + ',' + z);
+        let live = false;
+        while (queue.length) {
+          const [cx, cz] = queue.pop();
+          pool.push(cx + ',' + cz);
+          for (const [dx, dz] of N4) {
+            const nx = cx + dx;
+            const nz = cz + dz;
+            if (powers(nx, nz)) live = true;
+            if (conducts(nx, nz) && !seen.has(nx + ',' + nz)) {
+              seen.add(nx + ',' + nz);
+              queue.push([nx, nz]);
+            }
+          }
+        }
+        if (live) for (const k of pool) electrified.add(k);
+      }
+    }
+  }
+  const isElectrified = (x, z) => electrified.has(x + ',' + z);
+
+  return {
+    name: level.name || '', width, height,
+    typeAt, defAt, terrainOpen, surfaceAt, isElectrified,
+    playerSpawn, enemySpawns,
+  };
 }

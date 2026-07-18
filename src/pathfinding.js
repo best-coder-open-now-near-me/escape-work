@@ -7,9 +7,11 @@ export const DIRS8 = [
 // Shortest 8-directional path (Dijkstra: diagonals cost sqrt(2)). A diagonal
 // step is only allowed when both adjacent orthogonal tiles are open, so actors
 // never clip a wall corner. `isWalkable(x, z)` is supplied by the caller and
-// may include dynamic blockers. Returns [[x, z], ...] including the start
+// may include dynamic blockers. `extraCost(x, z)` (optional) makes tiles
+// expensive without blocking them - hazards get routed around unless they are
+// the only (or a much shorter) way. Returns [[x, z], ...] including the start
 // tile, or null when unreachable.
-export function findPath(isWalkable, sx, sz, tx, tz) {
+export function findPath(isWalkable, sx, sz, tx, tz, extraCost = null) {
   if (!isWalkable(tx, tz)) return null;
   const key = (x, z) => x + ',' + z;
   const dist = new Map([[key(sx, sz), 0]]);
@@ -25,7 +27,7 @@ export function findPath(isWalkable, sx, sz, tx, tz) {
       const nz = z + dz;
       if (!isWalkable(nx, nz)) continue;
       if (dx !== 0 && dz !== 0 && !(isWalkable(x + dx, z) && isWalkable(x, z + dz))) continue;
-      const nd = d + (dx !== 0 && dz !== 0 ? Math.SQRT2 : 1);
+      const nd = d + (dx !== 0 && dz !== 0 ? Math.SQRT2 : 1) + (extraCost ? extraCost(nx, nz) : 0);
       const k = key(nx, nz);
       if (nd < (dist.get(k) ?? Infinity)) {
         dist.set(k, nd);

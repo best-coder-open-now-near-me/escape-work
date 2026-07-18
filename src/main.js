@@ -7,6 +7,7 @@
 // classes, actions) is data in src/data/; levels are hand-editable JSON - or
 // paintable in the built-in editor (#editor / the link on the class picker).
 import { LEVELS, FIRST_LEVEL } from './data/levels.js';
+import { SURFACES, ELECTRIFIED } from './data/surfaces.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { CLASSES } from './data/classes.js';
 import { ACTIONS } from './data/actions.js';
@@ -61,7 +62,7 @@ app.start();
 // ---------------------------------------------------------------------------------
 function startGame(level) {
   const grid = parseLevel(level);
-  const { walls, updateWallFade, floorHeight } = buildLevel(app, grid);
+  const { walls, updateWallFade, animateSurfaces, floorHeight } = buildLevel(app, grid);
 
   // The sheet (and the player's model) only exist once a class is picked - the
   // picker overlay is the first thing the player sees.
@@ -75,7 +76,21 @@ function startGame(level) {
 
   const enemyAt = (x, z) => enemies.find((e) => e.alive && e.x === x && e.z === z) || null;
   const isWalkable = (x, z) => grid.terrainOpen(x, z) && !enemyAt(x, z);
-  const isHazard = (x, z) => grid.defAt(x, z).onEnter?.effect === 'damage';
+  // Surface queries. A cell is dangerous when stepping on it costs HP -
+  // electrified pools and live cables; plain water and coffee are just
+  // uncomfortable.
+  const surfEffect = (x, z) =>
+    grid.isElectrified(x, z) ? ELECTRIFIED.onEnter : SURFACES[grid.surfaceAt(x, z)]?.onEnter || null;
+  const isHazard = (x, z) => (surfEffect(x, z)?.amount || 0) > 0;
+  // Dangerous/uncomfortable surfaces cost extra to path through, so
+  // characters route around them unless told otherwise or there is no other
+  // way; smoothing must never straighten a route through a damaging cell the
+  // route avoided.
+  const hazardCost = (x, z) => {
+    if (grid.isElectrified(x, z)) return ELECTRIFIED.pathCost;
+    return SURFACES[grid.surfaceAt(x, z)]?.pathCost || 0;
+  };
+  const clearOfHazards = (x, z) => isWalkable(x, z) && !isHazard(x, z);
 
   // --- populate the scene -----------------------------------------------------
   const lift = floorHeight / 2;
@@ -103,10 +118,10 @@ function startGame(level) {
 
   function moveTo(tile) {
     if (!tile || !sheet || inCombat || gameOver || !isWalkable(tile.x, tile.z)) return;
-    const p = findPath(isWalkable, player.x, player.z, tile.x, tile.z);
+    const p = findPath(isWalkable, player.x, player.z, tile.x, tile.z, hazardCost);
     if (p && p.length > 1) {
       // Smoothed: straight any-angle runs wherever line of sight is clear.
-      const s = smoothPath(isWalkable, p);
+      const s = smoothPath(clearOfHazards, p);
       player.setPath(s);
       lastPath = s;
     }
@@ -121,12 +136,12 @@ function startGame(level) {
       const ax = en.x + dx;
       const az = en.z + dz;
       if (!isWalkable(ax, az)) continue;
-      const p = findPath(isWalkable, player.x, player.z, ax, az);
+      const p = findPath(isWalkable, player.x, player.z, ax, az, hazardCost);
       if (p && (!best || p.length < best.length)) best = p;
     }
     if (!best) return;
     if (best.length > 1) {
-      const s = smoothPath(isWalkable, best);
+      const s = smoothPath(clearOfHazards, best);
       player.setPath(s);
       lastPath = s;
     } else {
@@ -170,7 +185,7 @@ function startGame(level) {
   // Tile effects (data-driven from TILE_TYPES[..].onEnter) fire per step.
   // Hazards hit on any step; the exit only fires when it's the destination, so
   // pathing past it doesn't end the level by accident.
-  function onPlayerStep(x, z, pathDone) {
+  function onPlayerStep(x, z, pathDone, changed = true) {
     const fx = grid.defAt(x, z).onEnter;
     if (fx) {
       if (fx.effect === 'exit' && pathDone) {
@@ -180,6 +195,9 @@ function startGame(level) {
         // coffee habits - carries over via saved progress). The last floor,
         // and any playtest level, ends the run.
         if (!playtesting && level.next && LEVELS[level.next]) {
+          // A breather in the stairwell, so you never start a floor one
+          // puddle away from death.
+          sheet.hp = Math.min(sheet.maxHp, sheet.hp + 6);
           localStorage.setItem(PROGRESS_KEY, JSON.stringify({ levelId: level.next, sheet }));
           ui.showFloorClear({ nextName: LEVELS[level.next].name }, () => location.reload());
         } else {
@@ -188,7 +206,7 @@ function startGame(level) {
         }
         return;
       }
-      if (fx.effect === 'damage') {
+      if (fx.effect === 'damage' && changed) {
         const dead = applyDamage(sheet, fx.amount);
         ui.say(fx.message);
         ui.updateStatsHud(sheet);
@@ -199,6 +217,25 @@ function startGame(level) {
           ui.showLoseScreen('Done in by the office itself. The floor was, in fact, wet.');
           return;
         }
+      }
+    }
+    // Surface effects (data/surfaces.js): electrified pools and cables hurt,
+    // water and coffee just editorialize. Only on genuine tile entry.
+    const sfx = changed ? surfEffect(x, z) : null;
+    if (sfx) {
+      if (sfx.amount) {
+        const dead = applyDamage(sheet, sfx.amount);
+        ui.say(sfx.message);
+        ui.updateStatsHud(sheet);
+        if (dead) {
+          gameOver = true;
+          player.clearPath();
+          clearProgress();
+          ui.showLoseScreen('Done in by the office itself. Electricity and water: still a bad mix.');
+          return;
+        }
+      } else if (sfx.message) {
+        ui.say(sfx.message);
       }
     }
     checkCombatTrigger();
@@ -226,9 +263,10 @@ function startGame(level) {
           { label: 'Examine', action: () => ui.say(en.def.examine) },
         ]);
       } else if (isWalkable(tile.x, tile.z)) {
-        const flavor = isHazard(tile.x, tile.z)
-          ? 'A suspicious puddle. The mop is on PTO.'
-          : 'Standard-issue office carpet. Faintly damp.';
+        const surfId = grid.surfaceAt(tile.x, tile.z);
+        const flavor = grid.isElectrified(tile.x, tile.z)
+          ? ELECTRIFIED.examine
+          : (surfId && SURFACES[surfId].examine) || 'Standard-issue office carpet. Faintly damp.';
         ui.showMenu(sx, sy, [
           { label: 'Walk here', action: () => moveTo(tile) },
           { label: 'Examine', action: () => ui.say(flavor) },
@@ -242,7 +280,10 @@ function startGame(level) {
   });
 
   // --- main loop ------------------------------------------------------------------
+  const BASE_SPEED = 4;
   app.on('update', (dt) => {
+    // Sticky surfaces (coffee) slow you while you're on them.
+    player.speed = BASE_SPEED * (SURFACES[grid.surfaceAt(player.x, player.z)]?.slow || 1);
     player.update(dt, onPlayerStep);
     const world = {
       paused: inCombat || gameOver,
@@ -259,6 +300,7 @@ function startGame(level) {
       if (en.x !== beforeX || en.z !== beforeZ) anyoneMoved = true;
     }
     if (anyoneMoved) checkCombatTrigger(); // did someone just corner the player?
+    animateSurfaces(dt);
     // Follow the player, gently biased toward the map centre so corner spawns
     // don't leave half the frame empty.
     controls.follow({
@@ -318,6 +360,7 @@ function startGame(level) {
     get lastPath() { return lastPath; },
     get fadedWallCount() { return walls.filter((w) => w.faded).length; },
     get stats() { return sheet ? { ...sheet } : null; },
+    get playerSpeed() { return player.speed; },
     get enemies() { return enemies.map((e) => ({ name: e.def.name, x: e.x, z: e.z, alive: e.alive })); },
   };
 }

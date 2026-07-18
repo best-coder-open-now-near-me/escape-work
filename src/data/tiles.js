@@ -29,11 +29,25 @@ export const TILE_TYPES = {
     color: [0.96, 0.8, 0.26],
     onEnter: { effect: 'exit' },
   },
-  'wet-floor': {
+  // Surface-carrying floor tiles (see data/surfaces.js). The surface layer
+  // brings the effects and interactions - these tiles are just floor + paint.
+  water: {
     char: '~',
-    height: 0.26,
+    height: 0.2,
     color: [0.45, 0.72, 0.85],
-    onEnter: { effect: 'damage', amount: 3, message: 'You slip on the wet floor! -3 HP. (No sign in sight.)' },
+    surface: 'water',
+  },
+  'coffee-spill': {
+    char: '%',
+    height: 0.2,
+    color: [0.34, 0.22, 0.14],
+    surface: 'coffee',
+  },
+  cable: {
+    char: '*',
+    height: 0.2,
+    color: [0.2, 0.2, 0.24],
+    surface: 'cable',
   },
 
   // Furniture props: solid (they block movement and pathfinding) and rendered

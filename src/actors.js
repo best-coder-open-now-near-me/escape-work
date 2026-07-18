@@ -115,10 +115,14 @@ export class PlayerActor extends GridActor {
     const pos = this.entity.getPosition();
     const tx = Math.round(pos.x);
     const tz = Math.round(pos.z);
-    if (tx !== this.x || tz !== this.z || finished) {
+    // `changed` fires effects (damage once per tile entered); `finished` fires
+    // arrival-only logic (the exit). Arriving on a tile you already entered
+    // must not re-apply its effects.
+    const changed = tx !== this.x || tz !== this.z;
+    if (changed || finished) {
       this.x = tx;
       this.z = tz;
-      onTile && onTile(tx, tz, finished);
+      onTile && onTile(tx, tz, finished, changed);
     }
   }
 }
