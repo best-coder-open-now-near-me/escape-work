@@ -277,6 +277,7 @@ function startGame(level) {
         findPath: (sx, sz, tx, tz) => findPath(isWalkable, sx, sz, tx, tz, hazardCost),
         hasLos: (ax, az, bx, bz) => segmentClear(grid.terrainOpen, ax, az, bx, bz),
         surfaceIdAt: (x, z) => runtime.surfaceAt(x, z),
+        isElectrified: (x, z) => grid.isElectrified(x, z),
         enemySurfDamage: (x, z) => surfEffect(x, z)?.amount || 0,
       },
       callbacks: {

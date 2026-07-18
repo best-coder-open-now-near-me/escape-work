@@ -24,7 +24,8 @@ export function startCombat({ app, sheet, player, engaged, world, callbacks }) {
   // callbacks: { say, updateHud, onEnemyKilled(en), onWin, onLose }
   const talentFx = sheet.talent?.effects || {};
   const throwableIds = Object.keys(ACTIONS).filter((id) => ACTIONS[id].ammoCost);
-  const allActionIds = [...sheet.actions, ...throwableIds];
+  // Everyone can shove - it's an office, not a fencing academy.
+  const allActionIds = [...sheet.actions, 'shove', ...throwableIds];
   const usesLeft = {};
   for (const id of sheet.actions) if (ACTIONS[id].uses) usesLeft[id] = ACTIONS[id].uses;
   const ammoCostOf = (id) => {
@@ -118,7 +119,7 @@ export function startCombat({ app, sheet, player, engaged, world, callbacks }) {
         && (!a.ammoCost || sheet.paper >= ammoCostOf(id));
       b.disabled = !affordable;
       b.style.opacity = affordable ? '1' : '.4';
-      b.style.borderColor = (a.type === 'attack' && id === armed) ? '#8adf76' : '#3a3a52';
+      b.style.borderColor = ((a.type === 'attack' || a.type === 'shove') && id === armed) ? '#8adf76' : '#3a3a52';
     }
     endBtn.disabled = phase !== 'player';
     strip.innerHTML = `<div style="font-weight:700; margin-bottom:5px;">COMBAT</div>
@@ -164,6 +165,37 @@ export function startCombat({ app, sheet, player, engaged, world, callbacks }) {
   function handleEnemyClick(en) {
     if (phase !== 'player' || player.moving || !en.alive) return;
     const a = ACTIONS[armed];
+    if (a.type === 'shove') {
+      if (cheb(player.x, player.z, en.x, en.z) > 1) { log('Too far to shove.'); return; }
+      if (ap < a.ap) { log('Not enough AP.'); return; }
+      const dx = Math.sign(en.x - player.x);
+      const dz = Math.sign(en.z - player.z);
+      const tx = en.x + dx;
+      const tz = en.z + dz;
+      ap -= a.ap;
+      player.faceToward(en.x, en.z);
+      if (!world.isWalkable(tx, tz)) {
+        const died = en.takeDamage(2);
+        log(`You shove ${en.def.name} into something solid. -2.`);
+        if (died) callbacks.onEnemyKilled(en);
+      } else {
+        en.x = tx;
+        en.z = tz;
+        const dmg = world.enemySurfDamage(tx, tz);
+        if (dmg > 0) {
+          const live = world.isElectrified && world.isElectrified(tx, tz);
+          const surf = world.surfaceIdAt(tx, tz);
+          const died = en.takeDamage(dmg);
+          log(`You shove ${en.def.name} into the ${live ? 'LIVE water' : surf || 'hazard'}! -${dmg}.`);
+          if (died) callbacks.onEnemyKilled(en);
+        } else {
+          log(`You shove ${en.def.name} back a step.`);
+        }
+      }
+      refresh();
+      if (!engaged.some((e) => e.alive)) victory();
+      return;
+    }
     if (a.ammoCost) {
       // ranged: needs range, line of sight, ammo, AP
       if (cheb(player.x, player.z, en.x, en.z) > THROW_RANGE) { log('Too far to throw.'); return; }
@@ -231,7 +263,7 @@ export function startCombat({ app, sheet, player, engaged, world, callbacks }) {
       if (phase !== 'player' || b.disabled) return;
       const id = b.dataset.action;
       const a = ACTIONS[id];
-      if (a.type === 'attack') {
+      if (a.type === 'attack' || a.type === 'shove') {
         armed = id; // arm it; clicking an enemy fires it
         log(`${a.label} armed. Click a target.`);
         refresh();

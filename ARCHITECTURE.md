@@ -91,8 +91,10 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   tile (2 through sticky surfaces), melee needs adjacency (clicking a distant
   enemy walks you in), throws need range 5 + line of sight. Enemies within
   5 tiles join the fight, have persistent map HP (EnemyActor.hp), take
-  surface damage, and act in a sequenced AI phase. Fire keeps burning during
-  combat; printer explosions still resolve (combat prunes the dead).
+  surface damage, and act in a sequenced AI phase. Everyone can Shove (2 AP):
+  push an adjacent enemy one tile away - into a wall for a slam, or into
+  whatever surface is waiting for them. Fire keeps burning during combat;
+  printer explosions still resolve (combat prunes the dead).
 - **New furniture/prop**: a tile entry with `model` (a .glb under `assets/`) and
   `solid: true` - it blocks movement and renders as the model in both game and
   editor. Props are level data, never hardcoded set dressing.
