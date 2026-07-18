@@ -143,6 +143,44 @@ export function showClassPicker(classes, actions, onPick, onEditor) {
   if (onEditor) div.querySelector('#open-editor').onclick = () => { div.remove(); onEditor(); };
 }
 
+// Always-available corner menu (restart the run, open the editor) - the class
+// picker is skipped mid-campaign, so these need a home that is always there.
+export function showGameMenu(items) {
+  const btn = document.createElement('button');
+  btn.id = 'game-menu-btn';
+  btn.textContent = '☰';
+  Object.assign(btn.style, {
+    position: 'fixed', top: '12px', left: '12px', zIndex: '25',
+    background: '#232334', color: '#f0f0f5', border: '1px solid #3a3a52',
+    borderRadius: '7px', padding: '6px 10px', font: '14px system-ui, sans-serif',
+    cursor: 'pointer',
+  });
+  const menu = document.createElement('div');
+  menu.id = 'game-menu';
+  Object.assign(menu.style, {
+    position: 'fixed', top: '46px', left: '12px', zIndex: '25', display: 'none',
+    minWidth: '160px', background: '#232334', color: '#f0f0f5',
+    border: '1px solid #3a3a52', borderRadius: '7px', padding: '5px',
+    font: '13px system-ui, sans-serif', boxShadow: '0 8px 24px rgba(0,0,0,.45)',
+  });
+  for (const it of items) {
+    const row = document.createElement('div');
+    row.id = it.id;
+    row.textContent = it.label;
+    Object.assign(row.style, { padding: '7px 11px', borderRadius: '5px', cursor: 'pointer' });
+    row.onmouseenter = () => { row.style.background = '#34344f'; };
+    row.onmouseleave = () => { row.style.background = 'transparent'; };
+    row.onclick = () => { menu.style.display = 'none'; it.action(); };
+    menu.appendChild(row);
+  }
+  btn.onclick = () => { menu.style.display = menu.style.display === 'none' ? 'block' : 'none'; };
+  window.addEventListener('mousedown', (e) => {
+    if (e.target !== btn && !menu.contains(e.target)) menu.style.display = 'none';
+  });
+  document.body.appendChild(btn);
+  document.body.appendChild(menu);
+}
+
 // Small corner badge shown while playtesting an editor level.
 export function showPlaytestBadge(onBack) {
   const b = document.createElement('button');

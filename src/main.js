@@ -262,6 +262,28 @@ function startGame(level) {
 
   // --- boot -------------------------------------------------------------------------
   ui.say(grid.name);
+  // The escape hatches live here (not only on the class picker) because a
+  // mid-campaign reload skips the picker entirely.
+  ui.showGameMenu([
+    {
+      id: 'menu-restart',
+      label: 'Restart run',
+      action: () => {
+        clearProgress();
+        localStorage.removeItem(STASH_KEY);
+        location.hash = '';
+        location.reload();
+      },
+    },
+    {
+      id: 'menu-editor',
+      label: 'Level editor',
+      action: () => {
+        location.hash = '#editor';
+        location.reload();
+      },
+    },
+  ]);
   if (restoredSheet) {
     // Continuing a campaign run: same character, next floor - no picker.
     sheet = restoredSheet;
