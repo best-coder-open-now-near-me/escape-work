@@ -33,20 +33,29 @@ export class GridActor {
     this.entity.setEulerAngles(0, this.yaw, 0);
   }
 
-  // Slide the entity toward the logical tile (how enemies move).
+  // Slide the entity toward the logical tile, carrying any leftover movement
+  // across arrivals (onArrive may set a new destination mid-frame) so speed
+  // stays constant instead of hitching at each tile.
   update(dt) {
     if (!this.entity) return;
-    const pos = this.entity.getPosition();
-    const dx = this.x - pos.x;
-    const dz = this.z - pos.z;
-    const d = Math.hypot(dx, dz);
-    if (d > 0.001) {
-      const step = this.speed * dt;
-      if (d <= step) {
+    let remaining = this.speed * dt;
+    for (let guard = 0; guard < 4 && remaining > 0; guard++) {
+      const pos = this.entity.getPosition();
+      const dx = this.x - pos.x;
+      const dz = this.z - pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d < 1e-4) {
+        if (!(this.onArrive && this.onArrive())) break;
+        continue;
+      }
+      if (d <= remaining) {
         this.entity.setPosition(this.x, pos.y, this.z);
+        remaining -= d;
+        if (!(this.onArrive && this.onArrive())) break;
       } else {
-        this.entity.setPosition(pos.x + (dx / d) * step, pos.y, pos.z + (dz / d) * step);
+        this.entity.setPosition(pos.x + (dx / d) * remaining, pos.y, pos.z + (dz / d) * remaining);
         this.targetYaw = Math.atan2(dx, dz) * pc.math.RAD_TO_DEG;
+        remaining = 0;
       }
     }
     this.easeYaw(dt);
@@ -80,22 +89,26 @@ export class PlayerActor extends GridActor {
   update(dt, onTile) {
     if (!this.entity) return;
     let finished = false;
-    if (this.path) {
+    // Consume the whole frame's movement across waypoints - no per-bend
+    // hitch, so speed is constant through corners.
+    let remaining = this.path ? this.speed * dt : 0;
+    while (this.path && remaining > 0) {
       const [wx, wz] = this.path[this.pathIndex];
       const pos = this.entity.getPosition();
       const dx = wx - pos.x;
       const dz = wz - pos.z;
       const d = Math.hypot(dx, dz);
-      const step = this.speed * dt;
-      if (d <= step) {
+      if (d <= remaining) {
         this.entity.setPosition(wx, pos.y, wz);
+        remaining -= d;
         if (++this.pathIndex >= this.path.length) {
           this.path = null;
           finished = true;
         }
       } else {
-        this.entity.setPosition(pos.x + (dx / d) * step, pos.y, pos.z + (dz / d) * step);
+        this.entity.setPosition(pos.x + (dx / d) * remaining, pos.y, pos.z + (dz / d) * remaining);
         this.targetYaw = Math.atan2(dx, dz) * pc.math.RAD_TO_DEG;
+        remaining = 0;
       }
     }
     this.easeYaw(dt);
