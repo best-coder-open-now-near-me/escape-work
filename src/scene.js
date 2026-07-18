@@ -1,6 +1,9 @@
 // Everything that touches the PlayCanvas scene graph: engine boot, lighting,
-// tile/wall meshes, the occlusion fade, and model loading. Game logic lives
-// elsewhere and talks to this through plain data.
+// tile/surface/prop rendering, the occlusion fade, and model loading.
+//
+// All tile visuals go through ONE renderer (createTileRenderer) used by both
+// the game (buildLevel) and the level editor - they draw from the same data
+// registries through the same code, so they cannot drift apart.
 import { TILE_TYPES } from './data/tiles.js';
 import { SURFACES, ELECTRIFIED, FIRE } from './data/surfaces.js';
 
@@ -34,34 +37,50 @@ export function createApp(canvas) {
   return app;
 }
 
-function makeMaterial(rgb, { opacity = 1 } = {}) {
+function makeMaterial(rgb, { opacity = 1, gloss = null, emissive = null } = {}) {
   const m = new pc.StandardMaterial();
   m.diffuse = new pc.Color(rgb[0], rgb[1], rgb[2]);
+  if (gloss !== null) m.gloss = gloss;
   if (opacity < 1) {
     m.opacity = opacity;
     m.blendType = pc.BLEND_NORMAL;
     m.depthWrite = false;
   }
+  if (emissive) m.emissive = new pc.Color(emissive[0], emissive[1], emissive[2]);
   m.update();
   return m;
 }
 
-// Builds the tile meshes for a parsed grid. Returns the wall list plus the
-// occlusion-fade updater (walls between the camera and the player go ghostly).
-export function buildLevel(app, grid) {
-  const materials = {};
-  for (const [id, def] of Object.entries(TILE_TYPES)) materials[id] = makeMaterial(def.color);
-  // The exit glows a little - it should read as "the way out" from anywhere.
-  materials.exit.emissive = new pc.Color(0.4, 0.31, 0.06);
-  materials.exit.update();
-  const wallGhost = makeMaterial(TILE_TYPES.wall.color, { opacity: 0.25 });
+// The single source of tile visuals. renderFloor/renderMarker cover every
+// tile type the registries define; animate() drives the shared pulsing
+// materials (electrified water, fire).
+export function createTileRenderer(app) {
   const floorDef = TILE_TYPES.floor;
+  const surfaceTop = floorDef.height / 2 + 0.02;
+
+  const tileMats = {};
+  for (const [id, def] of Object.entries(TILE_TYPES)) tileMats[id] = makeMaterial(def.color);
+  // The exit glows a little - it should read as "the way out" from anywhere.
+  tileMats.exit.emissive = new pc.Color(0.4, 0.31, 0.06);
+  tileMats.exit.update();
+  const wallGhost = makeMaterial(TILE_TYPES.wall.color, { opacity: 0.25 });
   // Full-size slabs with a few near-identical tints: surfaces read as
   // continuous carpet with subtle variation instead of a grid of tiles.
-  const floorMats = [-1, 0, 1].map((i) => {
-    const c = TILE_TYPES.floor.color.map((v) => Math.min(1, v + i * 0.018));
-    return makeMaterial(c);
-  });
+  const floorMats = [-1, 0, 1].map((i) =>
+    makeMaterial(TILE_TYPES.floor.color.map((v) => Math.min(1, v + i * 0.018))));
+
+  const surfaceMats = {};
+  for (const [id, def] of Object.entries(SURFACES)) {
+    surfaceMats[id] = makeMaterial(def.color, { gloss: 0.85, opacity: 0.88 });
+  }
+  const paperMat = makeMaterial(SURFACES.paper.color, { gloss: 0.2 });
+  const electricMat = makeMaterial(ELECTRIFIED.color, { opacity: 0.92, gloss: 0.85, emissive: [0.25, 0.5, 0.65] });
+  const fireMat = makeMaterial(FIRE.color, { opacity: 0.92, emissive: [0.9, 0.35, 0.05] });
+  const fireCore = makeMaterial([1, 0.8, 0.3], { opacity: 0.95, emissive: [0.95, 0.7, 0.2] });
+  const trashMat = makeMaterial(TILE_TYPES.trash.color, { gloss: 0.4 });
+  const printerMat = makeMaterial(TILE_TYPES.printer.color, { gloss: 0.5 });
+  const printerDark = makeMaterial([0.2, 0.2, 0.24], { gloss: 0.3 });
+  const printerLight = makeMaterial([0.3, 0.9, 0.4], { gloss: 0.6, emissive: [0.1, 0.5, 0.15] });
 
   const addBox = (material, x, y, z, sx, sy, sz) => {
     const e = new pc.Entity();
@@ -72,28 +91,6 @@ export function buildLevel(app, grid) {
     return e;
   };
 
-  // Surface materials. All electrified pools share one pulsing material.
-  const surfaceMat = (rgb, { gloss = 0.85, opacity = 0.88, emissive = null } = {}) => {
-    const m = new pc.StandardMaterial();
-    m.diffuse = new pc.Color(rgb[0], rgb[1], rgb[2]);
-    m.gloss = gloss;
-    m.opacity = opacity;
-    m.blendType = pc.BLEND_NORMAL;
-    if (emissive) m.emissive = new pc.Color(emissive[0], emissive[1], emissive[2]);
-    m.update();
-    return m;
-  };
-  const surfaceMats = {};
-  for (const [id, def] of Object.entries(SURFACES)) surfaceMats[id] = surfaceMat(def.color);
-  const electricMat = surfaceMat(ELECTRIFIED.color, {
-    opacity: 0.92, emissive: [0.25, 0.5, 0.65],
-  });
-
-  const surfaceTop = floorDef.height / 2 + 0.02;
-  // Registries so runtime systems can remove visuals (burning paper, exploded
-  // printers).
-  const surfaceVisuals = new Map(); // "x,z" -> entity
-  const propVisuals = new Map();
   // Irregular overlapping blobs so spills read as liquid, not tiles. Rotated
   // per-cell so no two puddles look alike.
   function addPuddle(x, z, material) {
@@ -111,7 +108,6 @@ export function buildLevel(app, grid) {
     return holder;
   }
   // Scattered sheets: thin pale rectangles at odd angles.
-  const paperMat = surfaceMat(SURFACES.paper.color, { gloss: 0.2, opacity: 1 });
   function addPaper(x, z) {
     const holder = new pc.Entity();
     for (const [ox, oz, ry, s] of [[0, 0, 15, 0.42], [0.2, 0.16, 70, 0.34], [-0.18, -0.1, 40, 0.3], [-0.05, 0.22, 110, 0.28]]) {
@@ -127,8 +123,23 @@ export function buildLevel(app, grid) {
     app.root.addChild(holder);
     return holder;
   }
-  // Props built from primitives - no .glb needed.
-  const trashMat = surfaceMat(TILE_TYPES.trash.color, { gloss: 0.4, opacity: 1 });
+  // A frayed power strip: dark bar plus a glowing live end.
+  function addCable(x, z) {
+    const holder = new pc.Entity();
+    const bar = new pc.Entity();
+    bar.addComponent('render', { type: 'box', material: surfaceMats.cable });
+    bar.setLocalScale(0.85, 0.07, 0.2);
+    holder.addChild(bar);
+    const tip = new pc.Entity();
+    tip.addComponent('render', { type: 'box', material: electricMat });
+    tip.setLocalScale(0.14, 0.09, 0.14);
+    tip.setLocalPosition(0.38, 0.01, 0);
+    holder.addChild(tip);
+    holder.setEulerAngles(0, ((x * 53 + z * 97) % 4) * 45 + 20, 0);
+    holder.setPosition(x, surfaceTop, z);
+    app.root.addChild(holder);
+    return holder;
+  }
   function addTrash(x, z) {
     const holder = new pc.Entity();
     const can = new pc.Entity();
@@ -145,9 +156,6 @@ export function buildLevel(app, grid) {
     app.root.addChild(holder);
     return holder;
   }
-  const printerMat = surfaceMat(TILE_TYPES.printer.color, { gloss: 0.5, opacity: 1 });
-  const printerDark = surfaceMat([0.2, 0.2, 0.24], { gloss: 0.3, opacity: 1 });
-  const printerLight = surfaceMat([0.3, 0.9, 0.4], { gloss: 0.6, opacity: 1, emissive: [0.1, 0.5, 0.15] });
   function addPrinter(x, z) {
     const holder = new pc.Entity();
     const body = new pc.Entity();
@@ -171,63 +179,41 @@ export function buildLevel(app, grid) {
     return holder;
   }
 
-  // A frayed power strip: dark bar plus a glowing live end.
-  function addCable(x, z) {
-    const holder = new pc.Entity();
-    const bar = new pc.Entity();
-    bar.addComponent('render', { type: 'box', material: surfaceMats.cable });
-    bar.setLocalScale(0.85, 0.07, 0.2);
-    holder.addChild(bar);
-    const tip = new pc.Entity();
-    tip.addComponent('render', { type: 'box', material: electricMat });
-    tip.setLocalScale(0.14, 0.09, 0.14);
-    tip.setLocalPosition(0.38, 0.01, 0);
-    holder.addChild(tip);
-    holder.setEulerAngles(0, ((x * 53 + z * 97) % 4) * 45 + 20, 0);
-    holder.setPosition(x, surfaceTop, z);
-    app.root.addChild(holder);
-    return holder;
+  function renderFloor(x, z) {
+    return addBox(floorMats[(x * 31 + z * 17) % 3], x, 0, z, 1, floorDef.height, 1);
   }
 
-  const walls = [];
-  for (let z = 0; z < grid.height; z++) {
-    for (let x = 0; x < grid.width; x++) {
-      const type = grid.typeAt(x, z);
-      if (type === null) continue;
-      // Every cell gets a seamless floor slab; non-floor types get a marker
-      // box, a prop model, or a surface visual on top.
-      addBox(floorMats[(x * 31 + z * 17) % 3], x, 0, z, 1, floorDef.height, 1);
-      if (type !== 'floor') {
-        const def = TILE_TYPES[type];
-        if (def.model) {
-          placeModel(app, `assets/${def.model}.glb`, x, z, {
-            scale: def.scale || 1, rotY: def.rotY || 0, lift: floorDef.height / 2,
-          });
-        } else if (def.primitive) {
-          const builder = { trash: addTrash, printer: addPrinter }[def.primitive];
-          if (builder) propVisuals.set(x + ',' + z, builder(x, z));
-        } else if (def.surface) {
-          const surf = SURFACES[def.surface];
-          let vis;
-          if (surf.style === 'cable') vis = addCable(x, z);
-          else if (surf.style === 'paper') vis = addPaper(x, z);
-          else vis = addPuddle(x, z, grid.isElectrified(x, z) ? electricMat : surfaceMats[def.surface]);
-          surfaceVisuals.set(x + ',' + z, vis);
-        } else if (def.solid) {
-          // Full-size so adjacent walls merge into continuous surfaces.
-          const box = addBox(materials[type], x, def.height / 2, z, 1, def.height, 1);
-          walls.push({ entity: box, x, z, faded: false });
-        } else {
-          addBox(materials[type], x, def.height / 2, z, 1, def.height, 1);
-        }
-      }
+  // Draw whatever sits on top of the floor for a non-floor tile type.
+  // Returns { kind, entities }; model props arrive via onAsync(holder).
+  function renderMarker(x, z, type, { electrified = false, onAsync = null } = {}) {
+    const def = TILE_TYPES[type];
+    if (!def) return { kind: 'none', entities: [] };
+    if (def.model) {
+      placeModel(app, `assets/${def.model}.glb`, x, z, {
+        scale: def.scale || 1, rotY: def.rotY || 0, lift: floorDef.height / 2,
+        onReady: (holder) => onAsync && onAsync(holder),
+      });
+      return { kind: 'model', entities: [] };
     }
+    if (def.primitive) {
+      const builder = { trash: addTrash, printer: addPrinter }[def.primitive];
+      return { kind: 'prop', entities: builder ? [builder(x, z)] : [] };
+    }
+    if (def.surface) {
+      const surf = SURFACES[def.surface];
+      let vis;
+      if (surf.style === 'cable') vis = addCable(x, z);
+      else if (surf.style === 'paper') vis = addPaper(x, z);
+      else vis = addPuddle(x, z, electrified ? electricMat : surfaceMats[def.surface]);
+      return { kind: 'surface', entities: [vis] };
+    }
+    if (def.solid) {
+      // Full-size so adjacent walls merge into continuous surfaces.
+      return { kind: 'wall', entities: [addBox(tileMats[type], x, def.height / 2, z, 1, def.height, 1)] };
+    }
+    return { kind: 'marker', entities: [addBox(tileMats[type], x, def.height / 2, z, 1, def.height, 1)] };
   }
 
-  // Fire: shared flickering material; addFlame is handed to the surface
-  // runtime so burning cells get visuals.
-  const fireMat = surfaceMat(FIRE.color, { opacity: 0.92, emissive: [0.9, 0.35, 0.05] });
-  const fireCore = surfaceMat([1, 0.8, 0.3], { opacity: 0.95, emissive: [0.95, 0.7, 0.2] });
   function addFlame(x, z, lift = 0.16) {
     const holder = new pc.Entity();
     const outer = new pc.Entity();
@@ -264,33 +250,45 @@ export function buildLevel(app, grid) {
     app.on('update', anim);
   }
 
-  function hideSurfaceVisual(x, z) {
-    const v = surfaceVisuals.get(x + ',' + z);
-    if (v) {
-      v.destroy();
-      surfaceVisuals.delete(x + ',' + z);
-    }
-  }
-  function removePropVisual(x, z) {
-    const v = propVisuals.get(x + ',' + z);
-    if (v) {
-      v.destroy();
-      propVisuals.delete(x + ',' + z);
-    }
-  }
-
   // Live water crackles and fire flickers: pulse the shared materials.
-  let surfaceClock = 0;
-  function animateSurfaces(dt) {
-    surfaceClock += dt;
-    const pulse = 0.45 + 0.35 * Math.sin(surfaceClock * 7) + 0.12 * Math.sin(surfaceClock * 23);
+  let clock = 0;
+  function animate(dt) {
+    clock += dt;
+    const pulse = 0.45 + 0.35 * Math.sin(clock * 7) + 0.12 * Math.sin(clock * 23);
     electricMat.emissiveIntensity = Math.max(0.15, pulse);
-    fireMat.emissiveIntensity = 0.75 + 0.3 * Math.sin(surfaceClock * 11) + 0.15 * Math.sin(surfaceClock * 29);
-    fireCore.emissiveIntensity = 0.85 + 0.25 * Math.sin(surfaceClock * 17 + 1);
+    fireMat.emissiveIntensity = 0.75 + 0.3 * Math.sin(clock * 11) + 0.15 * Math.sin(clock * 29);
+    fireCore.emissiveIntensity = 0.85 + 0.25 * Math.sin(clock * 17 + 1);
   }
 
-  // Fade walls sitting between the camera and the player. With a perspective
-  // camera the "toward the camera" direction is the actual player->camera ray.
+  return {
+    renderFloor, renderMarker, addFlame, explosionFlash, animate,
+    tileMats, wallGhost, floorHeight: floorDef.height,
+  };
+}
+
+// Builds the full scene for a parsed grid using the shared renderer. Returns
+// the wall list, the occlusion-fade updater, and runtime hooks.
+export function buildLevel(app, grid) {
+  const r = createTileRenderer(app);
+  const walls = [];
+  const surfaceVisuals = new Map(); // "x,z" -> entity
+  const propVisuals = new Map();
+
+  for (let z = 0; z < grid.height; z++) {
+    for (let x = 0; x < grid.width; x++) {
+      const type = grid.typeAt(x, z);
+      if (type === null) continue;
+      r.renderFloor(x, z);
+      if (type === 'floor') continue;
+      const res = r.renderMarker(x, z, type, { electrified: grid.isElectrified(x, z) });
+      if (res.kind === 'wall') walls.push({ entity: res.entities[0], x, z, faded: false });
+      else if (res.kind === 'surface') surfaceVisuals.set(x + ',' + z, res.entities[0]);
+      else if (res.kind === 'prop') propVisuals.set(x + ',' + z, res.entities[0]);
+    }
+  }
+
+  // Fade walls sitting between the camera and the player - the "toward the
+  // camera" direction is the actual player->camera ray.
   function updateWallFade(cameraEntity, playerPos) {
     if (!playerPos) return;
     const cam = cameraEntity.getPosition();
@@ -308,15 +306,31 @@ export function buildLevel(app, grid) {
       const shouldFade = t > 0.3 && Math.hypot(px, pz) < 1.15;
       if (shouldFade !== w.faded) {
         w.faded = shouldFade;
-        w.entity.render.meshInstances[0].material = shouldFade ? wallGhost : materials.wall;
+        w.entity.render.meshInstances[0].material = shouldFade ? r.wallGhost : r.tileMats.wall;
       }
     }
   }
 
+  function hideSurfaceVisual(x, z) {
+    const v = surfaceVisuals.get(x + ',' + z);
+    if (v) {
+      v.destroy();
+      surfaceVisuals.delete(x + ',' + z);
+    }
+  }
+  function removePropVisual(x, z) {
+    const v = propVisuals.get(x + ',' + z);
+    if (v) {
+      v.destroy();
+      propVisuals.delete(x + ',' + z);
+    }
+  }
+
   return {
-    walls, updateWallFade, animateSurfaces,
-    addFlame, explosionFlash, hideSurfaceVisual, removePropVisual,
-    floorHeight: floorDef.height,
+    walls, updateWallFade, animateSurfaces: r.animate,
+    addFlame: r.addFlame, explosionFlash: r.explosionFlash,
+    hideSurfaceVisual, removePropVisual,
+    floorHeight: r.floorHeight,
   };
 }
 

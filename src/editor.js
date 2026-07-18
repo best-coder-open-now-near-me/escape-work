@@ -10,7 +10,8 @@ import { TILE_TYPES } from './data/tiles.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { LEVELS } from './data/levels.js';
 import { createControls } from './controls.js';
-import { placeModel } from './scene.js';
+import { createTileRenderer } from './scene.js';
+import { parseLevel } from './grid.js';
 import { say } from './ui.js';
 
 const pc = window.pc;
@@ -32,19 +33,40 @@ export function startEditor(app, levelData, stashKey) {
   const enemyByChar = {};
   for (const [id, def] of Object.entries(ENEMY_TYPES)) enemyByChar[def.char] = id;
 
-  // --- materials ---------------------------------------------------------------
+  // --- rendering ---------------------------------------------------------------
+  // The SAME renderer the game uses (scene.js), so what you paint is what the
+  // game shows - puddles, cables, paper drifts, props, glowing exits and all.
+  const renderer = createTileRenderer(app);
+  app.on('update', (dt) => renderer.animate(dt));
+  // Actor spawn markers are editor-only affordances (the game replaces them
+  // with character models).
   const mat = (rgb) => {
     const m = new pc.StandardMaterial();
     m.diffuse = new pc.Color(rgb[0], rgb[1], rgb[2]);
     m.update();
     return m;
   };
-  const materials = {};
-  for (const [id, def] of Object.entries(TILE_TYPES)) materials[id] = mat(def.color);
   const playerMat = mat([0.3, 0.8, 0.45]);
   const enemyMats = {};
   const enemyPalette = [[0.88, 0.32, 0.32], [0.9, 0.55, 0.25], [0.75, 0.35, 0.75]];
   Object.keys(ENEMY_TYPES).forEach((id, i) => { enemyMats[id] = mat(enemyPalette[i % enemyPalette.length]); });
+
+  // Live conduction preview: recompute electrified pools from the current map
+  // exactly the way the game will (grid.js), so painting a cable next to
+  // water lights the pool up right in the editor.
+  let electrified = new Set();
+  function computeElectrifiedSet() {
+    const s = new Set();
+    try {
+      const g = parseLevel(JSON.parse(toJson()));
+      for (let z = 0; z < g.height; z++) {
+        for (let x = 0; x < g.width; x++) {
+          if (g.isElectrified(x, z)) s.add(x + ',' + z);
+        }
+      }
+    } catch { /* mid-edit levels can be momentarily unparsable */ }
+    return s;
+  }
 
   // --- per-cell rendering --------------------------------------------------------
   const cellEntities = new Map(); // "x,z" -> [entities]
@@ -67,27 +89,23 @@ export function startEditor(app, levelData, stashKey) {
     cellEntities.set(key, out);
     const ch = rows[z][x];
     if (ch === ' ') return;
-    out.push(addBox(materials.floor, x, 0, z, 1, TILE_TYPES.floor.height, 1));
+    out.push(renderer.renderFloor(x, z));
     if (ch === PLAYER_CHAR) {
       out.push(addBox(playerMat, x, 0.35, z, 0.55, 0.5, 0.55));
     } else if (enemyByChar[ch]) {
       out.push(addBox(enemyMats[enemyByChar[ch]], x, 0.35, z, 0.55, 0.5, 0.55));
     } else {
       const type = tileByChar[ch] || 'floor';
-      const def = TILE_TYPES[type];
       if (type === 'floor') return;
-      if (def.model) {
-        placeModel(app, `assets/${def.model}.glb`, x, z, {
-          scale: def.scale || 1, rotY: def.rotY || 0, lift: TILE_TYPES.floor.height / 2,
-          onReady: (holder) => {
-            // The cell may have been repainted while the model loaded.
-            if (cellVersion.get(key) !== version) holder.destroy();
-            else out.push(holder);
-          },
-        });
-      } else {
-        out.push(addBox(materials[type], x, def.height / 2, z, 0.78, def.height, 0.78));
-      }
+      const res = renderer.renderMarker(x, z, type, {
+        electrified: electrified.has(key),
+        onAsync: (holder) => {
+          // The cell may have been repainted while the model loaded.
+          if (cellVersion.get(key) !== version) holder.destroy();
+          else out.push(holder);
+        },
+      });
+      out.push(...res.entities);
     }
   }
 
@@ -95,6 +113,7 @@ export function startEditor(app, levelData, stashKey) {
     for (const list of cellEntities.values()) for (const e of list) e.destroy();
     cellEntities.clear();
     cellVersion.clear();
+    electrified = computeElectrifiedSet();
     for (let z = 0; z < height; z++) for (let x = 0; x < width; x++) renderCell(x, z);
     updateSizeLabel();
   }
@@ -133,7 +152,19 @@ export function startEditor(app, levelData, stashKey) {
       }
     }
     rows[z][x] = ch;
+    // Conduction can change anywhere a pool connects - recompute first so the
+    // painted cell renders with fresh state, then re-render cells whose
+    // electrified state flipped (live preview of cable + water).
+    const next = computeElectrifiedSet();
+    const dirty = [];
+    for (const k of next) if (!electrified.has(k)) dirty.push(k);
+    for (const k of electrified) if (!next.has(k)) dirty.push(k);
+    electrified = next;
     renderCell(x, z);
+    for (const k of dirty) {
+      const [cx, cz] = k.split(',').map(Number);
+      if (cx !== x || cz !== z) renderCell(cx, cz);
+    }
   }
 
   // --- resizing (right/bottom edges; new cells are walls to keep maps sealed) ---
