@@ -258,9 +258,10 @@ function startGame(level) {
     pendingAction = null;
     inCombat = true;
     ui.hideMenu();
-    // Everyone close enough joins the brawl.
+    // Everyone close enough joins the brawl (those further than 2 tiles are
+    // surprised and lose their first turn - see combat.js).
     const engaged = enemies.filter((e) =>
-      e.alive && Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= 5);
+      e.alive && Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= 4);
     player.faceToward(en.x, en.z);
     en.faceToward(player.x, player.z);
     ui.say(engaged.length > 1

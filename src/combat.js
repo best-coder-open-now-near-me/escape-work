@@ -14,6 +14,11 @@ const THROW_RANGE = 5;
 const ENEMY_ATTACK_AP = 3;
 
 export function startCombat({ app, sheet, player, engaged, world, callbacks }) {
+  // Enemies pulled in from a distance are surprised - they spend their first
+  // turn realizing what's happening, so group openings don't alpha-strike you.
+  for (const en of engaged) {
+    en.surprised = cheb(en.x, en.z, player.x, player.z) > 2;
+  }
   // world: { isWalkable, findPath(sx,sz,tx,tz), hasLos(ax,az,bx,bz),
   //          surfaceIdAt(x,z), enemySurfDamage(x,z) }
   // callbacks: { say, updateHud, onEnemyKilled(en), onWin, onLose }
@@ -339,6 +344,12 @@ export function startCombat({ app, sheet, player, engaged, world, callbacks }) {
       const en = enemyQueue.shift();
       if (!en) { startPlayerTurn(); return; }
       if (!en.alive) return;
+      if (en.surprised) {
+        en.surprised = false;
+        log(`${en.def.name} is still grabbing their lanyard.`);
+        acting = { en, ap: 0, wait: 0.6 };
+        return;
+      }
       acting = { en, ap: en.def.ap, wait: 0.35 };
       return;
     }
