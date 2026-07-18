@@ -15,11 +15,19 @@ export function createApp(canvas) {
   app.setCanvasResolution(pc.RESOLUTION_AUTO);
   window.addEventListener('resize', () => app.resizeCanvas());
 
-  // Ambient fills the shadows; a directional light gives real shading so
-  // imported PBR models are actually lit, not black.
-  app.scene.ambientLight = new pc.Color(0.55, 0.55, 0.62);
+  // Ambient fills the shadows; a shadow-casting sun grounds everything and
+  // gives imported PBR models real shading.
+  app.scene.ambientLight = new pc.Color(0.56, 0.56, 0.62);
   const sun = new pc.Entity('sun');
-  sun.addComponent('light', { type: 'directional', intensity: 1.4 });
+  sun.addComponent('light', {
+    type: 'directional',
+    intensity: 1.25,
+    castShadows: true,
+    shadowResolution: 2048,
+    shadowDistance: 70,
+    shadowBias: 0.2,
+    normalOffsetBias: 0.06,
+  });
   sun.setEulerAngles(55, 35, 0);
   app.root.addChild(sun);
   return app;
@@ -42,8 +50,17 @@ function makeMaterial(rgb, { opacity = 1 } = {}) {
 export function buildLevel(app, grid) {
   const materials = {};
   for (const [id, def] of Object.entries(TILE_TYPES)) materials[id] = makeMaterial(def.color);
-  const wallGhost = makeMaterial(TILE_TYPES.wall.color, { opacity: 0.22 });
+  // The exit glows a little - it should read as "the way out" from anywhere.
+  materials.exit.emissive = new pc.Color(0.4, 0.31, 0.06);
+  materials.exit.update();
+  const wallGhost = makeMaterial(TILE_TYPES.wall.color, { opacity: 0.25 });
   const floorDef = TILE_TYPES.floor;
+  // Full-size slabs with a few near-identical tints: surfaces read as
+  // continuous carpet with subtle variation instead of a grid of tiles.
+  const floorMats = [-1, 0, 1].map((i) => {
+    const c = TILE_TYPES.floor.color.map((v) => Math.min(1, v + i * 0.018));
+    return makeMaterial(c);
+  });
 
   const addBox = (material, x, y, z, sx, sy, sz) => {
     const e = new pc.Entity();
@@ -59,39 +76,43 @@ export function buildLevel(app, grid) {
     for (let x = 0; x < grid.width; x++) {
       const type = grid.typeAt(x, z);
       if (type === null) continue;
-      // Every cell gets a floor slab; non-floor types get a marker box (or a
-      // prop model) on top.
-      addBox(materials.floor, x, 0, z, 0.96, floorDef.height, 0.96);
+      // Every cell gets a seamless floor slab; non-floor types get a marker
+      // box (or a prop model) on top.
+      addBox(floorMats[(x * 31 + z * 17) % 3], x, 0, z, 1, floorDef.height, 1);
       if (type !== 'floor') {
         const def = TILE_TYPES[type];
         if (def.model) {
           placeModel(app, `assets/${def.model}.glb`, x, z, {
             scale: def.scale || 1, rotY: def.rotY || 0, lift: floorDef.height / 2,
           });
+        } else if (def.solid) {
+          // Full-size so adjacent walls merge into continuous surfaces.
+          const box = addBox(materials[type], x, def.height / 2, z, 1, def.height, 1);
+          walls.push({ entity: box, x, z, faded: false });
         } else {
-          const box = addBox(materials[type], x, def.height / 2, z, def.solid ? 0.78 : 0.8, def.height, def.solid ? 0.78 : 0.8);
-          // Only wall-style boxes join the occlusion fade; props stay visible.
-          if (def.solid) walls.push({ entity: box, x, z, faded: false });
+          addBox(materials[type], x, def.height / 2, z, 1, def.height, 1);
         }
       }
     }
   }
 
-  // With an orthographic camera every point looks along the same direction, so
-  // "toward the camera" is one fixed axis: walk it from the player and fade
-  // any solid tile close to that line.
-  const _fadeDir = new pc.Vec3();
+  // Fade walls sitting between the camera and the player. With a perspective
+  // camera the "toward the camera" direction is the actual player->camera ray.
   function updateWallFade(cameraEntity, playerPos) {
     if (!playerPos) return;
-    const fwd = cameraEntity.forward;
-    _fadeDir.set(-fwd.x, 0, -fwd.z).normalize();
+    const cam = cameraEntity.getPosition();
+    let dx = cam.x - playerPos.x;
+    let dz = cam.z - playerPos.z;
+    const len = Math.hypot(dx, dz) || 1;
+    dx /= len;
+    dz /= len;
     for (const w of walls) {
       const vx = w.x - playerPos.x;
       const vz = w.z - playerPos.z;
-      const t = vx * _fadeDir.x + vz * _fadeDir.z;
-      const px = vx - t * _fadeDir.x;
-      const pz = vz - t * _fadeDir.z;
-      const shouldFade = t > 0.3 && Math.hypot(px, pz) < 1.05;
+      const t = vx * dx + vz * dz;
+      const px = vx - t * dx;
+      const pz = vz - t * dz;
+      const shouldFade = t > 0.3 && Math.hypot(px, pz) < 1.15;
       if (shouldFade !== w.faded) {
         w.faded = shouldFade;
         w.entity.render.meshInstances[0].material = shouldFade ? wallGhost : materials.wall;

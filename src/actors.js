@@ -1,9 +1,11 @@
 // Actors: things that live on the grid and own a 3D entity. GridActor handles
 // the shared mechanics (a logical tile position, an entity that slides smoothly
-// toward it, facing); PlayerActor adds waypoint-path following; EnemyActor adds
-// wander AI. New actor kinds (patrolling security, a chasing Deadline) extend
-// GridActor the same way.
+// toward it, eased turning); PlayerActor follows smoothed any-angle paths;
+// EnemyActor adds wander AI. New actor kinds extend GridActor the same way.
 const pc = window.pc;
+
+const wrapAngle = (a) => (((a + 180) % 360) + 360) % 360 - 180;
+const TURN_RATE = 10; // how quickly facing eases toward the heading
 
 export class GridActor {
   constructor(x, z, { speed = 2.2 } = {}) {
@@ -11,46 +13,56 @@ export class GridActor {
     this.z = z;
     this.speed = speed;
     this.entity = null;
+    this.yaw = 0;
+    this.targetYaw = 0;
   }
 
   attach(entity) {
     this.entity = entity;
+    this.yaw = this.targetYaw = entity.getEulerAngles().y;
   }
 
   faceToward(tx, tz) {
-    if (!this.entity) return;
-    this.entity.setEulerAngles(0, Math.atan2(tx - this.x, tz - this.z) * pc.math.RAD_TO_DEG, 0);
+    this.targetYaw = Math.atan2(tx - this.x, tz - this.z) * pc.math.RAD_TO_DEG;
   }
 
-  // Slide the entity toward the logical tile; face the direction of travel.
+  // Ease the model's facing toward targetYaw - no more snap turns.
+  easeYaw(dt) {
+    if (!this.entity) return;
+    this.yaw += wrapAngle(this.targetYaw - this.yaw) * Math.min(1, dt * TURN_RATE);
+    this.entity.setEulerAngles(0, this.yaw, 0);
+  }
+
+  // Slide the entity toward the logical tile (how enemies move).
   update(dt) {
     if (!this.entity) return;
     const pos = this.entity.getPosition();
-    const target = new pc.Vec3(this.x, pos.y, this.z);
-    const to = target.clone().sub(pos);
-    const d = to.length();
-    if (d < 0.001) return;
-    const step = this.speed * dt;
-    if (d <= step) {
-      this.entity.setPosition(target);
-    } else {
-      to.normalize();
-      this.entity.setPosition(pos.add(to.scale(step)));
-      this.entity.setEulerAngles(0, Math.atan2(to.x, to.z) * pc.math.RAD_TO_DEG, 0);
+    const dx = this.x - pos.x;
+    const dz = this.z - pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > 0.001) {
+      const step = this.speed * dt;
+      if (d <= step) {
+        this.entity.setPosition(this.x, pos.y, this.z);
+      } else {
+        this.entity.setPosition(pos.x + (dx / d) * step, pos.y, pos.z + (dz / d) * step);
+        this.targetYaw = Math.atan2(dx, dz) * pc.math.RAD_TO_DEG;
+      }
     }
+    this.easeYaw(dt);
   }
 }
 
 export class PlayerActor extends GridActor {
   constructor(x, z, opts = {}) {
-    super(x, z, { speed: 3.5, ...opts });
+    super(x, z, { speed: 4, ...opts });
     this.path = null;
     this.pathIndex = 0;
   }
 
   setPath(path) {
     this.path = path;
-    this.pathIndex = 1; // index 0 is the tile we already stand on
+    this.pathIndex = 1; // index 0 is where we already stand
   }
 
   clearPath() {
@@ -61,30 +73,39 @@ export class PlayerActor extends GridActor {
     return !!this.path;
   }
 
-  // Walks the waypoint list; calls onStep(x, z, pathDone) as each tile is
-  // reached so the game can apply tile effects and combat checks.
-  update(dt, onStep) {
-    if (!this.entity || !this.path) return;
-    const [tx, tz] = this.path[this.pathIndex];
+  // Follows (smoothed) waypoints at any angle. Because a straight run crosses
+  // tiles without stopping on them, the logical tile is tracked from the
+  // entity's position every frame - onTile(x, z, pathDone) fires on each tile
+  // entered so hazards/combat/exits react mid-stride.
+  update(dt, onTile) {
+    if (!this.entity) return;
+    let finished = false;
+    if (this.path) {
+      const [wx, wz] = this.path[this.pathIndex];
+      const pos = this.entity.getPosition();
+      const dx = wx - pos.x;
+      const dz = wz - pos.z;
+      const d = Math.hypot(dx, dz);
+      const step = this.speed * dt;
+      if (d <= step) {
+        this.entity.setPosition(wx, pos.y, wz);
+        if (++this.pathIndex >= this.path.length) {
+          this.path = null;
+          finished = true;
+        }
+      } else {
+        this.entity.setPosition(pos.x + (dx / d) * step, pos.y, pos.z + (dz / d) * step);
+        this.targetYaw = Math.atan2(dx, dz) * pc.math.RAD_TO_DEG;
+      }
+    }
+    this.easeYaw(dt);
     const pos = this.entity.getPosition();
-    const target = new pc.Vec3(tx, pos.y, tz);
-    const to = target.clone().sub(pos);
-    const dist = to.length();
-    const step = this.speed * dt;
-    if (dist <= step) {
-      this.entity.setPosition(target);
+    const tx = Math.round(pos.x);
+    const tz = Math.round(pos.z);
+    if (tx !== this.x || tz !== this.z || finished) {
       this.x = tx;
       this.z = tz;
-      let done = false;
-      if (++this.pathIndex >= this.path.length) {
-        this.path = null;
-        done = true;
-      }
-      onStep && onStep(tx, tz, done);
-    } else {
-      to.normalize();
-      this.entity.setPosition(pos.add(to.scale(step)));
-      this.entity.setEulerAngles(0, Math.atan2(to.x, to.z) * pc.math.RAD_TO_DEG, 0);
+      onTile && onTile(tx, tz, finished);
     }
   }
 }

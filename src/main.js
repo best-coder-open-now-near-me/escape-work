@@ -11,7 +11,7 @@ import { ENEMY_TYPES } from './data/enemies.js';
 import { CLASSES } from './data/classes.js';
 import { ACTIONS } from './data/actions.js';
 import { parseLevel } from './grid.js';
-import { findPath, DIRS8 } from './pathfinding.js';
+import { findPath, smoothPath, DIRS8 } from './pathfinding.js';
 import { createSheet, gainXp, applyDamage } from './stats.js';
 import { PlayerActor, EnemyActor } from './actors.js';
 import { createApp, buildLevel, placeModel } from './scene.js';
@@ -105,8 +105,10 @@ function startGame(level) {
     if (!tile || !sheet || inCombat || gameOver || !isWalkable(tile.x, tile.z)) return;
     const p = findPath(isWalkable, player.x, player.z, tile.x, tile.z);
     if (p && p.length > 1) {
-      player.setPath(p);
-      lastPath = p;
+      // Smoothed: straight any-angle runs wherever line of sight is clear.
+      const s = smoothPath(isWalkable, p);
+      player.setPath(s);
+      lastPath = s;
     }
   }
 
@@ -124,8 +126,9 @@ function startGame(level) {
     }
     if (!best) return;
     if (best.length > 1) {
-      player.setPath(best);
-      lastPath = best;
+      const s = smoothPath(isWalkable, best);
+      player.setPath(s);
+      lastPath = s;
     } else {
       checkCombatTrigger();
     }
@@ -256,7 +259,12 @@ function startGame(level) {
       if (en.x !== beforeX || en.z !== beforeZ) anyoneMoved = true;
     }
     if (anyoneMoved) checkCombatTrigger(); // did someone just corner the player?
-    controls.follow(player);
+    // Follow the player, gently biased toward the map centre so corner spawns
+    // don't leave half the frame empty.
+    controls.follow({
+      x: player.x * 0.82 + ((grid.width - 1) / 2) * 0.18,
+      z: player.z * 0.82 + ((grid.height - 1) / 2) * 0.18,
+    });
     updateWallFade(controls.cameraEntity, player.entity ? player.entity.getPosition() : null);
   });
 

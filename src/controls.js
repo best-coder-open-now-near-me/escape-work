@@ -12,22 +12,24 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   camYaw.addChild(camPitch);
   camPitch.addChild(cameraEntity);
   app.root.addChild(camYaw);
+  // Perspective, Baldur's Gate style: a fairly tight FOV looking down at the
+  // world, zooming by dollying the camera in and out.
   cameraEntity.addComponent('camera', {
-    projection: pc.PROJECTION_ORTHOGRAPHIC,
+    projection: pc.PROJECTION_PERSPECTIVE,
+    fov: 35,
     clearColor: new pc.Color(0.1, 0.1, 0.15),
-    nearClip: 0.1,
-    farClip: 1000,
+    nearClip: 0.5,
+    farClip: 300,
   });
 
   const CAM = {
-    yaw: 45, pitch: 34, zoom: 6, dist: 60,
-    minZoom: 2.5, maxZoom: 11, minPitch: 12, maxPitch: 72,
+    yaw: 45, pitch: 55, dist: 26,
+    minDist: 9, maxDist: 42, minPitch: 18, maxPitch: 80,
   };
-  cameraEntity.setLocalPosition(0, 0, CAM.dist);
   function apply() {
     camYaw.setLocalEulerAngles(0, CAM.yaw, 0);
     camPitch.setLocalEulerAngles(-CAM.pitch, 0, 0);
-    cameraEntity.camera.orthoHeight = CAM.zoom;
+    cameraEntity.setLocalPosition(0, 0, CAM.dist);
   }
   apply();
   camYaw.setPosition(focus.x, 0.3, focus.z);
@@ -67,8 +69,8 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   });
   app.mouse.on(pc.EVENT_MOUSEWHEEL, (e) => {
     // Scroll up (away from you) zooms in - wheelDelta is negative for
-    // scroll-up, so adding it shrinks the ortho height.
-    CAM.zoom = pc.math.clamp(CAM.zoom + e.wheelDelta * 0.6, CAM.minZoom, CAM.maxZoom);
+    // scroll-up, so adding it pulls the camera closer.
+    CAM.dist = pc.math.clamp(CAM.dist + e.wheelDelta * 2.4, CAM.minDist, CAM.maxDist);
     apply();
   });
 
