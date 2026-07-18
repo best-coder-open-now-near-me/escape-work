@@ -29,7 +29,8 @@ src/
   actors.js          GridActor base -> PlayerActor, EnemyActor (PlayCanvas)
   scene.js           Engine boot, tile meshes, occlusion fade, model loading
   controls.js        Camera rig + mouse -> semantic input (click tile, menu)
-  combat.js          Turn-based encounter runner, fully data-driven
+  combat.js          Tactical on-map combat: AP turns, movement, multi-enemy,
+                     ranged/melee, enemy AI phase - all costs from data
   ui.js              All DOM: HUD, context menu, win/lose overlays
   editor.js          In-browser level editor (paint/erase, export, playtest)
   main.js            Entry point: routes game vs #editor, owns game flow
@@ -85,6 +86,13 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   paperCutImmune, shockImmune, surfaceDamageResist, hasLighter, grantsAction.
 - **Thrown weapons**: actions with `ammoCost` (paper balls/airplanes) join the
   combat bar automatically; ammo (sheet.paper) is picked up from paper spills.
+- **Combat** is tactical and on-map: each action in `data/actions.js` carries
+  an `ap` cost; classes/enemies have per-turn AP budgets. Moving costs 1 AP a
+  tile (2 through sticky surfaces), melee needs adjacency (clicking a distant
+  enemy walks you in), throws need range 5 + line of sight. Enemies within
+  5 tiles join the fight, have persistent map HP (EnemyActor.hp), take
+  surface damage, and act in a sequenced AI phase. Fire keeps burning during
+  combat; printer explosions still resolve (combat prunes the dead).
 - **New furniture/prop**: a tile entry with `model` (a .glb under `assets/`) and
   `solid: true` - it blocks movement and renders as the model in both game and
   editor. Props are level data, never hardcoded set dressing.

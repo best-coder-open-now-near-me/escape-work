@@ -8,6 +8,7 @@ export const ENEMY_TYPES = {
     name: 'The Manager',
     model: 'manager',
     hp: 16,
+    ap: 5,
     xp: 8,
     examine: 'The Manager: radiates unread-email energy.',
     attacks: [
@@ -22,6 +23,7 @@ export const ENEMY_TYPES = {
     name: 'HR Representative',
     model: 'hr',
     hp: 12,
+    ap: 6,
     xp: 6,
     examine: 'HR: smiles warmly. Never stops taking notes.',
     attacks: [

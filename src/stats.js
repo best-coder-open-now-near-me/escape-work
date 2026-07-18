@@ -15,6 +15,7 @@ export function createSheet(classId) {
     model: cls.model,
     hp: cls.maxHp,
     maxHp: cls.maxHp,
+    maxAp: cls.ap,
     level: 1,
     xp: 0,
     xpNext: 10,
