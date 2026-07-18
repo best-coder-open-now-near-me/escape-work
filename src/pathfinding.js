@@ -9,9 +9,11 @@ export const DIRS8 = [
 // never clip a wall corner. `isWalkable(x, z)` is supplied by the caller and
 // may include dynamic blockers. `extraCost(x, z)` (optional) makes tiles
 // expensive without blocking them - hazards get routed around unless they are
-// the only (or a much shorter) way. Returns [[x, z], ...] including the start
+// the only (or a much shorter) way. `stepOpen(x, z, nx, nz)` (optional) vetoes
+// individual steps - this is how edge walls (partitions between tiles) block
+// movement without occupying a tile. Returns [[x, z], ...] including the start
 // tile, or null when unreachable.
-export function findPath(isWalkable, sx, sz, tx, tz, extraCost = null) {
+export function findPath(isWalkable, sx, sz, tx, tz, extraCost = null, stepOpen = null) {
   if (!isWalkable(tx, tz)) return null;
   const key = (x, z) => x + ',' + z;
   const dist = new Map([[key(sx, sz), 0]]);
@@ -27,6 +29,7 @@ export function findPath(isWalkable, sx, sz, tx, tz, extraCost = null) {
       const nz = z + dz;
       if (!isWalkable(nx, nz)) continue;
       if (dx !== 0 && dz !== 0 && !(isWalkable(x + dx, z) && isWalkable(x, z + dz))) continue;
+      if (stepOpen && !stepOpen(x, z, nx, nz)) continue;
       const nd = d + (dx !== 0 && dz !== 0 ? Math.SQRT2 : 1) + (extraCost ? extraCost(nx, nz) : 0);
       const k = key(nx, nz);
       if (nd < (dist.get(k) ?? Infinity)) {
@@ -50,8 +53,10 @@ export function findPath(isWalkable, sx, sz, tx, tz, extraCost = null) {
 // Does a straight segment between two points (tile-centre coordinates) stay on
 // walkable cells? Grid traversal (Amanatides & Woo): visit every cell the
 // segment passes through; an exact corner crossing requires both adjacent
-// cells open, so there is no squeezing between diagonal walls.
-export function segmentClear(isWalkable, ax, az, bx, bz) {
+// cells open, so there is no squeezing between diagonal walls. `edgeOpen`
+// (optional, 4-adjacent signature) additionally vetoes boundary crossings
+// blocked by edge walls; a corner crossing needs all four surrounding edges.
+export function segmentClear(isWalkable, ax, az, bx, bz, edgeOpen = null) {
   const x0 = ax + 0.5;
   const z0 = az + 0.5; // shift so cell boundaries sit on integers
   const x1 = bx + 0.5;
@@ -69,17 +74,22 @@ export function segmentClear(isWalkable, ax, az, bx, bz) {
   const tDeltaZ = dz !== 0 ? Math.abs(1 / dz) : Infinity;
   let tMaxX = dx !== 0 ? (dx > 0 ? cx + 1 - x0 : x0 - cx) * tDeltaX : Infinity;
   let tMaxZ = dz !== 0 ? (dz > 0 ? cz + 1 - z0 : z0 - cz) * tDeltaZ : Infinity;
-  for (let guard = 0; guard < 256 && (cx !== ex || cz !== ez); guard++) {
+  for (let guard = 0; guard < 512 && (cx !== ex || cz !== ez); guard++) {
     if (Math.abs(tMaxX - tMaxZ) < 1e-9) {
       if (!isWalkable(cx + stepX, cz) || !isWalkable(cx, cz + stepZ)) return false;
+      if (edgeOpen && !(edgeOpen(cx, cz, cx + stepX, cz) && edgeOpen(cx, cz, cx, cz + stepZ)
+        && edgeOpen(cx + stepX, cz, cx + stepX, cz + stepZ)
+        && edgeOpen(cx, cz + stepZ, cx + stepX, cz + stepZ))) return false;
       cx += stepX;
       cz += stepZ;
       tMaxX += tDeltaX;
       tMaxZ += tDeltaZ;
     } else if (tMaxX < tMaxZ) {
+      if (edgeOpen && !edgeOpen(cx, cz, cx + stepX, cz)) return false;
       cx += stepX;
       tMaxX += tDeltaX;
     } else {
+      if (edgeOpen && !edgeOpen(cx, cz, cx, cz + stepZ)) return false;
       cz += stepZ;
       tMaxZ += tDeltaZ;
     }
@@ -90,27 +100,27 @@ export function segmentClear(isWalkable, ax, az, bx, bz) {
 
 // A character has width: check the centreline plus two offset lines.
 const BODY_RADIUS = 0.3;
-function walkableCorridor(isWalkable, ax, az, bx, bz) {
+function walkableCorridor(isWalkable, ax, az, bx, bz, edgeOpen) {
   const dx = bx - ax;
   const dz = bz - az;
   const len = Math.hypot(dx, dz) || 1;
   const ox = (-dz / len) * BODY_RADIUS;
   const oz = (dx / len) * BODY_RADIUS;
-  return segmentClear(isWalkable, ax, az, bx, bz)
-    && segmentClear(isWalkable, ax + ox, az + oz, bx + ox, bz + oz)
-    && segmentClear(isWalkable, ax - ox, az - oz, bx - ox, bz - oz);
+  return segmentClear(isWalkable, ax, az, bx, bz, edgeOpen)
+    && segmentClear(isWalkable, ax + ox, az + oz, bx + ox, bz + oz, edgeOpen)
+    && segmentClear(isWalkable, ax - ox, az - oz, bx - ox, bz - oz, edgeOpen);
 }
 
 // "String pulling": collapse a tile-by-tile path into the fewest straight
 // runs with clear line of sight, so movement flows at any angle instead of
 // stair-stepping tile centres.
-export function smoothPath(isWalkable, path) {
+export function smoothPath(isWalkable, path, edgeOpen = null) {
   if (!path || path.length <= 2) return path;
   const out = [path[0]];
   let i = 0;
   while (i < path.length - 1) {
     let j = path.length - 1;
-    while (j > i + 1 && !walkableCorridor(isWalkable, path[i][0], path[i][1], path[j][0], path[j][1])) j--;
+    while (j > i + 1 && !walkableCorridor(isWalkable, path[i][0], path[i][1], path[j][0], path[j][1], edgeOpen)) j--;
     out.push(path[j]);
     i = j;
   }

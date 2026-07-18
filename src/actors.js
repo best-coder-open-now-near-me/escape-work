@@ -1,11 +1,15 @@
 // Actors: things that live on the grid and own a 3D entity. GridActor handles
 // the shared mechanics (a logical tile position, an entity that slides smoothly
-// toward it, eased turning); PlayerActor follows smoothed any-angle paths;
+// toward it, eased turning) plus the procedural animation layer: the HOLDER
+// entity carries position/facing, while the model child inside it gets the
+// walk bob, attack lunges, hit flinches and death topples - so animation can
+// never fight the movement code. PlayerActor follows smoothed any-angle paths;
 // EnemyActor adds wander AI. New actor kinds extend GridActor the same way.
 const pc = window.pc;
 
 const wrapAngle = (a) => (((a + 180) % 360) + 360) % 360 - 180;
 const TURN_RATE = 10; // how quickly facing eases toward the heading
+const FLASH_COLOR = [0.75, 0.09, 0.05];
 
 export class GridActor {
   constructor(x, z, { speed = 2.2 } = {}) {
@@ -13,13 +17,32 @@ export class GridActor {
     this.z = z;
     this.speed = speed;
     this.entity = null;
+    this.visual = null; // the model child that animation moves
     this.yaw = 0;
     this.targetYaw = 0;
+    // animation state
+    this.stride = 0; // accumulated distance, drives the walk bob
+    this.bobAmp = 0; // eases in/out so stopping doesn't cut the bob mid-air
+    this.fx = null; // { kind: 'lunge'|'flinch'|'death', t }
+    this.flashT = 0;
+    this.mats = []; // per-instance cloned materials (for damage flashes)
   }
 
   attach(entity) {
     this.entity = entity;
+    this.visual = entity.children[0] || entity;
     this.yaw = this.targetYaw = entity.getEulerAngles().y;
+    // Clone materials so damage flashes hit THIS character, not every
+    // character instantiated from the same .glb.
+    this.mats = [];
+    for (const rc of entity.findComponents('render')) {
+      for (const mi of rc.meshInstances) {
+        const clone = mi.material.clone();
+        clone.update();
+        mi.material = clone;
+        this.mats.push({ mat: clone, emissive: clone.emissive.clone() });
+      }
+    }
   }
 
   faceToward(tx, tz) {
@@ -33,12 +56,87 @@ export class GridActor {
     this.entity.setEulerAngles(0, this.yaw, 0);
   }
 
+  // --- animation triggers ------------------------------------------------------
+  lunge(tx, tz) {
+    if (this.fx?.kind === 'death') return;
+    if (tx !== undefined) this.faceToward(tx, tz);
+    this.fx = { kind: 'lunge', t: 0 };
+  }
+
+  flinch() {
+    if (this.fx?.kind === 'death') return;
+    this.fx = { kind: 'flinch', t: 0 };
+    this.flashT = 0.16;
+    for (const { mat } of this.mats) {
+      mat.emissive.set(FLASH_COLOR[0], FLASH_COLOR[1], FLASH_COLOR[2]);
+      mat.update();
+    }
+  }
+
+  // Drives the visual child each frame. `moved` is world distance covered this
+  // frame - the walk bob is distance-based so it tracks any movement speed.
+  updateAnim(dt, moved) {
+    if (!this.visual) return;
+    if (this.flashT > 0) {
+      this.flashT -= dt;
+      if (this.flashT <= 0) {
+        for (const { mat, emissive } of this.mats) {
+          mat.emissive.copy(emissive);
+          mat.update();
+        }
+      }
+    }
+    this.stride += moved * 4.4;
+    const target = moved > 0 ? 1 : 0;
+    this.bobAmp += (target - this.bobAmp) * Math.min(1, dt * 9);
+    let bobY = Math.abs(Math.sin(this.stride)) * 0.055 * this.bobAmp;
+    let roll = Math.sin(this.stride * 0.5) * 3.2 * this.bobAmp;
+    let forward = 0;
+    let pitch = 0;
+    let sx = 1;
+    let sy = 1;
+    if (this.fx) {
+      this.fx.t += dt;
+      const { kind, t } = this.fx;
+      if (kind === 'lunge') {
+        const T = 0.28;
+        if (t >= T) this.fx = null;
+        else forward = Math.sin((Math.PI * t) / T) * 0.42;
+      } else if (kind === 'flinch') {
+        const T = 0.24;
+        if (t >= T) this.fx = null;
+        else {
+          const k = Math.sin((Math.PI * t) / T);
+          sx = 1 + 0.13 * k;
+          sy = 1 - 0.2 * k;
+          forward = -0.1 * k; // recoil
+        }
+      } else if (kind === 'death') {
+        const T = 0.7;
+        const k = Math.min(1, t / T);
+        pitch = -88 * k * (2 - k); // ease-out topple onto their back
+        bobY = -Math.max(0, k - 0.7) * 0.5; // then sink into the carpet
+        roll = 0;
+        if (t >= T + 0.35) {
+          this.entity.destroy();
+          this.entity = null;
+          this.visual = null;
+          return;
+        }
+      }
+    }
+    this.visual.setLocalPosition(0, bobY, forward);
+    this.visual.setLocalEulerAngles(pitch, 0, roll);
+    this.visual.setLocalScale(sx, sy, sx);
+  }
+
   // Slide the entity toward the logical tile, carrying any leftover movement
   // across arrivals (onArrive may set a new destination mid-frame) so speed
   // stays constant instead of hitching at each tile.
   update(dt) {
     if (!this.entity) return;
-    let remaining = this.speed * dt;
+    const budget = this.speed * dt;
+    let remaining = budget;
     for (let guard = 0; guard < 4 && remaining > 0; guard++) {
       const pos = this.entity.getPosition();
       const dx = this.x - pos.x;
@@ -59,6 +157,7 @@ export class GridActor {
       }
     }
     this.easeYaw(dt);
+    this.updateAnim(dt, budget - remaining);
   }
 }
 
@@ -91,7 +190,8 @@ export class PlayerActor extends GridActor {
     let finished = false;
     // Consume the whole frame's movement across waypoints - no per-bend
     // hitch, so speed is constant through corners.
-    let remaining = this.path ? this.speed * dt : 0;
+    const budget = this.path ? this.speed * dt : 0;
+    let remaining = budget;
     while (this.path && remaining > 0) {
       const [wx, wz] = this.path[this.pathIndex];
       const pos = this.entity.getPosition();
@@ -112,6 +212,7 @@ export class PlayerActor extends GridActor {
       }
     }
     this.easeYaw(dt);
+    this.updateAnim(dt, budget - remaining);
     const pos = this.entity.getPosition();
     const tx = Math.round(pos.x);
     const tz = Math.round(pos.z);
@@ -147,17 +248,22 @@ export class EnemyActor extends GridActor {
       this.die();
       return true;
     }
+    this.flinch();
     return false;
   }
 
   die() {
     this.alive = false;
-    if (this.entity) this.entity.destroy();
+    if (this.entity) this.fx = { kind: 'death', t: 0 };
   }
 
-  // world: { paused, terrainOpen, isWalkable, isHazard, playerTile }
+  // world: { paused, terrainOpen, isWalkable, isHazard, stepOpen, playerTile }
   update(dt, world) {
-    if (!this.alive) return;
+    if (!this.alive) {
+      // Play out the death topple, then the entity removes itself.
+      if (this.entity) this.updateAnim(dt, 0);
+      return;
+    }
     super.update(dt);
     if (world.paused) return;
     this.wanderTimer -= dt;
@@ -171,6 +277,7 @@ export class EnemyActor extends GridActor {
       if (Math.abs(nx - this.spawnX) > this.leash || Math.abs(nz - this.spawnZ) > this.leash) continue;
       if (dx !== 0 && dz !== 0 && !(world.terrainOpen(this.x + dx, this.z) && world.terrainOpen(this.x, this.z + dz))) continue;
       if (!world.isWalkable(nx, nz)) continue;
+      if (world.stepOpen && !world.stepOpen(this.x, this.z, nx, nz)) continue;
       if (world.isHazard(nx, nz)) continue; // they know where the puddles are
       if (nx === world.playerTile.x && nz === world.playerTile.z) continue;
       options.push([nx, nz]);

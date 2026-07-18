@@ -49,9 +49,9 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     } else if (e.button === pc.MOUSEBUTTON_LEFT) {
       leftHeld = true;
       onAnyLeftPress && onAnyLeftPress();
-      onLeftClickTile && onLeftClickTile(screenToTile(e.x, e.y));
+      onLeftClickTile && onLeftClickTile(screenToTile(e.x, e.y), screenToGround(e.x, e.y));
     } else if (e.button === pc.MOUSEBUTTON_RIGHT) {
-      onRightClickTile && onRightClickTile(screenToTile(e.x, e.y), e.x, e.y);
+      onRightClickTile && onRightClickTile(screenToTile(e.x, e.y), e.x, e.y, screenToGround(e.x, e.y));
     }
   });
   app.mouse.on(pc.EVENT_MOUSEUP, (e) => {
@@ -64,7 +64,7 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
       CAM.pitch = pc.math.clamp(CAM.pitch + e.dy * 0.3, CAM.minPitch, CAM.maxPitch);
       apply();
     } else if (leftHeld && onLeftDragTile) {
-      onLeftDragTile(screenToTile(e.x, e.y));
+      onLeftDragTile(screenToTile(e.x, e.y), screenToGround(e.x, e.y));
     }
   });
   app.mouse.on(pc.EVENT_MOUSEWHEEL, (e) => {
@@ -74,10 +74,10 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     apply();
   });
 
-  // Turn a screen pixel into the grid tile under it (ray -> ground plane).
+  // Turn a screen pixel into a precise point on the ground plane...
   const _near = new pc.Vec3();
   const _far = new pc.Vec3();
-  function screenToTile(sx, sy) {
+  function screenToGround(sx, sy) {
     cameraEntity.camera.screenToWorld(sx, sy, cameraEntity.camera.nearClip, _near);
     cameraEntity.camera.screenToWorld(sx, sy, cameraEntity.camera.farClip, _far);
     const dir = _far.clone().sub(_near);
@@ -85,7 +85,13 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     const t = (0 - _near.y) / dir.y;
     if (t < 0) return null;
     const p = _near.add(dir.scale(t));
-    return { x: Math.round(p.x), z: Math.round(p.z) };
+    return { x: p.x, z: p.z };
+  }
+  // ...and into the grid tile under it (the editor also wants the raw point,
+  // to know which EDGE of the tile was clicked when painting partitions).
+  function screenToTile(sx, sy) {
+    const p = screenToGround(sx, sy);
+    return p ? { x: Math.round(p.x), z: Math.round(p.z) } : null;
   }
 
   // Ease the rig toward the target each frame so the camera trails the player.
@@ -94,5 +100,5 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     camYaw.setPosition(pc.math.lerp(c.x, target.x, 0.15), 0.3, pc.math.lerp(c.z, target.z, 0.15));
   }
 
-  return { cameraEntity, screenToTile, follow };
+  return { cameraEntity, screenToTile, screenToGround, follow };
 }

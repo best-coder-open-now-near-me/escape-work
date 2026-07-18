@@ -183,6 +183,25 @@ export function createTileRenderer(app) {
     return addBox(floorMats[(x * 31 + z * 17) % 3], x, 0, z, 1, floorDef.height, 1);
   }
 
+  // Edge walls: thin partitions BETWEEN tiles (see grid.js). 'h' sits on the
+  // north edge of (x, z), 'v' on the west edge. Slightly overlong so runs and
+  // corners merge into continuous walls.
+  const EDGE_HEIGHT = 0.72;
+  const EDGE_THICK = 0.12;
+  function renderEdgeWall(x, z, orient) {
+    const e = new pc.Entity();
+    e.addComponent('render', { type: 'box', material: tileMats.wall });
+    if (orient === 'h') {
+      e.setLocalScale(1 + EDGE_THICK, EDGE_HEIGHT, EDGE_THICK);
+      e.setPosition(x, EDGE_HEIGHT / 2, z - 0.5);
+    } else {
+      e.setLocalScale(EDGE_THICK, EDGE_HEIGHT, 1 + EDGE_THICK);
+      e.setPosition(x - 0.5, EDGE_HEIGHT / 2, z);
+    }
+    app.root.addChild(e);
+    return e;
+  }
+
   // Draw whatever sits on top of the floor for a non-floor tile type.
   // Returns { kind, entities }; model props arrive via onAsync(holder).
   function renderMarker(x, z, type, { electrified = false, onAsync = null } = {}) {
@@ -261,7 +280,7 @@ export function createTileRenderer(app) {
   }
 
   return {
-    renderFloor, renderMarker, addFlame, explosionFlash, animate,
+    renderFloor, renderMarker, renderEdgeWall, addFlame, explosionFlash, animate,
     tileMats, wallGhost, floorHeight: floorDef.height,
   };
 }
@@ -285,6 +304,16 @@ export function buildLevel(app, grid) {
       else if (res.kind === 'surface') surfaceVisuals.set(x + ',' + z, res.entities[0]);
       else if (res.kind === 'prop') propVisuals.set(x + ',' + z, res.entities[0]);
     }
+  }
+  // Edge walls (partitions between tiles) join the same fade list, keyed by
+  // their world-space centre.
+  for (const k of grid.hWalls) {
+    const [x, z] = k.split(',').map(Number);
+    walls.push({ entity: r.renderEdgeWall(x, z, 'h'), x, z: z - 0.5, faded: false });
+  }
+  for (const k of grid.vWalls) {
+    const [x, z] = k.split(',').map(Number);
+    walls.push({ entity: r.renderEdgeWall(x, z, 'v'), x: x - 0.5, z, faded: false });
   }
 
   // Fade walls sitting between the camera and the player - the "toward the
@@ -355,4 +384,132 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
   });
   asset.on('error', (err) => console.warn('asset load failed:', url, err));
   app.assets.load(asset);
+}
+
+// --- combat / impact FX ---------------------------------------------------------
+// Purely cosmetic: gameplay resolves instantly, these just make it readable.
+let fxMats = null;
+function ensureFxMats() {
+  if (fxMats) return fxMats;
+  fxMats = {
+    paper: makeMaterial([0.97, 0.96, 0.9], { gloss: 0.3 }),
+    trail: makeMaterial([1, 1, 1], { opacity: 0.4 }),
+  };
+  return fxMats;
+}
+
+// A thrown paper ball ('ball') or airplane ('plane') arcing from one tile to
+// another, shedding a fading trail. Fire and forget.
+export function throwProjectile(app, from, to, kind = 'ball') {
+  const m = ensureFxMats();
+  const holder = new pc.Entity('projectile');
+  if (kind === 'plane') {
+    const spine = new pc.Entity();
+    spine.addComponent('render', { type: 'box', material: m.paper });
+    spine.setLocalScale(0.06, 0.09, 0.36);
+    holder.addChild(spine);
+    for (const side of [-1, 1]) {
+      const wing = new pc.Entity();
+      wing.addComponent('render', { type: 'box', material: m.paper });
+      wing.setLocalScale(0.16, 0.02, 0.3);
+      wing.setLocalPosition(side * 0.09, 0.03, -0.02);
+      wing.setLocalEulerAngles(0, 0, side * 24);
+      holder.addChild(wing);
+    }
+  } else {
+    const wad = new pc.Entity();
+    wad.addComponent('render', { type: 'sphere', material: m.paper });
+    wad.setLocalScale(0.17, 0.15, 0.16);
+    holder.addChild(wad);
+  }
+  app.root.addChild(holder);
+
+  const dx = to.x - from.x;
+  const dz = to.z - from.z;
+  const dist = Math.hypot(dx, dz) || 1;
+  const dur = 0.18 + dist * 0.055;
+  const arc = 0.3 + dist * 0.07;
+  const yaw = Math.atan2(dx, dz) * pc.math.RAD_TO_DEG;
+  const Y = 0.55; // hand height
+  const parts = [];
+  let t = 0;
+  let acc = 0;
+  let flying = true;
+  const tick = (dt) => {
+    if (flying) {
+      t += dt;
+      const k = Math.min(1, t / dur);
+      const y = Y + Math.sin(Math.PI * k) * arc;
+      holder.setPosition(from.x + dx * k, y, from.z + dz * k);
+      if (kind === 'plane') {
+        const vy = (Math.PI / dur) * Math.cos(Math.PI * k) * arc;
+        const pitch = Math.atan2(vy, dist / dur) * pc.math.RAD_TO_DEG;
+        holder.setEulerAngles(-pitch, yaw, 0);
+      } else {
+        holder.setEulerAngles(t * 640, yaw, t * 470);
+      }
+      acc += dt;
+      while (acc > 0.024) {
+        acc -= 0.024;
+        const p = new pc.Entity();
+        p.addComponent('render', { type: 'sphere', material: m.trail });
+        p.setLocalScale(0.09, 0.09, 0.09);
+        p.setPosition(holder.getPosition());
+        app.root.addChild(p);
+        parts.push({ e: p, life: 0.32 });
+      }
+      if (k >= 1) {
+        flying = false;
+        holder.destroy();
+      }
+    }
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i];
+      p.life -= dt;
+      if (p.life <= 0) {
+        p.e.destroy();
+        parts.splice(i, 1);
+        continue;
+      }
+      const s = 0.09 * (p.life / 0.32);
+      p.e.setLocalScale(s, s, s);
+    }
+    if (!flying && !parts.length) app.off('update', tick);
+  };
+  app.on('update', tick);
+}
+
+// Floating damage/heal number above a tile. DOM-based so it stays crisp;
+// tracks the world position each frame as the camera moves.
+export function spawnDamageText(app, cameraEntity, wx, wy, wz, text, color = '#ff8a76') {
+  const div = document.createElement('div');
+  div.className = 'dmg-pop';
+  Object.assign(div.style, {
+    position: 'fixed', zIndex: '26', pointerEvents: 'none', left: '-999px',
+    font: '800 15px system-ui, sans-serif', color,
+    textShadow: '0 1px 4px rgba(0,0,0,.85)', transform: 'translate(-50%, -100%)',
+  });
+  div.textContent = text;
+  document.body.appendChild(div);
+  const pos = new pc.Vec3();
+  const out = new pc.Vec3();
+  let t = 0;
+  const tick = (dt) => {
+    t += dt;
+    const k = t / 0.9;
+    if (k >= 1) {
+      app.off('update', tick);
+      div.remove();
+      return;
+    }
+    pos.set(wx, wy + 0.6 + k * 0.85, wz);
+    cameraEntity.camera.worldToScreen(pos, out);
+    // worldToScreen works in device pixels; the DOM works in CSS pixels.
+    const canvas = app.graphicsDevice.canvas;
+    const s = canvas.clientWidth ? canvas.clientWidth / canvas.width : 1;
+    div.style.left = out.x * s + 'px';
+    div.style.top = out.y * s + 'px';
+    div.style.opacity = String(1 - k * k);
+  };
+  app.on('update', tick);
 }

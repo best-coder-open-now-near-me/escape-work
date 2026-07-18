@@ -11,6 +11,18 @@ export function updateStatsHud(sheet) {
   if (el) el.textContent = `Lv ${sheet.level} · HP ${sheet.hp}/${sheet.maxHp} · XP ${sheet.xp}/${sheet.xpNext}`;
 }
 
+// A soft radial vignette over the whole viewport - pure atmosphere, makes the
+// flat office glow feel a little more dungeon.
+export function addVignette() {
+  const v = document.createElement('div');
+  v.id = 'vignette';
+  Object.assign(v.style, {
+    position: 'fixed', inset: '0', zIndex: '4', pointerEvents: 'none',
+    background: 'radial-gradient(ellipse at center, transparent 52%, rgba(6,6,12,0.5) 100%)',
+  });
+  document.body.appendChild(v);
+}
+
 // --- context menu -----------------------------------------------------------
 let menuEl = null;
 function ensureMenu() {

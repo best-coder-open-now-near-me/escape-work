@@ -111,4 +111,28 @@ export const TILE_TYPES = {
     model: 'furniture/plant',
     scale: 0.9,
   },
+  couch: {
+    char: 'C',
+    solid: true,
+    height: 0.5,
+    color: [0.72, 0.45, 0.32],
+    model: 'furniture/couch',
+    scale: 0.5,
+  },
+  bookshelf: {
+    char: 'S',
+    solid: true,
+    height: 0.6,
+    color: [0.5, 0.36, 0.22],
+    model: 'furniture/bookshelf',
+    scale: 0.5,
+  },
+  lamp: {
+    char: 'L',
+    solid: true,
+    height: 0.6,
+    color: [0.92, 0.85, 0.55],
+    model: 'furniture/lamp',
+    scale: 0.55,
+  },
 };
