@@ -129,7 +129,7 @@ function startGame(level) {
   const lift = floorHeight / 2;
   for (const en of enemies) {
     placeModel(app, `assets/characters/${en.def.model}.glb`, en.x, en.z, {
-      lift, rotY: -90, onReady: (e) => en.attach(e),
+      lift, rotY: -90, animated: true, onReady: (e) => en.attach(e),
     });
   }
   // (Furniture is no longer set dressing here - props are solid tiles in the
@@ -138,7 +138,7 @@ function startGame(level) {
   // --- game flow ----------------------------------------------------------------
   function spawnPlayerModel() {
     placeModel(app, `assets/characters/${sheet.model}.glb`, player.x, player.z, {
-      lift, rotY: 90, onReady: (e) => player.attach(e),
+      lift, rotY: 90, animated: true, onReady: (e) => player.attach(e),
     });
     ui.updateStatsHud(sheet);
   }
@@ -175,6 +175,7 @@ function startGame(level) {
         abortCombat();
         clearProgress();
         ui.say(msg);
+        player.playDeath();
         ui.showLoseScreen('PC LOAD LETTER. Fatal.');
         return;
       }
@@ -186,6 +187,8 @@ function startGame(level) {
   function igniteAt(x, z) {
     const wasProp = !!grid.defAt(x, z).ignitable;
     if (runtime.ignite(x, z)) {
+      player.faceToward(x, z);
+      player.gesture('interact-right');
       ui.say(wasProp
         ? 'You introduce the trash can to fire. It goes about as expected.'
         : 'A flick of the lighter. The paperwork ascends.');
@@ -308,7 +311,8 @@ function startGame(level) {
           combat = null;
           gameOver = true;
           clearProgress();
-          ui.showLoseScreen('The office wins this round. Darkness falls between the cubicles.');
+          player.playDeath();
+        ui.showLoseScreen('The office wins this round. Darkness falls between the cubicles.');
         },
       },
     });
@@ -348,7 +352,8 @@ function startGame(level) {
           gameOver = true;
           player.clearPath();
           clearProgress();
-          ui.showLoseScreen('Done in by the office itself. The floor was, in fact, wet.');
+          player.playDeath();
+        ui.showLoseScreen('Done in by the office itself. The floor was, in fact, wet.');
           return;
         }
       }
@@ -365,6 +370,7 @@ function startGame(level) {
         player.clearPath();
         abortCombat();
         clearProgress();
+        player.playDeath();
         ui.showLoseScreen('Death by a thousand paper cuts. Well - several.');
         return;
       }
@@ -391,7 +397,8 @@ function startGame(level) {
           player.clearPath();
           abortCombat();
           clearProgress();
-          ui.showLoseScreen('Done in by the office itself. Facilities sends their regards.');
+          player.playDeath();
+        ui.showLoseScreen('Done in by the office itself. Facilities sends their regards.');
           return;
         }
       } else if (sfx.amount) {
@@ -583,6 +590,12 @@ function startGame(level) {
     get stats() { return sheet ? { ...sheet } : null; },
     get playerSpeed() { return player.speed; },
     get burning() { return runtime.burningCount; },
-    get enemies() { return enemies.map((e) => ({ name: e.def.name, x: e.x, z: e.z, alive: e.alive })); },
+    get playerAnim() { return player.entity?._animCtl?.current || null; },
+    get enemies() {
+      return enemies.map((e) => ({
+        name: e.def.name, x: e.x, z: e.z, alive: e.alive,
+        anim: e.entity?._animCtl?.current || null,
+      }));
+    },
   };
 }

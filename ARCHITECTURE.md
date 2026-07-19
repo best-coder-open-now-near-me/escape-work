@@ -68,9 +68,13 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   and `#` cell walls still exist for solid blocks that also stop throws.
 - **Actors**: extend `GridActor` for anything that lives on a tile and owns a
   model (it provides slide-to-tile movement and facing). The holder entity
-  carries position/facing; the model child inside carries procedural animation
-  (distance-driven walk bob, `lunge()`, `flinch()` with a per-instance red
-  flash, death topple) - so animation can never fight movement.
+  carries position/facing; the model child inside carries animation. The
+  character .glbs ship fully rigged with 32 clips - `placeModel(...,
+  {animated: true})` wires them into an anim component and actors resolve a
+  clip state each frame (die > gesture > attack-melee > walk/sprint > idle;
+  `die` leaves the corpse where it fell). `flinch()` (squash + per-instance
+  red flash) layers on top; a procedural bob remains as the fallback for
+  clip-less models. Animation never fights movement.
 - **Combat actions**: an action's id doubles as its DOM id (`#act-<id>`), which
   the test suite relies on. Weapons/items later = modifying a sheet's action
   list or the entries it points to.

@@ -286,6 +286,7 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
       } else if (a.type === 'defend') {
         ap -= a.ap;
         defended = true;
+        player.gesture('emote-no'); // declining the meeting invite, literally
         log(a.log);
         refresh();
       } else if (a.type === 'heal') {
@@ -293,6 +294,7 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
         if (a.uses) usesLeft[id] -= 1;
         ap -= a.ap;
         sheet.hp = Math.min(sheet.maxHp, sheet.hp + a.amount);
+        player.gesture('emote-yes');
         fx.damageText(player.x, player.z, `+${a.amount}`, '#8adf76');
         log(a.log);
         refresh();

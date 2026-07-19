@@ -364,8 +364,11 @@ export function buildLevel(app, grid) {
 }
 
 // Load a .glb, wrap it in a holder (so scaling/rotating is predictable), and
-// drop it on a tile. Reusable for every prop and character.
-export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY = 0, onReady = null } = {}) {
+// drop it on a tile. Reusable for every prop and character. With
+// `animated: true`, every animation clip shipped in the .glb is wired into an
+// anim component and a small controller is attached as holder._animCtl:
+//   { transition(name, fade), setSpeed(s), pause(), duration(name), current }
+export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY = 0, onReady = null, animated = false } = {}) {
   // Reuse the asset if this .glb was already requested (props repeat a lot,
   // and the editor repaints cells constantly).
   let asset = app.assets.find(url);
@@ -375,11 +378,40 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
   }
   asset.ready(() => {
     const holder = new pc.Entity(url);
-    holder.addChild(asset.resource.instantiateRenderEntity());
+    const modelRoot = asset.resource.instantiateRenderEntity();
+    holder.addChild(modelRoot);
     holder.setLocalScale(scale, scale, scale);
     holder.setEulerAngles(0, rotY, 0);
     holder.setPosition(tileX, lift, tileZ);
     app.root.addChild(holder);
+    const clips = animated ? (asset.resource.animations || []) : [];
+    if (clips.length) {
+      modelRoot.addComponent('anim', { activate: true });
+      const durations = {};
+      // assign 'idle' first: the first assigned state is the one that plays
+      const tracks = clips.map((a) => a.resource).filter(Boolean)
+        .sort((a, b) => (a.name === 'idle' ? -1 : b.name === 'idle' ? 1 : 0));
+      for (const track of tracks) {
+        modelRoot.anim.assignAnimation(track.name, track);
+        durations[track.name] = track.duration;
+      }
+      holder._animCtl = {
+        current: 'idle',
+        duration: (name) => durations[name] || 0.8,
+        transition(name, fade = 0.16) {
+          if (name === this.current || !modelRoot.anim.baseLayer) return;
+          this.current = name;
+          modelRoot.anim.baseLayer.transition(name, fade);
+        },
+        setSpeed(s) {
+          modelRoot.anim.speed = s;
+        },
+        pause() {
+          if (modelRoot.anim.baseLayer?.pause) modelRoot.anim.baseLayer.pause();
+          else modelRoot.anim.enabled = false;
+        },
+      };
+    }
     if (onReady) onReady(holder);
   });
   asset.on('error', (err) => console.warn('asset load failed:', url, err));
