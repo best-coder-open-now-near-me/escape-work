@@ -52,6 +52,7 @@ export function createSurfaceRuntime({ grid, hooks, onExplosion }) {
         for (const [dx, dz] of N4) {
           const nx = b.x + dx;
           const nz = b.z + dz;
+          if (!grid.edgeOpen(b.x, b.z, nx, nz)) continue; // partitions stop fire
           if (flammable(nx, nz)) ignite(nx, nz);
           const nk = key(nx, nz);
           if (grid.defAt(nx, nz).explosive && !exploded.has(nk) && !fuses.has(nk)) {

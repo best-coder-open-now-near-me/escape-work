@@ -14,7 +14,8 @@ need to change.
 ## Module map
 
 ```
-levels/*.json        Hand-editable levels: tile legend, actor legend, ASCII map
+levels/*.json        Hand-editable levels: tile legend, actor legend, ASCII map,
+                     edge-wall runs ("H x z len" / "V x z len")
 src/
   data/              CONTENT registries (pure data)
     tiles.js           tile types: solidity, size, color, onEnter effects
@@ -23,11 +24,13 @@ src/
     enemies.js         enemy types: stats, model, attack sets, flavor
     classes.js         player classes: base stats + action ids
     actions.js         combat actions: attack/defend/heal definitions
-  grid.js            Level parsing + terrain queries          (pure logic)
-  pathfinding.js     8-dir Dijkstra, corner-cut safe          (pure logic)
+  grid.js            Level parsing, terrain + edge-wall queries (pure logic)
+  pathfinding.js     8-dir Dijkstra, corner-cut + edge-wall safe (pure logic)
   stats.js           Character sheet, XP/levels, damage       (pure logic)
-  actors.js          GridActor base -> PlayerActor, EnemyActor (PlayCanvas)
-  scene.js           Engine boot, tile meshes, occlusion fade, model loading
+  actors.js          GridActor base -> PlayerActor, EnemyActor; procedural
+                     animation layer (walk bob, lunge, flinch, death topple)
+  scene.js           Engine boot, tile meshes, occlusion fade, model loading,
+                     combat FX (thrown projectiles + trails, damage popups)
   controls.js        Camera rig + mouse -> semantic input (click tile, menu)
   combat.js          Tactical on-map combat: AP turns, movement, multi-enemy,
                      ranged/melee, enemy AI phase - all costs from data
@@ -56,8 +59,18 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - **Walkability** is layered: `grid.terrainOpen` (static terrain) + living
   enemies (dynamic) = `isWalkable` in `main.js`. Pass `isWalkable` into
   `findPath`; never re-implement it.
+- **Walls live between tiles.** Rooms and cubicles are edge walls ("walls" in
+  the level JSON; `grid.hWalls`/`vWalls`), so a wall costs no floor space.
+  `grid.edgeOpen(x,z,nx,nz)` answers one boundary; `grid.stepOpen` answers a
+  full (possibly diagonal) step. Pathfinding, path smoothing, wander AI,
+  shoves, conduction pools and fire spread all consult them. Partitions are
+  chest height: combat throws sail OVER them (`hasLos` stays terrain-only),
+  and `#` cell walls still exist for solid blocks that also stop throws.
 - **Actors**: extend `GridActor` for anything that lives on a tile and owns a
-  model (it provides slide-to-tile movement and facing).
+  model (it provides slide-to-tile movement and facing). The holder entity
+  carries position/facing; the model child inside carries procedural animation
+  (distance-driven walk bob, `lunge()`, `flinch()` with a per-instance red
+  flash, death topple) - so animation can never fight movement.
 - **Combat actions**: an action's id doubles as its DOM id (`#act-<id>`), which
   the test suite relies on. Weapons/items later = modifying a sheet's action
   list or the entries it points to.
@@ -86,13 +99,18 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   paperCutImmune, shockImmune, surfaceDamageResist, hasLighter, grantsAction.
 - **Thrown weapons**: actions with `ammoCost` (paper balls/airplanes) join the
   combat bar automatically; ammo (sheet.paper) is picked up from paper spills.
+  Throws render as arcing projectiles with fading trails (`throwProjectile` in
+  scene.js); all damage/heals show floating popups (`spawnDamageText`). The
+  FX layer is purely cosmetic - gameplay resolves instantly.
 - **Combat** is tactical and on-map: each action in `data/actions.js` carries
   an `ap` cost; classes/enemies have per-turn AP budgets. Moving costs 1 AP a
   tile (2 through sticky surfaces), melee needs adjacency (clicking a distant
   enemy walks you in), throws need range 5 + line of sight. Enemies within
   5 tiles join the fight, have persistent map HP (EnemyActor.hp), take
-  surface damage, and act in a sequenced AI phase. Fire keeps burning during
-  combat; printer explosions still resolve (combat prunes the dead).
+  surface damage, and act in a sequenced AI phase. Everyone can Shove (2 AP):
+  push an adjacent enemy one tile away - into a wall for a slam, or into
+  whatever surface is waiting for them. Fire keeps burning during combat;
+  printer explosions still resolve (combat prunes the dead).
 - **New furniture/prop**: a tile entry with `model` (a .glb under `assets/`) and
   `solid: true` - it blocks movement and renders as the model in both game and
   editor. Props are level data, never hardcoded set dressing.
@@ -109,5 +127,6 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   `#editor`) and Export the JSON into `levels/`; playtest instantly via the
   localStorage stash. Registries drive the editor palette, so new tile/enemy
   types are paintable automatically (each registry entry carries its canonical
-  map `char`). Multi-level transitions still need a loader in `main.js`
-  (currently hardwired to level1).
+  map `char`). The `partition` brush paints the tile EDGE nearest the click
+  (right-click erases it); exports collapse edges into compact
+  `"H/V x z len"` runs via `compressWallRuns`.

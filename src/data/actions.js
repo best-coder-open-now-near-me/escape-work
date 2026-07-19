@@ -79,6 +79,14 @@ export const ACTIONS = {
     log: 'You crack open something neon. +4 HP.',
   },
 
+  // --- universal ----------------------------------------------------------------
+  shove: {
+    type: 'shove',
+    ap: 2,
+    label: 'Shove',
+    log: 'You shove them.',
+  },
+
   // --- talent-granted -----------------------------------------------------------
   cigarette: {
     type: 'heal',

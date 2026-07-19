@@ -11,7 +11,7 @@ import { ENEMY_TYPES } from './data/enemies.js';
 import { LEVELS } from './data/levels.js';
 import { createControls } from './controls.js';
 import { createTileRenderer } from './scene.js';
-import { parseLevel } from './grid.js';
+import { parseLevel, parseWallRuns, compressWallRuns } from './grid.js';
 import { say } from './ui.js';
 
 const pc = window.pc;
@@ -26,6 +26,9 @@ export function startEditor(app, levelData, stashKey) {
   let height = 0;
   let levelName = '';
   let levelNext; // preserved through export so campaigns survive editing
+  // Edge walls (partitions between tiles) - same Sets grid.js parses.
+  let hWalls = new Set();
+  let vWalls = new Set();
 
   // char <-> meaning, from the registries (single source of truth for export)
   const tileByChar = {};
@@ -109,12 +112,75 @@ export function startEditor(app, levelData, stashKey) {
     }
   }
 
+  // --- edge walls (partitions) ---------------------------------------------------
+  const edgeEntities = new Map(); // "h:x,z" / "v:x,z" -> entity
+
+  function edgeInRange(o, x, z) {
+    // Boundary edges (x == width / z == height) are valid: the far side of
+    // the last row/column.
+    if (o === 'h') return x >= 0 && x < width && z >= 0 && z <= height;
+    return x >= 0 && x <= width && z >= 0 && z < height;
+  }
+
+  // The partition brush works on the EDGE nearest the clicked ground point.
+  function nearestEdge(g) {
+    if (!g) return null;
+    const x = Math.round(g.x);
+    const z = Math.round(g.z);
+    const dx = g.x - x;
+    const dz = g.z - z;
+    if (Math.abs(dx) >= Math.abs(dz)) return { o: 'v', x: dx > 0 ? x + 1 : x, z };
+    return { o: 'h', x, z: dz > 0 ? z + 1 : z };
+  }
+
+  function paintEdge(edge, add) {
+    if (!edge || !edgeInRange(edge.o, edge.x, edge.z)) return;
+    const set = edge.o === 'h' ? hWalls : vWalls;
+    const k = edge.x + ',' + edge.z;
+    if (add === set.has(k)) return;
+    if (add) set.add(k);
+    else set.delete(k);
+    const ek = edge.o + ':' + k;
+    edgeEntities.get(ek)?.destroy();
+    edgeEntities.delete(ek);
+    if (add) edgeEntities.set(ek, renderer.renderEdgeWall(edge.x, edge.z, edge.o));
+    refreshElectrified(); // a partition can dam (or free) a conducting pool
+  }
+
+  function renderAllEdges() {
+    for (const e of edgeEntities.values()) e.destroy();
+    edgeEntities.clear();
+    for (const k of hWalls) {
+      const [x, z] = k.split(',').map(Number);
+      edgeEntities.set('h:' + k, renderer.renderEdgeWall(x, z, 'h'));
+    }
+    for (const k of vWalls) {
+      const [x, z] = k.split(',').map(Number);
+      edgeEntities.set('v:' + k, renderer.renderEdgeWall(x, z, 'v'));
+    }
+  }
+
+  // Recompute conduction and re-render only the cells whose electrified state
+  // flipped (skipping one cell the caller is about to render anyway).
+  function refreshElectrified(skipX = null, skipZ = null) {
+    const next = computeElectrifiedSet();
+    const dirty = [];
+    for (const k of next) if (!electrified.has(k)) dirty.push(k);
+    for (const k of electrified) if (!next.has(k)) dirty.push(k);
+    electrified = next;
+    for (const k of dirty) {
+      const [cx, cz] = k.split(',').map(Number);
+      if (cx !== skipX || cz !== skipZ) renderCell(cx, cz);
+    }
+  }
+
   function renderAll() {
     for (const list of cellEntities.values()) for (const e of list) e.destroy();
     cellEntities.clear();
     cellVersion.clear();
     electrified = computeElectrifiedSet();
     for (let z = 0; z < height; z++) for (let x = 0; x < width; x++) renderCell(x, z);
+    renderAllEdges();
     updateSizeLabel();
   }
 
@@ -126,6 +192,7 @@ export function startEditor(app, levelData, stashKey) {
       while (a.length < width) a.push(' ');
       return a;
     });
+    ({ h: hWalls, v: vWalls } = parseWallRuns(data.walls));
     levelName = data.name || 'Untitled Floor';
     levelNext = data.next;
     renderAll();
@@ -153,44 +220,48 @@ export function startEditor(app, levelData, stashKey) {
     }
     rows[z][x] = ch;
     // Conduction can change anywhere a pool connects - recompute first so the
-    // painted cell renders with fresh state, then re-render cells whose
-    // electrified state flipped (live preview of cable + water).
-    const next = computeElectrifiedSet();
-    const dirty = [];
-    for (const k of next) if (!electrified.has(k)) dirty.push(k);
-    for (const k of electrified) if (!next.has(k)) dirty.push(k);
-    electrified = next;
+    // painted cell renders with fresh state (live preview of cable + water).
+    refreshElectrified(x, z);
     renderCell(x, z);
-    for (const k of dirty) {
-      const [cx, cz] = k.split(',').map(Number);
-      if (cx !== x || cz !== z) renderCell(cx, cz);
-    }
   }
 
-  // --- resizing (right/bottom edges; new cells are walls to keep maps sealed) ---
+  // --- resizing (right/bottom edges; new cells are open floor - the world
+  // outside the map is solid anyway, and partitions are painted, not filled) ---
   function resize(dw, dh) {
     const nw = Math.min(MAX_SIZE, Math.max(MIN_SIZE, width + dw));
     const nh = Math.min(MAX_SIZE, Math.max(MIN_SIZE, height + dh));
     if (nw === width && nh === height) return;
-    while (rows.length < nh) rows.push(new Array(width).fill(TILE_TYPES.wall.char));
+    while (rows.length < nh) rows.push(new Array(width).fill(TILE_TYPES.floor.char));
     while (rows.length > nh) rows.pop();
     for (const row of rows) {
-      while (row.length < nw) row.push(TILE_TYPES.wall.char);
+      while (row.length < nw) row.push(TILE_TYPES.floor.char);
       while (row.length > nw) row.pop();
     }
     width = nw;
     height = nh;
+    // drop edge walls that fell off the map
+    hWalls = new Set([...hWalls].filter((k) => {
+      const [x, z] = k.split(',').map(Number);
+      return edgeInRange('h', x, z);
+    }));
+    vWalls = new Set([...vWalls].filter((k) => {
+      const [x, z] = k.split(',').map(Number);
+      return edgeInRange('v', x, z);
+    }));
     renderAll();
   }
 
   // --- camera / input ----------------------------------------------------------------
+  // The partition brush paints the edge nearest the click; every other brush
+  // paints the tile. Right-click erases (the nearest partition, or the cell).
   createControls({
     app,
     canvas: document.getElementById('app'),
     focus: { x: (levelData.map[0].length - 1) / 2, z: (levelData.map.length - 1) / 2 },
-    onLeftClickTile: (t) => paint(t),
-    onLeftDragTile: (t) => paint(t),
-    onRightClickTile: (t) => paint(t, TILE_TYPES.floor.char), // quick-erase
+    onLeftClickTile: (t, g) => (brush === 'partition' ? paintEdge(nearestEdge(g), true) : paint(t)),
+    onLeftDragTile: (t, g) => (brush === 'partition' ? paintEdge(nearestEdge(g), true) : paint(t)),
+    onRightClickTile: (t, sx, sy, g) =>
+      (brush === 'partition' ? paintEdge(nearestEdge(g), false) : paint(t, TILE_TYPES.floor.char)),
   });
 
   // --- level JSON in/out -----------------------------------------------------------
@@ -200,6 +271,8 @@ export function startEditor(app, levelData, stashKey) {
     const actors = { [PLAYER_CHAR]: 'player' };
     for (const [id, def] of Object.entries(ENEMY_TYPES)) actors[def.char] = id;
     const out = { name: levelName, tiles, actors, map: rows.map((r) => r.join('')) };
+    const walls = compressWallRuns(hWalls, vWalls);
+    if (walls.length) out.walls = walls;
     if (levelNext) out.next = levelNext;
     return JSON.stringify(out, null, 2);
   }
@@ -236,6 +309,12 @@ export function startEditor(app, levelData, stashKey) {
     brush = id;
     for (const b of brushButtons) b.style.borderColor = '#3a3a52';
     button.style.borderColor = '#8adf76';
+  }
+  {
+    // Partitions first - with edge walls they are the main way to build rooms.
+    const b = btn('brush-partition', 'partition');
+    b.onclick = () => selectBrush('partition', b);
+    brushButtons.push(b);
   }
   for (const [id] of Object.entries(TILE_TYPES)) {
     const b = btn('brush-' + id, id.replace('-', ' '));
@@ -327,13 +406,14 @@ export function startEditor(app, levelData, stashKey) {
   }
 
   loadLevel(levelData);
-  say('LEVEL EDITOR — left-click paints, right-click erases, middle-drag orbits');
+  say('LEVEL EDITOR — left-click paints (partition brush paints tile edges), right-click erases, middle-drag orbits');
 
   // Read-only handle for tests and console poking.
   window.__editor = {
     get map() { return rows.map((r) => r.join('')); },
     get size() { return { width, height }; },
     get brush() { return brush; },
+    get walls() { return compressWallRuns(hWalls, vWalls); },
     charAt: (x, z) => rows[z]?.[x],
     toJson,
   };

@@ -41,43 +41,53 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   // itch.io page hosting the iframe) scrolls instead of zooming.
   canvas.addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
 
+  // PlayCanvas attaches its mouse listeners to WINDOW, so clicks on DOM UI
+  // (combat buttons, menus, the editor bar) also arrive here - mousedown even
+  // fires BEFORE the button's own click event. Only events that actually
+  // start on the canvas may begin a game interaction.
+  const onCanvas = (e) => !e.event || e.event.target === canvas;
+
   let orbiting = false;
   let leftHeld = false; // for drag-painting in the editor
   app.mouse.on(pc.EVENT_MOUSEDOWN, (e) => {
+    if (!onCanvas(e)) return;
     if (e.button === pc.MOUSEBUTTON_MIDDLE) {
       orbiting = true;
     } else if (e.button === pc.MOUSEBUTTON_LEFT) {
       leftHeld = true;
       onAnyLeftPress && onAnyLeftPress();
-      onLeftClickTile && onLeftClickTile(screenToTile(e.x, e.y));
+      onLeftClickTile && onLeftClickTile(screenToTile(e.x, e.y), screenToGround(e.x, e.y));
     } else if (e.button === pc.MOUSEBUTTON_RIGHT) {
-      onRightClickTile && onRightClickTile(screenToTile(e.x, e.y), e.x, e.y);
+      onRightClickTile && onRightClickTile(screenToTile(e.x, e.y), e.x, e.y, screenToGround(e.x, e.y));
     }
   });
+  // Releases are never filtered - an orbit/drag must end even over UI.
   app.mouse.on(pc.EVENT_MOUSEUP, (e) => {
     if (e.button === pc.MOUSEBUTTON_MIDDLE) orbiting = false;
     if (e.button === pc.MOUSEBUTTON_LEFT) leftHeld = false;
   });
   app.mouse.on(pc.EVENT_MOUSEMOVE, (e) => {
     if (orbiting) {
+      // an orbit in progress keeps tracking even across UI
       CAM.yaw -= e.dx * 0.3;
       CAM.pitch = pc.math.clamp(CAM.pitch + e.dy * 0.3, CAM.minPitch, CAM.maxPitch);
       apply();
-    } else if (leftHeld && onLeftDragTile) {
-      onLeftDragTile(screenToTile(e.x, e.y));
+    } else if (leftHeld && onLeftDragTile && onCanvas(e)) {
+      onLeftDragTile(screenToTile(e.x, e.y), screenToGround(e.x, e.y));
     }
   });
   app.mouse.on(pc.EVENT_MOUSEWHEEL, (e) => {
+    if (!onCanvas(e)) return; // scrolling over a panel must not zoom
     // Scroll up (away from you) zooms in - wheelDelta is negative for
     // scroll-up, so adding it pulls the camera closer.
     CAM.dist = pc.math.clamp(CAM.dist + e.wheelDelta * 2.4, CAM.minDist, CAM.maxDist);
     apply();
   });
 
-  // Turn a screen pixel into the grid tile under it (ray -> ground plane).
+  // Turn a screen pixel into a precise point on the ground plane...
   const _near = new pc.Vec3();
   const _far = new pc.Vec3();
-  function screenToTile(sx, sy) {
+  function screenToGround(sx, sy) {
     cameraEntity.camera.screenToWorld(sx, sy, cameraEntity.camera.nearClip, _near);
     cameraEntity.camera.screenToWorld(sx, sy, cameraEntity.camera.farClip, _far);
     const dir = _far.clone().sub(_near);
@@ -85,14 +95,22 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     const t = (0 - _near.y) / dir.y;
     if (t < 0) return null;
     const p = _near.add(dir.scale(t));
-    return { x: Math.round(p.x), z: Math.round(p.z) };
+    return { x: p.x, z: p.z };
+  }
+  // ...and into the grid tile under it (the editor also wants the raw point,
+  // to know which EDGE of the tile was clicked when painting partitions).
+  function screenToTile(sx, sy) {
+    const p = screenToGround(sx, sy);
+    return p ? { x: Math.round(p.x), z: Math.round(p.z) } : null;
   }
 
   // Ease the rig toward the target each frame so the camera trails the player.
-  function follow(target) {
+  // Time-based smoothing, so the trailing speed is framerate-independent.
+  function follow(target, dt = 1 / 60) {
+    const k = 1 - Math.exp(-dt * 7);
     const c = camYaw.getPosition();
-    camYaw.setPosition(pc.math.lerp(c.x, target.x, 0.15), 0.3, pc.math.lerp(c.z, target.z, 0.15));
+    camYaw.setPosition(pc.math.lerp(c.x, target.x, k), 0.3, pc.math.lerp(c.z, target.z, k));
   }
 
-  return { cameraEntity, screenToTile, follow };
+  return { cameraEntity, screenToTile, screenToGround, follow };
 }

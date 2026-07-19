@@ -16,7 +16,7 @@ import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, DIRS8 } from './pathfinding.js';
 import { createSheet, gainXp, applyDamage } from './stats.js';
 import { PlayerActor, EnemyActor } from './actors.js';
-import { createApp, buildLevel, placeModel } from './scene.js';
+import { createApp, buildLevel, placeModel, throwProjectile, spawnDamageText } from './scene.js';
 import { createControls } from './controls.js';
 import { startCombat } from './combat.js';
 import { startEditor } from './editor.js';
@@ -166,6 +166,8 @@ function startGame(level) {
     if (slain) msg += ` ${slain} coworker${slain === 1 ? '' : 's'} caught in the blast (+XP).`;
     if (sheet && player.entity && Math.abs(player.x - x) <= 1 && Math.abs(player.z - z) <= 1) {
       const dead = applyDamage(sheet, 8);
+      player.flinch();
+      vfx.damageText(player.x, player.z, '-8');
       msg += ' You catch shrapnel. -8 HP.';
       if (dead) {
         gameOver = true;
@@ -202,12 +204,12 @@ function startGame(level) {
       const ax = x + dx;
       const az = z + dz;
       if (!isWalkable(ax, az)) continue;
-      const p = findPath(isWalkable, player.x, player.z, ax, az, hazardCost);
+      const p = findPath(isWalkable, player.x, player.z, ax, az, hazardCost, grid.stepOpen);
       if (p && (!best || p.length < best.length)) best = p;
     }
     if (!best || best.length < 2) return;
     pendingAction = { x, z, run };
-    const s = smoothPath(clearOfHazards, best);
+    const s = smoothPath(clearOfHazards, best, grid.edgeOpen);
     player.setPath(s);
     lastPath = s;
   }
@@ -215,10 +217,10 @@ function startGame(level) {
   function moveTo(tile) {
     if (!tile || !sheet || inCombat || gameOver || !isWalkable(tile.x, tile.z)) return;
     pendingAction = null;
-    const p = findPath(isWalkable, player.x, player.z, tile.x, tile.z, hazardCost);
+    const p = findPath(isWalkable, player.x, player.z, tile.x, tile.z, hazardCost, grid.stepOpen);
     if (p && p.length > 1) {
       // Smoothed: straight any-angle runs wherever line of sight is clear.
-      const s = smoothPath(clearOfHazards, p);
+      const s = smoothPath(clearOfHazards, p, grid.edgeOpen);
       player.setPath(s);
       lastPath = s;
     }
@@ -234,12 +236,12 @@ function startGame(level) {
       const ax = en.x + dx;
       const az = en.z + dz;
       if (!isWalkable(ax, az)) continue;
-      const p = findPath(isWalkable, player.x, player.z, ax, az, hazardCost);
+      const p = findPath(isWalkable, player.x, player.z, ax, az, hazardCost, grid.stepOpen);
       if (p && (!best || p.length < best.length)) best = p;
     }
     if (!best) return;
     if (best.length > 1) {
-      const s = smoothPath(clearOfHazards, best);
+      const s = smoothPath(clearOfHazards, best, grid.edgeOpen);
       player.setPath(s);
       lastPath = s;
     } else {
@@ -274,11 +276,16 @@ function startGame(level) {
       engaged,
       world: {
         isWalkable,
-        findPath: (sx, sz, tx, tz) => findPath(isWalkable, sx, sz, tx, tz, hazardCost),
+        findPath: (sx, sz, tx, tz) => findPath(isWalkable, sx, sz, tx, tz, hazardCost, grid.stepOpen),
+        // Partitions (edge walls) are chest height: they block movement but
+        // not throws - lob paper right over the cubicle wall.
         hasLos: (ax, az, bx, bz) => segmentClear(grid.terrainOpen, ax, az, bx, bz),
+        stepOpen: grid.stepOpen,
         surfaceIdAt: (x, z) => runtime.surfaceAt(x, z),
+        isElectrified: (x, z) => grid.isElectrified(x, z),
         enemySurfDamage: (x, z) => surfEffect(x, z)?.amount || 0,
       },
+      fx: vfx,
       callbacks: {
         say: ui.say,
         updateHud: () => ui.updateStatsHud(sheet),
@@ -333,6 +340,8 @@ function startGame(level) {
       }
       if (fx.effect === 'damage' && changed) {
         const dead = applyDamage(sheet, fx.amount);
+        player.flinch();
+        vfx.damageText(x, z, `-${fx.amount}`);
         ui.say(fx.message);
         ui.updateStatsHud(sheet);
         if (dead) {
@@ -348,6 +357,7 @@ function startGame(level) {
     if (changed && sheet.bleed > 0) {
       sheet.bleed -= 1;
       const bled = applyDamage(sheet, 1);
+      vfx.damageText(x, z, '-1');
       ui.say('You drip on the carpet. -1 HP.');
       ui.updateStatsHud(sheet);
       if (bled) {
@@ -366,11 +376,14 @@ function startGame(level) {
     if (sfx) {
       if (sfx.ammo) {
         sheet.paper = Math.min(8, sheet.paper + sfx.ammo);
+        vfx.damageText(x, z, '+📄', '#8adf76');
       }
       const amount = effectiveSurfDamage(x, z);
       if (amount > 0) {
         if (sfx.bleed) sheet.bleed = Math.max(sheet.bleed, sfx.bleed);
         const dead = applyDamage(sheet, amount);
+        player.flinch();
+        vfx.damageText(x, z, `-${amount}`);
         ui.say(sfx.message);
         ui.updateStatsHud(sheet);
         if (dead) {
@@ -473,6 +486,14 @@ function startGame(level) {
     },
   });
 
+  // Cosmetic combat feedback (projectiles, floating numbers). Defined after
+  // controls exist because the damage text projects through the camera.
+  const vfx = {
+    projectile: (from, to, kind) => throwProjectile(app, from, to, kind),
+    damageText: (x, z, text, color) =>
+      spawnDamageText(app, controls.cameraEntity, x, 0.2, z, text, color),
+  };
+
   // --- main loop ------------------------------------------------------------------
   const BASE_SPEED = 4;
   app.on('update', (dt) => {
@@ -484,6 +505,7 @@ function startGame(level) {
       terrainOpen: grid.terrainOpen,
       isWalkable,
       isHazard,
+      stepOpen: grid.stepOpen,
       playerTile: player,
     };
     let anyoneMoved = false;
@@ -497,15 +519,19 @@ function startGame(level) {
     if (!gameOver) runtime.tick(dt); // fire waits for no one, combat included
     animateSurfaces(dt);
     // Follow the player, gently biased toward the map centre so corner spawns
-    // don't leave half the frame empty.
+    // don't leave half the frame empty. Track the entity's CONTINUOUS position
+    // (player.x/z is the logical tile, which jumps a whole tile at a time and
+    // makes the camera step along with the walk).
+    const pp = player.entity ? player.entity.getPosition() : player;
     controls.follow({
-      x: player.x * 0.82 + ((grid.width - 1) / 2) * 0.18,
-      z: player.z * 0.82 + ((grid.height - 1) / 2) * 0.18,
-    });
+      x: pp.x * 0.82 + ((grid.width - 1) / 2) * 0.18,
+      z: pp.z * 0.82 + ((grid.height - 1) / 2) * 0.18,
+    }, dt);
     updateWallFade(controls.cameraEntity, player.entity ? player.entity.getPosition() : null);
   });
 
   // --- boot -------------------------------------------------------------------------
+  ui.addVignette();
   ui.say(grid.name);
   // The escape hatches live here (not only on the class picker) because a
   // mid-campaign reload skips the picker entirely.
