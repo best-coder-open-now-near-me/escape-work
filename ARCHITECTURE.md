@@ -109,8 +109,11 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   5 tiles join the fight, have persistent map HP (EnemyActor.hp), take
   surface damage, and act in a sequenced AI phase. Everyone can Shove (2 AP):
   push an adjacent enemy one tile away - into a wall for a slam, or into
-  whatever surface is waiting for them. Fire keeps burning during combat;
-  printer explosions still resolve (combat prunes the dead).
+  whatever surface is waiting for them. Walking OUT of melee reach provokes
+  an attack of opportunity - a free basic strike, one reaction per combatant
+  per round (surprised enemies get none; shoves are forced movement and never
+  provoke). Fire keeps burning during combat; printer explosions still
+  resolve (combat prunes the dead).
 - **New furniture/prop**: a tile entry with `model` (a .glb under `assets/`) and
   `solid: true` - it blocks movement and renders as the model in both game and
   editor. Props are level data, never hardcoded set dressing.

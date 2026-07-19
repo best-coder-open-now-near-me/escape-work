@@ -4,7 +4,9 @@
 // their own AP costs (data/actions.js). Melee needs adjacency (clicking a far
 // enemy walks you in first), thrown weapons need range and line of sight.
 // Nearby enemies join the fight; enemies have persistent map HP and take
-// surface damage like you do. Fire keeps burning throughout.
+// surface damage like you do. Fire keeps burning throughout. Walking out of
+// melee reach provokes an attack of opportunity (one reaction per combatant
+// per round; shoves are forced movement and never provoke).
 import { ACTIONS } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
 
@@ -43,6 +45,11 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
   let pendingMelee = null; // enemy to strike when the walk-up completes
   let enemyQueue = [];
   let acting = null; // { en, ap, wait }
+  // Attacks of opportunity: walking OUT of melee reach provokes a free strike.
+  // One reaction each per round; forced movement (shoves) never provokes.
+  let playerReaction = true;
+  for (const en of engaged) en.reaction = true;
+  let playerPrev = { x: player.x, z: player.z };
 
   // --- UI ---------------------------------------------------------------------
   const panel = document.createElement('div');
@@ -311,8 +318,58 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     phase = 'player';
     ap = sheet.maxAp;
     defended = false;
+    // a new round refreshes everyone's reaction
+    playerReaction = true;
+    for (const en of engaged) en.reaction = true;
     log('Your turn.');
     refresh();
+  }
+
+  // --- attacks of opportunity ------------------------------------------------------
+  // An enemy punishes the player for slipping out of reach.
+  function enemyOpportunityStrike(en) {
+    const atk = en.def.attacks[rand(0, en.def.attacks.length - 1)];
+    let dmg = rand(atk.min, atk.max);
+    if (defended) dmg = Math.ceil(dmg / 2);
+    en.lunge(player.x, player.z);
+    player.flinch();
+    sheet.hp = Math.max(0, sheet.hp - dmg);
+    fx.damageText(player.x, player.z, `-${dmg}`);
+    log(`Attack of opportunity! ${en.def.name} clips you as you slip away. -${dmg}.`);
+    refresh();
+    if (sheet.hp <= 0) defeat();
+  }
+
+  // The player punishes an enemy for stepping out of reach (their basic
+  // attack, no AP - it's a reaction).
+  function playerOpportunityStrike(en) {
+    const id = sheet.actions.find((i) => ACTIONS[i].type === 'attack') || 'attack';
+    const a = ACTIONS[id];
+    const dmg = rand(a.min, a.max) + (sheet.bonusDmg || 0);
+    player.lunge(en.x, en.z);
+    const died = en.takeDamage(dmg);
+    fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b');
+    log(`Attack of opportunity! You catch ${en.def.name} backing off. -${dmg}.`);
+    if (died) callbacks.onEnemyKilled(en);
+    refresh();
+    if (!engaged.some((e) => e.alive)) victory();
+  }
+
+  // Called per frame: fire enemy reactions for every tile step the player
+  // makes that leaves an enemy's reach. Surprised enemies are still fumbling
+  // with their lanyards and get no reaction.
+  function checkPlayerProvoked() {
+    if (player.x === playerPrev.x && player.z === playerPrev.z) return;
+    for (const en of engaged) {
+      if (phase === 'done') break;
+      if (!en.alive || en.surprised || !en.reaction) continue;
+      if (cheb(playerPrev.x, playerPrev.z, en.x, en.z) <= 1
+        && cheb(player.x, player.z, en.x, en.z) > 1) {
+        en.reaction = false;
+        enemyOpportunityStrike(en);
+      }
+    }
+    playerPrev = { x: player.x, z: player.z };
   }
 
   function enemyAttack(en) {
@@ -346,6 +403,13 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     }
     if (!best) return false;
     const [nx, nz] = best[1];
+    // stepping out of the player's reach provokes THEIR reaction
+    if (playerReaction && cheb(en.x, en.z, player.x, player.z) <= 1
+      && cheb(nx, nz, player.x, player.z) > 1) {
+      playerReaction = false;
+      playerOpportunityStrike(en);
+      if (!en.alive || phase === 'done') return false;
+    }
     en.x = nx;
     en.z = nz;
     // enemies feel the floor too
@@ -368,6 +432,8 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     if (phase === 'done') return;
     // prune anyone killed externally (printer explosions during combat)
     if (!engaged.some((e) => e.alive)) { victory(); return; }
+    checkPlayerProvoked();
+    if (phase === 'done') return; // an opportunity strike may have ended it
     if (phase === 'player') {
       // finish a queued walk-up strike
       if (pendingMelee && !player.moving) {
@@ -427,7 +493,12 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     get phase() { return phase; },
     get ap() { return ap; },
     get armed() { return armed; },
-    get enemies() { return engaged.map((e) => ({ name: e.def.name, x: e.x, z: e.z, hp: e.hp, alive: e.alive })); },
+    get playerReaction() { return playerReaction; },
+    get enemies() {
+      return engaged.map((e) => ({
+        name: e.def.name, x: e.x, z: e.z, hp: e.hp, alive: e.alive, reaction: e.reaction,
+      }));
+    },
   };
 
   return {
