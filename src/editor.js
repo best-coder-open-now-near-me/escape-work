@@ -92,7 +92,8 @@ export function startEditor(app, levelData, stashKey) {
     cellEntities.set(key, out);
     const ch = rows[z][x];
     if (ch === ' ') return;
-    out.push(renderer.renderFloor(x, z));
+    const isActor = ch === PLAYER_CHAR || !!enemyByChar[ch];
+    out.push(renderer.renderFloor(x, z, isActor ? 'floor' : tileByChar[ch] || 'floor'));
     if (ch === PLAYER_CHAR) {
       out.push(addBox(playerMat, x, 0.35, z, 0.55, 0.5, 0.55));
     } else if (enemyByChar[ch]) {
