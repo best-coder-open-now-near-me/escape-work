@@ -11,6 +11,7 @@
 import { ACTIONS } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
+import { damageBonus } from './stats.js';
 
 const pc = window.pc;
 const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
@@ -232,7 +233,7 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
   // --- player actions ------------------------------------------------------------
   function performOn(id, en) {
     const a = ACTIONS[id];
-    let dmg = rand(a.min, a.max) + (sheet.bonusDmg || 0);
+    let dmg = rand(a.min, a.max) + damageBonus(sheet); // carried staplers count
     if (a.ammoCost) {
       sheet.paper -= ammoCostOf(id);
       dmg += talentFx.paperDamageBonus || 0;

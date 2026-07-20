@@ -609,6 +609,21 @@ export function computeCarpetZones(typeAt, width, height) {
   return carpetAt;
 }
 
+// A dropped/loose item on the floor: a little manila parcel, hash-rotated so
+// piles don't align. The Alt loot overlay labels it; clicking picks it up.
+let droppedMat = null;
+export function placeDroppedItem(app, x, z) {
+  if (!droppedMat) droppedMat = makeMaterial([0.85, 0.76, 0.55], { gloss: 0.3 });
+  const e = new pc.Entity();
+  e.addComponent('render', { type: 'box', material: droppedMat });
+  e.setLocalScale(0.26, 0.14, 0.2);
+  const h = Math.sin(x * 91.7 + z * 57.3) * 43758.5453;
+  e.setEulerAngles(0, (h - Math.floor(h)) * 360, 0);
+  e.setPosition(x, TILE_TYPES.floor.height / 2 + 0.07, z); // resting on the floor top
+  app.root.addChild(e);
+  return e;
+}
+
 // Builds the full scene for a parsed grid using the shared renderer. Returns
 // the wall list, the occlusion-fade updater, and runtime hooks.
 export function buildLevel(app, grid) {

@@ -64,6 +64,160 @@ export function hideMenu() {
   if (menuEl) menuEl.style.display = 'none';
 }
 
+// --- Alt loot overlay ---------------------------------------------------------
+// BG3-style: while Alt is held, clickable labels float over everything
+// lootable in the area (loose items, containers, bodies). The caller supplies
+// entries with world positions and repositions them each frame via project().
+export function createLootLabels() {
+  const root = document.createElement('div');
+  root.id = 'loot-labels';
+  Object.assign(root.style, { position: 'fixed', inset: '0', zIndex: '18', display: 'none', pointerEvents: 'none' });
+  document.body.appendChild(root);
+  let entries = [];
+
+  function show(list) {
+    entries = list;
+    root.innerHTML = '';
+    for (const en of entries) {
+      const chip = document.createElement('div');
+      chip.className = 'loot-label';
+      chip.textContent = `${en.icon || '📦'} ${en.text}`;
+      Object.assign(chip.style, {
+        position: 'absolute', transform: 'translate(-50%, -100%)', whiteSpace: 'nowrap',
+        background: 'rgba(22,22,36,.92)', border: '1px solid #3a3a52', borderRadius: '6px',
+        padding: '3px 9px', color: '#f0f0f5', font: '12px system-ui, sans-serif',
+        cursor: 'pointer', pointerEvents: 'auto', userSelect: 'none', display: 'none',
+      });
+      chip.onmouseenter = () => { chip.style.borderColor = '#8adf76'; };
+      chip.onmouseleave = () => { chip.style.borderColor = '#3a3a52'; };
+      chip.onmousedown = (e) => e.stopPropagation(); // don't let the canvas see it
+      chip.onclick = () => { hide(); en.onClick && en.onClick(); };
+      en.el = chip;
+      root.appendChild(chip);
+    }
+    root.style.display = 'block';
+  }
+
+  function hide() {
+    entries = [];
+    root.innerHTML = '';
+    root.style.display = 'none';
+  }
+
+  // project(world) -> { x, y } screen px, or null when behind the camera.
+  function reposition(project) {
+    for (const en of entries) {
+      const s = project(en.world);
+      const ok = s && s.x > -80 && s.x < window.innerWidth + 80 && s.y > 0 && s.y < window.innerHeight + 40;
+      en.el.style.display = ok ? 'block' : 'none';
+      if (ok) {
+        en.el.style.left = `${s.x}px`;
+        en.el.style.top = `${s.y}px`;
+      }
+    }
+  }
+
+  return { show, hide, reposition, get visible() { return root.style.display !== 'none'; } };
+}
+
+// --- inventory panel ----------------------------------------------------------
+// The pockets. Toggled with I or the bag button. Rows come straight from the
+// item registry; `usable` items get Use, flavor items get Examine, everything
+// can be dropped (dropping creates a loose floor item the Alt overlay sees).
+export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine }) {
+  const bag = document.createElement('button');
+  bag.id = 'inventory-btn';
+  bag.textContent = '🎒';
+  Object.assign(bag.style, {
+    position: 'fixed', top: '12px', left: '58px', zIndex: '25',
+    background: '#232334', color: '#f0f0f5', border: '1px solid #3a3a52',
+    borderRadius: '7px', padding: '6px 10px', font: '14px system-ui, sans-serif',
+    cursor: 'pointer',
+  });
+  document.body.appendChild(bag);
+
+  const panel = document.createElement('div');
+  panel.id = 'inventory-panel';
+  Object.assign(panel.style, {
+    position: 'fixed', top: '54px', left: '12px', zIndex: '25', width: '250px',
+    display: 'none', background: '#232334', color: '#f0f0f5',
+    border: '1px solid #3a3a52', borderRadius: '9px', padding: '10px 12px',
+    font: '12px system-ui, sans-serif', boxShadow: '0 8px 24px rgba(0,0,0,.45)',
+  });
+  document.body.appendChild(panel);
+
+  const smallBtn = (label, title) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.title = title;
+    Object.assign(b.style, {
+      padding: '3px 8px', borderRadius: '5px', border: '1px solid #3a3a52',
+      background: '#2e2e46', color: '#f0f0f5', font: '11px system-ui, sans-serif',
+      cursor: 'pointer',
+    });
+    return b;
+  };
+
+  function refresh(sheet) {
+    const inv = sheet?.inventory || [];
+    panel.innerHTML = `<div style="font-weight:700; letter-spacing:1px; margin-bottom:7px;">
+      POCKETS <span style="opacity:.6; font-weight:400;">${inv.length}/${cap} · 📄 ${sheet?.paper ?? 0}</span></div>`;
+    if (!inv.length) {
+      const empty = document.createElement('div');
+      empty.style.opacity = '.6';
+      empty.textContent = 'Empty. The office provides, if you rummage.';
+      panel.appendChild(empty);
+      return;
+    }
+    inv.forEach((id, i) => {
+      const def = ITEMS[id];
+      const row = document.createElement('div');
+      row.id = `inv-row-${i}`;
+      Object.assign(row.style, {
+        display: 'flex', alignItems: 'center', gap: '7px', padding: '4px 2px',
+        borderTop: i ? '1px solid #2c2c42' : 'none',
+      });
+      const name = document.createElement('div');
+      name.textContent = `${def?.icon || '📦'} ${def?.name || id}`;
+      name.style.flex = '1';
+      name.title = def?.examine || '';
+      row.appendChild(name);
+      if (def?.heal || def?.ammo) {
+        const use = smallBtn('Use', def.heal ? `+${def.heal} HP` : `+${def.ammo} paper`);
+        use.id = `inv-use-${i}`;
+        use.onclick = () => onUse(i);
+        row.appendChild(use);
+      } else {
+        const ex = smallBtn('👁', def?.examine || '');
+        ex.id = `inv-examine-${i}`;
+        ex.onclick = () => onExamine(i);
+        row.appendChild(ex);
+      }
+      const drop = smallBtn('Drop', 'Leave it on the floor');
+      drop.id = `inv-drop-${i}`;
+      drop.onclick = () => onDrop(i);
+      row.appendChild(drop);
+      panel.appendChild(row);
+    });
+  }
+
+  let lastSheet = null;
+  function toggle(sheet) {
+    lastSheet = sheet;
+    const showing = panel.style.display !== 'none';
+    panel.style.display = showing ? 'none' : 'block';
+    if (!showing) refresh(sheet);
+  }
+  bag.onclick = () => { if (lastSheet) toggle(lastSheet); };
+
+  return {
+    toggle,
+    refresh: (sheet) => { lastSheet = sheet; if (panel.style.display !== 'none') refresh(sheet); },
+    hide: () => { panel.style.display = 'none'; },
+    get visible() { return panel.style.display !== 'none'; },
+  };
+}
+
 // --- end-of-game overlays ----------------------------------------------------
 function overlay(id, inner) {
   const div = document.createElement('div');

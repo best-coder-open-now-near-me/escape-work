@@ -8,6 +8,7 @@
 // flinches and death topples. EnemyActor adds wander AI on top. New actor
 // kinds extend GridActor the same way.
 const pc = window.pc;
+import { rollLoot } from './data/items.js';
 
 const wrapAngle = (a) => (((a + 180) % 360) + 360) % 360 - 180;
 const TURN_RATE = 10; // how quickly facing eases toward the heading
@@ -70,13 +71,13 @@ export class GridActor {
 
   // --- animation triggers ------------------------------------------------------
   lunge(tx, tz) {
-    if (this.fx?.kind === 'death') return;
+    if (this.fx?.kind === 'death' || this.fx?.kind === 'corpse') return;
     if (tx !== undefined) this.faceToward(tx, tz);
     this.fx = { kind: 'lunge', t: 0 };
   }
 
   flinch() {
-    if (this.fx?.kind === 'death') return;
+    if (this.fx?.kind === 'death' || this.fx?.kind === 'corpse') return;
     this.fx = { kind: 'flinch', t: 0 };
     this.flashT = 0.16;
     for (const { mat } of this.mats) {
@@ -110,7 +111,7 @@ export class GridActor {
         }
       }
     }
-    if (this.fx?.kind === 'death') this.setClip('idle', 0.2);
+    if (this.fx?.kind === 'death' || this.fx?.kind === 'corpse') this.setClip('idle', 0.2);
     else if (this.fx?.kind === 'lunge') this.setClip('attack-melee-right', 0.05, 1.3);
     else if (moved > 1e-5) this.setClip('walk', 0.15, this.speed * 0.5);
     else this.setClip('idle', 0.2);
@@ -152,12 +153,11 @@ export class GridActor {
         const k = Math.min(1, t / T);
         pitch = -88 * k * (2 - k); // ease-out topple onto their back
         bobY = -Math.max(0, k - 0.7) * 0.5; // then sink into the carpet
-        if (t >= T + 0.35) {
-          this.entity.destroy();
-          this.entity = null;
-          this.visual = null;
-          return;
-        }
+        // The body STAYS - a lootable office casualty, not a despawn.
+        if (t >= T + 0.35) this.fx = { kind: 'corpse', t: 0 };
+      } else if (kind === 'corpse') {
+        pitch = -88;
+        bobY = -0.15;
       }
     }
     this.visual.setLocalPosition(0, bobY, forward);
@@ -288,6 +288,7 @@ export class EnemyActor extends GridActor {
     this.path = null;
     this.slideTo = null;
     this.onTile = null;
+    this.loot = rollLoot(this.def.loot); // what the body carries (lootable)
     if (this.entity) this.fx = { kind: 'death', t: 0 };
   }
 
