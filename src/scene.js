@@ -20,12 +20,15 @@ export function createApp(canvas) {
   window.addEventListener('resize', () => app.resizeCanvas());
 
   // Ambient fills the shadows; a shadow-casting sun grounds everything and
-  // gives imported PBR models real shading.
-  app.scene.ambientLight = new pc.Color(0.56, 0.56, 0.62);
+  // gives imported PBR models real shading. Tuned for the cel look: a lower,
+  // cooler ambient against a warmer sun deepens the contrast between toon
+  // bands - the flat 0.56 gray fill washed them out.
+  app.scene.ambientLight = new pc.Color(0.44, 0.46, 0.56);
   const sun = new pc.Entity('sun');
   sun.addComponent('light', {
     type: 'directional',
-    intensity: 1.25,
+    color: new pc.Color(1, 0.96, 0.88),
+    intensity: 1.45,
     castShadows: true,
     shadowResolution: 2048,
     shadowDistance: 70,
@@ -35,6 +38,63 @@ export function createApp(canvas) {
   sun.setEulerAngles(55, 35, 0);
   app.root.addChild(sun);
   return app;
+}
+
+// Cel shading: replace the lambert term so each light's contribution snaps to
+// a few discrete bands (with a whisker of smoothstep so band edges don't
+// shimmer, and a sliver of the raw term so faces inside one band keep a hint
+// of modeling). The world is mostly flat-shaded boxes, so in practice every
+// face lands cleanly on one band - a graphic, toon-flat look instead of soft
+// gradients.
+const TOON_CHUNK = `
+float getLightDiffuse(vec3 worldNormal, vec3 viewDir, vec3 lightDirNorm) {
+    float d = max(dot(worldNormal, -lightDirNorm), 0.0);
+    float x = d * 3.0;
+    float banded = min((floor(x) + smoothstep(0.42, 0.58, fract(x))) / 3.0, 1.0);
+    return banded * 0.85 + d * 0.15;
+}`;
+
+const toonified = new WeakSet();
+function toonifyMaterial(m) {
+  if (toonified.has(m)) return;
+  toonified.add(m);
+  m.shaderChunks.glsl.set('lightDiffuseLambertPS', TOON_CHUNK);
+  m.update();
+}
+
+// Apply the toon ramp to everything a loaded model renders with. Materials
+// are shared per-asset, so the WeakSet keeps repeat placements from
+// rebuilding shaders. Per-character damage-flash clones inherit the chunk
+// through Material.copy.
+function toonifyEntity(entity) {
+  for (const rc of entity.findComponents('render')) {
+    for (const mi of rc.meshInstances) toonifyMaterial(mi.material);
+  }
+}
+
+// Post stack on the game camera (also used by the editor - controls.js calls
+// this wherever the camera rig is built). SSAO grounds props and walls with
+// contact shading the flat toon lighting can't provide, a whisper of bloom
+// makes the emissives (exit, fire, sparks) glow, and the grade adds the
+// saturation and warmth the toon bands need to read.
+export function applyCameraPostFx(app, cameraEntity) {
+  const frame = new pc.CameraFrame(app, cameraEntity.camera);
+  frame.rendering.samples = 4; // keep MSAA through the post pipeline
+  frame.ssao.type = pc.SSAOTYPE_COMBINE;
+  frame.ssao.intensity = 0.4;
+  frame.ssao.radius = 9;
+  frame.ssao.power = 5;
+  frame.bloom.intensity = 0.02;
+  frame.grading.enabled = true;
+  frame.grading.contrast = 1.06;
+  frame.grading.saturation = 1.18;
+  frame.grading.tint = new pc.Color(1, 0.985, 0.955, 1);
+  frame.vignette.intensity = 0.5;
+  frame.vignette.inner = 0.55;
+  frame.vignette.outer = 1.35;
+  frame.vignette.curvature = 0.6;
+  frame.update();
+  return frame;
 }
 
 function makeMaterial(rgb, { opacity = 1, gloss = null, emissive = null } = {}) {
@@ -47,7 +107,7 @@ function makeMaterial(rgb, { opacity = 1, gloss = null, emissive = null } = {}) 
     m.depthWrite = false;
   }
   if (emissive) m.emissive = new pc.Color(emissive[0], emissive[1], emissive[2]);
-  m.update();
+  toonifyMaterial(m);
   return m;
 }
 
@@ -376,6 +436,7 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
   asset.ready(() => {
     const holder = new pc.Entity(url);
     holder.addChild(asset.resource.instantiateRenderEntity());
+    toonifyEntity(holder);
     holder.setLocalScale(scale, scale, scale);
     holder.setEulerAngles(0, rotY, 0);
     holder.setPosition(tileX, lift, tileZ);
@@ -392,7 +453,7 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
 // legs and torso stretch, the head shrinks back toward realistic. Legs are
 // single rigid bones hip-to-foot - keep `legs` modest (~1.3) or the straight
 // leg starts to read as stilts when it swings.
-const PROPORTIONS = { legs: 1.3, torso: 1.12, head: 0.88 };
+const PROPORTIONS = { legs: 1.45, torso: 1.18, head: 0.8 };
 
 export function applyCharacterProportions(holder) {
   const root = holder.findByName('root');
