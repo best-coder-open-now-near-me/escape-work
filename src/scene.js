@@ -209,8 +209,19 @@ export function createTileRenderer(app) {
   const wallGhost = makeMaterial(TILE_TYPES.wall.color, { opacity: 0.25 });
   // Full-size slabs with a few near-identical tints: surfaces read as
   // continuous carpet with subtle variation instead of a grid of tiles.
-  const floorMats = [-1, 0, 1].map((i) =>
-    makeMaterial(TILE_TYPES.floor.color.map((v) => Math.min(1, v + i * 0.018))));
+  // One set of tints per carpet color - tiles with a `carpet` field get
+  // their own set, everything else shares the base floor's.
+  const carpetMats = new Map();
+  function floorMatsFor(type) {
+    const def = TILE_TYPES[type];
+    const key = def?.carpet ? type : 'floor';
+    if (!carpetMats.has(key)) {
+      const base = def?.carpet || TILE_TYPES.floor.color;
+      carpetMats.set(key, [-1, 0, 1].map((i) =>
+        makeMaterial(base.map((v) => Math.min(1, v + i * 0.018)))));
+    }
+    return carpetMats.get(key);
+  }
 
   const surfaceMats = {};
   for (const [id, def] of Object.entries(SURFACES)) {
@@ -322,8 +333,8 @@ export function createTileRenderer(app) {
     return holder;
   }
 
-  function renderFloor(x, z) {
-    return addBox(floorMats[(x * 31 + z * 17) % 3], x, 0, z, 1, floorDef.height, 1);
+  function renderFloor(x, z, type = 'floor') {
+    return addBox(floorMatsFor(type)[(x * 31 + z * 17) % 3], x, 0, z, 1, floorDef.height, 1);
   }
 
   // Edge walls: thin partitions BETWEEN tiles (see grid.js). 'h' sits on the
@@ -350,6 +361,8 @@ export function createTileRenderer(app) {
   function renderMarker(x, z, type, { electrified = false, onAsync = null } = {}) {
     const def = TILE_TYPES[type];
     if (!def) return { kind: 'none', entities: [] };
+    // Carpet variants ARE the floor - renderFloor already drew them recolored.
+    if (def.carpet) return { kind: 'none', entities: [] };
     if (def.model) {
       placeModel(app, `assets/${def.model}.glb`, x, z, {
         scale: def.scale || 1, rotY: def.rotY || 0, lift: floorDef.height / 2,
@@ -440,7 +453,7 @@ export function buildLevel(app, grid) {
     for (let x = 0; x < grid.width; x++) {
       const type = grid.typeAt(x, z);
       if (type === null) continue;
-      r.renderFloor(x, z);
+      r.renderFloor(x, z, type);
       if (type === 'floor') continue;
       const res = r.renderMarker(x, z, type, { electrified: grid.isElectrified(x, z) });
       if (res.kind === 'wall') walls.push({ entity: res.entities[0], x, z, faded: false });
@@ -539,7 +552,7 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
 // legs and torso stretch, the head shrinks back toward realistic. Legs are
 // single rigid bones hip-to-foot - keep `legs` modest (~1.3) or the straight
 // leg starts to read as stilts when it swings.
-const PROPORTIONS = { legs: 1.45, torso: 1.18, head: 0.8, arms: 0.78 };
+const PROPORTIONS = { legs: 1.45, torso: 1.18, head: 0.8, arms: 0.7 };
 
 export function applyCharacterProportions(holder) {
   const root = holder.findByName('root');

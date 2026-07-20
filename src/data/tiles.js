@@ -23,7 +23,29 @@ export const TILE_TYPES = {
     height: 0.2,
     // Neutral office-carpet gray: dark enough that the toon lighting has
     // range to shade against, without tinting the whole scene warm.
-    color: [0.72, 0.72, 0.74],
+    color: [0.6, 0.6, 0.64],
+  },
+  // Carpet-variant floors: plain walkable floor whose `carpet` recolors the
+  // checkered carpet itself (nothing is drawn on top). Paint rooms with these
+  // to give them an identity - meeting-room blue, break-room terracotta,
+  // IT slate.
+  'meeting-floor': {
+    char: 'm',
+    height: 0.2,
+    color: [0.48, 0.55, 0.68],
+    carpet: [0.48, 0.55, 0.68],
+  },
+  'break-floor': {
+    char: 'k',
+    height: 0.2,
+    color: [0.64, 0.48, 0.38],
+    carpet: [0.64, 0.48, 0.38],
+  },
+  'it-floor': {
+    char: 'i',
+    height: 0.2,
+    color: [0.4, 0.42, 0.5],
+    carpet: [0.4, 0.42, 0.5],
   },
   exit: {
     char: '>',
