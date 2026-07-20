@@ -446,33 +446,28 @@ export function createTileRenderer(app) {
   };
 }
 
-// Builds the full scene for a parsed grid using the shared renderer. Returns
-// the wall list, the occlusion-fade updater, and runtime hooks.
-export function buildLevel(app, grid) {
-  const r = createTileRenderer(app);
-  const walls = [];
-  const surfaceVisuals = new Map(); // "x,z" -> entity
-  const propVisuals = new Map();
-
-  // Carpet flows under items: a desk inside the meeting room should sit on
-  // meeting-room carpet, not punch a gray hole in the zone. Seed from the
-  // carpet tiles themselves, then let every non-plain-floor tile inherit the
-  // most common carpet among its 4-neighbours for a few passes, so multi-tile
-  // furniture clusters resolve from their edges inward. Plain floor never
-  // inherits - zone borders stay where the level painted them.
-  const carpetAt = new Map(); // "x,z" -> carpet tile type
-  for (let z = 0; z < grid.height; z++) {
-    for (let x = 0; x < grid.width; x++) {
-      const t = grid.typeAt(x, z);
+// Carpet flows under items: a desk inside the meeting room should sit on
+// meeting-room carpet, not punch a gray hole in the zone. Seed from the
+// carpet tiles themselves, then let every non-plain-floor tile inherit the
+// most common carpet among its 4-neighbours for a few passes, so multi-tile
+// furniture clusters resolve from their edges inward. Plain floor never
+// inherits - zone borders stay where the level painted them. Shared by the
+// game (buildLevel) and the editor, so both show the same floors.
+// `typeAt(x, z)` -> tile type id or null for void; returns "x,z" -> type.
+export function computeCarpetZones(typeAt, width, height) {
+  const carpetAt = new Map();
+  for (let z = 0; z < height; z++) {
+    for (let x = 0; x < width; x++) {
+      const t = typeAt(x, z);
       if (t && TILE_TYPES[t]?.carpet) carpetAt.set(x + ',' + z, t);
     }
   }
   for (let pass = 0; pass < 3; pass++) {
     const found = [];
-    for (let z = 0; z < grid.height; z++) {
-      for (let x = 0; x < grid.width; x++) {
+    for (let z = 0; z < height; z++) {
+      for (let x = 0; x < width; x++) {
         const key = x + ',' + z;
-        const t = grid.typeAt(x, z);
+        const t = typeAt(x, z);
         if (t === null || t === 'floor' || carpetAt.has(key)) continue;
         const counts = new Map();
         for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
@@ -487,6 +482,18 @@ export function buildLevel(app, grid) {
     if (!found.length) break;
     for (const [key, t] of found) carpetAt.set(key, t);
   }
+  return carpetAt;
+}
+
+// Builds the full scene for a parsed grid using the shared renderer. Returns
+// the wall list, the occlusion-fade updater, and runtime hooks.
+export function buildLevel(app, grid) {
+  const r = createTileRenderer(app);
+  const walls = [];
+  const surfaceVisuals = new Map(); // "x,z" -> entity
+  const propVisuals = new Map();
+
+  const carpetAt = computeCarpetZones(grid.typeAt, grid.width, grid.height);
 
   for (let z = 0; z < grid.height; z++) {
     for (let x = 0; x < grid.width; x++) {
