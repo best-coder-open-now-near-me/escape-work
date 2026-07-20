@@ -10,7 +10,7 @@ import { TILE_TYPES } from './data/tiles.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { LEVELS } from './data/levels.js';
 import { createControls } from './controls.js';
-import { createTileRenderer } from './scene.js';
+import { createTileRenderer, computeCarpetZones } from './scene.js';
 import { parseLevel, parseWallRuns, compressWallRuns } from './grid.js';
 import { say } from './ui.js';
 
@@ -71,6 +71,19 @@ export function startEditor(app, levelData, stashKey) {
     return s;
   }
 
+  // Live carpet preview: the game lets carpet flow under items (see
+  // computeCarpetZones in scene.js), so the editor must too - otherwise every
+  // prop punches a gray hole in its room. The effective type grid matches
+  // what parseLevel produces: actor tiles are plain floor, spaces are void.
+  let carpet = new Map();
+  const effectiveTypeAt = (x, z) => {
+    const ch = rows[z]?.[x];
+    if (ch === undefined || ch === ' ') return null;
+    if (ch === PLAYER_CHAR || enemyByChar[ch]) return 'floor';
+    return tileByChar[ch] || 'floor';
+  };
+  const computeCarpet = () => computeCarpetZones(effectiveTypeAt, width, height);
+
   // --- per-cell rendering --------------------------------------------------------
   const cellEntities = new Map(); // "x,z" -> [entities]
   const cellVersion = new Map(); // guards async model loads against repaints
@@ -93,7 +106,8 @@ export function startEditor(app, levelData, stashKey) {
     const ch = rows[z][x];
     if (ch === ' ') return;
     const isActor = ch === PLAYER_CHAR || !!enemyByChar[ch];
-    out.push(renderer.renderFloor(x, z, isActor ? 'floor' : tileByChar[ch] || 'floor'));
+    // Inherited carpet wins, exactly as buildLevel renders it in the game.
+    out.push(renderer.renderFloor(x, z, carpet.get(key) || (isActor ? 'floor' : tileByChar[ch] || 'floor')));
     if (ch === PLAYER_CHAR) {
       out.push(addBox(playerMat, x, 0.35, z, 0.55, 0.5, 0.55));
     } else if (enemyByChar[ch]) {
@@ -103,6 +117,10 @@ export function startEditor(app, levelData, stashKey) {
       if (type === 'floor') return;
       const res = renderer.renderMarker(x, z, type, {
         electrified: electrified.has(key),
+        surfaceAt: (sx, sz) => {
+          const c = rows[sz]?.[sx];
+          return c && c !== ' ' ? TILE_TYPES[tileByChar[c]]?.surface || null : null;
+        },
         onAsync: (holder) => {
           // The cell may have been repainted while the model loaded.
           if (cellVersion.get(key) !== version) holder.destroy();
@@ -175,11 +193,26 @@ export function startEditor(app, levelData, stashKey) {
     }
   }
 
+  // Same diff-and-rerender for inherited carpet: painting carpet (or erasing
+  // it) recolors the floor under nearby props, exactly as the game would.
+  function refreshCarpet(skipX = null, skipZ = null) {
+    const next = computeCarpet();
+    const dirty = new Set();
+    for (const [k, t] of next) if (carpet.get(k) !== t) dirty.add(k);
+    for (const k of carpet.keys()) if (!next.has(k)) dirty.add(k);
+    carpet = next;
+    for (const k of dirty) {
+      const [cx, cz] = k.split(',').map(Number);
+      if (cx !== skipX || cz !== skipZ) renderCell(cx, cz);
+    }
+  }
+
   function renderAll() {
     for (const list of cellEntities.values()) for (const e of list) e.destroy();
     cellEntities.clear();
     cellVersion.clear();
     electrified = computeElectrifiedSet();
+    carpet = computeCarpet();
     for (let z = 0; z < height; z++) for (let x = 0; x < width; x++) renderCell(x, z);
     renderAllEdges();
     updateSizeLabel();
@@ -220,10 +253,21 @@ export function startEditor(app, levelData, stashKey) {
       }
     }
     rows[z][x] = ch;
-    // Conduction can change anywhere a pool connects - recompute first so the
-    // painted cell renders with fresh state (live preview of cable + water).
+    // Conduction and carpet zones can change beyond the painted cell -
+    // recompute first so everything renders with fresh state (live preview
+    // of cable + water, carpet flowing under a just-placed desk).
     refreshElectrified(x, z);
+    refreshCarpet(x, z);
     renderCell(x, z);
+    // Pool shapes depend on same-surface neighbours (see addPool in
+    // scene.js) - repaint nearby spills so necks form and dissolve live.
+    for (let dz = -2; dz <= 2; dz++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        if (dx === 0 && dz === 0) continue;
+        const nc = rows[z + dz]?.[x + dx];
+        if (nc && nc !== ' ' && TILE_TYPES[tileByChar[nc]]?.surface) renderCell(x + dx, z + dz);
+      }
+    }
   }
 
   // --- resizing (right/bottom edges; new cells are open floor - the world
@@ -255,7 +299,7 @@ export function startEditor(app, levelData, stashKey) {
   // --- camera / input ----------------------------------------------------------------
   // The partition brush paints the edge nearest the click; every other brush
   // paints the tile. Right-click erases (the nearest partition, or the cell).
-  createControls({
+  const controls = createControls({
     app,
     canvas: document.getElementById('app'),
     focus: { x: (levelData.map[0].length - 1) / 2, z: (levelData.map.length - 1) / 2 },
@@ -415,6 +459,12 @@ export function startEditor(app, levelData, stashKey) {
     get size() { return { width, height }; },
     get brush() { return brush; },
     get walls() { return compressWallRuns(hWalls, vWalls); },
+    carpetAt: (x, z) => carpet.get(x + ',' + z) || null,
+    // World point -> screen pixel, so tests can click precise ground points.
+    project(x, z) {
+      const s = controls.cameraEntity.camera.worldToScreen(new pc.Vec3(x, 0, z));
+      return { x: s.x, y: s.y };
+    },
     charAt: (x, z) => rows[z]?.[x],
     toJson,
   };
