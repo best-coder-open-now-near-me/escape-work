@@ -25,9 +25,11 @@ src/
     classes.js         player classes: base stats + action ids
     actions.js         combat actions: attack/defend/heal definitions
   grid.js            Level parsing, terrain + edge-wall queries (pure logic)
-  pathfinding.js     8-dir Dijkstra, corner-cut + edge-wall safe (pure logic)
+  pathfinding.js     8-dir Dijkstra, string-pulling smoother, free-point
+                     clamping, distance-budget truncation      (pure logic)
   stats.js           Character sheet, XP/levels, damage       (pure logic)
-  actors.js          GridActor base -> PlayerActor, EnemyActor; procedural
+  actors.js          GridActor base -> PlayerActor, EnemyActor; smoothed
+                     any-angle waypoint movement for everyone; procedural
                      animation layer (walk bob, lunge, flinch, death topple)
   scene.js           Engine boot, tile meshes, occlusion fade, model loading,
                      combat FX (thrown projectiles + trails, damage popups)
@@ -66,8 +68,15 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   shoves, conduction pools and fire spread all consult them. Partitions are
   chest height: combat throws sail OVER them (`hasLos` stays terrain-only),
   and `#` cell walls still exist for solid blocks that also stop throws.
-- **Actors**: extend `GridActor` for anything that lives on a tile and owns a
-  model (it provides slide-to-tile movement and facing). The holder entity
+- **Movement is free-form, the grid is the data model.** Actors stand at
+  continuous points (a click walks you to the exact spot, clamped clear of
+  walls by `clampToClearance`); routes come from grid Dijkstra and are
+  string-pulled by `smoothPath` into any-angle runs. The logical tile is
+  DERIVED from the continuous position (rounded) and drives everything
+  tile-keyed: surfaces, hazards, adjacency, LOS, combat triggers.
+- **Actors**: extend `GridActor` for anything that lives on the grid and owns
+  a model (it provides smoothed waypoint-path movement, shove glides via
+  `pushTo`, and facing). The holder entity
   carries position/facing; the model child inside carries procedural animation
   (distance-driven walk bob, `lunge()`, `flinch()` with a per-instance red
   flash, death topple) - so animation can never fight movement.
@@ -103,8 +112,11 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   scene.js); all damage/heals show floating popups (`spawnDamageText`). The
   FX layer is purely cosmetic - gameplay resolves instantly.
 - **Combat** is tactical and on-map: each action in `data/actions.js` carries
-  an `ap` cost; classes/enemies have per-turn AP budgets. Moving costs 1 AP a
-  tile (2 through sticky surfaces), melee needs adjacency (clicking a distant
+  an `ap` cost; classes/enemies have per-turn AP budgets. Movement is priced
+  by DISTANCE - 1 AP per tile-length along the smoothed route (2 through
+  sticky surfaces), stopping at any point when the budget runs out
+  (`truncateByBudget`); hovering the floor previews the route and cost.
+  Melee needs adjacency (clicking a distant
   enemy walks you in), throws need range 5 + line of sight. Enemies within
   5 tiles join the fight, have persistent map HP (EnemyActor.hp), take
   surface damage, and act in a sequenced AI phase. Everyone can Shove (2 AP):

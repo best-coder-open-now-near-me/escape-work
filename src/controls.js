@@ -5,7 +5,7 @@ import { applyCameraPostFx } from './scene.js';
 
 const pc = window.pc;
 
-export function createControls({ app, canvas, focus, onLeftClickTile, onRightClickTile, onAnyLeftPress, onLeftDragTile }) {
+export function createControls({ app, canvas, focus, onLeftClickTile, onRightClickTile, onAnyLeftPress, onLeftDragTile, onHover }) {
   // Rig: camYaw (spins around the focus) -> camPitch (tilts) -> camera (sits
   // back at a fixed distance, looking at the focus).
   const camYaw = new pc.Entity('camYaw');
@@ -80,6 +80,8 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
       apply();
     } else if (leftHeld && onLeftDragTile && onCanvas(e)) {
       onLeftDragTile(screenToTile(e.x, e.y), screenToGround(e.x, e.y));
+    } else if (onHover && onCanvas(e)) {
+      onHover(screenToGround(e.x, e.y), e.x, e.y);
     }
   });
   app.mouse.on(pc.EVENT_MOUSEWHEEL, (e) => {

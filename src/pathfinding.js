@@ -99,7 +99,7 @@ export function segmentClear(isWalkable, ax, az, bx, bz, edgeOpen = null) {
 }
 
 // A character has width: check the centreline plus two offset lines.
-const BODY_RADIUS = 0.3;
+export const BODY_RADIUS = 0.3;
 function walkableCorridor(isWalkable, ax, az, bx, bz, edgeOpen) {
   const dx = bx - ax;
   const dz = bz - az;
@@ -109,6 +109,90 @@ function walkableCorridor(isWalkable, ax, az, bx, bz, edgeOpen) {
   return segmentClear(isWalkable, ax, az, bx, bz, edgeOpen)
     && segmentClear(isWalkable, ax + ox, az + oz, bx + ox, bz + oz, edgeOpen)
     && segmentClear(isWalkable, ax - ox, az - oz, bx - ox, bz - oz, edgeOpen);
+}
+
+// Standing spots are free points, not tile centres - but a body must stay
+// clear of solid cells and edge walls. Clamp a point within its cell away
+// from every blocked boundary; solid diagonal neighbours repel from their
+// corner too. Returns [x, z].
+export function clampToClearance(isOpen, edgeOpen, px, pz, radius = BODY_RADIUS) {
+  const cx = Math.round(px);
+  const cz = Math.round(pz);
+  const blocked = (nx, nz) => !isOpen(nx, nz) || (edgeOpen && !edgeOpen(cx, cz, nx, nz));
+  let x = px;
+  let z = pz;
+  if (blocked(cx + 1, cz)) x = Math.min(x, cx + 0.5 - radius);
+  if (blocked(cx - 1, cz)) x = Math.max(x, cx - 0.5 + radius);
+  if (blocked(cx, cz + 1)) z = Math.min(z, cz + 0.5 - radius);
+  if (blocked(cx, cz - 1)) z = Math.max(z, cz - 0.5 + radius);
+  for (const [dx, dz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+    if (isOpen(cx + dx, cz + dz)) continue;
+    const kx = cx + dx * 0.5;
+    const kz = cz + dz * 0.5;
+    const vx = x - kx;
+    const vz = z - kz;
+    const d = Math.hypot(vx, vz);
+    if (d >= radius) continue;
+    if (d < 1e-6) { x = cx; z = cz; break; }
+    x = kx + (vx / d) * radius;
+    z = kz + (vz / d) * radius;
+  }
+  return [x, z];
+}
+
+// Where to actually STAND in a goal tile when approaching a target: at
+// `reach` distance from the target's body along the approach line - walk up
+// TO them, not to the middle of the neighbouring square. The point is kept
+// inside the goal tile so the derived logical tile (and every tile-keyed
+// adjacency check) is unaffected, then clamped clear of walls.
+export function approachPoint(isOpen, edgeOpen, gx, gz, tx, tz, reach = 0.85) {
+  const dx = gx - tx;
+  const dz = gz - tz;
+  const d = Math.hypot(dx, dz);
+  let px = gx;
+  let pz = gz;
+  if (d > 1e-6) {
+    px = Math.min(gx + 0.42, Math.max(gx - 0.42, tx + (dx / d) * reach));
+    pz = Math.min(gz + 0.42, Math.max(gz - 0.42, tz + (dz / d) * reach));
+  }
+  return clampToClearance(isOpen, edgeOpen, px, pz);
+}
+
+// Walk a (smoothed) polyline charging `rate(x, z)` per unit of DISTANCE,
+// sampled from the cell under each slice. Returns the affordable prefix -
+// which may end mid-segment, so a move can stop at any point when the budget
+// runs dry - plus the exact cost spent, whether the whole path was afforded,
+// and the unaffordable remainder (for previews).
+export function truncateByBudget(path, budget, rate) {
+  const SLICE = 0.25; // sampling resolution along segments
+  const out = [path[0]];
+  let cost = 0;
+  for (let i = 1; i < path.length; i++) {
+    const [ax, az] = path[i - 1];
+    const [bx, bz] = path[i];
+    const len = Math.hypot(bx - ax, bz - az);
+    if (len < 1e-9) continue;
+    const n = Math.max(1, Math.ceil(len / SLICE));
+    const step = len / n;
+    let t = 0;
+    for (let s = 0; s < n; s++) {
+      const mid = (t + step / 2) / len;
+      const r = rate(Math.round(ax + (bx - ax) * mid), Math.round(az + (bz - az) * mid));
+      const c = step * r;
+      if (cost + c > budget + 1e-9) {
+        const within = r > 0 ? Math.max(0, (budget - cost) / r) : step;
+        const k = (t + within) / len;
+        cost += within * r;
+        const cut = [ax + (bx - ax) * k, az + (bz - az) * k];
+        if (k > 1e-6) out.push(cut);
+        return { points: out, cost, done: false, tail: [cut, ...path.slice(i)] };
+      }
+      cost += c;
+      t += step;
+    }
+    out.push([bx, bz]);
+  }
+  return { points: out, cost, done: true, tail: null };
 }
 
 // "String pulling": collapse a tile-by-tile path into the fewest straight

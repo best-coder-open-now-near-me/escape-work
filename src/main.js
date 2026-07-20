@@ -13,7 +13,7 @@ import { ENEMY_TYPES } from './data/enemies.js';
 import { CLASSES } from './data/classes.js';
 import { ACTIONS } from './data/actions.js';
 import { parseLevel } from './grid.js';
-import { findPath, smoothPath, segmentClear, DIRS8 } from './pathfinding.js';
+import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
 import { createSheet, gainXp, applyDamage } from './stats.js';
 import { PlayerActor, EnemyActor } from './actors.js';
 import { createApp, buildLevel, placeModel, applyCharacterProportions, throwProjectile, spawnDamageText } from './scene.js';
@@ -192,6 +192,21 @@ function startGame(level) {
     }
   }
 
+  // Smooth a raw tile path into any-angle runs, starting from where the
+  // player's body actually stands - not their tile centre, which they may be
+  // nowhere near after a free-point stop.
+  function smoothFromBody(p) {
+    const pos = player.entity?.getPosition();
+    if (pos) p = [[pos.x, pos.z], ...p.slice(1)];
+    return smoothPath(clearOfHazards, p, grid.edgeOpen);
+  }
+  // Where the body may actually stand: the exact clicked point, pulled in
+  // from walls/partitions so the model never clips them.
+  const clampPoint = (x, z) => clampToClearance(grid.terrainOpen, grid.edgeOpen, x, z);
+  // Walk-up landing spot: at reach of the target's body inside goal tile
+  // (gx, gz), instead of the tile's dead centre.
+  const approachTo = (gx, gz, tx, tz) => approachPoint(grid.terrainOpen, grid.edgeOpen, gx, gz, tx, tz);
+
   // Walk within reach of (x, z), then run the interaction.
   function approachAndDo(x, z, run) {
     if (!sheet || inCombat || gameOver) return;
@@ -209,18 +224,31 @@ function startGame(level) {
     }
     if (!best || best.length < 2) return;
     pendingAction = { x, z, run };
-    const s = smoothPath(clearOfHazards, best, grid.edgeOpen);
+    const [gx, gz] = best[best.length - 1];
+    best[best.length - 1] = approachTo(gx, gz, x, z);
+    const s = smoothFromBody(best);
     player.setPath(s);
     lastPath = s;
   }
 
-  function moveTo(tile) {
+  // Walk to the exact clicked point (BG3-style free movement), not the tile
+  // centre: route on the grid, then swap the final waypoint for the clamped
+  // click point. A click inside the current tile just shuffles over.
+  function moveTo(tile, point = null) {
     if (!tile || !sheet || inCombat || gameOver || !isWalkable(tile.x, tile.z)) return;
     pendingAction = null;
+    if (point && tile.x === player.x && tile.z === player.z && player.entity) {
+      const pos = player.entity.getPosition();
+      const s = [[pos.x, pos.z], clampPoint(point.x, point.z)];
+      player.setPath(s);
+      lastPath = s;
+      return;
+    }
     const p = findPath(isWalkable, player.x, player.z, tile.x, tile.z, hazardCost, grid.stepOpen);
     if (p && p.length > 1) {
+      if (point) p[p.length - 1] = clampPoint(point.x, point.z);
       // Smoothed: straight any-angle runs wherever line of sight is clear.
-      const s = smoothPath(clearOfHazards, p, grid.edgeOpen);
+      const s = smoothFromBody(p);
       player.setPath(s);
       lastPath = s;
     }
@@ -241,7 +269,10 @@ function startGame(level) {
     }
     if (!best) return;
     if (best.length > 1) {
-      const s = smoothPath(clearOfHazards, best, grid.edgeOpen);
+      const [gx, gz] = best[best.length - 1];
+      const bp = en.entity?.getPosition() || en;
+      best[best.length - 1] = approachTo(gx, gz, bp.x, bp.z);
+      const s = smoothFromBody(best);
       player.setPath(s);
       lastPath = s;
     } else {
@@ -257,6 +288,7 @@ function startGame(level) {
     const en = adjacentEnemy();
     if (!en) return;
     player.clearPath();
+    for (const e of enemies) e.clearPath(); // freeze any in-flight wander
     pendingAction = null;
     inCombat = true;
     ui.hideMenu();
@@ -277,6 +309,23 @@ function startGame(level) {
       world: {
         isWalkable,
         findPath: (sx, sz, tx, tz) => findPath(isWalkable, sx, sz, tx, tz, hazardCost, grid.stepOpen),
+        // Enemy routing: never through the player's tile.
+        findEnemyPath: (sx, sz, tx, tz) => findPath(
+          (x, z) => isWalkable(x, z) && !(x === player.x && z === player.z),
+          sx, sz, tx, tz, hazardCost, grid.stepOpen),
+        // Any-angle smoothing for combat walks. The player variant starts
+        // from their body position; the enemy variant treats the enemy's own
+        // tile as open (they're standing on it) and starts from their body.
+        smooth: (p) => smoothFromBody(p),
+        smoothEnemy: (en, p) => {
+          const pos = en.entity?.getPosition();
+          if (pos) p = [[pos.x, pos.z], ...p.slice(1)];
+          return smoothPath(
+            (x, z) => (x === en.x && z === en.z ? grid.terrainOpen(x, z) : clearOfHazards(x, z)),
+            p, grid.edgeOpen);
+        },
+        clampPoint,
+        approach: approachTo,
         // Partitions (edge walls) are chest height: they block movement but
         // not throws - lob paper right over the cubicle wall.
         hasLos: (ax, az, bx, bz) => segmentClear(grid.terrainOpen, ax, az, bx, bz),
@@ -419,19 +468,22 @@ function startGame(level) {
     canvas: document.getElementById('app'),
     focus: grid.playerSpawn,
     onAnyLeftPress: () => ui.hideMenu(),
-    onLeftClickTile: (tile) => {
+    onLeftClickTile: (tile, point) => {
       if (!tile || !sheet || gameOver) return;
       if (inCombat) {
         const en = enemyAt(tile.x, tile.z);
         if (en) combat?.handleEnemyClick(en);
-        else combat?.handleTileClick(tile);
+        else combat?.handleTileClick(tile, point);
         return;
       }
       const en = enemyAt(tile.x, tile.z);
       if (en) confront(en);
-      else moveTo(tile);
+      else moveTo(tile, point);
     },
-    onRightClickTile: (tile, sx, sy) => {
+    onHover: (point, sx, sy) => {
+      if (inCombat && combat) combat.handleHover(point, sx, sy);
+    },
+    onRightClickTile: (tile, sx, sy, point) => {
       if (!tile || !sheet || inCombat || gameOver) return;
       const en = enemyAt(tile.x, tile.z);
       if (en) {
@@ -448,7 +500,7 @@ function startGame(level) {
             ? ELECTRIFIED.examine
             : (surfId && SURFACES[surfId].examine) || 'Standard-issue office carpet. Faintly damp.';
         const items = [
-          { label: 'Walk here', action: () => moveTo(tile) },
+          { label: 'Walk here', action: () => moveTo(tile, point) },
           { label: 'Examine', action: () => ui.say(flavor) },
         ];
         // The Smoker's lighter turns any flammable surface into an option.
@@ -502,11 +554,24 @@ function startGame(level) {
     player.update(dt, onPlayerStep);
     const world = {
       paused: inCombat || gameOver,
-      terrainOpen: grid.terrainOpen,
       isWalkable,
       isHazard,
-      stepOpen: grid.stepOpen,
       playerTile: player,
+      occupied: (x, z, self) =>
+        (x === player.x && z === player.z)
+        || enemies.some((e) => e.alive && e !== self && e.x === x && e.z === z),
+      // A wander route never crosses hazards, other actors, or the player's
+      // tile; the enemy's own start tile counts as open. Returns it smoothed.
+      findWanderPath: (en, tx, tz) => {
+        const open = (x, z) => (x === en.x && z === en.z
+          ? grid.terrainOpen(x, z)
+          : clearOfHazards(x, z) && !(x === player.x && z === player.z));
+        const p = findPath(open, en.x, en.z, tx, tz, null, grid.stepOpen);
+        if (!p || p.length < 2) return null;
+        // amble to a loose spot in the tile, not its dead centre
+        p[p.length - 1] = clampPoint(tx + (Math.random() - 0.5) * 0.7, tz + (Math.random() - 0.5) * 0.7);
+        return smoothPath(open, p, grid.edgeOpen);
+      },
     };
     let anyoneMoved = false;
     for (const en of enemies) {
@@ -576,6 +641,15 @@ function startGame(level) {
   // Small read-only handle for tests and console poking.
   window.__game = {
     get playerTile() { return { x: player.x, z: player.z }; },
+    get playerPos() {
+      const p = player.entity?.getPosition();
+      return p ? { x: p.x, z: p.z } : { x: player.x, z: player.z };
+    },
+    // World point -> screen pixel, so tests can click precise ground points.
+    project(x, z) {
+      const s = controls.cameraEntity.camera.worldToScreen(new window.pc.Vec3(x, 0, z));
+      return { x: s.x, y: s.y };
+    },
     get inCombat() { return inCombat; },
     get gameOver() { return gameOver; },
     get lastPath() { return lastPath; },
@@ -583,6 +657,11 @@ function startGame(level) {
     get stats() { return sheet ? { ...sheet } : null; },
     get playerSpeed() { return player.speed; },
     get burning() { return runtime.burningCount; },
-    get enemies() { return enemies.map((e) => ({ name: e.def.name, x: e.x, z: e.z, alive: e.alive })); },
+    get enemies() {
+      return enemies.map((e) => {
+        const p = e.entity?.getPosition();
+        return { name: e.def.name, x: e.x, z: e.z, px: p?.x, pz: p?.z, alive: e.alive };
+      });
+    },
   };
 }
