@@ -21,9 +21,9 @@ export const TILE_TYPES = {
   floor: {
     char: '.',
     height: 0.2,
-    // Warm office-carpet greige: near-white washed the whole scene out and
-    // gave the toon lighting nothing to shade against.
-    color: [0.76, 0.74, 0.68],
+    // Neutral office-carpet gray: dark enough that the toon lighting has
+    // range to shade against, without tinting the whole scene warm.
+    color: [0.72, 0.72, 0.74],
   },
   exit: {
     char: '>',
