@@ -33,6 +33,11 @@ export class GridActor {
     this.entity = entity;
     this.visual = entity.children[0] || entity;
     this.animC = entity.findComponent('anim') || null;
+    // The idle clip animates only torso/arms/head - it has NO leg channels,
+    // so nothing ever writes the legs back after a walk stops mid-stride.
+    // updateAnim eases these home manually whenever we're idling.
+    this.legL = entity.findByName('leg-left');
+    this.legR = entity.findByName('leg-right');
     this.yaw = this.targetYaw = entity.getEulerAngles().y;
     // Clone materials so damage flashes hit THIS character, not every
     // character instantiated from the same .glb.
@@ -103,7 +108,19 @@ export class GridActor {
     if (this.fx?.kind === 'death') this.setClip('idle', 0.2);
     else if (this.fx?.kind === 'lunge') this.setClip('attack-melee-right', 0.05, 1.3);
     else if (moved > 1e-5) this.setClip('walk', 0.15, this.speed * 0.5);
-    else this.setClip('idle');
+    else this.setClip('idle', 0.2);
+    // Settle the legs into stance while idling - the idle clip never touches
+    // them (no leg curves), so a walk or attack would otherwise leave them
+    // frozen mid-stride.
+    if (this.clip === 'idle') {
+      const k = Math.min(1, dt * 12);
+      for (const leg of [this.legL, this.legR]) {
+        if (!leg) continue;
+        const q = leg.getLocalRotation();
+        q.slerp(q, pc.Quat.IDENTITY, k);
+        leg.setLocalRotation(q);
+      }
+    }
     let bobY = 0;
     let forward = 0;
     let pitch = 0;

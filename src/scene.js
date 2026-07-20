@@ -19,23 +19,28 @@ export function createApp(canvas) {
   app.setCanvasResolution(pc.RESOLUTION_AUTO);
   window.addEventListener('resize', () => app.resizeCanvas());
 
-  // Ambient fills the shadows; a shadow-casting sun grounds everything and
-  // gives imported PBR models real shading. Tuned for the cel look: a lower,
-  // slightly cool ambient against a neutral sun deepens the contrast between
-  // toon bands - the flat 0.56 gray fill washed them out.
+  // Office lighting, split across two directionals: an angled key light does
+  // the shading (toon bands need side/top contrast) but casts NO shadows,
+  // while a near-vertical "ceiling" light owns the shadows - overhead office
+  // lights pool shadows at your feet, they don't rake them across the carpet
+  // like a sunset. Ambient stays low and slightly cool for band contrast.
   app.scene.ambientLight = new pc.Color(0.44, 0.46, 0.56);
-  const sun = new pc.Entity('sun');
-  sun.addComponent('light', {
+  const key = new pc.Entity('key-light');
+  key.addComponent('light', { type: 'directional', intensity: 1.0, castShadows: false });
+  key.setEulerAngles(55, 35, 0);
+  app.root.addChild(key);
+  const ceiling = new pc.Entity('ceiling-light');
+  ceiling.addComponent('light', {
     type: 'directional',
-    intensity: 1.45,
+    intensity: 0.5,
     castShadows: true,
     shadowResolution: 2048,
     shadowDistance: 70,
     shadowBias: 0.2,
     normalOffsetBias: 0.06,
   });
-  sun.setEulerAngles(55, 35, 0);
-  app.root.addChild(sun);
+  ceiling.setEulerAngles(84, 35, 0);
+  app.root.addChild(ceiling);
   return app;
 }
 
@@ -449,11 +454,45 @@ export function buildLevel(app, grid) {
   const surfaceVisuals = new Map(); // "x,z" -> entity
   const propVisuals = new Map();
 
+  // Carpet flows under items: a desk inside the meeting room should sit on
+  // meeting-room carpet, not punch a gray hole in the zone. Seed from the
+  // carpet tiles themselves, then let every non-plain-floor tile inherit the
+  // most common carpet among its 4-neighbours for a few passes, so multi-tile
+  // furniture clusters resolve from their edges inward. Plain floor never
+  // inherits - zone borders stay where the level painted them.
+  const carpetAt = new Map(); // "x,z" -> carpet tile type
+  for (let z = 0; z < grid.height; z++) {
+    for (let x = 0; x < grid.width; x++) {
+      const t = grid.typeAt(x, z);
+      if (t && TILE_TYPES[t]?.carpet) carpetAt.set(x + ',' + z, t);
+    }
+  }
+  for (let pass = 0; pass < 3; pass++) {
+    const found = [];
+    for (let z = 0; z < grid.height; z++) {
+      for (let x = 0; x < grid.width; x++) {
+        const key = x + ',' + z;
+        const t = grid.typeAt(x, z);
+        if (t === null || t === 'floor' || carpetAt.has(key)) continue;
+        const counts = new Map();
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const n = carpetAt.get((x + dx) + ',' + (z + dz));
+          if (n) counts.set(n, (counts.get(n) || 0) + 1);
+        }
+        let best = null;
+        for (const [n, c] of counts) if (!best || c > counts.get(best)) best = n;
+        if (best) found.push([key, best]);
+      }
+    }
+    if (!found.length) break;
+    for (const [key, t] of found) carpetAt.set(key, t);
+  }
+
   for (let z = 0; z < grid.height; z++) {
     for (let x = 0; x < grid.width; x++) {
       const type = grid.typeAt(x, z);
       if (type === null) continue;
-      r.renderFloor(x, z, type);
+      r.renderFloor(x, z, carpetAt.get(x + ',' + z) || type);
       if (type === 'floor') continue;
       const res = r.renderMarker(x, z, type, { electrified: grid.isElectrified(x, z) });
       if (res.kind === 'wall') walls.push({ entity: res.entities[0], x, z, faded: false });
