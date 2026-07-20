@@ -129,7 +129,7 @@ function startGame(level) {
   const lift = floorHeight / 2;
   for (const en of enemies) {
     placeModel(app, `assets/characters/${en.def.model}.glb`, en.x, en.z, {
-      lift, rotY: -90, onReady: (e) => { applyCharacterProportions(e); en.attach(e); },
+      lift, rotY: -90, animate: true, onReady: (e) => { applyCharacterProportions(e); en.attach(e); },
     });
   }
   // (Furniture is no longer set dressing here - props are solid tiles in the
@@ -138,7 +138,7 @@ function startGame(level) {
   // --- game flow ----------------------------------------------------------------
   function spawnPlayerModel() {
     placeModel(app, `assets/characters/${sheet.model}.glb`, player.x, player.z, {
-      lift, rotY: 90, onReady: (e) => { applyCharacterProportions(e); player.attach(e); },
+      lift, rotY: 90, animate: true, onReady: (e) => { applyCharacterProportions(e); player.attach(e); },
     });
     ui.updateStatsHud(sheet);
   }

@@ -72,6 +72,91 @@ function toonifyEntity(entity) {
   }
 }
 
+// Ink outlines, inverted-hull style: every .glb model is drawn a second time
+// with its vertices pushed out along their normals and front faces culled, in
+// flat black - only the silhouette shell survives, reading as a drawn ink
+// line. The copies share the originals' skin instances so they track skeletal
+// animation for free. Tiles and walls stay clean (their SSAO edge does that
+// work) - the ink belongs on characters and furniture.
+//
+// The custom transformVS chunk inflates in world space. It runs before the
+// normal chunks in the assembled shader, so the normal helpers are forward-
+// declared (their definitions arrive later from normalCoreVS/normalVS, which
+// exist whenever NORMALS is defined - true for this lit material's forward
+// pass; shadow/depth variants compile the un-inflated fallback).
+const OUTLINE_TRANSFORM_CHUNK = `
+#ifdef NORMALS
+vec3 getLocalNormal(vec3 vertexNormal);
+mat3 getNormalMatrix(mat4 modelMatrix);
+#endif
+vec4 evalWorldPosition(vec3 vertexPosition, mat4 modelMatrix) {
+    vec4 posW = modelMatrix * vec4(getLocalPosition(vertexPosition), 1.0);
+#ifdef NORMALS
+    vec3 worldN = normalize(getNormalMatrix(modelMatrix) * getLocalNormal(vec3(0.0)));
+    posW.xyz += worldN * 0.012;
+#endif
+    return posW;
+}
+vec4 getPosition() {
+    dModelMatrix = getModelMatrix();
+    vec4 posW = evalWorldPosition(vertex_position.xyz, dModelMatrix);
+    dPositionW = posW.xyz;
+    return matrix_viewProjection * posW;
+}
+vec3 getWorldPosition() {
+    return dPositionW;
+}
+`;
+
+let outlineMat = null;
+function getOutlineMat() {
+  if (outlineMat) return outlineMat;
+  outlineMat = new pc.StandardMaterial();
+  outlineMat.diffuse = new pc.Color(0, 0, 0);
+  outlineMat.specular = new pc.Color(0, 0, 0);
+  outlineMat.gloss = 0;
+  outlineMat.cull = pc.CULLFACE_FRONT;
+  outlineMat.shaderChunks.glsl.set('transformVS', OUTLINE_TRANSFORM_CHUNK);
+  outlineMat.update();
+  return outlineMat;
+}
+
+function addOutlines(holder) {
+  const mat = getOutlineMat();
+  const copies = [];
+  for (const rc of holder.findComponents('render')) {
+    for (const mi of rc.meshInstances) {
+      if (mi.material === mat) continue;
+      const omi = new pc.MeshInstance(mi.mesh, mat, mi.node);
+      if (mi.skinInstance) omi.skinInstance = mi.skinInstance;
+      copies.push(omi);
+    }
+  }
+  if (!copies.length) return;
+  // A sibling render component, NOT appended to the original's meshInstances:
+  // that setter destroys the instances it replaces.
+  const shell = new pc.Entity('outlines');
+  shell.addComponent('render', { meshInstances: copies, castShadows: false });
+  holder.addChild(shell);
+}
+
+// The character .glbs ship with a full baked clip set (idle, walk, attacks,
+// die, sit...). Wire the ones the game drives into an anim component with an
+// auto-generated state graph - actors switch states via GridActor.setClip.
+// First assignment ('idle') becomes the initial state.
+const ACTOR_CLIPS = ['idle', 'walk', 'attack-melee-right'];
+function setupAnim(inst, asset) {
+  const tracks = {};
+  for (const a of asset.resource.animations) {
+    if (a.resource) tracks[a.resource.name] = a.resource;
+  }
+  if (!tracks.idle) return;
+  inst.addComponent('anim', { activate: true });
+  for (const name of ACTOR_CLIPS) {
+    if (tracks[name]) inst.anim.assignAnimation(name, tracks[name]);
+  }
+}
+
 // Post stack on the game camera (also used by the editor - controls.js calls
 // this wherever the camera rig is built). SSAO grounds props and walls with
 // contact shading the flat toon lighting can't provide, a whisper of bloom
@@ -425,7 +510,7 @@ export function buildLevel(app, grid) {
 
 // Load a .glb, wrap it in a holder (so scaling/rotating is predictable), and
 // drop it on a tile. Reusable for every prop and character.
-export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY = 0, onReady = null } = {}) {
+export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY = 0, onReady = null, animate = false } = {}) {
   // Reuse the asset if this .glb was already requested (props repeat a lot,
   // and the editor repaints cells constantly).
   let asset = app.assets.find(url);
@@ -435,8 +520,11 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
   }
   asset.ready(() => {
     const holder = new pc.Entity(url);
-    holder.addChild(asset.resource.instantiateRenderEntity());
+    const inst = asset.resource.instantiateRenderEntity();
+    holder.addChild(inst);
     toonifyEntity(holder);
+    addOutlines(holder);
+    if (animate) setupAnim(inst, asset);
     holder.setLocalScale(scale, scale, scale);
     holder.setEulerAngles(0, rotY, 0);
     holder.setPosition(tileX, lift, tileZ);
@@ -464,11 +552,14 @@ export function applyCharacterProportions(holder) {
   const { legs, torso: torsoS, head: headS } = PROPORTIONS;
   legL.setLocalScale(1, legs, 1);
   if (legR) legR.setLocalScale(1, legs, 1);
-  // Legs stretch downward from the hip joint, so lift the whole rig by the
-  // extra leg length to keep the feet on the floor.
+  // Legs stretch downward from the hip joint, so lift the rig by the extra
+  // leg length to keep the feet on the floor. The lift goes on root's PARENT
+  // (the glTF scene node, which no clip touches) - animation clips write
+  // root's translation every frame and would stomp a lift applied to root.
   const hipY = legL.getLocalPosition().y;
-  const rp = root.getLocalPosition();
-  root.setLocalPosition(rp.x, rp.y + hipY * (legs - 1), rp.z);
+  const top = root.parent;
+  const tp = top.getLocalPosition();
+  top.setLocalPosition(tp.x, tp.y + hipY * (legs - 1), tp.z);
   torso.setLocalScale(1, torsoS, 1);
   // Torso children inherit its stretch, which would deform them: counter it
   // on the head (shrinking it outright) and on the arms (the rig T-poses, so
