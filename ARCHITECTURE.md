@@ -21,9 +21,10 @@ src/
     tiles.js           tile types: solidity, size, color, onEnter effects
     surfaces.js        surface layer (water/coffee/cable): effects, slow,
                        conduction pools + electrification interactions
-    enemies.js         enemy types: stats, model, attack sets, flavor
+    enemies.js         enemy types: stats, model, attack sets, loot, flavor
     classes.js         player classes: base stats + action ids
     actions.js         combat actions: attack/defend/heal definitions
+    items.js           items + container loot tables (heal/ammo/bonusDmg/flavor)
   grid.js            Level parsing, terrain + edge-wall queries (pure logic)
   pathfinding.js     8-dir Dijkstra, string-pulling smoother, free-point
                      clamping, distance-budget truncation      (pure logic)
@@ -130,6 +131,16 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   the previous floor's `next` to its id. Exits mid-campaign show FLOOR CLEAR
   and carry the character sheet to the next floor (progress persists in
   localStorage); the last floor's exit wins the run.
+- **Items/looting**: `data/items.js` holds ITEMS and LOOT_TABLES. A tile type
+  with `loot: '<table>'` (+ `label`) is rummageable - trash cans, printers,
+  desks; enemies with a `loot` list leave lootable bodies (corpses persist).
+  Hold **Alt** for BG3-style clickable labels over everything lootable
+  nearby; clicking a label or the object walks you into reach and loots.
+  **I** (or the bag button) opens the pockets: use (heal/ammo), examine, or
+  drop - drops become loose floor items the overlay sees. Effects the code
+  understands: `heal`, `ammo`, `bonusDmg` (passive while carried, best item
+  counts - see `damageBonus` in stats.js). `sheet.inventory` persists across
+  floors with the campaign save.
 - **Weapons/items**: extend `data/actions.js`; equipping = swapping ids in
   `sheet.actions` (see `stats.js`).
 - **New class**: entry in `data/classes.js` (stats, model, action ids) - the

@@ -12,11 +12,12 @@ import { createSurfaceRuntime } from './surfaces-runtime.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { CLASSES } from './data/classes.js';
 import { ACTIONS } from './data/actions.js';
+import { ITEMS, LOOT_TABLES, rollLoot } from './data/items.js';
 import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
 import { createSheet, gainXp, applyDamage } from './stats.js';
 import { PlayerActor, EnemyActor } from './actors.js';
-import { createApp, buildLevel, placeModel, applyCharacterProportions, throwProjectile, spawnDamageText } from './scene.js';
+import { createApp, buildLevel, placeModel, applyCharacterProportions, throwProjectile, spawnDamageText, placeDroppedItem } from './scene.js';
 import { createControls } from './controls.js';
 import { startCombat } from './combat.js';
 import { startEditor } from './editor.js';
@@ -85,6 +86,11 @@ function startGame(level) {
   let lastPath = null; // kept for debugging/tests
   let pendingAction = null; // walk-up interaction, runs on arrival
 
+  // --- looting state ------------------------------------------------------------
+  const INV_CAP = 10;
+  const containerLoot = new Map(); // "x,z" -> remaining item ids (rolled on first rummage)
+  const looseItems = []; // { x, z, id, entity } - dropped/overflowed floor items
+
   function abortCombat() {
     if (combat) {
       combat.abort();
@@ -146,7 +152,8 @@ function startGame(level) {
   function onClassPicked(classId) {
     sheet = createSheet(classId);
     spawnPlayerModel();
-    ui.say(`${sheet.className}. Now get out of here.`);
+    invPanel.refresh(sheet);
+    ui.say(`${sheet.className}. Now get out of here. (Alt shows loot, I opens pockets.)`);
   }
 
   // Blowing up a printer: flash, clear the tile, flatten anyone beside it.
@@ -280,6 +287,145 @@ function startGame(level) {
     }
   }
 
+  // --- looting ------------------------------------------------------------------
+  const itemName = (id) => ITEMS[id]?.name || id;
+  const looseAt = (x, z) => looseItems.filter((li) => li.x === x && li.z === z);
+  const corpseAt = (x, z) =>
+    enemies.find((e) => !e.alive && e.loot?.length && e.x === x && e.z === z) || null;
+
+  const invPanel = ui.createInventoryPanel(ITEMS, INV_CAP, {
+    onUse: (i) => useItem(i),
+    onDrop: (i) => dropItem(i),
+    onExamine: (i) => ui.say(ITEMS[sheet.inventory[i]]?.examine || 'It is what it is.'),
+  });
+  const lootLabels = ui.createLootLabels();
+
+  function dropLoose(x, z, id) {
+    looseItems.push({ x, z, id, entity: placeDroppedItem(app, x, z) });
+  }
+
+  // Loot lands in the pockets; overflow hits the floor, where the Alt overlay
+  // (and a click) can pick it back up.
+  function receiveItems(ids, from) {
+    const taken = [];
+    let overflowed = false;
+    for (const id of ids) {
+      if (sheet.inventory.length < INV_CAP) {
+        sheet.inventory.push(id);
+        taken.push(itemName(id));
+      } else {
+        dropLoose(player.x, player.z, id);
+        overflowed = true;
+      }
+    }
+    let msg = `${from}: ${taken.length ? taken.join(', ') : 'nothing'}.`;
+    if (overflowed) msg += ' Pockets full - the rest hits the floor.';
+    ui.say(msg);
+    invPanel.refresh(sheet);
+  }
+
+  // Containers roll their table once, on first rummage; after that they're
+  // just furniture with a memory of better days.
+  function lootContainer(x, z) {
+    const def = grid.defAt(x, z);
+    if (!def.loot || inCombat || gameOver) return;
+    if (runtime.isBurning(x, z)) { ui.say('It is actively on fire. Rummage later.'); return; }
+    const key = x + ',' + z;
+    if (!containerLoot.has(key)) containerLoot.set(key, rollLoot(LOOT_TABLES[def.loot]));
+    const items = containerLoot.get(key);
+    if (!items.length) { ui.say(`${def.label}: nothing left but disappointment.`); return; }
+    containerLoot.set(key, []);
+    receiveItems(items, def.label);
+  }
+
+  function lootBody(en) {
+    if (!en || en.alive || inCombat || gameOver) return;
+    const items = en.loot || [];
+    if (!items.length) { ui.say(`${en.def.name} has nothing left to give. Fitting.`); return; }
+    en.loot = [];
+    receiveItems(items, `${en.def.name}'s pockets`);
+  }
+
+  function pickUpAt(x, z) {
+    if (inCombat || gameOver) return;
+    const here = looseAt(x, z);
+    if (!here.length) return;
+    const ids = [];
+    for (const li of here) {
+      li.entity?.destroy();
+      looseItems.splice(looseItems.indexOf(li), 1);
+      ids.push(li.id);
+    }
+    receiveItems(ids, 'Picked up');
+  }
+
+  function useItem(i) {
+    if (!sheet || i >= sheet.inventory.length) return;
+    if (inCombat) { ui.say('Not while everyone is watching.'); return; }
+    const id = sheet.inventory[i];
+    const def = ITEMS[id] || {};
+    if (def.heal) sheet.hp = Math.min(sheet.maxHp, sheet.hp + def.heal);
+    else if (def.ammo) sheet.paper = Math.min(8, sheet.paper + def.ammo);
+    else { ui.say(def.examine || 'It is what it is.'); return; } // flavor: not consumed
+    sheet.inventory.splice(i, 1);
+    ui.say(def.useLog || `You use the ${itemName(id)}.`);
+    ui.updateStatsHud(sheet);
+    invPanel.refresh(sheet);
+  }
+
+  function dropItem(i) {
+    if (!sheet || i >= sheet.inventory.length) return;
+    const [id] = sheet.inventory.splice(i, 1);
+    dropLoose(player.x, player.z, id);
+    ui.say(`You leave the ${itemName(id)} on the floor. Someone's problem now.`);
+    invPanel.refresh(sheet);
+    if (lootLabels.visible) showLootLabels(); // the floor just changed
+  }
+
+  // Everything lootable in the area, as clickable Alt-overlay entries.
+  // Clicking a label walks you into reach and loots - same path as clicking
+  // the object itself.
+  function lootEntries() {
+    const out = [];
+    const near = (x, z) => Math.max(Math.abs(x - player.x), Math.abs(z - player.z)) <= 10;
+    for (const li of looseItems) {
+      if (!near(li.x, li.z)) continue;
+      out.push({
+        icon: ITEMS[li.id]?.icon,
+        text: itemName(li.id),
+        world: { x: li.x, y: 0.35, z: li.z },
+        onClick: () => approachAndDo(li.x, li.z, () => pickUpAt(li.x, li.z)),
+      });
+    }
+    for (let z = 0; z < grid.height; z++) {
+      for (let x = 0; x < grid.width; x++) {
+        const def = grid.defAt(x, z);
+        if (!def.loot || !near(x, z)) continue;
+        const rolled = containerLoot.get(x + ',' + z);
+        if (rolled && !rolled.length) continue; // already cleaned out
+        const cx = x;
+        const cz = z;
+        out.push({
+          icon: { trash: '🗑️', printer: '🖨️', desk: '🗄️' }[def.loot],
+          text: def.label,
+          world: { x, y: def.height + 0.4, z },
+          onClick: () => approachAndDo(cx, cz, () => lootContainer(cx, cz)),
+        });
+      }
+    }
+    for (const en of enemies) {
+      if (en.alive || !en.loot?.length || !en.entity || !near(en.x, en.z)) continue;
+      out.push({
+        icon: '💀',
+        text: `${en.def.name} (body)`,
+        world: { x: en.x, y: 0.4, z: en.z },
+        onClick: () => approachAndDo(en.x, en.z, () => lootBody(en)),
+      });
+    }
+    return out;
+  }
+  function showLootLabels() { lootLabels.show(lootEntries()); }
+
   const adjacentEnemy = () =>
     enemies.find((e) => e.alive && Math.abs(player.x - e.x) <= 1 && Math.abs(player.z - e.z) <= 1) || null;
 
@@ -292,6 +438,7 @@ function startGame(level) {
     pendingAction = null;
     inCombat = true;
     ui.hideMenu();
+    lootLabels.hide(); // no browsing the shelves mid-fight
     // Everyone close enough joins the brawl (those further than 2 tiles are
     // surprised and lose their first turn - see combat.js).
     const engaged = enemies.filter((e) =>
@@ -477,8 +624,15 @@ function startGame(level) {
         return;
       }
       const en = enemyAt(tile.x, tile.z);
+      const corpse = corpseAt(tile.x, tile.z);
       if (en) confront(en);
-      else moveTo(tile, point);
+      else if (grid.defAt(tile.x, tile.z).loot) {
+        approachAndDo(tile.x, tile.z, () => lootContainer(tile.x, tile.z));
+      } else if (corpse) {
+        approachAndDo(corpse.x, corpse.z, () => lootBody(corpse));
+      } else if (looseAt(tile.x, tile.z).length) {
+        approachAndDo(tile.x, tile.z, () => pickUpAt(tile.x, tile.z));
+      } else moveTo(tile, point);
     },
     onHover: (point, sx, sy) => {
       if (inCombat && combat) combat.handleHover(point, sx, sy);
@@ -503,6 +657,20 @@ function startGame(level) {
           { label: 'Walk here', action: () => moveTo(tile, point) },
           { label: 'Examine', action: () => ui.say(flavor) },
         ];
+        const here = looseAt(tile.x, tile.z);
+        if (here.length) {
+          items.unshift({
+            label: `Pick up ${itemName(here[0].id)}${here.length > 1 ? ` (+${here.length - 1})` : ''}`,
+            action: () => approachAndDo(tile.x, tile.z, () => pickUpAt(tile.x, tile.z)),
+          });
+        }
+        const corpse = corpseAt(tile.x, tile.z);
+        if (corpse) {
+          items.unshift({
+            label: `Loot ${corpse.def.name}'s body`,
+            action: () => approachAndDo(corpse.x, corpse.z, () => lootBody(corpse)),
+          });
+        }
         // The Smoker's lighter turns any flammable surface into an option.
         if (sheet?.talent?.effects?.hasLighter
           && surfId && SURFACES[surfId].flammable && !runtime.isBurning(tile.x, tile.z)) {
@@ -525,18 +693,44 @@ function startGame(level) {
             action: () => approachAndDo(tile.x, tile.z, () => igniteAt(tile.x, tile.z)),
           });
         }
+        items.unshift({
+          label: 'Rummage',
+          action: () => approachAndDo(tile.x, tile.z, () => lootContainer(tile.x, tile.z)),
+        });
         ui.showMenu(sx, sy, items);
       } else if (grid.defAt(tile.x, tile.z).explosive) {
         ui.showMenu(sx, sy, [
+          { label: 'Rummage', action: () => approachAndDo(tile.x, tile.z, () => lootContainer(tile.x, tile.z)) },
           { label: 'Examine', action: () => ui.say('The printer. It has jammed 4 times today. It is waiting.') },
         ]);
       } else {
-        ui.showMenu(sx, sy, [
-          { label: 'Examine', action: () => ui.say('A cubicle wall. It has seen things.') },
-        ]);
+        const def = grid.defAt(tile.x, tile.z);
+        const items = [{ label: 'Examine', action: () => ui.say('A cubicle wall. It has seen things.') }];
+        if (def.loot) {
+          items[0] = { label: 'Examine', action: () => ui.say(`${def.label}. Probably contains secrets. Or staples.`) };
+          items.unshift({
+            label: 'Rummage',
+            action: () => approachAndDo(tile.x, tile.z, () => lootContainer(tile.x, tile.z)),
+          });
+        }
+        ui.showMenu(sx, sy, items);
       }
     },
   });
+
+  // --- keyboard: hold Alt for the loot overlay, I for the pockets ---------------
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Alt') {
+      e.preventDefault(); // keep focus off the browser's menu bar
+      if (!e.repeat && sheet && !inCombat && !gameOver) showLootLabels();
+    } else if ((e.key === 'i' || e.key === 'I') && sheet && !gameOver) {
+      invPanel.toggle(sheet);
+    }
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'Alt') lootLabels.hide();
+  });
+  window.addEventListener('blur', () => lootLabels.hide());
 
   // Cosmetic combat feedback (projectiles, floating numbers). Defined after
   // controls exist because the damage text projects through the camera.
@@ -583,6 +777,13 @@ function startGame(level) {
     if (anyoneMoved) checkCombatTrigger(); // did someone just corner the player?
     if (!gameOver) runtime.tick(dt); // fire waits for no one, combat included
     animateSurfaces(dt);
+    // The loot overlay tracks the world while held (the camera keeps easing).
+    if (lootLabels.visible) {
+      lootLabels.reposition((w) => {
+        const s = controls.cameraEntity.camera.worldToScreen(new window.pc.Vec3(w.x, w.y, w.z));
+        return s.z < 0 ? null : { x: s.x, y: s.y };
+      });
+    }
     // Follow the player, gently biased toward the map centre so corner spawns
     // don't leave half the frame empty. Track the entity's CONTINUOUS position
     // (player.x/z is the logical tile, which jumps a whole tile at a time and
@@ -623,7 +824,9 @@ function startGame(level) {
   if (restoredSheet) {
     // Continuing a campaign run: same character, next floor - no picker.
     sheet = restoredSheet;
+    sheet.inventory ||= []; // saves from before pockets existed
     spawnPlayerModel();
+    invPanel.refresh(sheet);
     ui.say(`${grid.name}. Keep going.`);
   } else {
     ui.showClassPicker(CLASSES, ACTIONS, onClassPicked, () => {
@@ -657,6 +860,10 @@ function startGame(level) {
     get stats() { return sheet ? { ...sheet } : null; },
     get playerSpeed() { return player.speed; },
     get burning() { return runtime.burningCount; },
+    get inventory() { return sheet ? [...sheet.inventory] : []; },
+    get looseItems() { return looseItems.map((li) => ({ x: li.x, z: li.z, id: li.id })); },
+    get lootLabelCount() { return document.querySelectorAll('.loot-label').length; },
+    containerLootAt: (x, z) => (containerLoot.has(x + ',' + z) ? [...containerLoot.get(x + ',' + z)] : null),
     get enemies() {
       return enemies.map((e) => {
         const p = e.entity?.getPosition();

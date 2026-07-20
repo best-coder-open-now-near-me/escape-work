@@ -11,6 +11,8 @@
 //   onEnter  - effect when the player steps on it:
 //                { effect: 'exit' }                          -> level complete
 //                { effect: 'damage', amount, message }       -> hazard
+//   loot     - loot table id (data/items.js LOOT_TABLES); makes the prop
+//              rummageable (click it, or its Alt label). `label` names it.
 export const TILE_TYPES = {
   wall: {
     char: '#',
@@ -90,6 +92,8 @@ export const TILE_TYPES = {
     color: [0.3, 0.32, 0.35],
     primitive: 'trash',
     ignitable: true,
+    label: 'Trash Can',
+    loot: 'trash',
   },
   printer: {
     char: 'R',
@@ -98,6 +102,8 @@ export const TILE_TYPES = {
     color: [0.56, 0.56, 0.6],
     primitive: 'printer',
     explosive: true,
+    label: 'Printer',
+    loot: 'printer',
   },
 
   // Furniture props: solid (they block movement and pathfinding) and rendered
@@ -109,6 +115,8 @@ export const TILE_TYPES = {
     color: [0.62, 0.42, 0.27],
     model: 'furniture/desk',
     scale: 0.5,
+    label: 'Desk',
+    loot: 'desk',
   },
   chair: {
     char: 'c',
