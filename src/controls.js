@@ -1,6 +1,8 @@
 // Camera rig + mouse input. Translates raw events into semantic game input:
 // onLeftClickTile(tile) / onRightClickTile(tile, screenX, screenY). Orbiting
 // and zooming are handled entirely in here - game logic never sees them.
+import { applyCameraPostFx } from './scene.js';
+
 const pc = window.pc;
 
 export function createControls({ app, canvas, focus, onLeftClickTile, onRightClickTile, onAnyLeftPress, onLeftDragTile }) {
@@ -17,10 +19,14 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   cameraEntity.addComponent('camera', {
     projection: pc.PROJECTION_PERSPECTIVE,
     fov: 35,
-    clearColor: new pc.Color(0.1, 0.1, 0.15),
+    // Linear-space value: the post pipeline gamma-encodes on output, so this
+    // is much lower than the old direct-to-screen 0.1 to keep the same dark
+    // void around the floor.
+    clearColor: new pc.Color(0.012, 0.012, 0.024),
     nearClip: 0.5,
     farClip: 300,
   });
+  applyCameraPostFx(app, cameraEntity);
 
   const CAM = {
     yaw: 45, pitch: 55, dist: 26,

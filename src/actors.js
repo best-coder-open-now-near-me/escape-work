@@ -1,10 +1,11 @@
 // Actors: things that live on the grid and own a 3D entity. GridActor handles
 // the shared mechanics (a logical tile position, an entity that slides smoothly
-// toward it, eased turning) plus the procedural animation layer: the HOLDER
-// entity carries position/facing, while the model child inside it gets the
-// walk bob, attack lunges, hit flinches and death topples - so animation can
-// never fight the movement code. PlayerActor follows smoothed any-angle paths;
-// EnemyActor adds wander AI. New actor kinds extend GridActor the same way.
+// toward it, eased turning) plus two animation layers that can't fight the
+// movement code or each other: baked skeletal clips (idle/walk/attack, wired
+// up in scene.js) play on the bones, while a procedural layer on the model
+// child adds the attack lunge push, hit flinches and death topples.
+// PlayerActor follows smoothed any-angle paths; EnemyActor adds wander AI.
+// New actor kinds extend GridActor the same way.
 const pc = window.pc;
 
 const wrapAngle = (a) => (((a + 180) % 360) + 360) % 360 - 180;
@@ -21,8 +22,8 @@ export class GridActor {
     this.yaw = 0;
     this.targetYaw = 0;
     // animation state
-    this.stride = 0; // accumulated distance, drives the walk bob
-    this.bobAmp = 0; // eases in/out so stopping doesn't cut the bob mid-air
+    this.animC = null; // anim component driving the baked clips
+    this.clip = null; // current clip state name
     this.fx = null; // { kind: 'lunge'|'flinch'|'death', t }
     this.flashT = 0;
     this.mats = []; // per-instance cloned materials (for damage flashes)
@@ -31,6 +32,7 @@ export class GridActor {
   attach(entity) {
     this.entity = entity;
     this.visual = entity.children[0] || entity;
+    this.animC = entity.findComponent('anim') || null;
     this.yaw = this.targetYaw = entity.getEulerAngles().y;
     // Clone materials so damage flashes hit THIS character, not every
     // character instantiated from the same .glb.
@@ -73,8 +75,20 @@ export class GridActor {
     }
   }
 
-  // Drives the visual child each frame. `moved` is world distance covered this
-  // frame - the walk bob is distance-based so it tracks any movement speed.
+  // Switch the skeletal clip (states assigned in scene.js setupAnim). The
+  // procedural fx layer rides on the visual node above the bones, so clips
+  // and fx compose instead of fighting.
+  setClip(name, blend = 0.15, speed = 1) {
+    if (!this.animC) return;
+    this.animC.speed = speed;
+    if (this.clip === name) return;
+    this.clip = name;
+    this.animC.baseLayer.transition(name, blend);
+  }
+
+  // Drives the clips and the visual child each frame. `moved` is world
+  // distance covered this frame - it picks walk vs idle and paces the walk
+  // cycle to actual movement speed.
   updateAnim(dt, moved) {
     if (!this.visual) return;
     if (this.flashT > 0) {
@@ -86,11 +100,11 @@ export class GridActor {
         }
       }
     }
-    this.stride += moved * 4.4;
-    const target = moved > 0 ? 1 : 0;
-    this.bobAmp += (target - this.bobAmp) * Math.min(1, dt * 9);
-    let bobY = Math.abs(Math.sin(this.stride)) * 0.055 * this.bobAmp;
-    let roll = Math.sin(this.stride * 0.5) * 3.2 * this.bobAmp;
+    if (this.fx?.kind === 'death') this.setClip('idle', 0.2);
+    else if (this.fx?.kind === 'lunge') this.setClip('attack-melee-right', 0.05, 1.3);
+    else if (moved > 1e-5) this.setClip('walk', 0.15, this.speed * 0.5);
+    else this.setClip('idle');
+    let bobY = 0;
     let forward = 0;
     let pitch = 0;
     let sx = 1;
@@ -116,7 +130,6 @@ export class GridActor {
         const k = Math.min(1, t / T);
         pitch = -88 * k * (2 - k); // ease-out topple onto their back
         bobY = -Math.max(0, k - 0.7) * 0.5; // then sink into the carpet
-        roll = 0;
         if (t >= T + 0.35) {
           this.entity.destroy();
           this.entity = null;
@@ -126,7 +139,7 @@ export class GridActor {
       }
     }
     this.visual.setLocalPosition(0, bobY, forward);
-    this.visual.setLocalEulerAngles(pitch, 0, roll);
+    this.visual.setLocalEulerAngles(pitch, 0, 0);
     this.visual.setLocalScale(sx, sy, sx);
   }
 

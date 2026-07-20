@@ -20,12 +20,15 @@ export function createApp(canvas) {
   window.addEventListener('resize', () => app.resizeCanvas());
 
   // Ambient fills the shadows; a shadow-casting sun grounds everything and
-  // gives imported PBR models real shading.
-  app.scene.ambientLight = new pc.Color(0.56, 0.56, 0.62);
+  // gives imported PBR models real shading. Tuned for the cel look: a lower,
+  // cooler ambient against a warmer sun deepens the contrast between toon
+  // bands - the flat 0.56 gray fill washed them out.
+  app.scene.ambientLight = new pc.Color(0.44, 0.46, 0.56);
   const sun = new pc.Entity('sun');
   sun.addComponent('light', {
     type: 'directional',
-    intensity: 1.25,
+    color: new pc.Color(1, 0.96, 0.88),
+    intensity: 1.45,
     castShadows: true,
     shadowResolution: 2048,
     shadowDistance: 70,
@@ -35,6 +38,148 @@ export function createApp(canvas) {
   sun.setEulerAngles(55, 35, 0);
   app.root.addChild(sun);
   return app;
+}
+
+// Cel shading: replace the lambert term so each light's contribution snaps to
+// a few discrete bands (with a whisker of smoothstep so band edges don't
+// shimmer, and a sliver of the raw term so faces inside one band keep a hint
+// of modeling). The world is mostly flat-shaded boxes, so in practice every
+// face lands cleanly on one band - a graphic, toon-flat look instead of soft
+// gradients.
+const TOON_CHUNK = `
+float getLightDiffuse(vec3 worldNormal, vec3 viewDir, vec3 lightDirNorm) {
+    float d = max(dot(worldNormal, -lightDirNorm), 0.0);
+    float x = d * 3.0;
+    float banded = min((floor(x) + smoothstep(0.42, 0.58, fract(x))) / 3.0, 1.0);
+    return banded * 0.85 + d * 0.15;
+}`;
+
+const toonified = new WeakSet();
+function toonifyMaterial(m) {
+  if (toonified.has(m)) return;
+  toonified.add(m);
+  m.shaderChunks.glsl.set('lightDiffuseLambertPS', TOON_CHUNK);
+  m.update();
+}
+
+// Apply the toon ramp to everything a loaded model renders with. Materials
+// are shared per-asset, so the WeakSet keeps repeat placements from
+// rebuilding shaders. Per-character damage-flash clones inherit the chunk
+// through Material.copy.
+function toonifyEntity(entity) {
+  for (const rc of entity.findComponents('render')) {
+    for (const mi of rc.meshInstances) toonifyMaterial(mi.material);
+  }
+}
+
+// Ink outlines, inverted-hull style: every .glb model is drawn a second time
+// with its vertices pushed out along their normals and front faces culled, in
+// flat black - only the silhouette shell survives, reading as a drawn ink
+// line. The copies share the originals' skin instances so they track skeletal
+// animation for free. Tiles and walls stay clean (their SSAO edge does that
+// work) - the ink belongs on characters and furniture.
+//
+// The custom transformVS chunk inflates in world space. It runs before the
+// normal chunks in the assembled shader, so the normal helpers are forward-
+// declared (their definitions arrive later from normalCoreVS/normalVS, which
+// exist whenever NORMALS is defined - true for this lit material's forward
+// pass; shadow/depth variants compile the un-inflated fallback).
+const OUTLINE_TRANSFORM_CHUNK = `
+#ifdef NORMALS
+vec3 getLocalNormal(vec3 vertexNormal);
+mat3 getNormalMatrix(mat4 modelMatrix);
+#endif
+vec4 evalWorldPosition(vec3 vertexPosition, mat4 modelMatrix) {
+    vec4 posW = modelMatrix * vec4(getLocalPosition(vertexPosition), 1.0);
+#ifdef NORMALS
+    vec3 worldN = normalize(getNormalMatrix(modelMatrix) * getLocalNormal(vec3(0.0)));
+    posW.xyz += worldN * 0.012;
+#endif
+    return posW;
+}
+vec4 getPosition() {
+    dModelMatrix = getModelMatrix();
+    vec4 posW = evalWorldPosition(vertex_position.xyz, dModelMatrix);
+    dPositionW = posW.xyz;
+    return matrix_viewProjection * posW;
+}
+vec3 getWorldPosition() {
+    return dPositionW;
+}
+`;
+
+let outlineMat = null;
+function getOutlineMat() {
+  if (outlineMat) return outlineMat;
+  outlineMat = new pc.StandardMaterial();
+  outlineMat.diffuse = new pc.Color(0, 0, 0);
+  outlineMat.specular = new pc.Color(0, 0, 0);
+  outlineMat.gloss = 0;
+  outlineMat.cull = pc.CULLFACE_FRONT;
+  outlineMat.shaderChunks.glsl.set('transformVS', OUTLINE_TRANSFORM_CHUNK);
+  outlineMat.update();
+  return outlineMat;
+}
+
+function addOutlines(holder) {
+  const mat = getOutlineMat();
+  const copies = [];
+  for (const rc of holder.findComponents('render')) {
+    for (const mi of rc.meshInstances) {
+      if (mi.material === mat) continue;
+      const omi = new pc.MeshInstance(mi.mesh, mat, mi.node);
+      if (mi.skinInstance) omi.skinInstance = mi.skinInstance;
+      copies.push(omi);
+    }
+  }
+  if (!copies.length) return;
+  // A sibling render component, NOT appended to the original's meshInstances:
+  // that setter destroys the instances it replaces.
+  const shell = new pc.Entity('outlines');
+  shell.addComponent('render', { meshInstances: copies, castShadows: false });
+  holder.addChild(shell);
+}
+
+// The character .glbs ship with a full baked clip set (idle, walk, attacks,
+// die, sit...). Wire the ones the game drives into an anim component with an
+// auto-generated state graph - actors switch states via GridActor.setClip.
+// First assignment ('idle') becomes the initial state.
+const ACTOR_CLIPS = ['idle', 'walk', 'attack-melee-right'];
+function setupAnim(inst, asset) {
+  const tracks = {};
+  for (const a of asset.resource.animations) {
+    if (a.resource) tracks[a.resource.name] = a.resource;
+  }
+  if (!tracks.idle) return;
+  inst.addComponent('anim', { activate: true });
+  for (const name of ACTOR_CLIPS) {
+    if (tracks[name]) inst.anim.assignAnimation(name, tracks[name]);
+  }
+}
+
+// Post stack on the game camera (also used by the editor - controls.js calls
+// this wherever the camera rig is built). SSAO grounds props and walls with
+// contact shading the flat toon lighting can't provide, a whisper of bloom
+// makes the emissives (exit, fire, sparks) glow, and the grade adds the
+// saturation and warmth the toon bands need to read.
+export function applyCameraPostFx(app, cameraEntity) {
+  const frame = new pc.CameraFrame(app, cameraEntity.camera);
+  frame.rendering.samples = 4; // keep MSAA through the post pipeline
+  frame.ssao.type = pc.SSAOTYPE_COMBINE;
+  frame.ssao.intensity = 0.4;
+  frame.ssao.radius = 9;
+  frame.ssao.power = 5;
+  frame.bloom.intensity = 0.02;
+  frame.grading.enabled = true;
+  frame.grading.contrast = 1.06;
+  frame.grading.saturation = 1.18;
+  frame.grading.tint = new pc.Color(1, 0.985, 0.955, 1);
+  frame.vignette.intensity = 0.5;
+  frame.vignette.inner = 0.55;
+  frame.vignette.outer = 1.35;
+  frame.vignette.curvature = 0.6;
+  frame.update();
+  return frame;
 }
 
 function makeMaterial(rgb, { opacity = 1, gloss = null, emissive = null } = {}) {
@@ -47,7 +192,7 @@ function makeMaterial(rgb, { opacity = 1, gloss = null, emissive = null } = {}) 
     m.depthWrite = false;
   }
   if (emissive) m.emissive = new pc.Color(emissive[0], emissive[1], emissive[2]);
-  m.update();
+  toonifyMaterial(m);
   return m;
 }
 
@@ -365,7 +510,7 @@ export function buildLevel(app, grid) {
 
 // Load a .glb, wrap it in a holder (so scaling/rotating is predictable), and
 // drop it on a tile. Reusable for every prop and character.
-export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY = 0, onReady = null } = {}) {
+export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY = 0, onReady = null, animate = false } = {}) {
   // Reuse the asset if this .glb was already requested (props repeat a lot,
   // and the editor repaints cells constantly).
   let asset = app.assets.find(url);
@@ -375,7 +520,11 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
   }
   asset.ready(() => {
     const holder = new pc.Entity(url);
-    holder.addChild(asset.resource.instantiateRenderEntity());
+    const inst = asset.resource.instantiateRenderEntity();
+    holder.addChild(inst);
+    toonifyEntity(holder);
+    addOutlines(holder);
+    if (animate) setupAnim(inst, asset);
     holder.setLocalScale(scale, scale, scale);
     holder.setEulerAngles(0, rotY, 0);
     holder.setPosition(tileX, lift, tileZ);
@@ -384,6 +533,44 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
   });
   asset.on('error', (err) => console.warn('asset load failed:', url, err));
   app.assets.load(asset);
+}
+
+// De-chibi the Kenney mini rigs. Every character shares the same 7-bone
+// skeleton (root -> leg-left/leg-right + torso -> arm-left/arm-right + head)
+// with no knees or elbows, so proportions are retuned by scaling bones:
+// legs and torso stretch, the head shrinks back toward realistic. Legs are
+// single rigid bones hip-to-foot - keep `legs` modest (~1.3) or the straight
+// leg starts to read as stilts when it swings.
+const PROPORTIONS = { legs: 1.45, torso: 1.18, head: 0.8 };
+
+export function applyCharacterProportions(holder) {
+  const root = holder.findByName('root');
+  const legL = holder.findByName('leg-left');
+  const legR = holder.findByName('leg-right');
+  const torso = holder.findByName('torso');
+  if (!root || !legL || !torso) return; // not a rigged mini character
+  const { legs, torso: torsoS, head: headS } = PROPORTIONS;
+  legL.setLocalScale(1, legs, 1);
+  if (legR) legR.setLocalScale(1, legs, 1);
+  // Legs stretch downward from the hip joint, so lift the rig by the extra
+  // leg length to keep the feet on the floor. The lift goes on root's PARENT
+  // (the glTF scene node, which no clip touches) - animation clips write
+  // root's translation every frame and would stomp a lift applied to root.
+  const hipY = legL.getLocalPosition().y;
+  const top = root.parent;
+  const tp = top.getLocalPosition();
+  top.setLocalPosition(tp.x, tp.y + hipY * (legs - 1), tp.z);
+  torso.setLocalScale(1, torsoS, 1);
+  // Torso children inherit its stretch, which would deform them: counter it
+  // on the head (shrinking it outright) and on the arms (the rig T-poses, so
+  // a Y-stretch would fatten them, not lengthen them). Their attach points
+  // still ride up with the taller torso.
+  const head = holder.findByName('head');
+  if (head) head.setLocalScale(headS, headS / torsoS, headS);
+  for (const name of ['arm-left', 'arm-right']) {
+    const arm = holder.findByName(name);
+    if (arm) arm.setLocalScale(1, 1 / torsoS, 1);
+  }
 }
 
 // --- combat / impact FX ---------------------------------------------------------
