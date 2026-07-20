@@ -386,6 +386,41 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
   app.assets.load(asset);
 }
 
+// De-chibi the Kenney mini rigs. Every character shares the same 7-bone
+// skeleton (root -> leg-left/leg-right + torso -> arm-left/arm-right + head)
+// with no knees or elbows, so proportions are retuned by scaling bones:
+// legs and torso stretch, the head shrinks back toward realistic. Legs are
+// single rigid bones hip-to-foot - keep `legs` modest (~1.3) or the straight
+// leg starts to read as stilts when it swings.
+const PROPORTIONS = { legs: 1.3, torso: 1.12, head: 0.88 };
+
+export function applyCharacterProportions(holder) {
+  const root = holder.findByName('root');
+  const legL = holder.findByName('leg-left');
+  const legR = holder.findByName('leg-right');
+  const torso = holder.findByName('torso');
+  if (!root || !legL || !torso) return; // not a rigged mini character
+  const { legs, torso: torsoS, head: headS } = PROPORTIONS;
+  legL.setLocalScale(1, legs, 1);
+  if (legR) legR.setLocalScale(1, legs, 1);
+  // Legs stretch downward from the hip joint, so lift the whole rig by the
+  // extra leg length to keep the feet on the floor.
+  const hipY = legL.getLocalPosition().y;
+  const rp = root.getLocalPosition();
+  root.setLocalPosition(rp.x, rp.y + hipY * (legs - 1), rp.z);
+  torso.setLocalScale(1, torsoS, 1);
+  // Torso children inherit its stretch, which would deform them: counter it
+  // on the head (shrinking it outright) and on the arms (the rig T-poses, so
+  // a Y-stretch would fatten them, not lengthen them). Their attach points
+  // still ride up with the taller torso.
+  const head = holder.findByName('head');
+  if (head) head.setLocalScale(headS, headS / torsoS, headS);
+  for (const name of ['arm-left', 'arm-right']) {
+    const arm = holder.findByName(name);
+    if (arm) arm.setLocalScale(1, 1 / torsoS, 1);
+  }
+}
+
 // --- combat / impact FX ---------------------------------------------------------
 // Purely cosmetic: gameplay resolves instantly, these just make it readable.
 let fxMats = null;
