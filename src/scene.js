@@ -229,8 +229,10 @@ export function createTileRenderer(app) {
   }
 
   const surfaceMats = {};
+  const ringMats = {}; // the darker damp edge under each liquid pool
   for (const [id, def] of Object.entries(SURFACES)) {
     surfaceMats[id] = makeMaterial(def.color, { gloss: 0.85, opacity: 0.88 });
+    ringMats[id] = makeMaterial(def.color.map((v) => v * 0.5), { gloss: 0.25, opacity: 0.5 });
   }
   const paperMat = makeMaterial(SURFACES.paper.color, { gloss: 0.2 });
   const electricMat = makeMaterial(ELECTRIFIED.color, { opacity: 0.92, gloss: 0.85, emissive: [0.25, 0.5, 0.65] });
@@ -250,18 +252,138 @@ export function createTileRenderer(app) {
     return e;
   };
 
-  // Irregular overlapping blobs so spills read as liquid, not tiles. Rotated
-  // per-cell so no two puddles look alike.
-  function addPuddle(x, z, material) {
-    const holder = new pc.Entity();
-    for (const [ox, oz, sx, sz] of [[0, 0, 0.85, 0.62], [0.17, -0.15, 0.5, 0.44], [-0.2, 0.14, 0.42, 0.5]]) {
-      const e = new pc.Entity();
-      e.addComponent('render', { type: 'cylinder', material });
-      e.setLocalScale(sx, 0.045, sz);
-      e.setLocalPosition(ox, 0, oz);
-      holder.addChild(e);
+  // --- organic liquid pools ----------------------------------------------------
+  // Spills used to be three stacked disks per tile, so multi-tile pools read
+  // as a row of separate splats. Instead, every 'puddle' tile renders ITS
+  // clip of a shared metaball field: each same-surface cell contributes a
+  // blob, marching squares extracts the iso-contour inside this tile, and
+  // because adjacent tiles evaluate the same field over the same sources,
+  // patches meet exactly at tile borders - a multi-tile spill is one
+  // continuous liquid shape, while hide/electrify/repaint stay per-tile.
+  // Two layers per pool: a darker damp ring under the glossy liquid.
+  // Per-cell hashes wobble radii and lobes so no two spills repeat. Pools
+  // stay inside their painted tiles (the hazard is tile-keyed - the visual
+  // must not overpromise) and merge orthogonally, like conduction pools.
+  const POOL_SIGMA2 = 0.3; // blob falloff: w * exp(-d^2 / (SIGMA2 * wobble))
+  const POOL_ISO_LIQUID = 0.587; // lone-cell liquid radius ~0.40
+  const POOL_ISO_RING = 0.509; // lone-cell damp-ring radius ~0.45
+  const POOL_STEPS = 12; // marching-squares resolution per tile
+
+  const hash01 = (x, z, salt) => {
+    const n = Math.sin(x * 127.1 + z * 311.7 + salt * 74.7) * 43758.5453;
+    return n - Math.floor(n);
+  };
+
+  // Every same-surface cell near (x, z) that can shape this tile's patch.
+  // The 5x5 window plus the distance cutoff in poolFieldAt guarantee two
+  // adjacent tiles agree on every source that matters at their shared edge.
+  function poolSources(x, z, surfId, surfaceAt) {
+    const sources = [];
+    for (let dz = -2; dz <= 2; dz++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const sx = x + dx;
+        const sz = z + dz;
+        if (!(dx === 0 && dz === 0) && (!surfaceAt || surfaceAt(sx, sz) !== surfId)) continue;
+        sources.push({
+          x: sx,
+          z: sz,
+          w: 0.92 + 0.22 * hash01(sx, sz, 1),
+          p1: hash01(sx, sz, 2) * Math.PI * 2,
+          p2: hash01(sx, sz, 3) * Math.PI * 2,
+        });
+      }
     }
-    holder.setEulerAngles(0, ((x * 73 + z * 131) % 8) * 45, 0);
+    return sources;
+  }
+
+  function poolFieldAt(sources, px, pz) {
+    let f = 0;
+    for (const s of sources) {
+      const dx = px - s.x;
+      const dz = pz - s.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > 2.6) continue;
+      const a = Math.atan2(dz, dx);
+      const wobble = 1 + 0.1 * Math.sin(3 * a + s.p1) + 0.05 * Math.sin(5 * a + s.p2);
+      f += s.w * Math.exp(-d2 / (POOL_SIGMA2 * wobble));
+    }
+    return f;
+  }
+
+  // Marching squares over this tile's unit square. Returns { positions,
+  // indices } in tile-local coordinates, or null if the contour misses the
+  // tile. Cells are walked around their perimeter keeping inside corners and
+  // interpolated crossings, then fan-triangulated - handles all 16 cases.
+  function poolPatchGeometry(x, z, sources, iso) {
+    const N = POOL_STEPS;
+    const F = new Float32Array((N + 1) * (N + 1));
+    for (let j = 0; j <= N; j++) {
+      for (let i = 0; i <= N; i++) {
+        F[j * (N + 1) + i] = poolFieldAt(sources, x - 0.5 + i / N, z - 0.5 + j / N);
+      }
+    }
+    const positions = [];
+    const indices = [];
+    const vcache = new Map(); // shared vertices keep the sheet watertight
+    const vert = (px, pz) => {
+      const k = Math.round(px * 8192) + ',' + Math.round(pz * 8192);
+      let idx = vcache.get(k);
+      if (idx === undefined) {
+        idx = positions.length / 3;
+        positions.push(px, 0, pz);
+        vcache.set(k, idx);
+      }
+      return idx;
+    };
+    const step = 1 / N;
+    for (let j = 0; j < N; j++) {
+      for (let i = 0; i < N; i++) {
+        const corners = [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]].map(([ci, cj]) => ({
+          x: -0.5 + ci * step,
+          z: -0.5 + cj * step,
+          f: F[cj * (N + 1) + ci],
+        }));
+        const poly = [];
+        for (let k = 0; k < 4; k++) {
+          const a = corners[k];
+          const b = corners[(k + 1) % 4];
+          if (a.f >= iso) poly.push([a.x, a.z]);
+          if ((a.f >= iso) !== (b.f >= iso)) {
+            const t = (iso - a.f) / (b.f - a.f);
+            poly.push([a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t]);
+          }
+        }
+        for (let k = 2; k < poly.length; k++) {
+          // reversed fan so the face normal points up (+y)
+          indices.push(vert(...poly[0]), vert(...poly[k]), vert(...poly[k - 1]));
+        }
+      }
+    }
+    return indices.length ? { positions, indices } : null;
+  }
+
+  function addPoolLayer(parent, geo, material, y) {
+    const mesh = new pc.Mesh(app.graphicsDevice);
+    mesh.setPositions(geo.positions);
+    const normals = new Array(geo.positions.length).fill(0);
+    for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
+    mesh.setNormals(normals);
+    mesh.setIndices(geo.indices);
+    mesh.update(pc.PRIMITIVE_TRIANGLES);
+    const e = new pc.Entity();
+    e.addComponent('render', { meshInstances: [new pc.MeshInstance(mesh, material)] });
+    e.render.castShadows = false;
+    e.setLocalPosition(0, y, 0);
+    parent.addChild(e);
+  }
+
+  function addPool(x, z, surfId, electrified, surfaceAt) {
+    const sources = poolSources(x, z, surfId, surfaceAt);
+    const holder = new pc.Entity();
+    const ring = poolPatchGeometry(x, z, sources, POOL_ISO_RING);
+    if (ring) addPoolLayer(holder, ring, ringMats[surfId], -0.01);
+    const liquid = poolPatchGeometry(x, z, sources, POOL_ISO_LIQUID);
+    if (liquid) addPoolLayer(holder, liquid, electrified ? electricMat : surfaceMats[surfId], 0);
     holder.setPosition(x, surfaceTop, z);
     app.root.addChild(holder);
     return holder;
@@ -363,7 +485,9 @@ export function createTileRenderer(app) {
 
   // Draw whatever sits on top of the floor for a non-floor tile type.
   // Returns { kind, entities }; model props arrive via onAsync(holder).
-  function renderMarker(x, z, type, { electrified = false, onAsync = null } = {}) {
+  // `surfaceAt(x, z)` (optional) reports the surface id of any cell so
+  // liquid pools can merge with their same-surface neighbours.
+  function renderMarker(x, z, type, { electrified = false, onAsync = null, surfaceAt = null } = {}) {
     const def = TILE_TYPES[type];
     if (!def) return { kind: 'none', entities: [] };
     // Carpet variants ARE the floor - renderFloor already drew them recolored.
@@ -384,7 +508,7 @@ export function createTileRenderer(app) {
       let vis;
       if (surf.style === 'cable') vis = addCable(x, z);
       else if (surf.style === 'paper') vis = addPaper(x, z);
-      else vis = addPuddle(x, z, electrified ? electricMat : surfaceMats[def.surface]);
+      else vis = addPool(x, z, def.surface, electrified, surfaceAt);
       return { kind: 'surface', entities: [vis] };
     }
     if (def.solid) {
@@ -501,7 +625,10 @@ export function buildLevel(app, grid) {
       if (type === null) continue;
       r.renderFloor(x, z, carpetAt.get(x + ',' + z) || type);
       if (type === 'floor') continue;
-      const res = r.renderMarker(x, z, type, { electrified: grid.isElectrified(x, z) });
+      const res = r.renderMarker(x, z, type, {
+        electrified: grid.isElectrified(x, z),
+        surfaceAt: (sx, sz) => TILE_TYPES[grid.typeAt(sx, sz)]?.surface || null,
+      });
       if (res.kind === 'wall') walls.push({ entity: res.entities[0], x, z, faded: false });
       else if (res.kind === 'surface') surfaceVisuals.set(x + ',' + z, res.entities[0]);
       else if (res.kind === 'prop') propVisuals.set(x + ',' + z, res.entities[0]);

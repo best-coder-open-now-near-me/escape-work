@@ -117,6 +117,10 @@ export function startEditor(app, levelData, stashKey) {
       if (type === 'floor') return;
       const res = renderer.renderMarker(x, z, type, {
         electrified: electrified.has(key),
+        surfaceAt: (sx, sz) => {
+          const c = rows[sz]?.[sx];
+          return c && c !== ' ' ? TILE_TYPES[tileByChar[c]]?.surface || null : null;
+        },
         onAsync: (holder) => {
           // The cell may have been repainted while the model loaded.
           if (cellVersion.get(key) !== version) holder.destroy();
@@ -255,6 +259,15 @@ export function startEditor(app, levelData, stashKey) {
     refreshElectrified(x, z);
     refreshCarpet(x, z);
     renderCell(x, z);
+    // Pool shapes depend on same-surface neighbours (see addPool in
+    // scene.js) - repaint nearby spills so necks form and dissolve live.
+    for (let dz = -2; dz <= 2; dz++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        if (dx === 0 && dz === 0) continue;
+        const nc = rows[z + dz]?.[x + dx];
+        if (nc && nc !== ' ' && TILE_TYPES[tileByChar[nc]]?.surface) renderCell(x + dx, z + dz);
+      }
+    }
   }
 
   // --- resizing (right/bottom edges; new cells are open floor - the world
