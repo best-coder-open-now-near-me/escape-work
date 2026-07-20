@@ -21,13 +21,12 @@ export function createApp(canvas) {
 
   // Ambient fills the shadows; a shadow-casting sun grounds everything and
   // gives imported PBR models real shading. Tuned for the cel look: a lower,
-  // cooler ambient against a warmer sun deepens the contrast between toon
-  // bands - the flat 0.56 gray fill washed them out.
+  // slightly cool ambient against a neutral sun deepens the contrast between
+  // toon bands - the flat 0.56 gray fill washed them out.
   app.scene.ambientLight = new pc.Color(0.44, 0.46, 0.56);
   const sun = new pc.Entity('sun');
   sun.addComponent('light', {
     type: 'directional',
-    color: new pc.Color(1, 0.96, 0.88),
     intensity: 1.45,
     castShadows: true,
     shadowResolution: 2048,
@@ -173,7 +172,6 @@ export function applyCameraPostFx(app, cameraEntity) {
   frame.grading.enabled = true;
   frame.grading.contrast = 1.06;
   frame.grading.saturation = 1.18;
-  frame.grading.tint = new pc.Color(1, 0.985, 0.955, 1);
   frame.vignette.intensity = 0.5;
   frame.vignette.inner = 0.55;
   frame.vignette.outer = 1.35;
@@ -541,7 +539,7 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
 // legs and torso stretch, the head shrinks back toward realistic. Legs are
 // single rigid bones hip-to-foot - keep `legs` modest (~1.3) or the straight
 // leg starts to read as stilts when it swings.
-const PROPORTIONS = { legs: 1.45, torso: 1.18, head: 0.8 };
+const PROPORTIONS = { legs: 1.45, torso: 1.18, head: 0.8, arms: 0.78 };
 
 export function applyCharacterProportions(holder) {
   const root = holder.findByName('root');
@@ -549,7 +547,7 @@ export function applyCharacterProportions(holder) {
   const legR = holder.findByName('leg-right');
   const torso = holder.findByName('torso');
   if (!root || !legL || !torso) return; // not a rigged mini character
-  const { legs, torso: torsoS, head: headS } = PROPORTIONS;
+  const { legs, torso: torsoS, head: headS, arms: armsS } = PROPORTIONS;
   legL.setLocalScale(1, legs, 1);
   if (legR) legR.setLocalScale(1, legs, 1);
   // Legs stretch downward from the hip joint, so lift the rig by the extra
@@ -562,14 +560,15 @@ export function applyCharacterProportions(holder) {
   top.setLocalPosition(tp.x, tp.y + hipY * (legs - 1), tp.z);
   torso.setLocalScale(1, torsoS, 1);
   // Torso children inherit its stretch, which would deform them: counter it
-  // on the head (shrinking it outright) and on the arms (the rig T-poses, so
-  // a Y-stretch would fatten them, not lengthen them). Their attach points
-  // still ride up with the taller torso.
+  // on the head (shrinking it outright) and on the arms' thickness. Arms
+  // extend along their bind-pose X axis (the T-pose direction), so the
+  // shortening goes on bone X - it follows the arm through any clip pose.
+  // Their attach points still ride up with the taller torso.
   const head = holder.findByName('head');
   if (head) head.setLocalScale(headS, headS / torsoS, headS);
   for (const name of ['arm-left', 'arm-right']) {
     const arm = holder.findByName(name);
-    if (arm) arm.setLocalScale(1, 1 / torsoS, 1);
+    if (arm) arm.setLocalScale(armsS, 1 / torsoS, 1);
   }
 }
 
