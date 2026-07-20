@@ -1,11 +1,12 @@
 // Actors: things that live on the grid and own a 3D entity. GridActor handles
-// the shared mechanics (a logical tile position, an entity that slides smoothly
-// toward it, eased turning) plus two animation layers that can't fight the
-// movement code or each other: baked skeletal clips (idle/walk/attack, wired
-// up in scene.js) play on the bones, while a procedural layer on the model
-// child adds the attack lunge push, hit flinches and death topples.
-// PlayerActor follows smoothed any-angle paths; EnemyActor adds wander AI.
-// New actor kinds extend GridActor the same way.
+// the shared mechanics (following smoothed any-angle waypoint paths at a
+// continuous position, a logical tile derived from that position, straight
+// slides for shoves, eased turning) plus two animation layers that can't
+// fight the movement code or each other: baked skeletal clips
+// (idle/walk/attack, wired up in scene.js) play on the bones, while a
+// procedural layer on the model child adds the attack lunge push, hit
+// flinches and death topples. EnemyActor adds wander AI on top. New actor
+// kinds extend GridActor the same way.
 const pc = window.pc;
 
 const wrapAngle = (a) => (((a + 180) % 360) + 360) % 360 - 180;
@@ -14,11 +15,15 @@ const FLASH_COLOR = [0.75, 0.09, 0.05];
 
 export class GridActor {
   constructor(x, z, { speed = 2.2 } = {}) {
-    this.x = x;
+    this.x = x; // logical tile - tracked from the continuous position
     this.z = z;
     this.speed = speed;
     this.entity = null;
     this.visual = null; // the model child that animation moves
+    this.path = null; // waypoints [[x, z], ...] - free points, not just centres
+    this.pathIndex = 0;
+    this.slideTo = null; // straight-line glide target (shoves) - {x, z}
+    this.onTile = null; // optional (x, z, pathDone, changed) per-tile hook
     this.yaw = 0;
     this.targetYaw = 0;
     // animation state
@@ -160,47 +165,10 @@ export class GridActor {
     this.visual.setLocalScale(sx, sy, sx);
   }
 
-  // Slide the entity toward the logical tile, carrying any leftover movement
-  // across arrivals (onArrive may set a new destination mid-frame) so speed
-  // stays constant instead of hitching at each tile.
-  update(dt) {
-    if (!this.entity) return;
-    const budget = this.speed * dt;
-    let remaining = budget;
-    for (let guard = 0; guard < 4 && remaining > 0; guard++) {
-      const pos = this.entity.getPosition();
-      const dx = this.x - pos.x;
-      const dz = this.z - pos.z;
-      const d = Math.hypot(dx, dz);
-      if (d < 1e-4) {
-        if (!(this.onArrive && this.onArrive())) break;
-        continue;
-      }
-      if (d <= remaining) {
-        this.entity.setPosition(this.x, pos.y, this.z);
-        remaining -= d;
-        if (!(this.onArrive && this.onArrive())) break;
-      } else {
-        this.entity.setPosition(pos.x + (dx / d) * remaining, pos.y, pos.z + (dz / d) * remaining);
-        this.targetYaw = Math.atan2(dx, dz) * pc.math.RAD_TO_DEG;
-        remaining = 0;
-      }
-    }
-    this.easeYaw(dt);
-    this.updateAnim(dt, budget - remaining);
-  }
-}
-
-export class PlayerActor extends GridActor {
-  constructor(x, z, opts = {}) {
-    super(x, z, { speed: 4, ...opts });
-    this.path = null;
-    this.pathIndex = 0;
-  }
-
   setPath(path) {
     this.path = path;
     this.pathIndex = 1; // index 0 is where we already stand
+    this.slideTo = null;
   }
 
   clearPath() {
@@ -208,20 +176,30 @@ export class PlayerActor extends GridActor {
   }
 
   get moving() {
-    return !!this.path;
+    return !!this.path || !!this.slideTo;
   }
 
-  // Follows (smoothed) waypoints at any angle. Because a straight run crosses
-  // tiles without stopping on them, the logical tile is tracked from the
-  // entity's position every frame - onTile(x, z, pathDone) fires on each tile
-  // entered so hazards/combat/exits react mid-stride.
-  update(dt, onTile) {
+  // Teleport the logical tile and glide the body there in a straight line
+  // (shoves). Free-form travel goes through setPath instead.
+  pushTo(x, z) {
+    this.x = x;
+    this.z = z;
+    this.slideTo = { x, z };
+    this.path = null;
+  }
+
+  // Follows (smoothed) waypoints at any angle, consuming the whole frame's
+  // movement across bends so speed is constant through corners. Because a
+  // straight run crosses tiles without stopping on them, the logical tile is
+  // tracked from the entity's position every frame - onTile(x, z, pathDone,
+  // changed) fires on each tile entered so hazards/combat/exits react
+  // mid-stride. Shove glides (slideTo) move the body without retracking the
+  // logical tile - pushTo already set it.
+  update(dt, onTile = null) {
     if (!this.entity) return;
-    let finished = false;
-    // Consume the whole frame's movement across waypoints - no per-bend
-    // hitch, so speed is constant through corners.
-    const budget = this.path ? this.speed * dt : 0;
+    const budget = (this.path || this.slideTo) ? this.speed * dt : 0;
     let remaining = budget;
+    let finished = false;
     while (this.path && remaining > 0) {
       const [wx, wz] = this.path[this.pathIndex];
       const pos = this.entity.getPosition();
@@ -241,8 +219,24 @@ export class PlayerActor extends GridActor {
         remaining = 0;
       }
     }
+    while (this.slideTo && remaining > 0) {
+      const pos = this.entity.getPosition();
+      const dx = this.slideTo.x - pos.x;
+      const dz = this.slideTo.z - pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d <= remaining) {
+        this.entity.setPosition(this.slideTo.x, pos.y, this.slideTo.z);
+        remaining -= Math.max(d, 1e-4);
+        this.slideTo = null;
+      } else {
+        this.entity.setPosition(pos.x + (dx / d) * remaining, pos.y, pos.z + (dz / d) * remaining);
+        this.targetYaw = Math.atan2(dx, dz) * pc.math.RAD_TO_DEG;
+        remaining = 0;
+      }
+    }
     this.easeYaw(dt);
     this.updateAnim(dt, budget - remaining);
+    if (this.slideTo) return; // logical tile already set by pushTo
     const pos = this.entity.getPosition();
     const tx = Math.round(pos.x);
     const tz = Math.round(pos.z);
@@ -253,8 +247,15 @@ export class PlayerActor extends GridActor {
     if (changed || finished) {
       this.x = tx;
       this.z = tz;
-      onTile && onTile(tx, tz, finished, changed);
+      const cb = onTile || this.onTile;
+      cb && cb(tx, tz, finished, changed);
     }
+  }
+}
+
+export class PlayerActor extends GridActor {
+  constructor(x, z, opts = {}) {
+    super(x, z, { speed: 4, ...opts });
   }
 }
 
@@ -284,10 +285,14 @@ export class EnemyActor extends GridActor {
 
   die() {
     this.alive = false;
+    this.path = null;
+    this.slideTo = null;
+    this.onTile = null;
     if (this.entity) this.fx = { kind: 'death', t: 0 };
   }
 
-  // world: { paused, terrainOpen, isWalkable, isHazard, stepOpen, playerTile }
+  // world: { paused, isWalkable, isHazard, playerTile, occupied,
+  //          findWanderPath } - see the update loop in main.js
   update(dt, world) {
     if (!this.alive) {
       // Play out the death topple, then the entity removes itself.
@@ -295,26 +300,30 @@ export class EnemyActor extends GridActor {
       return;
     }
     super.update(dt);
-    if (world.paused) return;
+    if (world.paused) return; // combat drives enemy movement itself
+    // Simultaneous wanderers can converge on the same spot - stop short
+    // rather than visibly overlapping another actor. (Combat movement is
+    // sequenced, so only wander needs this.)
+    if (this.path && this.entity) {
+      const pos = this.entity.getPosition();
+      const [wx, wz] = this.path[this.pathIndex];
+      const d = Math.hypot(wx - pos.x, wz - pos.z) || 1;
+      const ax = Math.round(pos.x + ((wx - pos.x) / d) * 0.7);
+      const az = Math.round(pos.z + ((wz - pos.z) / d) * 0.7);
+      if ((ax !== this.x || az !== this.z) && world.occupied(ax, az, this)) this.clearPath();
+    }
     this.wanderTimer -= dt;
-    if (this.wanderTimer > 0) return;
+    if (this.wanderTimer > 0 || this.moving) return;
     this.wanderTimer = 1.8;
     if (Math.random() < 0.45) return; // sometimes they just stand around
-    const options = [];
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-      const nx = this.x + dx;
-      const nz = this.z + dz;
-      if (Math.abs(nx - this.spawnX) > this.leash || Math.abs(nz - this.spawnZ) > this.leash) continue;
-      if (dx !== 0 && dz !== 0 && !(world.terrainOpen(this.x + dx, this.z) && world.terrainOpen(this.x, this.z + dz))) continue;
-      if (!world.isWalkable(nx, nz)) continue;
-      if (world.stepOpen && !world.stepOpen(this.x, this.z, nx, nz)) continue;
-      if (world.isHazard(nx, nz)) continue; // they know where the puddles are
-      if (nx === world.playerTile.x && nz === world.playerTile.z) continue;
-      options.push([nx, nz]);
-    }
-    if (!options.length) return;
-    const [nx, nz] = options[Math.floor(Math.random() * options.length)];
-    this.x = nx;
-    this.z = nz;
+    // Amble to a random open spot within the leash - a real smoothed path,
+    // walked in one run, instead of a one-tile hop.
+    const tx = this.spawnX + Math.floor(Math.random() * (this.leash * 2 + 1)) - this.leash;
+    const tz = this.spawnZ + Math.floor(Math.random() * (this.leash * 2 + 1)) - this.leash;
+    if (tx === this.x && tz === this.z) return;
+    if (!world.isWalkable(tx, tz) || world.isHazard(tx, tz)) return;
+    if (tx === world.playerTile.x && tz === world.playerTile.z) return;
+    const p = world.findWanderPath(this, tx, tz);
+    if (p && p.length > 1) this.setPath(p);
   }
 }
