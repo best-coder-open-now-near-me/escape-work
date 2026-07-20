@@ -13,7 +13,7 @@ import { ENEMY_TYPES } from './data/enemies.js';
 import { CLASSES } from './data/classes.js';
 import { ACTIONS } from './data/actions.js';
 import { parseLevel } from './grid.js';
-import { findPath, smoothPath, segmentClear, clampToClearance, DIRS8 } from './pathfinding.js';
+import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
 import { createSheet, gainXp, applyDamage } from './stats.js';
 import { PlayerActor, EnemyActor } from './actors.js';
 import { createApp, buildLevel, placeModel, applyCharacterProportions, throwProjectile, spawnDamageText } from './scene.js';
@@ -203,6 +203,9 @@ function startGame(level) {
   // Where the body may actually stand: the exact clicked point, pulled in
   // from walls/partitions so the model never clips them.
   const clampPoint = (x, z) => clampToClearance(grid.terrainOpen, grid.edgeOpen, x, z);
+  // Walk-up landing spot: at reach of the target's body inside goal tile
+  // (gx, gz), instead of the tile's dead centre.
+  const approachTo = (gx, gz, tx, tz) => approachPoint(grid.terrainOpen, grid.edgeOpen, gx, gz, tx, tz);
 
   // Walk within reach of (x, z), then run the interaction.
   function approachAndDo(x, z, run) {
@@ -221,6 +224,8 @@ function startGame(level) {
     }
     if (!best || best.length < 2) return;
     pendingAction = { x, z, run };
+    const [gx, gz] = best[best.length - 1];
+    best[best.length - 1] = approachTo(gx, gz, x, z);
     const s = smoothFromBody(best);
     player.setPath(s);
     lastPath = s;
@@ -264,6 +269,9 @@ function startGame(level) {
     }
     if (!best) return;
     if (best.length > 1) {
+      const [gx, gz] = best[best.length - 1];
+      const bp = en.entity?.getPosition() || en;
+      best[best.length - 1] = approachTo(gx, gz, bp.x, bp.z);
       const s = smoothFromBody(best);
       player.setPath(s);
       lastPath = s;
@@ -317,6 +325,7 @@ function startGame(level) {
             p, grid.edgeOpen);
         },
         clampPoint,
+        approach: approachTo,
         // Partitions (edge walls) are chest height: they block movement but
         // not throws - lob paper right over the cubicle wall.
         hasLos: (ax, az, bx, bz) => segmentClear(grid.terrainOpen, ax, az, bx, bz),
@@ -558,7 +567,10 @@ function startGame(level) {
           ? grid.terrainOpen(x, z)
           : clearOfHazards(x, z) && !(x === player.x && z === player.z));
         const p = findPath(open, en.x, en.z, tx, tz, null, grid.stepOpen);
-        return p && smoothPath(open, p, grid.edgeOpen);
+        if (!p || p.length < 2) return null;
+        // amble to a loose spot in the tile, not its dead centre
+        p[p.length - 1] = clampPoint(tx + (Math.random() - 0.5) * 0.7, tz + (Math.random() - 0.5) * 0.7);
+        return smoothPath(open, p, grid.edgeOpen);
       },
     };
     let anyoneMoved = false;
@@ -645,6 +657,11 @@ function startGame(level) {
     get stats() { return sheet ? { ...sheet } : null; },
     get playerSpeed() { return player.speed; },
     get burning() { return runtime.burningCount; },
-    get enemies() { return enemies.map((e) => ({ name: e.def.name, x: e.x, z: e.z, alive: e.alive })); },
+    get enemies() {
+      return enemies.map((e) => {
+        const p = e.entity?.getPosition();
+        return { name: e.def.name, x: e.x, z: e.z, px: p?.x, pz: p?.z, alive: e.alive };
+      });
+    },
   };
 }

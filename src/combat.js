@@ -311,7 +311,10 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
       if (p && (!best || p.length < best.length)) best = p;
     }
     if (!best || best.length < 2) { log('No way to reach them.'); return; }
-    const walk = walkPlayer(best, ap - a.ap);
+    // walk up to their body, not the centre of the neighbouring tile
+    const [gx, gz] = best[best.length - 1];
+    const ep = en.entity ? en.entity.getPosition() : { x: en.x, z: en.z };
+    const walk = walkPlayer(best, ap - a.ap, world.approach(gx, gz, ep.x, ep.z));
     if (!walk) { log('Not enough AP to reach them.'); return; }
     if (cheb(Math.round(walk.end[0]), Math.round(walk.end[1]), en.x, en.z) <= 1) {
       pendingMelee = en; // strike on arrival
@@ -433,6 +436,11 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
       if (p && p.length > 1 && (!best || p.length < best.length)) best = p;
     }
     if (!best) return 0;
+    // Stand at reach of the player's BODY, not the middle of the adjacent
+    // tile (the point stays inside that tile, so adjacency still holds).
+    const [gx, gz] = best[best.length - 1];
+    const pp = player.entity ? player.entity.getPosition() : { x: player.x, z: player.z };
+    best[best.length - 1] = world.approach(gx, gz, pp.x, pp.z);
     const s = world.smoothEnemy(en, best);
     const { points, cost } = truncateByBudget(s, budget, () => 1);
     if (points.length < 2 || cost < 0.05) return 0;

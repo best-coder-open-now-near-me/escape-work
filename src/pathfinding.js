@@ -140,6 +140,24 @@ export function clampToClearance(isOpen, edgeOpen, px, pz, radius = BODY_RADIUS)
   return [x, z];
 }
 
+// Where to actually STAND in a goal tile when approaching a target: at
+// `reach` distance from the target's body along the approach line - walk up
+// TO them, not to the middle of the neighbouring square. The point is kept
+// inside the goal tile so the derived logical tile (and every tile-keyed
+// adjacency check) is unaffected, then clamped clear of walls.
+export function approachPoint(isOpen, edgeOpen, gx, gz, tx, tz, reach = 0.85) {
+  const dx = gx - tx;
+  const dz = gz - tz;
+  const d = Math.hypot(dx, dz);
+  let px = gx;
+  let pz = gz;
+  if (d > 1e-6) {
+    px = Math.min(gx + 0.42, Math.max(gx - 0.42, tx + (dx / d) * reach));
+    pz = Math.min(gz + 0.42, Math.max(gz - 0.42, tz + (dz / d) * reach));
+  }
+  return clampToClearance(isOpen, edgeOpen, px, pz);
+}
+
 // Walk a (smoothed) polyline charging `rate(x, z)` per unit of DISTANCE,
 // sampled from the cell under each slice. Returns the affordable prefix -
 // which may end mid-segment, so a move can stop at any point when the budget
