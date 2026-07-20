@@ -48,8 +48,10 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
   let phase = 'player'; // 'player' | 'enemies' | 'done'
   let ap = sheet.maxAp;
   let defended = false;
-  let armed = sheet.actions.find((id) => ACTIONS[id].type === 'attack') || 'attack';
-  let pendingMelee = null; // enemy to strike when the walk-up completes
+  // Nothing is pre-aimed: arm an attack/shove, THEN pick a target. While
+  // armed, hover switches from the movement trail to target rings.
+  let armed = null;
+  let pendingMelee = null; // { en, action } to strike when the walk-up completes
   let enemyQueue = [];
   let acting = null; // { en, ap, wait }
 
@@ -105,7 +107,8 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
   }
 
   function handleHover(point, sx, sy) {
-    if (phase !== 'player' || player.moving || !point) { hidePreview(); return; }
+    // While aiming, target rings replace the movement trail entirely.
+    if (phase !== 'player' || player.moving || !point || armed) { hidePreview(); return; }
     const tx = Math.round(point.x);
     const tz = Math.round(point.z);
     if (!world.isWalkable(tx, tz)) { hidePreview(); return; } // enemies/walls: no route preview
@@ -128,6 +131,17 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     costTag.style.display = 'block';
   }
 
+  function drawRing(cx, cz, r, color, y = 0.14) {
+    const SEGS = 18;
+    let prev = null;
+    for (let i = 0; i <= SEGS; i++) {
+      const a = (i / SEGS) * Math.PI * 2;
+      const p = new pc.Vec3(cx + Math.cos(a) * r, y, cz + Math.sin(a) * r);
+      if (prev) app.drawLine(prev, p, color);
+      prev = p;
+    }
+  }
+
   function drawPreview() {
     if (!preview) return;
     const y = 0.14; // above the floor top (0.1) and surface decals (0.12)
@@ -141,13 +155,30 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     if (preview.tail) seg(preview.tail, PREVIEW_FAR);
     // ring where the walk would stop
     const [ex, ez] = preview.reach[preview.reach.length - 1];
-    const SEGS = 18;
-    let prev = null;
-    for (let i = 0; i <= SEGS; i++) {
-      const a = (i / SEGS) * Math.PI * 2;
-      const p = new pc.Vec3(ex + Math.cos(a) * 0.32, y, ez + Math.sin(a) * 0.32);
-      if (prev) app.drawLine(prev, p, PREVIEW_OK);
-      prev = p;
+    drawRing(ex, ez, 0.32, PREVIEW_OK, y);
+  }
+
+  // While an attack/shove is armed, rings mark the targets: green = usable on
+  // them right now (melee walks you in), red = out of range / no line / short
+  // on ammo or AP.
+  function drawTargets() {
+    if (phase !== 'player' || !armed) return;
+    const a = ACTIONS[armed];
+    if (a.type !== 'attack' && a.type !== 'shove') return;
+    for (const en of engaged) {
+      if (!en.alive || !en.entity) continue;
+      let ok;
+      if (a.type === 'shove') {
+        ok = cheb(player.x, player.z, en.x, en.z) <= 1 && ap >= a.ap;
+      } else if (a.ammoCost) {
+        ok = cheb(player.x, player.z, en.x, en.z) <= THROW_RANGE
+          && world.hasLos(player.x, player.z, en.x, en.z)
+          && sheet.paper >= ammoCostOf(armed) && ap >= a.ap;
+      } else {
+        ok = ap >= a.ap; // melee: clicking a distant target walks you in
+      }
+      const pos = en.entity.getPosition();
+      drawRing(pos.x, pos.z, 0.5, ok ? PREVIEW_OK : PREVIEW_FAR);
     }
   }
 
@@ -247,6 +278,7 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b');
     log(`${a.log} ${dmg} damage!`);
     if (died) callbacks.onEnemyKilled(en);
+    armed = null; // back to movement mode after the swing
     refresh();
     if (!engaged.some((e) => e.alive)) victory();
   }
@@ -254,6 +286,7 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
   function handleEnemyClick(en) {
     if (phase !== 'player' || player.moving || !en.alive) return;
     hidePreview();
+    if (!armed) { log('Choose an action first, then a target.'); return; }
     const a = ACTIONS[armed];
     if (a.type === 'shove') {
       if (cheb(player.x, player.z, en.x, en.z) > 1) { log('Too far to shove.'); return; }
@@ -284,6 +317,7 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
           log(`You shove ${en.def.name} back a step.`);
         }
       }
+      armed = null;
       refresh();
       if (!engaged.some((e) => e.alive)) victory();
       return;
@@ -318,9 +352,11 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     const walk = walkPlayer(best, ap - a.ap, world.approach(gx, gz, ep.x, ep.z));
     if (!walk) { log('Not enough AP to reach them.'); return; }
     if (cheb(Math.round(walk.end[0]), Math.round(walk.end[1]), en.x, en.z) <= 1) {
-      pendingMelee = en; // strike on arrival
+      pendingMelee = { en, action: armed }; // strike on arrival
     } else {
+      armed = null;
       log('You close the distance.');
+      refresh();
     }
   }
 
@@ -342,6 +378,13 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
 
   function handleTileClick(tile, point = null) {
     if (phase !== 'player' || player.moving || !tile) return;
+    if (armed) {
+      // aiming: a ground click lowers the action instead of walking
+      log(`You lower the ${ACTIONS[armed].label.toLowerCase()}.`);
+      armed = null;
+      refresh();
+      return;
+    }
     if (!world.isWalkable(tile.x, tile.z)) return;
     pendingMelee = null;
     if (point && tile.x === player.x && tile.z === player.z && player.entity) {
@@ -361,8 +404,14 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
       const id = b.dataset.action;
       const a = ACTIONS[id];
       if (a.type === 'attack' || a.type === 'shove') {
-        armed = id; // arm it; clicking an enemy fires it
-        log(`${a.label} armed. Click a target.`);
+        if (armed === id) {
+          armed = null; // clicking again lowers it
+          log(`You lower the ${a.label.toLowerCase()}.`);
+        } else {
+          armed = id; // arm it; clicking a ringed target fires it
+          hidePreview(); // aiming now - the movement trail yields to targets
+          log(`${a.label} armed. Click a target.`);
+        }
         refresh();
       } else if (a.type === 'defend') {
         ap -= a.ap;
@@ -389,6 +438,7 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
   function startEnemyPhase() {
     phase = 'enemies';
     pendingMelee = null;
+    armed = null;
     hidePreview();
     enemyQueue = engaged.filter((e) => e.alive);
     acting = null;
@@ -469,16 +519,20 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
   function update(dt) {
     if (phase === 'done') return;
     drawPreview(); // immediate-mode lines last one frame - redraw while shown
+    drawTargets();
     // prune anyone killed externally (printer explosions during combat)
     if (!engaged.some((e) => e.alive)) { victory(); return; }
     if (phase === 'player') {
       // finish a queued walk-up strike
       if (pendingMelee && !player.moving) {
-        const en = pendingMelee;
+        const { en, action } = pendingMelee;
         pendingMelee = null;
-        if (en.alive && cheb(player.x, player.z, en.x, en.z) <= 1 && ap >= ACTIONS[armed].ap) {
+        if (en.alive && cheb(player.x, player.z, en.x, en.z) <= 1 && ap >= ACTIONS[action].ap) {
           player.faceToward(en.x, en.z);
-          performOn(armed, en);
+          performOn(action, en);
+        } else {
+          armed = null;
+          refresh();
         }
       }
       return;
