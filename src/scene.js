@@ -866,6 +866,18 @@ export function throwProjectile(app, from, to, kind = 'ball') {
   app.on('update', tick);
 }
 
+// World point -> CSS-pixel screen point. worldToScreen works in device
+// pixels while the DOM works in CSS pixels, so every DOM element tracking a
+// world position (damage popups, loot labels, test helpers) must project
+// through this - a raw worldToScreen drifts on HiDPI displays.
+const _proj = new pc.Vec3();
+export function worldToScreenCss(app, cameraEntity, wx, wy, wz) {
+  cameraEntity.camera.worldToScreen(_proj.set(wx, wy, wz), _proj);
+  const canvas = app.graphicsDevice.canvas;
+  const s = canvas.clientWidth ? canvas.clientWidth / canvas.width : 1;
+  return { x: _proj.x * s, y: _proj.y * s, behind: _proj.z < 0 };
+}
+
 // Floating damage/heal number above a tile. DOM-based so it stays crisp;
 // tracks the world position each frame as the camera moves.
 export function spawnDamageText(app, cameraEntity, wx, wy, wz, text, color = '#ff8a76') {
@@ -878,8 +890,6 @@ export function spawnDamageText(app, cameraEntity, wx, wy, wz, text, color = '#f
   });
   div.textContent = text;
   document.body.appendChild(div);
-  const pos = new pc.Vec3();
-  const out = new pc.Vec3();
   let t = 0;
   const tick = (dt) => {
     t += dt;
@@ -889,13 +899,9 @@ export function spawnDamageText(app, cameraEntity, wx, wy, wz, text, color = '#f
       div.remove();
       return;
     }
-    pos.set(wx, wy + 0.6 + k * 0.85, wz);
-    cameraEntity.camera.worldToScreen(pos, out);
-    // worldToScreen works in device pixels; the DOM works in CSS pixels.
-    const canvas = app.graphicsDevice.canvas;
-    const s = canvas.clientWidth ? canvas.clientWidth / canvas.width : 1;
-    div.style.left = out.x * s + 'px';
-    div.style.top = out.y * s + 'px';
+    const s = worldToScreenCss(app, cameraEntity, wx, wy + 0.6 + k * 0.85, wz);
+    div.style.left = s.x + 'px';
+    div.style.top = s.y + 'px';
     div.style.opacity = String(1 - k * k);
   };
   app.on('update', tick);

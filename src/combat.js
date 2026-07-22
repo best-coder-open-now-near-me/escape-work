@@ -11,19 +11,27 @@
 import { ACTIONS } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
-import { damageBonus } from './stats.js';
+import { damageBonus, applyDamage } from './stats.js';
 
 const pc = window.pc;
 const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
 const cheb = (ax, az, bx, bz) => Math.max(Math.abs(ax - bx), Math.abs(az - bz));
 const THROW_RANGE = 5;
-const ENEMY_ATTACK_AP = 3;
+const SURPRISE_RADIUS = 2; // engaged from beyond this = loses the first turn
 
 export function startCombat({ app, sheet, player, engaged, world, fx, callbacks }) {
   // Enemies pulled in from a distance are surprised - they spend their first
   // turn realizing what's happening, so group openings don't alpha-strike you.
   for (const en of engaged) {
-    en.surprised = cheb(en.x, en.z, player.x, player.z) > 2;
+    en.surprised = cheb(en.x, en.z, player.x, player.z) > SURPRISE_RADIUS;
+  }
+  // A bystander outside the engagement radius who gets attacked anyway joins
+  // the fight - surprised, so they lose the turn they spend taking offense.
+  // Without this they'd soak thrown damage forever without ever hitting back.
+  function joinCombat(en) {
+    if (engaged.includes(en)) return;
+    engaged.push(en);
+    en.surprised = true;
   }
   // world: { isWalkable, findPath(sx,sz,tx,tz), hasLos(ax,az,bx,bz),
   //          stepOpen(x,z,nx,nz), surfaceIdAt(x,z), enemySurfDamage(x,z) }
@@ -39,8 +47,13 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     const base = ACTIONS[id].ammoCost || 0;
     return base > 1 ? Math.max(1, base - (talentFx.paperAmmoDiscount || 0)) : base;
   };
-  // Movement cost per unit distance: sticky surfaces cost double to cross.
-  const stepCost = (x, z) => (SURFACES[world.surfaceIdAt(x, z)]?.slow ? 2 : 1);
+  // Movement cost per unit distance, derived from the surface's `slow`
+  // multiplier (0.5 => twice the AP) - one number in data drives both walk
+  // speed and AP pricing, for everyone.
+  const stepCost = (x, z) => {
+    const slow = SURFACES[world.surfaceIdAt(x, z)]?.slow;
+    return slow ? 1 / slow : 1;
+  };
   // AP is spent in tenths now that movement charges by distance.
   const roundAp = (v) => Math.round(v * 10) / 10;
   const fmtAp = (v) => String(roundAp(v)).replace(/\.0$/, '');
@@ -160,13 +173,14 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
 
   // While an attack/shove is armed, rings mark the targets: green = usable on
   // them right now (melee walks you in), red = out of range / no line / short
-  // on ammo or AP.
+  // on ammo or AP. Every live enemy is ringed, not just the engaged - a
+  // clickable bystander deserves the same feedback.
   function drawTargets() {
     if (phase !== 'player' || !armed) return;
     const a = ACTIONS[armed];
     if (a.type !== 'attack' && a.type !== 'shove') return;
-    for (const en of engaged) {
-      if (!en.alive || !en.entity) continue;
+    for (const en of world.liveEnemies()) {
+      if (!en.entity) continue;
       let ok;
       if (a.type === 'shove') {
         ok = cheb(player.x, player.z, en.x, en.z) <= 1 && ap >= a.ap;
@@ -263,6 +277,7 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
 
   // --- player actions ------------------------------------------------------------
   function performOn(id, en) {
+    joinCombat(en); // attacking a bystander drags them into the fight
     const a = ACTIONS[id];
     let dmg = rand(a.min, a.max) + damageBonus(sheet); // carried staplers count
     if (a.ammoCost) {
@@ -291,6 +306,7 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     if (a.type === 'shove') {
       if (cheb(player.x, player.z, en.x, en.z) > 1) { log('Too far to shove.'); return; }
       if (ap < a.ap) { log('Not enough AP.'); return; }
+      joinCombat(en); // shoving a bystander is also an opinion they'll return
       const dx = Math.sign(en.x - player.x);
       const dz = Math.sign(en.z - player.z);
       const tx = en.x + dx;
@@ -414,12 +430,14 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
         }
         refresh();
       } else if (a.type === 'defend') {
+        if (defended) { log('You are already deflecting. Save the AP.'); return; }
         ap -= a.ap;
         defended = true;
         log(a.log);
         refresh();
       } else if (a.type === 'heal') {
         if (a.uses && usesLeft[id] <= 0) return;
+        if (sheet.hp >= sheet.maxHp) { log('Already at full health. Savor it.'); return; }
         if (a.uses) usesLeft[id] -= 1;
         ap -= a.ap;
         sheet.hp = Math.min(sheet.maxHp, sheet.hp + a.amount);
@@ -466,11 +484,11 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     }
     en.lunge(player.x, player.z);
     player.flinch();
-    sheet.hp = Math.max(0, sheet.hp - dmg);
+    const dead = applyDamage(sheet, dmg);
     fx.damageText(player.x, player.z, `-${dmg}`);
     log(line);
     refresh();
-    if (sheet.hp <= 0) defeat();
+    if (dead) defeat();
   }
 
   // Route toward the cheapest player-adjacent tile and walk it in ONE smooth
@@ -493,7 +511,8 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     const pp = player.entity ? player.entity.getPosition() : { x: player.x, z: player.z };
     best[best.length - 1] = world.approach(gx, gz, pp.x, pp.z);
     const s = world.smoothEnemy(en, best);
-    const { points, cost } = truncateByBudget(s, budget, () => 1);
+    // Enemies pay the same surface movement tax the player does.
+    const { points, cost } = truncateByBudget(s, budget, stepCost);
     if (points.length < 2 || cost < 0.05) return 0;
     en.onTile = (x, z, done, changed) => {
       if (changed) {
@@ -558,9 +577,9 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     const { en } = acting;
     if (!en.alive) { acting = null; return; }
     if (en.moving) return; // let the current walk play out
-    if (cheb(en.x, en.z, player.x, player.z) <= 1 && acting.ap >= ENEMY_ATTACK_AP) {
+    if (cheb(en.x, en.z, player.x, player.z) <= 1 && acting.ap >= en.def.attackAp) {
       enemyAttack(en);
-      acting.ap -= ENEMY_ATTACK_AP;
+      acting.ap -= en.def.attackAp;
       acting.wait = 0.55;
     } else if (acting.ap >= 1 && cheb(en.x, en.z, player.x, player.z) > 1) {
       const spent = enemyAdvance(en, acting.ap);

@@ -6,12 +6,15 @@
   "description": "Escape Work - a turn-based RPG about escaping the office. Code-first PlayCanvas.",
   "scripts": {
     "build": "node build.mjs",
-    "serve": "node build.mjs && python3 -m http.server 8000 --directory build/web"
+    "serve": "node build.mjs && python3 -m http.server 8000 --directory build/web",
+    "test": "node --test \"tests/unit/*.test.js\"",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "playcanvas": "2.20.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "esbuild": "^0.24.0"
   }
 }

@@ -14,8 +14,9 @@
 import { TILE_TYPES } from './data/tiles.js';
 import { SURFACES } from './data/surfaces.js';
 
-// Old saves/exports may reference renamed tile types.
-const TYPE_ALIASES = { 'wet-floor': 'water' };
+// Old saves/exports may reference renamed tile types. Exported so the editor
+// can upgrade them when loading a level for editing.
+export const TYPE_ALIASES = { 'wet-floor': 'water' };
 
 // "H x z len" specs -> { h, v } Sets of "x,z" edge keys.
 export function parseWallRuns(specs) {
@@ -125,11 +126,12 @@ export function parseLevel(level) {
   };
 
   // Conduction: flood-fill pools of `conducts` surfaces (4-connected); a pool
-  // with a `powers` surface on any 4-neighbour is electrified. Computed once -
-  // cables don't move (yet). Pools do not leak through edge walls: a partition
-  // dams the spill.
-  const electrified = new Set();
-  {
+  // with a `powers` surface on any 4-neighbour is electrified. Recomputed
+  // whenever the grid mutates (setType), so a destroyed prop or repainted
+  // tile can never leave a stale live pool behind. Pools do not leak through
+  // edge walls: a partition dams the spill.
+  function computeElectrified() {
+    const electrified = new Set();
     const seen = new Set();
     const conducts = (x, z) => SURFACES[surfaceAt(x, z)]?.conducts;
     const powers = (x, z) => SURFACES[surfaceAt(x, z)]?.powers;
@@ -158,12 +160,19 @@ export function parseLevel(level) {
         if (live) for (const k of pool) electrified.add(k);
       }
     }
+    return electrified;
   }
+  let electrified = computeElectrified();
   const isElectrified = (x, z) => electrified.has(x + ',' + z);
 
   // Destructible props (exploding printers) mutate the grid at runtime.
+  // Conduction depends on surfaces, and surfaces hang off tile types - so a
+  // type change re-runs the flood fill.
   const setType = (x, z, type) => {
-    if (z >= 0 && z < height && x >= 0 && x < width) typeGrid[z][x] = type;
+    if (z >= 0 && z < height && x >= 0 && x < width) {
+      typeGrid[z][x] = type;
+      electrified = computeElectrified();
+    }
   };
 
   return {

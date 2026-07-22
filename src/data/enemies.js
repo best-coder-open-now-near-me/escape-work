@@ -10,6 +10,7 @@ export const ENEMY_TYPES = {
     model: 'manager',
     hp: 14,
     ap: 5,
+    attackAp: 3, // AP one swing costs them in combat
     xp: 8,
     examine: 'The Manager: radiates unread-email energy.',
     loot: [
@@ -29,6 +30,7 @@ export const ENEMY_TYPES = {
     model: 'hr',
     hp: 12,
     ap: 6,
+    attackAp: 3,
     xp: 6,
     examine: 'HR: smiles warmly. Never stops taking notes.',
     loot: [

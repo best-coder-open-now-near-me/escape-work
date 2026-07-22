@@ -2,6 +2,10 @@
 import { CLASSES } from './data/classes.js';
 import { ITEMS } from './data/items.js';
 
+// Thrown-weapon ammo cap: paper picked up from spills, spent on throws.
+// Every pickup/use site clamps against this one value.
+export const PAPER_CAP = 8;
+
 // The sheet is the single persistent record of the player character. Combat
 // mutates hp in place so wounds carry between fights.
 export function createSheet(classId) {

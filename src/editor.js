@@ -10,8 +10,8 @@ import { TILE_TYPES } from './data/tiles.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { LEVELS } from './data/levels.js';
 import { createControls } from './controls.js';
-import { createTileRenderer, computeCarpetZones } from './scene.js';
-import { parseLevel, parseWallRuns, compressWallRuns } from './grid.js';
+import { createTileRenderer, computeCarpetZones, worldToScreenCss } from './scene.js';
+import { parseLevel, parseWallRuns, compressWallRuns, TYPE_ALIASES } from './grid.js';
 import { say } from './ui.js';
 
 const pc = window.pc;
@@ -221,8 +221,21 @@ export function startEditor(app, levelData, stashKey) {
   function loadLevel(data) {
     height = data.map.length;
     width = Math.max(...data.map.map((r) => r.length));
+    // Level legends are per-file (any char can mean anything); the editor
+    // paints and exports canonical registry chars. Remap through the file's
+    // OWN legend on the way in, or a hand-authored level using different
+    // chars would silently corrupt on the load -> export round trip.
+    const canonical = (ch) => {
+      if (ch === ' ') return ' ';
+      const actor = (data.actors || {})[ch];
+      if (actor === 'player') return PLAYER_CHAR;
+      if (actor) return ENEMY_TYPES[actor]?.char ?? TILE_TYPES.floor.char;
+      const raw = (data.tiles || {})[ch] || 'floor';
+      const type = TYPE_ALIASES[raw] || raw;
+      return TILE_TYPES[type]?.char ?? TILE_TYPES.floor.char;
+    };
     rows = data.map.map((r) => {
-      const a = r.split('');
+      const a = r.split('').map(canonical);
       while (a.length < width) a.push(' ');
       return a;
     });
@@ -446,7 +459,10 @@ export function startEditor(app, levelData, stashKey) {
     document.body.appendChild(div);
     const ta = div.querySelector('#export-json');
     ta.value = toJson();
-    div.querySelector('#export-copy').onclick = () => { ta.select(); document.execCommand('copy'); };
+    div.querySelector('#export-copy').onclick = () => {
+      ta.select(); // visible feedback either way
+      navigator.clipboard?.writeText(ta.value).catch(() => {});
+    };
     div.querySelector('#export-close').onclick = () => div.remove();
   }
 
@@ -460,9 +476,10 @@ export function startEditor(app, levelData, stashKey) {
     get brush() { return brush; },
     get walls() { return compressWallRuns(hWalls, vWalls); },
     carpetAt: (x, z) => carpet.get(x + ',' + z) || null,
-    // World point -> screen pixel, so tests can click precise ground points.
+    // World point -> CSS-pixel screen point, so tests can click precise
+    // ground points (mouse events arrive in CSS pixels).
     project(x, z) {
-      const s = controls.cameraEntity.camera.worldToScreen(new pc.Vec3(x, 0, z));
+      const s = worldToScreenCss(app, controls.cameraEntity, x, 0, z);
       return { x: s.x, y: s.y };
     },
     charAt: (x, z) => rows[z]?.[x],
