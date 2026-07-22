@@ -543,6 +543,14 @@ function startGame(level) {
         enemySurfDamage: (x, z) => surfEffect(x, z)?.amount || 0,
         slipChanceAt,
         stickGum,
+        // Cone attacks carpet plain floor with a surface tile (Bulk Mail ->
+        // paper). Only bare floor converts - carpets, surfaces, props stay.
+        leaveSurface: (x, z, tileType) => {
+          if (grid.typeAt(x, z) !== 'floor') return false;
+          grid.setType(x, z, tileType);
+          scene.addSurfaceVisual(x, z, tileType);
+          return true;
+        },
       },
       fx: vfx,
       callbacks: {
@@ -978,6 +986,7 @@ function startGame(level) {
     get lootLabelCount() { return document.querySelectorAll('.loot-label').length; },
     containerLootAt: (x, z) => (containerLoot.has(x + ',' + z) ? [...containerLoot.get(x + ',' + z)] : null),
     get doors() { return [...grid.doors].map(([key, d]) => ({ key, open: d.open })); },
+    surfaceAt: (x, z) => runtime.surfaceAt(x, z),
     get enemies() {
       return enemies.map((e) => {
         const p = e.entity?.getPosition();

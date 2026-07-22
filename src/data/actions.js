@@ -10,6 +10,10 @@
 //   purge (on an attack) - hitting a target also wipes their status effects,
 //   harmful and helpful alike; click your own tile while armed to self-cast
 //   footwork - unusable while gum is stuck to the shoe (sheet.gum > 0)
+//   cone { range, halfAngle } (on an attack) - aimed at any clicked point:
+//   hits every enemy in the wedge (needs line of sight), rolls damage per
+//   target. `leaves: '<tileType>'` carpets the wedge's plain floor with that
+//   surface tile (Bulk Mail leaves paper - fuel, caltrops, and future ammo).
 export const ACTIONS = {
   // --- Office Drone -----------------------------------------------------------
   attack: {
@@ -86,6 +90,32 @@ export const ACTIONS = {
     amount: 4,
     uses: 4,
     log: 'You crack open something neon. +4 HP.',
+  },
+
+  // --- Mail Room ----------------------------------------------------------------
+  'mail-cone': {
+    type: 'attack',
+    ap: 3,
+    cone: { range: 4, halfAngle: 35 },
+    leaves: 'paper',
+    label: 'Bulk Mail',
+    min: 2,
+    max: 4,
+    log: 'You fan a fistful of envelopes downrange.',
+  },
+  'return-to-sender': {
+    type: 'defend',
+    ap: 2,
+    label: 'Return to Sender',
+    log: 'You mark the incoming abuse "addressee unknown". Damage halved.',
+  },
+  'snack-cart': {
+    type: 'heal',
+    ap: 2,
+    label: 'Snack Cart Raid',
+    amount: 5,
+    uses: 3,
+    log: 'You liberate a pastry from the cart. +5 HP.',
   },
 
   // --- universal ----------------------------------------------------------------

@@ -34,6 +34,22 @@ export const CLASSES = {
       effects: { hasLighter: true, grantsAction: 'cigarette' },
     },
   },
+  'mail-room': {
+    name: 'Mail Room',
+    model: 'worker', // TODO: dedicated mailroom .glb when one lands in assets
+    tagline: 'Knows every corridor. Slips on nothing. Delivers regardless.',
+    objective: 'To deliver. Rain, shine, or restructuring.',
+    experience: 'Mail Room Clerk, 11 yrs. Knows where every body is filed.',
+    maxHp: 24,
+    ap: 6,
+    bonusDmg: 0,
+    actions: ['mail-cone', 'return-to-sender', 'snack-cart'],
+    talent: {
+      name: 'Warehouse Soles',
+      blurb: 'Eleven years of ignored wet-floor signs. You cannot slip. Ever.',
+      effects: { slipImmune: true },
+    },
+  },
   'it-support': {
     name: 'IT Support',
     model: 'itsupport',
