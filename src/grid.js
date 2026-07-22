@@ -104,13 +104,56 @@ export function parseLevel(level) {
 
   // --- edge walls -------------------------------------------------------------
   const { h: hWalls, v: vWalls } = parseWallRuns(level.walls);
-  // Is the shared edge between two 4-adjacent cells free of a wall?
-  const edgeOpen = (x, z, nx, nz) => {
+
+  // --- doors -------------------------------------------------------------------
+  // Doors sit on edges like walls ("doors" runs in the level JSON, same
+  // "H x z len" format) but can be opened and closed at runtime. A door on an
+  // edge replaces any wall painted there. Closed doors block movement and
+  // sight; conduction ignores them entirely - water finds the gap underneath,
+  // so pools stay static however often the door swings.
+  const { h: hDoorSet, v: vDoorSet } = parseWallRuns(level.doors);
+  for (const k of hDoorSet) hWalls.delete(k);
+  for (const k of vDoorSet) vWalls.delete(k);
+  const doors = new Map(); // 'h:x,z' | 'v:x,z' -> { open }
+  for (const k of hDoorSet) doors.set('h:' + k, { open: false });
+  for (const k of vDoorSet) doors.set('v:' + k, { open: false });
+  const doorKeyBetween = (x, z, nx, nz) => {
+    if (nx > x) return 'v:' + nx + ',' + z;
+    if (nx < x) return 'v:' + x + ',' + z;
+    if (nz > z) return 'h:' + x + ',' + nz;
+    if (nz < z) return 'h:' + x + ',' + z;
+    return null;
+  };
+  const doorBetween = (x, z, nx, nz) => {
+    const k = doorKeyBetween(x, z, nx, nz);
+    const d = k && doors.get(k);
+    return d ? { key: k, open: d.open } : null;
+  };
+  const setDoorOpen = (key, open) => {
+    const d = doors.get(key);
+    if (d) d.open = open;
+  };
+
+  // Is the shared edge between two 4-adjacent cells free of a wall? (Static -
+  // this is what conduction pools flood against.)
+  const wallEdgeOpen = (x, z, nx, nz) => {
     if (nx > x) return !vWalls.has(nx + ',' + z);
     if (nx < x) return !vWalls.has(x + ',' + z);
     if (nz > z) return !hWalls.has(x + ',' + nz);
     if (nz < z) return !hWalls.has(x + ',' + z);
     return true;
+  };
+  // The live version movement consults: walls, plus any CLOSED door.
+  const edgeOpen = (x, z, nx, nz) => {
+    if (!wallEdgeOpen(x, z, nx, nz)) return false;
+    const d = doorBetween(x, z, nx, nz);
+    return !d || d.open;
+  };
+  // Sight (throws) crosses chest-high partitions freely, but not closed
+  // doors - those go floor to frame.
+  const sightOpen = (x, z, nx, nz) => {
+    const d = doorBetween(x, z, nx, nz);
+    return !d || d.open;
   };
   // Full edge legality for a (possibly diagonal) single step. Cell solidity is
   // NOT checked here - callers layer terrain/enemies on top. A diagonal step
@@ -147,7 +190,7 @@ export function parseLevel(level) {
           for (const [dx, dz] of N4) {
             const nx = cx + dx;
             const nz = cz + dz;
-            if (!edgeOpen(cx, cz, nx, nz)) continue;
+            if (!wallEdgeOpen(cx, cz, nx, nz)) continue; // doors don't dam pools
             if (powers(nx, nz)) live = true;
             if (conducts(nx, nz) && !seen.has(nx + ',' + nz)) {
               seen.add(nx + ',' + nz);
@@ -169,7 +212,8 @@ export function parseLevel(level) {
   return {
     name: level.name || '', width, height,
     typeAt, defAt, terrainOpen, surfaceAt, isElectrified, setType,
-    hWalls, vWalls, edgeOpen, stepOpen,
+    hWalls, vWalls, edgeOpen, stepOpen, sightOpen,
+    doors, doorBetween, setDoorOpen,
     playerSpawn, enemySpawns,
   };
 }
