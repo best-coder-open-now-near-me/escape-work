@@ -51,12 +51,14 @@ test('desk rummage, drop, Alt pickup, and consumable use', async ({ page }) => {
   ).toBe(0);
   expect(await page.evaluate(() => window.__game.inventory.length)).toBe(count);
 
-  // Use the consumable: it heals (capped) and leaves the pockets.
+  // Healing consumables refuse to burn at full HP - ration the snacks. (The
+  // player is unhurt here, so the coffee must survive the attempt.)
   const idx = await page.evaluate(() => window.__game.inventory.indexOf('cold-coffee'));
   await page.keyboard.press('i'); // refresh the panel's row ids
   await page.keyboard.press('i');
   await page.click(`#inv-use-${idx}`);
-  await expect.poll(() => page.evaluate(() => window.__game.inventory.length)).toBe(count - 1);
+  await expect(page.locator('#subtitle')).toContainText('full health');
+  expect(await page.evaluate(() => window.__game.inventory.length)).toBe(count);
 });
 
 test('a fallen coworker leaves a lootable body', async ({ page }) => {
