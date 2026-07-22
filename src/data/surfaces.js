@@ -16,7 +16,7 @@
 //               paid for is lost; a slipped enemy loses the rest of its
 //               turn). Electrified/burning tiles never also slip - they have
 //               bigger problems. slipImmune talents (safety tread) ignore it.
-//   style     - 'puddle' | 'cable' (how scene.js draws it)
+//   style     - 'puddle' | 'cable' | 'gum' (how tile-renderer.js draws it)
 export const SURFACES = {
   water: {
     conducts: true,

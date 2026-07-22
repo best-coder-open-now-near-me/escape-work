@@ -5,7 +5,8 @@
 // Item fields the code understands:
 //   name, icon - shown in the inventory panel and Alt loot labels
 //   heal       - using it restores HP (consumed)
-//   ammo       - using it adds paper ammo, capped at 8 (consumed)
+//   ammo       - using it adds paper ammo, capped at PAPER_CAP in stats.js
+//                (consumed)
 //   bonusDmg   - passive damage bonus while it's in your pockets (the best
 //                single item counts - you can only wield one stapler)
 //   examine    - flavor line (items with no use are pure office archaeology)

@@ -30,6 +30,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Unit tests
+        run: npm test
+
       - name: Build web bundle
         run: npm run build
 
@@ -54,8 +57,10 @@ jobs:
           path: build/web
 
       - name: Install butler
+        # Pinned (not LATEST) so deploys are reproducible and the binary that
+        # touches the itch.io API key doesn't change out from under us.
         run: |
-          curl -sL -o butler.zip https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default
+          curl -sL -o butler.zip https://broth.itch.zone/butler/linux-amd64/15.21.0/archive/default
           unzip -q butler.zip -d butler-bin
           chmod +x butler-bin/butler
           ./butler-bin/butler -V

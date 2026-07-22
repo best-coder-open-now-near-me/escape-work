@@ -3,7 +3,7 @@
 // continuous position, a logical tile derived from that position, straight
 // slides for shoves, eased turning) plus two animation layers that can't
 // fight the movement code or each other: baked skeletal clips
-// (idle/walk/attack, wired up in scene.js) play on the bones, while a
+// (idle/walk/attack, wired up in models.js) play on the bones, while a
 // procedural layer on the model child adds the attack lunge push, hit
 // flinches and death topples. EnemyActor adds wander AI on top. New actor
 // kinds extend GridActor the same way.
@@ -87,7 +87,7 @@ export class GridActor {
     }
   }
 
-  // Switch the skeletal clip (states assigned in scene.js setupAnim). The
+  // Switch the skeletal clip (states assigned in models.js setupAnim). The
   // procedural fx layer rides on the visual node above the bones, so clips
   // and fx compose instead of fighting.
   setClip(name, blend = 0.15, speed = 1) {

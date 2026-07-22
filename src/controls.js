@@ -1,7 +1,7 @@
 // Camera rig + mouse input. Translates raw events into semantic game input:
 // onLeftClickTile(tile) / onRightClickTile(tile, screenX, screenY). Orbiting
 // and zooming are handled entirely in here - game logic never sees them.
-import { applyCameraPostFx } from './scene.js';
+import { applyCameraPostFx } from './shading.js';
 
 const pc = window.pc;
 

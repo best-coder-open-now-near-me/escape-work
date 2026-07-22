@@ -1,6 +1,18 @@
 // All DOM-facing UI: the HUD lines, the right-click context menu, and the
 // win/lose overlays. Nothing in here knows about PlayCanvas.
 
+// Shared chrome for floating panels and buttons - combat.js and the editor
+// build their own DOM but should look like the rest of the UI, so the
+// palette lives in exactly one place.
+export const PANEL_CHROME = {
+  background: '#232334', color: '#f0f0f5', border: '1px solid #3a3a52',
+  boxShadow: '0 8px 24px rgba(0,0,0,.45)', font: '13px system-ui, sans-serif',
+};
+export const BUTTON_CHROME = {
+  border: '1px solid #3a3a52', background: '#2e2e46', color: '#f0f0f5',
+  font: 'inherit', cursor: 'pointer',
+};
+
 export function say(text) {
   const el = document.getElementById('subtitle');
   if (el) el.textContent = text;
