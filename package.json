@@ -7,7 +7,7 @@
   "scripts": {
     "build": "node build.mjs",
     "serve": "node build.mjs && python3 -m http.server 8000 --directory build/web",
-    "test": "node --test \"tests/unit/*.test.js\"",
+    "test": "node --test tests/unit/*.test.js",
     "test:e2e": "playwright test"
   },
   "dependencies": {
