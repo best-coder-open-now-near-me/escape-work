@@ -52,9 +52,10 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
 // skeleton (root -> leg-left/leg-right + torso -> arm-left/arm-right + head)
 // with no knees or elbows, so proportions are retuned by scaling bones:
 // legs and torso stretch, the head shrinks back toward realistic. Legs are
-// single rigid bones hip-to-foot - keep `legs` modest (~1.3) or the straight
-// leg starts to read as stilts when it swings.
-const PROPORTIONS = { legs: 1.45, torso: 1.18, head: 0.8, arms: 0.7 };
+// single rigid bones hip-to-foot, so past a point the straight leg reads as
+// stilts when it swings - 1.75 was checked against the walk cycle in-game
+// and still looks fine; go carefully beyond that.
+const PROPORTIONS = { legs: 1.75, torso: 1.5, head: 0.62, arms: 0.7 };
 
 export function applyCharacterProportions(holder) {
   const root = holder.findByName('root');
