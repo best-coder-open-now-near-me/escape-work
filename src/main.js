@@ -190,7 +190,34 @@ function startGame(level) {
     ui.updateStatsHud(sheet);
   }
 
+  // --- class-carousel 3D preview ------------------------------------------------
+  // While the picker is up, the browsed candidate idles on the spawn tile on
+  // a slow turntable, camera dollied in. The token guards rapid carousel
+  // flips against async .glb loads landing out of order.
+  let previewEntity = null;
+  let previewToken = 0;
+  const previewSpin = (dt) => { if (previewEntity) previewEntity.rotate(0, 35 * dt, 0); };
+  function previewClass(classId) {
+    const token = ++previewToken;
+    if (previewEntity) { previewEntity.destroy(); previewEntity = null; }
+    placeModel(app, `assets/characters/${CLASSES[classId].model}.glb`, player.x, player.z, {
+      lift, animate: true,
+      onReady: (e) => {
+        applyCharacterProportions(e);
+        if (token !== previewToken) { e.destroy(); return; }
+        previewEntity = e;
+      },
+    });
+  }
+  function endClassPreview() {
+    previewToken += 1;
+    if (previewEntity) { previewEntity.destroy(); previewEntity = null; }
+    app.off('update', previewSpin);
+    controls.setZoom(26);
+  }
+
   function onClassPicked(classId) {
+    endClassPreview();
     sheet = createSheet(classId);
     spawnPlayerModel();
     loot.refreshPanel(sheet);
@@ -850,10 +877,14 @@ function startGame(level) {
     loot.refreshPanel(sheet);
     ui.say(`${grid.name}. Keep going.`);
   } else {
+    // The carousel: dolly in on the spawn tile where previewClass parades
+    // the browsed candidate; onClassPicked restores the tactical camera.
+    controls.setZoom(10);
+    app.on('update', previewSpin);
     ui.showClassPicker(CLASSES, ACTIONS, onClassPicked, () => {
       location.hash = '#editor';
       location.reload();
-    });
+    }, previewClass);
   }
   if (playtesting) {
     ui.showPlaytestBadge(() => {

@@ -120,5 +120,12 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     camYaw.setPosition(pc.math.lerp(c.x, target.x, k), 0.3, pc.math.lerp(c.z, target.z, k));
   }
 
-  return { cameraEntity, screenToTile, screenToGround, follow };
+  // Programmatic dolly (the class-picker carousel zooms in on the candidate).
+  // Allows closer than the wheel's minDist; callers restore a sane distance.
+  function setZoom(dist) {
+    CAM.dist = pc.math.clamp(dist, 5, CAM.maxDist);
+    apply();
+  }
+
+  return { cameraEntity, screenToTile, screenToGround, follow, setZoom };
 }

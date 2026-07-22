@@ -281,47 +281,150 @@ export function showLoseScreen(message) {
 }
 
 // --- class picker -------------------------------------------------------------
-// Shown once at boot, styled as a stack of resumes on the hiring desk. Cards
-// are generated from the class registry plus the action registry, so new
-// classes appear here automatically.
-export function showClassPicker(classes, actions, onPick, onEditor) {
-  const section = (title) =>
+// A hiring-desk carousel: one resume at a time on the right, and the
+// candidate themselves idling on the office floor to the left (main.js drives
+// the 3D preview via onPreview). Arrows, dots, and arrow keys browse; the
+// ACTIVE slide's hire button is #pick-<classId>, so muscle memory and tests
+// address classes directly.
+export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
+  const ids = Object.keys(classes);
+  let index = 0;
+
+  const root = document.createElement('div');
+  root.id = 'class-picker';
+  Object.assign(root.style, {
+    position: 'fixed', inset: '0', zIndex: '40', pointerEvents: 'none',
+    color: '#f0f0f5', font: '15px system-ui, sans-serif',
+  });
+  // Dim hardest under the resume so the candidate stays lit on the left.
+  const dim = document.createElement('div');
+  Object.assign(dim.style, {
+    position: 'absolute', inset: '0',
+    background: 'linear-gradient(90deg, rgba(8,8,16,.28) 0%, rgba(8,8,16,.22) 46%, rgba(8,8,16,.8) 74%)',
+  });
+  root.appendChild(dim);
+
+  const title = document.createElement('div');
+  // Sits below the game's own header lines, not on top of them.
+  Object.assign(title.style, { position: 'absolute', top: '96px', left: '0', right: '0', textAlign: 'center' });
+  title.innerHTML = `
+    <div style="font-size:22px; font-weight:800; letter-spacing:2px;">CHOOSE YOUR CAREER MISTAKE</div>
+    <div style="opacity:.8; margin-top:4px;">${ids.length} r&eacute;sum&eacute;s on the desk. You will be living one of them.</div>`;
+  root.appendChild(title);
+
+  const panel = document.createElement('div');
+  Object.assign(panel.style, {
+    position: 'absolute', right: 'min(6vw, 84px)', top: '50%', transform: 'translateY(-50%)',
+    width: '308px', pointerEvents: 'auto', textAlign: 'center',
+  });
+  root.appendChild(panel);
+
+  const section = (t) =>
     `<div style="font:700 10px system-ui, sans-serif; letter-spacing:2px; color:#8a8577;
-      border-bottom:1px solid #d8d2c2; padding-bottom:2px; margin:10px 0 5px;">${title}</div>`;
-  const cards = Object.entries(classes).map(([id, cls]) => `
-    <button id="pick-${id}" data-class="${id}" style="flex:1; min-width:210px; max-width:240px;
-      text-align:left; background:#f6f3ea; border:1px solid #d8d2c2; border-radius:3px;
-      padding:18px 16px 14px; color:#2b2a26; font:13px Georgia, 'Times New Roman', serif;
-      cursor:pointer; box-shadow:0 6px 18px rgba(0,0,0,.45); position:relative;">
+      border-bottom:1px solid #d8d2c2; padding-bottom:2px; margin:10px 0 5px;">${t}</div>`;
+  const resumeHtml = (id) => {
+    const cls = classes[id];
+    return `
       <div style="font-size:17px; font-weight:700; letter-spacing:.5px;">${cls.name}</div>
       <div style="font-size:11px; color:#8a8577; margin-top:2px;">Applying for: Former Employee</div>
       ${section('OBJECTIVE')}
-      <div style="font-style:italic; min-height:44px;">${cls.objective}</div>
+      <div style="font-style:italic;">${cls.objective}</div>
       ${section('EXPERIENCE')}
-      <div style="min-height:34px;">${cls.experience}</div>
+      <div>${cls.experience}</div>
       ${section('SKILLS')}
       <div style="line-height:1.55;">
         ${cls.actions.map((a) => '&bull; ' + actions[a].label).join('<br>')}
       </div>
       ${section('TALENTS')}
-      <div style="min-height:30px;">${cls.talent ? `<b>${cls.talent.name}.</b> ${cls.talent.blurb}` : '&mdash;'}</div>
+      <div>${cls.talent ? `<b>${cls.talent.name}.</b> ${cls.talent.blurb}` : '&mdash;'}</div>
       <div style="position:absolute; top:10px; right:12px; font:700 9px system-ui, sans-serif;
         letter-spacing:1px; color:#b0392e; border:1px solid #b0392e; border-radius:2px;
-        padding:2px 5px; transform:rotate(6deg); opacity:.85;">CONFIDENTIAL</div>
-    </button>`).join('');
-  const div = overlay('class-picker', `
-    <div style="font-size:22px; font-weight:800; letter-spacing:2px; margin-bottom:6px;">CHOOSE YOUR CAREER MISTAKE</div>
-    <div style="opacity:.8; margin-bottom:18px;">Three r&eacute;sum&eacute;s on the desk. You will be living one of them.</div>
-    <div style="display:flex; gap:14px; flex-wrap:wrap; justify-content:center; max-width:800px;">${cards}</div>
-    ${onEditor ? `<div style="margin-top:16px;"><button id="open-editor" style="background:none; border:none;
-      color:#8a8ac0; font:12px system-ui, sans-serif; cursor:pointer; text-decoration:underline;">
-      or open the level editor</button></div>` : ''}`);
-  for (const card of div.querySelectorAll('button[data-class]')) {
-    card.onmouseenter = () => { card.style.boxShadow = '0 10px 26px rgba(0,0,0,.6)'; card.style.transform = 'translateY(-3px)'; };
-    card.onmouseleave = () => { card.style.boxShadow = '0 6px 18px rgba(0,0,0,.45)'; card.style.transform = 'none'; };
-    card.onclick = () => { div.remove(); onPick(card.dataset.class); };
+        padding:2px 5px; transform:rotate(6deg); opacity:.85;">CONFIDENTIAL</div>`;
+  };
+
+  const card = document.createElement('div');
+  card.id = 'resume-card';
+  Object.assign(card.style, {
+    textAlign: 'left', background: '#f6f3ea', border: '1px solid #d8d2c2', borderRadius: '3px',
+    padding: '18px 16px 14px', color: '#2b2a26', font: "13px Georgia, 'Times New Roman', serif",
+    boxShadow: '0 10px 30px rgba(0,0,0,.55)', position: 'relative',
+  });
+  panel.appendChild(card);
+
+  const nav = document.createElement('div');
+  Object.assign(nav.style, {
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    gap: '12px', margin: '12px 0 10px',
+  });
+  const navBtn = (id, label) => {
+    const b = document.createElement('button');
+    b.id = id;
+    b.textContent = label;
+    Object.assign(b.style, BUTTON_CHROME, { padding: '6px 14px', borderRadius: '7px', fontSize: '15px' });
+    return b;
+  };
+  const prev = navBtn('carousel-prev', '‹');
+  const next = navBtn('carousel-next', '›');
+  const dots = document.createElement('div');
+  dots.id = 'carousel-dots';
+  Object.assign(dots.style, { display: 'flex', gap: '7px' });
+  nav.append(prev, dots, next);
+  panel.appendChild(nav);
+
+  const hire = document.createElement('button');
+  Object.assign(hire.style, BUTTON_CHROME, {
+    width: '100%', padding: '11px', borderRadius: '8px', fontWeight: '700',
+    letterSpacing: '1px', borderColor: '#5a8a4e', background: '#31452c', fontSize: '13px',
+  });
+  panel.appendChild(hire);
+
+  if (onEditor) {
+    const ed = document.createElement('button');
+    ed.id = 'open-editor';
+    ed.textContent = 'or open the level editor';
+    Object.assign(ed.style, {
+      background: 'none', border: 'none', color: '#8a8ac0', marginTop: '12px',
+      font: '12px system-ui, sans-serif', cursor: 'pointer', textDecoration: 'underline',
+    });
+    ed.onclick = () => { cleanup(); onEditor(); };
+    panel.appendChild(ed);
   }
-  if (onEditor) div.querySelector('#open-editor').onclick = () => { div.remove(); onEditor(); };
+
+  function render() {
+    const id = ids[index];
+    card.innerHTML = resumeHtml(id);
+    dots.innerHTML = '';
+    ids.forEach((_, i) => {
+      const d = document.createElement('button');
+      Object.assign(d.style, {
+        width: '9px', height: '9px', borderRadius: '50%', border: 'none', padding: '0',
+        cursor: 'pointer', background: i === index ? '#8adf76' : '#4a4a66',
+      });
+      d.onclick = () => { index = i; render(); };
+      dots.appendChild(d);
+    });
+    hire.id = `pick-${id}`;
+    hire.dataset.class = id;
+    hire.textContent = `START AS ${classes[id].name.toUpperCase()}`;
+    onPreview && onPreview(id);
+  }
+  const step = (d) => { index = (index + d + ids.length) % ids.length; render(); };
+  prev.onclick = () => step(-1);
+  next.onclick = () => step(1);
+  hire.onclick = () => { cleanup(); onPick(ids[index]); };
+  const onKey = (e) => {
+    if (e.key === 'ArrowLeft') step(-1);
+    else if (e.key === 'ArrowRight') step(1);
+    else if (e.key === 'Enter') hire.onclick();
+  };
+  window.addEventListener('keydown', onKey);
+  function cleanup() {
+    window.removeEventListener('keydown', onKey);
+    root.remove();
+  }
+
+  document.body.appendChild(root);
+  render();
 }
 
 // Always-available corner menu (restart the run, open the editor) - the class
