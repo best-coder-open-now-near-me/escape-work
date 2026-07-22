@@ -51,11 +51,14 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
 // De-chibi the Kenney mini rigs. Every character shares the same 7-bone
 // skeleton (root -> leg-left/leg-right + torso -> arm-left/arm-right + head)
 // with no knees or elbows, so proportions are retuned by scaling bones:
-// legs and torso stretch, the head shrinks back toward realistic. Legs are
-// single rigid bones hip-to-foot, so past a point the straight leg reads as
-// stilts when it swings - 1.75 was checked against the walk cycle in-game
-// and still looks fine; go carefully beyond that.
-const PROPORTIONS = { legs: 1.75, torso: 1.5, head: 0.62, arms: 0.7 };
+// legs and torso stretch, the head shrinks back toward realistic. Height
+// belongs in `legs`: arms/head hang off the torso and their counter-scales
+// only cancel the torso stretch in the bind pose - once a clip rotates an
+// arm to hang down, a big torso Y stretch runs along the arm's length and
+// visibly distorts it, so keep `torso` modest. Legs are single rigid bones
+// hip-to-foot with nothing attached; 1.9 was checked against the walk cycle
+// in-game and still swings fine - go carefully beyond that.
+const PROPORTIONS = { legs: 1.9, torso: 1.3, head: 0.62, arms: 0.7 };
 
 export function applyCharacterProportions(holder) {
   const root = holder.findByName('root');
