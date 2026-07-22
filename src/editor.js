@@ -10,9 +10,10 @@ import { TILE_TYPES } from './data/tiles.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { LEVELS } from './data/levels.js';
 import { createControls } from './controls.js';
-import { createTileRenderer, computeCarpetZones, worldToScreenCss } from './scene.js';
+import { createTileRenderer, computeCarpetZones } from './tile-renderer.js';
+import { worldToScreenCss } from './fx.js';
 import { parseLevel, parseWallRuns, compressWallRuns, TYPE_ALIASES } from './grid.js';
-import { say } from './ui.js';
+import { say, PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 
 const pc = window.pc;
 const PLAYER_CHAR = '@';
@@ -338,20 +339,18 @@ export function startEditor(app, levelData, stashKey) {
   // --- editor UI ----------------------------------------------------------------------
   const bar = document.createElement('div');
   bar.id = 'editor-bar';
-  Object.assign(bar.style, {
+  Object.assign(bar.style, PANEL_CHROME, {
     position: 'fixed', left: '50%', bottom: '14px', transform: 'translateX(-50%)',
     zIndex: '30', display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'center',
-    maxWidth: '96vw', background: '#232334', border: '1px solid #3a3a52',
-    borderRadius: '10px', padding: '9px', font: '12px system-ui, sans-serif',
-    color: '#f0f0f5', boxShadow: '0 10px 30px rgba(0,0,0,.5)', alignItems: 'center',
+    maxWidth: '96vw', borderRadius: '10px', padding: '9px',
+    font: '12px system-ui, sans-serif', alignItems: 'center',
   });
   const btn = (id, label) => {
     const b = document.createElement('button');
     b.id = id;
     b.textContent = label;
-    Object.assign(b.style, {
-      padding: '7px 10px', borderRadius: '7px', border: '1px solid #3a3a52',
-      background: '#2e2e46', color: '#f0f0f5', font: 'inherit', cursor: 'pointer',
+    Object.assign(b.style, BUTTON_CHROME, {
+      padding: '7px 10px', borderRadius: '7px',
     });
     bar.appendChild(b);
     return b;
@@ -409,9 +408,8 @@ export function startEditor(app, levelData, stashKey) {
   // load a shipped level as a base
   const select = document.createElement('select');
   select.id = 'ed-level';
-  Object.assign(select.style, {
-    padding: '6px', borderRadius: '7px', border: '1px solid #3a3a52',
-    background: '#2e2e46', color: '#f0f0f5', font: 'inherit',
+  Object.assign(select.style, BUTTON_CHROME, {
+    padding: '6px', borderRadius: '7px', cursor: 'auto',
   });
   select.innerHTML = `<option value="">load level…</option>` +
     Object.entries(LEVELS).map(([id, l]) => `<option value="${id}">${l.name || id}</option>`).join('');

@@ -12,6 +12,7 @@ import { ACTIONS } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage } from './stats.js';
+import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 
 const pc = window.pc;
 const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
@@ -71,12 +72,10 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
   // --- UI ---------------------------------------------------------------------
   const panel = document.createElement('div');
   panel.id = 'combat-panel';
-  Object.assign(panel.style, {
+  Object.assign(panel.style, PANEL_CHROME, {
     position: 'fixed', left: '50%', bottom: '18px', transform: 'translateX(-50%)',
-    zIndex: '30', width: 'min(640px, 94vw)', background: '#232334',
-    border: '1px solid #3a3a52', borderRadius: '10px', padding: '10px 14px',
-    color: '#f0f0f5', font: '13px system-ui, sans-serif', userSelect: 'none',
-    boxShadow: '0 10px 30px rgba(0,0,0,.5)',
+    zIndex: '30', width: 'min(640px, 94vw)', borderRadius: '10px',
+    padding: '10px 14px', userSelect: 'none',
   });
   panel.innerHTML = `
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
@@ -89,11 +88,9 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
 
   const strip = document.createElement('div');
   strip.id = 'combat-strip';
-  Object.assign(strip.style, {
+  Object.assign(strip.style, PANEL_CHROME, {
     position: 'fixed', top: '54px', right: '12px', zIndex: '25', minWidth: '170px',
-    background: '#232334', border: '1px solid #3a3a52', borderRadius: '9px',
-    padding: '9px 12px', color: '#f0f0f5', font: '12px system-ui, sans-serif',
-    boxShadow: '0 8px 24px rgba(0,0,0,.45)',
+    borderRadius: '9px', padding: '9px 12px', font: '12px system-ui, sans-serif',
   });
   document.body.appendChild(strip);
 
@@ -103,11 +100,10 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
   // cursor - the other half of what makes free movement feel free.
   const costTag = document.createElement('div');
   costTag.id = 'combat-move-cost';
-  Object.assign(costTag.style, {
+  Object.assign(costTag.style, PANEL_CHROME, {
     position: 'fixed', zIndex: '26', padding: '2px 8px', borderRadius: '6px',
-    background: 'rgba(22,22,36,.88)', border: '1px solid #3a3a52',
-    color: '#f0f0f5', font: '12px system-ui, sans-serif',
-    pointerEvents: 'none', display: 'none',
+    background: 'rgba(22,22,36,.88)', font: '12px system-ui, sans-serif',
+    boxShadow: 'none', pointerEvents: 'none', display: 'none',
   });
   document.body.appendChild(costTag);
   const PREVIEW_OK = new pc.Color(0.42, 0.78, 0.35);
@@ -203,10 +199,8 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     b.id = 'act-' + id;
     b.dataset.action = id;
     b.textContent = label;
-    Object.assign(b.style, {
+    Object.assign(b.style, BUTTON_CHROME, {
       flex: '1', minWidth: '110px', padding: '8px 6px', borderRadius: '7px',
-      border: '1px solid #3a3a52', background: '#2e2e46', color: '#f0f0f5',
-      font: 'inherit', cursor: 'pointer',
     });
     actionsRow.appendChild(b);
     buttons.push(b);
