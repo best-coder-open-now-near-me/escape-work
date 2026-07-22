@@ -120,7 +120,11 @@ export class GridActor {
     }
     if (this.fx?.kind === 'death' || this.fx?.kind === 'corpse') this.setClip('idle', 0.2);
     else if (this.fx?.kind === 'lunge') this.setClip('attack-melee-right', 0.05, 1.3);
-    else if (moved > 1e-5) this.setClip('walk', 0.15, this.speed * 0.5);
+    // 0.25 paces the 0.667s walk clip for the STRETCHED legs (models.js):
+    // the de-chibi'd stride covers roughly twice the ground, so the cycle
+    // runs at half the cadence the stubby rig wanted. Higher rates read as
+    // leg-whipping ("twitchy") - most visible on wandering NPCs' short hops.
+    else if (moved > 1e-5) this.setClip('walk', 0.15, this.speed * 0.25);
     else this.setClip('idle', 0.2);
     // Settle the legs into stance while idling - the idle clip never touches
     // them (no leg curves), so a walk or attack would otherwise leave them
