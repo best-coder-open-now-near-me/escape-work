@@ -10,9 +10,10 @@ import { TILE_TYPES } from './data/tiles.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { LEVELS } from './data/levels.js';
 import { createControls } from './controls.js';
-import { createTileRenderer, computeCarpetZones } from './scene.js';
-import { parseLevel, parseWallRuns, compressWallRuns } from './grid.js';
-import { say } from './ui.js';
+import { createTileRenderer, computeCarpetZones } from './tile-renderer.js';
+import { worldToScreenCss } from './fx.js';
+import { parseLevel, parseWallRuns, compressWallRuns, TYPE_ALIASES } from './grid.js';
+import { say, PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 
 const pc = window.pc;
 const PLAYER_CHAR = '@';
@@ -40,7 +41,7 @@ export function startEditor(app, levelData, stashKey) {
   for (const [id, def] of Object.entries(ENEMY_TYPES)) enemyByChar[def.char] = id;
 
   // --- rendering ---------------------------------------------------------------
-  // The SAME renderer the game uses (scene.js), so what you paint is what the
+  // The SAME renderer the game uses (tile-renderer.js), so what you paint is what the
   // game shows - puddles, cables, paper drifts, props, glowing exits and all.
   const renderer = createTileRenderer(app);
   app.on('update', (dt) => renderer.animate(dt));
@@ -75,7 +76,7 @@ export function startEditor(app, levelData, stashKey) {
   }
 
   // Live carpet preview: the game lets carpet flow under items (see
-  // computeCarpetZones in scene.js), so the editor must too - otherwise every
+  // computeCarpetZones in tile-renderer.js), so the editor must too - otherwise every
   // prop punches a gray hole in its room. The effective type grid matches
   // what parseLevel produces: actor tiles are plain floor, spaces are void.
   let carpet = new Map();
@@ -245,8 +246,21 @@ export function startEditor(app, levelData, stashKey) {
   function loadLevel(data) {
     height = data.map.length;
     width = Math.max(...data.map.map((r) => r.length));
+    // Level legends are per-file (any char can mean anything); the editor
+    // paints and exports canonical registry chars. Remap through the file's
+    // OWN legend on the way in, or a hand-authored level using different
+    // chars would silently corrupt on the load -> export round trip.
+    const canonical = (ch) => {
+      if (ch === ' ') return ' ';
+      const actor = (data.actors || {})[ch];
+      if (actor === 'player') return PLAYER_CHAR;
+      if (actor) return ENEMY_TYPES[actor]?.char ?? TILE_TYPES.floor.char;
+      const raw = (data.tiles || {})[ch] || 'floor';
+      const type = TYPE_ALIASES[raw] || raw;
+      return TILE_TYPES[type]?.char ?? TILE_TYPES.floor.char;
+    };
     rows = data.map.map((r) => {
-      const a = r.split('');
+      const a = r.split('').map(canonical);
       while (a.length < width) a.push(' ');
       return a;
     });
@@ -285,7 +299,7 @@ export function startEditor(app, levelData, stashKey) {
     refreshCarpet(x, z);
     renderCell(x, z);
     // Pool shapes depend on same-surface neighbours (see addPool in
-    // scene.js) - repaint nearby spills so necks form and dissolve live.
+    // tile-renderer.js) - repaint nearby spills so necks form and dissolve live.
     for (let dz = -2; dz <= 2; dz++) {
       for (let dx = -2; dx <= 2; dx++) {
         if (dx === 0 && dz === 0) continue;
@@ -352,20 +366,18 @@ export function startEditor(app, levelData, stashKey) {
   // --- editor UI ----------------------------------------------------------------------
   const bar = document.createElement('div');
   bar.id = 'editor-bar';
-  Object.assign(bar.style, {
+  Object.assign(bar.style, PANEL_CHROME, {
     position: 'fixed', left: '50%', bottom: '14px', transform: 'translateX(-50%)',
     zIndex: '30', display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'center',
-    maxWidth: '96vw', background: '#232334', border: '1px solid #3a3a52',
-    borderRadius: '10px', padding: '9px', font: '12px system-ui, sans-serif',
-    color: '#f0f0f5', boxShadow: '0 10px 30px rgba(0,0,0,.5)', alignItems: 'center',
+    maxWidth: '96vw', borderRadius: '10px', padding: '9px',
+    font: '12px system-ui, sans-serif', alignItems: 'center',
   });
   const btn = (id, label) => {
     const b = document.createElement('button');
     b.id = id;
     b.textContent = label;
-    Object.assign(b.style, {
-      padding: '7px 10px', borderRadius: '7px', border: '1px solid #3a3a52',
-      background: '#2e2e46', color: '#f0f0f5', font: 'inherit', cursor: 'pointer',
+    Object.assign(b.style, BUTTON_CHROME, {
+      padding: '7px 10px', borderRadius: '7px',
     });
     bar.appendChild(b);
     return b;
@@ -428,9 +440,8 @@ export function startEditor(app, levelData, stashKey) {
   // load a shipped level as a base
   const select = document.createElement('select');
   select.id = 'ed-level';
-  Object.assign(select.style, {
-    padding: '6px', borderRadius: '7px', border: '1px solid #3a3a52',
-    background: '#2e2e46', color: '#f0f0f5', font: 'inherit',
+  Object.assign(select.style, BUTTON_CHROME, {
+    padding: '6px', borderRadius: '7px', cursor: 'auto',
   });
   select.innerHTML = `<option value="">load level…</option>` +
     Object.entries(LEVELS).map(([id, l]) => `<option value="${id}">${l.name || id}</option>`).join('');
@@ -478,7 +489,10 @@ export function startEditor(app, levelData, stashKey) {
     document.body.appendChild(div);
     const ta = div.querySelector('#export-json');
     ta.value = toJson();
-    div.querySelector('#export-copy').onclick = () => { ta.select(); document.execCommand('copy'); };
+    div.querySelector('#export-copy').onclick = () => {
+      ta.select(); // visible feedback either way
+      navigator.clipboard?.writeText(ta.value).catch(() => {});
+    };
     div.querySelector('#export-close').onclick = () => div.remove();
   }
 
@@ -493,9 +507,10 @@ export function startEditor(app, levelData, stashKey) {
     get walls() { return compressWallRuns(hWalls, vWalls); },
     get doors() { return compressWallRuns(hDoors, vDoors); },
     carpetAt: (x, z) => carpet.get(x + ',' + z) || null,
-    // World point -> screen pixel, so tests can click precise ground points.
+    // World point -> CSS-pixel screen point, so tests can click precise
+    // ground points (mouse events arrive in CSS pixels).
     project(x, z) {
-      const s = controls.cameraEntity.camera.worldToScreen(new pc.Vec3(x, 0, z));
+      const s = worldToScreenCss(app, controls.cameraEntity, x, 0, z);
       return { x: s.x, y: s.y };
     },
     charAt: (x, z) => rows[z]?.[x],

@@ -1,0 +1,482 @@
+// The single source of tile visuals, used by both the game (scene.js
+// buildLevel) and the level editor - they draw from the same data registries
+// through the same code, so they cannot drift apart. renderFloor/renderMarker
+// cover every tile type the registries define; animate() drives the shared
+// pulsing materials (electrified water, fire).
+import { TILE_TYPES } from './data/tiles.js';
+import { SURFACES, ELECTRIFIED, FIRE } from './data/surfaces.js';
+import { makeMaterial } from './shading.js';
+import { placeModel } from './models.js';
+
+const pc = window.pc;
+
+export function createTileRenderer(app) {
+  const floorDef = TILE_TYPES.floor;
+  const surfaceTop = floorDef.height / 2 + 0.02;
+
+  const tileMats = {};
+  for (const [id, def] of Object.entries(TILE_TYPES)) tileMats[id] = makeMaterial(def.color);
+  // The exit glows a little - it should read as "the way out" from anywhere.
+  tileMats.exit.emissive = new pc.Color(0.4, 0.31, 0.06);
+  tileMats.exit.update();
+  const wallGhost = makeMaterial(TILE_TYPES.wall.color, { opacity: 0.25 });
+  // Full-size slabs with a few near-identical tints: surfaces read as
+  // continuous carpet with subtle variation instead of a grid of tiles.
+  // One set of tints per carpet color - tiles with a `carpet` field get
+  // their own set, everything else shares the base floor's.
+  const carpetMats = new Map();
+  function floorMatsFor(type) {
+    const def = TILE_TYPES[type];
+    const key = def?.carpet ? type : 'floor';
+    if (!carpetMats.has(key)) {
+      const base = def?.carpet || TILE_TYPES.floor.color;
+      carpetMats.set(key, [-1, 0, 1].map((i) =>
+        makeMaterial(base.map((v) => Math.min(1, v + i * 0.018)))));
+    }
+    return carpetMats.get(key);
+  }
+
+  const surfaceMats = {};
+  const ringMats = {}; // the darker damp edge under each liquid pool
+  for (const [id, def] of Object.entries(SURFACES)) {
+    surfaceMats[id] = makeMaterial(def.color, { gloss: 0.85, opacity: 0.88 });
+    ringMats[id] = makeMaterial(def.color.map((v) => v * 0.5), { gloss: 0.25, opacity: 0.5 });
+  }
+  const paperMat = makeMaterial(SURFACES.paper.color, { gloss: 0.2 });
+  const electricMat = makeMaterial(ELECTRIFIED.color, { opacity: 0.92, gloss: 0.85, emissive: [0.25, 0.5, 0.65] });
+  const fireMat = makeMaterial(FIRE.color, { opacity: 0.92, emissive: [0.9, 0.35, 0.05] });
+  const fireCore = makeMaterial([1, 0.8, 0.3], { opacity: 0.95, emissive: [0.95, 0.7, 0.2] });
+  const trashMat = makeMaterial(TILE_TYPES.trash.color, { gloss: 0.4 });
+  const printerMat = makeMaterial(TILE_TYPES.printer.color, { gloss: 0.5 });
+  const printerDark = makeMaterial([0.2, 0.2, 0.24], { gloss: 0.3 });
+  const printerLight = makeMaterial([0.3, 0.9, 0.4], { gloss: 0.6, emissive: [0.1, 0.5, 0.15] });
+
+  const addBox = (material, x, y, z, sx, sy, sz) => {
+    const e = new pc.Entity();
+    e.addComponent('render', { type: 'box', material });
+    e.setLocalScale(sx, sy, sz);
+    e.setPosition(x, y, z);
+    app.root.addChild(e);
+    return e;
+  };
+
+  // --- organic liquid pools ----------------------------------------------------
+  // Spills used to be three stacked disks per tile, so multi-tile pools read
+  // as a row of separate splats. Instead, every 'puddle' tile renders ITS
+  // clip of a shared metaball field: each same-surface cell contributes a
+  // blob, marching squares extracts the iso-contour inside this tile, and
+  // because adjacent tiles evaluate the same field over the same sources,
+  // patches meet exactly at tile borders - a multi-tile spill is one
+  // continuous liquid shape, while hide/electrify/repaint stay per-tile.
+  // Two layers per pool: a darker damp ring under the glossy liquid.
+  // Per-cell hashes wobble radii and lobes so no two spills repeat. Pools
+  // stay inside their painted tiles (the hazard is tile-keyed - the visual
+  // must not overpromise) and merge orthogonally, like conduction pools.
+  const POOL_SIGMA2 = 0.3; // blob falloff: w * exp(-d^2 / (SIGMA2 * wobble))
+  const POOL_ISO_LIQUID = 0.587; // lone-cell liquid radius ~0.40
+  const POOL_ISO_RING = 0.509; // lone-cell damp-ring radius ~0.45
+  const POOL_STEPS = 12; // marching-squares resolution per tile
+
+  const hash01 = (x, z, salt) => {
+    const n = Math.sin(x * 127.1 + z * 311.7 + salt * 74.7) * 43758.5453;
+    return n - Math.floor(n);
+  };
+
+  // Every same-surface cell near (x, z) that can shape this tile's patch.
+  // The 5x5 window plus the distance cutoff in poolFieldAt guarantee two
+  // adjacent tiles agree on every source that matters at their shared edge.
+  function poolSources(x, z, surfId, surfaceAt) {
+    const sources = [];
+    for (let dz = -2; dz <= 2; dz++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const sx = x + dx;
+        const sz = z + dz;
+        if (!(dx === 0 && dz === 0) && (!surfaceAt || surfaceAt(sx, sz) !== surfId)) continue;
+        sources.push({
+          x: sx,
+          z: sz,
+          w: 0.92 + 0.22 * hash01(sx, sz, 1),
+          p1: hash01(sx, sz, 2) * Math.PI * 2,
+          p2: hash01(sx, sz, 3) * Math.PI * 2,
+        });
+      }
+    }
+    return sources;
+  }
+
+  function poolFieldAt(sources, px, pz) {
+    let f = 0;
+    for (const s of sources) {
+      const dx = px - s.x;
+      const dz = pz - s.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > 2.6) continue;
+      const a = Math.atan2(dz, dx);
+      const wobble = 1 + 0.1 * Math.sin(3 * a + s.p1) + 0.05 * Math.sin(5 * a + s.p2);
+      f += s.w * Math.exp(-d2 / (POOL_SIGMA2 * wobble));
+    }
+    return f;
+  }
+
+  // Marching squares over this tile's unit square. Returns { positions,
+  // indices } in tile-local coordinates, or null if the contour misses the
+  // tile. Cells are walked around their perimeter keeping inside corners and
+  // interpolated crossings, then fan-triangulated - handles all 16 cases.
+  function poolPatchGeometry(x, z, sources, iso) {
+    const N = POOL_STEPS;
+    const F = new Float32Array((N + 1) * (N + 1));
+    for (let j = 0; j <= N; j++) {
+      for (let i = 0; i <= N; i++) {
+        F[j * (N + 1) + i] = poolFieldAt(sources, x - 0.5 + i / N, z - 0.5 + j / N);
+      }
+    }
+    const positions = [];
+    const indices = [];
+    const vcache = new Map(); // shared vertices keep the sheet watertight
+    const vert = (px, pz) => {
+      const k = Math.round(px * 8192) + ',' + Math.round(pz * 8192);
+      let idx = vcache.get(k);
+      if (idx === undefined) {
+        idx = positions.length / 3;
+        positions.push(px, 0, pz);
+        vcache.set(k, idx);
+      }
+      return idx;
+    };
+    const step = 1 / N;
+    for (let j = 0; j < N; j++) {
+      for (let i = 0; i < N; i++) {
+        const corners = [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]].map(([ci, cj]) => ({
+          x: -0.5 + ci * step,
+          z: -0.5 + cj * step,
+          f: F[cj * (N + 1) + ci],
+        }));
+        const poly = [];
+        for (let k = 0; k < 4; k++) {
+          const a = corners[k];
+          const b = corners[(k + 1) % 4];
+          if (a.f >= iso) poly.push([a.x, a.z]);
+          if ((a.f >= iso) !== (b.f >= iso)) {
+            const t = (iso - a.f) / (b.f - a.f);
+            poly.push([a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t]);
+          }
+        }
+        for (let k = 2; k < poly.length; k++) {
+          // reversed fan so the face normal points up (+y)
+          indices.push(vert(...poly[0]), vert(...poly[k]), vert(...poly[k - 1]));
+        }
+      }
+    }
+    return indices.length ? { positions, indices } : null;
+  }
+
+  function addPoolLayer(parent, geo, material, y) {
+    const mesh = new pc.Mesh(app.graphicsDevice);
+    mesh.setPositions(geo.positions);
+    const normals = new Array(geo.positions.length).fill(0);
+    for (let i = 1; i < normals.length; i += 3) normals[i] = 1;
+    mesh.setNormals(normals);
+    mesh.setIndices(geo.indices);
+    mesh.update(pc.PRIMITIVE_TRIANGLES);
+    const e = new pc.Entity();
+    e.addComponent('render', { meshInstances: [new pc.MeshInstance(mesh, material)] });
+    e.render.castShadows = false;
+    e.setLocalPosition(0, y, 0);
+    parent.addChild(e);
+  }
+
+  function addPool(x, z, surfId, electrified, surfaceAt) {
+    const sources = poolSources(x, z, surfId, surfaceAt);
+    const holder = new pc.Entity();
+    const ring = poolPatchGeometry(x, z, sources, POOL_ISO_RING);
+    if (ring) addPoolLayer(holder, ring, ringMats[surfId], -0.01);
+    const liquid = poolPatchGeometry(x, z, sources, POOL_ISO_LIQUID);
+    if (liquid) addPoolLayer(holder, liquid, electrified ? electricMat : surfaceMats[surfId], 0);
+    holder.setPosition(x, surfaceTop, z);
+    app.root.addChild(holder);
+    return holder;
+  }
+  // A trodden gum wad: small pink blobs, mine-sized - easy to not notice.
+  const gumMat = makeMaterial(SURFACES.gum.color, { gloss: 0.6 });
+  function addGumWad(x, z) {
+    const holder = new pc.Entity();
+    for (const [ox, oz, s] of [[0, 0, 0.34], [0.14, 0.1, 0.2], [-0.13, 0.08, 0.16]]) {
+      const b = new pc.Entity();
+      b.addComponent('render', { type: 'sphere', material: gumMat });
+      b.setLocalScale(s, s * 0.35, s);
+      b.setLocalPosition(ox, 0, oz);
+      holder.addChild(b);
+    }
+    holder.setEulerAngles(0, ((x * 47 + z * 113) % 8) * 45, 0);
+    holder.setPosition(x, surfaceTop, z);
+    app.root.addChild(holder);
+    return holder;
+  }
+
+  // Scattered sheets: thin pale rectangles at odd angles.
+  function addPaper(x, z) {
+    const holder = new pc.Entity();
+    for (const [ox, oz, ry, s] of [[0, 0, 15, 0.42], [0.2, 0.16, 70, 0.34], [-0.18, -0.1, 40, 0.3], [-0.05, 0.22, 110, 0.28]]) {
+      const e = new pc.Entity();
+      e.addComponent('render', { type: 'box', material: paperMat });
+      e.setLocalScale(s, 0.02, s * 0.72);
+      e.setLocalPosition(ox, 0, oz);
+      e.setLocalEulerAngles(0, ry, 0);
+      holder.addChild(e);
+    }
+    holder.setEulerAngles(0, ((x * 61 + z * 89) % 8) * 45, 0);
+    holder.setPosition(x, surfaceTop, z);
+    app.root.addChild(holder);
+    return holder;
+  }
+  // A frayed power strip: dark bar plus a glowing live end.
+  function addCable(x, z) {
+    const holder = new pc.Entity();
+    const bar = new pc.Entity();
+    bar.addComponent('render', { type: 'box', material: surfaceMats.cable });
+    bar.setLocalScale(0.85, 0.07, 0.2);
+    holder.addChild(bar);
+    const tip = new pc.Entity();
+    tip.addComponent('render', { type: 'box', material: electricMat });
+    tip.setLocalScale(0.14, 0.09, 0.14);
+    tip.setLocalPosition(0.38, 0.01, 0);
+    holder.addChild(tip);
+    holder.setEulerAngles(0, ((x * 53 + z * 97) % 4) * 45 + 20, 0);
+    holder.setPosition(x, surfaceTop, z);
+    app.root.addChild(holder);
+    return holder;
+  }
+  function addTrash(x, z) {
+    const holder = new pc.Entity();
+    const can = new pc.Entity();
+    can.addComponent('render', { type: 'cylinder', material: trashMat });
+    can.setLocalScale(0.44, 0.5, 0.44);
+    can.setLocalPosition(0, 0.25, 0);
+    holder.addChild(can);
+    const rim = new pc.Entity();
+    rim.addComponent('render', { type: 'cylinder', material: trashMat });
+    rim.setLocalScale(0.5, 0.05, 0.5);
+    rim.setLocalPosition(0, 0.5, 0);
+    holder.addChild(rim);
+    holder.setPosition(x, floorDef.height / 2, z);
+    app.root.addChild(holder);
+    return holder;
+  }
+  function addPrinter(x, z) {
+    const holder = new pc.Entity();
+    const body = new pc.Entity();
+    body.addComponent('render', { type: 'box', material: printerMat });
+    body.setLocalScale(0.66, 0.4, 0.52);
+    body.setLocalPosition(0, 0.2, 0);
+    holder.addChild(body);
+    const tray = new pc.Entity();
+    tray.addComponent('render', { type: 'box', material: printerDark });
+    tray.setLocalScale(0.5, 0.06, 0.3);
+    tray.setLocalPosition(0, 0.44, -0.05);
+    holder.addChild(tray);
+    const light = new pc.Entity();
+    light.addComponent('render', { type: 'box', material: printerLight });
+    light.setLocalScale(0.07, 0.05, 0.05);
+    light.setLocalPosition(0.24, 0.34, 0.27);
+    holder.addChild(light);
+    holder.setEulerAngles(0, ((x * 37 + z * 71) % 4) * 90, 0);
+    holder.setPosition(x, floorDef.height / 2, z);
+    app.root.addChild(holder);
+    return holder;
+  }
+
+  function renderFloor(x, z, type = 'floor') {
+    return addBox(floorMatsFor(type)[(x * 31 + z * 17) % 3], x, 0, z, 1, floorDef.height, 1);
+  }
+
+  // Edge walls: thin partitions BETWEEN tiles (see grid.js). 'h' sits on the
+  // north edge of (x, z), 'v' on the west edge. Slightly overlong so runs and
+  // corners merge into continuous walls.
+  const EDGE_HEIGHT = 0.72;
+  const EDGE_THICK = 0.12;
+  function renderEdgeWall(x, z, orient) {
+    const e = new pc.Entity();
+    e.addComponent('render', { type: 'box', material: tileMats.wall });
+    if (orient === 'h') {
+      e.setLocalScale(1 + EDGE_THICK, EDGE_HEIGHT, EDGE_THICK);
+      e.setPosition(x, EDGE_HEIGHT / 2, z - 0.5);
+    } else {
+      e.setLocalScale(EDGE_THICK, EDGE_HEIGHT, 1 + EDGE_THICK);
+      e.setPosition(x - 0.5, EDGE_HEIGHT / 2, z);
+    }
+    app.root.addChild(e);
+    return e;
+  }
+
+  // Doors: office-wood panels on an edge, hinged at one end. Closed spans the
+  // doorway; open swings 100 degrees clear of it. Returns { holder, panel } -
+  // the panel is the single render entity the fade system swaps materials on.
+  const doorMat = makeMaterial([0.52, 0.35, 0.2], { gloss: 0.35 });
+  const doorGhost = makeMaterial([0.52, 0.35, 0.2], { gloss: 0.35, opacity: 0.25 });
+  const knobMat = makeMaterial([0.85, 0.72, 0.35], { gloss: 0.8 });
+  const DOOR_HEIGHT = 0.8;
+  function renderDoor(x, z, orient, open) {
+    const holder = new pc.Entity(); // sits at the hinge end of the edge
+    const panel = new pc.Entity();
+    panel.addComponent('render', { type: 'box', material: doorMat });
+    panel.setLocalScale(0.92, DOOR_HEIGHT, 0.09);
+    panel.setLocalPosition(0.48, DOOR_HEIGHT / 2, 0);
+    holder.addChild(panel);
+    const knob = new pc.Entity();
+    knob.addComponent('render', { type: 'sphere', material: knobMat });
+    knob.setLocalScale(0.07, 0.07, 0.07);
+    knob.setLocalPosition(0.82, DOOR_HEIGHT * 0.55, 0.06);
+    holder.addChild(knob);
+    // Hinge at the west/north end of the edge; open swings into the room.
+    if (orient === 'h') {
+      holder.setPosition(x - 0.5, 0, z - 0.5);
+      holder.setEulerAngles(0, open ? 100 : 0, 0);
+    } else {
+      holder.setPosition(x - 0.5, 0, z - 0.5);
+      holder.setEulerAngles(0, open ? -10 : -90, 0);
+    }
+    app.root.addChild(holder);
+    return { holder, panel };
+  }
+
+  // Draw whatever sits on top of the floor for a non-floor tile type.
+  // Returns { kind, entities }; model props arrive via onAsync(holder).
+  // `surfaceAt(x, z)` (optional) reports the surface id of any cell so
+  // liquid pools can merge with their same-surface neighbours.
+  function renderMarker(x, z, type, { electrified = false, onAsync = null, surfaceAt = null } = {}) {
+    const def = TILE_TYPES[type];
+    if (!def) return { kind: 'none', entities: [] };
+    // Carpet variants ARE the floor - renderFloor already drew them recolored.
+    if (def.carpet) return { kind: 'none', entities: [] };
+    if (def.model) {
+      placeModel(app, `assets/${def.model}.glb`, x, z, {
+        scale: def.scale || 1, rotY: def.rotY || 0, lift: floorDef.height / 2,
+        onReady: (holder) => onAsync && onAsync(holder),
+      });
+      return { kind: 'model', entities: [] };
+    }
+    if (def.primitive) {
+      const builder = { trash: addTrash, printer: addPrinter }[def.primitive];
+      return { kind: 'prop', entities: builder ? [builder(x, z)] : [] };
+    }
+    if (def.surface) {
+      const surf = SURFACES[def.surface];
+      let vis;
+      if (surf.style === 'cable') vis = addCable(x, z);
+      else if (surf.style === 'paper') vis = addPaper(x, z);
+      else if (surf.style === 'gum') vis = addGumWad(x, z);
+      else vis = addPool(x, z, def.surface, electrified, surfaceAt);
+      return { kind: 'surface', entities: [vis] };
+    }
+    if (def.solid) {
+      // Full-size so adjacent walls merge into continuous surfaces.
+      return { kind: 'wall', entities: [addBox(tileMats[type], x, def.height / 2, z, 1, def.height, 1)] };
+    }
+    return { kind: 'marker', entities: [addBox(tileMats[type], x, def.height / 2, z, 1, def.height, 1)] };
+  }
+
+  function addFlame(x, z, lift = 0.16) {
+    const holder = new pc.Entity();
+    const outer = new pc.Entity();
+    outer.addComponent('render', { type: 'cone', material: fireMat });
+    outer.setLocalScale(0.5, 0.62, 0.5);
+    outer.setLocalPosition(0, 0.3, 0);
+    holder.addChild(outer);
+    const inner = new pc.Entity();
+    inner.addComponent('render', { type: 'cone', material: fireCore });
+    inner.setLocalScale(0.26, 0.42, 0.26);
+    inner.setLocalPosition(0.04, 0.24, 0.03);
+    holder.addChild(inner);
+    holder.setPosition(x, floorDef.height / 2 + lift, z);
+    app.root.addChild(holder);
+    return holder;
+  }
+
+  // A brief expanding toner-cloud boom.
+  function explosionFlash(x, z) {
+    const e = new pc.Entity();
+    e.addComponent('render', { type: 'sphere', material: fireCore });
+    e.setPosition(x, 0.5, z);
+    app.root.addChild(e);
+    let t = 0;
+    const anim = (dt) => {
+      t += dt;
+      const s = 0.4 + t * 6;
+      e.setLocalScale(s, s, s);
+      if (t > 0.45) {
+        app.off('update', anim);
+        e.destroy();
+      }
+    };
+    app.on('update', anim);
+  }
+
+  // Live water crackles and fire flickers: pulse the shared materials.
+  let clock = 0;
+  function animate(dt) {
+    clock += dt;
+    const pulse = 0.45 + 0.35 * Math.sin(clock * 7) + 0.12 * Math.sin(clock * 23);
+    electricMat.emissiveIntensity = Math.max(0.15, pulse);
+    fireMat.emissiveIntensity = 0.75 + 0.3 * Math.sin(clock * 11) + 0.15 * Math.sin(clock * 29);
+    fireCore.emissiveIntensity = 0.85 + 0.25 * Math.sin(clock * 17 + 1);
+  }
+
+  return {
+    renderFloor, renderMarker, renderEdgeWall, renderDoor, addFlame, explosionFlash, animate,
+    tileMats, wallGhost, doorMat, doorGhost, floorHeight: floorDef.height,
+  };
+}
+
+// Carpet flows under items: a desk inside the meeting room should sit on
+// meeting-room carpet, not punch a gray hole in the zone. Seed from the
+// carpet tiles themselves, then let every non-plain-floor tile inherit the
+// most common carpet among its 4-neighbours for a few passes, so multi-tile
+// furniture clusters resolve from their edges inward. Plain floor never
+// inherits - zone borders stay where the level painted them. Shared by the
+// game (buildLevel) and the editor, so both show the same floors.
+// `typeAt(x, z)` -> tile type id or null for void; returns "x,z" -> type.
+export function computeCarpetZones(typeAt, width, height) {
+  const carpetAt = new Map();
+  for (let z = 0; z < height; z++) {
+    for (let x = 0; x < width; x++) {
+      const t = typeAt(x, z);
+      if (t && TILE_TYPES[t]?.carpet) carpetAt.set(x + ',' + z, t);
+    }
+  }
+  for (let pass = 0; pass < 3; pass++) {
+    const found = [];
+    for (let z = 0; z < height; z++) {
+      for (let x = 0; x < width; x++) {
+        const key = x + ',' + z;
+        const t = typeAt(x, z);
+        if (t === null || t === 'floor' || carpetAt.has(key)) continue;
+        const counts = new Map();
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const n = carpetAt.get((x + dx) + ',' + (z + dz));
+          if (n) counts.set(n, (counts.get(n) || 0) + 1);
+        }
+        let best = null;
+        for (const [n, c] of counts) if (!best || c > counts.get(best)) best = n;
+        if (best) found.push([key, best]);
+      }
+    }
+    if (!found.length) break;
+    for (const [key, t] of found) carpetAt.set(key, t);
+  }
+  return carpetAt;
+}
+
+// A dropped/loose item on the floor: a little manila parcel, hash-rotated so
+// piles don't align. The Alt loot overlay labels it; clicking picks it up.
+let droppedMat = null;
+export function placeDroppedItem(app, x, z) {
+  if (!droppedMat) droppedMat = makeMaterial([0.85, 0.76, 0.55], { gloss: 0.3 });
+  const e = new pc.Entity();
+  e.addComponent('render', { type: 'box', material: droppedMat });
+  e.setLocalScale(0.26, 0.14, 0.2);
+  const h = Math.sin(x * 91.7 + z * 57.3) * 43758.5453;
+  e.setEulerAngles(0, (h - Math.floor(h)) * 360, 0);
+  e.setPosition(x, TILE_TYPES.floor.height / 2 + 0.07, z); // resting on the floor top
+  app.root.addChild(e);
+  return e;
+}

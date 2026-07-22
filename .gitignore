@@ -5,6 +5,10 @@ node_modules/
 build/
 dist/
 
+# Playwright output
+test-results/
+playwright-report/
+
 # IDE
 .vscode/
 .idea/
