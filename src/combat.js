@@ -112,6 +112,7 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
   const PREVIEW_OK = new pc.Color(0.42, 0.78, 0.35);
   const PREVIEW_FAR = new pc.Color(0.85, 0.28, 0.24);
   let preview = null; // { reach: [[x,z],...], tail: [[x,z],...] | null }
+  let aimPoint = null; // hover point while a cone attack is armed
 
   function hidePreview() {
     preview = null;
@@ -120,6 +121,8 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
 
   function handleHover(point, sx, sy) {
     // While aiming, target rings replace the movement trail entirely.
+    // Cone attacks additionally track the cursor - the wedge follows it.
+    if (armed && ACTIONS[armed].cone) aimPoint = point;
     if (phase !== 'player' || player.moving || !point || armed) { hidePreview(); return; }
     const tx = Math.round(point.x);
     const tz = Math.round(point.z);
@@ -170,14 +173,62 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     drawRing(ex, ez, 0.32, PREVIEW_OK, y);
   }
 
+  // The wedge a cone attack would cover, aimed from the player's body toward
+  // (tx, tz). Returns a tile test, or null when there's no meaningful aim.
+  function coneTest(a, tx, tz) {
+    const pp = player.entity ? player.entity.getPosition() : { x: player.x, z: player.z };
+    let dx = tx - pp.x;
+    let dz = tz - pp.z;
+    const len = Math.hypot(dx, dz);
+    if (len < 0.2) return null;
+    dx /= len;
+    dz /= len;
+    const cosLimit = Math.cos((a.cone.halfAngle * Math.PI) / 180);
+    const test = (wx, wz) => {
+      const vx = wx - pp.x;
+      const vz = wz - pp.z;
+      const d = Math.hypot(vx, vz);
+      if (d < 0.3 || d > a.cone.range) return false;
+      return (vx * dx + vz * dz) / d >= cosLimit;
+    };
+    test.origin = pp;
+    test.angle = Math.atan2(dz, dx);
+    return test;
+  }
+
   // While an attack/shove is armed, rings mark the targets: green = usable on
   // them right now (melee walks you in), red = out of range / no line / short
   // on ammo or AP. Every live enemy is ringed, not just the engaged - a
-  // clickable bystander deserves the same feedback.
+  // clickable bystander deserves the same feedback. A cone draws its aimed
+  // wedge instead, ringing whoever it would catch.
   function drawTargets() {
     if (phase !== 'player' || !armed) return;
     const a = ACTIONS[armed];
     if (a.type !== 'attack' && a.type !== 'shove') return;
+    if (a.cone) {
+      const test = aimPoint && coneTest(a, aimPoint.x, aimPoint.z);
+      if (test) {
+        const y = 0.14;
+        const half = (a.cone.halfAngle * Math.PI) / 180;
+        const pts = [];
+        for (let i = 0; i <= 14; i++) {
+          const ang = test.angle - half + (2 * half * i) / 14;
+          pts.push(new pc.Vec3(test.origin.x + Math.cos(ang) * a.cone.range, y,
+            test.origin.z + Math.sin(ang) * a.cone.range));
+        }
+        const o = new pc.Vec3(test.origin.x, y, test.origin.z);
+        app.drawLine(o, pts[0], PREVIEW_OK);
+        app.drawLine(o, pts[pts.length - 1], PREVIEW_OK);
+        for (let i = 1; i < pts.length; i++) app.drawLine(pts[i - 1], pts[i], PREVIEW_OK);
+      }
+      for (const en of world.liveEnemies()) {
+        if (!en.entity) continue;
+        const pos = en.entity.getPosition();
+        const hit = test && test(en.x, en.z) && world.hasLos(player.x, player.z, en.x, en.z);
+        drawRing(pos.x, pos.z, 0.5, hit && ap >= a.ap ? PREVIEW_OK : PREVIEW_FAR);
+      }
+      return;
+    }
     for (const en of world.liveEnemies()) {
       if (!en.entity) continue;
       let ok;
@@ -314,11 +365,54 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     if (!engaged.some((e) => e.alive)) victory();
   }
 
+  // Fire an armed cone attack toward (tx, tz): per-target damage rolls for
+  // every enemy in the wedge with line of sight, then the wedge's plain floor
+  // is carpeted with the action's `leaves` surface.
+  function fireCone(tx, tz) {
+    const a = ACTIONS[armed];
+    if (ap < a.ap) { log('Not enough AP.'); return; }
+    const test = coneTest(a, tx, tz);
+    if (!test) { log('Aim somewhere.'); return; }
+    ap = roundAp(ap - a.ap);
+    player.lunge(tx, tz);
+    let hits = 0;
+    for (const en of world.liveEnemies()) {
+      if (!test(en.x, en.z)) continue;
+      if (!world.hasLos(player.x, player.z, en.x, en.z)) continue;
+      joinCombat(en); // a bystander caught in the mail joins the fight
+      const dmg = rand(a.min, a.max) + damageBonus(sheet);
+      fx.projectile({ x: player.x, z: player.z }, { x: en.x, z: en.z }, 'plane');
+      const died = en.takeDamage(dmg);
+      fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b');
+      hits += 1;
+      if (died) callbacks.onEnemyKilled(en);
+    }
+    if (a.leaves) {
+      const R = Math.ceil(a.cone.range);
+      for (let z = Math.floor(test.origin.z) - R; z <= Math.ceil(test.origin.z) + R; z++) {
+        for (let x = Math.floor(test.origin.x) - R; x <= Math.ceil(test.origin.x) + R; x++) {
+          if (!test(x, z)) continue;
+          if (x === player.x && z === player.z) continue;
+          if (!world.hasLos(player.x, player.z, x, z)) continue;
+          world.leaveSurface(x, z, a.leaves);
+        }
+      }
+    }
+    log(hits
+      ? `${a.log} ${hits} hit${hits > 1 ? 's' : ''}. The paperwork settles everywhere.`
+      : `${a.log} No casualties. Plenty of litter.`);
+    armed = null;
+    aimPoint = null;
+    refresh();
+    if (!engaged.some((e) => e.alive)) victory();
+  }
+
   function handleEnemyClick(en) {
     if (phase !== 'player' || player.moving || !en.alive) return;
     hidePreview();
     if (!armed) { log('Choose an action first, then a target.'); return; }
     const a = ACTIONS[armed];
+    if (a.cone) { fireCone(en.x, en.z); return; }
     if (a.type === 'shove') {
       if (cheb(player.x, player.z, en.x, en.z) > 1) { log('Too far to shove.'); return; }
       if (ap < a.ap) { log('Not enough AP.'); return; }
@@ -412,6 +506,8 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     if (phase !== 'player' || player.moving || !tile) return;
     if (armed) {
       const a = ACTIONS[armed];
+      // Cones fire at wherever you click - ground included.
+      if (a.cone && point) { fireCone(point.x, point.z); return; }
       // A purge (reboot) can target YOURSELF: wipes your statuses too -
       // paper-cut bleeding stops, but so does your Deflect.
       if (a.purge && tile.x === player.x && tile.z === player.z) {

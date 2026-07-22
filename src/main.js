@@ -451,6 +451,14 @@ function startGame(level) {
         enemySurfDamage: (x, z) => rawSurfDamage(x, z),
         slipChanceAt,
         stickGum,
+        // Cone attacks carpet plain floor with a surface tile (Bulk Mail ->
+        // paper). Only bare floor converts - carpets, surfaces, props stay.
+        leaveSurface: (x, z, tileType) => {
+          if (grid.typeAt(x, z) !== 'floor') return false;
+          grid.setType(x, z, tileType);
+          scene.addSurfaceVisual(x, z, tileType);
+          return true;
+        },
         // Anyone alive is a legal target - bystanders outside the initial
         // engagement get pulled in when attacked.
         liveEnemies: () => enemies.filter((e) => e.alive),
@@ -879,6 +887,7 @@ function startGame(level) {
     get lootLabelCount() { return document.querySelectorAll('.loot-label').length; },
     containerLootAt: loot.debug.containerLootAt,
     get doors() { return [...grid.doors].map(([key, d]) => ({ key, open: d.open })); },
+    surfaceAt: (x, z) => runtime.surfaceAt(x, z),
     get enemies() {
       return enemies.map((e) => {
         const p = e.entity?.getPosition();

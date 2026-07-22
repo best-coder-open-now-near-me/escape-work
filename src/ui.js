@@ -305,8 +305,6 @@ export function showClassPicker(classes, actions, onPick, onEditor) {
       </div>
       ${section('TALENTS')}
       <div style="min-height:30px;">${cls.talent ? `<b>${cls.talent.name}.</b> ${cls.talent.blurb}` : '&mdash;'}</div>
-      ${section('BENEFITS BALANCE')}
-      <div>Sick days remaining: <b>${cls.maxHp}</b></div>
       <div style="position:absolute; top:10px; right:12px; font:700 9px system-ui, sans-serif;
         letter-spacing:1px; color:#b0392e; border:1px solid #b0392e; border-radius:2px;
         padding:2px 5px; transform:rotate(6deg); opacity:.85;">CONFIDENTIAL</div>

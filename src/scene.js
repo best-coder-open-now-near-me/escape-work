@@ -136,6 +136,16 @@ export function buildLevel(app, grid) {
       surfaceVisuals.delete(x + ',' + z);
     }
   }
+  // Surfaces created at runtime (Bulk Mail leaving paper drifts). Registered
+  // in surfaceVisuals so fire can consume them like any painted surface.
+  function addSurfaceVisual(x, z, type) {
+    hideSurfaceVisual(x, z);
+    const res = r.renderMarker(x, z, type, {
+      electrified: grid.isElectrified(x, z),
+      surfaceAt: (sx, sz) => TILE_TYPES[grid.typeAt(sx, sz)]?.surface || null,
+    });
+    if (res.kind === 'surface') surfaceVisuals.set(x + ',' + z, res.entities[0]);
+  }
   function removePropVisual(x, z) {
     const v = propVisuals.get(x + ',' + z);
     if (v) {
@@ -147,7 +157,7 @@ export function buildLevel(app, grid) {
   return {
     walls, updateWallFade, animateSurfaces: r.animate,
     addFlame: r.addFlame, explosionFlash: r.explosionFlash,
-    hideSurfaceVisual, removePropVisual,
+    hideSurfaceVisual, addSurfaceVisual, removePropVisual,
     refreshDoor: renderDoorAt,
     floorHeight: r.floorHeight,
   };
