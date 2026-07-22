@@ -9,6 +9,7 @@
 // Modifiers:
 //   purge (on an attack) - hitting a target also wipes their status effects,
 //   harmful and helpful alike; click your own tile while armed to self-cast
+//   footwork - unusable while gum is stuck to the shoe (sheet.gum > 0)
 export const ACTIONS = {
   // --- Office Drone -----------------------------------------------------------
   attack: {
@@ -102,6 +103,7 @@ export const ACTIONS = {
     label: 'Steel-Toe Kick',
     min: 2,
     max: 4,
+    footwork: true, // disabled while gum is on the shoe
     log: 'You deliver OSHA-approved footwear at speed.',
   },
   cigarette: {

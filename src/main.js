@@ -7,7 +7,7 @@
 // classes, actions) is data in src/data/; levels are hand-editable JSON - or
 // paintable in the built-in editor (#editor / the link on the class picker).
 import { LEVELS, FIRST_LEVEL } from './data/levels.js';
-import { SURFACES, ELECTRIFIED, FIRE } from './data/surfaces.js';
+import { SURFACES, ELECTRIFIED, FIRE, GUM } from './data/surfaces.js';
 import { createSurfaceRuntime } from './surfaces-runtime.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { CLASSES } from './data/classes.js';
@@ -118,6 +118,20 @@ function startGame(level) {
     return Math.max(0, fx.amount - (t.surfaceDamageResist || 0));
   };
   const isHazard = (x, z) => effectiveSurfDamage(x, z) > 0;
+  // Wet floors are SLIPPERY - unless electrified or burning, which are
+  // different problems. Chance per tile entered; safety tread ignores it.
+  const slipChanceAt = (x, z) => {
+    if (grid.isElectrified(x, z) || runtime.isBurning(x, z)) return 0;
+    return SURFACES[runtime.surfaceAt(x, z)]?.slippery || 0;
+  };
+  // A gum wad sticks to whoever steps on it - the tile is spent (the wad is
+  // on their shoe now). Returns true if there was gum to collect.
+  const stickGum = (x, z) => {
+    if (runtime.surfaceAt(x, z) !== 'gum') return false;
+    grid.setType(x, z, 'floor');
+    scene.hideSurfaceVisual(x, z);
+    return true;
+  };
   // Dangerous/uncomfortable surfaces cost extra to path through, so
   // characters route around them unless told otherwise or there is no other
   // way; smoothing must never straighten a route through a damaging cell the
@@ -527,6 +541,8 @@ function startGame(level) {
         surfaceIdAt: (x, z) => runtime.surfaceAt(x, z),
         isElectrified: (x, z) => grid.isElectrified(x, z),
         enemySurfDamage: (x, z) => surfEffect(x, z)?.amount || 0,
+        slipChanceAt,
+        stickGum,
       },
       fx: vfx,
       callbacks: {
@@ -621,6 +637,13 @@ function startGame(level) {
         sheet.paper = Math.min(8, sheet.paper + sfx.ammo);
         vfx.damageText(x, z, '+📄', '#8adf76');
       }
+      // Gum on shoe: slowed, no kicking, but genuine traction (can't slip).
+      if (sfx.applies === 'gum' && stickGum(x, z)) {
+        const had = sheet.gum > 0;
+        sheet.gum = GUM.steps;
+        ui.say(had ? 'More gum. You are building a collection.' : sfx.message);
+        ui.updateStatsHud(sheet);
+      }
       const amount = effectiveSurfDamage(x, z);
       if (amount > 0) {
         if (sfx.bleed) sheet.bleed = Math.max(sheet.bleed, sfx.bleed);
@@ -642,8 +665,30 @@ function startGame(level) {
           ? 'The water crackles. Your ESD soles rate this a non-event. 0 damage.'
           : 'You glide across the drift, harvesting ammunition. The edges respect a master. (+1 paper)');
         ui.updateStatsHud(sheet);
-      } else if (sfx.message) {
+      } else if (sfx.message && !sfx.applies) {
         ui.say(sfx.message);
+      }
+    }
+    // Slippery surfaces: every wet tile entered risks a spill that ends the
+    // walk right there. In combat the movement AP already spent stays spent -
+    // that IS the penalty. slipImmune tread never slips; neither does a
+    // gummed shoe - gum is traction.
+    if (changed && !gameOver && !sheet.talent?.effects?.slipImmune && !(sheet.gum > 0)) {
+      const chance = slipChanceAt(x, z);
+      if (chance && Math.random() < chance) {
+        player.clearPath();
+        player.flinch();
+        vfx.damageText(x, z, 'slip!', '#8ad4df');
+        if (inCombat) combat?.notifySlip();
+        else ui.say('The floor was, in fact, wet. You go down. Gracefully? No.');
+      }
+    }
+    // Gum wears off with mileage.
+    if (changed && sheet.gum > 0) {
+      sheet.gum -= 1;
+      if (sheet.gum === 0) {
+        ui.say('The gum finally lets go of your sole. Freedom.');
+        ui.updateStatsHud(sheet);
       }
     }
     // Walk-up interactions (lighting trash cans) fire on deliberate arrival.
@@ -806,8 +851,11 @@ function startGame(level) {
   // --- main loop ------------------------------------------------------------------
   const BASE_SPEED = 4;
   app.on('update', (dt) => {
-    // Sticky surfaces (coffee) slow you while you're on them.
-    player.speed = BASE_SPEED * (SURFACES[grid.surfaceAt(player.x, player.z)]?.slow || 1);
+    // Sticky surfaces (coffee) slow you while you're on them; gum on the
+    // shoe slows you everywhere.
+    player.speed = BASE_SPEED
+      * (SURFACES[grid.surfaceAt(player.x, player.z)]?.slow || 1)
+      * (sheet?.gum > 0 ? GUM.slow : 1);
     player.update(dt, onPlayerStep);
     const world = {
       paused: inCombat || gameOver,
@@ -817,6 +865,8 @@ function startGame(level) {
       occupied: (x, z, self) =>
         (x === player.x && z === player.z)
         || enemies.some((e) => e.alive && e !== self && e.x === x && e.z === z),
+      slips: (x, z) => Math.random() < slipChanceAt(x, z),
+      stickGum,
       // A wander route never crosses hazards, other actors, or the player's
       // tile; the enemy's own start tile counts as open. Returns it smoothed.
       findWanderPath: (en, tx, tz) => {

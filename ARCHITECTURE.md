@@ -102,7 +102,11 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   legend + a .glb in `assets/characters/`.
 - **New hazard/tile**: entry in `data/tiles.js` + character in `tiles` legend.
 - **New surface** (the Divinity layer): entry in `data/surfaces.js` + a tile
-  type carrying it. Surfaces slow, damage, bleed, arm you, editorialize - and
+  type carrying it. Surfaces slow, damage, bleed, arm you, trip you
+  (`slippery`: wet floors end a walk mid-stride), stick to you (gum wads are
+  one-shot mines: `onEnter.applies: 'gum'` slows the victim, disables
+  `footwork` actions, but grants slip-proof traction until it wears off -
+  Managers can also flick gum at you in combat), editorialize - and
   interact: `conducts` surfaces pool via flood fill (grid.js) and a pool
   touching a `powers` surface is electrified; `flammable` surfaces burn.
   Characters path around expensive surfaces (per-surface `pathCost`);
@@ -114,7 +118,8 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   enemies for XP, and destroy the prop (grid.setType).
 - **Talents**: per-class in `data/classes.js` (shown on the resume cards).
   Effects the code understands: paperDamageBonus, paperAmmoDiscount,
-  paperCutImmune, shockImmune, surfaceDamageResist, hasLighter, grantsAction.
+  paperCutImmune, shockImmune, slipImmune, surfaceDamageResist, hasLighter,
+  grantsAction.
 - **Thrown weapons**: actions with `ammoCost` (paper balls/airplanes) join the
   combat bar automatically; ammo (sheet.paper) is picked up from paper spills.
   Throws render as arcing projectiles with fading trails (`throwProjectile` in

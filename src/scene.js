@@ -388,6 +388,23 @@ export function createTileRenderer(app) {
     app.root.addChild(holder);
     return holder;
   }
+  // A trodden gum wad: small pink blobs, mine-sized - easy to not notice.
+  const gumMat = makeMaterial(SURFACES.gum.color, { gloss: 0.6 });
+  function addGumWad(x, z) {
+    const holder = new pc.Entity();
+    for (const [ox, oz, s] of [[0, 0, 0.34], [0.14, 0.1, 0.2], [-0.13, 0.08, 0.16]]) {
+      const b = new pc.Entity();
+      b.addComponent('render', { type: 'sphere', material: gumMat });
+      b.setLocalScale(s, s * 0.35, s);
+      b.setLocalPosition(ox, 0, oz);
+      holder.addChild(b);
+    }
+    holder.setEulerAngles(0, ((x * 47 + z * 113) % 8) * 45, 0);
+    holder.setPosition(x, surfaceTop, z);
+    app.root.addChild(holder);
+    return holder;
+  }
+
   // Scattered sheets: thin pale rectangles at odd angles.
   function addPaper(x, z) {
     const holder = new pc.Entity();
@@ -539,6 +556,7 @@ export function createTileRenderer(app) {
       let vis;
       if (surf.style === 'cable') vis = addCable(x, z);
       else if (surf.style === 'paper') vis = addPaper(x, z);
+      else if (surf.style === 'gum') vis = addGumWad(x, z);
       else vis = addPool(x, z, def.surface, electrified, surfaceAt);
       return { kind: 'surface', entities: [vis] };
     }

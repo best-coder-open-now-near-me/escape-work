@@ -9,6 +9,7 @@
 // kinds extend GridActor the same way.
 const pc = window.pc;
 import { rollLoot } from './data/items.js';
+import { GUM } from './data/surfaces.js';
 
 const wrapAngle = (a) => (((a + 180) % 360) + 360) % 360 - 180;
 const TURN_RATE = 10; // how quickly facing eases toward the heading
@@ -325,6 +326,21 @@ export class EnemyActor extends GridActor {
     if (!world.isWalkable(tx, tz) || world.isHazard(tx, tz)) return;
     if (tx === world.playerTile.x && tz === world.playerTile.z) return;
     const p = world.findWanderPath(this, tx, tz);
-    if (p && p.length > 1) this.setPath(p);
+    if (p && p.length > 1) {
+      // Wet floors are slippery for everyone - a slip ends the amble there.
+      // Gum wads stick to wanderers too: slow forever, but never slip again.
+      this.onTile = (x, z, done, changed) => {
+        if (changed && !this.gummed && world.stickGum(x, z)) {
+          this.gummed = true;
+          this.speed *= GUM.slow;
+        }
+        if (changed && !this.gummed && world.slips(x, z)) {
+          this.clearPath();
+          this.flinch();
+        }
+        if (done || !this.path) this.onTile = null;
+      };
+      this.setPath(p);
+    }
   }
 }
