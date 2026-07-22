@@ -29,6 +29,9 @@ export function startEditor(app, levelData, stashKey) {
   // Edge walls (partitions between tiles) - same Sets grid.js parses.
   let hWalls = new Set();
   let vWalls = new Set();
+  // Doors, also on edges (a door replaces a wall on the same edge).
+  let hDoors = new Set();
+  let vDoors = new Set();
 
   // char <-> meaning, from the registries (single source of truth for export)
   const tileByChar = {};
@@ -152,17 +155,30 @@ export function startEditor(app, levelData, stashKey) {
     return { o: 'h', x, z: dz > 0 ? z + 1 : z };
   }
 
+  // Paint or erase the edge under the partition/door brush. Walls and doors
+  // are mutually exclusive on an edge (painting one replaces the other);
+  // erasing clears whichever is there.
   function paintEdge(edge, add) {
     if (!edge || !edgeInRange(edge.o, edge.x, edge.z)) return;
-    const set = edge.o === 'h' ? hWalls : vWalls;
+    const wallSet = edge.o === 'h' ? hWalls : vWalls;
+    const doorSet = edge.o === 'h' ? hDoors : vDoors;
     const k = edge.x + ',' + edge.z;
-    if (add === set.has(k)) return;
-    if (add) set.add(k);
-    else set.delete(k);
+    if (add) {
+      const target = brush === 'door' ? doorSet : wallSet;
+      const other = brush === 'door' ? wallSet : doorSet;
+      if (target.has(k) && !other.has(k)) return;
+      other.delete(k);
+      target.add(k);
+    } else {
+      if (!wallSet.has(k) && !doorSet.has(k)) return;
+      wallSet.delete(k);
+      doorSet.delete(k);
+    }
     const ek = edge.o + ':' + k;
     edgeEntities.get(ek)?.destroy();
     edgeEntities.delete(ek);
-    if (add) edgeEntities.set(ek, renderer.renderEdgeWall(edge.x, edge.z, edge.o));
+    if (wallSet.has(k)) edgeEntities.set(ek, renderer.renderEdgeWall(edge.x, edge.z, edge.o));
+    else if (doorSet.has(k)) edgeEntities.set(ek, renderer.renderDoor(edge.x, edge.z, edge.o, false).holder);
     refreshElectrified(); // a partition can dam (or free) a conducting pool
   }
 
@@ -176,6 +192,14 @@ export function startEditor(app, levelData, stashKey) {
     for (const k of vWalls) {
       const [x, z] = k.split(',').map(Number);
       edgeEntities.set('v:' + k, renderer.renderEdgeWall(x, z, 'v'));
+    }
+    for (const k of hDoors) {
+      const [x, z] = k.split(',').map(Number);
+      edgeEntities.set('h:' + k, renderer.renderDoor(x, z, 'h', false).holder);
+    }
+    for (const k of vDoors) {
+      const [x, z] = k.split(',').map(Number);
+      edgeEntities.set('v:' + k, renderer.renderDoor(x, z, 'v', false).holder);
     }
   }
 
@@ -227,6 +251,7 @@ export function startEditor(app, levelData, stashKey) {
       return a;
     });
     ({ h: hWalls, v: vWalls } = parseWallRuns(data.walls));
+    ({ h: hDoors, v: vDoors } = parseWallRuns(data.doors));
     levelName = data.name || 'Untitled Floor';
     levelNext = data.next;
     renderAll();
@@ -284,15 +309,15 @@ export function startEditor(app, levelData, stashKey) {
     }
     width = nw;
     height = nh;
-    // drop edge walls that fell off the map
-    hWalls = new Set([...hWalls].filter((k) => {
+    // drop edge walls/doors that fell off the map
+    const inRange = (o) => (k) => {
       const [x, z] = k.split(',').map(Number);
-      return edgeInRange('h', x, z);
-    }));
-    vWalls = new Set([...vWalls].filter((k) => {
-      const [x, z] = k.split(',').map(Number);
-      return edgeInRange('v', x, z);
-    }));
+      return edgeInRange(o, x, z);
+    };
+    hWalls = new Set([...hWalls].filter(inRange('h')));
+    vWalls = new Set([...vWalls].filter(inRange('v')));
+    hDoors = new Set([...hDoors].filter(inRange('h')));
+    vDoors = new Set([...vDoors].filter(inRange('v')));
     renderAll();
   }
 
@@ -303,10 +328,10 @@ export function startEditor(app, levelData, stashKey) {
     app,
     canvas: document.getElementById('app'),
     focus: { x: (levelData.map[0].length - 1) / 2, z: (levelData.map.length - 1) / 2 },
-    onLeftClickTile: (t, g) => (brush === 'partition' ? paintEdge(nearestEdge(g), true) : paint(t)),
-    onLeftDragTile: (t, g) => (brush === 'partition' ? paintEdge(nearestEdge(g), true) : paint(t)),
+    onLeftClickTile: (t, g) => (brush === 'partition' || brush === 'door' ? paintEdge(nearestEdge(g), true) : paint(t)),
+    onLeftDragTile: (t, g) => (brush === 'partition' || brush === 'door' ? paintEdge(nearestEdge(g), true) : paint(t)),
     onRightClickTile: (t, sx, sy, g) =>
-      (brush === 'partition' ? paintEdge(nearestEdge(g), false) : paint(t, TILE_TYPES.floor.char)),
+      (brush === 'partition' || brush === 'door' ? paintEdge(nearestEdge(g), false) : paint(t, TILE_TYPES.floor.char)),
   });
 
   // --- level JSON in/out -----------------------------------------------------------
@@ -318,6 +343,8 @@ export function startEditor(app, levelData, stashKey) {
     const out = { name: levelName, tiles, actors, map: rows.map((r) => r.join('')) };
     const walls = compressWallRuns(hWalls, vWalls);
     if (walls.length) out.walls = walls;
+    const doors = compressWallRuns(hDoors, vDoors);
+    if (doors.length) out.doors = doors;
     if (levelNext) out.next = levelNext;
     return JSON.stringify(out, null, 2);
   }
@@ -359,6 +386,11 @@ export function startEditor(app, levelData, stashKey) {
     // Partitions first - with edge walls they are the main way to build rooms.
     const b = btn('brush-partition', 'partition');
     b.onclick = () => selectBrush('partition', b);
+    brushButtons.push(b);
+  }
+  {
+    const b = btn('brush-door', 'door');
+    b.onclick = () => selectBrush('door', b);
     brushButtons.push(b);
   }
   for (const [id] of Object.entries(TILE_TYPES)) {
@@ -459,6 +491,7 @@ export function startEditor(app, levelData, stashKey) {
     get size() { return { width, height }; },
     get brush() { return brush; },
     get walls() { return compressWallRuns(hWalls, vWalls); },
+    get doors() { return compressWallRuns(hDoors, vDoors); },
     carpetAt: (x, z) => carpet.get(x + ',' + z) || null,
     // World point -> screen pixel, so tests can click precise ground points.
     project(x, z) {

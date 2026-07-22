@@ -45,9 +45,9 @@ export const CLASSES = {
     bonusDmg: 0,
     actions: ['reboot', 'firewall', 'energy-drink'],
     talent: {
-      name: 'Rubber-Soled Shoes',
-      blurb: 'Immune to electrified water. You know better.',
-      effects: { shockImmune: true },
+      name: 'ESD Steel-Toes',
+      blurb: 'Electrostatic-discharge rated, steel toe box. Live water can\'t touch you, and the toe adds a Steel-Toe Kick to your repertoire.',
+      effects: { shockImmune: true, grantsAction: 'kick' },
     },
   },
 };

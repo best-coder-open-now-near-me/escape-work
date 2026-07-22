@@ -180,6 +180,11 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
       const pos = en.entity.getPosition();
       drawRing(pos.x, pos.z, 0.5, ok ? PREVIEW_OK : PREVIEW_FAR);
     }
+    // A purge can also target yourself - ring the caster too.
+    if (a.purge && player.entity) {
+      const pp = player.entity.getPosition();
+      drawRing(pp.x, pp.z, 0.5, ap >= a.ap ? PREVIEW_OK : PREVIEW_FAR);
+    }
   }
 
   const actionsRow = panel.querySelector('#combat-actions');
@@ -276,7 +281,13 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     ap -= a.ap;
     const died = en.takeDamage(dmg);
     fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b');
-    log(`${a.log} ${dmg} damage!`);
+    let line = `${a.log} ${dmg} damage!`;
+    // A purge (reboot) wipes the target's statuses - good and bad alike.
+    if (a.purge && !died && en.surprised) {
+      en.surprised = false;
+      line += ' Their surprise is power-cycled away.';
+    }
+    log(line);
     if (died) callbacks.onEnemyKilled(en);
     armed = null; // back to movement mode after the swing
     refresh();
@@ -379,8 +390,24 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
   function handleTileClick(tile, point = null) {
     if (phase !== 'player' || player.moving || !tile) return;
     if (armed) {
+      const a = ACTIONS[armed];
+      // A purge (reboot) can target YOURSELF: wipes your statuses too -
+      // paper-cut bleeding stops, but so does your Deflect.
+      if (a.purge && tile.x === player.x && tile.z === player.z) {
+        if (ap < a.ap) { log('Not enough AP.'); return; }
+        ap -= a.ap;
+        const hadBleed = sheet.bleed > 0;
+        sheet.bleed = 0;
+        defended = false;
+        armed = null;
+        log(hadBleed
+          ? 'You turn yourself off and on again. The bleeding stops. So does everything else.'
+          : 'You turn yourself off and on again. All effects cleared. Classic fix.');
+        refresh();
+        return;
+      }
       // aiming: a ground click lowers the action instead of walking
-      log(`You lower the ${ACTIONS[armed].label.toLowerCase()}.`);
+      log(`You lower the ${a.label.toLowerCase()}.`);
       armed = null;
       refresh();
       return;
