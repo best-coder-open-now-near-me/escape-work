@@ -43,11 +43,11 @@ for (const f of files) {
     }
   });
 
-  test(`${f} wall runs stay inside the map`, () => {
+  test(`${f} wall and door runs stay inside the map`, () => {
     const data = load(f);
     const width = Math.max(...data.map.map((r) => r.length));
     const height = data.map.length;
-    for (const spec of data.walls || []) {
+    for (const spec of [...(data.walls || []), ...(data.doors || [])]) {
       const [o, xs, zs, ls] = spec.split(/\s+/);
       const x = Number(xs);
       const z = Number(zs);

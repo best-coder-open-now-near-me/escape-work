@@ -20,7 +20,10 @@ export function say(text) {
 
 export function updateStatsHud(sheet) {
   const el = document.getElementById('stats');
-  if (el) el.textContent = `Lv ${sheet.level} · HP ${sheet.hp}/${sheet.maxHp} · XP ${sheet.xp}/${sheet.xpNext}`;
+  if (!el) return;
+  let text = `Lv ${sheet.level} · HP ${sheet.hp}/${sheet.maxHp} · XP ${sheet.xp}/${sheet.xpNext}`;
+  if (sheet.gum > 0) text += ' · gum on shoe';
+  el.textContent = text;
 }
 
 // A soft radial vignette over the whole viewport - pure atmosphere, makes the

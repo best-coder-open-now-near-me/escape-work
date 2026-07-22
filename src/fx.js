@@ -8,12 +8,16 @@ const pc = window.pc;
 // pixels while the DOM works in CSS pixels, so every DOM element tracking a
 // world position (damage popups, loot labels, test helpers) must project
 // through this - a raw worldToScreen drifts on HiDPI displays.
-const _proj = new pc.Vec3();
+// Input and output vectors MUST be distinct: worldToScreen re-reads the
+// world point after writing the result (for the perspective divide), so
+// passing one vector as both corrupts the projection.
+const _projIn = new pc.Vec3();
+const _projOut = new pc.Vec3();
 export function worldToScreenCss(app, cameraEntity, wx, wy, wz) {
-  cameraEntity.camera.worldToScreen(_proj.set(wx, wy, wz), _proj);
+  cameraEntity.camera.worldToScreen(_projIn.set(wx, wy, wz), _projOut);
   const canvas = app.graphicsDevice.canvas;
   const s = canvas.clientWidth ? canvas.clientWidth / canvas.width : 1;
-  return { x: _proj.x * s, y: _proj.y * s, behind: _proj.z < 0 };
+  return { x: _projOut.x * s, y: _projOut.y * s, behind: _projOut.z < 0 };
 }
 
 let fxMats = null;

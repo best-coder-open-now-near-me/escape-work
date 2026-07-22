@@ -13,7 +13,9 @@ import * as ui from './ui.js';
 
 export const INV_CAP = 10;
 
-export function createLooting({ app, grid, runtime, player, enemies, getSheet, isInCombat, isGameOver, approachAndDo }) {
+// `extraEntries` (optional) lets the host add non-loot entries to the Alt
+// overlay (doors) without this module knowing what they are.
+export function createLooting({ app, grid, runtime, player, enemies, getSheet, isInCombat, isGameOver, approachAndDo, extraEntries = null }) {
   const containerLoot = new Map(); // "x,z" -> remaining item ids (rolled on first rummage)
   const looseItems = []; // { x, z, id, entity } - dropped/overflowed floor items
 
@@ -162,6 +164,7 @@ export function createLooting({ app, grid, runtime, player, enemies, getSheet, i
         onClick: () => approachAndDo(en.x, en.z, () => lootBody(en)),
       });
     }
+    if (extraEntries) out.push(...extraEntries());
     return out;
   }
   function showLabels() { lootLabels.show(lootEntries()); }

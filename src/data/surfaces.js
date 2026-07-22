@@ -11,15 +11,21 @@
 //   pathCost  - extra pathfinding cost (characters route around expensive
 //               surfaces unless told otherwise); electrified pools use
 //               ELECTRIFIED.pathCost regardless
-//   style     - 'puddle' | 'cable' (how tile-renderer.js draws it)
+//   slippery  - chance (0..1), per tile entered, of slipping: the walker goes
+//               down and the walk ends there (in combat, movement already
+//               paid for is lost; a slipped enemy loses the rest of its
+//               turn). Electrified/burning tiles never also slip - they have
+//               bigger problems. slipImmune talents (safety tread) ignore it.
+//   style     - 'puddle' | 'cable' | 'gum' (how tile-renderer.js draws it)
 export const SURFACES = {
   water: {
     conducts: true,
+    slippery: 0.45,
     style: 'puddle',
     color: [0.42, 0.68, 0.84],
-    pathCost: 1,
+    pathCost: 2,
     onEnter: { message: 'Your socks are instantly soaked. HP intact. Dignity, less so.' },
-    examine: 'Standing water. Facilities has been notified. Allegedly.',
+    examine: 'Standing water, slick as a resignation letter. Facilities has been notified. Allegedly.',
   },
   coffee: {
     style: 'puddle',
@@ -37,6 +43,13 @@ export const SURFACES = {
     onEnter: { amount: 2, message: 'You step on a frayed power cable. -2 HP.' },
     examine: 'A frayed power strip, daisy-chained six deep. OSHA would like a word.',
   },
+  gum: {
+    style: 'gum',
+    color: [0.93, 0.5, 0.65],
+    pathCost: 0, // nobody routes around gum - that's what makes it a mine
+    onEnter: { applies: 'gum', message: 'Squish. That was gum. It is yours now.' },
+    examine: 'A wad of gum, pre-owned. Possibly load-bearing.',
+  },
   paper: {
     style: 'paper',
     flammable: true,
@@ -48,6 +61,12 @@ export const SURFACES = {
     examine: 'A drift of shredded TPS reports. Sharp edges. Free ammo?',
   },
 };
+
+// Gum-on-shoe: the status a stepped-on wad (or a well-aimed Manager) applies.
+// Slows movement and disables footwork actions (the kick) - but gum is
+// TRACTION: you cannot slip while stuck. Wears off after `steps` tiles
+// walked. `slow` scales walk speed; `moveCost` scales combat move AP.
+export const GUM = { steps: 20, slow: 0.6, moveCost: 1.5 };
 
 // Derived state for conduction pools touching a power source - not painted
 // directly.

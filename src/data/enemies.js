@@ -22,6 +22,8 @@ export const ENEMY_TYPES = {
       { min: 2, max: 3, log: 'The Manager asks for "just one more thing".' },
       { min: 2, max: 3, log: 'The Manager CCs your skip-level.' },
       { min: 2, max: 4, log: '"Per my last email..."' },
+      // applies: 'gum' - sticks gum to the target's shoe (see GUM in surfaces.js)
+      { min: 1, max: 2, log: 'The Manager parks his gum on your shoe. A power move.', applies: 'gum' },
     ],
   },
   hr: {

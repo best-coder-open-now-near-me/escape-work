@@ -46,17 +46,35 @@ test('the pockets toggle with I and start empty', async ({ page }) => {
   await expect(page.locator('#inventory-panel')).toBeHidden();
 });
 
+test('clicking a closed door walks up and swings it open', async ({ page }) => {
+  await bootAndPick(page);
+  await page.waitForTimeout(400);
+  const doors = await page.evaluate(() => window.__game.doors);
+  expect(doors.length).toBeGreaterThan(0);
+  expect(doors.every((d) => !d.open)).toBe(true); // all start closed
+  // Click just shy of the cubicle-row door on the north edge of (8, 5) -
+  // the walk-up crosses open corridor from the spawn.
+  const p = await page.evaluate(() => window.__game.project(8, 4.58));
+  await page.mouse.click(p.x, p.y);
+  await expect.poll(
+    () => page.evaluate(() => window.__game.doors.find((d) => d.key === 'h:8,5')?.open),
+    { timeout: 15_000 },
+  ).toBe(true);
+});
+
 test('confronting a coworker starts combat and an attack lands', async ({ page }) => {
   test.setTimeout(120_000);
   await bootAndPick(page);
   await page.waitForTimeout(400);
-  // Click the nearest live enemy until the fight starts - they wander inside
-  // a small leash, so a single long walk-up can arrive a tile short.
+  // Click live enemies round-robin until a fight starts - they wander inside
+  // a small leash (so a single long walk-up can arrive a tile short), and
+  // some start behind closed doors where no walk-up route exists at all.
   let inCombat = false;
   for (let i = 0; i < 12 && !inCombat; i++) {
     inCombat = await page.evaluate(() => window.__game.inCombat);
     if (inCombat) break;
-    const en = await page.evaluate(() => window.__game.enemies.find((e) => e.alive));
+    const ens = await page.evaluate(() => window.__game.enemies.filter((e) => e.alive));
+    const en = ens[i % ens.length];
     const p = await page.evaluate(([x, z]) => window.__game.project(x, z), [en.x, en.z]);
     await page.mouse.click(p.x, p.y);
     await page.waitForTimeout(1500);

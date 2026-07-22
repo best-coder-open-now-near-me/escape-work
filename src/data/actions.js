@@ -6,6 +6,10 @@
 //   attack - rolls min..max (+ the character sheet's bonusDmg)
 //   defend - halves the next incoming hit
 //   heal   - restores `amount` HP, limited to `uses` per fight
+// Modifiers:
+//   purge (on an attack) - hitting a target also wipes their status effects,
+//   harmful and helpful alike; click your own tile while armed to self-cast
+//   footwork - unusable while gum is stuck to the shoe (sheet.gum > 0)
 export const ACTIONS = {
   // --- Office Drone -----------------------------------------------------------
   attack: {
@@ -62,6 +66,11 @@ export const ACTIONS = {
     label: 'Turn It Off And On Again',
     min: 4,
     max: 7,
+    // purge: a reboot wipes the target's status effects - helpful AND harmful
+    // alike (a surprised enemy wakes up; rebooting YOURSELF clears paper-cut
+    // bleeding but also drops your Deflect). Click your own tile while it's
+    // armed to self-cast.
+    purge: true,
     log: 'You power-cycle their whole workflow.',
   },
   firewall: {
@@ -88,6 +97,15 @@ export const ACTIONS = {
   },
 
   // --- talent-granted -----------------------------------------------------------
+  kick: {
+    type: 'attack',
+    ap: 2,
+    label: 'Steel-Toe Kick',
+    min: 2,
+    max: 4,
+    footwork: true, // disabled while gum is on the shoe
+    log: 'You deliver OSHA-approved footwear at speed.',
+  },
   cigarette: {
     type: 'heal',
     ap: 2,

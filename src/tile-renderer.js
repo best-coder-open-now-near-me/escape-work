@@ -196,6 +196,23 @@ export function createTileRenderer(app) {
     app.root.addChild(holder);
     return holder;
   }
+  // A trodden gum wad: small pink blobs, mine-sized - easy to not notice.
+  const gumMat = makeMaterial(SURFACES.gum.color, { gloss: 0.6 });
+  function addGumWad(x, z) {
+    const holder = new pc.Entity();
+    for (const [ox, oz, s] of [[0, 0, 0.34], [0.14, 0.1, 0.2], [-0.13, 0.08, 0.16]]) {
+      const b = new pc.Entity();
+      b.addComponent('render', { type: 'sphere', material: gumMat });
+      b.setLocalScale(s, s * 0.35, s);
+      b.setLocalPosition(ox, 0, oz);
+      holder.addChild(b);
+    }
+    holder.setEulerAngles(0, ((x * 47 + z * 113) % 8) * 45, 0);
+    holder.setPosition(x, surfaceTop, z);
+    app.root.addChild(holder);
+    return holder;
+  }
+
   // Scattered sheets: thin pale rectangles at odd angles.
   function addPaper(x, z) {
     const holder = new pc.Entity();
@@ -291,6 +308,37 @@ export function createTileRenderer(app) {
     return e;
   }
 
+  // Doors: office-wood panels on an edge, hinged at one end. Closed spans the
+  // doorway; open swings 100 degrees clear of it. Returns { holder, panel } -
+  // the panel is the single render entity the fade system swaps materials on.
+  const doorMat = makeMaterial([0.52, 0.35, 0.2], { gloss: 0.35 });
+  const doorGhost = makeMaterial([0.52, 0.35, 0.2], { gloss: 0.35, opacity: 0.25 });
+  const knobMat = makeMaterial([0.85, 0.72, 0.35], { gloss: 0.8 });
+  const DOOR_HEIGHT = 0.8;
+  function renderDoor(x, z, orient, open) {
+    const holder = new pc.Entity(); // sits at the hinge end of the edge
+    const panel = new pc.Entity();
+    panel.addComponent('render', { type: 'box', material: doorMat });
+    panel.setLocalScale(0.92, DOOR_HEIGHT, 0.09);
+    panel.setLocalPosition(0.48, DOOR_HEIGHT / 2, 0);
+    holder.addChild(panel);
+    const knob = new pc.Entity();
+    knob.addComponent('render', { type: 'sphere', material: knobMat });
+    knob.setLocalScale(0.07, 0.07, 0.07);
+    knob.setLocalPosition(0.82, DOOR_HEIGHT * 0.55, 0.06);
+    holder.addChild(knob);
+    // Hinge at the west/north end of the edge; open swings into the room.
+    if (orient === 'h') {
+      holder.setPosition(x - 0.5, 0, z - 0.5);
+      holder.setEulerAngles(0, open ? 100 : 0, 0);
+    } else {
+      holder.setPosition(x - 0.5, 0, z - 0.5);
+      holder.setEulerAngles(0, open ? -10 : -90, 0);
+    }
+    app.root.addChild(holder);
+    return { holder, panel };
+  }
+
   // Draw whatever sits on top of the floor for a non-floor tile type.
   // Returns { kind, entities }; model props arrive via onAsync(holder).
   // `surfaceAt(x, z)` (optional) reports the surface id of any cell so
@@ -316,6 +364,7 @@ export function createTileRenderer(app) {
       let vis;
       if (surf.style === 'cable') vis = addCable(x, z);
       else if (surf.style === 'paper') vis = addPaper(x, z);
+      else if (surf.style === 'gum') vis = addGumWad(x, z);
       else vis = addPool(x, z, def.surface, electrified, surfaceAt);
       return { kind: 'surface', entities: [vis] };
     }
@@ -373,8 +422,8 @@ export function createTileRenderer(app) {
   }
 
   return {
-    renderFloor, renderMarker, renderEdgeWall, addFlame, explosionFlash, animate,
-    tileMats, wallGhost, floorHeight: floorDef.height,
+    renderFloor, renderMarker, renderEdgeWall, renderDoor, addFlame, explosionFlash, animate,
+    tileMats, wallGhost, doorMat, doorGhost, floorHeight: floorDef.height,
   };
 }
 

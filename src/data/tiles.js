@@ -81,6 +81,12 @@ export const TILE_TYPES = {
     color: [0.93, 0.91, 0.83],
     surface: 'paper',
   },
+  gum: {
+    char: 'g',
+    height: 0.2,
+    color: [0.93, 0.5, 0.65],
+    surface: 'gum',
+  },
 
   // Interactive props built from primitives (no .glb needed). Solid like
   // furniture; `ignitable` offers "set it on fire" on right-click, and

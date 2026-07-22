@@ -44,10 +44,13 @@ export const CLASSES = {
     ap: 7,
     bonusDmg: 0,
     actions: ['reboot', 'firewall', 'energy-drink'],
+    // (An anti-slip footwear talent is reserved for a future talent-choice
+    // system - the engine already honors slipImmune. Until then, gum on your
+    // shoe is the anti-slip option, at a price.)
     talent: {
-      name: 'Rubber-Soled Shoes',
-      blurb: 'Immune to electrified water. You know better.',
-      effects: { shockImmune: true },
+      name: 'ESD Steel-Toes',
+      blurb: 'Electrostatic-discharge rated, steel toe box. Live water can\'t shock you, and the toe adds a Steel-Toe Kick to your repertoire.',
+      effects: { shockImmune: true, grantsAction: 'kick' },
     },
   },
 };

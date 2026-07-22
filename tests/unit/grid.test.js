@@ -79,6 +79,31 @@ test('a partition dams the conduction pool', () => {
   assert.equal(g.isElectrified(2, 0), false); // walled off from the live half
 });
 
+test('doors block edges while closed and open on demand', () => {
+  const g = parseLevel(level(['..', '..'], { doors: ['V 1 0 1'] }));
+  const key = 'v:1,0';
+  assert.equal(g.doors.get(key).open, false); // doors start closed
+  assert.equal(g.edgeOpen(0, 0, 1, 0), false);
+  assert.equal(g.sightOpen(0, 0, 1, 0), false); // closed doors stop throws
+  assert.equal(g.stepOpen(0, 0, 1, 1), false); // and diagonal corner cuts
+  g.setDoorOpen(key, true);
+  assert.equal(g.edgeOpen(0, 0, 1, 0), true);
+  assert.equal(g.sightOpen(0, 0, 1, 0), true);
+});
+
+test('a door replaces any wall painted on the same edge', () => {
+  const g = parseLevel(level(['..'], { walls: ['V 1 0 1'], doors: ['V 1 0 1'] }));
+  assert.equal(g.doors.has('v:1,0'), true);
+  assert.equal(g.vWalls.has('1,0'), false); // the wall yielded to the door
+  g.setDoorOpen('v:1,0', true);
+  assert.equal(g.edgeOpen(0, 0, 1, 0), true); // no phantom wall behind it
+});
+
+test('conduction ignores doors - water finds the gap underneath', () => {
+  const g = parseLevel(level(['*~~'], { doors: ['V 2 0 1'] }));
+  assert.equal(g.isElectrified(2, 0), true); // closed door, live pool anyway
+});
+
 test('setType recomputes conduction pools', () => {
   // Water conducts to the cable only THROUGH the middle cell; blow the
   // bridge away and the far water must go dead.

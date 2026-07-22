@@ -9,7 +9,7 @@
 // the fight; enemies have persistent map HP and take surface damage like you
 // do. Fire keeps burning throughout.
 import { ACTIONS } from './data/actions.js';
-import { SURFACES } from './data/surfaces.js';
+import { SURFACES, GUM } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage } from './stats.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
@@ -50,11 +50,14 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
   };
   // Movement cost per unit distance, derived from the surface's `slow`
   // multiplier (0.5 => twice the AP) - one number in data drives both walk
-  // speed and AP pricing, for everyone.
-  const stepCost = (x, z) => {
+  // speed and AP pricing, for everyone. Gum on a shoe surcharges every step;
+  // the player's gum lives on the sheet, an enemy's on the actor (see
+  // enemyAdvance).
+  const surfaceStepCost = (x, z) => {
     const slow = SURFACES[world.surfaceIdAt(x, z)]?.slow;
     return slow ? 1 / slow : 1;
   };
+  const stepCost = (x, z) => surfaceStepCost(x, z) * (sheet.gum > 0 ? GUM.moveCost : 1);
   // AP is spent in tenths now that movement charges by distance.
   const roundAp = (v) => Math.round(v * 10) / 10;
   const fmtAp = (v) => String(roundAp(v)).replace(/\.0$/, '');
@@ -190,6 +193,11 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
       const pos = en.entity.getPosition();
       drawRing(pos.x, pos.z, 0.5, ok ? PREVIEW_OK : PREVIEW_FAR);
     }
+    // A purge can also target yourself - ring the caster too.
+    if (a.purge && player.entity) {
+      const pp = player.entity.getPosition();
+      drawRing(pp.x, pp.z, 0.5, ap >= a.ap ? PREVIEW_OK : PREVIEW_FAR);
+    }
   }
 
   const actionsRow = panel.querySelector('#combat-actions');
@@ -238,7 +246,8 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
       b.textContent = label;
       const affordable = phase === 'player' && ap >= a.ap
         && (!a.uses || usesLeft[id] > 0)
-        && (!a.ammoCost || sheet.paper >= ammoCostOf(id));
+        && (!a.ammoCost || sheet.paper >= ammoCostOf(id))
+        && !(a.footwork && sheet.gum > 0); // no kicking with gum on the shoe
       b.disabled = !affordable;
       b.style.opacity = affordable ? '1' : '.4';
       b.style.borderColor = ((a.type === 'attack' || a.type === 'shove') && id === armed) ? '#8adf76' : '#3a3a52';
@@ -271,8 +280,15 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
 
   // --- player actions ------------------------------------------------------------
   function performOn(id, en) {
-    joinCombat(en); // attacking a bystander drags them into the fight
     const a = ACTIONS[id];
+    // Footwork actions (the kick) need an un-gummed shoe.
+    if (a.footwork && sheet.gum > 0) {
+      log('You wind up the kick... the gum disagrees. Pick something else.');
+      armed = null;
+      refresh();
+      return;
+    }
+    joinCombat(en); // attacking a bystander drags them into the fight
     let dmg = rand(a.min, a.max) + damageBonus(sheet); // carried staplers count
     if (a.ammoCost) {
       sheet.paper -= ammoCostOf(id);
@@ -285,7 +301,13 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     ap -= a.ap;
     const died = en.takeDamage(dmg);
     fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b');
-    log(`${a.log} ${dmg} damage!`);
+    let line = `${a.log} ${dmg} damage!`;
+    // A purge (reboot) wipes the target's statuses - good and bad alike.
+    if (a.purge && !died && en.surprised) {
+      en.surprised = false;
+      line += ' Their surprise is power-cycled away.';
+    }
+    log(line);
     if (died) callbacks.onEnemyKilled(en);
     armed = null; // back to movement mode after the swing
     refresh();
@@ -389,8 +411,24 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
   function handleTileClick(tile, point = null) {
     if (phase !== 'player' || player.moving || !tile) return;
     if (armed) {
+      const a = ACTIONS[armed];
+      // A purge (reboot) can target YOURSELF: wipes your statuses too -
+      // paper-cut bleeding stops, but so does your Deflect.
+      if (a.purge && tile.x === player.x && tile.z === player.z) {
+        if (ap < a.ap) { log('Not enough AP.'); return; }
+        ap -= a.ap;
+        const hadBleed = sheet.bleed > 0;
+        sheet.bleed = 0;
+        defended = false;
+        armed = null;
+        log(hadBleed
+          ? 'You turn yourself off and on again. The bleeding stops. So does everything else.'
+          : 'You turn yourself off and on again. All effects cleared. Classic fix.');
+        refresh();
+        return;
+      }
       // aiming: a ground click lowers the action instead of walking
-      log(`You lower the ${ACTIONS[armed].label.toLowerCase()}.`);
+      log(`You lower the ${a.label.toLowerCase()}.`);
       armed = null;
       refresh();
       return;
@@ -480,6 +518,10 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     player.flinch();
     const dead = applyDamage(sheet, dmg);
     fx.damageText(player.x, player.z, `-${dmg}`);
+    if (atk.applies === 'gum') {
+      sheet.gum = GUM.steps;
+      line += ' Gum. On your shoe.';
+    }
     log(line);
     refresh();
     if (dead) defeat();
@@ -505,8 +547,10 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     const pp = player.entity ? player.entity.getPosition() : { x: player.x, z: player.z };
     best[best.length - 1] = world.approach(gx, gz, pp.x, pp.z);
     const s = world.smoothEnemy(en, best);
-    // Enemies pay the same surface movement tax the player does.
-    const { points, cost } = truncateByBudget(s, budget, stepCost);
+    // Enemies pay the same surface movement tax the player does, plus their
+    // own gum surcharge if they've stepped in a wad.
+    const { points, cost } = truncateByBudget(s, budget,
+      (x, z) => surfaceStepCost(x, z) * (en.gummed ? GUM.moveCost : 1));
     if (points.length < 2 || cost < 0.05) return 0;
     en.onTile = (x, z, done, changed) => {
       if (changed) {
@@ -520,6 +564,20 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
             callbacks.onEnemyKilled(en);
             refresh();
           }
+        }
+        // gum wads stick to enemies too: slowed for good, but sure-footed
+        if (en.alive && !en.gummed && world.stickGum(x, z)) {
+          en.gummed = true;
+          en.speed *= GUM.slow;
+          log(`${en.def.name} steps in gum. It's theirs now.`);
+        }
+        // wet floor: a slip ends their whole turn (they spend it getting up)
+        if (en.alive && !en.gummed && Math.random() < (world.slipChanceAt(x, z) || 0)) {
+          en.clearPath();
+          en.flinch();
+          en.slipped = true;
+          fx.damageText(x, z, 'slip!', '#8ad4df');
+          log(`${en.def.name} slips in the water and goes down.`);
         }
       }
       if (done || !en.alive) en.onTile = null;
@@ -571,6 +629,12 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     const { en } = acting;
     if (!en.alive) { acting = null; return; }
     if (en.moving) return; // let the current walk play out
+    if (en.slipped) {
+      en.slipped = false;
+      acting.ap = 0; // the rest of the turn goes to getting up with dignity
+      acting.wait = 0.6;
+      return;
+    }
     if (cheb(en.x, en.z, player.x, player.z) <= 1 && acting.ap >= en.def.attackAp) {
       enemyAttack(en);
       acting.ap -= en.def.attackAp;
@@ -601,6 +665,8 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
     handleTileClick,
     handleEnemyClick,
     handleHover,
+    // main.js detected a slip mid-walk (tile effects live there) - narrate it
+    notifySlip: () => log('You slip in the water. The rest of that movement is a donation.'),
     abort: cleanup, // for deaths resolved outside combat (surfaces, explosions)
     get active() { return phase !== 'done'; },
   };

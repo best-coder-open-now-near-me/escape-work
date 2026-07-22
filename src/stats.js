@@ -29,6 +29,7 @@ export function createSheet(classId) {
     talent: cls.talent || null,
     paper: 0, // thrown-weapon ammo, picked up from paper spills
     bleed: 0, // paper-cut bleeding: lose 1 HP for this many more tiles
+    gum: 0, // gum on shoe: slowed, no kicking, can't slip - for this many tiles
     inventory: [], // looted item ids (data/items.js) - persists across floors
   };
 }

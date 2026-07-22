@@ -7,7 +7,7 @@
 // classes, actions) is data in src/data/; levels are hand-editable JSON - or
 // paintable in the built-in editor (#editor / the link on the class picker).
 import { LEVELS, FIRST_LEVEL } from './data/levels.js';
-import { SURFACES, ELECTRIFIED, FIRE } from './data/surfaces.js';
+import { SURFACES, ELECTRIFIED, FIRE, GUM } from './data/surfaces.js';
 import { createSurfaceRuntime } from './surfaces-runtime.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { CLASSES } from './data/classes.js';
@@ -102,6 +102,7 @@ function startGame(level) {
     isInCombat: () => inCombat,
     isGameOver: () => gameOver,
     approachAndDo: (x, z, run) => approachAndDo(x, z, run),
+    extraEntries: () => doorEntries(), // doors share the Alt overlay
   });
 
   function abortCombat() {
@@ -136,6 +137,21 @@ function startGame(level) {
   };
   const isHazard = (x, z) => effectiveSurfDamage(x, z) > 0;
   const enemyIsHazard = (x, z) => rawSurfDamage(x, z) > 0;
+  // Wet floors are SLIPPERY - unless electrified or burning, which are
+  // different problems. Chance per tile entered; safety tread ignores it.
+  // Talent-free by design: enemies consult it too.
+  const slipChanceAt = (x, z) => {
+    if (grid.isElectrified(x, z) || runtime.isBurning(x, z)) return 0;
+    return SURFACES[runtime.surfaceAt(x, z)]?.slippery || 0;
+  };
+  // A gum wad sticks to whoever steps on it - the tile is spent (the wad is
+  // on their shoe now). Returns true if there was gum to collect.
+  const stickGum = (x, z) => {
+    if (runtime.surfaceAt(x, z) !== 'gum') return false;
+    grid.setType(x, z, 'floor');
+    scene.hideSurfaceVisual(x, z);
+    return true;
+  };
   // Dangerous/uncomfortable surfaces cost extra to path through, so
   // characters route around them unless told otherwise or there is no other
   // way; smoothing must never straighten a route through a damaging cell the
@@ -323,6 +339,58 @@ function startGame(level) {
     }
   }
 
+  // --- doors --------------------------------------------------------------------
+  // A door is an EDGE, not a tile - clicks find the nearest door edge to the
+  // precise ground point, walk to either side, and swing it.
+  function doorNearPoint(point) {
+    if (!point) return null;
+    const x = Math.round(point.x);
+    const z = Math.round(point.z);
+    const dx = point.x - x;
+    const dz = point.z - z;
+    if (0.5 - Math.max(Math.abs(dx), Math.abs(dz)) > 0.3) return null; // not near any edge
+    const key = Math.abs(dx) >= Math.abs(dz)
+      ? 'v:' + (dx > 0 ? x + 1 : x) + ',' + z
+      : 'h:' + x + ',' + (dz > 0 ? z + 1 : z);
+    return grid.doors.has(key) ? key : null;
+  }
+  const doorSides = (key) => {
+    const [x, z] = key.slice(2).split(',').map(Number);
+    return key[0] === 'h' ? [[x, z - 1], [x, z]] : [[x - 1, z], [x, z]];
+  };
+  function toggleDoor(key) {
+    if (inCombat || gameOver) return;
+    const open = !grid.doors.get(key).open;
+    grid.setDoorOpen(key, open);
+    scene.refreshDoor(key);
+    for (const e of enemies) e.clearPath(); // their routes may have just changed
+    ui.say(open ? 'The door swings open.' : 'You pull the door shut.');
+    if (loot.labelsVisible) loot.showLabels();
+  }
+  function approachDoor(key) {
+    const sides = doorSides(key);
+    const [ax, az] = isWalkable(sides[0][0], sides[0][1]) ? sides[0] : sides[1];
+    approachAndDo(ax, az, () => toggleDoor(key));
+  }
+  // Doors join the Alt overlay through the looting module's extraEntries
+  // hook (doors aren't loot, so the door logic stays here).
+  function doorEntries() {
+    const out = [];
+    const near = (x, z) => Math.max(Math.abs(x - player.x), Math.abs(z - player.z)) <= 10;
+    for (const [key, d] of grid.doors) {
+      const [x, z] = key.slice(2).split(',').map(Number);
+      const wx = key[0] === 'v' ? x - 0.5 : x;
+      const wz = key[0] === 'h' ? z - 0.5 : z;
+      if (!near(Math.round(wx), Math.round(wz))) continue;
+      out.push({
+        icon: '🚪',
+        text: d.open ? 'Door (open)' : 'Door',
+        world: { x: wx, y: 0.95, z: wz },
+        onClick: () => approachDoor(key),
+      });
+    }
+    return out;
+  }
 
   const adjacentEnemy = () =>
     enemies.find((e) => e.alive && Math.abs(player.x - e.x) <= 1 && Math.abs(player.z - e.z) <= 1) || null;
@@ -374,12 +442,15 @@ function startGame(level) {
         clampPoint,
         approach: approachTo,
         // Partitions (edge walls) are chest height: they block movement but
-        // not throws - lob paper right over the cubicle wall.
-        hasLos: (ax, az, bx, bz) => segmentClear(grid.terrainOpen, ax, az, bx, bz),
+        // not throws - lob paper right over the cubicle wall. Closed doors go
+        // floor to frame, so they DO stop throws (grid.sightOpen).
+        hasLos: (ax, az, bx, bz) => segmentClear(grid.terrainOpen, ax, az, bx, bz, grid.sightOpen),
         stepOpen: grid.stepOpen,
         surfaceIdAt: (x, z) => runtime.surfaceAt(x, z),
         isElectrified: (x, z) => grid.isElectrified(x, z),
         enemySurfDamage: (x, z) => rawSurfDamage(x, z),
+        slipChanceAt,
+        stickGum,
         // Anyone alive is a legal target - bystanders outside the initial
         // engagement get pulled in when attacked.
         liveEnemies: () => enemies.filter((e) => e.alive),
@@ -464,6 +535,13 @@ function startGame(level) {
         sheet.paper = Math.min(PAPER_CAP, sheet.paper + sfx.ammo);
         vfx.damageText(x, z, '+📄', '#8adf76');
       }
+      // Gum on shoe: slowed, no kicking, but genuine traction (can't slip).
+      if (sfx.applies === 'gum' && stickGum(x, z)) {
+        const had = sheet.gum > 0;
+        sheet.gum = GUM.steps;
+        ui.say(had ? 'More gum. You are building a collection.' : sfx.message);
+        ui.updateStatsHud(sheet);
+      }
       const amount = effectiveSurfDamage(x, z);
       if (amount > 0) {
         if (sfx.bleed) sheet.bleed = Math.max(sheet.bleed, sfx.bleed);
@@ -478,11 +556,33 @@ function startGame(level) {
         }
       } else if (sfx.amount) {
         ui.say(sheet.talent?.effects?.shockImmune && grid.isElectrified(x, z)
-          ? 'The water crackles. Your rubber soles hum smugly. 0 damage.'
+          ? 'The water crackles. Your ESD soles rate this a non-event. 0 damage.'
           : 'You glide across the drift, harvesting ammunition. The edges respect a master. (+1 paper)');
         ui.updateStatsHud(sheet);
-      } else if (sfx.message) {
+      } else if (sfx.message && !sfx.applies) {
         ui.say(sfx.message);
+      }
+    }
+    // Slippery surfaces: every wet tile entered risks a spill that ends the
+    // walk right there. In combat the movement AP already spent stays spent -
+    // that IS the penalty. slipImmune tread never slips; neither does a
+    // gummed shoe - gum is traction.
+    if (changed && !gameOver && !sheet.talent?.effects?.slipImmune && !(sheet.gum > 0)) {
+      const chance = slipChanceAt(x, z);
+      if (chance && Math.random() < chance) {
+        player.clearPath();
+        player.flinch();
+        vfx.damageText(x, z, 'slip!', '#8ad4df');
+        if (inCombat) combat?.notifySlip();
+        else ui.say('The floor was, in fact, wet. You go down. Gracefully? No.');
+      }
+    }
+    // Gum wears off with mileage.
+    if (changed && sheet.gum > 0) {
+      sheet.gum -= 1;
+      if (sheet.gum === 0) {
+        ui.say('The gum finally lets go of your sole. Freedom.');
+        ui.updateStatsHud(sheet);
       }
     }
     // Walk-up interactions (lighting trash cans) fire on deliberate arrival.
@@ -511,7 +611,9 @@ function startGame(level) {
       }
       const en = enemyAt(tile.x, tile.z);
       const corpse = loot.corpseAt(tile.x, tile.z);
+      const doorKey = doorNearPoint(point);
       if (en) confront(en);
+      else if (doorKey) approachDoor(doorKey);
       else if (grid.defAt(tile.x, tile.z).loot) {
         approachAndDo(tile.x, tile.z, () => loot.lootContainer(tile.x, tile.z));
       } else if (corpse) {
@@ -525,6 +627,20 @@ function startGame(level) {
     },
     onRightClickTile: (tile, sx, sy, point) => {
       if (!tile || !sheet || inCombat || gameOver) return;
+      const doorKey = doorNearPoint(point);
+      if (doorKey) {
+        const open = grid.doors.get(doorKey).open;
+        ui.showMenu(sx, sy, [
+          { label: open ? 'Close the door' : 'Open the door', action: () => approachDoor(doorKey) },
+          {
+            label: 'Examine',
+            action: () => ui.say(open
+              ? 'An office door, ajar. A bold statement of availability.'
+              : 'A closed office door. The universal sign for "do not perceive me."'),
+          },
+        ]);
+        return;
+      }
       const en = enemyAt(tile.x, tile.z);
       if (en) {
         ui.showMenu(sx, sy, [
@@ -629,9 +745,12 @@ function startGame(level) {
   // --- main loop ------------------------------------------------------------------
   const BASE_SPEED = 4;
   app.on('update', (dt) => {
-    // Sticky surfaces (coffee) slow you while you're on them. Queried from
+    // Sticky surfaces (coffee) slow you while you're on them - queried from
     // the RUNTIME layer, so a surface that burns away stops slowing anyone.
-    player.speed = BASE_SPEED * (SURFACES[runtime.surfaceAt(player.x, player.z)]?.slow || 1);
+    // Gum on the shoe slows you everywhere.
+    player.speed = BASE_SPEED
+      * (SURFACES[runtime.surfaceAt(player.x, player.z)]?.slow || 1)
+      * (sheet?.gum > 0 ? GUM.slow : 1);
     player.update(dt, onPlayerStep);
     const world = {
       paused: inCombat || gameOver,
@@ -641,6 +760,8 @@ function startGame(level) {
       occupied: (x, z, self) =>
         (x === player.x && z === player.z)
         || enemies.some((e) => e.alive && e !== self && e.x === x && e.z === z),
+      slips: (x, z) => Math.random() < slipChanceAt(x, z),
+      stickGum,
       // A wander route never crosses hazards, other actors, or the player's
       // tile; the enemy's own start tile counts as open. Returns it smoothed.
       findWanderPath: (en, tx, tz) => {
@@ -716,6 +837,7 @@ function startGame(level) {
     sheet.inventory ||= []; // saves from before pockets existed
     sheet.paper ??= 0;
     sheet.bleed ??= 0;
+    sheet.gum ??= 0;
     spawnPlayerModel();
     loot.refreshPanel(sheet);
     ui.say(`${grid.name}. Keep going.`);
@@ -756,6 +878,7 @@ function startGame(level) {
     get looseItems() { return loot.debug.looseItems(); },
     get lootLabelCount() { return document.querySelectorAll('.loot-label').length; },
     containerLootAt: loot.debug.containerLootAt,
+    get doors() { return [...grid.doors].map(([key, d]) => ({ key, open: d.open })); },
     get enemies() {
       return enemies.map((e) => {
         const p = e.entity?.getPosition();
