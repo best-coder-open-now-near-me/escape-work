@@ -71,8 +71,11 @@ export function applyCharacterProportions(holder) {
   if (legR) legR.setLocalScale(1, legs, 1);
   // Legs stretch downward from the hip joint, so lift the rig by the extra
   // leg length to keep the feet on the floor. The lift goes on root's PARENT
-  // (the glTF scene node, which no clip touches) - animation clips write
-  // root's translation every frame and would stomp a lift applied to root.
+  // (the glTF scene node) - animation clips write root's translation every
+  // frame and would stomp a lift applied to root. GridActor.updateAnim ALSO
+  // rewrites the scene node's position every frame, so attach() captures
+  // this lift as the baseline its bob/lunge offsets compose onto - zeroing
+  // it is exactly the feet-through-the-floor bug.
   const hipY = legL.getLocalPosition().y;
   const top = root.parent;
   const tp = top.getLocalPosition();

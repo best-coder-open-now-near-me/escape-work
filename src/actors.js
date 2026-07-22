@@ -22,6 +22,7 @@ export class GridActor {
     this.speed = speed;
     this.entity = null;
     this.visual = null; // the model child that animation moves
+    this.visualLift = 0; // baseline y of the visual (proportion foot lift)
     this.path = null; // waypoints [[x, z], ...] - free points, not just centres
     this.pathIndex = 0;
     this.slideTo = null; // straight-line glide target (shoves) - {x, z}
@@ -39,6 +40,11 @@ export class GridActor {
   attach(entity) {
     this.entity = entity;
     this.visual = entity.children[0] || entity;
+    // applyCharacterProportions lifts the visual so the stretched legs keep
+    // the feet on the floor. updateAnim rewrites the visual's position every
+    // frame, so capture that lift as the baseline it composes onto - zeroing
+    // it would sink the feet through the floor.
+    this.visualLift = this.visual.getLocalPosition().y;
     this.animC = entity.findComponent('anim') || null;
     // The idle clip animates only torso/arms/head - it has NO leg channels,
     // so nothing ever writes the legs back after a walk stops mid-stride.
@@ -161,7 +167,7 @@ export class GridActor {
         bobY = -0.15;
       }
     }
-    this.visual.setLocalPosition(0, bobY, forward);
+    this.visual.setLocalPosition(0, this.visualLift + bobY, forward);
     this.visual.setLocalEulerAngles(pitch, 0, 0);
     this.visual.setLocalScale(sx, sy, sx);
   }
