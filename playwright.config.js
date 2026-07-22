@@ -5,7 +5,9 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: 'tests/e2e',
-  timeout: 30_000,
+  // Generous: CI renders through software GL, where boot alone can eat 30s+
+  // of shader compilation. Locally everything exits early.
+  timeout: 120_000,
   retries: process.env.CI ? 1 : 0,
   use: {
     baseURL: 'http://127.0.0.1:8173',
