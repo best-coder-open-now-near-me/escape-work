@@ -38,7 +38,7 @@ export function startEditor(app, levelData, stashKey) {
   for (const [id, def] of Object.entries(ENEMY_TYPES)) enemyByChar[def.char] = id;
 
   // --- rendering ---------------------------------------------------------------
-  // The SAME renderer the game uses (scene.js), so what you paint is what the
+  // The SAME renderer the game uses (tile-renderer.js), so what you paint is what the
   // game shows - puddles, cables, paper drifts, props, glowing exits and all.
   const renderer = createTileRenderer(app);
   app.on('update', (dt) => renderer.animate(dt));
@@ -73,7 +73,7 @@ export function startEditor(app, levelData, stashKey) {
   }
 
   // Live carpet preview: the game lets carpet flow under items (see
-  // computeCarpetZones in scene.js), so the editor must too - otherwise every
+  // computeCarpetZones in tile-renderer.js), so the editor must too - otherwise every
   // prop punches a gray hole in its room. The effective type grid matches
   // what parseLevel produces: actor tiles are plain floor, spaces are void.
   let carpet = new Map();
@@ -274,7 +274,7 @@ export function startEditor(app, levelData, stashKey) {
     refreshCarpet(x, z);
     renderCell(x, z);
     // Pool shapes depend on same-surface neighbours (see addPool in
-    // scene.js) - repaint nearby spills so necks form and dissolve live.
+    // tile-renderer.js) - repaint nearby spills so necks form and dissolve live.
     for (let dz = -2; dz <= 2; dz++) {
       for (let dx = -2; dx <= 2; dx++) {
         if (dx === 0 && dz === 0) continue;

@@ -11,7 +11,7 @@
 //   pathCost  - extra pathfinding cost (characters route around expensive
 //               surfaces unless told otherwise); electrified pools use
 //               ELECTRIFIED.pathCost regardless
-//   style     - 'puddle' | 'cable' (how scene.js draws it)
+//   style     - 'puddle' | 'cable' (how tile-renderer.js draws it)
 export const SURFACES = {
   water: {
     conducts: true,
