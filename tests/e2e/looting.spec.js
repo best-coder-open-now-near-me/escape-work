@@ -36,9 +36,14 @@ test('desk rummage, drop, Alt pickup, and consumable use', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => window.__game.looseItems.length)).toBe(1);
 
   // Alt shows a clickable label over it; clicking walks over and picks it up.
+  // The chips are repositioned every frame while the camera eases, which
+  // fails Playwright's stability gate - settle, then click by coordinates.
+  await page.waitForTimeout(1500);
   await page.keyboard.down('Alt');
-  await expect(page.locator('.loot-label').first()).toBeVisible();
-  await page.locator('.loot-label', { hasText: 'Coffee' }).first().click();
+  const chip = page.locator('.loot-label', { hasText: 'Coffee' }).first();
+  await expect(chip).toBeVisible();
+  const box = await chip.boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await page.keyboard.up('Alt');
   await expect.poll(
     () => page.evaluate(() => window.__game.looseItems.length),
