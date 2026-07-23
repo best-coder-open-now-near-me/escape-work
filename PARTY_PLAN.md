@@ -150,7 +150,7 @@ level's legend places them (spawn-time check against the party roster).
 
 ## Milestones (each one a PR that keeps `npm test` + e2e green)
 
-1. **Party foundation refactor (no behavior change).** Introduce `party.js`
+1. **Party foundation refactor (no behavior change).** ✅ Landed. Introduce `party.js`
    and the `party` array; thread it through `main.js` and `combat.js` as a
    one-member party; generalize `onPlayerStep` → `onMemberStep` and the enemy
    world hooks. Save format v2 + migration. The game plays identically;

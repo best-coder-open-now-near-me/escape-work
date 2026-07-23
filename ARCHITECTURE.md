@@ -30,6 +30,9 @@ src/
   pathfinding.js     8-dir Dijkstra, string-pulling smoother, free-point
                      clamping, distance-budget truncation      (pure logic)
   stats.js           Character sheet, XP/levels, damage       (pure logic)
+  party.js           The roster: members (sheet + actor), the active
+                     leader, XP fan-out, campaign-save format + the
+                     legacy-save migration                    (pure logic)
   actors.js          GridActor base -> PlayerActor, EnemyActor; smoothed
                      any-angle waypoint movement for everyone; procedural
                      animation layer (walk bob, lunge, flinch, death topple)
@@ -61,7 +64,7 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 ## Layering
 
 - `data/*` imports nothing.
-- `grid`, `pathfinding`, `stats`, `surfaces-runtime` are pure JS (no
+- `grid`, `pathfinding`, `stats`, `party`, `surfaces-runtime` are pure JS (no
   PlayCanvas, no DOM) - unit tested in isolation (tests/unit).
 - `scene`, `shading`, `tile-renderer`, `models`, `controls`, `picking`,
   `actors` touch PlayCanvas; `ui`, `combat`, `looting` touch the DOM; `fx`
@@ -129,6 +132,17 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   string-pulled by `smoothPath` into any-angle runs. The logical tile is
   DERIVED from the continuous position (rounded) and drives everything
   tile-keyed: surfaces, hazards, adjacency, LOS, combat triggers.
+- **The party** (`party.js`): the roster of player-controlled characters -
+  ordered members of `{ sheet, actor }`, with `members[active]` the LEADER
+  the player controls. `main.js` keeps `sheet`/`player` as the leader's live
+  bindings; everything a member does with their feet (surfaces, slips, gum,
+  ammo pickup) runs against THAT member's own sheet via `onMemberStep`. The
+  exit and walk-up interactions stay leader-only. Combat fields every member
+  with per-member AP/deflect/uses (`combat.js` `members`, `active`); enemies
+  target the nearest living member, ties to the bloodied one. Campaign saves
+  are v2 (`{ version, levelId, party: [sheets], active }`); old single-sheet
+  saves migrate on load (`party.parseProgress`). Today the roster holds one
+  member - recruitment (PARTY_PLAN.md) grows it.
 - **Actors**: extend `GridActor` for anything that lives on the grid and owns
   a model (it provides smoothed waypoint-path movement, shove glides via
   `pushTo`, and facing). The holder entity
@@ -148,8 +162,8 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   `window.__editor` expose read-only state; the e2e tests assert against
   them and click through their `project()` / `project3()` helpers (CSS
   pixels - `project3` aims at a world point at any height, for tall meshes).
-  `__game` also exposes `npcs`, `armed` (hotbar), `hoverKind`, `cursor`, and
-  `dialogueOpen`. Keep them in sync when adding state. `window.__god` is the
+  `__game` also exposes `npcs`, `party`, `armed` (hotbar), `hoverKind`,
+  `cursor`, and `dialogueOpen`. Keep them in sync when adding state. `window.__god` is the
   exception: it hands out LIVE references and mutators for the god-mode panel
   (god.js) to edit runtime state in place. It ships in the release but the
   panel stays hidden until a tester toggles it (` / F8, remembered in

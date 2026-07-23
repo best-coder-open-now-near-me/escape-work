@@ -337,7 +337,7 @@ export class EnemyActor extends GridActor {
     if (this.entity) this.fx = { kind: 'death', t: 0 };
   }
 
-  // world: { paused, isWalkable, isHazard, playerTile, occupied,
+  // world: { paused, isWalkable, isHazard, blockedByParty, occupied,
   //          findWanderPath } - see the update loop in main.js
   update(dt, world) {
     if (!this.alive) {
@@ -368,7 +368,7 @@ export class EnemyActor extends GridActor {
     const tz = this.spawnZ + Math.floor(Math.random() * (this.leash * 2 + 1)) - this.leash;
     if (tx === this.x && tz === this.z) return;
     if (!world.isWalkable(tx, tz) || world.isHazard(tx, tz)) return;
-    if (tx === world.playerTile.x && tz === world.playerTile.z) return;
+    if (world.blockedByParty(tx, tz)) return;
     const p = world.findWanderPath(this, tx, tz);
     if (p && p.length > 1) {
       // Wet floors are slippery for everyone - a slip ends the amble there.

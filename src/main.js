@@ -14,7 +14,8 @@ import { CLASSES } from './data/classes.js';
 import { ACTIONS } from './data/actions.js';
 import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
-import { createSheet, gainXp, applyDamage, PAPER_CAP } from './stats.js';
+import { createSheet, applyDamage, PAPER_CAP } from './stats.js';
+import { createParty, leader as partyLeader, addMember, gainXpAll, serializeProgress, parseProgress } from './party.js';
 import { PlayerActor, EnemyActor, NpcActor } from './actors.js';
 import { createApp, buildLevel } from './scene.js';
 import { placeModel, applyCharacterProportions } from './models.js';
@@ -41,7 +42,7 @@ const app = createApp(document.getElementById('app'));
 let activeLevel = LEVELS[FIRST_LEVEL];
 let activeLevelId = FIRST_LEVEL;
 let playtesting = false;
-let restoredSheet = null;
+let restoredProgress = null; // { levelId, sheets, active } - party.js handles old shapes
 try {
   const stash = localStorage.getItem(STASH_KEY);
   const progress = localStorage.getItem(PROGRESS_KEY);
@@ -50,11 +51,11 @@ try {
     activeLevelId = null;
     playtesting = true;
   } else if (progress) {
-    const p = JSON.parse(progress);
-    if (LEVELS[p.levelId]) {
+    const p = parseProgress(JSON.parse(progress));
+    if (p && LEVELS[p.levelId]) {
       activeLevel = LEVELS[p.levelId];
       activeLevelId = p.levelId;
-      restoredSheet = p.sheet || null;
+      restoredProgress = p;
     }
   }
 } catch { /* corrupted storage - fall back to the shipped level */ }
@@ -85,8 +86,11 @@ function startGame(level) {
     onExplosion: handleExplosion,
   });
 
-  // The sheet (and the player's model) only exist once a class is picked - the
-  // picker overlay is the first thing the player sees.
+  // The party (and the leader's model) only exist once a class is picked - the
+  // picker overlay is the first thing the player sees. `sheet` and `player`
+  // are the LEADER's live bindings - the character the player controls - and
+  // exist alongside the party so every leader-keyed closure reads naturally.
+  let party = null;
   let sheet = null;
   const player = new PlayerActor(grid.playerSpawn.x, grid.playerSpawn.z);
   const enemies = grid.enemySpawns.map((s) => new EnemyActor(s.x, s.z, s.type, ENEMY_TYPES[s.type]));
@@ -131,6 +135,12 @@ function startGame(level) {
 
   const enemyAt = (x, z) => enemies.find((e) => e.alive && e.x === x && e.z === z) || null;
   const npcAt = (x, z) => npcs.find((n) => n.x === x && n.z === z) || null;
+  // Does a living party member stand on this tile? Enemy decisions (wander
+  // targets, combat routing) treat every member the way they treated the
+  // player. Pre-pick (no party yet) the lone spawn tile still counts.
+  const partyAt = (x, z) => (party
+    ? party.members.some((m) => m.actor && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z)
+    : (x === player.x && z === player.z));
   // NPCs stand on their tile and block movement like any body.
   const isWalkable = (x, z) => grid.terrainOpen(x, z) && !enemyAt(x, z) && !npcAt(x, z);
   // Surface queries, consulting the runtime (fire) before static state.
@@ -143,12 +153,13 @@ function startGame(level) {
   // (pathing, wander avoidance) run on this: what hurts a coworker has
   // nothing to do with the player's shoes.
   const rawSurfDamage = (x, z) => surfEffect(x, z)?.amount || 0;
-  // What a step actually costs the PLAYER, after talents (Origami Specialist,
-  // Rubber-Soled Shoes).
-  const effectiveSurfDamage = (x, z) => {
+  // What a step actually costs a party member, after their talents (Origami
+  // Specialist, ESD Steel-Toes). Defaults to the leader - the one whose
+  // pathing decisions this shapes.
+  const effectiveSurfDamage = (x, z, s = sheet) => {
     const fx = surfEffect(x, z);
     if (!fx || !fx.amount) return 0;
-    const t = sheet?.talent?.effects || {};
+    const t = s?.talent?.effects || {};
     if (t.shockImmune && grid.isElectrified(x, z) && !runtime.isBurning(x, z)) return 0;
     if (t.paperCutImmune && runtime.surfaceAt(x, z) === 'paper' && !runtime.isBurning(x, z)) return 0;
     return Math.max(0, fx.amount - (t.surfaceDamageResist || 0));
@@ -249,6 +260,7 @@ function startGame(level) {
   function onClassPicked(classId) {
     endClassPreview();
     sheet = createSheet(classId);
+    party = createParty(sheet, player);
     spawnPlayerModel();
     loot.refreshPanel(sheet);
     buildHotbar();
@@ -266,11 +278,13 @@ function startGame(level) {
   }
 
   // Every enemy death pays out the same way - combat kill, shove into live
-  // water, or a printer taking them along. Promotions announce themselves.
+  // water, or a printer taking them along. XP fans out to the whole party;
+  // promotions announce themselves.
   function awardKill(dead) {
-    if (!sheet) return;
-    const promoted = gainXp(sheet, dead.def.xp);
-    if (promoted) ui.say(`Promotion! Level ${sheet.level}: fully rested, +1 damage.`);
+    if (!party) return;
+    for (const m of gainXpAll(party, dead.def.xp)) {
+      ui.say(`Promotion! Level ${m.sheet.level}: fully rested, +1 damage.`);
+    }
     ui.updateStatsHud(sheet);
   }
 
@@ -284,10 +298,13 @@ function startGame(level) {
     for (const en of slain) en.die();
     let msg = 'The printer detonates in a cloud of toner.';
     if (slain.length) msg += ` ${slain.length} coworker${slain.length === 1 ? '' : 's'} caught in the blast (+XP).`;
-    if (sheet && player.entity && Math.abs(player.x - x) <= 1 && Math.abs(player.z - z) <= 1) {
-      const dead = applyDamage(sheet, EXPLOSION_DAMAGE);
-      player.flinch();
-      vfx.damageText(player.x, player.z, `-${EXPLOSION_DAMAGE}`);
+    // Shrapnel hits every party member beside the printer, not just the leader.
+    for (const m of party ? party.members : []) {
+      if (!m.actor?.entity || m.sheet.hp <= 0) continue;
+      if (Math.abs(m.actor.x - x) > 1 || Math.abs(m.actor.z - z) > 1) continue;
+      const dead = applyDamage(m.sheet, EXPLOSION_DAMAGE);
+      m.actor.flinch();
+      vfx.damageText(m.actor.x, m.actor.z, `-${EXPLOSION_DAMAGE}`);
       msg += ` You catch shrapnel. -${EXPLOSION_DAMAGE} HP.`;
       if (dead) {
         ui.say(msg);
@@ -310,10 +327,10 @@ function startGame(level) {
   }
 
   // Smooth a raw tile path into any-angle runs, starting from where the
-  // player's body actually stands - not their tile centre, which they may be
-  // nowhere near after a free-point stop.
-  function smoothFromBody(p) {
-    const pos = player.entity?.getPosition();
+  // walker's body actually stands - not their tile centre, which they may be
+  // nowhere near after a free-point stop. Defaults to the leader.
+  function smoothFromBody(p, actor = player) {
+    const pos = actor.entity?.getPosition();
     if (pos) p = [[pos.x, pos.z], ...p.slice(1)];
     return smoothPath(clearOfHazards, p, grid.edgeOpen);
   }
@@ -372,7 +389,7 @@ function startGame(level) {
   }
 
   // Walk to the open tile nearest an enemy; combat starts on arrival via the
-  // adjacency check in onPlayerStep.
+  // adjacency check in onMemberStep.
   function confront(en) {
     if (!en || !en.alive || inCombat || gameOver) return;
     pendingAction = null;
@@ -640,8 +657,17 @@ function startGame(level) {
     ui.say(armedOoc ? `${ACTIONS[armedOoc].label} ready — click a coworker to start it.` : 'You stand down.');
   }
 
-  const adjacentEnemy = () =>
-    enemies.find((e) => e.alive && Math.abs(player.x - e.x) <= 1 && Math.abs(player.z - e.z) <= 1) || null;
+  // First (enemy, member) adjacency in the party - any member can get
+  // cornered, and the fight engages around whoever it was.
+  function adjacentEnemyToParty() {
+    for (const m of party?.members || []) {
+      if (!m.actor?.entity || m.sheet.hp <= 0) continue;
+      const en = enemies.find((e) =>
+        e.alive && Math.abs(m.actor.x - e.x) <= 1 && Math.abs(m.actor.z - e.z) <= 1);
+      if (en) return { en, member: m };
+    }
+    return null;
+  }
 
   // Start (or refuse to start) a fight. `engaged` is everyone joining now,
   // `primary` the coworker who triggered it (drives the flavor line + facing),
@@ -671,22 +697,21 @@ function startGame(level) {
       : `${primary.def.name} has noticed you.`);
     combat = startCombat({
       app,
-      sheet,
-      player,
+      party,
       engaged,
       opening,
       world: {
         isWalkable,
         findPath: (sx, sz, tx, tz) => findPath(isWalkable, sx, sz, tx, tz, hazardCost, grid.stepOpen),
-        // Enemy routing: never through the player's tile, and costed by the
-        // enemy hazard model - the player's talents don't shape THEIR fears.
+        // Enemy routing: never through a party member's tile, and costed by
+        // the enemy hazard model - your talents don't shape THEIR fears.
         findEnemyPath: (sx, sz, tx, tz) => findPath(
-          (x, z) => isWalkable(x, z) && !(x === player.x && z === player.z),
+          (x, z) => isWalkable(x, z) && !partyAt(x, z),
           sx, sz, tx, tz, enemyHazardCost, grid.stepOpen),
-        // Any-angle smoothing for combat walks. The player variant starts
-        // from their body position; the enemy variant treats the enemy's own
-        // tile as open (they're standing on it) and starts from their body.
-        smooth: (p) => smoothFromBody(p),
+        // Any-angle smoothing for combat walks. The party variant starts
+        // from the acting member's body; the enemy variant treats the enemy's
+        // own tile as open (they're standing on it) and starts from their body.
+        smooth: (p, actor) => smoothFromBody(p, actor),
         smoothEnemy: (en, p) => {
           const pos = en.entity?.getPosition();
           if (pos) p = [[pos.x, pos.z], ...p.slice(1)];
@@ -727,8 +752,11 @@ function startGame(level) {
           inCombat = false;
           combat = null;
           // A breather after every victory, so back-to-back fights aren't a
-          // death spiral - wounds still carry over, just less brutally.
-          sheet.hp = Math.min(sheet.maxHp, sheet.hp + VICTORY_HEAL);
+          // death spiral - wounds still carry over, just less brutally. The
+          // whole party catches its breath.
+          for (const m of party.members) {
+            if (m.sheet.hp > 0) m.sheet.hp = Math.min(m.sheet.maxHp, m.sheet.hp + VICTORY_HEAL);
+          }
           ui.say(`The floor is yours. You catch your breath. (+${VICTORY_HEAL} HP)`);
           ui.updateStatsHud(sheet);
         },
@@ -741,14 +769,16 @@ function startGame(level) {
     });
   }
 
-  // Proximity trigger: an adjacent coworker starts the fight (walk into range,
-  // or get cornered). Everyone within the engage radius joins.
+  // Proximity trigger: a coworker adjacent to any party member starts the
+  // fight (walk into range, or get cornered). Everyone within the engage
+  // radius of the cornered member joins.
   function checkCombatTrigger() {
     if (!sheet || inCombat || gameOver || !player.entity) return;
-    const en = adjacentEnemy();
-    if (!en) return;
+    const hit = adjacentEnemyToParty();
+    if (!hit) return;
+    const { en, member } = hit;
     const engaged = enemies.filter((e) =>
-      e.alive && Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= ENGAGE_RADIUS);
+      e.alive && Math.max(Math.abs(e.x - member.actor.x), Math.abs(e.z - member.actor.z)) <= ENGAGE_RADIUS);
     beginCombat({ engaged, primary: en });
   }
 
@@ -763,33 +793,41 @@ function startGame(level) {
     beginCombat({ engaged, primary: en, opening: { actionId, target: en } });
   }
 
-  // Tile effects (data-driven from TILE_TYPES[..].onEnter) fire per step.
-  // Hazards hit on any step; the exit only fires when it's the destination, so
-  // pathing past it doesn't end the level by accident.
-  function onPlayerStep(x, z, pathDone, changed = true) {
+  // Tile effects (data-driven from TILE_TYPES[..].onEnter) fire per step, for
+  // ANY party member walking - each member's own sheet takes the damage, the
+  // gum, the ammo. Hazards hit on any step; the exit only fires when it's the
+  // LEADER's deliberate destination, so pathing past it (or a follower
+  // trailing over it) doesn't end the level by accident. Walk-up interactions
+  // are the leader's too - they're what the player clicked.
+  function onMemberStep(member, x, z, pathDone, changed = true) {
+    const ms = member.sheet;
+    const actor = member.actor;
+    const isLeader = member === partyLeader(party);
     const fx = grid.defAt(x, z).onEnter;
     if (fx) {
-      if (fx.effect === 'exit' && pathDone && !inCombat) {
+      if (fx.effect === 'exit' && pathDone && !inCombat && isLeader) {
         gameOver = true;
-        player.clearPath();
-        // Mid-campaign exits lead to the next floor (the sheet - wounds, XP,
+        actor.clearPath();
+        // Mid-campaign exits lead to the next floor (the party - wounds, XP,
         // coffee habits - carries over via saved progress). The last floor,
         // and any playtest level, ends the run.
         if (!playtesting && level.next && LEVELS[level.next]) {
           // A breather in the stairwell, so you never start a floor one
           // puddle away from death.
-          sheet.hp = Math.min(sheet.maxHp, sheet.hp + STAIRWELL_HEAL);
-          localStorage.setItem(PROGRESS_KEY, JSON.stringify({ levelId: level.next, sheet }));
+          for (const m of party.members) {
+            if (m.sheet.hp > 0) m.sheet.hp = Math.min(m.sheet.maxHp, m.sheet.hp + STAIRWELL_HEAL);
+          }
+          localStorage.setItem(PROGRESS_KEY, JSON.stringify(serializeProgress(party, level.next)));
           ui.showFloorClear({ nextName: LEVELS[level.next].name }, () => location.reload());
         } else {
           clearProgress();
-          ui.showWinScreen({ level: sheet.level, defeated: enemies.filter((e) => !e.alive).length });
+          ui.showWinScreen({ level: ms.level, defeated: enemies.filter((e) => !e.alive).length });
         }
         return;
       }
       if (fx.effect === 'damage' && changed) {
-        const dead = applyDamage(sheet, fx.amount);
-        player.flinch();
+        const dead = applyDamage(ms, fx.amount);
+        actor.flinch();
         vfx.damageText(x, z, `-${fx.amount}`);
         ui.say(fx.message);
         ui.updateStatsHud(sheet);
@@ -800,9 +838,9 @@ function startGame(level) {
       }
     }
     // Paper-cut bleeding drips on every tile entered while it lasts.
-    if (changed && sheet.bleed > 0) {
-      sheet.bleed -= 1;
-      const bled = applyDamage(sheet, 1);
+    if (changed && ms.bleed > 0) {
+      ms.bleed -= 1;
+      const bled = applyDamage(ms, 1);
       vfx.damageText(x, z, '-1');
       ui.say('You drip on the carpet. -1 HP.');
       ui.updateStatsHud(sheet);
@@ -812,26 +850,26 @@ function startGame(level) {
       }
     }
     // Surface effects (data/surfaces.js): fire and electrified pools hurt,
-    // paper cuts (and arms you), water and coffee editorialize. Talents can
-    // shrug damage off. Only on genuine tile entry.
+    // paper cuts (and arms you), water and coffee editorialize. The walking
+    // member's talents can shrug damage off. Only on genuine tile entry.
     const sfx = changed ? surfEffect(x, z) : null;
     if (sfx) {
       if (sfx.ammo) {
-        sheet.paper = Math.min(PAPER_CAP, sheet.paper + sfx.ammo);
+        ms.paper = Math.min(PAPER_CAP, ms.paper + sfx.ammo);
         vfx.damageText(x, z, '+📄', '#8adf76');
       }
       // Gum on shoe: slowed, no kicking, but genuine traction (can't slip).
       if (sfx.applies === 'gum' && stickGum(x, z)) {
-        const had = sheet.gum > 0;
-        sheet.gum = GUM.steps;
+        const had = ms.gum > 0;
+        ms.gum = GUM.steps;
         ui.say(had ? 'More gum. You are building a collection.' : sfx.message);
         ui.updateStatsHud(sheet);
       }
-      const amount = effectiveSurfDamage(x, z);
+      const amount = effectiveSurfDamage(x, z, ms);
       if (amount > 0) {
-        if (sfx.bleed) sheet.bleed = Math.max(sheet.bleed, sfx.bleed);
-        const dead = applyDamage(sheet, amount);
-        player.flinch();
+        if (sfx.bleed) ms.bleed = Math.max(ms.bleed, sfx.bleed);
+        const dead = applyDamage(ms, amount);
+        actor.flinch();
         vfx.damageText(x, z, `-${amount}`);
         ui.say(sfx.message);
         ui.updateStatsHud(sheet);
@@ -840,7 +878,7 @@ function startGame(level) {
           return;
         }
       } else if (sfx.amount) {
-        ui.say(sheet.talent?.effects?.shockImmune && grid.isElectrified(x, z)
+        ui.say(ms.talent?.effects?.shockImmune && grid.isElectrified(x, z)
           ? 'The water crackles. Your ESD soles rate this a non-event. 0 damage.'
           : 'You glide across the drift, harvesting ammunition. The edges respect a master. (+1 paper)');
         ui.updateStatsHud(sheet);
@@ -852,26 +890,26 @@ function startGame(level) {
     // walk right there. In combat the movement AP already spent stays spent -
     // that IS the penalty. slipImmune tread never slips; neither does a
     // gummed shoe - gum is traction.
-    if (changed && !gameOver && !sheet.talent?.effects?.slipImmune && !(sheet.gum > 0)) {
+    if (changed && !gameOver && !ms.talent?.effects?.slipImmune && !(ms.gum > 0)) {
       const chance = slipChanceAt(x, z);
       if (chance && Math.random() < chance) {
-        player.clearPath();
-        player.flinch();
+        actor.clearPath();
+        actor.flinch();
         vfx.damageText(x, z, 'slip!', '#8ad4df');
         if (inCombat) combat?.notifySlip();
         else ui.say('The floor was, in fact, wet. You go down. Gracefully? No.');
       }
     }
     // Gum wears off with mileage.
-    if (changed && sheet.gum > 0) {
-      sheet.gum -= 1;
-      if (sheet.gum === 0) {
+    if (changed && ms.gum > 0) {
+      ms.gum -= 1;
+      if (ms.gum === 0) {
         ui.say('The gum finally lets go of your sole. Freedom.');
         ui.updateStatsHud(sheet);
       }
     }
     // Walk-up interactions (lighting trash cans) fire on deliberate arrival.
-    if (pendingAction && pathDone
+    if (isLeader && pendingAction && pathDone
       && Math.abs(x - pendingAction.x) <= 1 && Math.abs(z - pendingAction.z) <= 1) {
       const act = pendingAction;
       pendingAction = null;
@@ -1074,23 +1112,26 @@ function startGame(level) {
     player.speed = BASE_SPEED
       * (SURFACES[runtime.surfaceAt(player.x, player.z)]?.slow || 1)
       * (sheet?.gum > 0 ? GUM.slow : 1);
-    player.update(dt, onPlayerStep);
+    player.update(dt, (x, z, done, changed) => {
+      if (party) onMemberStep(partyLeader(party), x, z, done, changed);
+    });
     const world = {
       paused: inCombat || gameOver,
       isWalkable,
       isHazard: enemyIsHazard, // wander avoidance uses the ENEMY hazard model
-      playerTile: player,
+      blockedByParty: partyAt,
       occupied: (x, z, self) =>
-        (x === player.x && z === player.z)
+        partyAt(x, z)
         || enemies.some((e) => e.alive && e !== self && e.x === x && e.z === z),
       slips: (x, z) => Math.random() < slipChanceAt(x, z),
       stickGum,
-      // A wander route never crosses hazards, other actors, or the player's
-      // tile; the enemy's own start tile counts as open. Returns it smoothed.
+      // A wander route never crosses hazards, other actors, or a party
+      // member's tile; the enemy's own start tile counts as open. Returns it
+      // smoothed.
       findWanderPath: (en, tx, tz) => {
         const open = (x, z) => (x === en.x && z === en.z
           ? grid.terrainOpen(x, z)
-          : enemyClearOfHazards(x, z) && !(x === player.x && z === player.z));
+          : enemyClearOfHazards(x, z) && !partyAt(x, z));
         const p = findPath(open, en.x, en.z, tx, tz, null, grid.stepOpen);
         if (!p || p.length < 2) return null;
         // amble to a loose spot in the tile, not its dead centre
@@ -1165,15 +1206,15 @@ function startGame(level) {
       },
     },
   ]);
-  if (restoredSheet) {
-    // Continuing a campaign run: same character, next floor - no picker.
-    // Backfill fields older saves may predate, so no math ever meets
-    // undefined.
-    sheet = restoredSheet;
-    sheet.inventory ||= []; // saves from before pockets existed
-    sheet.paper ??= 0;
-    sheet.bleed ??= 0;
-    sheet.gum ??= 0;
+  if (restoredProgress) {
+    // Continuing a campaign run: same party, next floor - no picker. Field
+    // backfills for older saves live in parseProgress. Only the leader gets
+    // an actor until companion spawning arrives with recruitment.
+    party = createParty(restoredProgress.sheets[0]);
+    for (const s of restoredProgress.sheets.slice(1)) addMember(party, s);
+    party.active = restoredProgress.active;
+    partyLeader(party).actor = player;
+    sheet = partyLeader(party).sheet;
     spawnPlayerModel();
     loot.refreshPanel(sheet);
     buildHotbar();
@@ -1235,6 +1276,12 @@ function startGame(level) {
       });
     },
     get npcs() { return npcs.map((n) => ({ name: n.def.name, x: n.x, z: n.z })); },
+    get party() {
+      return party ? party.members.map((m, i) => ({
+        name: m.sheet.name, hp: m.sheet.hp, maxHp: m.sheet.maxHp,
+        x: m.actor?.x, z: m.actor?.z, active: i === party.active,
+      })) : [];
+    },
     // Out-of-combat targeting + hover state, for the e2e suite.
     get armed() { return armedOoc; },
     get hoverKind() { return hoverKind; },

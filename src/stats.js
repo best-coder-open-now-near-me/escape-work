@@ -17,6 +17,7 @@ export function createSheet(classId) {
   return {
     classId,
     className: cls.name,
+    name: cls.name, // display name - companions get personal names here
     model: cls.model,
     hp: cls.maxHp,
     maxHp: cls.maxHp,
