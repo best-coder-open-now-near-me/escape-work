@@ -24,13 +24,18 @@ test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ pa
   await waitStill(page); // player stationary => camera done easing
   let spent = false;
   for (let i = 0; i < 6 && !spent; i++) {
-    if (await page.evaluate(() => window.__combat.armed) !== 'reboot') await page.click('#act-reboot');
+    // Re-arm only if reboot is armable (a prior mis-click could have walked
+    // and spent AP; never click a disabled button - that would hang).
+    if (await page.evaluate(() => window.__combat.armed) !== 'reboot') {
+      if (!(await page.locator('#act-reboot').isEnabled())) break;
+      await page.click('#act-reboot');
+    }
     const tile = await page.evaluate(() => window.__game.playerTile); // rounded - matches the purge check
     expect(await clickWorld(page, tile.x, tile.z)).toBe(true);
     spent = await page.evaluate(() => window.__combat.ap === ap0 - 3).catch(() => false);
-    if (!spent) await page.waitForTimeout(500); // let any stray walk/ease settle, then retry
+    if (!spent) await waitStill(page); // let any stray walk settle before retrying
   }
-  await expect.poll(() => page.evaluate(() => window.__combat.ap)).toBe(ap0 - 3);
+  expect(spent).toBe(true); // reboot self-cast consumed exactly its AP
   expect(await page.evaluate(() => window.__combat.armed)).toBe(null);
 });
 

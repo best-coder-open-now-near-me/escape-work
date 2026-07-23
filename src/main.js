@@ -1264,6 +1264,14 @@ function startGame(level) {
         // Clicking a teammate's body hands them the floor; clicking a
         // coworker's body targets them. Ground clicks stay tile-based for
         // movement.
+        // Your OWN tile wins first: a self-cast (purge on yourself) or a
+        // shuffle-in-place must never be stolen by an adjacent enemy's tall
+        // body mesh overlapping the click. Enemies can't stand on your tile,
+        // so this is unambiguous.
+        if (tile && tile.x === player.x && tile.z === player.z) {
+          combat?.handleTileClick(tile, point);
+          return;
+        }
         const bodyHit = picking.pick(controls.cameraEntity, sx, sy);
         if (bodyHit?.kind === 'party') {
           const m = memberOf(bodyHit.ref);
