@@ -127,7 +127,13 @@ const onCanvas = (page, p) => page.evaluate(
 // becomes eligible. Each click's walk plays out fully before the next attempt.
 export async function enterCombat(page) {
   let inCombat = false;
-  for (let i = 0; i < 10 && !inCombat; i++) {
+  for (let i = 0; i < 12 && !inCombat; i++) {
+    // Let the camera settle before projecting - a walk-up leaves it easing,
+    // and a stale projection lands the click a tile off (walks past the
+    // target instead of engaging). Settling on the player fixes the whole
+    // projection, enemies included.
+    const pp = await page.evaluate(() => window.__game.playerPos);
+    await stableProject(page, pp.x, pp.z).catch(() => {});
     const pt = await page.evaluate(() => window.__game.playerTile);
     const ens = await page.evaluate(() => window.__game.enemies.filter((e) => e.alive && e.reachable));
     if (!ens.length) { await page.waitForTimeout(700); continue; } // all sealed/far - let them wander
