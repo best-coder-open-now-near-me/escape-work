@@ -17,7 +17,7 @@ the module-by-module changes, and the milestone order. No code yet.
   spend their AP in any order, then End Turn hands the round to the enemies —
   the Divinity Original Sin round shape, minus per-character initiative.
 - **Party UI**: a portrait bar showing each member's HP/status, used to switch
-  the active member in combat.
+  the member you control — the active member in combat, the leader out of it.
 - **Persistence**: the whole party carries across floors with the campaign
   save, like the sheet does today.
 
@@ -35,7 +35,7 @@ the module-by-module changes, and the milestone order. No code yet.
 | 8 | Enemy targeting | Nearest living party member (Chebyshev), ties broken by lowest HP | Simple, readable, and creates real tank/squishy positioning decisions. Threat tables are overkill. |
 | 9 | Hazards & surfaces | Followers trigger surfaces/hazards per tile entered, same as the leader (slips, gum, paper pickup, damage — all per-sheet) | It's the Divinity layer; exempting companions would make them ghosts. Slight added risk of "companion walks through fire" annoyance — mitigated because followers path with the same hazard-avoiding cost model. |
 | 10 | Floor exit | Leader reaching the exit ends the floor; the party is gathered automatically into the stairwell (they all spawn together next floor) | Requiring everyone to reach the exit adds shepherding busywork; BG3 does gather-on-transition too. |
-| 11 | Leader switching out of combat | Not in v1. The character you picked at boot is the leader; portraits are informational out of combat | Cuts scope: hotbar, talents-affecting-movement (slip immunity, lighter), and camera all key off the leader. Revisit once the party core is stable. |
+| 11 | Leader switching out of combat | In v1: clicking a portrait switches which member you control, any time outside combat and dialogue | The supporting machinery (active-member abstraction, per-member action bars, portrait bar, per-member stepping) is all built for combat anyway; the only genuinely new piece is the portrait click re-keying camera, hotbar, HUD, and the follower set to the new leader. Downed members can't be selected. |
 
 ## Architecture: where it lands
 
@@ -53,11 +53,12 @@ through the refactor).
   Nervous IT Intern, promoted from `data/npcs.js`.
 - `src/party.js` — pure logic (unit-testable, no PlayCanvas/DOM): party
   creation, `createCompanionSheet(id, level)` (leans on stats.js), add/remove
-  member, downed/revive rules, XP fan-out, save serialization + migration of
-  the old single-sheet shape.
+  member, active-member tracking (who you control), downed/revive rules, XP
+  fan-out, save serialization + migration of the old single-sheet shape.
 - `ui.createPartyBar` in `src/ui.js` — portraits with HP bars, active-member
-  highlight, downed marker. Clicking a portrait switches the active member in
-  combat (and later, the leader out of combat).
+  highlight, downed marker. Clicking a portrait switches the active member —
+  in combat (whose AP and action bar are live) and out of it (who you
+  control).
 
 ### Changed files, in dependency order
 
@@ -83,6 +84,12 @@ path with their registry attached).
   the members. `isWalkable` blocks on any party member's tile for enemies —
   but party members are pass-through **for each other's pathing** (BG3-style),
   so followers never traffic-jam in a doorway.
+- The leader is the party's **active member**, not a fixed index. A portrait
+  click out of combat re-keys everything that reads the leader accessor:
+  camera follow, click-to-move, the hotbar (rebuilt for the new member's
+  actions), the stats HUD, talent-shaped pathing costs, world-verb menus, and
+  the follower set. The outgoing leader stops walking and any pending walk-up
+  action cancels; switching is blocked during dialogue.
 - `onPlayerStep` generalizes to `onMemberStep(member, …)`: surfaces, slips,
   gum, bleed, paper pickup all run against that member's sheet. Exit and
   pending walk-up interactions stay leader-only. `checkCombatTrigger` fires on
@@ -134,9 +141,9 @@ caveat applies, fix not in this plan's scope.
 
 ### Persistence
 
-Progress save v2: `{ version: 2, levelId, party: [sheet, …] }`. Loading the
-old `{ levelId, sheet }` shape wraps it into a one-member party (migration
-lives in `party.js`, unit tested). All members spawn adjacent to the player
+Progress save v2: `{ version: 2, levelId, party: [sheet, …], active }`.
+Loading the old `{ levelId, sheet }` shape wraps it into a one-member party
+with `active: 0` (migration lives in `party.js`, unit tested). All members spawn adjacent to the player
 spawn on the next floor. Recruitment state needs no separate flag — a
 companion in the save's party array simply doesn't spawn as an NPC when the
 level's legend places them (spawn-time check against the party roster).
@@ -149,11 +156,12 @@ level's legend places them (spawn-time check against the party roster).
    world hooks. Save format v2 + migration. The game plays identically;
    existing tests prove it. This PR is deliberately boring and is most of the
    risk.
-2. **Recruitment + following.** `data/companions.js`, dialogue `effect`s,
-   NpcActor→CompanionActor conversion, follower movement, hazards-per-member,
-   party pass-through pathing, party bar (display only), picking kind. After
-   this PR you can recruit the intern and walk the floor as a duo — but combat
-   still only fields the leader.
+2. **Recruitment + following + leader switching.** `data/companions.js`,
+   dialogue `effect`s, NpcActor→CompanionActor conversion, follower movement,
+   hazards-per-member, party pass-through pathing, party bar with
+   out-of-combat portrait switching, picking kind. After this PR you can
+   recruit the intern, walk the floor as a duo, and swap who you control —
+   but combat still only fields whoever is leader when it starts.
 3. **Party combat.** Per-member combat state + active-member switching, enemy
    targeting, downed/revive, party wipe, strip/UI. The core payoff PR.
 4. **Persistence + polish.** Party across floors, help-up interaction out of
@@ -171,9 +179,12 @@ level's legend places them (spawn-time check against the party roster).
   check that legend chars resolving into COMPANIONS are valid.
 - **e2e** (`tests/e2e/party.spec.js`): recruit via dialogue → party size 2 and
   the follower actually follows (tile distance bound after a long walk);
-  combat: switch active member, both spend AP, enemy attacks the nearest
-  member; downed member revives on victory at 1 HP; floor exit carries the
-  party (reload, both present); old save loads as a one-member party.
+  portrait click out of combat → the other member walks on the next ground
+  click, the ex-leader follows, and the hotbar shows the new member's
+  actions; combat: switch active member, both spend AP, enemy attacks the
+  nearest member; downed member revives on victory at 1 HP; floor exit
+  carries the party (reload, both present); old save loads as a one-member
+  party.
 - **Regression invariant**: every existing spec must pass unchanged after
   milestone 1 — a one-member party is today's game.
 
@@ -188,19 +199,21 @@ level's legend places them (spawn-time check against the party roster).
   stop-short guard should cover it; budget playtest time here.
 - **Balance inversion** — two bodies with today's encounter sizes makes fights
   easy. Acceptable during milestones 2–4; milestone 5 owns the rebalance.
-- **Open: does the armed-hotbar opening strike stay leader-only?** Plan says
-  yes for v1 (the hotbar is the leader's), with combat switching available the
-  moment the fight starts.
+- **Resolved: the armed-hotbar opening strike belongs to the active member.**
+  With leader switching in v1 the hotbar is simply whoever you control — the
+  opening strike needs no special case.
 - **Companion talents that act on the world** (a Smoker companion's lighter).
   Resolved: since a talent isn't a passable object, the long-term model is
   spell-like — a targeted ability owned by the character. It rides the
   existing arm-then-target hotbar pattern: arm Flick the Lighter, click a
   flammable target, and the ability's OWNER walks up and performs it, whoever
   in the party that is. That needs companion walk-up movement, which
-  milestone 2 builds anyway; the ability lands in milestone 4/5. Until then
-  (v1): talents apply only to their owner's own stepping/combat, and the
-  right-click ignite menu stays leader-gated. The menu option survives as a
-  shortcut that dispatches the same ability. (Alternative considered: demote
+  milestone 2 builds anyway; the ability lands in milestone 4/5. Until then:
+  talents apply only to their owner's own stepping/combat, and menu verbs key
+  off the **active member's** talents — switch to the Smoker and the lighter
+  options appear. With leader switching in v1 that interim is the authentic
+  BG1/2 answer rather than a stopgap; the armed-ability version becomes
+  convenience polish (use it without switching first). (Alternative considered: demote
   the lighter to a carried item in shared pockets, making "can the party
   ignite this?" an inventory query — cheaper, but it hollows out the Smoker's
   "a lighter, always" identity. Rejected.) Purely passive talents
