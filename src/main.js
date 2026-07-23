@@ -832,10 +832,13 @@ function startGame(level) {
     // (player.x/z is the logical tile, which jumps a whole tile at a time and
     // makes the camera step along with the walk).
     const pp = player.entity ? player.entity.getPosition() : player;
-    controls.follow({
+    // While the class carousel is up (no sheet yet), look dead at the
+    // candidate so they sit centred in frame; in play, bias toward the map
+    // centre so corner spawns don't leave half the frame empty.
+    controls.follow(sheet ? {
       x: pp.x * 0.82 + ((grid.width - 1) / 2) * 0.18,
       z: pp.z * 0.82 + ((grid.height - 1) / 2) * 0.18,
-    }, dt);
+    } : { x: pp.x, z: pp.z }, dt);
     updateWallFade(controls.cameraEntity, player.entity ? player.entity.getPosition() : null);
   });
 
@@ -880,7 +883,7 @@ function startGame(level) {
     // The carousel: frame the spawn tile close and head-on (eye-ish level,
     // aimed at the chest) where previewClass parades the browsed candidate;
     // onClassPicked restores the tactical camera.
-    controls.setView({ dist: 1, pitch: 14, focusY: 0.85 });
+    controls.setView({ dist: 3, pitch: 14, focusY: 0.8 });
     app.on('update', previewSpin);
     ui.showClassPicker(CLASSES, ACTIONS, onClassPicked, () => {
       location.hash = '#editor';
