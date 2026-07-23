@@ -81,7 +81,12 @@ function startGame(level) {
   // hoisted from below.
   const runtime = createSurfaceRuntime({
     grid,
-    hooks: { addFlame: scene.addFlame, hideSurfaceVisual: scene.hideSurfaceVisual },
+    hooks: {
+      addFlame: scene.addFlame,
+      hideSurfaceVisual: scene.hideSurfaceVisual,
+      addSmoke: scene.addSmoke,
+      removeSmoke: scene.removeSmoke,
+    },
     onExplosion: handleExplosion,
   });
 
@@ -103,12 +108,14 @@ function startGame(level) {
   let hotbar = null; // persistent attack bar (built once a class is picked)
   let hotbarPaper = -1; // last paper count the hotbar rendered (refresh gate)
   let pendingGodPick = null; // god-mode click-to-place callback (see window.__god)
+  let oocTurnClock = 0; // out-of-combat real-time accrued toward the next fire/smoke turn
 
   // --- gameplay tuning --------------------------------------------------------
   const ENGAGE_RADIUS = 4; // Chebyshev tiles within which enemies join a fight
   const EXPLOSION_DAMAGE = 8; // shrapnel to the player standing beside a printer
   const VICTORY_HEAL = 5; // the breather after winning a fight
   const STAIRWELL_HEAL = 6; // the breather between floors
+  const OOC_TURN_SECONDS = 1.6; // out-of-combat seconds that count as one fire/smoke turn
 
   // Looting (containers, bodies, pockets, the Alt overlay) lives in its own
   // module; approachAndDo is hoisted, so wiring it here is safe.
@@ -300,12 +307,26 @@ function startGame(level) {
     if (sheet) ui.updateStatsHud(sheet);
   }
 
+  // Who can start a fire: the Middle Manager's Smoker lighter (unlimited), or
+  // anyone carrying a book of matches (consumed one per light).
+  const hasLighter = () => !!sheet?.talent?.effects?.hasLighter;
+  const canIgnite = () => hasLighter() || !!sheet?.inventory?.includes('matches');
+  const igniteVerb = () => (hasLighter() ? 'Flick the lighter' : 'Strike a match');
+
   function igniteAt(x, z) {
+    if (!canIgnite()) return;
     const wasProp = !!grid.defAt(x, z).ignitable;
     if (runtime.ignite(x, z)) {
+      if (!hasLighter()) {
+        const i = sheet.inventory.indexOf('matches');
+        if (i >= 0) sheet.inventory.splice(i, 1); // a match is spent
+        loot.refreshPanel(sheet);
+      }
       ui.say(wasProp
         ? 'You introduce the trash can to fire. It goes about as expected.'
-        : 'A flick of the lighter. The paperwork ascends.');
+        : hasLighter()
+          ? 'A flick of the lighter. The paperwork ascends.'
+          : 'A match flares, then the paperwork. Ashes to ashes.');
     }
   }
 
@@ -453,8 +474,12 @@ function startGame(level) {
   // --- targeting, hover highlight, cursor --------------------------------------
   const THROW_RANGE = 5; // must match combat.js
   const cheb = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.z - b.z));
+  // A sight line for throws: open terrain that ISN'T hazed by smoke. Smoke
+  // hangs floor-to-ceiling for a couple of turns and breaks line of sight;
+  // movement ignores it, so this is separate from terrainOpen.
+  const sightClear = (x, z) => grid.terrainOpen(x, z) && !runtime.isSmoke(x, z);
   // Throws sail over chest-high partitions but not closed doors (grid.sightOpen).
-  const hasLos = (a, b) => segmentClear(grid.terrainOpen, a.x, a.z, b.x, b.z, grid.sightOpen);
+  const hasLos = (a, b) => segmentClear(sightClear, a.x, a.z, b.x, b.z, grid.sightOpen);
   const throwAmmoCost = (id) => {
     const base = ACTIONS[id].ammoCost || 0;
     const disc = sheet?.talent?.effects?.paperAmmoDiscount || 0;
@@ -759,8 +784,9 @@ function startGame(level) {
         approach: approachTo,
         // Partitions (edge walls) are chest height: they block movement but
         // not throws - lob paper right over the cubicle wall. Closed doors go
-        // floor to frame, so they DO stop throws (grid.sightOpen).
-        hasLos: (ax, az, bx, bz) => segmentClear(grid.terrainOpen, ax, az, bx, bz, grid.sightOpen),
+        // floor to frame, so they DO stop throws (grid.sightOpen); so does smoke
+        // (sightClear).
+        hasLos: (ax, az, bx, bz) => segmentClear(sightClear, ax, az, bx, bz, grid.sightOpen),
         stepOpen: grid.stepOpen,
         surfaceIdAt: (x, z) => runtime.surfaceAt(x, z),
         isElectrified: (x, z) => grid.isElectrified(x, z),
@@ -783,6 +809,9 @@ function startGame(level) {
       callbacks: {
         say: ui.say,
         updateHud: () => ui.updateStatsHud(sheet),
+        // One combat round = one fire/smoke turn (combat.js calls this as it
+        // hands the turn back to the player).
+        onRound: () => runtime.advanceTurn(),
         onEnemyKilled: awardKill,
         onWin: () => {
           inCombat = false;
@@ -1053,11 +1082,11 @@ function startGame(level) {
             action: () => approachAndDo(corpse.x, corpse.z, () => loot.lootBody(corpse)),
           });
         }
-        // The Smoker's lighter turns any flammable surface into an option.
-        if (sheet?.talent?.effects?.hasLighter
-          && surfId && SURFACES[surfId].flammable && !runtime.isBurning(tile.x, tile.z)) {
+        // A lighter (Smoker) or a book of matches turns a flammable surface
+        // into an option.
+        if (canIgnite() && surfId && SURFACES[surfId].flammable && !runtime.isBurning(tile.x, tile.z)) {
           items.unshift({
-            label: 'Flick the lighter',
+            label: igniteVerb(),
             action: () => approachAndDo(tile.x, tile.z, () => igniteAt(tile.x, tile.z)),
           });
         }
@@ -1069,9 +1098,9 @@ function startGame(level) {
             ? 'The trash can is thoroughly on fire. Somewhere, an alarm should be going off.'
             : 'A trash can. Sixty percent paper, forty percent regret.'),
         }];
-        if (runtime.ignitable(tile.x, tile.z)) {
+        if (canIgnite() && runtime.ignitable(tile.x, tile.z)) {
           items.unshift({
-            label: 'Set it on fire (why not)',
+            label: igniteVerb(),
             action: () => approachAndDo(tile.x, tile.z, () => igniteAt(tile.x, tile.z)),
           });
         }
@@ -1181,7 +1210,16 @@ function startGame(level) {
       if (show && sheet.paper !== hotbarPaper) { hotbarPaper = sheet.paper; hotbar.refresh(sheet); }
       if (show && armedOoc) drawOocTargets();
     }
-    if (!gameOver) runtime.tick(dt); // fire waits for no one, combat included
+    // Fire/smoke age in TURNS. In combat, combat.js advances one per round (via
+    // the onRound callback in beginCombat). Out of combat there are no rounds, so
+    // a real-time clock stands in - about one turn per OOC_TURN_SECONDS.
+    if (!gameOver && !inCombat) {
+      oocTurnClock += dt;
+      while (oocTurnClock >= OOC_TURN_SECONDS) {
+        oocTurnClock -= OOC_TURN_SECONDS;
+        runtime.advanceTurn();
+      }
+    }
     animateSurfaces(dt);
     // The loot overlay tracks the world while held (the camera keeps easing).
     if (loot.labelsVisible) {
@@ -1280,6 +1318,9 @@ function startGame(level) {
     get stats() { return sheet ? { ...sheet } : null; },
     get playerSpeed() { return player.speed; },
     get burning() { return runtime.burningCount; },
+    get smoking() { return runtime.smokingCount; },
+    isSmoke: (x, z) => runtime.isSmoke(x, z),
+    losClear: (ax, az, bx, bz) => hasLos({ x: ax, z: az }, { x: bx, z: bz }),
     get inventory() { return sheet ? [...sheet.inventory] : []; },
     get looseItems() { return loot.debug.looseItems(); },
     get lootLabelCount() { return document.querySelectorAll('.loot-label').length; },
@@ -1354,6 +1395,10 @@ function startGame(level) {
     // ground (handled in onLeftClickTile) fires it with the picked tile/point.
     armPick(cb) { pendingGodPick = cb; },
     get picking() { return !!pendingGodPick; },
+    // Step the fire/smoke lifecycle one turn (what a combat round does) - a
+    // deterministic handle for the god panel and tests, independent of the
+    // out-of-combat real-time clock.
+    advanceFireTurn() { runtime.advanceTurn(); },
   };
   installGodMode(window.__god);
 }

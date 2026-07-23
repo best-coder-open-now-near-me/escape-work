@@ -49,6 +49,11 @@ export function createTileRenderer(app) {
   const electricMat = makeMaterial(ELECTRIFIED.color, { opacity: 0.92, gloss: 0.85, emissive: [0.25, 0.5, 0.65] });
   const fireMat = makeMaterial(FIRE.color, { opacity: 0.92, emissive: [0.9, 0.35, 0.05] });
   const fireCore = makeMaterial([1, 0.8, 0.3], { opacity: 0.95, emissive: [0.95, 0.7, 0.2] });
+  // Smoke: a low, translucent grey cloud over a burnt-out tile. It blocks line
+  // of sight for a couple of turns (the runtime owns that rule); here it's just
+  // a few drifting lobes.
+  const smokeMat = makeMaterial([0.36, 0.36, 0.4], { opacity: 0.4, gloss: 0.05 });
+  const smokeVisuals = new Map(); // "x,z" -> { holder, puffs }
   const trashMat = makeMaterial(TILE_TYPES.trash.color, { gloss: 0.4 });
   const printerMat = makeMaterial(TILE_TYPES.printer.color, { gloss: 0.5 });
   const printerDark = makeMaterial([0.2, 0.2, 0.24], { gloss: 0.3 });
@@ -406,6 +411,34 @@ export function createTileRenderer(app) {
     return holder;
   }
 
+  // A drifting smoke puff over a burnt tile - a few translucent lobes that bob
+  // (animate() drives the bob). Keyed by cell so the runtime can clear it.
+  function addSmoke(x, z) {
+    const k = x + ',' + z;
+    if (smokeVisuals.has(k)) return smokeVisuals.get(k).holder;
+    const holder = new pc.Entity();
+    const puffs = [];
+    const lobes = [[0, 0.55, 0, 0.52], [0.24, 0.66, 0.12, 0.36], [-0.22, 0.62, -0.12, 0.32], [0.06, 0.82, -0.16, 0.28]];
+    for (const [ox, oy, oz, s] of lobes) {
+      const p = new pc.Entity();
+      p.addComponent('render', { type: 'sphere', material: smokeMat });
+      p.render.castShadows = false;
+      p.setLocalScale(s, s * 0.8, s);
+      p.setLocalPosition(ox, oy, oz);
+      holder.addChild(p);
+      puffs.push({ e: p, baseY: oy, phase: x * 12.9 + z * 7.7 + puffs.length * 2.1 });
+    }
+    holder.setPosition(x, floorDef.height / 2, z);
+    app.root.addChild(holder);
+    smokeVisuals.set(k, { holder, puffs });
+    return holder;
+  }
+  function removeSmoke(x, z) {
+    const k = x + ',' + z;
+    const s = smokeVisuals.get(k);
+    if (s) { s.holder.destroy(); smokeVisuals.delete(k); }
+  }
+
   // A brief expanding toner-cloud boom.
   function explosionFlash(x, z) {
     const e = new pc.Entity();
@@ -433,10 +466,17 @@ export function createTileRenderer(app) {
     electricMat.emissiveIntensity = Math.max(0.15, pulse);
     fireMat.emissiveIntensity = 0.75 + 0.3 * Math.sin(clock * 11) + 0.15 * Math.sin(clock * 29);
     fireCore.emissiveIntensity = 0.85 + 0.25 * Math.sin(clock * 17 + 1);
+    for (const { puffs } of smokeVisuals.values()) {
+      for (const pf of puffs) {
+        const p = pf.e.getLocalPosition();
+        pf.e.setLocalPosition(p.x, pf.baseY + 0.05 * Math.sin(clock * 1.4 + pf.phase), p.z);
+      }
+    }
   }
 
   return {
     renderFloor, renderMarker, renderEdgeWall, renderDoor, addFlame, explosionFlash, animate,
+    addSmoke, removeSmoke,
     tileMats, wallGhost, doorMat, doorGhost, floorHeight: floorDef.height,
   };
 }
