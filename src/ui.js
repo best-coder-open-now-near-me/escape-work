@@ -71,6 +71,55 @@ function narrate(text) {
   narratorTimer = setTimeout(hideNarrator, 5200);
 }
 
+// --- focused-object banner (Divinity/BG3 examine-on-hover) --------------------
+// Naming whatever the cursor is over, up top, before you click it. Cosmetic +
+// non-interactive; main.js feeds it the current hover target each mouse move
+// (an { name, detail, color } object) or null to clear. The border tint tracks
+// the hover-highlight palette (hostile red, talkable green, lootable gold,
+// neutral cyan) so the banner and the world glow read as the same signal.
+let focusEl = null;
+function ensureFocusBanner() {
+  if (focusEl) return focusEl;
+  focusEl = document.createElement('div');
+  focusEl.id = 'focus-banner';
+  Object.assign(focusEl.style, {
+    position: 'fixed', top: '12px', left: '50%', transform: 'translate(-50%, -4px)',
+    zIndex: '20', pointerEvents: 'none', display: 'flex', alignItems: 'baseline', gap: '9px',
+    maxWidth: 'min(520px, 66vw)', padding: '7px 15px', borderRadius: '9px',
+    background: 'rgba(20,20,32,.92)', border: '1px solid #3a3a52',
+    boxShadow: '0 6px 20px rgba(0,0,0,.5)', whiteSpace: 'nowrap',
+    opacity: '0', transition: 'opacity .12s ease, transform .12s ease',
+  });
+  document.body.appendChild(focusEl);
+  return focusEl;
+}
+
+export function setFocusBanner(info) {
+  const el = ensureFocusBanner();
+  if (!info) {
+    el.style.opacity = '0';
+    el.style.transform = 'translate(-50%, -4px)';
+    return;
+  }
+  el.innerHTML = '';
+  const name = document.createElement('span');
+  Object.assign(name.style, { font: '700 14px system-ui, sans-serif', letterSpacing: '.4px', color: '#f4f4fa' });
+  name.textContent = info.name;
+  el.appendChild(name);
+  if (info.detail) {
+    const detail = document.createElement('span');
+    Object.assign(detail.style, {
+      font: '12px system-ui, sans-serif', opacity: '.62',
+      overflow: 'hidden', textOverflow: 'ellipsis',
+    });
+    detail.textContent = info.detail;
+    el.appendChild(detail);
+  }
+  el.style.borderColor = info.color || '#3a3a52';
+  el.style.opacity = '1';
+  el.style.transform = 'translate(-50%, 0)';
+}
+
 // --- loot toast ---------------------------------------------------------------
 // A short-lived notice pinned top-left, just right of the inventory button, so
 // loot pickups ("Printer: Toner Cartridge") read as a quick "you got X" instead

@@ -480,6 +480,51 @@ function startGame(level) {
     loot: [1.0, 0.82, 0.4],
     interact: [0.5, 0.8, 1.0],
   };
+  const rgbCss = ([r, g, b]) => `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
+
+  // The top focus banner's label for whatever the cursor is over: an
+  // interactable entity, or a flat target the pick ray skims (a corpse,
+  // dropped item, container, or door edge on the floor). Null over bare floor -
+  // nothing worth naming. Mirrors dispatchHit/cursorFor so the banner always
+  // describes the verb a click would actually take.
+  function focusInfoFor(hit, point) {
+    if (hit) {
+      const { kind, ref } = hit;
+      if (kind === 'enemy') {
+        return ref.alive
+          ? { name: ref.def.name, detail: `Hostile · HP ${ref.hp}/${ref.def.hp}`, color: rgbCss(HL.enemy) }
+          : { name: ref.def.name, detail: ref.loot?.length ? 'Body · lootable' : 'Body · picked clean', color: rgbCss(HL.loot) };
+      }
+      if (kind === 'npc') return { name: ref.def.name, detail: 'Coworker · talk', color: rgbCss(HL.npc) };
+      if (kind === 'door') {
+        const open = grid.doors.get(ref)?.open;
+        return { name: open ? 'Door · open' : 'Door · closed', detail: open ? 'Close' : 'Open', color: rgbCss(HL.interact) };
+      }
+      if (kind === 'prop') {
+        const def = grid.defAt(ref.x, ref.z);
+        const detail = def.loot ? 'Rummage' : def.explosive ? 'Volatile' : def.ignitable ? 'Flammable' : 'Object';
+        return { name: def.label || 'Object', detail, color: rgbCss(def.loot ? HL.loot : HL.interact) };
+      }
+    }
+    if (point) {
+      const tx = Math.round(point.x);
+      const tz = Math.round(point.z);
+      const corpse = loot.corpseAt(tx, tz);
+      if (corpse) return { name: corpse.def.name, detail: 'Body · lootable', color: rgbCss(HL.loot) };
+      const loose = loot.looseAt(tx, tz);
+      if (loose.length) {
+        const extra = loose.length > 1 ? ` +${loose.length - 1}` : '';
+        return { name: loot.itemName(loose[0].id) + extra, detail: 'Pick up', color: rgbCss(HL.loot) };
+      }
+      const doorKey = doorNearPoint(point);
+      if (doorKey) {
+        const open = grid.doors.get(doorKey)?.open;
+        return { name: open ? 'Door · open' : 'Door · closed', detail: open ? 'Close' : 'Open', color: rgbCss(HL.interact) };
+      }
+      if (grid.defAt(tx, tz).loot) return { name: grid.defAt(tx, tz).label, detail: 'Rummage', color: rgbCss(HL.loot) };
+    }
+    return null;
+  }
   const canvasEl = document.getElementById('app');
   const hlShells = new WeakMap(); // holder entity -> highlight shell (or null)
   let hoverEntity = null;
@@ -536,6 +581,7 @@ function startGame(level) {
     if (hit) setHoverHighlight(hit.entity, colorForHit(hit));
     else clearHoverHighlight();
     setCursor(cursorFor(hit, point));
+    ui.setFocusBanner(focusInfoFor(hit, point));
   }
 
   // Immediate-mode target rings for an armed hotbar action (redrawn each frame
@@ -591,6 +637,7 @@ function startGame(level) {
       loot.hideLabels();
       clearHoverHighlight();
       setCursor(null);
+      ui.setFocusBanner(null);
       renderDialogueNode(npc.def.dialogue.start);
     },
     close() { dialogueNpc = null; dialoguePanel.hide(); },
@@ -660,6 +707,7 @@ function startGame(level) {
     loot.hideLabels(); // no browsing the shelves mid-fight
     clearHoverHighlight();
     setCursor(null);
+    ui.setFocusBanner(null);
     // Everyone close enough joins the brawl (those further than 2 tiles are
     // surprised and lose their first turn - see combat.js). Bystanders
     // outside the radius join later if attacked (combat.js joinCombat).
@@ -931,8 +979,8 @@ function startGame(level) {
       } else moveTo(tile, point);
     },
     onHover: (point, sx, sy) => {
-      if (inCombat && combat) { combat.handleHover(point, sx, sy); return; }
-      if (!sheet || gameOver || dialogue.visible) { clearHoverHighlight(); setCursor(null); return; }
+      if (inCombat && combat) { combat.handleHover(point, sx, sy); ui.setFocusBanner(null); return; }
+      if (!sheet || gameOver || dialogue.visible) { clearHoverHighlight(); setCursor(null); ui.setFocusBanner(null); return; }
       worldHover(point, sx, sy);
     },
     onRightClickTile: (tile, sx, sy, point) => {
