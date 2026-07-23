@@ -13,6 +13,7 @@ import { GUM } from './data/surfaces.js';
 
 const wrapAngle = (a) => (((a + 180) % 360) + 360) % 360 - 180;
 const TURN_RATE = 10; // how quickly facing eases toward the heading
+const _settleQ = new pc.Quat(); // scratch for the leg-settle interpolation
 const FLASH_COLOR = [0.75, 0.09, 0.05];
 
 export class GridActor {
@@ -32,6 +33,9 @@ export class GridActor {
     // animation state
     this.animC = null; // anim component driving the baked clips
     this.clip = null; // current clip state name
+    this.legSettle = 1; // 0..1 progress easing legs to stance after a walk
+    this.legQL = null; // leg poses snapshotted when the walk ended
+    this.legQR = null;
     this.fx = null; // { kind: 'lunge'|'flinch'|'death', t }
     this.flashT = 0;
     this.mats = []; // per-instance cloned materials (for damage flashes)
@@ -46,9 +50,11 @@ export class GridActor {
     // it would sink the feet through the floor.
     this.visualLift = this.visual.getLocalPosition().y;
     this.animC = entity.findComponent('anim') || null;
-    // The idle clip animates only torso/arms/head - it has NO leg channels,
-    // so nothing ever writes the legs back after a walk stops mid-stride.
-    // updateAnim eases these home manually whenever we're idling.
+    // The idle clip has NO leg curves - but during the walk->idle blend the
+    // outgoing walk clip's leg curves keep playing at FULL amplitude (curves
+    // missing from one state aren't faded), and when the blend ends the legs
+    // freeze at whatever angle the walk last wrote. updateAnim's settle
+    // block owns the legs through and after every stop (see there).
     this.legL = entity.findByName('leg-left');
     this.legR = entity.findByName('leg-right');
     this.yaw = this.targetYaw = entity.getEulerAngles().y;
@@ -101,6 +107,17 @@ export class GridActor {
     this.animC.speed = speed;
     if (this.clip === name) return;
     this.clip = name;
+    // Entering idle: snapshot the legs' mid-stride pose. The settle in
+    // updateAnim eases from this snapshot to stance on its own clock,
+    // because the outgoing walk clip keeps writing leg swings for the whole
+    // transition blend - damping the CURRENT rotation per frame lets those
+    // writes through at a rate that shrinks with dt, so legs kept flailing
+    // after every stop at high fps while looking fine at low fps.
+    if (name === 'idle') {
+      this.legSettle = 0;
+      if (this.legL) this.legQL = this.legL.getLocalRotation().clone();
+      if (this.legR) this.legQR = this.legR.getLocalRotation().clone();
+    }
     this.animC.baseLayer.transition(name, blend);
   }
 
@@ -126,16 +143,21 @@ export class GridActor {
     // leg-whipping ("twitchy") - most visible on wandering NPCs' short hops.
     else if (moved > 1e-5) this.setClip('walk', 0.15, this.speed * 0.25);
     else this.setClip('idle', 0.2);
-    // Settle the legs into stance while idling - the idle clip never touches
-    // them (no leg curves), so a walk or attack would otherwise leave them
-    // frozen mid-stride.
+    // Settle the legs into straight stance while idling, and HOLD them
+    // there. This runs after the anim system each frame, so its write wins
+    // over the fading walk clip, whose leg curves keep playing at full
+    // amplitude for the whole walk->idle blend (see attach). Easing the
+    // CURRENT rotation instead (the old approach) only damped those writes
+    // by a dt-scaled factor: legs flailed after every stop at 60fps while
+    // snapping cleanly on slow software GL - fps-dependent twitching.
     if (this.clip === 'idle') {
-      const k = Math.min(1, dt * 12);
-      for (const leg of [this.legL, this.legR]) {
+      this.legSettle = Math.min(1, this.legSettle + dt / 0.25);
+      const a = this.legSettle * (2 - this.legSettle); // ease-out
+      for (const [leg, q0] of [[this.legL, this.legQL], [this.legR, this.legQR]]) {
         if (!leg) continue;
-        const q = leg.getLocalRotation();
-        q.slerp(q, pc.Quat.IDENTITY, k);
-        leg.setLocalRotation(q);
+        if (q0 && a < 1) _settleQ.slerp(q0, pc.Quat.IDENTITY, a);
+        else _settleQ.copy(pc.Quat.IDENTITY);
+        leg.setLocalRotation(_settleQ);
       }
     }
     let bobY = 0;
