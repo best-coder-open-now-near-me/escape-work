@@ -1,10 +1,78 @@
 // Character sheet + progression. Pure logic - no PlayCanvas, no DOM.
 import { CLASSES } from './data/classes.js';
+import { COMPANIONS } from './data/companions.js';
 import { ITEMS } from './data/items.js';
 
 // Thrown-weapon ammo cap: paper picked up from spills, spent on throws.
 // Every pickup/use site clamps against this one value.
 export const PAPER_CAP = 8;
+
+// --- attributes & derived stats ---------------------------------------------
+// The four office attributes are a character's single source of truth for its
+// combat numbers; maxHp/maxAp are DERIVED from them (the same shape the grid
+// uses - a logical value derived from raw state). A sheet carries its four
+// `attr` scores plus an innate `base` floor; recomputeDerived folds them into
+// the stored maxHp/maxAp that combat and the HUD read.
+//
+// All the progression knobs live in one block so balancing is a single edit
+// (and the god panel can pin them). Attribute POINTS, the class track, and
+// Savvy/Composure driving damage/deflect arrive in later milestones; this
+// milestone only makes attributes the stat SOURCE, calibrated so every
+// character's level-1 numbers are byte-for-byte today's.
+export const PROGRESSION = {
+  HP_PER_GRIT: 2,       // each point of Grit adds this much max HP
+  AP_PER_HUSTLE: 4,     // every N points of Hustle adds +1 max AP (AP is precious)
+  DMG_PER_SAVVY: 3,     // every N points of Savvy adds +1 attack damage (later)
+  COMP_PER_DEFLECT: 4,  // every N points of Composure softens a hit by 1 (later)
+  ATTR_PER_LEVEL: 2,    // attribute points granted per level-up (later)
+  CP_EVERY: 2,          // a class point every N levels (later)
+};
+
+export const ATTR_KEYS = ['grit', 'hustle', 'savvy', 'composure'];
+
+// A clean {grit,hustle,savvy,composure} object from any partial source.
+export function normalizeAttr(src = {}) {
+  const attr = {};
+  for (const k of ATTR_KEYS) attr[k] = Number.isFinite(src[k]) ? src[k] : 0;
+  return attr;
+}
+
+// The innate floor that, added to the attribute contribution, reproduces a
+// given maxHp/maxAp. Stored on the sheet so raising attributes always lands
+// ABOVE today's numbers rather than redefining them.
+function baseFrom(maxHp, maxAp, attr) {
+  return {
+    hp: maxHp - attr.grit * PROGRESSION.HP_PER_GRIT,
+    ap: maxAp - Math.floor(attr.hustle / PROGRESSION.AP_PER_HUSTLE),
+  };
+}
+
+// Fold attributes + base into the stored derived stats. Called after sheet
+// creation, save-load backfill, and (later) every point spend. hp is clamped
+// down to a shrunken max but never raised - healing is the caller's job.
+export function recomputeDerived(sheet) {
+  const { attr, base } = sheet;
+  sheet.maxHp = base.hp + attr.grit * PROGRESSION.HP_PER_GRIT;
+  sheet.maxAp = base.ap + Math.floor(attr.hustle / PROGRESSION.AP_PER_HUSTLE);
+  if (sheet.hp > sheet.maxHp) sheet.hp = sheet.maxHp;
+  return sheet;
+}
+
+// Backfill attributes onto a sheet from an older save (pre-attributes). Prefer
+// the character's own class/companion spread; the base is computed from the
+// sheet's SAVED maxHp/maxAp so the loaded character keeps the exact stats it
+// was saved with either way. Idempotent - a sheet that already has attributes
+// is just recomputed.
+export function ensureAttributes(sheet) {
+  if (sheet.attr && sheet.base) return recomputeDerived(sheet);
+  const block = (sheet.classId && CLASSES[sheet.classId])
+    || (sheet.companionId && COMPANIONS[sheet.companionId]) || null;
+  sheet.attr = normalizeAttr(block?.attr);
+  const maxHp = sheet.maxHp ?? sheet.hp;
+  const maxAp = sheet.maxAp ?? block?.ap ?? 0;
+  sheet.base = baseFrom(maxHp, maxAp, sheet.attr);
+  return recomputeDerived(sheet);
+}
 
 // The sheet is the persistent record of one character - the player or a
 // companion. Combat mutates hp in place so wounds carry between fights.
@@ -15,13 +83,18 @@ export function createSheetFrom(block, extra = {}) {
   const actions = [...block.actions];
   // Talents can grant an extra combat action (Smoker's cigarette).
   if (block.talent?.effects?.grantsAction) actions.push(block.talent.effects.grantsAction);
-  return {
+  const attr = normalizeAttr(block.attr);
+  const maxHp = block.maxHp ?? block.hp;
+  const base = baseFrom(maxHp, block.ap, attr); // reproduces the block's maxHp/ap
+  const sheet = {
     className: block.name,
     name: block.name, // display name - the class label, or the companion's own
     model: block.model,
-    hp: block.maxHp,
-    maxHp: block.maxHp,
+    hp: maxHp,
+    maxHp,
     maxAp: block.ap,
+    attr, // the four office attributes - the source maxHp/maxAp derive from
+    base, // innate floor; growth stacks on top (recomputeDerived)
     level: 1,
     xp: 0,
     xpNext: 10,
@@ -34,6 +107,9 @@ export function createSheetFrom(block, extra = {}) {
     inventory: [], // looted item ids (data/items.js) - persists across floors
     ...extra,
   };
+  recomputeDerived(sheet); // no-op at creation (base was solved to match), but
+  sheet.hp = sheet.maxHp;  // the invariant that keeps maxHp derived, not stored
+  return sheet;
 }
 
 export function createSheet(classId) {

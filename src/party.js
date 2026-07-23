@@ -4,7 +4,7 @@
 // the character the player controls out of combat, and whose turn state is
 // live in combat. Today the roster holds one member; recruitment
 // (data/companions.js) grows it.
-import { gainXp, createSheetFrom } from './stats.js';
+import { gainXp, createSheetFrom, ensureAttributes } from './stats.js';
 
 export const PARTY_CAP = 3; // leader + 2 companions - see PARTY_PLAN.md
 export const SAVE_VERSION = 2;
@@ -60,6 +60,7 @@ function normalizeSheet(sheet) {
   sheet.bleed ??= 0;
   sheet.gum ??= 0;
   sheet.name ??= sheet.className;
+  ensureAttributes(sheet); // pre-attribute saves get their class spread + derive
   return sheet;
 }
 

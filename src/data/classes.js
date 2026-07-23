@@ -18,6 +18,10 @@ export const CLASSES = {
     maxHp: 22,
     ap: 6,
     bonusDmg: 0,
+    // Office attributes (Grit/Hustle/Savvy/Composure) - the source the sheet
+    // derives maxHp/maxAp/damage from (stats.js recomputeDerived). Calibrated so
+    // level-1 stats equal the maxHp/ap above; the Drone is deliberately even.
+    attr: { grit: 5, hustle: 5, savvy: 5, composure: 5 },
     actions: ['attack', 'defend', 'coffee'],
     talent: {
       name: 'Origami Specialist',
@@ -33,6 +37,7 @@ export const CLASSES = {
     maxHp: 28,
     ap: 5,
     bonusDmg: 0,
+    attr: { grit: 8, hustle: 3, savvy: 4, composure: 7 }, // tanky, unhurried
     actions: ['delegate', 'own-calendar', 'espresso'],
     talent: {
       name: 'Smoker',
@@ -48,6 +53,7 @@ export const CLASSES = {
     maxHp: 24,
     ap: 6,
     bonusDmg: 0,
+    attr: { grit: 6, hustle: 8, savvy: 4, composure: 4 }, // fast on his feet
     actions: ['mail-cone', 'return-to-sender', 'snack-cart'],
     talent: {
       name: 'Warehouse Soles',
@@ -63,6 +69,7 @@ export const CLASSES = {
     maxHp: 17,
     ap: 7,
     bonusDmg: 0,
+    attr: { grit: 3, hustle: 6, savvy: 8, composure: 3 }, // glass cannon
     actions: ['reboot', 'firewall', 'energy-drink'],
     // (An anti-slip footwear talent is reserved for a future talent-choice
     // system - the engine already honors slipImmune. Until then, gum on your
@@ -82,6 +89,7 @@ export const CLASSES = {
     maxHp: 20,
     ap: 6,
     bonusDmg: 0,
+    attr: { grit: 5, hustle: 5, savvy: 4, composure: 8 }, // unflappable support
     // Post the Role summons applicants to fight for you; Deflect Blame and
     // Coffee Break round out a support kit that survives while the temps swing.
     actions: ['summon-applicants', 'defend', 'coffee'],

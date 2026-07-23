@@ -22,9 +22,36 @@ screen, the derivation math, and the enemy scaler are the only new *systems*.
   `bonusDmg`, `actions`, one `talent`). The code already anticipates "a future
   talent-choice system" (see the IT Support comment) — this plan is that system.
 - **Enemies don't progress at all.** `data/enemies.js` entries are static and
-  hand-placed by legend char; `new EnemyActor(x, z, type, ENEMY_TYPES[type])`
-  reads `def.hp` straight through. A floor-1 Manager and a floor-9 Manager are
-  identical.
+  hand-placed by legend char; a floor-1 Manager and a floor-9 Manager are
+  identical. (Their stats now flow through `unitCombat(def)` — see below.)
+
+## Reconciliation: the summon / faction system landed first
+
+Since this plan was drafted, the HR summon / faction work merged to `main`
+(`SUMMON_PLAN.md`, milestones 1–4). It doesn't conflict with progression, but it
+moves two things this plan must build *with*:
+
+- **`unitCombat(def)` is now the archetype seam** (`stats.js`). Any AI unit — an
+  `ENEMY_TYPES` def or a class-backed summon — reads its combat stats through it
+  (`{ name, model, maxHp: def.maxHp ?? def.hp, ap, attackAp, attacks, xp, loot }`).
+  **That is where enemy scaling belongs.** `scaleEnemy(def, level)` becomes a
+  wrapper applied at spawn whose result flows through `unitCombat`, so a scaled
+  Manager and any future scaled class-backed unit share one path — no parallel
+  scaling code.
+- **A class is becoming the shared unit archetype**, and there are now **five
+  playable classes** (Human Resources joined) plus a non-playable `applicant`.
+  So the per-class attribute spreads must cover HR too, and the attribute layer
+  is explicitly a **sheet** concept (`createSheetFrom` — player + companions).
+  **Summons and enemies are NOT sheets**: they stay `unitCombat`-driven and
+  scale on the enemy curve, never on attribute points. If the broader class
+  convergence later turns enemies into full sheets, attributes-for-enemies is a
+  follow-on, not this plan.
+
+Two clean synergies fall out: HR's *Open Door Policy* talent — whose blurb
+already reserves "a summon-scaling effect can land later" — is a natural
+**class-track node** (class points → +1 applicant / tougher applicants), and the
+level-up screen reuses the picker's `playable !== false` filter so `applicant`
+never appears in it.
 
 ## What we're building
 
@@ -182,9 +209,12 @@ scaleEnemy(def, level) →
 ```
 
 **Spawn wiring** (main.js): `effectiveLevel = max(def.level, level.depth)`, then
-`new EnemyActor(x, z, type, scaleEnemy(def, effectiveLevel))`. So a Manager on
-floor 3 is level 3 and beefier; a Senior Manager placed on floor 2 keeps its
-tier. The enemy's level surfaces in `examine` / the focus banner subtitle.
+`new EnemyActor(x, z, type, scaleEnemy(def, effectiveLevel))`. `scaleEnemy`
+returns a scaled def of the same shape, so it still flows through `unitCombat`
+untouched — the AI driver reads the scaled numbers without knowing they were
+scaled. So a Manager on floor 3 is level 3 and beefier; a Senior Manager placed
+on floor 2 keeps its tier. The enemy's level surfaces in `examine` / the focus
+banner subtitle.
 
 **Levels** get an explicit `depth` field; variant chars are placed in the legend
 like any enemy. The floor curve means we don't have to re-author every enemy per

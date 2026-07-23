@@ -18,6 +18,7 @@ export const COMPANIONS = {
     maxHp: 14,
     ap: 6,
     bonusDmg: 0,
+    attr: { grit: 3, hustle: 6, savvy: 3, composure: 3 }, // quick but green
     actions: ['reboot', 'firewall', 'energy-drink'],
     talent: null, // too new for a talent - fresh eyes, no habits
     dialogue: {
@@ -88,6 +89,7 @@ export const COMPANIONS = {
     maxHp: 18,
     ap: 6,
     bonusDmg: 0,
+    attr: { grit: 6, hustle: 8, savvy: 4, composure: 5 }, // seasoned, sure-footed
     actions: ['mail-cone', 'return-to-sender', 'snack-cart'],
     talent: {
       name: 'Warehouse Soles',

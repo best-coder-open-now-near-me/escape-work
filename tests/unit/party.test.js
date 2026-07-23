@@ -74,6 +74,10 @@ test('parseProgress migrates a legacy single-sheet save and backfills fields', (
   assert.equal(s.bleed, 0);
   assert.equal(s.gum, 0);
   assert.equal(s.name, 'Office Drone'); // name backfills from the class
+  for (const k of ['grit', 'hustle', 'savvy', 'composure']) {
+    assert.equal(typeof s.attr[k], 'number', `attr.${k} backfilled`);
+  }
+  assert.equal(s.maxHp, 22); // derivation preserves the saved max HP
 });
 
 test('parseProgress clamps a bad active index to the leader', () => {
