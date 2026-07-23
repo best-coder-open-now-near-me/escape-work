@@ -9,7 +9,11 @@ test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ pa
   await enterCombat(page);
   await expect(page.locator('#act-kick')).toBeVisible(); // talent-granted
 
-  await page.click('#act-reboot');
+  // A stray projected click during combat entry can have pre-armed (or a
+  // first click can toggle OFF) an action - ensure reboot ends up armed.
+  for (let i = 0; i < 3 && await page.evaluate(() => window.__combat.armed) !== 'reboot'; i++) {
+    await page.click('#act-reboot');
+  }
   expect(await page.evaluate(() => window.__combat.armed)).toBe('reboot');
   const ap0 = await page.evaluate(() => window.__combat.ap);
   // Click your own tile: the reboot turns YOU off and on again. The camera is

@@ -492,19 +492,26 @@ function startGame(level) {
     }
   }
 
+  // Cheapest walk-up route to any open tile beside (x, z), or null when the
+  // target can't be reached at all (sealed behind walls or a closed door).
+  function bestApproachPath(x, z) {
+    let best = null;
+    for (const [dx, dz] of DIRS8) {
+      const ax = x + dx;
+      const az = z + dz;
+      if (!isWalkable(ax, az)) continue;
+      const p = findPath(isWalkable, player.x, player.z, ax, az, hazardCost, grid.stepOpen);
+      if (p && (!best || p.length < best.length)) best = p;
+    }
+    return best;
+  }
+
   // Walk to the open tile nearest an enemy; combat starts on arrival via the
   // adjacency check in onMemberStep.
   function confront(en) {
     if (!en || !en.alive || inCombat || gameOver) return;
     pendingAction = null;
-    let best = null;
-    for (const [dx, dz] of DIRS8) {
-      const ax = en.x + dx;
-      const az = en.z + dz;
-      if (!isWalkable(ax, az)) continue;
-      const p = findPath(isWalkable, player.x, player.z, ax, az, hazardCost, grid.stepOpen);
-      if (p && (!best || p.length < best.length)) best = p;
-    }
+    const best = bestApproachPath(en.x, en.z);
     if (!best) return;
     if (best.length > 1) {
       const [gx, gz] = best[best.length - 1];
@@ -1052,6 +1059,19 @@ function startGame(level) {
   // (a thrown opener can reach further than the auto-engage does).
   function engageWithAction(en, actionId) {
     if (!sheet || inCombat || gameOver || !en?.alive) return;
+    // Pre-flight the opener before any fight begins: an armed misclick on a
+    // coworker nobody can actually reach (sealed behind walls and closed
+    // doors) or throw at would otherwise open an unwinnable stalemate -
+    // combat would start, and neither side could ever close the distance.
+    const a = ACTIONS[actionId];
+    if (a.ammoCost) {
+      if (!oocTargetOk(actionId, en)) { ui.say('No line for that throw from here.'); return; }
+    } else if (a.type === 'shove') {
+      if (cheb(player, en) > 1) { ui.say('Too far to shove. Walk your feelings over first.'); return; }
+    } else if (cheb(player, en) > 1 && !bestApproachPath(en.x, en.z)) {
+      ui.say('No way to reach them from here.');
+      return;
+    }
     const engaged = enemies.filter((e) =>
       e.alive && Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= ENGAGE_RADIUS);
     if (!engaged.includes(en)) engaged.push(en);

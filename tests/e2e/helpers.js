@@ -93,6 +93,13 @@ export async function combatOrWalkDone(page, capMs) {
   return page.evaluate(() => window.__game.inCombat);
 }
 
+// Does a CSS-pixel point actually land on the game canvas? Fixed UI overlays
+// (the hotbar and combat panel sit bottom-center) swallow clicks aimed at the
+// world behind them - a stray hit can even ARM an attack, and an armed click
+// on the next enemy means an unintended fight.
+const onCanvas = (page, p) => page.evaluate(
+  ([x, y]) => document.elementFromPoint(x, y)?.id === 'app', [p.x, p.y]);
+
 // Click live enemies round-robin until a fight starts - they wander inside a
 // small leash (so a single long walk-up can arrive a tile short), and some
 // start behind closed doors where no walk-up route exists at all. Each
@@ -104,6 +111,7 @@ export async function enterCombat(page) {
     const en = ens[i % ens.length];
     const p = await page.evaluate(([x, z]) => window.__game.project(x, z), [en.x, en.z]);
     if (!onScreen(p)) continue; // out of view even zoomed out - try the next
+    if (!(await onCanvas(page, p))) continue; // hidden behind a UI overlay - next
     await page.mouse.click(p.x, p.y);
     inCombat = await combatOrWalkDone(page, 25_000);
   }
