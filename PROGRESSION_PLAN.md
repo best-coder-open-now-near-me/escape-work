@@ -75,10 +75,10 @@ never appears in it.
   campaign save (v3), with v1/v2 saves migrating cleanly.
 
 Companions progress too — they level in lockstep (shared XP), and **you build
-them like the leader**: their points bank and you spend them on the level-up
-screen, paging through the roster. Auto-allocation is kept only to fill the
-levels a recruit earned *before* joining, so a fresh companion arrives built
-rather than sitting on a pile of unspent points.
+them exactly like the leader**: their points bank and you spend them on the
+level-up screen. Nothing auto-allocates. A recruit simply joins at your level
+with those levels' points already banked and a level-up pip on its portrait —
+you build it from scratch, which is the point, not a chore to skip.
 
 ## Design decisions (recommended, with alternatives considered)
 
@@ -90,7 +90,7 @@ rather than sitting on a pile of unspent points.
 | 4 | Attributes are the source, numbers are derived | Store the four attributes (+ a small per-class residual base); compute `maxHp`, `maxAp`, `damageBonus`, deflect from them via `recomputeDerived(sheet)` | Keeps `combat.js`/`ui.js` readers of `sheet.maxHp`/`sheet.maxAp` working unchanged — only *writers* of attributes call recompute. A pure-getter model was cleaner in theory but would touch every reader and complicate the save. `hp` still mutates in combat and clamps to the recomputed `maxHp`. |
 | 5 | Regression-preserving calibration | Milestone 1 picks per-class base attributes **and** a residual `base:{hp,ap}` so every class's level-1 derived `maxHp`/`maxAp` **exactly equals today's constants** | The residual guarantees any target value is reachable (`maxHp = base.hp + grit·HP_PER_GRIT`), so the boring foundational refactor changes zero observable numbers — the same invariant that kept `PARTY_PLAN.md` milestone 1 green. |
 | 6 | Point cadence | **2 attribute points / level**; **1 class point every 2 levels** (levels 2, 4, 6…). All cadence numbers live in one tunable `PROGRESSION` block | Starting proposal, balance-owned. Round numbers, easy to reason about, easy to pin in the god panel. |
-| 7 | Companion allocation | **You build the whole party** — companions bank points and you spend them via the level-up screen (page through members), same as the leader. Auto-allocation is kept ONLY to fill the levels a companion earned *before* recruitment (`createCompanionSheet`), so recruits arrive built | Points **bank** rather than forcing a modal, so "everyone dinged at once" is a pip per member you open when you like — not three screens per kill, which was the only argument for auto-allocating. Full party-build agency matches the control-switching design (you already drive every member's actions and AP). *Revised from the initial draft (auto-allocate companions) after review.* |
+| 7 | Companion allocation | **You build the whole party, and nothing auto-allocates.** Every member — leader and companion — banks points and you spend them on the level-up screen. A recruit joins at your level with those levels' points already banked; its **party-bar portrait shows the level-up pip** so you build it from scratch, same as any level-up | One rule, zero special cases. Points **bank** rather than forcing a modal, so a member with unspent points is just a pip you clear when you like — never three screens per kill (the only argument auto-allocation ever had). A fresh recruit being briefly unbuilt is a feature: you decide how it's specced. Drops the `autoAllocate` catch-up entirely — no allocation code at all. *Revised twice: auto-allocate-all → catch-up-only → none.* |
 | 8 | When you spend | Points **bank** on the sheet the instant you level; the allocation screen is deferred to a safe moment (combat end, floor transition) and openable any time points are pending | Opening a modal mid-swing breaks tactical flow. Banking + a HUD "Level Up!" pip matches BG3's rest-to-level rhythm and sidesteps a combat/modal interleave bug surface. Level-ups still **full-heal on the spot** — that moment stays. |
 | 9 | No respec (v1) | Allocation is one-way; no rebuild screen yet | Ships the core loop faster. A "Visit HR to refile your paperwork" respec is an obvious, on-theme later add; noted in open questions. |
 | 10 | Enemy level source | `effectiveLevel = max(entry.level, floorDepth)`; `scaleEnemy(def, effectiveLevel)` derives hp/attacks/ap/xp at spawn | `max` means a low variant placed deep still scales up, while a high-tier variant on a shallow floor keeps its tier — no double-inflation. Variants exist mainly for **fiction, new attacks, and loot**; the curve owns the **numbers**. |
@@ -243,11 +243,10 @@ floor — placing the base `M` on a deep floor already scales.
 **`src/progression.js`** (new, or a section of stats.js) — `scaleEnemy(def,
 level)` and the enemy curve constants. Pure and lint/unit friendly.
 
-**`src/party.js`** — `createCompanionSheet` already levels via `gainXp`; now it
-**auto-allocates ONLY the pre-recruitment catch-up points**
-(`autoAllocate(sheet, weights)`) so a recruit arrives built. Points earned
-*after* joining bank normally and are spent by the player on the level-up
-screen, same as the leader. Save bumps to **v3** (below);
+**`src/party.js`** — `createCompanionSheet` already levels via `gainXp`, which
+(from M2) banks attribute/class points per level. A recruit therefore arrives
+with its pre-join points already banked, ready for the player to spend — **no
+allocation code at all** (`autoAllocate` is dropped). Save bumps to **v3** (below);
 `normalizeSheet` backfills `attr`/points/`perks`/`actionMods` for v1/v2 sheets
 (default attributes from class base, then `recomputeDerived`).
 
@@ -268,7 +267,12 @@ apply `sheet.actionMods` when resolving an action's `min/max/ap/uses`, and fold
 
 **`src/ui.js`**
 - `updateStatsHud` gains the four attributes (compact) and a "Level Up!" pip when
-  points are pending.
+  the leader has points pending.
+- **Party-bar pip** (`createPartyBar`, `#party-slot-<i>`): each portrait shows a
+  small level-up badge while THAT member has unspent points — the per-member
+  signal that drives "build the whole party" (decision #7), and how a fresh
+  recruit advertises its banked pre-join points. Clicking a pipped portrait
+  opens `showLevelUpScreen` for that member.
 - **`showLevelUpScreen(sheet, { onDone })`** — the allocation UI: four attribute
   steppers spending `attrPoints`, and the available `track` nodes spending
   `classPoints`, with prereqs greyed. Reuses class-picker/dialogue chrome. Stable
@@ -309,8 +313,10 @@ trusted from disk). Migration in `party.js`:
    instead of auto damage; Savvy now drives damage, Grit HP, Hustle AP,
    Composure deflect. `showLevelUpScreen` (attribute half), banking + HUD pip,
    deferred open at combat end / floor transition. The screen pages through the
-   whole party (leader + companions); a recruit's pre-join levels auto-fill so
-   it arrives built. Savvy→damage, Composure→deflect fold into combat.
+   whole party (leader + companions), and each member's party-bar portrait shows
+   a level-up pip while it has unspent points — a fresh recruit included (it
+   banks its pre-join points and is built by hand, nothing auto-fills).
+   Savvy→damage, Composure→deflect fold into combat.
 3. **Class points + the ability track.** `track` data on all four classes;
    `actionMods`/`upgradeAction` in combat; `grantsAction`/`talent`/`attrBonus`
    nodes; the class-point half of the level-up screen; perks persisted and
@@ -333,8 +339,9 @@ trusted from disk). Migration in `party.js`:
     includes Savvy; deflect/status-resist helpers.
   - `progression.test.js` — `scaleEnemy` monotonicity (hp/xp grow with level),
     `effectiveLevel = max(level, depth)`, base-tier identity at native level.
-  - `party.test.js` — save **v1→v3** and **v2→v3** migration; companion
-    `autoAllocate` spends all banked points.
+  - `party.test.js` — save **v1→v3** and **v2→v3** migration; a recruit made via
+    `createCompanionSheet` at the leader's level arrives with the expected points
+    banked (nothing auto-spent).
   - `levels.test.js` — lint gains: `depth` present and integer; any legend char
     resolving into a variant enemy is a valid `ENEMY_TYPES` id.
 - **e2e** (`tests/e2e/`):
