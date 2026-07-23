@@ -74,21 +74,23 @@ never appears in it.
 - **Persistence**: attributes, unspent points, and chosen track nodes ride the
   campaign save (v3), with v1/v2 saves migrating cleanly.
 
-Companions progress too — they level in lockstep (shared XP) and grow, but to
-avoid babysitting three build screens they **auto-allocate** on a per-companion
-weighting by default; manual party-wide allocation is a later milestone.
+Companions progress too — they level in lockstep (shared XP), and **you build
+them like the leader**: their points bank and you spend them on the level-up
+screen, paging through the roster. Auto-allocation is kept only to fill the
+levels a recruit earned *before* joining, so a fresh companion arrives built
+rather than sitting on a pile of unspent points.
 
 ## Design decisions (recommended, with alternatives considered)
 
 | # | Decision | Choice | Why / alternatives |
 |---|----------|--------|--------------------|
 | 1 | Attribute set | **Office-themed 4-stat**: Grit, Hustle, Savvy, Composure | Fits the satire and stays small enough to balance across 4 classes + companions + enemies and to fit the god panel. A classic STR/DEX/CON/INT/WIS/CHA spread was considered — familiar and deeper, but off-theme and 6 axes to tune. A derived-only, no-raw-attribute model was rejected: it wouldn't deliver a real "attribute point system." |
-| 2 | Level-up agency | **Player allocates both** attribute points and class points | Full CRPG build agency, which is the point of the request. Auto-attributes-choose-talents and fully-automatic were the leaner alternatives; both were passed over for the leader, but auto-allocation is reused for *companions* (see #7) to cap the UI burden. |
+| 2 | Level-up agency | **Player allocates both** attribute points and class points | Full CRPG build agency, which is the point of the request. Auto-attributes-choose-talents and fully-automatic were the leaner alternatives; both were passed over. The screen pages through the whole party (see #7), so agency extends to companions too. |
 | 3 | Enemy progression | **Tiered variants + floor curve** | Named seniority variants are pure `data/enemies.js` content (content-is-data); the floor curve keeps even the base three relevant at depth. Floor-scaling-only was simpler but every floor fights the same three faces; elite modifiers are attractive and **kept as a stretch item** (#12), orthogonal to depth. |
 | 4 | Attributes are the source, numbers are derived | Store the four attributes (+ a small per-class residual base); compute `maxHp`, `maxAp`, `damageBonus`, deflect from them via `recomputeDerived(sheet)` | Keeps `combat.js`/`ui.js` readers of `sheet.maxHp`/`sheet.maxAp` working unchanged — only *writers* of attributes call recompute. A pure-getter model was cleaner in theory but would touch every reader and complicate the save. `hp` still mutates in combat and clamps to the recomputed `maxHp`. |
 | 5 | Regression-preserving calibration | Milestone 1 picks per-class base attributes **and** a residual `base:{hp,ap}` so every class's level-1 derived `maxHp`/`maxAp` **exactly equals today's constants** | The residual guarantees any target value is reachable (`maxHp = base.hp + grit·HP_PER_GRIT`), so the boring foundational refactor changes zero observable numbers — the same invariant that kept `PARTY_PLAN.md` milestone 1 green. |
 | 6 | Point cadence | **2 attribute points / level**; **1 class point every 2 levels** (levels 2, 4, 6…). All cadence numbers live in one tunable `PROGRESSION` block | Starting proposal, balance-owned. Round numbers, easy to reason about, easy to pin in the god panel. |
-| 7 | Companion allocation | Companions **auto-allocate** via a per-companion `attrWeights` and a fixed track preference; the leader allocates manually | Everyone levels together (shared XP), so three manual screens per kill would be misery. Per-member *manual* allocation (page through the roster, BG3-style) lands in the polish milestone for players who want it. |
+| 7 | Companion allocation | **You build the whole party** — companions bank points and you spend them via the level-up screen (page through members), same as the leader. Auto-allocation is kept ONLY to fill the levels a companion earned *before* recruitment (`createCompanionSheet`), so recruits arrive built | Points **bank** rather than forcing a modal, so "everyone dinged at once" is a pip per member you open when you like — not three screens per kill, which was the only argument for auto-allocating. Full party-build agency matches the control-switching design (you already drive every member's actions and AP). *Revised from the initial draft (auto-allocate companions) after review.* |
 | 8 | When you spend | Points **bank** on the sheet the instant you level; the allocation screen is deferred to a safe moment (combat end, floor transition) and openable any time points are pending | Opening a modal mid-swing breaks tactical flow. Banking + a HUD "Level Up!" pip matches BG3's rest-to-level rhythm and sidesteps a combat/modal interleave bug surface. Level-ups still **full-heal on the spot** — that moment stays. |
 | 9 | No respec (v1) | Allocation is one-way; no rebuild screen yet | Ships the core loop faster. A "Visit HR to refile your paperwork" respec is an obvious, on-theme later add; noted in open questions. |
 | 10 | Enemy level source | `effectiveLevel = max(entry.level, floorDepth)`; `scaleEnemy(def, effectiveLevel)` derives hp/attacks/ap/xp at spawn | `max` means a low variant placed deep still scales up, while a high-tier variant on a shallow floor keeps its tier — no double-inflation. Variants exist mainly for **fiction, new attacks, and loot**; the curve owns the **numbers**. |
@@ -242,8 +244,10 @@ floor — placing the base `M` on a deep floor already scales.
 level)` and the enemy curve constants. Pure and lint/unit friendly.
 
 **`src/party.js`** — `createCompanionSheet` already levels via `gainXp`; now it
-also **auto-allocates** the banked points (`autoAllocate(sheet, weights)`) so
-recruits never sit on unspent points. Save bumps to **v3** (below);
+**auto-allocates ONLY the pre-recruitment catch-up points**
+(`autoAllocate(sheet, weights)`) so a recruit arrives built. Points earned
+*after* joining bank normally and are spent by the player on the level-up
+screen, same as the leader. Save bumps to **v3** (below);
 `normalizeSheet` backfills `attr`/points/`perks`/`actionMods` for v1/v2 sheets
 (default attributes from class base, then `recomputeDerived`).
 
@@ -304,7 +308,9 @@ trusted from disk). Migration in `party.js`:
 2. **Attribute points + the level-up screen.** `gainXp` grants `ATTR_PER_LEVEL`
    instead of auto damage; Savvy now drives damage, Grit HP, Hustle AP,
    Composure deflect. `showLevelUpScreen` (attribute half), banking + HUD pip,
-   deferred open at combat end / floor transition. Companions auto-allocate.
+   deferred open at combat end / floor transition. The screen pages through the
+   whole party (leader + companions); a recruit's pre-join levels auto-fill so
+   it arrives built. Savvy→damage, Composure→deflect fold into combat.
 3. **Class points + the ability track.** `track` data on all four classes;
    `actionMods`/`upgradeAction` in combat; `grantsAction`/`talent`/`attrBonus`
    nodes; the class-point half of the level-up screen; perks persisted and
@@ -313,8 +319,7 @@ trusted from disk). Migration in `party.js`:
    `depth` field on levels, seniority variant entries (Senior Manager, Regional
    Executive), scaled XP, level in examine/banner. Place variants on floor 2 and
    rebalance floors 1–2 for the now-stronger party.
-5. **Polish + party-wide builds.** Per-member manual allocation (page the roster
-   in the level-up screen), the character-sheet inspect panel (**C**), god-panel
+5. **Polish.** The character-sheet inspect panel (**C**), god-panel
    progression editing, an on-theme respec if it earns its keep, and a content
    pass (a deeper floor to show the curve off). Elite modifiers (#12) can ride
    here or wait.
