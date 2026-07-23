@@ -176,10 +176,52 @@ export function toast(text, ms = 2600) {
 
 export function updateStatsHud(sheet) {
   const el = document.getElementById('stats');
-  if (!el) return;
-  let text = `Lv ${sheet.level} · HP ${sheet.hp}/${sheet.maxHp} · XP ${sheet.xp}/${sheet.xpNext}`;
-  if (sheet.gum > 0) text += ' · gum on shoe';
-  el.textContent = text;
+  if (el) el.textContent = `Lv ${sheet.level} · HP ${sheet.hp}/${sheet.maxHp} · XP ${sheet.xp}/${sheet.xpNext}`;
+  renderStatusEffects(sheet);
+}
+
+// --- player status effects ----------------------------------------------------
+// Transient effects stacked just above the bottom-left stats - gum, bleeding,
+// and any temporary buffs. NOT the class talent, which is a permanent trait,
+// not a status. Buffs read green, debuffs amber - the same good/bad language as
+// the enemy aggression dots. Rebuilt on every stats refresh (each effect change
+// already pokes updateStatsHud), so it appears/clears in step with the effect.
+let statusEl = null;
+function ensureStatusList() {
+  if (statusEl) return statusEl;
+  statusEl = document.createElement('div');
+  statusEl.id = 'status-effects';
+  Object.assign(statusEl.style, {
+    position: 'fixed', left: '12px', bottom: '48px', zIndex: '6',
+    display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start',
+    pointerEvents: 'none', font: '12px system-ui, sans-serif',
+  });
+  document.body.appendChild(statusEl);
+  return statusEl;
+}
+
+function effectChips(sheet) {
+  const chips = [];
+  if (sheet.gum > 0) chips.push({ icon: '🍬', label: 'Gum on shoe', good: false });
+  if (sheet.bleed > 0) chips.push({ icon: '🩸', label: 'Bleeding', good: false });
+  return chips;
+}
+
+function renderStatusEffects(sheet) {
+  const el = ensureStatusList();
+  el.innerHTML = '';
+  if (!sheet) return;
+  for (const c of effectChips(sheet)) {
+    const chip = document.createElement('div');
+    chip.className = 'status-chip';
+    chip.textContent = `${c.icon} ${c.label}`;
+    const accent = c.good ? '#6fc86f' : '#e0b23a';
+    Object.assign(chip.style, {
+      padding: '3px 9px', borderRadius: '6px', whiteSpace: 'nowrap', letterSpacing: '.3px',
+      background: 'rgba(20,20,32,.72)', border: `1px solid ${accent}`, color: '#eef',
+    });
+    el.appendChild(chip);
+  }
 }
 
 // A soft radial vignette over the whole viewport - pure atmosphere, makes the
