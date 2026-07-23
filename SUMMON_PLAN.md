@@ -225,16 +225,21 @@ applicants.)
 
 ## Milestones (each one a PR that keeps `npm test` + e2e green)
 
-1. **Faction layer + the archetype seam + enemy HR summon.** The `playable`
-   flag + AI-combat fields on the class shape; the `applicant` non-playable
-   class; the `unitCombat` accessor; `team`/`summonedBy`/`summoned` on actors;
-   the `pickTarget → nearestHostile` and `enemy* → ai*` refactor (proven
-   behavior-identical by the existing enemy e2e); `world.spawnSummon`;
-   `resolveSummon`; the HR `summon` descriptor and the enemy-AI trigger. After
-   this PR, fighting HR means fighting the temps it posts — capped, cooling
-   down, worth no XP. **No new phase, no player-facing action yet** — the
-   smallest slice that delivers a real feature and forces the faction refactor
-   to be honest.
+1. **Faction layer + the archetype seam + enemy HR summon.** ✅ Landed. The
+   `playable` flag + AI-combat fields on the class shape; the `applicant`
+   non-playable class + picker filter; the `unitCombat` accessor;
+   `team`/`summonedBy`/`summoned` on actors; `world.spawnSummon` + a
+   `freeTilesNear` placement helper; `resolveSummon` (team-parameterized); the
+   HR `summon` descriptor and the enemy-AI trigger (off cooldown, under a live
+   cap, affordable → posts the req, else fights). Fighting HR now means
+   fighting the temps it posts — capped at 2, cooling down 2 rounds, worth no
+   XP or loot. Covered by `tests/unit/summons.test.js` + a `summons.spec.js`
+   e2e. **Deviation:** the `pickTarget → nearestHostile` / `enemy* → ai*`
+   rename is deferred to milestone 2 — it's a behavioral no-op until
+   player-team summons exist as enemy targets, so doing it here would be churn
+   on the enemy turn for no gain. The faction substrate (team tags,
+   team-parameterized summon path) is all in place. **No new phase, no
+   player-facing action yet.**
 2. **Player-team ally phase.** The `player → allies → enemies` phase machine;
    the `summons` (player) list + per-frame stepping; enemy `nearestHostile`
    ranging over party + player summons; player summons blocking enemy pathing;

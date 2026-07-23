@@ -223,6 +223,28 @@ function startGame(level) {
   const clearOfHazards = (x, z) => isWalkable(x, z) && !isHazard(x, z);
   const enemyClearOfHazards = (x, z) => isWalkable(x, z) && !enemyIsHazard(x, z);
 
+  // The nearest open tiles around (cx,cz) for dropping summoned units onto:
+  // walkable (no walls, bodies, or NPCs - isWalkable already excludes living
+  // enemies), off any party member, and clear of the hazards a fresh arrival
+  // shouldn't materialize into. Rings outward so reinforcements appear beside
+  // their summoner, not across the room; returns up to `n` [x,z] pairs (fewer
+  // when the summoner is boxed in). Used by world.spawnSummon.
+  function freeTilesNear(cx, cz, n) {
+    const out = [];
+    for (let r = 1; r <= 4 && out.length < n; r++) {
+      for (let dz = -r; dz <= r && out.length < n; dz++) {
+        for (let dx = -r; dx <= r && out.length < n; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue; // this ring shell only
+          const x = cx + dx;
+          const z = cz + dz;
+          if (!isWalkable(x, z) || partyAt(x, z) || enemyIsHazard(x, z)) continue;
+          out.push([x, z]);
+        }
+      }
+    }
+    return out;
+  }
+
   // --- populate the scene -----------------------------------------------------
   const lift = floorHeight / 2;
   for (const en of enemies) {
@@ -367,6 +389,7 @@ function startGame(level) {
   // promotions announce themselves.
   function awardKill(dead) {
     if (!party) return;
+    if (dead.summoned) return; // summoned minions pay no XP (SUMMON_PLAN #6)
     for (const m of gainXpAll(party, dead.def.xp)) {
       ui.say(`Promotion! Level ${m.sheet.level}: fully rested, +1 damage.`);
     }
@@ -637,7 +660,7 @@ function startGame(level) {
       if (kind === 'enemy') {
         if (ref.alive) {
           const ag = aggroColor(ref);
-          return { name: ref.def.name, sub: `HP ${ref.hp}/${ref.def.hp}`, color: ag, dotColor: ag };
+          return { name: ref.def.name, sub: `HP ${ref.hp}/${ref.maxHp}`, color: ag, dotColor: ag };
         }
         return { name: ref.def.name, sub: ref.loot?.length ? 'Body · lootable' : 'Body · picked clean', color: rgbCss(HL.loot) };
       }
@@ -1040,6 +1063,30 @@ function startGame(level) {
         // Anyone alive is a legal target - bystanders outside the initial
         // engagement get pulled in when attacked.
         liveEnemies: () => enemies.filter((e) => e.alive),
+        // Summon reinforcements: drop up to `n` archetype units (a class id -
+        // e.g. 'applicant' - or an ENEMY_TYPES id) on the nearest free tiles
+        // around `summoner`, wire their models, and file them into the roster
+        // for `team`. Enemy-team summons join `enemies`, so every existing
+        // enemy system (rendering, pruning, liveEnemies, looting) applies for
+        // free; player-team summons get their own list with the ally phase
+        // (M2). Returns the tagged actors; combat.js resolveSummon slots them
+        // into the fight.
+        spawnSummon: (archetypeId, team, summoner, n) => {
+          const def = CLASSES[archetypeId] || ENEMY_TYPES[archetypeId];
+          if (!def) return [];
+          const out = [];
+          for (const [x, z] of freeTilesNear(summoner.x, summoner.z, n)) {
+            const a = new EnemyActor(x, z, archetypeId, def,
+              { team, summoned: true, summonedBy: summoner });
+            enemies.push(a);
+            placeModel(app, `assets/characters/${def.model}.glb`, x, z, {
+              lift, rotY: -90, animate: true,
+              onReady: (e) => { applyCharacterProportions(e); a.attach(e); picking.register(e, 'enemy', a); },
+            });
+            out.push(a);
+          }
+          return out;
+        },
       },
       fx: vfx,
       callbacks: {

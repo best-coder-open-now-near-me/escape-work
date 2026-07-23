@@ -1,6 +1,14 @@
 // Player class registry. A class is starting stats, a character model
 // (assets/characters/<model>.glb), and the combat actions it brings (ids into
 // data/actions.js). Weapons/perks later modify or extend the same action list.
+//
+// A class is becoming the shared unit archetype - not just what you pick, but
+// what companions and (increasingly) enemies are (see SUMMON_PLAN.md). Two
+// optional fields carry that:
+//   playable: false  - kept out of the class picker (ui.showClassPicker)
+//   AI-combat fields (attacks, attackAp, xp, loot) - read via stats.js
+//     unitCombat when a class backs an AI-DRIVEN unit (a summon, later an
+//     enemy) instead of a player. Player classes omit them and are unchanged.
 export const CLASSES = {
   'office-drone': {
     name: 'Office Drone',
@@ -64,5 +72,33 @@ export const CLASSES = {
       blurb: 'Electrostatic-discharge rated, steel toe box. Live water can\'t shock you, and the toe adds a Steel-Toe Kick to your repertoire.',
       effects: { shockImmune: true, grantsAction: 'kick' },
     },
+  },
+
+  // --- summoned, never chosen -------------------------------------------------
+  // The applicant is a class with no résumé worth reading: spawned by an HR
+  // summon (data/enemies.js hr.summon, and later the HR class's Post the Role),
+  // it fights on whichever side called it. `playable: false` keeps it out of
+  // the picker; the AI-combat fields below are what let a class stand in for an
+  // AI-driven unit (stats.js unitCombat, combat.js). Deliberately flimsy - a
+  // swarm you clear, not a wall you grind - and worth no XP or loot, so an HR
+  // that summons on a cooldown is a spawner, not a farm (SUMMON_PLAN #6).
+  applicant: {
+    name: 'Applicant',
+    model: 'worker', // reuse the office-worker rig; a temp .glb can land later
+    playable: false,
+    maxHp: 5,
+    ap: 4,
+    bonusDmg: 0,
+    actions: [], // AI-driven: it swings from `attacks`, never an action bar
+    talent: null,
+    // AI-combat fields (read only for AI-driven class units):
+    attackAp: 3,
+    xp: 0,
+    loot: [],
+    attacks: [
+      { min: 1, max: 2, log: 'An applicant waves a résumé in your face.' },
+      { min: 1, max: 3, log: 'An applicant asks if this "counts as an interview".' },
+      { min: 1, max: 2, log: 'An applicant follows up. And follows up again.' },
+    ],
   },
 };

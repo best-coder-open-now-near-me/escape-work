@@ -639,7 +639,9 @@ export function showLoseScreen(message) {
 // ACTIVE slide's hire button is #pick-<classId>, so muscle memory and tests
 // address classes directly.
 export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
-  const ids = Object.keys(classes);
+  // Only playable careers reach the desk - archetypes like the summoned
+  // applicant (playable: false) are units, not résumés (SUMMON_PLAN.md).
+  const ids = Object.keys(classes).filter((id) => classes[id].playable !== false);
   let index = 0;
 
   const root = document.createElement('div');

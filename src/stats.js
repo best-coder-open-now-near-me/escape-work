@@ -42,6 +42,25 @@ export function createSheet(classId) {
   return createSheetFrom(cls, { classId });
 }
 
+// Normalize any unit archetype - an ENEMY_TYPES def or a class - into the
+// combat stats the AI reads. The only field that differs by registry is max
+// HP (enemies spell it `hp`, classes `maxHp`); everything else already lines
+// up. This is the seam the class-as-shared-archetype direction widens: an
+// AI-driven unit reads its stats through here whether it came from the enemy
+// registry or the class registry (see SUMMON_PLAN.md).
+export function unitCombat(def) {
+  return {
+    name: def.name,
+    model: def.model,
+    maxHp: def.maxHp ?? def.hp,
+    ap: def.ap,
+    attackAp: def.attackAp,
+    attacks: def.attacks || [],
+    xp: def.xp ?? 0,
+    loot: def.loot || [],
+  };
+}
+
 // Total damage bonus: levels/class plus the best carried item (you can only
 // wield one stapler at a time, however many you hoard).
 export function damageBonus(sheet) {

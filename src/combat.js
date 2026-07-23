@@ -393,7 +393,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         return `<div>${label} &middot; ${state}</div>`;
       }).join('') +
       engaged.filter((e) => e.alive).map((e) =>
-        `<div style="opacity:.9">${e.def.name} &middot; ${e.hp}/${e.def.hp}</div>`).join('');
+        `<div style="opacity:.9">${e.def.name} &middot; ${e.hp}/${e.maxHp}</div>`).join('');
     callbacks.updateHud();
   }
 
@@ -681,6 +681,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     pendingMelee = null;
     armed = null;
     hidePreview();
+    // One enemy phase is one round: age every summoner's cooldown a tick, so a
+    // capped/cooling HR fights instead of re-posting the same req every turn.
+    for (const e of engaged) if (e.summonCd > 0) e.summonCd -= 1;
     enemyQueue = engaged.filter((e) => e.alive);
     acting = null;
     log('Their turn...');
@@ -697,6 +700,28 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     callbacks.onRound?.(); // a full round elapsed - age fire/smoke one turn
     log('Your turn.');
     refresh();
+  }
+
+  // --- summons ----------------------------------------------------------------
+  // Live minions a summoner still has on the board - the cap counts these.
+  // Enemy-team summons live in the shared enemy list (world.liveEnemies);
+  // player-team summons arrive with the ally phase (M2).
+  function liveSummonsOf(summoner) {
+    return world.liveEnemies().filter((e) => e.summonedBy === summoner).length;
+  }
+  // Post the req: spawn up to the descriptor's `count` for `team` beside the
+  // summoner, never past its live `cap`. Enemy-team arrivals join `engaged` so
+  // they count toward victory and queue next round - they don't act the turn
+  // they're summoned. Returns how many actually showed up.
+  function resolveSummon(summoner, team, d) {
+    const room = (d.cap ?? d.count) - liveSummonsOf(summoner);
+    const n = Math.min(d.count, Math.max(0, room));
+    if (n <= 0) return 0;
+    const spawned = world.spawnSummon(d.archetype, team, summoner, n) || [];
+    for (const a of spawned) {
+      if (team === 'enemy' && !engaged.includes(a)) engaged.push(a);
+    }
+    return spawned.length;
   }
 
   function enemyAttack(en, target) {
@@ -847,6 +872,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     const target = pickTarget(en);
     if (!target) { defeat(); return; }
+    // A summoner reinforces before it wades in: off cooldown, able to afford
+    // the post, and under its live cap (resolveSummon returns 0 when full, so a
+    // maxed HR just fights). Posting the req is the whole beat.
+    const sm = en.def.summon;
+    if (sm && (en.summonCd || 0) <= 0 && acting.ap >= sm.ap
+      && resolveSummon(en, 'enemy', sm) > 0) {
+      en.summonCd = sm.cooldownRounds || 0;
+      acting.ap = roundAp(acting.ap - sm.ap);
+      en.lunge(target.actor.x, target.actor.z);
+      log(sm.log || `${en.def.name} calls in reinforcements.`);
+      acting.wait = 0.6;
+      refresh();
+      return;
+    }
     if (cheb(en.x, en.z, target.actor.x, target.actor.z) <= 1 && acting.ap >= en.def.attackAp) {
       enemyAttack(en, target);
       acting.ap -= en.def.attackAp;
