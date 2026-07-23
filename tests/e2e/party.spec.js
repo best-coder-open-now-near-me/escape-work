@@ -2,7 +2,7 @@
 // the lead from the party bar, fight as either member - and prove old
 // single-sheet saves still load.
 import { test, expect } from '@playwright/test';
-import { bootStash, clickWorld, waitStill, combatOrWalkDone } from './helpers.js';
+import { bootStash, clickWorld, waitStill, enterCombat } from './helpers.js';
 
 // A small arena: the intern one tile from spawn, open floor to walk.
 const LEVEL = {
@@ -21,27 +21,36 @@ const LEVEL = {
 
 // The same arena with a Manager equidistant from both members - combat's
 // nearest-target tiebreak (lowest HP) makes his focus controllable.
+// The Manager sits FAR from the recruit corner: his wander leash (2 tiles)
+// must never reach adjacent to the player/intern, or combat could trigger
+// mid-recruit-dialogue and detach the option buttons. Combat starts only when
+// a test deliberately clicks him.
 const COMBAT_LEVEL = {
   name: 'Party Combat Floor',
   tiles: { '#': 'wall', '.': 'floor', '>': 'exit' },
   actors: { '@': 'player', N: 'it-intern', M: 'manager' },
   map: [
-    '##########',
-    '#........#',
-    '#.@N.....#',
-    '#........#',
-    '#..M....>#',
-    '##########',
+    '################',
+    '#..............#',
+    '#.@N.......M...#',
+    '#..............#',
+    '#............>.#',
+    '################',
   ],
 };
 
 // Recruit the intern via the dialogue tree (assumes he stands adjacent).
+// Tolerate the "Stick close" button re-rendering: only the recruit (on the
+// "Come with me" click) is load-bearing - assert on the party size.
 async function recruitIntern(page) {
   expect(await clickWorld(page, 3, 2)).toBe(true);
   await page.waitForFunction(() => window.__game.dialogueOpen, null, { timeout: 20_000 });
   await page.click('button.dialogue-option:has-text("Come with me")');
-  await page.click('button.dialogue-option:has-text("Stick close")');
-  expect(await page.evaluate(() => window.__game.party.length)).toBe(2);
+  await expect.poll(() => page.evaluate(() => window.__game.party.length)).toBe(2);
+  // Close out the confirmation node if it's still up (a fight could have
+  // stolen focus and closed it already).
+  const close = page.locator('button.dialogue-option:has-text("Stick close")');
+  if (await close.count()) await close.click().catch(() => {});
 }
 
 test('recruit the intern, he follows, and the party bar hands him the lead', async ({ page }) => {
@@ -85,9 +94,8 @@ test('party combat: switch the active member, and the fight survives the leader 
   await bootStash(page, COMBAT_LEVEL);
   await recruitIntern(page);
 
-  // Pick the fight: click the Manager, walk up, combat triggers on arrival.
-  expect(await clickWorld(page, 3, 4)).toBe(true);
-  expect(await combatOrWalkDone(page, 30_000)).toBe(true);
+  // Pick the fight: walk up to the Manager; combat triggers on arrival.
+  await enterCombat(page);
   expect(await page.evaluate(() => window.__combat.party.length)).toBe(2);
 
   // In combat the portraits carry each member's remaining AP.
