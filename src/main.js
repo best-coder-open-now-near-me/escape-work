@@ -104,6 +104,11 @@ function startGame(level) {
   let sheet = null;
   let player = new PlayerActor(grid.playerSpawn.x, grid.playerSpawn.z);
   const enemies = grid.enemySpawns.map((s) => new EnemyActor(s.x, s.z, s.type, ENEMY_TYPES[s.type]));
+  // Player-team summons (SUMMON_PLAN.md): temporary AI allies conjured mid-fight
+  // by a summon power. Not party members, not saved - they live only for the
+  // combat and are despawned when it ends. They block enemies (like the party)
+  // but are pass-through for the party.
+  const summons = [];
   // Non-hostile coworkers you talk to (data/npcs.js) - separate from `enemies`
   // so combat never engages them and they take no turns.
   const npcs = grid.npcSpawns.map((s) => new NpcActor(s.x, s.z, s.type, NPCS[s.type]));
@@ -151,7 +156,16 @@ function startGame(level) {
       combat = null;
     }
     inCombat = false;
+    despawnSummons();
     syncLeaderBindings();
+  }
+
+  // Summons are a combat effect, not a roster: when the fight ends (win, loss,
+  // or abort) they vanish. Destroying the entity auto-unregisters it from
+  // picking (see ARCHITECTURE.md).
+  function despawnSummons() {
+    for (const s of summons) s.entity?.destroy();
+    summons.length = 0;
   }
 
   const enemyAt = (x, z) => enemies.find((e) => e.alive && e.x === x && e.z === z) || null;
@@ -162,6 +176,10 @@ function startGame(level) {
   const partyAt = (x, z) => (party
     ? party.members.some((m) => m.actor && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z)
     : (x === player.x && z === player.z));
+  // A living player-team summon on this tile. Summons block enemies (folded
+  // into enemy pathing/occupancy below) but stay pass-through for the party -
+  // isWalkable deliberately ignores them, so members walk right through.
+  const summonAt = (x, z) => summons.some((s) => s.alive && s.x === x && s.z === z);
   // NPCs stand on their tile and block movement like any body.
   const isWalkable = (x, z) => grid.terrainOpen(x, z) && !enemyAt(x, z) && !npcAt(x, z);
   // Surface queries, consulting the runtime (fire) before static state.
@@ -237,7 +255,7 @@ function startGame(level) {
           if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue; // this ring shell only
           const x = cx + dx;
           const z = cz + dz;
-          if (!isWalkable(x, z) || partyAt(x, z) || enemyIsHazard(x, z)) continue;
+          if (!isWalkable(x, z) || partyAt(x, z) || summonAt(x, z) || enemyIsHazard(x, z)) continue;
           out.push([x, z]);
         }
       }
@@ -803,6 +821,11 @@ function startGame(level) {
       const p = en.entity.getPosition();
       drawRing(p.x, p.z, 0.5, RING_HOSTILE);
     }
+    for (const s of summons) {
+      if (!s.alive || !s.entity) continue;
+      const p = s.entity.getPosition();
+      drawRing(p.x, p.z, 0.42, RING_PARTY); // your summons ring as friendly
+    }
     for (const npc of npcs) {
       if (!npc.entity) continue;
       const p = npc.entity.getPosition();
@@ -1023,10 +1046,12 @@ function startGame(level) {
             m.actor && m.actor !== self && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z);
           return findPath(open, sx, sz, tx, tz, hazardCostFor(ms), grid.stepOpen);
         },
-        // Enemy routing: never through a party member's tile, and costed by
-        // the enemy hazard model - your talents don't shape THEIR fears.
+        // AI routing (enemies and player-team summons): never through a party
+        // member's or another summon's tile, costed by the enemy hazard model -
+        // your talents don't shape an AI unit's fears. The mover's own start
+        // tile isn't re-checked by findPath, so a unit never blocks on itself.
         findEnemyPath: (sx, sz, tx, tz) => findPath(
-          (x, z) => isWalkable(x, z) && !partyAt(x, z),
+          (x, z) => isWalkable(x, z) && !partyAt(x, z) && !summonAt(x, z),
           sx, sz, tx, tz, enemyHazardCost, grid.stepOpen),
         // Any-angle smoothing for combat walks. The party variant starts
         // from the acting member's body; the enemy variant treats the enemy's
@@ -1063,25 +1088,34 @@ function startGame(level) {
         // Anyone alive is a legal target - bystanders outside the initial
         // engagement get pulled in when attacked.
         liveEnemies: () => enemies.filter((e) => e.alive),
+        // Living player-team summons - the enemy's extra targets and the ally
+        // phase's queue (combat.js).
+        liveAllies: () => summons.filter((s) => s.alive),
         // Summon reinforcements: drop up to `n` archetype units (a class id -
         // e.g. 'applicant' - or an ENEMY_TYPES id) on the nearest free tiles
         // around `summoner`, wire their models, and file them into the roster
         // for `team`. Enemy-team summons join `enemies`, so every existing
         // enemy system (rendering, pruning, liveEnemies, looting) applies for
-        // free; player-team summons get their own list with the ally phase
-        // (M2). Returns the tagged actors; combat.js resolveSummon slots them
-        // into the fight.
+        // free; player-team summons join `summons` (stepped by the update loop,
+        // despawned at combat end) and register as a non-selectable 'summon'
+        // kind so a click falls through to the ground. Returns the tagged
+        // actors; combat.js resolveSummon slots them into the fight.
         spawnSummon: (archetypeId, team, summoner, n) => {
           const def = CLASSES[archetypeId] || ENEMY_TYPES[archetypeId];
           if (!def) return [];
+          const ally = team === 'player';
           const out = [];
           for (const [x, z] of freeTilesNear(summoner.x, summoner.z, n)) {
             const a = new EnemyActor(x, z, archetypeId, def,
               { team, summoned: true, summonedBy: summoner });
-            enemies.push(a);
+            (ally ? summons : enemies).push(a);
             placeModel(app, `assets/characters/${def.model}.glb`, x, z, {
-              lift, rotY: -90, animate: true,
-              onReady: (e) => { applyCharacterProportions(e); a.attach(e); picking.register(e, 'enemy', a); },
+              lift, rotY: ally ? 90 : -90, animate: true,
+              onReady: (e) => {
+                applyCharacterProportions(e);
+                a.attach(e);
+                picking.register(e, ally ? 'summon' : 'enemy', a);
+              },
             });
             out.push(a);
           }
@@ -1099,6 +1133,7 @@ function startGame(level) {
         onWin: () => {
           inCombat = false;
           combat = null;
+          despawnSummons(); // the applicants file out with the fight over
           syncLeaderBindings(); // control stays with whoever had the floor
           // A breather after every victory, so back-to-back fights aren't a
           // death spiral - wounds still carry over, just less brutally. The
@@ -1117,6 +1152,7 @@ function startGame(level) {
         onLose: () => {
           inCombat = false;
           combat = null;
+          despawnSummons();
           loseGame('The office wins this round. Darkness falls between the cubicles.');
         },
       },
@@ -1632,6 +1668,7 @@ function startGame(level) {
       blockedByParty: partyAt,
       occupied: (x, z, self) =>
         partyAt(x, z)
+        || summonAt(x, z)
         || enemies.some((e) => e.alive && e !== self && e.x === x && e.z === z),
       slips: (x, z) => Math.random() < slipChanceAt(x, z),
       stickGum,
@@ -1657,6 +1694,9 @@ function startGame(level) {
       if (en.x !== beforeX || en.z !== beforeZ) anyoneMoved = true;
     }
     if (anyoneMoved) checkCombatTrigger(); // did someone just corner the player?
+    // Player-team summons walk their combat paths and animate the same way;
+    // world.paused stops any wander (they only exist mid-fight anyway).
+    for (const s of summons) s.update(dt, world);
     for (const npc of npcs) npc.update(dt); // idle in place, ease their facing
     // The bottom narrator box gets general narration only when nothing else
     // owns the bottom of the screen: not mid-fight (combat has its own log),
@@ -1835,6 +1875,9 @@ function startGame(level) {
       });
     },
     get npcs() { return npcs.map((n) => ({ name: n.def.name, x: n.x, z: n.z })); },
+    get summons() {
+      return summons.filter((s) => s.alive).map((s) => ({ name: s.def.name, x: s.x, z: s.z, hp: s.hp }));
+    },
     get party() {
       return party ? party.members.map((m, i) => ({
         name: m.sheet.name, hp: m.sheet.hp, maxHp: m.sheet.maxHp,

@@ -240,12 +240,18 @@ applicants.)
    on the enemy turn for no gain. The faction substrate (team tags,
    team-parameterized summon path) is all in place. **No new phase, no
    player-facing action yet.**
-2. **Player-team ally phase.** The `player → allies → enemies` phase machine;
-   the `summons` (player) list + per-frame stepping; enemy `nearestHostile`
-   ranging over party + player summons; player summons blocking enemy pathing;
-   despawn-on-combat-end. Driven in tests by a `__god.summon('player', …)`
-   handle, since no player action exists yet. Ally units fight for you; their
-   death is never a loss.
+2. **Player-team ally phase.** ✅ Landed. The `player → allies → enemies` phase
+   machine (invisible with no summons, so ordinary fights are unchanged); the
+   `summons` (player) list + per-frame stepping + despawn-on-combat-end; the
+   `pickTarget → hostilesFor`/`enemyAttack → aiAttack`/`enemyAdvance →
+   aiAdvance` generalization so enemies range over party **+** player summons
+   and summons range over enemies; player summons block enemy pathing
+   (`summonAt` in `findEnemyPath`/`freeTilesNear`/`occupied`) yet stay
+   pass-through for the party; friendly Ctrl rings; a non-selectable `summon`
+   pick kind. Driven in tests by a `__combat.summonAlly()` debug hook, since no
+   player action exists yet. Ally units fight for you and vanish on victory;
+   their death is never a loss. This PR absorbs the AI-driver refactor
+   milestone 1 deferred.
 3. **The HR summon power.** `type: 'summon'` action handling in combat.js; the
    `summon-applicants` action; the **Human Resources** playable class + picker
    filter. Pick HR, enter a fight, post the role, watch applicants swarm the
