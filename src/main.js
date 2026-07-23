@@ -1770,7 +1770,13 @@ function startGame(level) {
     get enemies() {
       return enemies.map((e) => {
         const p = e.entity?.getPosition();
-        return { name: e.def.name, x: e.x, z: e.z, px: p?.x, pz: p?.z, alive: e.alive };
+        // `reachable`: is there a walk-up route from the leader to a tile
+        // beside them right now? Sealed-in coworkers (behind walls + a closed
+        // door) are unreachable, so a click on them does nothing - the e2e
+        // suite uses this to avoid wasting engage attempts on them.
+        const reachable = e.alive
+          && (cheb(player, e) <= 1 || !!bestApproachPath(e.x, e.z));
+        return { name: e.def.name, x: e.x, z: e.z, px: p?.x, pz: p?.z, alive: e.alive, reachable };
       });
     },
     get npcs() { return npcs.map((n) => ({ name: n.def.name, x: n.x, z: n.z })); },

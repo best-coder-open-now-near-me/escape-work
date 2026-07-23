@@ -100,14 +100,22 @@ export async function combatOrWalkDone(page, capMs) {
 const onCanvas = (page, p) => page.evaluate(
   ([x, y]) => document.elementFromPoint(x, y)?.id === 'app', [p.x, p.y]);
 
-// Click live enemies round-robin until a fight starts - they wander inside a
-// small leash (so a single long walk-up can arrive a tile short), and some
-// start behind closed doors where no walk-up route exists at all. Each
-// click's walk plays out fully before the next attempt.
+// Click live enemies until a fight starts. Two things make a naive round-robin
+// flaky: some coworkers spawn SEALED behind walls + a closed door (no walk-up
+// route ever exists - clicking them silently does nothing and wastes the
+// attempt), and wanderers can drift a tile out of reach between attempts. So
+// we target only enemies the game reports as `reachable` right now, nearest
+// first, and re-query every attempt so a coworker who just wandered into reach
+// becomes eligible. Each click's walk plays out fully before the next attempt.
 export async function enterCombat(page) {
   let inCombat = false;
-  for (let i = 0; i < 8 && !inCombat; i++) {
-    const ens = await page.evaluate(() => window.__game.enemies.filter((e) => e.alive));
+  for (let i = 0; i < 10 && !inCombat; i++) {
+    const pt = await page.evaluate(() => window.__game.playerTile);
+    const ens = await page.evaluate(() => window.__game.enemies.filter((e) => e.alive && e.reachable));
+    if (!ens.length) { await page.waitForTimeout(700); continue; } // all sealed/far - let them wander
+    ens.sort((a, b) => // nearest first: shortest walk-up, most likely on-screen
+      Math.max(Math.abs(a.x - pt.x), Math.abs(a.z - pt.z))
+      - Math.max(Math.abs(b.x - pt.x), Math.abs(b.z - pt.z)));
     const en = ens[i % ens.length];
     // Aim at the BODY, not the floor under it: the pick ray lands on the
     // enemy mesh (more accurate), and a chest-height point clears the fixed
@@ -121,7 +129,7 @@ export async function enterCombat(page) {
     if (!onScreen(p) || !(await onCanvas(page, p))) {
       p = await page.evaluate(([x, z]) => window.__game.project(x, z), [en.x, en.z]);
     }
-    if (!onScreen(p) || !(await onCanvas(page, p))) continue; // unreachable by click - next
+    if (!onScreen(p) || !(await onCanvas(page, p))) continue; // covered by UI - next
     await page.mouse.click(p.x, p.y);
     inCombat = await combatOrWalkDone(page, 25_000);
   }
