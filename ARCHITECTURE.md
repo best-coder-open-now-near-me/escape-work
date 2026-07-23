@@ -44,6 +44,8 @@ src/
                      ranged/melee, enemy AI phase - all costs from data
   looting.js         Containers, bodies, loose items, pockets, Alt overlay
   ui.js              All DOM: HUD, context menu, overlays, shared chrome
+  god.js             God-mode tweak panel (` / F8): live-reflects the sheet,
+                     enemies, combat + world; edit/pin values, pause, spawn
   editor.js          In-browser level editor (paint/erase, export, playtest)
   main.js            Entry point: routes game vs #editor, owns game flow
   index.html         Shell; loads engine + bundle
@@ -114,7 +116,10 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - **Debug/test surface**: `window.__game` / `window.__combat` /
   `window.__editor` expose read-only state; the e2e tests assert against
   them and click through their `project()` helpers (CSS pixels). Keep them
-  in sync when adding state.
+  in sync when adding state. `window.__god` is the exception: it hands out
+  LIVE references and mutators for the god-mode panel (god.js) to edit runtime
+  state in place. It ships in the release but the panel stays hidden until a
+  tester toggles it (` / F8, remembered in localStorage or via `#god`).
 
 ## Growth paths (where things plug in)
 

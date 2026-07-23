@@ -178,6 +178,8 @@ export function createLooting({ app, grid, runtime, player, enemies, getSheet, i
     hideLabels: () => lootLabels.hide(),
     repositionLabels: (project) => lootLabels.reposition(project),
     get labelsVisible() { return lootLabels.visible; },
+    // Spawn a loose floor item at a tile (god mode's "drop on ground").
+    dropAt: (x, z, id) => dropLoose(x, z, id),
     // Read-only views for the window.__game debug/test surface.
     debug: {
       looseItems: () => looseItems.map((li) => ({ x: li.x, z: li.z, id: li.id })),

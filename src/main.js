@@ -23,6 +23,7 @@ import { createControls } from './controls.js';
 import { createLooting } from './looting.js';
 import { startCombat } from './combat.js';
 import { startEditor } from './editor.js';
+import { installGodMode } from './god.js';
 import * as ui from './ui.js';
 
 const STASH_KEY = 'escape-work.playtest';
@@ -87,6 +88,7 @@ function startGame(level) {
   let gameOver = false;
   let lastPath = null; // kept for debugging/tests
   let pendingAction = null; // walk-up interaction, runs on arrival
+  let pendingGodPick = null; // god-mode click-to-place callback (see window.__god)
 
   // --- gameplay tuning --------------------------------------------------------
   const ENGAGE_RADIUS = 4; // Chebyshev tiles within which enemies join a fight
@@ -637,6 +639,14 @@ function startGame(level) {
     focus: grid.playerSpawn,
     onAnyLeftPress: () => ui.hideMenu(),
     onLeftClickTile: (tile, point) => {
+      // God-mode click-to-place (spawn/drop/teleport) consumes the click before
+      // any normal handling, reusing the game's own ground raycast.
+      if (pendingGodPick) {
+        const cb = pendingGodPick;
+        pendingGodPick = null;
+        cb(tile, point);
+        return;
+      }
       if (!tile || !sheet || gameOver) return;
       if (inCombat) {
         const en = enemyAt(tile.x, tile.z);
@@ -930,4 +940,61 @@ function startGame(level) {
       });
     },
   };
+
+  // God mode (human-testing tweak panel; toggle with ` or F8). Unlike __game,
+  // this hands out LIVE references and mutators so the panel can edit runtime
+  // state in place - see god.js. It reflects over the same objects the game
+  // owns; the action methods below are the few things the panel can't reach
+  // without this closure (spawning into `enemies`, dropping via `loot`, etc.).
+  window.__god = {
+    get player() { return sheet; }, // the live character sheet, or null pre-pick
+    get playerActor() { return player; },
+    get enemies() { return enemies; },
+    get combat() { return window.__combat || null; }, // live only mid-fight
+    app,
+    get timeScale() { return app.timeScale; },
+    set timeScale(v) { app.timeScale = v; },
+    get inCombat() { return inCombat; },
+    get gameOver() { return gameOver; },
+    get burningCount() { return runtime.burningCount; },
+    get doors() { return [...grid.doors].map(([key, d]) => ({ key, open: d.open })); },
+    setDoorOpen(key, open) {
+      if (!grid.doors.has(key)) return;
+      grid.setDoorOpen(key, open);
+      scene.refreshDoor(key);
+      for (const e of enemies) e.clearPath(); // their routes may have changed
+    },
+    spawnEnemy(typeId, x, z) {
+      const def = ENEMY_TYPES[typeId];
+      if (!def) return null;
+      const en = new EnemyActor(x, z, typeId, def);
+      enemies.push(en);
+      placeModel(app, `assets/characters/${def.model}.glb`, x, z, {
+        lift, rotY: -90, animate: true,
+        onReady: (e) => { applyCharacterProportions(e); en.attach(e); },
+      });
+      return en;
+    },
+    giveItem(id) {
+      if (!sheet) return;
+      sheet.inventory.push(id);
+      loot.refreshPanel(sheet);
+      ui.updateStatsHud(sheet);
+    },
+    dropItem(id, x, z) { loot.dropAt(x, z, id); },
+    teleport(x, z) {
+      if (!player.entity) return;
+      const p = player.entity.getPosition();
+      player.clearPath();
+      player.entity.setPosition(x, p.y, z);
+      player.x = Math.round(x);
+      player.z = Math.round(z);
+    },
+    refreshHud() { if (sheet) { ui.updateStatsHud(sheet); loot.refreshPanel(sheet); } },
+    // Click-to-place: the panel arms a callback, the next left-click on the
+    // ground (handled in onLeftClickTile) fires it with the picked tile/point.
+    armPick(cb) { pendingGodPick = cb; },
+    get picking() { return !!pendingGodPick; },
+  };
+  installGodMode(window.__god);
 }
