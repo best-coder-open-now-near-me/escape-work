@@ -191,7 +191,18 @@ level's legend places them (spawn-time check against the party roster).
 - **Open: does the armed-hotbar opening strike stay leader-only?** Plan says
   yes for v1 (the hotbar is the leader's), with combat switching available the
   moment the fight starts.
-- **Open: companion talents that affect the world out of combat** (a Smoker
-  companion's lighter, slip immunity). v1: talents apply only to their owner's
-  own stepping/combat; world verbs (right-click ignite) stay leader-gated.
-  Revisit with leader switching.
+- **Companion talents that act on the world** (a Smoker companion's lighter).
+  Resolved: since a talent isn't a passable object, the long-term model is
+  spell-like — a targeted ability owned by the character. It rides the
+  existing arm-then-target hotbar pattern: arm Flick the Lighter, click a
+  flammable target, and the ability's OWNER walks up and performs it, whoever
+  in the party that is. That needs companion walk-up movement, which
+  milestone 2 builds anyway; the ability lands in milestone 4/5. Until then
+  (v1): talents apply only to their owner's own stepping/combat, and the
+  right-click ignite menu stays leader-gated. The menu option survives as a
+  shortcut that dispatches the same ability. (Alternative considered: demote
+  the lighter to a carried item in shared pockets, making "can the party
+  ignite this?" an inventory query — cheaper, but it hollows out the Smoker's
+  "a lighter, always" identity. Rejected.) Purely passive talents
+  (slipImmune, shockImmune) never had this problem — they already apply
+  per-owner.
