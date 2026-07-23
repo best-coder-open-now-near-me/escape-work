@@ -749,12 +749,20 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
   log('Combat! Your move.');
   refresh();
 
-  // Read-only handle for tests.
+  // Read-only handle for tests, plus a few live setters god mode (god.js) uses
+  // to edit turn state in place. Tests only ever read phase/ap/armed/enemies;
+  // the added members are harmless to them.
   window.__combat = {
     get phase() { return phase; },
     get ap() { return ap; },
+    set ap(v) { ap = Math.max(0, roundAp(Number(v) || 0)); refresh(); },
     get armed() { return armed; },
     get enemies() { return engaged.map((e) => ({ name: e.def.name, x: e.x, z: e.z, hp: e.hp, alive: e.alive })); },
+    get maxAp() { return sheet.maxAp; },
+    get defended() { return defended; },
+    set defended(v) { defended = !!v; refresh(); },
+    usesLeft, // live { actionId: count } - edit in place, then call refresh()
+    refresh,
   };
 
   return {
