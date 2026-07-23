@@ -84,8 +84,9 @@ function ensureFocusBanner() {
   focusEl.id = 'focus-banner';
   Object.assign(focusEl.style, {
     position: 'fixed', top: '12px', left: '50%', transform: 'translate(-50%, -4px)',
-    zIndex: '20', pointerEvents: 'none', display: 'flex', alignItems: 'baseline', gap: '9px',
-    maxWidth: 'min(520px, 66vw)', padding: '7px 15px', borderRadius: '9px',
+    zIndex: '20', pointerEvents: 'none',
+    display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center',
+    minWidth: '150px', maxWidth: 'min(520px, 66vw)', padding: '8px 18px', borderRadius: '10px',
     background: 'rgba(20,20,32,.92)', border: '1px solid #3a3a52',
     boxShadow: '0 6px 20px rgba(0,0,0,.5)', whiteSpace: 'nowrap',
     opacity: '0', transition: 'opacity .12s ease, transform .12s ease',
@@ -94,6 +95,9 @@ function ensureFocusBanner() {
   return focusEl;
 }
 
+// info: { name, sub, color, dotColor }. Tiered + centred - the name on top,
+// `sub` (HP, or the verb a click takes) beneath. When `dotColor` is set a small
+// dot flanks each side of the name; callers use it for an enemy's aggression.
 export function setFocusBanner(info) {
   const el = ensureFocusBanner();
   if (!info) {
@@ -102,18 +106,30 @@ export function setFocusBanner(info) {
     return;
   }
   el.innerHTML = '';
-  const name = document.createElement('span');
-  Object.assign(name.style, { font: '700 14px system-ui, sans-serif', letterSpacing: '.4px', color: '#f4f4fa' });
-  name.textContent = info.name;
-  el.appendChild(name);
-  if (info.detail) {
-    const detail = document.createElement('span');
-    Object.assign(detail.style, {
-      font: '12px system-ui, sans-serif', opacity: '.62',
-      overflow: 'hidden', textOverflow: 'ellipsis',
+
+  const nameRow = document.createElement('div');
+  Object.assign(nameRow.style, { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '9px' });
+  const dot = () => {
+    const d = document.createElement('span');
+    Object.assign(d.style, {
+      width: '8px', height: '8px', borderRadius: '50%', flex: '0 0 auto',
+      background: info.dotColor, boxShadow: `0 0 6px ${info.dotColor}`,
     });
-    detail.textContent = info.detail;
-    el.appendChild(detail);
+    return d;
+  };
+  if (info.dotColor) nameRow.appendChild(dot());
+  const name = document.createElement('span');
+  Object.assign(name.style, { font: '700 15px system-ui, sans-serif', letterSpacing: '.4px', color: '#f4f4fa' });
+  name.textContent = info.name;
+  nameRow.appendChild(name);
+  if (info.dotColor) nameRow.appendChild(dot());
+  el.appendChild(nameRow);
+
+  if (info.sub) {
+    const sub = document.createElement('div');
+    Object.assign(sub.style, { font: '12px system-ui, sans-serif', opacity: '.66', marginTop: '3px', letterSpacing: '.5px' });
+    sub.textContent = info.sub;
+    el.appendChild(sub);
   }
   el.style.borderColor = info.color || '#3a3a52';
   el.style.opacity = '1';

@@ -3,6 +3,12 @@
 // assets/characters/. `attacks` are picked at random each enemy turn; the log
 // line gets the rolled damage appended. `loot` (data/items.js ids) rolls onto
 // their body when they fall - bodies stay on the floor and can be looted.
+//
+// `aggression` is their disposition toward starting a fight, surfaced as the
+// dots flanking their name in the focus banner:
+//   'green'  - no intention of initiating; only fights if provoked
+//   'yellow' - will talk first, then maybe escalate
+//   'red'    - straight to battle
 export const ENEMY_TYPES = {
   manager: {
     char: 'M',
@@ -12,6 +18,7 @@ export const ENEMY_TYPES = {
     ap: 5,
     attackAp: 3, // AP one swing costs them in combat
     xp: 8,
+    aggression: 'red', // straight to battle
     examine: 'The Manager: radiates unread-email energy.',
     loot: [
       { item: 'performance-review', chance: 1 },
@@ -34,6 +41,7 @@ export const ENEMY_TYPES = {
     ap: 6,
     attackAp: 3,
     xp: 6,
+    aggression: 'yellow', // wants a "culture-fit conversation" before the knives
     examine: 'HR: smiles warmly. Never stops taking notes.',
     loot: [
       { item: 'hr-pamphlet', chance: 1 },

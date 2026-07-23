@@ -482,6 +482,17 @@ function startGame(level) {
   };
   const rgbCss = ([r, g, b]) => `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
 
+  // Aggression dot colours (data/enemies.js `aggression`): whether a coworker
+  // will start a fight. Green = won't initiate, yellow = talks first, red =
+  // straight to battle. Tints both the enemy's flanking dots and the banner
+  // border, so the banner reads as one aggression signal.
+  const AGGRO = {
+    green: 'rgb(111, 200, 111)',
+    yellow: 'rgb(224, 178, 58)',
+    red: 'rgb(224, 80, 58)',
+  };
+  const aggroColor = (en) => AGGRO[en.def.aggression] || AGGRO.red;
+
   // The top focus banner's label for whatever the cursor is over: an
   // interactable entity, or a flat target the pick ray skims (a corpse,
   // dropped item, container, or door edge on the floor). Null over bare floor -
@@ -491,37 +502,39 @@ function startGame(level) {
     if (hit) {
       const { kind, ref } = hit;
       if (kind === 'enemy') {
-        return ref.alive
-          ? { name: ref.def.name, detail: `Hostile · HP ${ref.hp}/${ref.def.hp}`, color: rgbCss(HL.enemy) }
-          : { name: ref.def.name, detail: ref.loot?.length ? 'Body · lootable' : 'Body · picked clean', color: rgbCss(HL.loot) };
+        if (ref.alive) {
+          const ag = aggroColor(ref);
+          return { name: ref.def.name, sub: `HP ${ref.hp}/${ref.def.hp}`, color: ag, dotColor: ag };
+        }
+        return { name: ref.def.name, sub: ref.loot?.length ? 'Body · lootable' : 'Body · picked clean', color: rgbCss(HL.loot) };
       }
-      if (kind === 'npc') return { name: ref.def.name, detail: 'Coworker · talk', color: rgbCss(HL.npc) };
+      if (kind === 'npc') return { name: ref.def.name, sub: 'Coworker · talk', color: rgbCss(HL.npc) };
       if (kind === 'door') {
         const open = grid.doors.get(ref)?.open;
-        return { name: open ? 'Door · open' : 'Door · closed', detail: open ? 'Close' : 'Open', color: rgbCss(HL.interact) };
+        return { name: open ? 'Door · open' : 'Door · closed', sub: open ? 'Close' : 'Open', color: rgbCss(HL.interact) };
       }
       if (kind === 'prop') {
         const def = grid.defAt(ref.x, ref.z);
-        const detail = def.loot ? 'Rummage' : def.explosive ? 'Volatile' : def.ignitable ? 'Flammable' : 'Object';
-        return { name: def.label || 'Object', detail, color: rgbCss(def.loot ? HL.loot : HL.interact) };
+        const sub = def.loot ? 'Rummage' : def.explosive ? 'Volatile' : def.ignitable ? 'Flammable' : 'Object';
+        return { name: def.label || 'Object', sub, color: rgbCss(def.loot ? HL.loot : HL.interact) };
       }
     }
     if (point) {
       const tx = Math.round(point.x);
       const tz = Math.round(point.z);
       const corpse = loot.corpseAt(tx, tz);
-      if (corpse) return { name: corpse.def.name, detail: 'Body · lootable', color: rgbCss(HL.loot) };
+      if (corpse) return { name: corpse.def.name, sub: 'Body · lootable', color: rgbCss(HL.loot) };
       const loose = loot.looseAt(tx, tz);
       if (loose.length) {
         const extra = loose.length > 1 ? ` +${loose.length - 1}` : '';
-        return { name: loot.itemName(loose[0].id) + extra, detail: 'Pick up', color: rgbCss(HL.loot) };
+        return { name: loot.itemName(loose[0].id) + extra, sub: 'Pick up', color: rgbCss(HL.loot) };
       }
       const doorKey = doorNearPoint(point);
       if (doorKey) {
         const open = grid.doors.get(doorKey)?.open;
-        return { name: open ? 'Door · open' : 'Door · closed', detail: open ? 'Close' : 'Open', color: rgbCss(HL.interact) };
+        return { name: open ? 'Door · open' : 'Door · closed', sub: open ? 'Close' : 'Open', color: rgbCss(HL.interact) };
       }
-      if (grid.defAt(tx, tz).loot) return { name: grid.defAt(tx, tz).label, detail: 'Rummage', color: rgbCss(HL.loot) };
+      if (grid.defAt(tx, tz).loot) return { name: grid.defAt(tx, tz).label, sub: 'Rummage', color: rgbCss(HL.loot) };
     }
     return null;
   }
