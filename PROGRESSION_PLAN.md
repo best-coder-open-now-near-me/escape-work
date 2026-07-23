@@ -46,6 +46,15 @@ moves two things this plan must build *with*:
   scale on the enemy curve, never on attribute points. If the broader class
   convergence later turns enemies into full sheets, attributes-for-enemies is a
   follow-on, not this plan.
+- **Summons are the one exception to "you build every unit" (decision #7), and
+  it needs no handling.** An applicant is class-backed but never a sheet
+  (`unitCombat` + `EnemyActor`, not `createSheetFrom`), never a party member (no
+  portrait, no pip), and combat-scoped (0 XP, unlevelable, despawned at fight
+  end) — so there is nothing to allocate and nobody to allocate it. If a summon
+  should ever grow, it scales off the *summoner* via the summon descriptor
+  (`countBonus` / a level into `scaleEnemy`), not a build screen. This is also
+  why the `applicant` class deliberately carries no `attr` spread — it would be
+  dead data (`normalizeAttr` defaults to zeros if anything ever sheets it).
 
 Two clean synergies fall out: HR's *Open Door Policy* talent — whose blurb
 already reserves "a summon-scaling effect can land later" — is a natural
