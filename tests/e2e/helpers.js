@@ -111,9 +111,13 @@ export async function enterCombat(page) {
     const en = ens[i % ens.length];
     // Aim at the BODY, not the floor under it: the pick ray lands on the
     // enemy mesh (more accurate), and a chest-height point clears the fixed
-    // bottom UI band far more often. Fall back to the ground point, and only
-    // skip when both are covered or off-screen.
-    let p = await page.evaluate(([x, z]) => window.__game.project3(x, 0.9, z), [en.x, en.z]);
+    // bottom UI band far more often. Use the CONTINUOUS body position (px/pz)
+    // - wanderers stand at loose points, and a chest-height ray at the tile
+    // centre can miss the narrow mesh and fall to the floor behind them.
+    // Fall back to the ground-tile point (resolved by tile, so it can't
+    // miss), and only skip when both are covered or off-screen.
+    let p = await page.evaluate(
+      ([x, z]) => window.__game.project3(x, 0.9, z), [en.px ?? en.x, en.pz ?? en.z]);
     if (!onScreen(p) || !(await onCanvas(page, p))) {
       p = await page.evaluate(([x, z]) => window.__game.project(x, z), [en.x, en.z]);
     }
