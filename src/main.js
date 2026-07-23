@@ -760,6 +760,33 @@ function startGame(level) {
     }
   }
 
+  // Hold Ctrl: a ground ring under EVERY character at their true position -
+  // tall meshes read a tile off at this camera angle, so the ring is where a
+  // click actually lands. Party teal, enemies red, NPCs green, the downed
+  // gold (they're a help-up target, not a threat).
+  const RING_PARTY = new pc.Color(0.45, 0.9, 0.8);
+  const RING_DOWN = new pc.Color(1.0, 0.82, 0.4);
+  const RING_HOSTILE = new pc.Color(1.0, 0.28, 0.2);
+  const RING_FRIENDLY = new pc.Color(0.42, 0.85, 0.42);
+  let ctrlHeld = false;
+  function drawCharacterRings() {
+    for (const m of party?.members || []) {
+      if (!m.actor?.entity) continue;
+      const p = m.actor.entity.getPosition();
+      drawRing(p.x, p.z, 0.42, m.sheet.hp <= 0 ? RING_DOWN : RING_PARTY);
+    }
+    for (const en of enemies) {
+      if (!en.alive || !en.entity) continue;
+      const p = en.entity.getPosition();
+      drawRing(p.x, p.z, 0.5, RING_HOSTILE);
+    }
+    for (const npc of npcs) {
+      if (!npc.entity) continue;
+      const p = npc.entity.getPosition();
+      drawRing(p.x, p.z, 0.42, RING_FRIENDLY);
+    }
+  }
+
   // --- left-click verb dispatch (Divinity-style: the target picks the verb) ---
   function attackOrConfront(en) {
     const a = armedOoc && ACTIONS[armedOoc];
@@ -1288,7 +1315,29 @@ function startGame(level) {
       } else moveTo(tile, point);
     },
     onHover: (point, sx, sy) => {
-      if (inCombat && combat) { combat.handleHover(point, sx, sy); ui.setFocusBanner(null); return; }
+      if (inCombat && combat) {
+        combat.handleHover(point, sx, sy);
+        // Hold Ctrl mid-fight and hovering a character glows their BODY (and
+        // names them in the banner) - the same read you get out of combat.
+        if (ctrlHeld) {
+          const hit = picking.pick(controls.cameraEntity, sx, sy);
+          const character = hit && (hit.kind === 'party' || hit.kind === 'npc'
+            || (hit.kind === 'enemy' && hit.ref.alive));
+          hoverKind = character ? hit.kind : null;
+          if (character) {
+            setHoverHighlight(hit.entity, colorForHit(hit));
+            ui.setFocusBanner(focusInfoFor(hit, point));
+          } else {
+            clearHoverHighlight();
+            ui.setFocusBanner(null);
+          }
+        } else {
+          hoverKind = null;
+          clearHoverHighlight();
+          ui.setFocusBanner(null);
+        }
+        return;
+      }
       if (!sheet || gameOver || dialogue.visible) { clearHoverHighlight(); setCursor(null); ui.setFocusBanner(null); return; }
       worldHover(point, sx, sy);
     },
@@ -1420,6 +1469,8 @@ function startGame(level) {
     if (e.key === 'Alt') {
       e.preventDefault(); // keep focus off the browser's menu bar
       if (!e.repeat && sheet && !inCombat && !gameOver) loot.showLabels();
+    } else if (e.key === 'Control') {
+      ctrlHeld = true; // rings under everyone while held (see drawCharacterRings)
     } else if ((e.key === 'i' || e.key === 'I') && sheet && !gameOver) {
       loot.togglePanel(sheet);
     } else if (/^[1-9]$/.test(e.key) && sheet && !inCombat && !gameOver && !dialogue.visible) {
@@ -1436,8 +1487,9 @@ function startGame(level) {
   });
   window.addEventListener('keyup', (e) => {
     if (e.key === 'Alt') loot.hideLabels();
+    if (e.key === 'Control') ctrlHeld = false;
   });
-  window.addEventListener('blur', () => loot.hideLabels());
+  window.addEventListener('blur', () => { loot.hideLabels(); ctrlHeld = false; });
 
   // Cosmetic combat feedback (projectiles, floating numbers). Defined after
   // controls exist because the damage text projects through the camera.
@@ -1564,6 +1616,9 @@ function startGame(level) {
       if (show && sheet.paper !== hotbarPaper) { hotbarPaper = sheet.paper; hotbar.refresh(sheet); }
       if (show && armedOoc) drawOocTargets();
     }
+    // Ctrl rings redraw each frame while held (immediate-mode lines last one
+    // frame) - in and out of combat alike.
+    if (ctrlHeld && sheet && !gameOver) drawCharacterRings();
     // Party bar: redraw only when the roster state changes (names/HP/active,
     // plus per-member AP mid-fight); visible only once there's an actual
     // party to show.
@@ -1625,7 +1680,7 @@ function startGame(level) {
         location.reload();
       },
     },
-  ], ['Alt — show loot', 'I — open pockets', '1–9 — aim an attack']);
+  ], ['Alt — show loot', 'Ctrl — mark everyone', 'I — open pockets', '1–9 — aim an attack']);
   if (restoredProgress) {
     // Continuing a campaign run: same party, next floor - no picker. Field
     // backfills for older saves live in parseProgress. The active member gets
@@ -1728,6 +1783,7 @@ function startGame(level) {
     // Out-of-combat targeting + hover state, for the e2e suite.
     get armed() { return armedOoc; },
     get hoverKind() { return hoverKind; },
+    get ctrlHeld() { return ctrlHeld; },
     get cursor() { return canvasEl ? canvasEl.style.cursor : ''; },
     get dialogueOpen() { return dialogue.visible; },
   };

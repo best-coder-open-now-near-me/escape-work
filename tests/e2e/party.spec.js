@@ -101,6 +101,19 @@ test('party combat: switch the active member, and the fight survives the leader 
   await page.click('#party-slot-0');
   await expect.poll(() => page.evaluate(() => window.__combat.party[0].active)).toBe(true);
 
+  // Hold Ctrl: rings under everyone, and hovering a body mid-fight glows it
+  // and names it in the banner.
+  await page.keyboard.down('Control');
+  expect(await page.evaluate(() => window.__game.ctrlHeld)).toBe(true);
+  const mp = await page.evaluate(() => {
+    const en = window.__game.enemies.find((e) => e.alive);
+    return window.__game.project3(en.px ?? en.x, 0.9, en.pz ?? en.z);
+  });
+  await page.mouse.move(mp.x, mp.y);
+  await expect.poll(() => page.evaluate(() => window.__game.hoverKind), { timeout: 10_000 }).toBe('enemy');
+  await page.keyboard.up('Control');
+  expect(await page.evaluate(() => window.__game.ctrlHeld)).toBe(false);
+
   // Wound the controlled leader to 1 HP (live god handle), then end their
   // turn. End Turn QUEUES through the party: the first click passes the
   // floor to the intern, only the second hands the round to the enemies.

@@ -167,7 +167,10 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   coworker's body targets - the rings mark bodies, and the ground tile
   behind a tall mesh is a mis-walk); ground clicks stay tile-based for
   movement, and a member's combat route treats allies as blockers so a move
-  never ends stacked on a teammate. **Downed**:
+  never ends stacked on a teammate. **Hold Ctrl** to draw a ground ring at
+  every character's TRUE position (party teal, hostiles red, NPCs green, the
+  downed gold) - tall meshes read a tile off at this camera angle - and to
+  get the hover body-highlight + focus banner inside combat too. **Downed**:
   a member at 0 HP topples and sits out; the run only ends on a party WIPE.
   If the member you're controlling falls, a survivor steps up on the spot -
   in combat via `combat.notifyMemberDown`/the enemy-attack handoff, outside
