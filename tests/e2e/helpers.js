@@ -109,9 +109,15 @@ export async function enterCombat(page) {
   for (let i = 0; i < 8 && !inCombat; i++) {
     const ens = await page.evaluate(() => window.__game.enemies.filter((e) => e.alive));
     const en = ens[i % ens.length];
-    const p = await page.evaluate(([x, z]) => window.__game.project(x, z), [en.x, en.z]);
-    if (!onScreen(p)) continue; // out of view even zoomed out - try the next
-    if (!(await onCanvas(page, p))) continue; // hidden behind a UI overlay - next
+    // Aim at the BODY, not the floor under it: the pick ray lands on the
+    // enemy mesh (more accurate), and a chest-height point clears the fixed
+    // bottom UI band far more often. Fall back to the ground point, and only
+    // skip when both are covered or off-screen.
+    let p = await page.evaluate(([x, z]) => window.__game.project3(x, 0.9, z), [en.x, en.z]);
+    if (!onScreen(p) || !(await onCanvas(page, p))) {
+      p = await page.evaluate(([x, z]) => window.__game.project(x, z), [en.x, en.z]);
+    }
+    if (!onScreen(p) || !(await onCanvas(page, p))) continue; // unreachable by click - next
     await page.mouse.click(p.x, p.y);
     inCombat = await combatOrWalkDone(page, 25_000);
   }
