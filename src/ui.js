@@ -304,9 +304,13 @@ export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
   });
   root.appendChild(dim);
 
+  // The picker owns the top of the screen: the game's HUD banner steps aside
+  // until a class is hired.
+  const hud = document.getElementById('hud');
+  if (hud) hud.style.display = 'none';
+
   const title = document.createElement('div');
-  // Sits below the game's own header lines, not on top of them.
-  Object.assign(title.style, { position: 'absolute', top: '96px', left: '0', right: '0', textAlign: 'center' });
+  Object.assign(title.style, { position: 'absolute', top: '26px', left: '0', right: '0', textAlign: 'center' });
   title.innerHTML = `
     <div style="font-size:22px; font-weight:800; letter-spacing:2px;">CHOOSE YOUR CAREER MISTAKE</div>
     <div style="opacity:.8; margin-top:4px;">${ids.length} r&eacute;sum&eacute;s on the desk. You will be living one of them.</div>`;
@@ -420,6 +424,7 @@ export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
   window.addEventListener('keydown', onKey);
   function cleanup() {
     window.removeEventListener('keydown', onKey);
+    if (hud) hud.style.display = '';
     root.remove();
   }
 
