@@ -42,10 +42,10 @@ export function createTileRenderer(app) {
     surfaceMats[id] = makeMaterial(def.color, { gloss: 0.85, opacity: 0.88 });
     ringMats[id] = makeMaterial(def.color.map((v) => v * 0.5), { gloss: 0.25, opacity: 0.5 });
   }
-  const paperMat = makeMaterial(SURFACES.paper.color, { gloss: 0.2 });
-  // A darker sheet peeking out at the drift's edge gives the paper some
-  // thickness instead of reading as a flat decal (the pools' damp-ring trick).
-  const paperEdgeMat = makeMaterial(SURFACES.paper.color.map((v) => v * 0.68), { gloss: 0.12, opacity: 0.92 });
+  // A few near-identical paper tints so scattered sheets don't read as one flat
+  // mass - some catch a little more light than others.
+  const paperTints = [-0.04, 0, 0.035].map((d) =>
+    makeMaterial(SURFACES.paper.color.map((v) => Math.min(1, v + d)), { gloss: 0.18 }));
   const electricMat = makeMaterial(ELECTRIFIED.color, { opacity: 0.92, gloss: 0.85, emissive: [0.25, 0.5, 0.65] });
   const fireMat = makeMaterial(FIRE.color, { opacity: 0.92, emissive: [0.9, 0.35, 0.05] });
   const fireCore = makeMaterial([1, 0.8, 0.3], { opacity: 0.95, emissive: [0.95, 0.7, 0.2] });
@@ -216,17 +216,29 @@ export function createTileRenderer(app) {
     return holder;
   }
 
-  // A paper drift renders like a spill: the SAME shared metaball field as the
-  // liquid pools, so adjacent paper tiles fuse into one continuous, natural
-  // shape instead of a square patch per tile - just drawn with a matte, opaque
-  // paper material (and a darker sheet at the edge) instead of glossy liquid.
-  function addPaperDrift(x, z, surfaceAt) {
-    const sources = poolSources(x, z, 'paper', surfaceAt);
+  // Loose sheets, scattered. The old look stamped the SAME little stack on
+  // every tile, so a multi-tile drift read as a row of identical clusters.
+  // Instead each sheet gets its own hashed position (spread across the whole
+  // tile and reaching the edges, so neighbouring paper tiles intermingle into
+  // one spread), rotation, size and tint, and the count varies per tile - a
+  // continuous mess of paper rather than repeated clusters. A per-tile base
+  // height plus a tiny per-sheet rise keeps overlapping sheets from z-fighting.
+  function addPaper(x, z) {
     const holder = new pc.Entity();
-    const edge = poolPatchGeometry(x, z, sources, POOL_ISO_RING);
-    if (edge) addPoolLayer(holder, edge, paperEdgeMat, -0.008);
-    const sheet = poolPatchGeometry(x, z, sources, POOL_ISO_LIQUID);
-    if (sheet) addPoolLayer(holder, sheet, paperMat, 0);
+    const baseY = hash01(x, z, 50) * 0.014;
+    const n = 6 + Math.floor(hash01(x, z, 99) * 3); // 6-8 sheets
+    for (let i = 0; i < n; i++) {
+      const ox = (hash01(x, z, i * 4 + 1) - 0.5) * 0.86;
+      const oz = (hash01(x, z, i * 4 + 2) - 0.5) * 0.86;
+      const ry = hash01(x, z, i * 4 + 3) * 360;
+      const s = 0.24 + hash01(x, z, i * 4 + 4) * 0.15; // 0.24-0.39
+      const e = new pc.Entity();
+      e.addComponent('render', { type: 'box', material: paperTints[i % paperTints.length] });
+      e.setLocalScale(s, 0.02, s * 0.74);
+      e.setLocalPosition(ox, baseY + 0.006 * i, oz);
+      e.setLocalEulerAngles(0, ry, 0);
+      holder.addChild(e);
+    }
     holder.setPosition(x, surfaceTop, z);
     app.root.addChild(holder);
     return holder;
@@ -365,7 +377,7 @@ export function createTileRenderer(app) {
       const surf = SURFACES[def.surface];
       let vis;
       if (surf.style === 'cable') vis = addCable(x, z);
-      else if (surf.style === 'paper') vis = addPaperDrift(x, z, surfaceAt);
+      else if (surf.style === 'paper') vis = addPaper(x, z);
       else if (surf.style === 'gum') vis = addGumWad(x, z);
       else vis = addPool(x, z, def.surface, electrified, surfaceAt);
       return { kind: 'surface', entities: [vis] };
