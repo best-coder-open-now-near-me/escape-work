@@ -886,18 +886,21 @@ function startGame(level) {
     onAnyLeftPress: () => ui.hideMenu(),
     onLeftClickTile: (tile, point, sx, sy) => {
       if (!sheet || gameOver) return;
-      // The interactable ENTITY under the cursor wins over the floor tile
-      // behind it - this is what finally makes a click on the tall door mesh
-      // (or a standing enemy) land on the thing you aimed at.
-      const hit = picking.pick(controls.cameraEntity, sx, sy);
+      // In combat, targeting stays tile-based: the tactical grid (movement
+      // previews, AP, target rings) is all tile/ground-keyed, and a click must
+      // hit the enemy on the CLICKED tile, not whichever body the ray grazes.
       if (inCombat) {
-        const en = (hit && hit.kind === 'enemy' && hit.ref.alive) ? hit.ref
-          : (tile ? enemyAt(tile.x, tile.z) : null);
+        if (!tile) return;
+        const en = enemyAt(tile.x, tile.z);
         if (en) combat?.handleEnemyClick(en);
-        else if (tile) combat?.handleTileClick(tile, point);
+        else combat?.handleTileClick(tile, point);
         return;
       }
       if (dialogue.visible) return; // talking: clicks belong to the panel
+      // Out of combat, the interactable ENTITY under the cursor wins over the
+      // floor tile behind it - what finally makes a click on the tall door
+      // mesh (or a standing enemy) land on the thing you aimed at.
+      const hit = picking.pick(controls.cameraEntity, sx, sy);
       if (hit && dispatchHit(hit)) return;
       if (!tile) return;
       // Ground fallback - also catches flat targets the pick ray skims over: a
