@@ -128,7 +128,7 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   // candidate close and head-on, past the wheel/orbit limits). Values apply
   // raw - callers restore the defaults when done.
   function setView({ dist, pitch, yaw, focusY } = {}) {
-    if (dist !== undefined) CAM.dist = pc.math.clamp(dist, 4, CAM.maxDist);
+    if (dist !== undefined) CAM.dist = pc.math.clamp(dist, 1.5, CAM.maxDist);
     if (pitch !== undefined) CAM.pitch = pitch;
     if (yaw !== undefined) CAM.yaw = yaw;
     if (focusY !== undefined) focusHeight = focusY;
