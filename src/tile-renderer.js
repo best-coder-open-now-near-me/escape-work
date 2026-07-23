@@ -43,6 +43,9 @@ export function createTileRenderer(app) {
     ringMats[id] = makeMaterial(def.color.map((v) => v * 0.5), { gloss: 0.25, opacity: 0.5 });
   }
   const paperMat = makeMaterial(SURFACES.paper.color, { gloss: 0.2 });
+  // A darker sheet peeking out at the drift's edge gives the paper some
+  // thickness instead of reading as a flat decal (the pools' damp-ring trick).
+  const paperEdgeMat = makeMaterial(SURFACES.paper.color.map((v) => v * 0.68), { gloss: 0.12, opacity: 0.92 });
   const electricMat = makeMaterial(ELECTRIFIED.color, { opacity: 0.92, gloss: 0.85, emissive: [0.25, 0.5, 0.65] });
   const fireMat = makeMaterial(FIRE.color, { opacity: 0.92, emissive: [0.9, 0.35, 0.05] });
   const fireCore = makeMaterial([1, 0.8, 0.3], { opacity: 0.95, emissive: [0.95, 0.7, 0.2] });
@@ -213,18 +216,17 @@ export function createTileRenderer(app) {
     return holder;
   }
 
-  // Scattered sheets: thin pale rectangles at odd angles.
-  function addPaper(x, z) {
+  // A paper drift renders like a spill: the SAME shared metaball field as the
+  // liquid pools, so adjacent paper tiles fuse into one continuous, natural
+  // shape instead of a square patch per tile - just drawn with a matte, opaque
+  // paper material (and a darker sheet at the edge) instead of glossy liquid.
+  function addPaperDrift(x, z, surfaceAt) {
+    const sources = poolSources(x, z, 'paper', surfaceAt);
     const holder = new pc.Entity();
-    for (const [ox, oz, ry, s] of [[0, 0, 15, 0.42], [0.2, 0.16, 70, 0.34], [-0.18, -0.1, 40, 0.3], [-0.05, 0.22, 110, 0.28]]) {
-      const e = new pc.Entity();
-      e.addComponent('render', { type: 'box', material: paperMat });
-      e.setLocalScale(s, 0.02, s * 0.72);
-      e.setLocalPosition(ox, 0, oz);
-      e.setLocalEulerAngles(0, ry, 0);
-      holder.addChild(e);
-    }
-    holder.setEulerAngles(0, ((x * 61 + z * 89) % 8) * 45, 0);
+    const edge = poolPatchGeometry(x, z, sources, POOL_ISO_RING);
+    if (edge) addPoolLayer(holder, edge, paperEdgeMat, -0.008);
+    const sheet = poolPatchGeometry(x, z, sources, POOL_ISO_LIQUID);
+    if (sheet) addPoolLayer(holder, sheet, paperMat, 0);
     holder.setPosition(x, surfaceTop, z);
     app.root.addChild(holder);
     return holder;
@@ -363,7 +365,7 @@ export function createTileRenderer(app) {
       const surf = SURFACES[def.surface];
       let vis;
       if (surf.style === 'cable') vis = addCable(x, z);
-      else if (surf.style === 'paper') vis = addPaper(x, z);
+      else if (surf.style === 'paper') vis = addPaperDrift(x, z, surfaceAt);
       else if (surf.style === 'gum') vis = addGumWad(x, z);
       else vis = addPool(x, z, def.surface, electrified, surfaceAt);
       return { kind: 'surface', entities: [vis] };
