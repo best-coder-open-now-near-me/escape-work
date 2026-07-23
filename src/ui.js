@@ -333,8 +333,6 @@ export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
     return `
       <div style="font-size:17px; font-weight:700; letter-spacing:.5px;">${cls.name}</div>
       <div style="font-size:11px; color:#8a8577; margin-top:2px;">Applying for: Former Employee</div>
-      ${section('OBJECTIVE')}
-      <div style="font-style:italic;">${cls.objective}</div>
       ${section('EXPERIENCE')}
       <div>${cls.experience}</div>
       ${section('SKILLS')}

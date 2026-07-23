@@ -14,6 +14,7 @@ import { GUM } from './data/surfaces.js';
 const wrapAngle = (a) => (((a + 180) % 360) + 360) % 360 - 180;
 const TURN_RATE = 10; // how quickly facing eases toward the heading
 const FLASH_COLOR = [0.75, 0.09, 0.05];
+const _settleQuat = new pc.Quat(); // scratch for the idle leg-settle slerp
 
 export class GridActor {
   constructor(x, z, { speed = 2.2 } = {}) {
@@ -32,6 +33,7 @@ export class GridActor {
     // animation state
     this.animC = null; // anim component driving the baked clips
     this.clip = null; // current clip state name
+    this.legSettle = null; // { t, l, r } ease from the stop pose into stance
     this.fx = null; // { kind: 'lunge'|'flinch'|'death', t }
     this.flashT = 0;
     this.mats = []; // per-instance cloned materials (for damage flashes)
@@ -126,17 +128,31 @@ export class GridActor {
     // leg-whipping ("twitchy") - most visible on wandering NPCs' short hops.
     else if (moved > 1e-5) this.setClip('walk', 0.15, this.speed * 0.25);
     else this.setClip('idle', 0.2);
-    // Settle the legs into stance while idling - the idle clip never touches
-    // them (no leg curves), so a walk or attack would otherwise leave them
-    // frozen mid-stride.
+    // Settle the legs into stance while idling - the idle clip has no leg
+    // curves, so after a walk they'd otherwise be left mid-stride. The catch:
+    // the walk clip keeps writing the legs for the length of its blend-out
+    // (~0.2s) and its cycle keeps advancing, so easing from whatever the legs
+    // read *this* frame just chases that fading, still-stepping pose - the
+    // legs twitch as if taking one more step. Instead, snapshot the pose the
+    // walk left them in the instant we go idle and drive that snapshot home on
+    // a clock of our own. Because the app's 'update' fires after the anim
+    // system's, this write lands last and overrides the blending-out walk, so
+    // the legs ease straight from the stop pose to stance with no twitch.
     if (this.clip === 'idle') {
-      const k = Math.min(1, dt * 12);
-      for (const leg of [this.legL, this.legR]) {
-        if (!leg) continue;
-        const q = leg.getLocalRotation();
-        q.slerp(q, pc.Quat.IDENTITY, k);
-        leg.setLocalRotation(q);
+      if (!this.legSettle) {
+        this.legSettle = {
+          t: 0,
+          l: this.legL ? this.legL.getLocalRotation().clone() : null,
+          r: this.legR ? this.legR.getLocalRotation().clone() : null,
+        };
       }
+      const s = this.legSettle;
+      s.t = Math.min(1, s.t + dt * 5); // ~0.2s to reach stance
+      const k = s.t * s.t * (3 - 2 * s.t); // smoothstep - no abrupt start/stop
+      if (this.legL && s.l) this.legL.setLocalRotation(_settleQuat.slerp(s.l, pc.Quat.IDENTITY, k));
+      if (this.legR && s.r) this.legR.setLocalRotation(_settleQuat.slerp(s.r, pc.Quat.IDENTITY, k));
+    } else {
+      this.legSettle = null;
     }
     let bobY = 0;
     let forward = 0;
