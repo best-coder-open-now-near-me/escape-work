@@ -252,7 +252,7 @@ function startGame(level) {
     spawnPlayerModel();
     loot.refreshPanel(sheet);
     buildHotbar();
-    ui.say(`${sheet.className}. Now get out of here. (Alt shows loot, I opens pockets, 1-9 to aim an attack.)`);
+    ui.say(`${sheet.className}. Now get out of here.`); // hotkeys live in the HUD strip
   }
 
   // Every way to die funnels through here: freeze the world, drop any active
@@ -1107,6 +1107,10 @@ function startGame(level) {
     }
     if (anyoneMoved) checkCombatTrigger(); // did someone just corner the player?
     for (const npc of npcs) npc.update(dt); // idle in place, ease their facing
+    // The bottom narrator box gets general narration only when nothing else
+    // owns the bottom of the screen: not mid-fight (combat has its own log),
+    // not mid-conversation (the dialogue panel is up), not pre-class-pick.
+    ui.setNarrationGate(!!sheet && !inCombat && !gameOver && !dialogue.visible);
     // Persistent hotbar: visible only when it can act; ammo counts refresh
     // when they change (the gate keeps DOM writes off the hot path). Armed
     // out-of-combat target rings redraw each frame, like combat's own.
@@ -1157,7 +1161,7 @@ function startGame(level) {
         location.reload();
       },
     },
-  ]);
+  ], ['Alt — show loot', 'I — open pockets', '1–9 — aim an attack']);
   if (restoredSheet) {
     // Continuing a campaign run: same character, next floor - no picker.
     // Backfill fields older saves may predate, so no math ever meets

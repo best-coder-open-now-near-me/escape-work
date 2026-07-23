@@ -16,6 +16,59 @@ export const BUTTON_CHROME = {
 export function say(text) {
   const el = document.getElementById('subtitle');
   if (el) el.textContent = text;
+  narrate(text);
+}
+
+// --- narrator box (Divinity / BG3 style general narration) --------------------
+// General narration surfaces in a dialogue-style box near the bottom, like the
+// narrator in Divinity/BG3 - not just the (now hidden) top subtitle. It is
+// purely cosmetic: pointer-events pass through so play never stalls, and it
+// auto-fades. Combat owns its own bottom panel + log and a live conversation
+// owns the dialogue panel, so main.js gates the narrator off during both (see
+// setNarrationGate) to avoid stacking boxes at the bottom of the screen.
+let narratorEl = null;
+let narratorTimer = null;
+let narrationOk = false;
+
+function ensureNarrator() {
+  if (narratorEl) return narratorEl;
+  narratorEl = document.createElement('div');
+  narratorEl.id = 'narration-box';
+  Object.assign(narratorEl.style, {
+    position: 'fixed', right: '14px', bottom: '20px', transform: 'translateY(6px)',
+    zIndex: '27', maxWidth: 'min(360px, 46vw)', boxSizing: 'border-box',
+    pointerEvents: 'none', textAlign: 'left',
+    background: 'rgba(18,18,30,.9)', border: '1px solid #3a3a52', borderRadius: '12px',
+    padding: '11px 16px', color: '#e9e7f2',
+    font: 'italic 14px Georgia, "Times New Roman", serif', lineHeight: '1.5',
+    boxShadow: '0 8px 24px rgba(0,0,0,.5)',
+    opacity: '0', transition: 'opacity .2s ease, transform .2s ease',
+  });
+  document.body.appendChild(narratorEl);
+  return narratorEl;
+}
+
+function hideNarrator() {
+  if (!narratorEl) return;
+  narratorEl.style.opacity = '0';
+  narratorEl.style.transform = 'translateY(6px)';
+}
+
+// main.js flips this each frame: narration is welcome only when a class is in
+// play and neither combat nor a conversation owns the bottom of the screen.
+export function setNarrationGate(ok) {
+  narrationOk = ok;
+  if (!ok) hideNarrator();
+}
+
+function narrate(text) {
+  if (!narrationOk || !text) return;
+  const el = ensureNarrator();
+  el.textContent = text;
+  el.style.opacity = '1';
+  el.style.transform = 'translateY(0)';
+  if (narratorTimer) clearTimeout(narratorTimer);
+  narratorTimer = setTimeout(hideNarrator, 5200);
 }
 
 // --- loot toast ---------------------------------------------------------------
@@ -574,7 +627,9 @@ export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
 
 // Always-available corner menu (restart the run, open the editor) - the class
 // picker is skipped mid-campaign, so these need a home that is always there.
-export function showGameMenu(items) {
+// `hints` (optional) are non-clickable shortcut reminders tucked below the
+// actions, so the HUD itself stays clean.
+export function showGameMenu(items, hints = null) {
   const btn = document.createElement('button');
   btn.id = 'game-menu-btn';
   btn.textContent = '☰';
@@ -601,6 +656,28 @@ export function showGameMenu(items) {
     row.onmouseleave = () => { row.style.background = 'transparent'; };
     row.onclick = () => { menu.style.display = 'none'; it.action(); };
     menu.appendChild(row);
+  }
+  // Shortcut reminders live here now, out of the HUD's way - a muted,
+  // non-clickable block under a divider.
+  if (hints && hints.length) {
+    const divider = document.createElement('div');
+    Object.assign(divider.style, { borderTop: '1px solid #3a3a52', margin: '5px 6px' });
+    menu.appendChild(divider);
+    const title = document.createElement('div');
+    title.textContent = 'SHORTCUTS';
+    Object.assign(title.style, {
+      padding: '2px 11px 4px', font: '700 10px system-ui, sans-serif',
+      letterSpacing: '1.5px', opacity: '.5',
+    });
+    menu.appendChild(title);
+    for (const h of hints) {
+      const row = document.createElement('div');
+      row.textContent = h;
+      Object.assign(row.style, {
+        padding: '3px 11px', opacity: '.65', whiteSpace: 'nowrap', cursor: 'default',
+      });
+      menu.appendChild(row);
+    }
   }
   btn.onclick = () => { menu.style.display = menu.style.display === 'none' ? 'block' : 'none'; };
   window.addEventListener('mousedown', (e) => {
