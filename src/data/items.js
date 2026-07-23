@@ -79,6 +79,13 @@ export const ITEMS = {
     icon: '💾',
     examine: 'Unlabeled. Found in the trash. Absolutely do not plug this in.',
   },
+  matches: {
+    name: 'Book of Matches',
+    icon: '🔥',
+    // A one-shot fire source for the classes that lack the Smoker's lighter -
+    // main.js consumes one per light (see igniteAt / canIgnite).
+    examine: 'From a bar nobody admits going to. Enough for a fire or two.',
+  },
 };
 
 // Container loot tables (see tiles.js `loot` field). Each entry rolls
@@ -87,6 +94,7 @@ export const LOOT_TABLES = {
   trash: [
     { item: 'paper-wad', chance: 1 },
     { item: 'half-sandwich', chance: 0.5 },
+    { item: 'matches', chance: 0.4 },
     { item: 'energy-drink', chance: 0.25 },
     { item: 'usb-stick', chance: 0.15 },
   ],

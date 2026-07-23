@@ -16,14 +16,212 @@ export const BUTTON_CHROME = {
 export function say(text) {
   const el = document.getElementById('subtitle');
   if (el) el.textContent = text;
+  narrate(text);
+}
+
+// --- narrator box (Divinity / BG3 style general narration) --------------------
+// General narration surfaces in a dialogue-style box near the bottom, like the
+// narrator in Divinity/BG3 - not just the (now hidden) top subtitle. It is
+// purely cosmetic: pointer-events pass through so play never stalls, and it
+// auto-fades. Combat owns its own bottom panel + log and a live conversation
+// owns the dialogue panel, so main.js gates the narrator off during both (see
+// setNarrationGate) to avoid stacking boxes at the bottom of the screen.
+let narratorEl = null;
+let narratorTimer = null;
+let narrationOk = false;
+
+function ensureNarrator() {
+  if (narratorEl) return narratorEl;
+  narratorEl = document.createElement('div');
+  narratorEl.id = 'narration-box';
+  Object.assign(narratorEl.style, {
+    position: 'fixed', right: '14px', bottom: '20px', transform: 'translateY(6px)',
+    zIndex: '27', maxWidth: 'min(360px, 46vw)', boxSizing: 'border-box',
+    pointerEvents: 'none', textAlign: 'left',
+    background: 'rgba(18,18,30,.9)', border: '1px solid #3a3a52', borderRadius: '12px',
+    padding: '11px 16px', color: '#e9e7f2',
+    font: 'italic 14px Georgia, "Times New Roman", serif', lineHeight: '1.5',
+    boxShadow: '0 8px 24px rgba(0,0,0,.5)',
+    opacity: '0', transition: 'opacity .2s ease, transform .2s ease',
+  });
+  document.body.appendChild(narratorEl);
+  return narratorEl;
+}
+
+function hideNarrator() {
+  if (!narratorEl) return;
+  narratorEl.style.opacity = '0';
+  narratorEl.style.transform = 'translateY(6px)';
+}
+
+// main.js flips this each frame: narration is welcome only when a class is in
+// play and neither combat nor a conversation owns the bottom of the screen.
+export function setNarrationGate(ok) {
+  narrationOk = ok;
+  if (!ok) hideNarrator();
+}
+
+function narrate(text) {
+  if (!narrationOk || !text) return;
+  const el = ensureNarrator();
+  el.textContent = text;
+  el.style.opacity = '1';
+  el.style.transform = 'translateY(0)';
+  if (narratorTimer) clearTimeout(narratorTimer);
+  narratorTimer = setTimeout(hideNarrator, 5200);
+}
+
+// --- focused-object banner (Divinity/BG3 examine-on-hover) --------------------
+// Naming whatever the cursor is over, up top, before you click it. Cosmetic +
+// non-interactive; main.js feeds it the current hover target each mouse move
+// (an { name, detail, color } object) or null to clear. The border tint tracks
+// the hover-highlight palette (hostile red, talkable green, lootable gold,
+// neutral cyan) so the banner and the world glow read as the same signal.
+let focusEl = null;
+function ensureFocusBanner() {
+  if (focusEl) return focusEl;
+  focusEl = document.createElement('div');
+  focusEl.id = 'focus-banner';
+  Object.assign(focusEl.style, {
+    position: 'fixed', top: '12px', left: '50%', transform: 'translate(-50%, -4px)',
+    zIndex: '20', pointerEvents: 'none',
+    display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center',
+    minWidth: '150px', maxWidth: 'min(520px, 66vw)', padding: '8px 18px', borderRadius: '10px',
+    background: 'rgba(20,20,32,.92)', border: '1px solid #3a3a52',
+    boxShadow: '0 6px 20px rgba(0,0,0,.5)', whiteSpace: 'nowrap',
+    opacity: '0', transition: 'opacity .12s ease, transform .12s ease',
+  });
+  document.body.appendChild(focusEl);
+  return focusEl;
+}
+
+// info: { name, sub, color, dotColor }. Tiered + centred - the name on top,
+// `sub` (HP, or the verb a click takes) beneath. When `dotColor` is set a small
+// dot flanks each side of the name; callers use it for an enemy's aggression.
+export function setFocusBanner(info) {
+  const el = ensureFocusBanner();
+  if (!info) {
+    el.style.opacity = '0';
+    el.style.transform = 'translate(-50%, -4px)';
+    return;
+  }
+  el.innerHTML = '';
+
+  const nameRow = document.createElement('div');
+  Object.assign(nameRow.style, { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '9px' });
+  const dot = () => {
+    const d = document.createElement('span');
+    Object.assign(d.style, {
+      width: '8px', height: '8px', borderRadius: '50%', flex: '0 0 auto',
+      background: info.dotColor, boxShadow: `0 0 6px ${info.dotColor}`,
+    });
+    return d;
+  };
+  if (info.dotColor) nameRow.appendChild(dot());
+  const name = document.createElement('span');
+  Object.assign(name.style, { font: '700 15px system-ui, sans-serif', letterSpacing: '.4px', color: '#f4f4fa' });
+  name.textContent = info.name;
+  nameRow.appendChild(name);
+  if (info.dotColor) nameRow.appendChild(dot());
+  el.appendChild(nameRow);
+
+  if (info.sub) {
+    const sub = document.createElement('div');
+    Object.assign(sub.style, { font: '12px system-ui, sans-serif', opacity: '.66', marginTop: '3px', letterSpacing: '.5px' });
+    sub.textContent = info.sub;
+    el.appendChild(sub);
+  }
+  el.style.borderColor = info.color || '#3a3a52';
+  el.style.opacity = '1';
+  el.style.transform = 'translate(-50%, 0)';
+}
+
+// --- loot toast ---------------------------------------------------------------
+// A short-lived notice pinned top-left, just right of the inventory button, so
+// loot pickups ("Printer: Toner Cartridge") read as a quick "you got X" instead
+// of taking over the centre HUD. One reused element: rapid loots replace the
+// text and restart the pop rather than stacking.
+let toastEl = null;
+let toastTimer = null;
+export function toast(text, ms = 2600) {
+  if (!toastEl) {
+    toastEl = document.createElement('div');
+    toastEl.id = 'loot-toast';
+    Object.assign(toastEl.style, {
+      position: 'fixed', top: '12px', left: '102px', zIndex: '26',
+      maxWidth: 'min(360px, 52vw)', padding: '7px 13px', borderRadius: '7px',
+      background: 'rgba(20,20,32,.94)', border: '1px solid #8adf76',
+      color: '#eafff0', font: '700 13px system-ui, sans-serif', letterSpacing: '.4px',
+      boxShadow: '0 6px 20px rgba(0,0,0,.5)', pointerEvents: 'none',
+      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      opacity: '0', transform: 'translateY(-6px)',
+    });
+    document.body.appendChild(toastEl);
+  }
+  toastEl.textContent = text;
+  // Replay the slide/fade even when re-fired while still on screen.
+  toastEl.style.transition = 'none';
+  toastEl.style.opacity = '0';
+  toastEl.style.transform = 'translateY(-6px)';
+  void toastEl.offsetWidth; // reflow so the reset lands before we animate in
+  toastEl.style.transition = 'opacity .18s ease, transform .18s ease';
+  toastEl.style.opacity = '1';
+  toastEl.style.transform = 'translateY(0)';
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toastEl.style.opacity = '0';
+    toastEl.style.transform = 'translateY(-6px)';
+  }, ms);
 }
 
 export function updateStatsHud(sheet) {
   const el = document.getElementById('stats');
-  if (!el) return;
-  let text = `Lv ${sheet.level} · HP ${sheet.hp}/${sheet.maxHp} · XP ${sheet.xp}/${sheet.xpNext}`;
-  if (sheet.gum > 0) text += ' · gum on shoe';
-  el.textContent = text;
+  if (el) el.textContent = `Lv ${sheet.level} · HP ${sheet.hp}/${sheet.maxHp} · XP ${sheet.xp}/${sheet.xpNext}`;
+  renderStatusEffects(sheet);
+}
+
+// --- player status effects ----------------------------------------------------
+// Transient effects stacked just above the bottom-left stats - gum, bleeding,
+// and any temporary buffs. NOT the class talent, which is a permanent trait,
+// not a status. Buffs read green, debuffs amber - the same good/bad language as
+// the enemy aggression dots. Rebuilt on every stats refresh (each effect change
+// already pokes updateStatsHud), so it appears/clears in step with the effect.
+let statusEl = null;
+function ensureStatusList() {
+  if (statusEl) return statusEl;
+  statusEl = document.createElement('div');
+  statusEl.id = 'status-effects';
+  Object.assign(statusEl.style, {
+    position: 'fixed', left: '12px', bottom: '48px', zIndex: '6',
+    display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start',
+    pointerEvents: 'none', font: '12px system-ui, sans-serif',
+  });
+  document.body.appendChild(statusEl);
+  return statusEl;
+}
+
+function effectChips(sheet) {
+  const chips = [];
+  if (sheet.gum > 0) chips.push({ icon: '🍬', label: 'Gum on shoe', good: false });
+  if (sheet.bleed > 0) chips.push({ icon: '🩸', label: 'Bleeding', good: false });
+  return chips;
+}
+
+function renderStatusEffects(sheet) {
+  const el = ensureStatusList();
+  el.innerHTML = '';
+  if (!sheet) return;
+  for (const c of effectChips(sheet)) {
+    const chip = document.createElement('div');
+    chip.className = 'status-chip';
+    chip.textContent = `${c.icon} ${c.label}`;
+    const accent = c.good ? '#6fc86f' : '#e0b23a';
+    Object.assign(chip.style, {
+      padding: '3px 9px', borderRadius: '6px', whiteSpace: 'nowrap', letterSpacing: '.3px',
+      background: 'rgba(20,20,32,.72)', border: `1px solid ${accent}`, color: '#eef',
+    });
+    el.appendChild(chip);
+  }
 }
 
 // A soft radial vignette over the whole viewport - pure atmosphere, makes the
@@ -536,7 +734,9 @@ export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
 
 // Always-available corner menu (restart the run, open the editor) - the class
 // picker is skipped mid-campaign, so these need a home that is always there.
-export function showGameMenu(items) {
+// `hints` (optional) are non-clickable shortcut reminders tucked below the
+// actions, so the HUD itself stays clean.
+export function showGameMenu(items, hints = null) {
   const btn = document.createElement('button');
   btn.id = 'game-menu-btn';
   btn.textContent = '☰';
@@ -563,6 +763,28 @@ export function showGameMenu(items) {
     row.onmouseleave = () => { row.style.background = 'transparent'; };
     row.onclick = () => { menu.style.display = 'none'; it.action(); };
     menu.appendChild(row);
+  }
+  // Shortcut reminders live here now, out of the HUD's way - a muted,
+  // non-clickable block under a divider.
+  if (hints && hints.length) {
+    const divider = document.createElement('div');
+    Object.assign(divider.style, { borderTop: '1px solid #3a3a52', margin: '5px 6px' });
+    menu.appendChild(divider);
+    const title = document.createElement('div');
+    title.textContent = 'SHORTCUTS';
+    Object.assign(title.style, {
+      padding: '2px 11px 4px', font: '700 10px system-ui, sans-serif',
+      letterSpacing: '1.5px', opacity: '.5',
+    });
+    menu.appendChild(title);
+    for (const h of hints) {
+      const row = document.createElement('div');
+      row.textContent = h;
+      Object.assign(row.style, {
+        padding: '3px 11px', opacity: '.65', whiteSpace: 'nowrap', cursor: 'default',
+      });
+      menu.appendChild(row);
+    }
   }
   btn.onclick = () => { menu.style.display = menu.style.display === 'none' ? 'block' : 'none'; };
   window.addEventListener('mousedown', (e) => {

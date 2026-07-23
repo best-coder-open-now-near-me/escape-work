@@ -171,6 +171,7 @@ export function buildLevel(app, grid, { picking = null } = {}) {
   return {
     walls, updateWallFade, animateSurfaces: r.animate,
     addFlame: r.addFlame, explosionFlash: r.explosionFlash,
+    addSmoke: r.addSmoke, removeSmoke: r.removeSmoke,
     hideSurfaceVisual, addSurfaceVisual, removePropVisual,
     refreshDoor: renderDoorAt,
     floorHeight: r.floorHeight,

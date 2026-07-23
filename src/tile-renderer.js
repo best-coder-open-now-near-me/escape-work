@@ -42,10 +42,18 @@ export function createTileRenderer(app) {
     surfaceMats[id] = makeMaterial(def.color, { gloss: 0.85, opacity: 0.88 });
     ringMats[id] = makeMaterial(def.color.map((v) => v * 0.5), { gloss: 0.25, opacity: 0.5 });
   }
-  const paperMat = makeMaterial(SURFACES.paper.color, { gloss: 0.2 });
+  // A few near-identical paper tints so scattered sheets don't read as one flat
+  // mass - some catch a little more light than others.
+  const paperTints = [-0.04, 0, 0.035].map((d) =>
+    makeMaterial(SURFACES.paper.color.map((v) => Math.min(1, v + d)), { gloss: 0.18 }));
   const electricMat = makeMaterial(ELECTRIFIED.color, { opacity: 0.92, gloss: 0.85, emissive: [0.25, 0.5, 0.65] });
   const fireMat = makeMaterial(FIRE.color, { opacity: 0.92, emissive: [0.9, 0.35, 0.05] });
   const fireCore = makeMaterial([1, 0.8, 0.3], { opacity: 0.95, emissive: [0.95, 0.7, 0.2] });
+  // Smoke: a low, translucent grey cloud over a burnt-out tile. It blocks line
+  // of sight for a couple of turns (the runtime owns that rule); here it's just
+  // a few drifting lobes.
+  const smokeMat = makeMaterial([0.36, 0.36, 0.4], { opacity: 0.4, gloss: 0.05 });
+  const smokeVisuals = new Map(); // "x,z" -> { holder, puffs }
   const trashMat = makeMaterial(TILE_TYPES.trash.color, { gloss: 0.4 });
   const printerMat = makeMaterial(TILE_TYPES.printer.color, { gloss: 0.5 });
   const printerDark = makeMaterial([0.2, 0.2, 0.24], { gloss: 0.3 });
@@ -213,18 +221,29 @@ export function createTileRenderer(app) {
     return holder;
   }
 
-  // Scattered sheets: thin pale rectangles at odd angles.
+  // Loose sheets, scattered. The old look stamped the SAME little stack on
+  // every tile, so a multi-tile drift read as a row of identical clusters.
+  // Instead each sheet gets its own hashed position (spread across the whole
+  // tile and reaching the edges, so neighbouring paper tiles intermingle into
+  // one spread), rotation, size and tint, and the count varies per tile - a
+  // continuous mess of paper rather than repeated clusters. A per-tile base
+  // height plus a tiny per-sheet rise keeps overlapping sheets from z-fighting.
   function addPaper(x, z) {
     const holder = new pc.Entity();
-    for (const [ox, oz, ry, s] of [[0, 0, 15, 0.42], [0.2, 0.16, 70, 0.34], [-0.18, -0.1, 40, 0.3], [-0.05, 0.22, 110, 0.28]]) {
+    const baseY = hash01(x, z, 50) * 0.014;
+    const n = 6 + Math.floor(hash01(x, z, 99) * 3); // 6-8 sheets
+    for (let i = 0; i < n; i++) {
+      const ox = (hash01(x, z, i * 4 + 1) - 0.5) * 0.86;
+      const oz = (hash01(x, z, i * 4 + 2) - 0.5) * 0.86;
+      const ry = hash01(x, z, i * 4 + 3) * 360;
+      const s = 0.24 + hash01(x, z, i * 4 + 4) * 0.15; // 0.24-0.39
       const e = new pc.Entity();
-      e.addComponent('render', { type: 'box', material: paperMat });
-      e.setLocalScale(s, 0.02, s * 0.72);
-      e.setLocalPosition(ox, 0, oz);
+      e.addComponent('render', { type: 'box', material: paperTints[i % paperTints.length] });
+      e.setLocalScale(s, 0.02, s * 0.74);
+      e.setLocalPosition(ox, baseY + 0.006 * i, oz);
       e.setLocalEulerAngles(0, ry, 0);
       holder.addChild(e);
     }
-    holder.setEulerAngles(0, ((x * 61 + z * 89) % 8) * 45, 0);
     holder.setPosition(x, surfaceTop, z);
     app.root.addChild(holder);
     return holder;
@@ -392,6 +411,34 @@ export function createTileRenderer(app) {
     return holder;
   }
 
+  // A drifting smoke puff over a burnt tile - a few translucent lobes that bob
+  // (animate() drives the bob). Keyed by cell so the runtime can clear it.
+  function addSmoke(x, z) {
+    const k = x + ',' + z;
+    if (smokeVisuals.has(k)) return smokeVisuals.get(k).holder;
+    const holder = new pc.Entity();
+    const puffs = [];
+    const lobes = [[0, 0.55, 0, 0.52], [0.24, 0.66, 0.12, 0.36], [-0.22, 0.62, -0.12, 0.32], [0.06, 0.82, -0.16, 0.28]];
+    for (const [ox, oy, oz, s] of lobes) {
+      const p = new pc.Entity();
+      p.addComponent('render', { type: 'sphere', material: smokeMat });
+      p.render.castShadows = false;
+      p.setLocalScale(s, s * 0.8, s);
+      p.setLocalPosition(ox, oy, oz);
+      holder.addChild(p);
+      puffs.push({ e: p, baseY: oy, phase: x * 12.9 + z * 7.7 + puffs.length * 2.1 });
+    }
+    holder.setPosition(x, floorDef.height / 2, z);
+    app.root.addChild(holder);
+    smokeVisuals.set(k, { holder, puffs });
+    return holder;
+  }
+  function removeSmoke(x, z) {
+    const k = x + ',' + z;
+    const s = smokeVisuals.get(k);
+    if (s) { s.holder.destroy(); smokeVisuals.delete(k); }
+  }
+
   // A brief expanding toner-cloud boom.
   function explosionFlash(x, z) {
     const e = new pc.Entity();
@@ -419,10 +466,17 @@ export function createTileRenderer(app) {
     electricMat.emissiveIntensity = Math.max(0.15, pulse);
     fireMat.emissiveIntensity = 0.75 + 0.3 * Math.sin(clock * 11) + 0.15 * Math.sin(clock * 29);
     fireCore.emissiveIntensity = 0.85 + 0.25 * Math.sin(clock * 17 + 1);
+    for (const { puffs } of smokeVisuals.values()) {
+      for (const pf of puffs) {
+        const p = pf.e.getLocalPosition();
+        pf.e.setLocalPosition(p.x, pf.baseY + 0.05 * Math.sin(clock * 1.4 + pf.phase), p.z);
+      }
+    }
   }
 
   return {
     renderFloor, renderMarker, renderEdgeWall, renderDoor, addFlame, explosionFlash, animate,
+    addSmoke, removeSmoke,
     tileMats, wallGhost, doorMat, doorGhost, floorHeight: floorDef.height,
   };
 }
