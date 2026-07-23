@@ -114,3 +114,20 @@ test('a player-summoned ally fights for you, then vanishes when the fight ends',
   await expect.poll(() => page.evaluate(() => window.__game.summons.length),
     { timeout: 20_000 }).toBe(0);
 });
+
+test('the HR class posts the role, staffing your side of the fight', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, MELEE_ARENA, 'human-resources');
+  await enterCombat(page);
+
+  // Post the Role is on the bar, and no applicants have shown up yet.
+  await expect(page.locator('#act-summon-applicants')).toBeVisible();
+  expect(await page.evaluate(() => window.__game.summons.length)).toBe(0);
+
+  // Click it: two applicants report for duty on YOUR side (summons, not enemies).
+  await page.click('#act-summon-applicants');
+  await expect.poll(() => page.evaluate(() => window.__game.summons.length),
+    { timeout: 15_000 }).toBe(2);
+  expect(await page.evaluate(() =>
+    (window.__combat.enemies || []).some((e) => e.name === 'Applicant'))).toBe(false);
+});

@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { unitCombat } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
+import { ACTIONS } from '../../src/data/actions.js';
 
 // Resolve a summon descriptor's archetype id the way world.spawnSummon does.
 const archetypeOf = (id) => CLASSES[id] || ENEMY_TYPES[id];
@@ -82,4 +83,28 @@ test('enemy summon descriptors reference a valid, combat-ready archetype', () =>
 test('HR is a summoner; its applicants are worth no XP (spawner, not farm)', () => {
   assert.ok(ENEMY_TYPES.hr.summon, 'HR has a summon power');
   assert.equal(unitCombat(archetypeOf(ENEMY_TYPES.hr.summon.archetype)).xp, 0);
+});
+
+// Every summon ACTION (the player-facing power) must reference a real,
+// combat-ready archetype with a sane cost/cap - the same guard as the enemy
+// descriptors, on the other side of the ledger.
+test('summon actions reference a valid, combat-ready archetype', () => {
+  const summonActions = Object.entries(ACTIONS).filter(([, a]) => a.type === 'summon');
+  assert.ok(summonActions.length >= 1, 'at least one summon action exists');
+  for (const [id, a] of summonActions) {
+    const arch = archetypeOf(a.archetype);
+    assert.ok(arch, `${id}.archetype "${a.archetype}" resolves`);
+    assert.ok(unitCombat(arch).attacks.length > 0, `${id}'s summon can fight`);
+    assert.ok(a.count >= 1, `${id}.count >= 1`);
+    assert.ok((a.cap ?? a.count) >= a.count, `${id}.cap >= count`);
+    assert.ok(a.ap > 0, `${id}.ap costs something`);
+  }
+});
+
+test('Human Resources is a playable summoner class', () => {
+  const hr = CLASSES['human-resources'];
+  assert.ok(hr, 'the HR class exists');
+  assert.notEqual(hr.playable, false); // shows in the picker
+  assert.ok(hr.actions.includes('summon-applicants'), 'HR carries Post the Role');
+  assert.equal(ACTIONS['summon-applicants'].type, 'summon');
 });

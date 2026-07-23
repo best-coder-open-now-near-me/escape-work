@@ -74,6 +74,24 @@ export const CLASSES = {
     },
   },
 
+  'human-resources': {
+    name: 'Human Resources',
+    model: 'hr', // the HR rig already ships (assets/characters/hr.glb)
+    tagline: 'Doesn\'t fight so much as staff. Brings friends to your review.',
+    experience: 'People Ops "Business Partner". Owns the offsite. Tenure: undisclosed.',
+    maxHp: 20,
+    ap: 6,
+    bonusDmg: 0,
+    // Post the Role summons applicants to fight for you; Deflect Blame and
+    // Coffee Break round out a support kit that survives while the temps swing.
+    actions: ['summon-applicants', 'defend', 'coffee'],
+    talent: {
+      name: 'Open Door Policy',
+      blurb: 'The door is always open. So is the req. There is always another applicant.',
+      effects: {}, // flavor for now; a summon-scaling effect can land later
+    },
+  },
+
   // --- summoned, never chosen -------------------------------------------------
   // The applicant is a class with no résumé worth reading: spawned by an HR
   // summon (data/enemies.js hr.summon, and later the HR class's Post the Role),

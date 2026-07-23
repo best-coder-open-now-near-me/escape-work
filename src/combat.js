@@ -678,6 +678,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       fx.damageText(active.actor.x, active.actor.z, `+${a.amount}`, '#8adf76');
       log(a.log);
       refresh();
+    } else if (a.type === 'summon') {
+      // Post the role: applicants report for duty on your side, up to the
+      // action's live cap. Instant, like heal/defend - no target to pick.
+      if (a.uses && active.usesLeft[id] <= 0) return;
+      const n = resolveSummon(active.actor, 'player', a);
+      if (n <= 0) { log('No room - the applicants can\'t find a free desk.'); return; }
+      if (a.uses) active.usesLeft[id] -= 1;
+      active.ap -= a.ap;
+      active.actor.lunge();
+      log(`${a.log} ${n} report${n === 1 ? 's' : ''} for duty.`);
+      refresh();
     }
   }
   // End Turn queues through the party: it ends the ACTIVE member's turn and

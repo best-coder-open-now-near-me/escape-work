@@ -252,10 +252,15 @@ applicants.)
    player action exists yet. Ally units fight for you and vanish on victory;
    their death is never a loss. This PR absorbs the AI-driver refactor
    milestone 1 deferred.
-3. **The HR summon power.** `type: 'summon'` action handling in combat.js; the
-   `summon-applicants` action; the **Human Resources** playable class + picker
-   filter. Pick HR, enter a fight, post the role, watch applicants swarm the
-   Manager. The headline player-facing payoff.
+3. **The HR summon power.** ✅ Landed. `type: 'summon'` handling in combat.js's
+   `onActionButton` (instant, like heal/defend - spends AP, respects `uses`,
+   files onto team `'player'` via resolveSummon); the `summon-applicants`
+   action (**Post the Role**: 2 applicants, live cap 3, 2 uses/fight); the
+   **Human Resources** playable class (`hr.glb`, `summon-applicants` + defend +
+   heal, *Open Door Policy* talent). The picker filter from milestone 1 shows
+   HR automatically. Pick HR, enter a fight, post the role, watch applicants
+   report for duty. Covered by a `summons.spec.js` e2e; the carousel e2e gains
+   HR to its lineup. The headline player-facing payoff.
 4. **Balance, content & polish.** Tune caps/cooldowns/HP/XP and HR's summon
    cadence; rebalance any floor that HR now over-defends; flavor lines for
    applicant attacks and summon events; `__god`/`__combat`/`__game` debug
