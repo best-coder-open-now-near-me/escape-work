@@ -18,6 +18,44 @@ export function say(text) {
   if (el) el.textContent = text;
 }
 
+// --- loot toast ---------------------------------------------------------------
+// A short-lived notice pinned top-left, just right of the inventory button, so
+// loot pickups ("Printer: Toner Cartridge") read as a quick "you got X" instead
+// of taking over the centre HUD. One reused element: rapid loots replace the
+// text and restart the pop rather than stacking.
+let toastEl = null;
+let toastTimer = null;
+export function toast(text, ms = 2600) {
+  if (!toastEl) {
+    toastEl = document.createElement('div');
+    toastEl.id = 'loot-toast';
+    Object.assign(toastEl.style, {
+      position: 'fixed', top: '12px', left: '102px', zIndex: '26',
+      maxWidth: 'min(360px, 52vw)', padding: '7px 13px', borderRadius: '7px',
+      background: 'rgba(20,20,32,.94)', border: '1px solid #8adf76',
+      color: '#eafff0', font: '700 13px system-ui, sans-serif', letterSpacing: '.4px',
+      boxShadow: '0 6px 20px rgba(0,0,0,.5)', pointerEvents: 'none',
+      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      opacity: '0', transform: 'translateY(-6px)',
+    });
+    document.body.appendChild(toastEl);
+  }
+  toastEl.textContent = text;
+  // Replay the slide/fade even when re-fired while still on screen.
+  toastEl.style.transition = 'none';
+  toastEl.style.opacity = '0';
+  toastEl.style.transform = 'translateY(-6px)';
+  void toastEl.offsetWidth; // reflow so the reset lands before we animate in
+  toastEl.style.transition = 'opacity .18s ease, transform .18s ease';
+  toastEl.style.opacity = '1';
+  toastEl.style.transform = 'translateY(0)';
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toastEl.style.opacity = '0';
+    toastEl.style.transform = 'translateY(-6px)';
+  }, ms);
+}
+
 export function updateStatsHud(sheet) {
   const el = document.getElementById('stats');
   if (!el) return;

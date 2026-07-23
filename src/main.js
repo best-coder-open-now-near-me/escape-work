@@ -1125,18 +1125,11 @@ function startGame(level) {
         return s.behind ? null : s;
       });
     }
-    // Follow the player, gently biased toward the map centre so corner spawns
-    // don't leave half the frame empty. Track the entity's CONTINUOUS position
-    // (player.x/z is the logical tile, which jumps a whole tile at a time and
-    // makes the camera step along with the walk).
+    // Follow the player, keeping them centred in frame. Track the entity's
+    // CONTINUOUS position (player.x/z is the logical tile, which jumps a whole
+    // tile at a time and makes the camera step along with the walk).
     const pp = player.entity ? player.entity.getPosition() : player;
-    // While the class carousel is up (no sheet yet), look dead at the
-    // candidate so they sit centred in frame; in play, bias toward the map
-    // centre so corner spawns don't leave half the frame empty.
-    controls.follow(sheet ? {
-      x: pp.x * 0.82 + ((grid.width - 1) / 2) * 0.18,
-      z: pp.z * 0.82 + ((grid.height - 1) / 2) * 0.18,
-    } : { x: pp.x, z: pp.z }, dt);
+    controls.follow({ x: pp.x, z: pp.z }, dt);
     updateWallFade(controls.cameraEntity, player.entity ? player.entity.getPosition() : null);
   });
 

@@ -52,7 +52,7 @@ export function createLooting({ app, grid, runtime, player, enemies, getSheet, i
     }
     let msg = `${from}: ${taken.length ? taken.join(', ') : 'nothing'}.`;
     if (overflowed) msg += ' Pockets full - the rest hits the floor.';
-    ui.say(msg);
+    ui.toast(msg);
     invPanel.refresh(sheet);
   }
 
@@ -65,7 +65,7 @@ export function createLooting({ app, grid, runtime, player, enemies, getSheet, i
     const key = x + ',' + z;
     if (!containerLoot.has(key)) containerLoot.set(key, rollLoot(LOOT_TABLES[def.loot]));
     const items = containerLoot.get(key);
-    if (!items.length) { ui.say(`${def.label}: nothing left but disappointment.`); return; }
+    if (!items.length) { ui.toast(`${def.label}: nothing left but disappointment.`); return; }
     containerLoot.set(key, []);
     receiveItems(items, def.label);
   }
@@ -73,7 +73,7 @@ export function createLooting({ app, grid, runtime, player, enemies, getSheet, i
   function lootBody(en) {
     if (!en || en.alive || isInCombat() || isGameOver()) return;
     const items = en.loot || [];
-    if (!items.length) { ui.say(`${en.def.name} has nothing left to give. Fitting.`); return; }
+    if (!items.length) { ui.toast(`${en.def.name} has nothing left to give. Fitting.`); return; }
     en.loot = [];
     receiveItems(items, `${en.def.name}'s pockets`);
   }
