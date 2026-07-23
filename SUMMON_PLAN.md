@@ -261,11 +261,17 @@ applicants.)
    HR automatically. Pick HR, enter a fight, post the role, watch applicants
    report for duty. Covered by a `summons.spec.js` e2e; the carousel e2e gains
    HR to its lineup. The headline player-facing payoff.
-4. **Balance, content & polish.** Tune caps/cooldowns/HP/XP and HR's summon
-   cadence; rebalance any floor that HR now over-defends; flavor lines for
-   applicant attacks and summon events; `__god`/`__combat`/`__game` debug
-   surfaces finalized; timed-expiry and a dedicated applicant `.glb` noted as
-   future work.
+4. **Balance, content & polish.** ✅ Landed (the non-playtest slice). Side-neutral
+   applicant attack lines (they fight on either team); `ARCHITECTURE.md`
+   documents the summon system (growth path, the `playable`/AI-fields class
+   note, and the `__game`/`__combat` debug surface); `__god.spawnEnemy` resolves
+   class archetypes and registers picking, plus a `__god.summonAlly` console
+   twin of Post the Role for tuning. **Deferred to real playtest** (needs hands
+   on the game, not code): final caps/cooldowns/HP/XP numbers and HR's summon
+   cadence, any floor rebalance for HR's new staying power, timed-expiry summons,
+   and a dedicated applicant `.glb`. The shipped defaults (enemy cap 2 /
+   cooldown 2; player cap 3 / 2 uses; applicant 5 HP, 0 XP) are a sane starting
+   point, all in data.
 
 ## Testing
 

@@ -113,9 +113,11 @@ export const CLASSES = {
     attackAp: 3,
     xp: 0,
     loot: [],
+    // Side-neutral flavor: applicants fight on either team, so no line
+    // addresses "you" - it reads the same whoever they're swinging at.
     attacks: [
-      { min: 1, max: 2, log: 'An applicant waves a résumé in your face.' },
-      { min: 1, max: 3, log: 'An applicant asks if this "counts as an interview".' },
+      { min: 1, max: 2, log: 'An applicant brandishes a résumé.' },
+      { min: 1, max: 3, log: 'An applicant asks about the growth trajectory.' },
       { min: 1, max: 2, log: 'An applicant follows up. And follows up again.' },
     ],
   },

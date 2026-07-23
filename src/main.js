@@ -1933,16 +1933,23 @@ function startGame(level) {
       scene.refreshDoor(key);
       for (const e of enemies) e.clearPath(); // their routes may have changed
     },
+    // Resolves an ENEMY_TYPES id or a class archetype (e.g. 'applicant'), so a
+    // tester can drop class-based units to feel out balance.
     spawnEnemy(typeId, x, z) {
-      const def = ENEMY_TYPES[typeId];
+      const def = ENEMY_TYPES[typeId] || CLASSES[typeId];
       if (!def) return null;
       const en = new EnemyActor(x, z, typeId, def);
       enemies.push(en);
       placeModel(app, `assets/characters/${def.model}.glb`, x, z, {
         lift, rotY: -90, animate: true,
-        onReady: (e) => { applyCharacterProportions(e); en.attach(e); },
+        onReady: (e) => { applyCharacterProportions(e); en.attach(e); picking.register(e, 'enemy', en); },
       });
       return en;
+    },
+    // Drop a player-team summon beside the active member (combat only) - the
+    // console-side twin of the HR class's Post the Role, for tuning.
+    summonAlly(archetypeId = 'applicant', n = 1) {
+      return window.__combat ? window.__combat.summonAlly(archetypeId, n) : 0;
     },
     giveItem(id) {
       if (!sheet) return;
