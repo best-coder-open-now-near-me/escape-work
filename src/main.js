@@ -880,7 +880,7 @@ function startGame(level) {
     // The carousel: frame the spawn tile close and head-on (eye-ish level,
     // aimed at the chest) where previewClass parades the browsed candidate;
     // onClassPicked restores the tactical camera.
-    controls.setView({ dist: 2, pitch: 14, focusY: 0.85 });
+    controls.setView({ dist: 1, pitch: 14, focusY: 0.85 });
     app.on('update', previewSpin);
     ui.showClassPicker(CLASSES, ACTIONS, onClassPicked, () => {
       location.hash = '#editor';
