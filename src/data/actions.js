@@ -6,6 +6,8 @@
 //   attack - rolls min..max (+ the character sheet's bonusDmg)
 //   defend - halves the next incoming hit
 //   heal   - restores `amount` HP, limited to `uses` per fight
+//   summon - conjures `count` AI allies of `archetype` (a class id) on your
+//            side, up to a live `cap`; instant, `uses` per fight (SUMMON_PLAN)
 // Modifiers:
 //   purge (on an attack) - hitting a target also wipes their status effects,
 //   harmful and helpful alike; click your own tile while armed to self-cast
@@ -124,6 +126,22 @@ export const ACTIONS = {
     ap: 2,
     label: 'Shove',
     log: 'You shove them.',
+  },
+
+  // --- Human Resources ----------------------------------------------------------
+  // The HR class's power (SUMMON_PLAN.md): post the role and applicants report
+  // for duty on your side. `archetype` is the unit (the applicant class),
+  // `count` how many per post, `cap` how many may be live at once, `uses` how
+  // many posts per fight. Instant - no target to pick.
+  'summon-applicants': {
+    type: 'summon',
+    ap: 4,
+    archetype: 'applicant',
+    count: 2,
+    cap: 3,
+    uses: 2,
+    label: 'Post the Role',
+    log: 'You open a req. Applicants flood in -',
   },
 
   // --- talent-granted -----------------------------------------------------------

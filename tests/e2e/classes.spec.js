@@ -1,7 +1,7 @@
 // Class-specific kit: IT Support's granted kick and self-targeted purging
 // reboot, and the Mail Room's cone attack with its paper aftermath.
 import { test, expect } from '@playwright/test';
-import { bootAndPick, clickWorld, enterCombat } from './helpers.js';
+import { bootAndPick, clickWorld, enterCombat, waitStill, stableProject } from './helpers.js';
 
 test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ page }) => {
   test.setTimeout(300_000);
@@ -16,21 +16,30 @@ test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ pa
   }
   expect(await page.evaluate(() => window.__combat.armed)).toBe('reboot');
   const ap0 = await page.evaluate(() => window.__combat.ap);
-  // Click your own tile: the reboot turns YOU off and on again. The camera is
-  // still easing after combat start, so a projected click can land a tile off
-  // and lower the action instead - re-arm and retry with a fresh projection.
-  await page.waitForTimeout(800); // camera settle before projecting
+  // Click your own tile: the reboot turns YOU off and on again. The purge's
+  // self-cast is tile-based (tile === your tile), so settle first - a click
+  // taken while the camera still eases can project a tile off and lower the
+  // action instead - then aim at the TILE CENTRE (what the check compares),
+  // not the continuous body point. Re-arm and retry on a miss.
   let spent = false;
-  for (let i = 0; i < 4 && !spent; i++) {
-    if (await page.evaluate(() => window.__combat.armed) !== 'reboot') await page.click('#act-reboot');
-    const pos = await page.evaluate(() => window.__game.playerPos);
-    expect(await clickWorld(page, pos.x, pos.z)).toBe(true);
-    spent = await page.evaluate(() => window.__combat.ap)
-      .then((ap) => ap === ap0 - 3)
-      .catch(() => false);
-    if (!spent) await page.waitForTimeout(700); // let the ease finish, then retry
+  for (let i = 0; i < 6 && !spent; i++) {
+    // Re-arm only if reboot is armable (a prior mis-click could have walked
+    // and spent AP; never click a disabled button - that would hang).
+    if (await page.evaluate(() => window.__combat.armed) !== 'reboot') {
+      if (!(await page.locator('#act-reboot').isEnabled())) break;
+      await page.click('#act-reboot');
+    }
+    // Aim at the tile CENTRE (what the purge check compares), and wait for
+    // the camera to actually settle so the projection lands true - not just
+    // for the player to stop.
+    const tile = await page.evaluate(() => window.__game.playerTile);
+    const p = await stableProject(page, tile.x, tile.z);
+    await page.mouse.click(p.x, p.y);
+    // Compare in NODE - `ap0` doesn't exist in the browser page context.
+    const ap = await page.evaluate(() => window.__combat.ap).catch(() => null);
+    spent = ap === ap0 - 3;
   }
-  await expect.poll(() => page.evaluate(() => window.__combat.ap)).toBe(ap0 - 3);
+  expect(spent).toBe(true); // reboot self-cast consumed exactly its AP
   expect(await page.evaluate(() => window.__combat.armed)).toBe(null);
 });
 

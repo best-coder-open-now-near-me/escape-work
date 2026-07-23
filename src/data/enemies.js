@@ -74,5 +74,17 @@ export const ENEMY_TYPES = {
       { min: 2, max: 4, log: 'HR slides a self-evaluation form across the desk.' },
       { min: 1, max: 4, log: 'HR reminds you fun is mandatory at the offsite.' },
     ],
+    // HR's power (SUMMON_PLAN.md): posts the role and applicants materialize to
+    // fight for it. `archetype` names a unit (the `applicant` class); `cap` is
+    // how many it may have live at once; `cooldownRounds` is the wait between
+    // reqs; `ap` is what the post costs its turn. The combat AI reads this.
+    summon: {
+      archetype: 'applicant',
+      count: 2,
+      cap: 2,
+      cooldownRounds: 2,
+      ap: 3,
+      log: 'HR posts the role internally. Applicants materialize, résumés in hand.',
+    },
   },
 };

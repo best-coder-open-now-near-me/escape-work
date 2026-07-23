@@ -67,6 +67,24 @@ export async function clickWorld(page, x, z) {
   return true;
 }
 
+// Wait until a world point's PROJECTION stops moving, then return its stable
+// screen point. The camera eases toward the player for a beat after they stop
+// (waitStill sees the player still, but the camera is not), so a projected
+// click taken too early lands a tile off and walks. Polling the projection
+// itself detects the camera settling directly.
+export async function stableProject(page, x, z, timeout = 20_000) {
+  let last = null;
+  let stable = null;
+  await expect.poll(async () => {
+    const p = await page.evaluate(([wx, wz]) => window.__game.project(wx, wz), [x, z]);
+    const ok = last && Math.abs(p.x - last.x) < 1.5 && Math.abs(p.y - last.y) < 1.5;
+    last = p;
+    if (ok) stable = p;
+    return ok;
+  }, { timeout, intervals: [150] }).toBe(true);
+  return stable;
+}
+
 // Wait until the player's continuous position stops changing.
 export async function waitStill(page, timeout = 60_000) {
   let last = null;
@@ -100,24 +118,36 @@ export async function combatOrWalkDone(page, capMs) {
 const onCanvas = (page, p) => page.evaluate(
   ([x, y]) => document.elementFromPoint(x, y)?.id === 'app', [p.x, p.y]);
 
-// Click live enemies round-robin until a fight starts - they wander inside a
-// small leash (so a single long walk-up can arrive a tile short), and some
-// start behind closed doors where no walk-up route exists at all. Each
-// click's walk plays out fully before the next attempt.
+// Click live enemies until a fight starts. Two things make a naive round-robin
+// flaky: some coworkers spawn SEALED behind walls + a closed door (no walk-up
+// route ever exists - clicking them silently does nothing and wastes the
+// attempt), and wanderers can drift a tile out of reach between attempts. So
+// we target only enemies the game reports as `reachable` right now, nearest
+// first, and re-query every attempt so a coworker who just wandered into reach
+// becomes eligible. Each click's walk plays out fully before the next attempt.
 export async function enterCombat(page) {
   let inCombat = false;
-  for (let i = 0; i < 8 && !inCombat; i++) {
-    const ens = await page.evaluate(() => window.__game.enemies.filter((e) => e.alive));
+  for (let i = 0; i < 10 && !inCombat; i++) {
+    const pt = await page.evaluate(() => window.__game.playerTile);
+    const ens = await page.evaluate(() => window.__game.enemies.filter((e) => e.alive && e.reachable));
+    if (!ens.length) { await page.waitForTimeout(700); continue; } // all sealed/far - let them wander
+    ens.sort((a, b) => // nearest first: shortest walk-up, most likely on-screen
+      Math.max(Math.abs(a.x - pt.x), Math.abs(a.z - pt.z))
+      - Math.max(Math.abs(b.x - pt.x), Math.abs(b.z - pt.z)));
     const en = ens[i % ens.length];
     // Aim at the BODY, not the floor under it: the pick ray lands on the
     // enemy mesh (more accurate), and a chest-height point clears the fixed
-    // bottom UI band far more often. Fall back to the ground point, and only
-    // skip when both are covered or off-screen.
-    let p = await page.evaluate(([x, z]) => window.__game.project3(x, 0.9, z), [en.x, en.z]);
+    // bottom UI band far more often. Use the CONTINUOUS body position (px/pz)
+    // - wanderers stand at loose points, and a chest-height ray at the tile
+    // centre can miss the narrow mesh and fall to the floor behind them.
+    // Fall back to the ground-tile point (resolved by tile, so it can't
+    // miss), and only skip when both are covered or off-screen.
+    let p = await page.evaluate(
+      ([x, z]) => window.__game.project3(x, 0.9, z), [en.px ?? en.x, en.pz ?? en.z]);
     if (!onScreen(p) || !(await onCanvas(page, p))) {
       p = await page.evaluate(([x, z]) => window.__game.project(x, z), [en.x, en.z]);
     }
-    if (!onScreen(p) || !(await onCanvas(page, p))) continue; // unreachable by click - next
+    if (!onScreen(p) || !(await onCanvas(page, p))) continue; // covered by UI - next
     await page.mouse.click(p.x, p.y);
     inCombat = await combatOrWalkDone(page, 25_000);
   }

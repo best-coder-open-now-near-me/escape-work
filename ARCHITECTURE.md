@@ -158,7 +158,19 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   (camera, hotbar, HUD, pockets, menu verbs, follower set); in combat it
   moves combat's `active` pointer (their action bar, their AP - switching is
   free and reversible, DOS-style), and when the fight ends the out-of-combat
-  bindings follow whoever had the floor (`syncLeaderBindings`). **Downed**:
+  bindings follow whoever had the floor (`syncLeaderBindings`). **End Turn
+  queues**: it ends the ACTIVE member's turn and auto-advances to the next
+  member who hasn't ended (the button reads "Next Member" until the last
+  hand-off gives the round to the enemies); manual switching back to a
+  passed member still works - `done` gates only the auto-advance. In-combat
+  clicks check the pick ray for BODIES first (a teammate's body switches, a
+  coworker's body targets - the rings mark bodies, and the ground tile
+  behind a tall mesh is a mis-walk); ground clicks stay tile-based for
+  movement, and a member's combat route treats allies as blockers so a move
+  never ends stacked on a teammate. **Hold Ctrl** to draw a ground ring at
+  every character's TRUE position (party teal, hostiles red, NPCs green, the
+  downed gold) - tall meshes read a tile off at this camera angle - and to
+  get the hover body-highlight + focus banner inside combat too. **Downed**:
   a member at 0 HP topples and sits out; the run only ends on a party WIPE.
   If the member you're controlling falls, a survivor steps up on the spot -
   in combat via `combat.notifyMemberDown`/the enemy-attack handoff, outside
@@ -185,8 +197,9 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   `window.__editor` expose read-only state; the e2e tests assert against
   them and click through their `project()` / `project3()` helpers (CSS
   pixels - `project3` aims at a world point at any height, for tall meshes).
-  `__game` also exposes `npcs`, `party`, `armed` (hotbar), `hoverKind`,
-  `cursor`, and `dialogueOpen`. Keep them in sync when adding state. `window.__god` is the
+  `__game` also exposes `npcs`, `party`, `summons`, `armed` (hotbar),
+  `hoverKind`, `cursor`, and `dialogueOpen`; `__combat` exposes `summons` and a
+  `summonAlly(archetypeId, n)` test hook. Keep them in sync when adding state. `window.__god` is the
   exception: it hands out LIVE references and mutators for the god-mode panel
   (god.js) to edit runtime state in place - including the party
   (`__god.party`, `switchTo`, `reviveMember`, `recruit`; the panel's Player
@@ -246,6 +259,22 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   an adjacent enemy one tile away - into a wall for a slam, or into whatever
   surface is waiting for them. Fire keeps burning during combat; printer
   explosions still resolve (combat prunes the dead).
+- **Summons** (SUMMON_PLAN.md): a combat action `type: 'summon'`, or an enemy's
+  `summon` descriptor, conjures temporary AI units on the summoner's side. A
+  unit is an `archetype` id resolved from CLASSES (or ENEMY_TYPES) through
+  `stats.js` `unitCombat` - the `applicant` class is the first (weak,
+  `playable: false`, worth no XP or loot, so a summoner is a spawner not a
+  farm). Every AI combatant carries a `team` (`'player'`/`'enemy'`); combat.js's
+  one AI driver hunts the nearest hostile on the OPPOSITE team, so enemies
+  target the party AND your summons, and your summons target enemies. Player
+  summons act on the `allies` phase (player -> allies -> enemies), live in
+  main.js's `summons` list (they block enemies but stay pass-through for the
+  party), ring friendly on Ctrl, and are despawned when the fight ends - never
+  saved, and their death is never a game-over. Enemy summons join `enemies` and
+  reuse every enemy system. Caps + cooldowns are data: the HR enemy's `summon`
+  (data/enemies.js) and the HR class's Post the Role (`summon-applicants`,
+  data/actions.js). `world.spawnSummon` + `freeTilesNear` (main.js) place them;
+  `resolveSummon` (combat.js) enforces the live cap.
 - **New furniture/prop**: a tile entry with `model` (a .glb under `assets/`) and
   `solid: true` - it blocks movement and renders as the model in both game and
   editor. Props are level data, never hardcoded set dressing.
@@ -267,7 +296,10 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   `sheet.actions` (see `stats.js`).
 - **New class**: entry in `data/classes.js` (stats, model, action ids) - the
   boot-time class picker (`ui.showClassPicker`) renders cards straight from the
-  registry, so new classes appear automatically.
+  registry, so new classes appear automatically. `playable: false` hides a
+  class from the picker (it's a summon/AI archetype, not a career); optional
+  AI-combat fields (attacks, attackAp, xp, loot) let a class back an AI-driven
+  unit, read via `stats.js` `unitCombat` - the on-ramp to class-based enemies.
 - **New level**: paint it in the built-in editor (link on the class picker, or
   `#editor`) and Export the JSON into `levels/`; playtest instantly via the
   localStorage stash. Registries drive the editor palette, so new tile/enemy

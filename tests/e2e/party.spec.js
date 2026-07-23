@@ -101,11 +101,29 @@ test('party combat: switch the active member, and the fight survives the leader 
   await page.click('#party-slot-0');
   await expect.poll(() => page.evaluate(() => window.__combat.party[0].active)).toBe(true);
 
-  // Wound the controlled leader to 1 HP (live god handle) and hand the round
-  // over: the Manager targets the bloodied nearest member, the leader drops,
-  // and the intern steps up instead of the fight ending.
+  // Hold Ctrl: rings under everyone, and hovering a body mid-fight glows it
+  // and names it in the banner.
+  await page.keyboard.down('Control');
+  expect(await page.evaluate(() => window.__game.ctrlHeld)).toBe(true);
+  const mp = await page.evaluate(() => {
+    const en = window.__game.enemies.find((e) => e.alive);
+    return window.__game.project3(en.px ?? en.x, 0.9, en.pz ?? en.z);
+  });
+  await page.mouse.move(mp.x, mp.y);
+  await expect.poll(() => page.evaluate(() => window.__game.hoverKind), { timeout: 10_000 }).toBe('enemy');
+  await page.keyboard.up('Control');
+  expect(await page.evaluate(() => window.__game.ctrlHeld)).toBe(false);
+
+  // Wound the controlled leader to 1 HP (live god handle), then end their
+  // turn. End Turn QUEUES through the party: the first click passes the
+  // floor to the intern, only the second hands the round to the enemies.
   await page.evaluate(() => { window.__god.player.hp = 1; window.__combat.refresh(); });
   await page.click('#combat-end-turn');
+  await expect.poll(() => page.evaluate(() => window.__combat.party[1].active)).toBe(true);
+  expect(await page.evaluate(() => window.__combat.phase)).toBe('player');
+  await page.click('#combat-end-turn');
+  // The Manager targets the bloodied nearest member, the leader drops, and
+  // the fight carries on with the intern in control instead of ending.
   await expect.poll(
     () => page.evaluate(() => window.__combat.party[0].hp === 0 && window.__combat.party[1].active),
     { timeout: 90_000 },
