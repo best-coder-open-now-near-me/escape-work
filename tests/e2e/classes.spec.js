@@ -35,7 +35,9 @@ test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ pa
     const tile = await page.evaluate(() => window.__game.playerTile);
     const p = await stableProject(page, tile.x, tile.z);
     await page.mouse.click(p.x, p.y);
-    spent = await page.evaluate(() => window.__combat.ap === ap0 - 3).catch(() => false);
+    // Compare in NODE - `ap0` doesn't exist in the browser page context.
+    const ap = await page.evaluate(() => window.__combat.ap).catch(() => null);
+    spent = ap === ap0 - 3;
   }
   expect(spent).toBe(true); // reboot self-cast consumed exactly its AP
   expect(await page.evaluate(() => window.__combat.armed)).toBe(null);
