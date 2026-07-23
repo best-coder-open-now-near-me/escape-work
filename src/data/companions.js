@@ -80,4 +80,70 @@ export const COMPANIONS = {
       },
     },
   },
+  'mail-veteran': {
+    char: 'V',
+    name: 'Mail Room Veteran',
+    model: 'worker', // shares the mail-room rig; a dedicated .glb can land later
+    examine: 'Eleven years in the mail room. Knows every corridor. Fears no wet floor.',
+    maxHp: 18,
+    ap: 6,
+    bonusDmg: 0,
+    actions: ['mail-cone', 'return-to-sender', 'snack-cart'],
+    talent: {
+      name: 'Warehouse Soles',
+      blurb: 'Eleven years of ignored wet-floor signs. Cannot slip. Ever.',
+      effects: { slipImmune: true },
+    },
+    dialogue: {
+      start: 'hi',
+      nodes: {
+        hi: {
+          text: '"You\'re moving with purpose. Nobody on this floor moves with purpose unless they\'re quitting or fleeing. Which is it?"',
+          options: [
+            { label: 'Fleeing. Escaping, technically.', next: 'escape' },
+            { label: 'Who are you?', next: 'who' },
+            { label: 'Neither. Carry on.', next: null },
+          ],
+        },
+        who: {
+          text: '"Mail room, eleven years. I\'ve pushed a cart down every corridor in this building. There\'s nothing on these floors I haven\'t delivered, dodged, or mopped around."',
+          options: [
+            { label: 'Then you know the way out. Come with me.', next: 'joined', effect: { recruit: true } },
+            { label: 'Good for you.', next: null },
+          ],
+        },
+        escape: {
+          text: '"Ha. Stairwell\'s past the far cubicles - mind the spilled coffee, it never dries. I\'d know. I\'ve routed around it for a decade."',
+          options: [
+            { label: 'Route around it WITH me. We\'re leaving.', next: 'joined', effect: { recruit: true } },
+            { label: 'Noted. Thanks.', next: null },
+          ],
+        },
+        joined: {
+          text: '"Eleven years and nobody ever asked. One second - I\'m taking the good hand truck. Okay. Follow me. Actually - I\'ll follow you. Symbolism matters."',
+          options: [
+            { label: 'Stay close.', next: null },
+          ],
+        },
+      },
+    },
+    recruitedDialogue: {
+      start: 'hi',
+      nodes: {
+        hi: {
+          text: '"Still here. Still not slipping. You get used to the floors betraying you - and then one day they simply can\'t anymore."',
+          options: [
+            { label: 'Any advice?', next: 'advice' },
+            { label: 'Keep moving.', next: null },
+          ],
+        },
+        advice: {
+          text: '"Shove the paperwork problems into the wet-floor problems. Let the problems fight each other. Eleven years of management theory, that."',
+          options: [
+            { label: 'Solid.', next: null },
+          ],
+        },
+      },
+    },
+  },
 };

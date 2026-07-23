@@ -114,6 +114,42 @@ test('party combat: switch the active member, and the fight survives the leader 
   expect(await page.evaluate(() => window.__combat.phase)).not.toBe('done');
 });
 
+// Both recruitables in one room - the roster fills to its cap of three.
+const TRIO_LEVEL = {
+  name: 'Full Roster Floor',
+  tiles: { '#': 'wall', '.': 'floor', '>': 'exit' },
+  actors: { '@': 'player', N: 'it-intern', V: 'mail-veteran' },
+  map: [
+    '##########',
+    '#........#',
+    '#.@N.V...#',
+    '#........#',
+    '#.......>#',
+    '##########',
+  ],
+};
+
+test('a full roster: both companions join and Tab cycles control', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, TRIO_LEVEL);
+  await recruitIntern(page);
+
+  // The veteran stands a short walk on - click him, walk up, sign him too.
+  expect(await clickWorld(page, 5, 2)).toBe(true);
+  await page.waitForFunction(() => window.__game.dialogueOpen, null, { timeout: 30_000 });
+  await page.click('button.dialogue-option:has-text("Who are you")');
+  await page.click('button.dialogue-option:has-text("Come with me")');
+  await page.click('button.dialogue-option:has-text("Stay close")');
+  await expect.poll(() => page.evaluate(() => window.__game.party.length)).toBe(3);
+  await expect(page.locator('#party-slot-2')).toBeVisible();
+
+  // Tab hands control around the roster.
+  await page.keyboard.press('Tab');
+  await expect.poll(() => page.evaluate(() => window.__game.party[1].active)).toBe(true);
+  await page.keyboard.press('Tab');
+  await expect.poll(() => page.evaluate(() => window.__game.party[2].active)).toBe(true);
+});
+
 test('a legacy single-sheet save loads as a one-member party', async ({ page }) => {
   test.setTimeout(300_000);
   await page.goto('/');

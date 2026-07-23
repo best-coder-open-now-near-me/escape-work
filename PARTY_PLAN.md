@@ -172,10 +172,13 @@ level's legend places them (spawn-time check against the party roster).
    party surface (a live sheet card per member with Control/Revive, a Recruit
    tool, `__god.party/switchTo/reviveMember/recruit`) and per-member AP on
    the party-bar portraits during combat.
-5. **Content + balance.** A second companion on floor 2 (a Mail Room veteran
-   fits the fiction and the unused `mail-cone` action set), encounter
-   rebalance (more/beefier enemies per floor to meet the bigger party), flavor
-   lines. New e2e specs land with each milestone, not just here.
+5. **Content + balance.** ✅ Landed. The Mail Room Veteran joins on floor 2
+   (`mail-cone` kit, Warehouse Soles slip immunity, break-room recruit
+   dialogue); floor 2 meets the bigger party with a new beefier enemy type -
+   The Executive (18 HP, harder swings, red aggression) - plus a third
+   Manager patrolling the lower floor. Floor 1 stays as-is: it's the floor
+   where the party forms, and its encounters suit a duo. e2e: a full-roster
+   test recruits both companions and Tab-cycles control across all three.
 
 ## Testing
 

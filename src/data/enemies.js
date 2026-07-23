@@ -33,6 +33,28 @@ export const ENEMY_TYPES = {
       { min: 1, max: 2, log: 'The Manager parks his gum on your shoe. A power move.', applies: 'gum' },
     ],
   },
+  executive: {
+    char: 'E',
+    name: 'The Executive',
+    model: 'midmanager',
+    hp: 18,
+    ap: 5,
+    attackAp: 3,
+    xp: 10,
+    aggression: 'red', // descended from the floors above; negotiation is beneath him
+    examine: 'An Executive, down from the floors above. The air pressure changes around him.',
+    loot: [
+      { item: 'performance-review', chance: 1 },
+      { item: 'red-stapler', chance: 0.35 },
+      { item: 'cold-coffee', chance: 0.5 },
+    ],
+    attacks: [
+      { min: 3, max: 5, log: 'The Executive restructures your reporting line.' },
+      { min: 2, max: 4, log: 'The Executive asks what it is you even do here.' },
+      { min: 2, max: 5, log: 'The Executive aligns you with the new strategy.' },
+      { min: 1, max: 2, log: 'The Executive parks his gum on your shoe. Delegation.', applies: 'gum' },
+    ],
+  },
   hr: {
     char: 'H',
     name: 'HR Representative',
