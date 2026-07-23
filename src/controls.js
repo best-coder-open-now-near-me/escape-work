@@ -62,7 +62,7 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     } else if (e.button === pc.MOUSEBUTTON_LEFT) {
       leftHeld = true;
       onAnyLeftPress && onAnyLeftPress();
-      onLeftClickTile && onLeftClickTile(screenToTile(e.x, e.y), screenToGround(e.x, e.y));
+      onLeftClickTile && onLeftClickTile(screenToTile(e.x, e.y), screenToGround(e.x, e.y), e.x, e.y);
     } else if (e.button === pc.MOUSEBUTTON_RIGHT) {
       onRightClickTile && onRightClickTile(screenToTile(e.x, e.y), e.x, e.y, screenToGround(e.x, e.y));
     }

@@ -233,6 +233,105 @@ export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine }) {
   };
 }
 
+// --- persistent attack hotbar -------------------------------------------------
+// Always-on out-of-combat action bar: the player's OFFENSIVE actions (attacks,
+// shove, thrown weapons) so a coworker can be targeted before a fight starts.
+// Arming a slot and clicking an enemy opens combat with that move (main.js
+// wires the arming + targeting). Ids are `#hotbar-act-<id>` - deliberately NOT
+// the combat bar's `#act-<id>`, so the two never collide in the DOM or tests.
+// `actions` is [{ id, label, ap, ammoCost }]; onArm(id) toggles a slot.
+export function createHotbar(actions, { onArm }) {
+  const bar = document.createElement('div');
+  bar.id = 'hotbar';
+  Object.assign(bar.style, PANEL_CHROME, {
+    position: 'fixed', left: '50%', bottom: '18px', transform: 'translateX(-50%)',
+    zIndex: '22', display: 'none', gap: '7px', padding: '8px 10px', borderRadius: '10px',
+    userSelect: 'none',
+  });
+  document.body.appendChild(bar);
+
+  const buttons = actions.map((a, i) => {
+    const b = document.createElement('button');
+    b.id = 'hotbar-act-' + a.id;
+    b.dataset.action = a.id;
+    Object.assign(b.style, BUTTON_CHROME, {
+      minWidth: '104px', padding: '7px 6px', borderRadius: '7px',
+    });
+    b.title = `${a.label} · ${a.ap}AP`;
+    b.onmousedown = (e) => e.stopPropagation(); // don't let the canvas see it
+    b.onclick = () => onArm(a.id);
+    bar.appendChild(b);
+    return { b, def: a };
+  });
+
+  let armed = null;
+  let sheet = null;
+  function render() {
+    buttons.forEach(({ b, def }, i) => {
+      let label = `${i + 1} · ${def.label}`;
+      if (def.ammoCost) label += ` (${sheet?.paper ?? 0}📄)`;
+      b.textContent = label;
+      const usable = !def.ammoCost || (sheet?.paper ?? 0) >= def.ammoCost;
+      b.disabled = !usable;
+      b.style.opacity = usable ? '1' : '.4';
+      b.style.borderColor = def.id === armed ? '#8adf76' : '#3a3a52';
+    });
+  }
+  render();
+
+  return {
+    setVisible: (v) => { bar.style.display = v ? 'flex' : 'none'; },
+    setArmed: (id) => { armed = id; render(); },
+    refresh: (s) => { sheet = s; render(); },
+    get armed() { return armed; },
+    get visible() { return bar.style.display !== 'none'; },
+  };
+}
+
+// --- dialogue -----------------------------------------------------------------
+// The minimal talking layer: a bottom panel with the speaker's name, a line,
+// and one button per response. Dumb by design - main.js owns the dialogue tree
+// (data/npcs.js) and hands over a rendered view each step. Options carry an
+// `action` the caller supplies (advance to the next node, or close).
+export function createDialoguePanel() {
+  const panel = document.createElement('div');
+  panel.id = 'dialogue-panel';
+  Object.assign(panel.style, PANEL_CHROME, {
+    position: 'fixed', left: '50%', bottom: '22px', transform: 'translateX(-50%)',
+    zIndex: '28', width: 'min(560px, 92vw)', display: 'none', borderRadius: '12px',
+    padding: '16px 18px', userSelect: 'none',
+  });
+  panel.onmousedown = (e) => e.stopPropagation(); // clicks stay off the canvas
+  document.body.appendChild(panel);
+
+  function show({ name, text, options }) {
+    panel.innerHTML = '';
+    const nm = document.createElement('div');
+    Object.assign(nm.style, { fontWeight: '700', letterSpacing: '1px', marginBottom: '6px', color: '#8adf76' });
+    nm.textContent = name;
+    panel.appendChild(nm);
+    const tx = document.createElement('div');
+    Object.assign(tx.style, { margin: '0 0 12px', lineHeight: '1.5' });
+    tx.textContent = text;
+    panel.appendChild(tx);
+    const opts = document.createElement('div');
+    Object.assign(opts.style, { display: 'flex', flexDirection: 'column', gap: '6px' });
+    options.forEach((o, i) => {
+      const b = document.createElement('button');
+      b.className = 'dialogue-option';
+      b.id = 'dialogue-option-' + i;
+      Object.assign(b.style, BUTTON_CHROME, { textAlign: 'left', padding: '8px 10px', borderRadius: '7px' });
+      b.textContent = o.label;
+      b.onclick = () => o.action();
+      opts.appendChild(b);
+    });
+    panel.appendChild(opts);
+    panel.style.display = 'block';
+  }
+  function hide() { panel.style.display = 'none'; panel.innerHTML = ''; }
+  return { show, hide, get visible() { return panel.style.display !== 'none'; } };
+}
+
 // --- end-of-game overlays ----------------------------------------------------
 function overlay(id, inner) {
   const div = document.createElement('div');

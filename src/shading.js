@@ -104,6 +104,89 @@ export function addOutlines(holder) {
   holder.addChild(shell);
 }
 
+// --- hover highlight ----------------------------------------------------------
+// A BG3/Divinity-style target glow: the SAME inverted-hull trick as the ink
+// outline, but pushed out further and drawn full-bright in a colour, so a
+// coloured rim reads around whatever the cursor is over. Built once per
+// interactable (disabled), then toggled/recoloured on hover by setHighlight -
+// per-entity, so it never touches the shared model materials. The bigger push
+// (0.04 vs the ink line's 0.012) makes the rim sit OUTSIDE the black outline.
+const HIGHLIGHT_TRANSFORM_CHUNK = `
+#ifdef NORMALS
+vec3 getLocalNormal(vec3 vertexNormal);
+mat3 getNormalMatrix(mat4 modelMatrix);
+#endif
+vec4 evalWorldPosition(vec3 vertexPosition, mat4 modelMatrix) {
+    vec4 posW = modelMatrix * vec4(getLocalPosition(vertexPosition), 1.0);
+#ifdef NORMALS
+    vec3 worldN = normalize(getNormalMatrix(modelMatrix) * getLocalNormal(vec3(0.0)));
+    posW.xyz += worldN * 0.04;
+#endif
+    return posW;
+}
+vec4 getPosition() {
+    dModelMatrix = getModelMatrix();
+    vec4 posW = evalWorldPosition(vertex_position.xyz, dModelMatrix);
+    dPositionW = posW.xyz;
+    return matrix_viewProjection * posW;
+}
+vec3 getWorldPosition() {
+    return dPositionW;
+}
+`;
+
+// One material per highlight shell, so each target can be recoloured
+// independently (an alive enemy glows red, its corpse glows loot-gold). Colour
+// lives in emissive (unlit-looking rim, and a whisper of bloom picks it up);
+// diffuse/specular stay black like the ink outline so lighting never tints it.
+function makeHighlightMat() {
+  const m = new pc.StandardMaterial();
+  m.diffuse = new pc.Color(0, 0, 0);
+  m.specular = new pc.Color(0, 0, 0);
+  m.gloss = 0;
+  m.emissive = new pc.Color(1, 1, 1);
+  m.emissiveIntensity = 1.6;
+  m.cull = pc.CULLFACE_FRONT;
+  m.depthWrite = false;
+  m.shaderChunks.glsl.set('transformVS', HIGHLIGHT_TRANSFORM_CHUNK);
+  m.update();
+  return m;
+}
+
+// Build a coloured highlight shell on `holder` (disabled). Returns the shell
+// entity, or null if the holder has no pickable geometry. Skips the ink
+// outline and any prior highlight so the rim wraps the model, not a shell.
+export function addHighlight(holder) {
+  const mat = makeHighlightMat();
+  const copies = [];
+  for (const rc of holder.findComponents('render')) {
+    if (rc.entity.name === 'outlines' || rc.entity.name === 'highlight') continue;
+    for (const mi of rc.meshInstances) {
+      const omi = new pc.MeshInstance(mi.mesh, mat, mi.node);
+      if (mi.skinInstance) omi.skinInstance = mi.skinInstance;
+      copies.push(omi);
+    }
+  }
+  if (!copies.length) return null;
+  const shell = new pc.Entity('highlight');
+  shell.addComponent('render', { meshInstances: copies, castShadows: false });
+  shell.enabled = false;
+  shell._hlMat = mat; // recoloured by setHighlight
+  holder.addChild(shell);
+  return shell;
+}
+
+// Toggle a highlight shell on/off, recolouring it when turned on. `rgb` is a
+// [r, g, b] 0..1 array.
+export function setHighlight(shell, on, rgb) {
+  if (!shell) return;
+  if (on && rgb && shell._hlMat) {
+    shell._hlMat.emissive.set(rgb[0], rgb[1], rgb[2]);
+    shell._hlMat.update();
+  }
+  shell.enabled = !!on;
+}
+
 // Post stack on the game camera (also used by the editor - controls.js calls
 // this wherever the camera rig is built). SSAO grounds props and walls with
 // contact shading the flat toon lighting can't provide, a whisper of bloom

@@ -7,6 +7,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { parseLevel } from '../../src/grid.js';
 import { TILE_TYPES } from '../../src/data/tiles.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
+import { NPCS } from '../../src/data/npcs.js';
 
 const files = readdirSync('levels').filter((f) => f.endsWith('.json'));
 const load = (f) => JSON.parse(readFileSync(`levels/${f}`, 'utf8'));
@@ -38,8 +39,9 @@ for (const f of files) {
     }
     for (const [ch, actor] of Object.entries(data.actors)) {
       if (actor === 'player') continue;
-      assert.ok(ENEMY_TYPES[actor], `enemy type "${actor}" exists`);
-      assert.equal(ENEMY_TYPES[actor].char, ch, `char "${ch}" is canonical for "${actor}"`);
+      const reg = ENEMY_TYPES[actor] || NPCS[actor]; // enemies OR talkable NPCs
+      assert.ok(reg, `actor type "${actor}" exists`);
+      assert.equal(reg.char, ch, `char "${ch}" is canonical for "${actor}"`);
     }
   });
 

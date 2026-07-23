@@ -43,8 +43,11 @@ export function createApp(canvas) {
 }
 
 // Builds the full scene for a parsed grid using the shared renderer. Returns
-// the wall list, the occlusion-fade updater, and runtime hooks.
-export function buildLevel(app, grid) {
+// the wall list, the occlusion-fade updater, and runtime hooks. `picking`
+// (optional) is the object-picker registrar (src/picking.js): doors and
+// interactable props register their holder entities so a click on the tall
+// mesh resolves to the object, not the floor behind it.
+export function buildLevel(app, grid, { picking = null } = {}) {
   const r = createTileRenderer(app);
   const walls = [];
   const surfaceVisuals = new Map(); // "x,z" -> entity
@@ -58,13 +61,22 @@ export function buildLevel(app, grid) {
       if (type === null) continue;
       r.renderFloor(x, z, carpetAt.get(x + ',' + z) || type);
       if (type === 'floor') continue;
+      // Rummageable / ignitable / explosive props are left-clickable and
+      // hover-highlightable: register their holder for object picking. Model
+      // props (desks) load async, so catch them via onAsync too.
+      const def = TILE_TYPES[type];
+      const interactive = !!def && (def.loot || def.ignitable || def.explosive);
       const res = r.renderMarker(x, z, type, {
         electrified: grid.isElectrified(x, z),
         surfaceAt: (sx, sz) => TILE_TYPES[grid.typeAt(sx, sz)]?.surface || null,
+        onAsync: interactive && picking ? (holder) => picking.register(holder, 'prop', { x, z }) : null,
       });
       if (res.kind === 'wall') walls.push({ entity: res.entities[0], x, z, faded: false });
       else if (res.kind === 'surface') surfaceVisuals.set(x + ',' + z, res.entities[0]);
-      else if (res.kind === 'prop') propVisuals.set(x + ',' + z, res.entities[0]);
+      else if (res.kind === 'prop') {
+        propVisuals.set(x + ',' + z, res.entities[0]);
+        if (interactive && picking) picking.register(res.entities[0], 'prop', { x, z });
+      }
     }
   }
   // Edge walls (partitions between tiles) join the same fade list, keyed by
@@ -84,12 +96,14 @@ export function buildLevel(app, grid) {
   function renderDoorAt(key) {
     const old = doorVisuals.get(key);
     if (old) {
+      picking?.unregister(old.holder);
       old.holder.destroy();
       walls.splice(walls.indexOf(old.wallEntry), 1);
     }
     const [orient, coords] = [key[0], key.slice(2)];
     const [x, z] = coords.split(',').map(Number);
     const { holder, panel } = r.renderDoor(x, z, orient, grid.doors.get(key).open);
+    picking?.register(holder, 'door', key);
     const wallEntry = {
       entity: panel,
       x: orient === 'v' ? x - 0.5 : x,

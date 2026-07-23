@@ -13,6 +13,7 @@
 // (`#` cell walls still exist for solid blocks/pillars; partitions are edges.)
 import { TILE_TYPES } from './data/tiles.js';
 import { SURFACES } from './data/surfaces.js';
+import { NPCS } from './data/npcs.js';
 
 // Old saves/exports may reference renamed tile types. Exported so the editor
 // can upgrade them when loading a level for editing.
@@ -66,6 +67,7 @@ export function parseLevel(level) {
 
   let playerSpawn = { x: Math.floor(width / 2), z: Math.floor(height / 2) };
   const enemySpawns = [];
+  const npcSpawns = [];
   // typeGrid[z][x] = tile type id, or null for void (space) cells.
   const typeGrid = [];
 
@@ -80,6 +82,7 @@ export function parseLevel(level) {
       const actor = actorsLegend[ch];
       if (actor !== undefined) {
         if (actor === 'player') playerSpawn = { x, z };
+        else if (NPCS[actor]) npcSpawns.push({ type: actor, x, z });
         else enemySpawns.push({ type: actor, x, z });
         row.push('floor');
         continue;
@@ -223,6 +226,6 @@ export function parseLevel(level) {
     typeAt, defAt, terrainOpen, surfaceAt, isElectrified, setType,
     hWalls, vWalls, edgeOpen, stepOpen, sightOpen,
     doors, doorBetween, setDoorOpen,
-    playerSpawn, enemySpawns,
+    playerSpawn, enemySpawns, npcSpawns,
   };
 }

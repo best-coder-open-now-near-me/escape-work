@@ -286,6 +286,24 @@ export class PlayerActor extends GridActor {
   }
 }
 
+// A non-hostile coworker you talk to (data/npcs.js). It just stands on its
+// tile and idles - no wander, no combat, no HP. It blocks movement like any
+// body (main.js layers its tile into isWalkable) and turns to face the player
+// when a conversation opens. GridActor.update with no path plays the idle
+// clip and eases facing, which is all an NPC needs.
+export class NpcActor extends GridActor {
+  constructor(x, z, typeId, def, opts = {}) {
+    super(x, z, { speed: 2.2, ...opts });
+    this.typeId = typeId;
+    this.def = def;
+  }
+
+  update(dt) {
+    if (!this.entity) return;
+    super.update(dt); // idle anim + facing ease; no path, so it stays put
+  }
+}
+
 export class EnemyActor extends GridActor {
   constructor(x, z, typeId, def, opts = {}) {
     super(x, z, { speed: 2.2, ...opts });
