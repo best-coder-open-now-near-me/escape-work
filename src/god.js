@@ -16,6 +16,7 @@
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { ITEMS } from './data/items.js';
 import { ENEMY_TYPES } from './data/enemies.js';
+import { COMPANIONS } from './data/companions.js';
 
 const PRIM = new Set(['number', 'boolean', 'string']);
 // Animation / rig bookkeeping on an actor - real properties, but noise for a
@@ -299,15 +300,33 @@ function buildPanel(api, requestToggle) {
   // --- per-tab target lists -------------------------------------------------
   function playerTargets() {
     const out = [];
-    const sheet = api.player;
-    if (sheet) {
-      out.push({
-        id: 'sheet', scope: 'sheet', title: 'Character Sheet', obj: sheet, getObj: () => api.player,
-        readOnly: new Set(['classId', 'className', 'model', 'xpNext']), special: 'inventory',
-      });
-    } else {
+    const party = api.party;
+    if (!party) {
       out.push({ id: 'sheet', title: 'Character Sheet', note: 'Pick a class first.' });
+      return out;
     }
+    // One live sheet card per party member; the active one carries the
+    // inventory editor (Give lands in the controlled member's pockets).
+    party.members.forEach((m, i) => {
+      const active = i === party.active;
+      const actions = [];
+      if (!active && m.sheet.hp > 0 && m.actor) {
+        actions.push({ label: 'Control', run: () => { api.switchTo(i); render(); } });
+      }
+      if (m.sheet.hp <= 0) {
+        actions.push({ label: 'Revive (1 HP)', run: () => { api.reviveMember(i); render(); } });
+      }
+      out.push({
+        // The ACTIVE member keeps the plain 'sheet' scope - stable field ids
+        // (#god-f-sheet-hp) and pins that always mean "whoever I control".
+        id: active ? 'sheet' : `sheet-${i}`, scope: active ? 'sheet' : `sheet-${i}`,
+        title: `${m.sheet.name}${active ? ' (active)' : ''}${m.sheet.hp <= 0 ? ' †' : ''}`,
+        obj: m.sheet, getObj: () => api.party?.members[i]?.sheet,
+        readOnly: new Set(['classId', 'companionId', 'className', 'model', 'xpNext', 'name']),
+        special: active ? 'inventory' : null,
+        actions,
+      });
+    });
     const pa = api.playerActor;
     if (pa && pa.entity) {
       out.push({
@@ -397,6 +416,17 @@ function buildPanel(api, requestToggle) {
       button('Give', () => { api.giveItem(iSel.value); render(); }),
       button('Drop (click)', () => armPlace('drop', iSel.value, `Click a tile to drop ${ITEMS[iSel.value].name}`)));
     body.append(iRow);
+
+    body.append(sectionTitle('PARTY'));
+    const cRow = el('div', { display: 'flex', gap: '5px' });
+    const cSel = el('select', selectStyle());
+    for (const id of Object.keys(COMPANIONS)) cSel.append(el('option', null, { value: id, textContent: COMPANIONS[id].name }));
+    const recruitBtn = button('Recruit', () => { api.recruit(cSel.value); render(); });
+    recruitBtn.id = 'god-recruit';
+    cRow.append(cSel, recruitBtn);
+    body.append(cRow);
+    body.append(el('div', { opacity: '.55', font: '11px system-ui', marginTop: '4px' },
+      { textContent: 'Recruits the companion if they stand on this floor and the roster has room.' }));
     if (!api.player) body.append(el('div', { opacity: '.55', font: '11px system-ui', marginTop: '6px' }, { textContent: 'Give needs a character - pick a class first.' }));
   }
 
@@ -503,7 +533,12 @@ function buildPanel(api, requestToggle) {
   // changes (a fight starts, an enemy spawns, a class is picked) the view is
   // rebuilt; otherwise the 10 Hz tick only refreshes values in place.
   function signature() {
-    return [activeTab, search.value, showInternals, !!api.player, api.enemies.length,
+    // The party fingerprint: size, who's active, who's down - recruit,
+    // switch and knock-out all restructure the player tab.
+    const partySig = api.party
+      ? api.party.members.map((m) => (m.sheet.hp <= 0 ? 'd' : 'a')).join('') + api.party.active
+      : '';
+    return [activeTab, search.value, showInternals, !!api.player, partySig, api.enemies.length,
       !!api.combat, api.doors.length, panel.pins.size, placing ? placing.kind : ''].join('|');
   }
 

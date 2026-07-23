@@ -1519,13 +1519,15 @@ function startGame(level) {
       if (show && sheet.paper !== hotbarPaper) { hotbarPaper = sheet.paper; hotbar.refresh(sheet); }
       if (show && armedOoc) drawOocTargets();
     }
-    // Party bar: redraw only when the roster state changes (names/HP/active);
-    // visible only once there's an actual party to show.
+    // Party bar: redraw only when the roster state changes (names/HP/active,
+    // plus per-member AP mid-fight); visible only once there's an actual
+    // party to show.
     if (party) {
+      const cp = inCombat && combat ? combat.party : null;
       const key = party.members
-        .map((m, i) => `${m.sheet.name}:${m.sheet.hp}/${m.sheet.maxHp}${i === party.active ? '*' : ''}`)
+        .map((m, i) => `${m.sheet.name}:${m.sheet.hp}/${m.sheet.maxHp}${i === party.active ? '*' : ''}${cp ? ':' + cp[i].ap : ''}`)
         .join('|');
-      if (key !== partyBarKey) { partyBarKey = key; partyBar.refresh(party); }
+      if (key !== partyBarKey) { partyBarKey = key; partyBar.refresh(party, cp); }
       partyBar.setVisible(party.members.length > 1 && !gameOver);
     }
     // Fire/smoke age in TURNS. In combat, combat.js advances one per round (via
@@ -1691,8 +1693,26 @@ function startGame(level) {
   // owns; the action methods below are the few things the panel can't reach
   // without this closure (spawning into `enemies`, dropping via `loot`, etc.).
   window.__god = {
-    get player() { return sheet; }, // the live character sheet, or null pre-pick
+    get player() { return sheet; }, // the ACTIVE member's live sheet, or null pre-pick
     get playerActor() { return player; },
+    get party() { return party; }, // live - the god panel reflects every member's sheet
+    switchTo(i) {
+      if (inCombat && combat) combat.setActive(i);
+      else switchLeader(i);
+    },
+    reviveMember(i) {
+      const m = party?.members[i];
+      if (m && m.sheet.hp <= 0) helpUp(m);
+      window.__combat?.refresh();
+    },
+    // Recruit a companion standing on this floor (the same path a dialogue
+    // effect takes). Returns false when they aren't here or the roster's full.
+    recruit(id) {
+      const npc = npcs.find((n) => n instanceof CompanionActor && n.typeId === id);
+      if (!npc || !canRecruit(npc)) return false;
+      recruitCompanion(npc);
+      return true;
+    },
     get enemies() { return enemies; },
     get combat() { return window.__combat || null; }, // live only mid-fight
     app,

@@ -503,11 +503,14 @@ export function createPartyBar({ onSelect }) {
   bar.onmousedown = (e) => e.stopPropagation(); // clicks stay off the canvas
   document.body.appendChild(bar);
 
-  function refresh(party) {
+  // `combatInfo` (optional) is combat's per-member snapshot ([{ap}, ...]) -
+  // when present, each living slot also shows that member's remaining AP.
+  function refresh(party, combatInfo = null) {
     bar.innerHTML = '';
     party.members.forEach((m, i) => {
       const s = m.sheet;
       const down = s.hp <= 0;
+      const ap = combatInfo && !down ? ` · ${combatInfo[i]?.ap ?? 0}AP` : '';
       const slot = document.createElement('div');
       slot.id = 'party-slot-' + i;
       slot.className = 'party-slot';
@@ -520,7 +523,7 @@ export function createPartyBar({ onSelect }) {
       slot.innerHTML = `
         <div style="display:flex; justify-content:space-between; gap:8px;">
           <span style="font-weight:${i === party.active ? '700' : '400'};">${s.name}</span>
-          <span style="opacity:.8">${down ? 'DOWN' : `${s.hp}/${s.maxHp}`}</span>
+          <span style="opacity:.8">${down ? 'DOWN' : `${s.hp}/${s.maxHp}${ap}`}</span>
         </div>
         <div style="height:4px; margin-top:4px; background:#1a1a28; border-radius:2px;">
           <div style="height:100%; width:${Math.max(0, Math.round((s.hp / s.maxHp) * 100))}%;

@@ -188,7 +188,9 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   `__game` also exposes `npcs`, `party`, `armed` (hotbar), `hoverKind`,
   `cursor`, and `dialogueOpen`. Keep them in sync when adding state. `window.__god` is the
   exception: it hands out LIVE references and mutators for the god-mode panel
-  (god.js) to edit runtime state in place. It ships in the release but the
+  (god.js) to edit runtime state in place - including the party
+  (`__god.party`, `switchTo`, `reviveMember`, `recruit`; the panel's Player
+  tab shows one live sheet card per member). It ships in the release but the
   panel stays hidden until a tester toggles it (` / F8, remembered in
   localStorage or via `#god`).
 

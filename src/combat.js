@@ -884,6 +884,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     setActive,
     cycleActive,
     notifyMemberDown,
+    // Per-member turn snapshot, for the party bar's in-combat AP readout.
+    get party() {
+      return members.map((m) => ({ name: m.sheet.name, hp: m.sheet.hp, ap: m.ap, active: m === active }));
+    },
     // main.js detected a slip mid-walk (tile effects live there) - narrate it
     notifySlip: () => log('You slip in the water. The rest of that movement is a donation.'),
     abort: cleanup, // for deaths resolved outside combat (surfaces, explosions)

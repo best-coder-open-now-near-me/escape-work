@@ -166,9 +166,12 @@ level's legend places them (spawn-time check against the party roster).
    switching (portraits, Tab, clicking a body), enemy targeting,
    downed/revive with automatic handoff when the controlled member falls
    (in combat and out), party-wipe-only defeat, strip/UI. The core payoff PR.
-4. **Persistence + polish.** Party across floors, help-up interaction out of
-   combat, god-mode/debug surface, XP fan-out, victory/stairwell heals for
-   all, examine/dialogue for recruited companions.
+4. **Persistence + polish.** ✅ Landed - and smaller than planned, because
+   persistence, help-up, XP fan-out, party heals and recruited dialogue all
+   shipped early inside milestones 1–3. What actually remained: the god-mode
+   party surface (a live sheet card per member with Control/Revive, a Recruit
+   tool, `__god.party/switchTo/reviveMember/recruit`) and per-member AP on
+   the party-bar portraits during combat.
 5. **Content + balance.** A second companion on floor 2 (a Mail Room veteran
    fits the fiction and the unused `mail-cone` action set), encounter
    rebalance (more/beefier enemies per floor to meet the bigger party), flavor

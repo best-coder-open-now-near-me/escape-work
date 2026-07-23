@@ -90,6 +90,9 @@ test('party combat: switch the active member, and the fight survives the leader 
   expect(await combatOrWalkDone(page, 30_000)).toBe(true);
   expect(await page.evaluate(() => window.__combat.party.length)).toBe(2);
 
+  // In combat the portraits carry each member's remaining AP.
+  await expect(page.locator('#party-slot-0')).toContainText('AP');
+
   // Portrait click hands the intern the floor: his action bar, his AP.
   await page.click('#party-slot-1');
   await expect.poll(() => page.evaluate(() => window.__combat.party[1].active)).toBe(true);
