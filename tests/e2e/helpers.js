@@ -67,6 +67,24 @@ export async function clickWorld(page, x, z) {
   return true;
 }
 
+// Wait until a world point's PROJECTION stops moving, then return its stable
+// screen point. The camera eases toward the player for a beat after they stop
+// (waitStill sees the player still, but the camera is not), so a projected
+// click taken too early lands a tile off and walks. Polling the projection
+// itself detects the camera settling directly.
+export async function stableProject(page, x, z, timeout = 20_000) {
+  let last = null;
+  let stable = null;
+  await expect.poll(async () => {
+    const p = await page.evaluate(([wx, wz]) => window.__game.project(wx, wz), [x, z]);
+    const ok = last && Math.abs(p.x - last.x) < 1.5 && Math.abs(p.y - last.y) < 1.5;
+    last = p;
+    if (ok) stable = p;
+    return ok;
+  }, { timeout, intervals: [150] }).toBe(true);
+  return stable;
+}
+
 // Wait until the player's continuous position stops changing.
 export async function waitStill(page, timeout = 60_000) {
   let last = null;
