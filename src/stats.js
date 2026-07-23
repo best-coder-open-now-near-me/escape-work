@@ -6,33 +6,40 @@ import { ITEMS } from './data/items.js';
 // Every pickup/use site clamps against this one value.
 export const PAPER_CAP = 8;
 
-// The sheet is the single persistent record of the player character. Combat
-// mutates hp in place so wounds carry between fights.
-export function createSheet(classId) {
-  const cls = CLASSES[classId];
-  if (!cls) throw new Error(`Unknown class "${classId}"`);
-  const actions = [...cls.actions];
+// The sheet is the persistent record of one character - the player or a
+// companion. Combat mutates hp in place so wounds carry between fights.
+// `block` is any class-shaped stat source (data/classes.js, or a companion
+// entry from data/companions.js); `extra` stamps identity fields on top
+// (classId for classes, companionId for companions).
+export function createSheetFrom(block, extra = {}) {
+  const actions = [...block.actions];
   // Talents can grant an extra combat action (Smoker's cigarette).
-  if (cls.talent?.effects?.grantsAction) actions.push(cls.talent.effects.grantsAction);
+  if (block.talent?.effects?.grantsAction) actions.push(block.talent.effects.grantsAction);
   return {
-    classId,
-    className: cls.name,
-    name: cls.name, // display name - companions get personal names here
-    model: cls.model,
-    hp: cls.maxHp,
-    maxHp: cls.maxHp,
-    maxAp: cls.ap,
+    className: block.name,
+    name: block.name, // display name - the class label, or the companion's own
+    model: block.model,
+    hp: block.maxHp,
+    maxHp: block.maxHp,
+    maxAp: block.ap,
     level: 1,
     xp: 0,
     xpNext: 10,
-    bonusDmg: cls.bonusDmg,
+    bonusDmg: block.bonusDmg,
     actions,
-    talent: cls.talent || null,
+    talent: block.talent || null,
     paper: 0, // thrown-weapon ammo, picked up from paper spills
     bleed: 0, // paper-cut bleeding: lose 1 HP for this many more tiles
     gum: 0, // gum on shoe: slowed, no kicking, can't slip - for this many tiles
     inventory: [], // looted item ids (data/items.js) - persists across floors
+    ...extra,
   };
+}
+
+export function createSheet(classId) {
+  const cls = CLASSES[classId];
+  if (!cls) throw new Error(`Unknown class "${classId}"`);
+  return createSheetFrom(cls, { classId });
 }
 
 // Total damage bonus: levels/class plus the best carried item (you can only

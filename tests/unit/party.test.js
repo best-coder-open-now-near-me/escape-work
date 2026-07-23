@@ -2,10 +2,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createParty, leader, addMember, livingMembers, gainXpAll,
+  createParty, leader, addMember, livingMembers, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP, SAVE_VERSION,
 } from '../../src/party.js';
 import { createSheet } from '../../src/stats.js';
+import { COMPANIONS } from '../../src/data/companions.js';
 
 test('createParty starts with the leader as its only member', () => {
   const sheet = createSheet('office-drone');
@@ -82,6 +83,32 @@ test('parseProgress clamps a bad active index to the leader', () => {
   assert.equal(parseProgress(saved).active, 0);
   saved.active = -1;
   assert.equal(parseProgress(saved).active, 0);
+});
+
+test('createCompanionSheet joins at the given level, fully rested', () => {
+  const def = COMPANIONS['it-intern'];
+  const s = createCompanionSheet(def, 'it-intern', 3);
+  assert.equal(s.companionId, 'it-intern');
+  assert.equal(s.name, def.name);
+  assert.equal(s.level, 3);
+  assert.equal(s.bonusDmg, def.bonusDmg + 2); // one +1 per promotion
+  assert.equal(s.hp, s.maxHp);
+  assert.equal(s.classId, undefined); // a companion is not a picked class
+});
+
+test('every companion recruit option leads to a real node', () => {
+  for (const [id, def] of Object.entries(COMPANIONS)) {
+    for (const tree of [def.dialogue, def.recruitedDialogue]) {
+      if (!tree) continue;
+      assert.ok(tree.nodes[tree.start], `${id}: start node exists`);
+      for (const node of Object.values(tree.nodes)) {
+        for (const o of node.options || []) {
+          if (o.next !== null) assert.ok(tree.nodes[o.next], `${id}: option "${o.label}" leads somewhere`);
+        }
+      }
+    }
+    assert.ok(def.actions.length, `${id} brings combat actions`);
+  }
 });
 
 test('parseProgress rejects records in no known format', () => {

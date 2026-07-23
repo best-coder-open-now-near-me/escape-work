@@ -649,9 +649,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     log(line);
     refresh();
-    // The fight is lost when nobody is left standing, not when one member
-    // drops (with one member those are the same thing).
-    if (dead && !livingMembers().length) defeat();
+    if (dead) {
+      // Until in-combat switching lands, losing the member you're CONTROLLING
+      // loses the fight; a follower just goes down (topple, out of the
+      // rotation, back at 1 HP if the survivors win).
+      if (target === active || !livingMembers().length) { defeat(); return; }
+      target.actor.clearPath();
+      target.actor.fx = { kind: 'death', t: 0 };
+      log(`${target.sheet.name} is out cold.`);
+    }
   }
 
   // Route toward the cheapest target-adjacent tile and walk it in ONE smooth

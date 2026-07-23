@@ -26,6 +26,9 @@ src/
     actions.js         combat actions: attack/defend/heal definitions
     items.js           items + container loot tables (heal/ammo/bonusDmg/flavor)
     npcs.js            non-hostile actors you TALK to: name, model, dialogue tree
+    companions.js      recruitable coworkers: an NPC-shaped presence plus a
+                       class-shaped stat block; dialogue options can carry
+                       effect: { recruit } to sign them onto the party
   grid.js            Level parsing, terrain + edge-wall queries (pure logic)
   pathfinding.js     8-dir Dijkstra, string-pulling smoother, free-point
                      clamping, distance-budget truncation      (pure logic)
@@ -141,8 +144,20 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   with per-member AP/deflect/uses (`combat.js` `members`, `active`); enemies
   target the nearest living member, ties to the bloodied one. Campaign saves
   are v2 (`{ version, levelId, party: [sheets], active }`); old single-sheet
-  saves migrate on load (`party.parseProgress`). Today the roster holds one
-  member - recruitment (PARTY_PLAN.md) grows it.
+  saves migrate on load (`party.parseProgress`), and recruited companions
+  respawn beside the leader on the next floor. **Recruitment**: companions
+  (data/companions.js) stand among the NPCs until a dialogue option carrying
+  `effect: { recruit: true }` signs them on - the same actor converts in
+  place (picking kind `party`, sheet minted at the leader's level).
+  **Following**: out of combat, followers path to a free tile beside the
+  leader on a small repath cadence - costed by their OWN talents, pass-through
+  for the rest of the party, never parking on a tile that hurts them.
+  **Leader switching**: clicking a party-bar portrait (`ui.createPartyBar`,
+  `#party-slot-<i>`) re-keys the `sheet`/`player` bindings - camera, hotbar,
+  HUD, pockets, menu verbs and the follower set all follow. **Downed**: a
+  companion at 0 HP topples and sits out (the run only ends when the LEADER
+  falls); they're back at 1 HP after a victory, a stairwell, or a walk-up
+  hand up.
 - **Actors**: extend `GridActor` for anything that lives on the grid and owns
   a model (it provides smoothed waypoint-path movement, shove glides via
   `pushTo`, and facing). The holder entity
@@ -176,6 +191,11 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - **New NPC (talkable)**: entry in `data/npcs.js` (name, model, dialogue tree)
   + character in a level's `actors` legend. It stands, blocks movement, and
   talks on left-click; it never fights. Reuses a character `.glb`.
+- **New companion (recruitable)**: entry in `data/companions.js` - the NPC
+  fields plus a class-shaped stat block (maxHp, ap, actions, talent) and a
+  dialogue option with `effect: { recruit: true }`. Give it a character in a
+  level's `actors` legend; everything else (recruit conversion, following,
+  the party bar slot, per-member stepping, the save) is systems.
 - **New hazard/tile**: entry in `data/tiles.js` + character in `tiles` legend.
 - **New surface** (the Divinity layer): entry in `data/surfaces.js` + a tile
   type carrying it. Surfaces slow, damage, bleed, arm you, trip you

@@ -4,7 +4,7 @@
 // the character the player controls out of combat, and whose turn state is
 // live in combat. Today the roster holds one member; recruitment
 // (data/companions.js) grows it.
-import { gainXp } from './stats.js';
+import { gainXp, createSheetFrom } from './stats.js';
 
 export const PARTY_CAP = 3; // leader + 2 companions - see PARTY_PLAN.md
 export const SAVE_VERSION = 2;
@@ -30,6 +30,14 @@ export function addMember(party, sheet, actor = null) {
 // announce each promotion.
 export function gainXpAll(party, amount) {
   return party.members.filter((m) => m.sheet.hp > 0 && gainXp(m.sheet, amount));
+}
+
+// A companion's sheet, promoted to match the leader's level so recruits are
+// never dead weight (PARTY_PLAN.md: companions join at the party's level).
+export function createCompanionSheet(def, id, level = 1) {
+  const sheet = createSheetFrom(def, { companionId: id });
+  while (sheet.level < level) gainXp(sheet, sheet.xpNext - sheet.xp);
+  return sheet;
 }
 
 // --- campaign progress -------------------------------------------------------

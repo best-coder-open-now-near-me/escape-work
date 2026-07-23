@@ -12,10 +12,20 @@ test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ pa
   await page.click('#act-reboot');
   expect(await page.evaluate(() => window.__combat.armed)).toBe('reboot');
   const ap0 = await page.evaluate(() => window.__combat.ap);
-  // Click your own tile: the reboot turns YOU off and on again.
+  // Click your own tile: the reboot turns YOU off and on again. The camera is
+  // still easing after combat start, so a projected click can land a tile off
+  // and lower the action instead - re-arm and retry with a fresh projection.
   await page.waitForTimeout(800); // camera settle before projecting
-  const pos = await page.evaluate(() => window.__game.playerPos);
-  expect(await clickWorld(page, pos.x, pos.z)).toBe(true);
+  let spent = false;
+  for (let i = 0; i < 4 && !spent; i++) {
+    if (await page.evaluate(() => window.__combat.armed) !== 'reboot') await page.click('#act-reboot');
+    const pos = await page.evaluate(() => window.__game.playerPos);
+    expect(await clickWorld(page, pos.x, pos.z)).toBe(true);
+    spent = await page.evaluate(() => window.__combat.ap)
+      .then((ap) => ap === ap0 - 3)
+      .catch(() => false);
+    if (!spent) await page.waitForTimeout(700); // let the ease finish, then retry
+  }
   await expect.poll(() => page.evaluate(() => window.__combat.ap)).toBe(ap0 - 3);
   expect(await page.evaluate(() => window.__combat.armed)).toBe(null);
 });

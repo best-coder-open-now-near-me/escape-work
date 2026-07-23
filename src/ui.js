@@ -483,6 +483,58 @@ export function createHotbar(actions, { onArm }) {
     refresh: (s) => { sheet = s; render(); },
     get armed() { return armed; },
     get visible() { return bar.style.display !== 'none'; },
+    destroy: () => bar.remove(), // leader switches rebuild the bar wholesale
+  };
+}
+
+// --- party bar ----------------------------------------------------------------
+// The roster, top-left: one slot per member (#party-slot-<i> for the tests)
+// with name, an HP bar, a DOWN marker, and a highlight on the member being
+// controlled. Clicking a slot asks the host to switch control - the host
+// decides whether that's allowed right now (combat, dialogue, downed).
+export function createPartyBar({ onSelect }) {
+  const bar = document.createElement('div');
+  bar.id = 'party-bar';
+  Object.assign(bar.style, PANEL_CHROME, {
+    position: 'fixed', left: '12px', top: '54px', zIndex: '21',
+    display: 'none', flexDirection: 'column', gap: '6px',
+    padding: '8px', borderRadius: '10px', userSelect: 'none', minWidth: '130px',
+  });
+  bar.onmousedown = (e) => e.stopPropagation(); // clicks stay off the canvas
+  document.body.appendChild(bar);
+
+  function refresh(party) {
+    bar.innerHTML = '';
+    party.members.forEach((m, i) => {
+      const s = m.sheet;
+      const down = s.hp <= 0;
+      const slot = document.createElement('div');
+      slot.id = 'party-slot-' + i;
+      slot.className = 'party-slot';
+      Object.assign(slot.style, {
+        padding: '6px 8px', borderRadius: '7px', cursor: 'pointer',
+        border: `1px solid ${i === party.active ? '#8adf76' : '#3a3a52'}`,
+        background: i === party.active ? '#2e3a2e' : '#2a2a3e',
+        opacity: down ? '.6' : '1', font: '12px system-ui, sans-serif',
+      });
+      slot.innerHTML = `
+        <div style="display:flex; justify-content:space-between; gap:8px;">
+          <span style="font-weight:${i === party.active ? '700' : '400'};">${s.name}</span>
+          <span style="opacity:.8">${down ? 'DOWN' : `${s.hp}/${s.maxHp}`}</span>
+        </div>
+        <div style="height:4px; margin-top:4px; background:#1a1a28; border-radius:2px;">
+          <div style="height:100%; width:${Math.max(0, Math.round((s.hp / s.maxHp) * 100))}%;
+            background:${down ? '#5a2a2a' : s.hp / s.maxHp > 0.4 ? '#6fc86f' : '#e0b23a'}; border-radius:2px;"></div>
+        </div>`;
+      slot.onclick = () => onSelect(i);
+      bar.appendChild(slot);
+    });
+  }
+
+  return {
+    refresh,
+    setVisible: (v) => { bar.style.display = v ? 'flex' : 'none'; },
+    get visible() { return bar.style.display !== 'none'; },
   };
 }
 

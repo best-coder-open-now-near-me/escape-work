@@ -3,9 +3,10 @@
 // of main.js so the game flow only wires clicks to verbs; every rule about
 // what loot does lives here.
 //
-// The host supplies world access and three live queries (the sheet is
-// reassigned on class pick, combat/game-over toggle): getSheet, isInCombat,
-// isGameOver - plus approachAndDo so overlay clicks walk the player in.
+// The host supplies world access and live queries (the sheet AND the actor
+// are reassigned on class pick and on leader switches, so both come in as
+// accessors): getActor, getSheet, isInCombat, isGameOver - plus approachAndDo
+// so overlay clicks walk the leader in.
 import { ITEMS, LOOT_TABLES, rollLoot } from './data/items.js';
 import { PAPER_CAP } from './stats.js';
 import { placeDroppedItem } from './tile-renderer.js';
@@ -15,7 +16,7 @@ export const INV_CAP = 10;
 
 // `extraEntries` (optional) lets the host add non-loot entries to the Alt
 // overlay (doors) without this module knowing what they are.
-export function createLooting({ app, grid, runtime, player, enemies, getSheet, isInCombat, isGameOver, approachAndDo, extraEntries = null }) {
+export function createLooting({ app, grid, runtime, enemies, getActor, getSheet, isInCombat, isGameOver, approachAndDo, extraEntries = null }) {
   const containerLoot = new Map(); // "x,z" -> remaining item ids (rolled on first rummage)
   const looseItems = []; // { x, z, id, entity } - dropped/overflowed floor items
   const harvestedPaper = new Set(); // "x,z" of paper drifts already gathered for ammo
@@ -52,7 +53,7 @@ export function createLooting({ app, grid, runtime, player, enemies, getSheet, i
         sheet.inventory.push(id);
         taken.push(itemName(id));
       } else {
-        dropLoose(player.x, player.z, id);
+        dropLoose(getActor().x, getActor().z, id);
         overflowed = true;
       }
     }
@@ -148,7 +149,7 @@ export function createLooting({ app, grid, runtime, player, enemies, getSheet, i
     // dropped stapler would silently change your damage bonus).
     if (isInCombat()) { ui.say('Not while everyone is watching.'); return; }
     const [id] = sheet.inventory.splice(i, 1);
-    dropLoose(player.x, player.z, id);
+    dropLoose(getActor().x, getActor().z, id);
     ui.say(`You leave the ${itemName(id)} on the floor. Someone's problem now.`);
     invPanel.refresh(sheet);
     if (lootLabels.visible) showLabels(); // the floor just changed
@@ -159,7 +160,8 @@ export function createLooting({ app, grid, runtime, player, enemies, getSheet, i
   // the object itself.
   function lootEntries() {
     const out = [];
-    const near = (x, z) => Math.max(Math.abs(x - player.x), Math.abs(z - player.z)) <= 10;
+    const me = getActor();
+    const near = (x, z) => Math.max(Math.abs(x - me.x), Math.abs(z - me.z)) <= 10;
     for (const li of looseItems) {
       if (!near(li.x, li.z)) continue;
       out.push({
@@ -225,7 +227,7 @@ export function createLooting({ app, grid, runtime, player, enemies, getSheet, i
         let target = patch[0];
         let bestD = Infinity;
         for (const [px, pz] of patch) {
-          const d = Math.max(Math.abs(px - player.x), Math.abs(pz - player.z));
+          const d = Math.max(Math.abs(px - me.x), Math.abs(pz - me.z));
           if (d < bestD) { bestD = d; target = [px, pz]; }
         }
         out.push({

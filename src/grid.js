@@ -14,6 +14,7 @@
 import { TILE_TYPES } from './data/tiles.js';
 import { SURFACES } from './data/surfaces.js';
 import { NPCS } from './data/npcs.js';
+import { COMPANIONS } from './data/companions.js';
 
 // Old saves/exports may reference renamed tile types. Exported so the editor
 // can upgrade them when loading a level for editing.
@@ -68,6 +69,7 @@ export function parseLevel(level) {
   let playerSpawn = { x: Math.floor(width / 2), z: Math.floor(height / 2) };
   const enemySpawns = [];
   const npcSpawns = [];
+  const companionSpawns = []; // recruitable bystanders (data/companions.js)
   // typeGrid[z][x] = tile type id, or null for void (space) cells.
   const typeGrid = [];
 
@@ -82,6 +84,7 @@ export function parseLevel(level) {
       const actor = actorsLegend[ch];
       if (actor !== undefined) {
         if (actor === 'player') playerSpawn = { x, z };
+        else if (COMPANIONS[actor]) companionSpawns.push({ type: actor, x, z });
         else if (NPCS[actor]) npcSpawns.push({ type: actor, x, z });
         else enemySpawns.push({ type: actor, x, z });
         row.push('floor');
@@ -226,6 +229,6 @@ export function parseLevel(level) {
     typeAt, defAt, terrainOpen, surfaceAt, isElectrified, setType,
     hWalls, vWalls, edgeOpen, stepOpen, sightOpen,
     doors, doorBetween, setDoorOpen,
-    playerSpawn, enemySpawns, npcSpawns,
+    playerSpawn, enemySpawns, npcSpawns, companionSpawns,
   };
 }

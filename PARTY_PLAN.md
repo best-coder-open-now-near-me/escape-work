@@ -30,7 +30,7 @@ the module-by-module changes, and the milestone order. No code yet.
 | 3 | Recruitment | Dialogue option with an `effect: { recruit: '<id>' }` — the NPC converts to a party member in place | Reuses the existing NPC + dialogue plumbing; no new interaction verb needed. |
 | 4 | Companion identity | New `data/companions.js` registry; entries carry a class-like stat block (maxHp, ap, actions, talent) plus the NPC-side fields (dialogue, examine) | BG-style: a companion IS a fixed class. Sharing the CLASSES registry was considered but companions want weaker stat lines and their own dialogue/recruit metadata — a merged registry muddies both. |
 | 5 | XP | Every living member gets full XP from every kill; companions join at the leader's level | No split-XP bookkeeping, nobody lags. Matches BG3's shared-level feel. |
-| 6 | Inventory | Shared party pockets (one `inventory`, on the party, not per sheet); physical statuses (paper ammo, gum, bleed) stay per-sheet | Per-character inventory means an inventory-owner picker on every pickup — UI weight with no gameplay payoff at this scale. Paper ammo is debatable; keeping it per-sheet preserves "who's carrying the stack" as a tactical fact and matches how gum/bleed already work. |
+| 6 | Inventory | REVISED in milestone 2: per-member pockets — loot lands in whoever you're controlling; physical statuses (paper ammo, gum, bleed) stay per-sheet | With leader switching in v1, loot simply goes to the active member — no owner-picker UI needed, which was the whole argument for a shared pool. Per-member also keeps `damageBonus` (best carried stapler) coherent per character. A shared pool can still land later if pocket-shuffling proves annoying. |
 | 7 | Death | 0 HP = **downed**, not dead: death-topple anim, out of the fight, not lootable. Party wipe (everyone down) = game over. Survivors' victory ends the fight and downed members get up on 1 HP. Out of combat, walk up to a downed companion to help them up (1 HP) | Permadeath punishes experimenting with hazards (this game's whole identity). "Demoralized, not deceased" also fits the office fiction. |
 | 8 | Enemy targeting | Nearest living party member (Chebyshev), ties broken by lowest HP | Simple, readable, and creates real tank/squishy positioning decisions. Threat tables are overkill. |
 | 9 | Hazards & surfaces | Followers trigger surfaces/hazards per tile entered, same as the leader (slips, gum, paper pickup, damage — all per-sheet) | It's the Divinity layer; exempting companions would make them ghosts. Slight added risk of "companion walks through fire" annoyance — mitigated because followers path with the same hazard-avoiding cost model. |
@@ -156,7 +156,7 @@ level's legend places them (spawn-time check against the party roster).
    world hooks. Save format v2 + migration. The game plays identically;
    existing tests prove it. This PR is deliberately boring and is most of the
    risk.
-2. **Recruitment + following + leader switching.** `data/companions.js`,
+2. **Recruitment + following + leader switching.** ✅ Landed. `data/companions.js`,
    dialogue `effect`s, NpcActor→CompanionActor conversion, follower movement,
    hazards-per-member, party pass-through pathing, party bar with
    out-of-combat portrait switching, picking kind. After this PR you can

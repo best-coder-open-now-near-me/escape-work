@@ -15,8 +15,12 @@ import { ACTIONS } from './data/actions.js';
 import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
 import { createSheet, applyDamage, PAPER_CAP } from './stats.js';
-import { createParty, leader as partyLeader, addMember, gainXpAll, serializeProgress, parseProgress } from './party.js';
-import { PlayerActor, EnemyActor, NpcActor } from './actors.js';
+import {
+  createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
+  serializeProgress, parseProgress, PARTY_CAP,
+} from './party.js';
+import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
+import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel } from './scene.js';
 import { placeModel, applyCharacterProportions } from './models.js';
 import { addHighlight, setHighlight } from './shading.js';
@@ -94,14 +98,22 @@ function startGame(level) {
   // The party (and the leader's model) only exist once a class is picked - the
   // picker overlay is the first thing the player sees. `sheet` and `player`
   // are the LEADER's live bindings - the character the player controls - and
-  // exist alongside the party so every leader-keyed closure reads naturally.
+  // are REASSIGNED when a portrait click hands control to another member, so
+  // every leader-keyed closure follows along.
   let party = null;
   let sheet = null;
-  const player = new PlayerActor(grid.playerSpawn.x, grid.playerSpawn.z);
+  let player = new PlayerActor(grid.playerSpawn.x, grid.playerSpawn.z);
   const enemies = grid.enemySpawns.map((s) => new EnemyActor(s.x, s.z, s.type, ENEMY_TYPES[s.type]));
   // Non-hostile coworkers you talk to (data/npcs.js) - separate from `enemies`
   // so combat never engages them and they take no turns.
   const npcs = grid.npcSpawns.map((s) => new NpcActor(s.x, s.z, s.type, NPCS[s.type]));
+  // Recruitable companions (data/companions.js) stand among the NPCs until
+  // they join - same blocking, same talk verb. One already in a restored
+  // party doesn't respawn as a bystander; they arrive as a member below.
+  for (const s of grid.companionSpawns) {
+    if (restoredProgress?.sheets.some((sh) => sh.companionId === s.type)) continue;
+    npcs.push(new CompanionActor(s.x, s.z, s.type, COMPANIONS[s.type]));
+  }
 
   let inCombat = false;
   let combat = null; // active tactical-combat controller
@@ -124,7 +136,8 @@ function startGame(level) {
   // Looting (containers, bodies, pockets, the Alt overlay) lives in its own
   // module; approachAndDo is hoisted, so wiring it here is safe.
   const loot = createLooting({
-    app, grid, runtime, player, enemies,
+    app, grid, runtime, enemies,
+    getActor: () => player, // the leader's actor - re-pointed on leader switch
     getSheet: () => sheet,
     isInCombat: () => inCombat,
     isGameOver: () => gameOver,
@@ -193,13 +206,14 @@ function startGame(level) {
   // way; smoothing must never straighten a route through a damaging cell the
   // route avoided. The player and enemies get separate cost models - talents
   // discount only the player's.
-  const hazardCost = (x, z) => {
+  const hazardCostFor = (ms) => (x, z) => {
     if (runtime.isBurning(x, z)) return FIRE.pathCost;
     if (grid.isElectrified(x, z)) {
-      return sheet?.talent?.effects?.shockImmune ? 1 : ELECTRIFIED.pathCost;
+      return ms?.talent?.effects?.shockImmune ? 1 : ELECTRIFIED.pathCost;
     }
     return SURFACES[runtime.surfaceAt(x, z)]?.pathCost || 0;
   };
+  const hazardCost = (x, z) => hazardCostFor(sheet)(x, z); // the leader's cost model
   const enemyHazardCost = (x, z) => {
     if (runtime.isBurning(x, z)) return FIRE.pathCost;
     if (grid.isElectrified(x, z)) return ELECTRIFIED.pathCost;
@@ -284,6 +298,24 @@ function startGame(level) {
     ui.showLoseScreen(message);
   }
 
+  // A leader death ends the run; a companion just goes down - breathing, out
+  // of action, back up at 1 HP after a victory, a stairwell, or a hand up.
+  function downOrLose(member, message) {
+    if (member === partyLeader(party)) loseGame(message);
+    else downCompanion(member);
+  }
+  function downCompanion(m) {
+    m.actor?.clearPath();
+    if (m.actor) m.actor.fx = { kind: 'death', t: 0 };
+    ui.say(`${m.sheet.name} goes down. Breathing, but done for now.`);
+  }
+  function helpUp(m) {
+    if (!m || m.sheet.hp > 0) return;
+    m.sheet.hp = 1;
+    if (m.actor) m.actor.fx = null;
+    ui.say(`You haul ${m.sheet.name} upright. They pretend that was a stretch.`);
+  }
+
   // Every enemy death pays out the same way - combat kill, shove into live
   // water, or a printer taking them along. XP fans out to the whole party;
   // promotions announce themselves.
@@ -312,11 +344,16 @@ function startGame(level) {
       const dead = applyDamage(m.sheet, EXPLOSION_DAMAGE);
       m.actor.flinch();
       vfx.damageText(m.actor.x, m.actor.z, `-${EXPLOSION_DAMAGE}`);
-      msg += ` You catch shrapnel. -${EXPLOSION_DAMAGE} HP.`;
+      msg += m === partyLeader(party)
+        ? ` You catch shrapnel. -${EXPLOSION_DAMAGE} HP.`
+        : ` ${m.sheet.name} catches shrapnel. -${EXPLOSION_DAMAGE} HP.`;
       if (dead) {
-        ui.say(msg);
-        loseGame('PC LOAD LETTER. Fatal.');
-        return;
+        if (m === partyLeader(party)) {
+          ui.say(msg);
+          loseGame('PC LOAD LETTER. Fatal.');
+          return;
+        }
+        downCompanion(m);
       }
     }
     ui.say(msg);
@@ -519,6 +556,7 @@ function startGame(level) {
   const HL = {
     enemy: [1.0, 0.28, 0.2],
     npc: [0.42, 0.85, 0.42],
+    party: [0.45, 0.9, 0.8],
     loot: [1.0, 0.82, 0.4],
     interact: [0.5, 0.8, 1.0],
   };
@@ -551,6 +589,11 @@ function startGame(level) {
         return { name: ref.def.name, sub: ref.loot?.length ? 'Body · lootable' : 'Body · picked clean', color: rgbCss(HL.loot) };
       }
       if (kind === 'npc') return { name: ref.def.name, sub: 'Coworker · talk', color: rgbCss(HL.npc) };
+      if (kind === 'party') {
+        const m = memberOf(ref);
+        const sub = m && m.sheet.hp <= 0 ? 'Down · help up' : `Party · HP ${m?.sheet.hp}/${m?.sheet.maxHp}`;
+        return { name: ref.def.name, sub, color: rgbCss(HL.party) };
+      }
       if (kind === 'door') {
         const open = grid.doors.get(ref)?.open;
         return { name: open ? 'Door · open' : 'Door · closed', sub: open ? 'Close' : 'Open', color: rgbCss(HL.interact) };
@@ -604,7 +647,9 @@ function startGame(level) {
 
   const colorForHit = (hit) =>
     hit.kind === 'enemy' ? (hit.ref.alive ? HL.enemy : HL.loot)
-      : hit.kind === 'npc' ? HL.npc : HL.interact;
+      : hit.kind === 'npc' ? HL.npc
+        : hit.kind === 'party' ? HL.party : HL.interact;
+  const memberOf = (actor) => party?.members.find((m) => m.actor === actor) || null;
 
   function cursorFor(hit, point) {
     if (armedOoc) {
@@ -672,6 +717,12 @@ function startGame(level) {
     const { kind, ref } = hit;
     if (kind === 'door') { approachDoor(ref); return true; }
     if (kind === 'npc') { approachAndDo(ref.x, ref.z, () => dialogue.open(ref)); return true; }
+    if (kind === 'party') {
+      const m = memberOf(ref);
+      if (m && m.sheet.hp <= 0) approachAndDo(ref.x, ref.z, () => helpUp(m));
+      else approachAndDo(ref.x, ref.z, () => dialogue.open(ref));
+      return true;
+    }
     if (kind === 'enemy') {
       if (ref.alive) { attackOrConfront(ref); return true; }
       if (ref.loot?.length) approachAndDo(ref.x, ref.z, () => loot.lootBody(ref)); // corpse
@@ -682,34 +733,66 @@ function startGame(level) {
   }
 
   // --- dialogue (minimal talking layer) ---------------------------------------
+  // Recruitable companions use the same trees, plus option `effect`s: an
+  // option carrying { recruit: true } signs the speaker onto the party when
+  // picked. The tree is CAPTURED at open (pre-recruit conversations finish in
+  // the tree they started in - the recruit option's own `next` node lives
+  // there); the next open reads `recruitedDialogue` instead.
   const dialoguePanel = ui.createDialoguePanel();
   let dialogueNpc = null;
+  let dialogueTree = null;
+  const canRecruit = (npc) =>
+    npc instanceof CompanionActor && !npc.recruited && !!party && party.members.length < PARTY_CAP;
   const dialogue = {
     open(npc) {
       if (inCombat || gameOver || !npc) return;
+      const tree = (npc.recruited && npc.def.recruitedDialogue) || npc.def.dialogue;
+      if (!tree) return; // nothing to say (a restored companion without lines)
       dialogueNpc = npc;
+      dialogueTree = tree;
       npc.faceToward(player.x, player.z);
       loot.hideLabels();
       clearHoverHighlight();
       setCursor(null);
       ui.setFocusBanner(null);
-      renderDialogueNode(npc.def.dialogue.start);
+      renderDialogueNode(dialogueTree.start);
     },
-    close() { dialogueNpc = null; dialoguePanel.hide(); },
+    close() { dialogueNpc = null; dialogueTree = null; dialoguePanel.hide(); },
     get visible() { return dialoguePanel.visible; },
   };
   function renderDialogueNode(nodeId) {
-    const tree = dialogueNpc?.def.dialogue;
-    const node = tree?.nodes[nodeId];
+    const node = dialogueTree?.nodes[nodeId];
     if (!node) { dialogue.close(); return; }
-    dialoguePanel.show({
-      name: dialogueNpc.def.name,
-      text: node.text,
-      options: (node.options || [{ label: 'Leave', next: null }]).map((o) => ({
+    const options = (node.options || [{ label: 'Leave', next: null }])
+      // A recruit offer only shows while it can be accepted (not already
+      // aboard, roster not full).
+      .filter((o) => !o.effect?.recruit || canRecruit(dialogueNpc))
+      .map((o) => ({
         label: o.label,
-        action: () => { if (o.next) renderDialogueNode(o.next); else dialogue.close(); },
-      })),
-    });
+        action: () => {
+          if (o.effect?.recruit) recruitCompanion(dialogueNpc);
+          if (o.next) renderDialogueNode(o.next); else dialogue.close();
+        },
+      }));
+    dialoguePanel.show({ name: dialogueNpc.def.name, text: node.text, options });
+  }
+
+  // Sign a bystander onto the party: out of the `npcs` roster (they stop
+  // blocking as an NPC - partyAt covers them now), sheet minted at the
+  // leader's level, picking re-tagged so hover/clicks read them as one of
+  // ours. The entity, model and position stay exactly where they were.
+  function recruitCompanion(npc) {
+    if (!canRecruit(npc)) return;
+    const idx = npcs.indexOf(npc);
+    if (idx >= 0) npcs.splice(idx, 1);
+    npc.recruited = true;
+    const member = addMember(party, createCompanionSheet(npc.def, npc.typeId, sheet.level), npc);
+    if (!member) return;
+    if (npc.entity) {
+      picking.unregister(npc.entity);
+      picking.register(npc.entity, 'party', npc);
+    }
+    ui.toast(`${npc.def.name} joins the party.`);
   }
 
   // --- persistent attack hotbar ------------------------------------------------
@@ -727,6 +810,7 @@ function startGame(level) {
     });
   }
   function buildHotbar() {
+    hotbar?.destroy(); // a leader switch rebuilds it for the new sheet
     const ids = offensiveActionIds();
     hotbar = ui.createHotbar(
       ids.map((id) => ({ id, label: ACTIONS[id].label, ap: ACTIONS[id].ap, ammoCost: ACTIONS[id].ammoCost })),
@@ -734,6 +818,30 @@ function startGame(level) {
     );
     hotbar.refresh(sheet);
     hotbarPaper = sheet.paper;
+  }
+
+  // --- leader switching --------------------------------------------------------
+  // A portrait click hands control to another member. Everything leader-keyed
+  // re-keys through the `sheet`/`player` bindings: camera follow, click-to-
+  // move, the hotbar (rebuilt - different sheets bring different actions), the
+  // HUD, pathing costs, menu verbs, and the follower set. The outgoing leader
+  // stops walking and their pending walk-up dies with the handoff.
+  const partyBar = ui.createPartyBar({ onSelect: (i) => switchLeader(i) });
+  let partyBarKey = ''; // last rendered roster state (refresh gate)
+  function switchLeader(i) {
+    if (!party || inCombat || gameOver || dialogue.visible) return;
+    const m = party.members[i];
+    if (!m?.actor || m === partyLeader(party) || m.sheet.hp <= 0) return;
+    player.clearPath();
+    pendingAction = null;
+    armedOoc = null;
+    party.active = i;
+    sheet = m.sheet;
+    player = m.actor;
+    buildHotbar(); // their attacks, their ammo count
+    ui.updateStatsHud(sheet);
+    loot.refreshPanel(sheet);
+    ui.say(`You take point as ${m.sheet.name}.`);
   }
   function toggleOocArm(id) {
     if (!sheet || inCombat || gameOver || dialogue.visible || !ACTIONS[id]) return;
@@ -760,7 +868,7 @@ function startGame(level) {
   // fight is kicked off from the persistent hotbar.
   function beginCombat({ engaged, primary, opening = null }) {
     if (!sheet || inCombat || gameOver || !player.entity) return;
-    player.clearPath();
+    for (const m of party.members) m.actor?.clearPath(); // followers freeze too
     for (const e of enemies) e.clearPath(); // freeze any in-flight wander
     pendingAction = null;
     armedOoc = null;
@@ -843,9 +951,14 @@ function startGame(level) {
           combat = null;
           // A breather after every victory, so back-to-back fights aren't a
           // death spiral - wounds still carry over, just less brutally. The
-          // whole party catches its breath.
+          // whole party catches its breath, and the downed come to at 1 HP.
           for (const m of party.members) {
             if (m.sheet.hp > 0) m.sheet.hp = Math.min(m.sheet.maxHp, m.sheet.hp + VICTORY_HEAL);
+            else {
+              m.sheet.hp = 1;
+              if (m.actor) m.actor.fx = null;
+              ui.toast(`${m.sheet.name} comes to.`);
+            }
           }
           ui.say(`The floor is yours. You catch your breath. (+${VICTORY_HEAL} HP)`);
           ui.updateStatsHud(sheet);
@@ -903,9 +1016,10 @@ function startGame(level) {
         // and any playtest level, ends the run.
         if (!playtesting && level.next && LEVELS[level.next]) {
           // A breather in the stairwell, so you never start a floor one
-          // puddle away from death.
+          // puddle away from death. The downed get carried and come to on
+          // the landing.
           for (const m of party.members) {
-            if (m.sheet.hp > 0) m.sheet.hp = Math.min(m.sheet.maxHp, m.sheet.hp + STAIRWELL_HEAL);
+            m.sheet.hp = Math.min(m.sheet.maxHp, Math.max(m.sheet.hp, 0) + STAIRWELL_HEAL);
           }
           localStorage.setItem(PROGRESS_KEY, JSON.stringify(serializeProgress(party, level.next)));
           ui.showFloorClear({ nextName: LEVELS[level.next].name }, () => location.reload());
@@ -922,7 +1036,7 @@ function startGame(level) {
         ui.say(fx.message);
         ui.updateStatsHud(sheet);
         if (dead) {
-          loseGame('Done in by the office itself. The floor was, in fact, wet.');
+          downOrLose(member, 'Done in by the office itself. The floor was, in fact, wet.');
           return;
         }
       }
@@ -935,7 +1049,7 @@ function startGame(level) {
       ui.say('You drip on the carpet. -1 HP.');
       ui.updateStatsHud(sheet);
       if (bled) {
-        loseGame('Death by a thousand paper cuts. Well - several.');
+        downOrLose(member, 'Death by a thousand paper cuts. Well - several.');
         return;
       }
     }
@@ -964,7 +1078,7 @@ function startGame(level) {
         ui.say(sfx.message);
         ui.updateStatsHud(sheet);
         if (dead) {
-          loseGame('Done in by the office itself. Facilities sends their regards.');
+          downOrLose(member, 'Done in by the office itself. Facilities sends their regards.');
           return;
         }
       } else if (sfx.amount) {
@@ -1071,6 +1185,20 @@ function startGame(level) {
           { label: `Talk to ${hit.ref.def.name}`, action: () => approachAndDo(hit.ref.x, hit.ref.z, () => dialogue.open(hit.ref)) },
           { label: 'Examine', action: () => ui.say(hit.ref.def.examine || 'A coworker. Non-hostile, for now.') },
         ]);
+        return;
+      }
+      if (hit && hit.kind === 'party') {
+        const m = memberOf(hit.ref);
+        const items = [];
+        if (m && m.sheet.hp <= 0) {
+          items.push({ label: `Help ${hit.ref.def.name} up`, action: () => approachAndDo(hit.ref.x, hit.ref.z, () => helpUp(m)) });
+        } else if (m) {
+          items.push({ label: `Talk to ${hit.ref.def.name}`, action: () => approachAndDo(hit.ref.x, hit.ref.z, () => dialogue.open(hit.ref)) });
+          const i = party.members.indexOf(m);
+          if (i !== party.active) items.push({ label: `Switch to ${hit.ref.def.name}`, action: () => switchLeader(i) });
+        }
+        items.push({ label: 'Examine', action: () => ui.say(hit.ref.def.examine || 'One of yours. Holding up, mostly.') });
+        ui.showMenu(sx, sy, items);
         return;
       }
       if (!tile) return;
@@ -1195,16 +1323,75 @@ function startGame(level) {
 
   // --- main loop ------------------------------------------------------------------
   const BASE_SPEED = 4;
+  const FOLLOW_NEAR = 2; // tiles from the leader - close enough, stand easy
+  const CATCH_UP = 1.3; // a lagging follower hustles
+  // Sticky surfaces (coffee) slow whoever stands in them - queried from the
+  // RUNTIME layer, so a surface that burns away stops slowing anyone. Gum on
+  // a shoe slows its owner everywhere. Followers who fall behind walk faster
+  // than decorum allows.
+  function memberSpeed(m) {
+    let s = BASE_SPEED
+      * (SURFACES[runtime.surfaceAt(m.actor.x, m.actor.z)]?.slow || 1)
+      * (m.sheet.gum > 0 ? GUM.slow : 1);
+    const lead = partyLeader(party);
+    if (m !== lead && lead.actor
+      && Math.max(Math.abs(m.actor.x - lead.actor.x), Math.abs(m.actor.z - lead.actor.z)) > FOLLOW_NEAR + 1) {
+      s *= CATCH_UP;
+    }
+    return s;
+  }
+  // Followers trail the leader BG-style: when one drifts beyond FOLLOW_NEAR it
+  // paths to a free tile beside the leader (distinct per follower), costed by
+  // its OWN talents, pass-through for the rest of the party, and never parking
+  // on a tile that would hurt it. A small repath cadence keeps Dijkstra off
+  // the hot path; per-tile effects land through onMemberStep like any walk.
+  function updateFollowers(dt) {
+    const lead = partyLeader(party);
+    if (!lead.actor?.entity) return;
+    const claimed = new Set();
+    for (const m of party.members) {
+      if (m === lead || !m.actor?.entity || m.sheet.hp <= 0) continue;
+      m.followT = (m.followT ?? 0) - dt;
+      if (m.followT > 0) continue;
+      m.followT = 0.25;
+      const dist = Math.max(Math.abs(m.actor.x - lead.actor.x), Math.abs(m.actor.z - lead.actor.z));
+      if (dist <= FOLLOW_NEAR) continue; // near enough - let any walk finish
+      // Through the party, around everything else.
+      const open = (x, z) => grid.terrainOpen(x, z) && !enemyAt(x, z) && !npcAt(x, z);
+      let spot = null;
+      for (const [dx, dz] of DIRS8) {
+        const sx = lead.actor.x + dx;
+        const sz = lead.actor.z + dz;
+        if (!open(sx, sz) || claimed.has(sx + ',' + sz)) continue;
+        if (effectiveSurfDamage(sx, sz, m.sheet) > 0) continue; // no parking in fire
+        if (!spot || Math.hypot(sx - m.actor.x, sz - m.actor.z) < Math.hypot(spot[0] - m.actor.x, spot[1] - m.actor.z)) {
+          spot = [sx, sz];
+        }
+      }
+      if (!spot) continue;
+      claimed.add(spot[0] + ',' + spot[1]);
+      const p = findPath(open, m.actor.x, m.actor.z, spot[0], spot[1], hazardCostFor(m.sheet), grid.stepOpen);
+      if (!p || p.length < 2) continue;
+      p[p.length - 1] = clampPoint(spot[0], spot[1]);
+      const pos = m.actor.entity.getPosition();
+      const s = smoothPath((x, z) => open(x, z) && effectiveSurfDamage(x, z, m.sheet) <= 0,
+        [[pos.x, pos.z], ...p.slice(1)], grid.edgeOpen);
+      m.actor.setPath(s);
+    }
+  }
   app.on('update', (dt) => {
-    // Sticky surfaces (coffee) slow you while you're on them - queried from
-    // the RUNTIME layer, so a surface that burns away stops slowing anyone.
-    // Gum on the shoe slows you everywhere.
-    player.speed = BASE_SPEED
-      * (SURFACES[runtime.surfaceAt(player.x, player.z)]?.slow || 1)
-      * (sheet?.gum > 0 ? GUM.slow : 1);
-    player.update(dt, (x, z, done, changed) => {
-      if (party) onMemberStep(partyLeader(party), x, z, done, changed);
-    });
+    // Every party member walks, steps and animates the same way; each one's
+    // tile effects run against their own sheet (onMemberStep).
+    if (party) {
+      for (const m of party.members) {
+        if (!m.actor) continue;
+        m.actor.speed = memberSpeed(m);
+        m.actor.update(dt, (x, z, done, changed) => onMemberStep(m, x, z, done, changed));
+      }
+      if (sheet && !inCombat && !gameOver) updateFollowers(dt);
+    } else {
+      player.update(dt); // idling on the spawn tile behind the class picker
+    }
     const world = {
       paused: inCombat || gameOver,
       isWalkable,
@@ -1250,6 +1437,15 @@ function startGame(level) {
       hotbar.setVisible(show);
       if (show && sheet.paper !== hotbarPaper) { hotbarPaper = sheet.paper; hotbar.refresh(sheet); }
       if (show && armedOoc) drawOocTargets();
+    }
+    // Party bar: redraw only when the roster state changes (names/HP/active);
+    // visible only once there's an actual party to show.
+    if (party) {
+      const key = party.members
+        .map((m, i) => `${m.sheet.name}:${m.sheet.hp}/${m.sheet.maxHp}${i === party.active ? '*' : ''}`)
+        .join('|');
+      if (key !== partyBarKey) { partyBarKey = key; partyBar.refresh(party); }
+      partyBar.setVisible(party.members.length > 1 && !gameOver);
     }
     // Fire/smoke age in TURNS. In combat, combat.js advances one per round (via
     // the onRound callback in beginCombat). Out of combat there are no rounds, so
@@ -1304,14 +1500,34 @@ function startGame(level) {
   ], ['Alt — show loot', 'I — open pockets', '1–9 — aim an attack']);
   if (restoredProgress) {
     // Continuing a campaign run: same party, next floor - no picker. Field
-    // backfills for older saves live in parseProgress. Only the leader gets
-    // an actor until companion spawning arrives with recruitment.
+    // backfills for older saves live in parseProgress. The active member gets
+    // the PlayerActor; everyone else walks out of the stairwell beside them.
     party = createParty(restoredProgress.sheets[0]);
     for (const s of restoredProgress.sheets.slice(1)) addMember(party, s);
     party.active = restoredProgress.active;
     partyLeader(party).actor = player;
     sheet = partyLeader(party).sheet;
     spawnPlayerModel();
+    for (const m of party.members) {
+      if (m.actor) continue; // the leader, already placed
+      const def = COMPANIONS[m.sheet.companionId]
+        // A non-active class character (saved mid-switch) rides the same
+        // follower plumbing with a minimal def - model from their own sheet.
+        || { name: m.sheet.name, model: m.sheet.model, examine: 'One of yours. Holding up, mostly.' };
+      let spot = grid.playerSpawn;
+      for (const [dx, dz] of DIRS8) {
+        const x = grid.playerSpawn.x + dx;
+        const z = grid.playerSpawn.z + dz;
+        if (isWalkable(x, z)) { spot = { x, z }; break; }
+      }
+      const comp = new CompanionActor(spot.x, spot.z, m.sheet.companionId || m.sheet.classId, def);
+      comp.recruited = true;
+      m.actor = comp;
+      placeModel(app, `assets/characters/${m.sheet.model}.glb`, spot.x, spot.z, {
+        lift, rotY: 90, animate: true,
+        onReady: (e) => { applyCharacterProportions(e); comp.attach(e); picking.register(e, 'party', comp); },
+      });
+    }
     loot.refreshPanel(sheet);
     buildHotbar();
     ui.say(`${grid.name}. Keep going.`);

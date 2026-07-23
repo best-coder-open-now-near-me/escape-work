@@ -304,6 +304,21 @@ export class NpcActor extends GridActor {
   }
 }
 
+// A recruitable coworker (data/companions.js). Before recruitment it stands
+// and talks like any NPC - it lives in main.js's `npcs` array and blocks like
+// a body. Once `recruited`, main.js moves it into the party: follow paths are
+// issued by the follower logic there, per-member stepping runs through
+// onMemberStep, and this actor just walks what it's given (GridActor already
+// knows how). Player-grade walk speed, because it keeps up or it gets left.
+export class CompanionActor extends GridActor {
+  constructor(x, z, typeId, def, opts = {}) {
+    super(x, z, { speed: 4, ...opts });
+    this.typeId = typeId;
+    this.def = def;
+    this.recruited = false;
+  }
+}
+
 export class EnemyActor extends GridActor {
   constructor(x, z, typeId, def, opts = {}) {
     super(x, z, { speed: 2.2, ...opts });
