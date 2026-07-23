@@ -158,7 +158,16 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   (camera, hotbar, HUD, pockets, menu verbs, follower set); in combat it
   moves combat's `active` pointer (their action bar, their AP - switching is
   free and reversible, DOS-style), and when the fight ends the out-of-combat
-  bindings follow whoever had the floor (`syncLeaderBindings`). **Downed**:
+  bindings follow whoever had the floor (`syncLeaderBindings`). **End Turn
+  queues**: it ends the ACTIVE member's turn and auto-advances to the next
+  member who hasn't ended (the button reads "Next Member" until the last
+  hand-off gives the round to the enemies); manual switching back to a
+  passed member still works - `done` gates only the auto-advance. In-combat
+  clicks check the pick ray for BODIES first (a teammate's body switches, a
+  coworker's body targets - the rings mark bodies, and the ground tile
+  behind a tall mesh is a mis-walk); ground clicks stay tile-based for
+  movement, and a member's combat route treats allies as blockers so a move
+  never ends stacked on a teammate. **Downed**:
   a member at 0 HP topples and sits out; the run only ends on a party WIPE.
   If the member you're controlling falls, a survivor steps up on the spot -
   in combat via `combat.notifyMemberDown`/the enemy-attack handoff, outside

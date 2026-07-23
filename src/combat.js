@@ -28,7 +28,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const members = party.members.map((m) => {
     const usesLeft = {};
     for (const id of m.sheet.actions) if (ACTIONS[id].uses) usesLeft[id] = ACTIONS[id].uses;
-    return { sheet: m.sheet, actor: m.actor, ap: m.sheet.maxAp, defended: false, usesLeft };
+    // `done` marks a member End Turn has passed - it gates the auto-advance,
+    // never the member (switch back manually and they can still act).
+    return { sheet: m.sheet, actor: m.actor, ap: m.sheet.maxAp, defended: false, done: false, usesLeft };
   });
   let active = members[party.active];
   const livingMembers = () => members.filter((m) => m.sheet.hp > 0 && m.actor);
@@ -150,7 +152,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (!pos) { hidePreview(); return; }
       raw = [[pos.x, pos.z], world.clampPoint(point.x, point.z)];
     } else {
-      const p = world.findPath(active.actor.x, active.actor.z, tx, tz);
+      const p = world.findPath(active.actor.x, active.actor.z, tx, tz, active.actor);
       if (!p || p.length < 2) { hidePreview(); return; }
       raw = [...p.slice(0, -1), world.clampPoint(point.x, point.z)];
     }
@@ -320,9 +322,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function setActive(i) {
     const m = members[i];
     if (phase !== 'player' || !m || m === active || m.sheet.hp <= 0 || !m.actor) return;
-    if (active.actor.moving) return; // let the current walk land first
+    if (active.actor.moving) { log('Let the current move land first.'); return; }
     applyActive(i);
-    log(`${m.sheet.name} has the floor.`);
+    log(`${m.sheet.name} has the floor. ${fmtAp(m.ap)} AP.`);
   }
   function cycleActive() {
     for (let step = 1; step < members.length; step++) {
@@ -378,6 +380,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       b.style.borderColor = ((a.type === 'attack' || a.type === 'shove') && id === armed) ? '#8adf76' : '#3a3a52';
     }
     endBtn.disabled = phase !== 'player';
+    // The label says what the click will actually do: pass to a teammate who
+    // hasn't ended their turn, or hand the round to the other side.
+    endBtn.textContent = members.some((m) => m !== active && !m.done && m.sheet.hp > 0 && m.actor)
+      ? 'Next Member' : 'End Turn';
     // One member reads as "You"; a real party lists everyone by name, the
     // downed marked as such.
     strip.innerHTML = `<div style="font-weight:700; margin-bottom:5px;">COMBAT</div>` +
@@ -549,7 +555,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // walk the cheapest route to their side, as far as AP allows
     let best = null;
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-      const p = world.findPath(active.actor.x, active.actor.z, en.x + dx, en.z + dz);
+      const p = world.findPath(active.actor.x, active.actor.z, en.x + dx, en.z + dz, active.actor);
       if (p && (!best || p.length < best.length)) best = p;
     }
     if (!best || best.length < 2) { log('No way to reach them.'); return; }
@@ -619,7 +625,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       walkActive([[pos.x, pos.z], world.clampPoint(point.x, point.z)], active.ap);
       return;
     }
-    const p = world.findPath(active.actor.x, active.actor.z, tile.x, tile.z);
+    const p = world.findPath(active.actor.x, active.actor.z, tile.x, tile.z, active.actor);
     if (!p || p.length < 2) return;
     walkActive(p, active.ap, point ? world.clampPoint(point.x, point.z) : null);
   }
@@ -654,8 +660,18 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       refresh();
     }
   }
+  // End Turn queues through the party: it ends the ACTIVE member's turn and
+  // hands the floor to the next member who hasn't ended theirs - only the
+  // last hand-off gives the round to the enemies. One member = the old
+  // button exactly.
   endBtn.onclick = () => {
     if (phase !== 'player') return;
+    active.done = true;
+    const next = members.find((m) => m !== active && !m.done && m.sheet.hp > 0 && m.actor);
+    if (next) {
+      setActive(members.indexOf(next));
+      return;
+    }
     startEnemyPhase();
   };
 
@@ -676,6 +692,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     for (const m of members) {
       m.ap = m.sheet.maxAp;
       m.defended = false;
+      m.done = false;
     }
     callbacks.onRound?.(); // a full round elapsed - age fire/smoke one turn
     log('Your turn.');

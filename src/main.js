@@ -964,7 +964,15 @@ function startGame(level) {
       opening,
       world: {
         isWalkable,
-        findPath: (sx, sz, tx, tz) => findPath(isWalkable, sx, sz, tx, tz, hazardCost, grid.stepOpen),
+        // The acting member's own route: allies BLOCK in combat (no ending a
+        // move stacked on a teammate; sequenced moves can afford the detour)
+        // and the costs are the walker's own talents, not the leader's.
+        findPath: (sx, sz, tx, tz, self = player) => {
+          const ms = party.members.find((m) => m.actor === self)?.sheet || sheet;
+          const open = (x, z) => isWalkable(x, z) && !party.members.some((m) =>
+            m.actor && m.actor !== self && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z);
+          return findPath(open, sx, sz, tx, tz, hazardCostFor(ms), grid.stepOpen);
+        },
         // Enemy routing: never through a party member's tile, and costed by
         // the enemy hazard model - your talents don't shape THEIR fears.
         findEnemyPath: (sx, sz, tx, tz) => findPath(
@@ -1224,11 +1232,28 @@ function startGame(level) {
       // previews, AP, target rings) is all tile/ground-keyed, and a click must
       // hit the enemy on the CLICKED tile, not whichever body the ray grazes.
       if (inCombat) {
+        // Bodies first, via the pick ray: the target rings mark BODIES, and
+        // the ground fallback behind a tall mesh is a mis-walk that burns AP.
+        // Clicking a teammate's body hands them the floor; clicking a
+        // coworker's body targets them. Ground clicks stay tile-based for
+        // movement.
+        const bodyHit = picking.pick(controls.cameraEntity, sx, sy);
+        if (bodyHit?.kind === 'party') {
+          const m = memberOf(bodyHit.ref);
+          if (m && m.sheet.hp > 0 && m !== partyLeader(party)) {
+            combat?.setActive(party.members.indexOf(m));
+            return;
+          }
+          // your own body (or a downed member): fall through to the ground
+        } else if (bodyHit?.kind === 'enemy' && bodyHit.ref.alive) {
+          combat?.handleEnemyClick(bodyHit.ref);
+          return;
+        }
         if (!tile) return;
         const en = enemyAt(tile.x, tile.z);
         if (en) { combat?.handleEnemyClick(en); return; }
-        // Clicking another member's body hands them the floor (their own
-        // tile stays a ground click - purge self-casts, shuffles).
+        // Clicking another member's ground tile also hands them the floor
+        // (their own tile stays a ground click - purge self-casts, shuffles).
         const pm = party?.members.find((m) =>
           m.actor && m.sheet.hp > 0 && m.actor.x === tile.x && m.actor.z === tile.z);
         if (pm && pm !== partyLeader(party)) {
