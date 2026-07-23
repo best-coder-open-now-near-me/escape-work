@@ -324,11 +324,20 @@ export class EnemyActor extends GridActor {
     super(x, z, { speed: 2.2, ...opts });
     this.typeId = typeId;
     this.def = def;
-    this.hp = def.hp; // map HP - damage persists outside combat too
+    // Classes spell max HP `maxHp`, the enemy registry spells it `hp` - an
+    // AI unit can be backed by either now (SUMMON_PLAN.md / stats.js unitCombat).
+    this.maxHp = def.maxHp ?? def.hp;
+    this.hp = this.maxHp; // map HP - damage persists outside combat too
     this.spawnX = x;
     this.spawnZ = z;
     this.alive = true;
     this.leash = 2;
+    // Faction + summon lifecycle. A hand-placed coworker is a permanent enemy
+    // on the enemy team; a summoned unit carries its summoner (for live-count
+    // caps) and the `summoned` marker (no loot, no XP, gone at combat end).
+    this.team = opts.team || 'enemy';
+    this.summonedBy = opts.summonedBy || null;
+    this.summoned = !!opts.summoned;
     // Stagger decisions so enemies don't all step in lockstep.
     this.wanderTimer = 1 + Math.random() * 1.5;
   }
@@ -348,7 +357,9 @@ export class EnemyActor extends GridActor {
     this.path = null;
     this.slideTo = null;
     this.onTile = null;
-    this.loot = rollLoot(this.def.loot); // what the body carries (lootable)
+    // Summoned minions leave nothing to rummage - they're spent, not slain
+    // (SUMMON_PLAN #6). A hand-placed coworker rolls their loot table.
+    this.loot = this.summoned ? [] : rollLoot(this.def.loot); // body carry (lootable)
     if (this.entity) this.fx = { kind: 'death', t: 0 };
   }
 
