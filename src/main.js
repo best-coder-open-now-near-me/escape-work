@@ -903,7 +903,7 @@ function startGame(level) {
       } else if (sfx.amount) {
         ui.say(sheet.talent?.effects?.shockImmune && grid.isElectrified(x, z)
           ? 'The water crackles. Your ESD soles rate this a non-event. 0 damage.'
-          : 'You glide across the drift, harvesting ammunition. The edges respect a master. (+1 paper)');
+          : 'You glide across the drift; the edges respect a master. Not a scratch.');
         ui.updateStatsHud(sheet);
       } else if (sfx.message && !sfx.applies) {
         ui.say(sfx.message);
