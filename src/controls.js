@@ -112,20 +112,28 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     return p ? { x: Math.round(p.x), z: Math.round(p.z) } : null;
   }
 
+  // The height the rig looks at: floor-ish for play, chest height when the
+  // class carousel frames a candidate.
+  let focusHeight = 0.3;
+
   // Ease the rig toward the target each frame so the camera trails the player.
   // Time-based smoothing, so the trailing speed is framerate-independent.
   function follow(target, dt = 1 / 60) {
     const k = 1 - Math.exp(-dt * 7);
     const c = camYaw.getPosition();
-    camYaw.setPosition(pc.math.lerp(c.x, target.x, k), 0.3, pc.math.lerp(c.z, target.z, k));
+    camYaw.setPosition(pc.math.lerp(c.x, target.x, k), focusHeight, pc.math.lerp(c.z, target.z, k));
   }
 
-  // Programmatic dolly (the class-picker carousel zooms in on the candidate).
-  // Allows closer than the wheel's minDist; callers restore a sane distance.
-  function setZoom(dist) {
-    CAM.dist = pc.math.clamp(dist, 5, CAM.maxDist);
+  // Programmatic camera override (the class-picker carousel frames the
+  // candidate close and head-on, past the wheel/orbit limits). Values apply
+  // raw - callers restore the defaults when done.
+  function setView({ dist, pitch, yaw, focusY } = {}) {
+    if (dist !== undefined) CAM.dist = pc.math.clamp(dist, 1, CAM.maxDist);
+    if (pitch !== undefined) CAM.pitch = pitch;
+    if (yaw !== undefined) CAM.yaw = yaw;
+    if (focusY !== undefined) focusHeight = focusY;
     apply();
   }
 
-  return { cameraEntity, screenToTile, screenToGround, follow, setZoom };
+  return { cameraEntity, screenToTile, screenToGround, follow, setView };
 }

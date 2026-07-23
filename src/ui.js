@@ -304,17 +304,23 @@ export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
   });
   root.appendChild(dim);
 
+  // The picker owns the top of the screen: the game's HUD banner steps aside
+  // until a class is hired.
+  const hud = document.getElementById('hud');
+  if (hud) hud.style.display = 'none';
+
   const title = document.createElement('div');
-  // Sits below the game's own header lines, not on top of them.
-  Object.assign(title.style, { position: 'absolute', top: '96px', left: '0', right: '0', textAlign: 'center' });
+  Object.assign(title.style, { position: 'absolute', top: '26px', left: '0', right: '0', textAlign: 'center' });
   title.innerHTML = `
     <div style="font-size:22px; font-weight:800; letter-spacing:2px;">CHOOSE YOUR CAREER MISTAKE</div>
     <div style="opacity:.8; margin-top:4px;">${ids.length} r&eacute;sum&eacute;s on the desk. You will be living one of them.</div>`;
   root.appendChild(title);
 
+  // Bottom-anchored so the nav and hire buttons never move between slides -
+  // a taller resume grows upward instead of shifting the controls.
   const panel = document.createElement('div');
   Object.assign(panel.style, {
-    position: 'absolute', right: 'min(6vw, 84px)', top: '50%', transform: 'translateY(-50%)',
+    position: 'absolute', right: 'min(6vw, 84px)', bottom: '46px',
     width: '308px', pointerEvents: 'auto', textAlign: 'center',
   });
   root.appendChild(panel);
@@ -348,6 +354,9 @@ export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
     textAlign: 'left', background: '#f6f3ea', border: '1px solid #d8d2c2', borderRadius: '3px',
     padding: '18px 16px 14px', color: '#2b2a26', font: "13px Georgia, 'Times New Roman', serif",
     boxShadow: '0 10px 30px rgba(0,0,0,.55)', position: 'relative',
+    // Every resume gets the same sheet of paper - roomy enough that longer
+    // future write-ups still won't shove the controls around.
+    minHeight: '360px', boxSizing: 'border-box',
   });
   panel.appendChild(card);
 
@@ -420,6 +429,7 @@ export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
   window.addEventListener('keydown', onKey);
   function cleanup() {
     window.removeEventListener('keydown', onKey);
+    if (hud) hud.style.display = '';
     root.remove();
   }
 
