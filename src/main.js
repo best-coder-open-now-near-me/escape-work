@@ -201,7 +201,7 @@ function startGame(level) {
     const token = ++previewToken;
     if (previewEntity) { previewEntity.destroy(); previewEntity = null; }
     placeModel(app, `assets/characters/${CLASSES[classId].model}.glb`, player.x, player.z, {
-      lift, animate: true,
+      lift, rotY: 45, animate: true, // start facing the head-on camera
       onReady: (e) => {
         applyCharacterProportions(e);
         if (token !== previewToken) { e.destroy(); return; }
@@ -213,7 +213,7 @@ function startGame(level) {
     previewToken += 1;
     if (previewEntity) { previewEntity.destroy(); previewEntity = null; }
     app.off('update', previewSpin);
-    controls.setZoom(26);
+    controls.setView({ dist: 26, pitch: 55, focusY: 0.3 }); // tactical camera
   }
 
   function onClassPicked(classId) {
@@ -877,9 +877,10 @@ function startGame(level) {
     loot.refreshPanel(sheet);
     ui.say(`${grid.name}. Keep going.`);
   } else {
-    // The carousel: dolly in on the spawn tile where previewClass parades
-    // the browsed candidate; onClassPicked restores the tactical camera.
-    controls.setZoom(10);
+    // The carousel: frame the spawn tile close and head-on (eye-ish level,
+    // aimed at the chest) where previewClass parades the browsed candidate;
+    // onClassPicked restores the tactical camera.
+    controls.setView({ dist: 3.6, pitch: 14, focusY: 0.85 });
     app.on('update', previewSpin);
     ui.showClassPicker(CLASSES, ACTIONS, onClassPicked, () => {
       location.hash = '#editor';
