@@ -20,7 +20,7 @@ const cheb = (ax, az, bx, bz) => Math.max(Math.abs(ax - bx), Math.abs(az - bz));
 const THROW_RANGE = 5;
 const SURPRISE_RADIUS = 2; // engaged from beyond this = loses the first turn
 
-export function startCombat({ app, sheet, player, engaged, world, fx, callbacks }) {
+export function startCombat({ app, sheet, player, engaged, world, fx, callbacks, opening = null }) {
   // Enemies pulled in from a distance are surprised - they spend their first
   // turn realizing what's happening, so group openings don't alpha-strike you.
   for (const en of engaged) {
@@ -748,6 +748,15 @@ export function startCombat({ app, sheet, player, engaged, world, fx, callbacks 
   app.on('update', update);
   log('Combat! Your move.');
   refresh();
+
+  // Started from the persistent hotbar: the fight opens with the armed action
+  // aimed at the coworker you clicked. handleEnemyClick sorts out the rest -
+  // melee walks up and strikes on arrival, a throw fires if in range and line.
+  if (opening && ACTIONS[opening.actionId] && opening.target?.alive) {
+    armed = opening.actionId;
+    refresh();
+    handleEnemyClick(opening.target);
+  }
 
   // Read-only handle for tests.
   window.__combat = {

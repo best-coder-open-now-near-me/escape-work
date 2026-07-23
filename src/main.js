@@ -15,16 +15,20 @@ import { ACTIONS } from './data/actions.js';
 import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
 import { createSheet, gainXp, applyDamage, PAPER_CAP } from './stats.js';
-import { PlayerActor, EnemyActor } from './actors.js';
+import { PlayerActor, EnemyActor, NpcActor } from './actors.js';
 import { createApp, buildLevel } from './scene.js';
 import { placeModel, applyCharacterProportions } from './models.js';
+import { addHighlight, setHighlight } from './shading.js';
 import { throwProjectile, spawnDamageText, worldToScreenCss } from './fx.js';
 import { createControls } from './controls.js';
+import { createPicker } from './picking.js';
 import { createLooting } from './looting.js';
 import { startCombat } from './combat.js';
 import { startEditor } from './editor.js';
+import { NPCS } from './data/npcs.js';
 import * as ui from './ui.js';
 
+const pc = window.pc;
 const STASH_KEY = 'escape-work.playtest';
 const PROGRESS_KEY = 'escape-work.progress';
 const app = createApp(document.getElementById('app'));
@@ -66,7 +70,11 @@ app.start();
 // ---------------------------------------------------------------------------------
 function startGame(level) {
   const grid = parseLevel(level);
-  const scene = buildLevel(app, grid);
+  // Object picking: a click/hover resolves to the interactable ENTITY under
+  // the cursor (door, enemy, NPC, prop), not just the floor tile behind it.
+  // Built before the scene so doors/props can register as they're created.
+  const picking = createPicker();
+  const scene = buildLevel(app, grid, { picking });
   const { walls, updateWallFade, animateSurfaces, floorHeight } = scene;
   // Fire and its consequences live in the surface runtime; handleExplosion is
   // hoisted from below.
@@ -81,12 +89,18 @@ function startGame(level) {
   let sheet = null;
   const player = new PlayerActor(grid.playerSpawn.x, grid.playerSpawn.z);
   const enemies = grid.enemySpawns.map((s) => new EnemyActor(s.x, s.z, s.type, ENEMY_TYPES[s.type]));
+  // Non-hostile coworkers you talk to (data/npcs.js) - separate from `enemies`
+  // so combat never engages them and they take no turns.
+  const npcs = grid.npcSpawns.map((s) => new NpcActor(s.x, s.z, s.type, NPCS[s.type]));
 
   let inCombat = false;
   let combat = null; // active tactical-combat controller
   let gameOver = false;
   let lastPath = null; // kept for debugging/tests
   let pendingAction = null; // walk-up interaction, runs on arrival
+  let armedOoc = null; // hotbar action armed OUT of combat (targets an enemy)
+  let hotbar = null; // persistent attack bar (built once a class is picked)
+  let hotbarPaper = -1; // last paper count the hotbar rendered (refresh gate)
 
   // --- gameplay tuning --------------------------------------------------------
   const ENGAGE_RADIUS = 4; // Chebyshev tiles within which enemies join a fight
@@ -114,7 +128,9 @@ function startGame(level) {
   }
 
   const enemyAt = (x, z) => enemies.find((e) => e.alive && e.x === x && e.z === z) || null;
-  const isWalkable = (x, z) => grid.terrainOpen(x, z) && !enemyAt(x, z);
+  const npcAt = (x, z) => npcs.find((n) => n.x === x && n.z === z) || null;
+  // NPCs stand on their tile and block movement like any body.
+  const isWalkable = (x, z) => grid.terrainOpen(x, z) && !enemyAt(x, z) && !npcAt(x, z);
   // Surface queries, consulting the runtime (fire) before static state.
   const surfEffect = (x, z) => {
     if (runtime.isBurning(x, z)) return FIRE.onEnter;
@@ -176,7 +192,19 @@ function startGame(level) {
   const lift = floorHeight / 2;
   for (const en of enemies) {
     placeModel(app, `assets/characters/${en.def.model}.glb`, en.x, en.z, {
-      lift, rotY: -90, animate: true, onReady: (e) => { applyCharacterProportions(e); en.attach(e); },
+      lift, rotY: -90, animate: true,
+      onReady: (e) => { applyCharacterProportions(e); en.attach(e); picking.register(e, 'enemy', en); },
+    });
+  }
+  for (const npc of npcs) {
+    placeModel(app, `assets/characters/${npc.def.model}.glb`, npc.x, npc.z, {
+      lift, rotY: 90, animate: true,
+      onReady: (e) => {
+        applyCharacterProportions(e);
+        npc.attach(e);
+        npc.faceToward(player.x, player.z);
+        picking.register(e, 'npc', npc);
+      },
     });
   }
   // (Furniture is no longer set dressing here - props are solid tiles in the
@@ -221,7 +249,8 @@ function startGame(level) {
     sheet = createSheet(classId);
     spawnPlayerModel();
     loot.refreshPanel(sheet);
-    ui.say(`${sheet.className}. Now get out of here. (Alt shows loot, I opens pockets.)`);
+    buildHotbar();
+    ui.say(`${sheet.className}. Now get out of here. (Alt shows loot, I opens pockets, 1-9 to aim an attack.)`);
   }
 
   // Every way to die funnels through here: freeze the world, drop any active
@@ -419,34 +448,231 @@ function startGame(level) {
     return out;
   }
 
+  // --- targeting, hover highlight, cursor --------------------------------------
+  const THROW_RANGE = 5; // must match combat.js
+  const cheb = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.z - b.z));
+  // Throws sail over chest-high partitions but not closed doors (grid.sightOpen).
+  const hasLos = (a, b) => segmentClear(grid.terrainOpen, a.x, a.z, b.x, b.z, grid.sightOpen);
+  const throwAmmoCost = (id) => {
+    const base = ACTIONS[id].ammoCost || 0;
+    const disc = sheet?.talent?.effects?.paperAmmoDiscount || 0;
+    return base > 1 ? Math.max(1, base - disc) : base;
+  };
+  // Out of combat there's no AP budget: a thrown opener needs range + line +
+  // ammo; melee/shove just walk you in, so they can always open a fight.
+  const oocTargetOk = (id, en) => {
+    const a = ACTIONS[id];
+    if (a.ammoCost) {
+      return cheb(player, en) <= THROW_RANGE && hasLos(player, en) && (sheet?.paper || 0) >= throwAmmoCost(id);
+    }
+    return true;
+  };
+
+  // BG3-style hover glow: one colored inverted-hull shell per interactable
+  // (shading.addHighlight), built lazily, toggled/recolored as the cursor
+  // moves. Color reads the target's nature: hostile red, talkable green,
+  // lootable gold, neutral interactable (doors/props) cyan.
+  const HL = {
+    enemy: [1.0, 0.28, 0.2],
+    npc: [0.42, 0.85, 0.42],
+    loot: [1.0, 0.82, 0.4],
+    interact: [0.5, 0.8, 1.0],
+  };
+  const canvasEl = document.getElementById('app');
+  const hlShells = new WeakMap(); // holder entity -> highlight shell (or null)
+  let hoverEntity = null;
+  let hoverShell = null;
+  let hoverKind = null; // exposed for tests
+  function highlightShellFor(holder) {
+    if (!hlShells.has(holder)) hlShells.set(holder, addHighlight(holder));
+    return hlShells.get(holder);
+  }
+  function setHoverHighlight(holder, rgb) {
+    if (holder === hoverEntity) {
+      if (holder && hoverShell) setHighlight(hoverShell, true, rgb);
+      return;
+    }
+    if (hoverShell) { try { setHighlight(hoverShell, false); } catch { /* holder gone */ } }
+    hoverEntity = holder;
+    hoverShell = holder ? highlightShellFor(holder) : null;
+    if (hoverShell) setHighlight(hoverShell, true, rgb);
+  }
+  const clearHoverHighlight = () => setHoverHighlight(null, null);
+  const setCursor = (c) => { if (canvasEl) canvasEl.style.cursor = c || ''; };
+
+  const colorForHit = (hit) =>
+    hit.kind === 'enemy' ? (hit.ref.alive ? HL.enemy : HL.loot)
+      : hit.kind === 'npc' ? HL.npc : HL.interact;
+
+  function cursorFor(hit, point) {
+    if (armedOoc) {
+      if (hit && hit.kind === 'enemy' && hit.ref.alive) {
+        return oocTargetOk(armedOoc, hit.ref) ? 'crosshair' : 'not-allowed';
+      }
+      return 'default';
+    }
+    if (hit) {
+      if (hit.kind === 'enemy') return hit.ref.alive ? 'crosshair' : 'pointer';
+      if (hit.kind === 'npc') return 'help';
+      return 'pointer'; // door, prop
+    }
+    // Flat targets the pick ray misses (corpses, dropped items, a door edge
+    // clicked on the floor) still deserve the interact cursor.
+    if (point) {
+      const tx = Math.round(point.x);
+      const tz = Math.round(point.z);
+      if (doorNearPoint(point)) return 'pointer';
+      if (loot.corpseAt(tx, tz) || loot.looseAt(tx, tz).length || grid.defAt(tx, tz).loot) return 'pointer';
+    }
+    return 'default';
+  }
+
+  // Out-of-combat hover: highlight what's under the cursor and pick a cursor.
+  function worldHover(point, sx, sy) {
+    const hit = picking.pick(controls.cameraEntity, sx, sy);
+    hoverKind = hit ? hit.kind : null;
+    if (hit) setHoverHighlight(hit.entity, colorForHit(hit));
+    else clearHoverHighlight();
+    setCursor(cursorFor(hit, point));
+  }
+
+  // Immediate-mode target rings for an armed hotbar action (redrawn each frame
+  // while armed, like combat's own target rings).
+  const RING_OK = new pc.Color(0.42, 0.78, 0.35);
+  const RING_FAR = new pc.Color(0.85, 0.28, 0.24);
+  function drawRing(cx, cz, r, color, y = 0.14) {
+    const SEGS = 18;
+    let prev = null;
+    for (let i = 0; i <= SEGS; i++) {
+      const a = (i / SEGS) * Math.PI * 2;
+      const p = new pc.Vec3(cx + Math.cos(a) * r, y, cz + Math.sin(a) * r);
+      if (prev) app.drawLine(prev, p, color);
+      prev = p;
+    }
+  }
+  function drawOocTargets() {
+    for (const en of enemies) {
+      if (!en.alive || !en.entity) continue;
+      const pos = en.entity.getPosition();
+      drawRing(pos.x, pos.z, 0.5, oocTargetOk(armedOoc, en) ? RING_OK : RING_FAR);
+    }
+  }
+
+  // --- left-click verb dispatch (Divinity-style: the target picks the verb) ---
+  function attackOrConfront(en) {
+    const a = armedOoc && ACTIONS[armedOoc];
+    if (a && (a.type === 'attack' || a.type === 'shove')) engageWithAction(en, armedOoc);
+    else confront(en);
+  }
+  // Act on the interactable ENTITY under the cursor. Returns true if handled.
+  function dispatchHit(hit) {
+    const { kind, ref } = hit;
+    if (kind === 'door') { approachDoor(ref); return true; }
+    if (kind === 'npc') { approachAndDo(ref.x, ref.z, () => dialogue.open(ref)); return true; }
+    if (kind === 'enemy') {
+      if (ref.alive) { attackOrConfront(ref); return true; }
+      if (ref.loot?.length) approachAndDo(ref.x, ref.z, () => loot.lootBody(ref)); // corpse
+      return true;
+    }
+    if (kind === 'prop') { approachAndDo(ref.x, ref.z, () => loot.lootContainer(ref.x, ref.z)); return true; }
+    return false;
+  }
+
+  // --- dialogue (minimal talking layer) ---------------------------------------
+  const dialoguePanel = ui.createDialoguePanel();
+  let dialogueNpc = null;
+  const dialogue = {
+    open(npc) {
+      if (inCombat || gameOver || !npc) return;
+      dialogueNpc = npc;
+      npc.faceToward(player.x, player.z);
+      loot.hideLabels();
+      clearHoverHighlight();
+      setCursor(null);
+      renderDialogueNode(npc.def.dialogue.start);
+    },
+    close() { dialogueNpc = null; dialoguePanel.hide(); },
+    get visible() { return dialoguePanel.visible; },
+  };
+  function renderDialogueNode(nodeId) {
+    const tree = dialogueNpc?.def.dialogue;
+    const node = tree?.nodes[nodeId];
+    if (!node) { dialogue.close(); return; }
+    dialoguePanel.show({
+      name: dialogueNpc.def.name,
+      text: node.text,
+      options: (node.options || [{ label: 'Leave', next: null }]).map((o) => ({
+        label: o.label,
+        action: () => { if (o.next) renderDialogueNode(o.next); else dialogue.close(); },
+      })),
+    });
+  }
+
+  // --- persistent attack hotbar ------------------------------------------------
+  // The offensive slice of the action list: things that target an enemy and
+  // can OPEN a fight. Heal/defend stay combat-only (they're reactive - no
+  // meaning with nobody swinging at you); out of combat you heal from pockets.
+  function offensiveActionIds() {
+    const throwables = Object.keys(ACTIONS).filter((id) => ACTIONS[id].ammoCost);
+    const seen = new Set();
+    return [...sheet.actions, 'shove', ...throwables].filter((id) => {
+      if (seen.has(id) || !ACTIONS[id]) return false;
+      seen.add(id);
+      const t = ACTIONS[id].type;
+      return t === 'attack' || t === 'shove';
+    });
+  }
+  function buildHotbar() {
+    const ids = offensiveActionIds();
+    hotbar = ui.createHotbar(
+      ids.map((id) => ({ id, label: ACTIONS[id].label, ap: ACTIONS[id].ap, ammoCost: ACTIONS[id].ammoCost })),
+      { onArm: toggleOocArm },
+    );
+    hotbar.refresh(sheet);
+    hotbarPaper = sheet.paper;
+  }
+  function toggleOocArm(id) {
+    if (!sheet || inCombat || gameOver || dialogue.visible || !ACTIONS[id]) return;
+    armedOoc = armedOoc === id ? null : id;
+    hotbar?.setArmed(armedOoc);
+    ui.say(armedOoc ? `${ACTIONS[armedOoc].label} ready — click a coworker to start it.` : 'You stand down.');
+  }
+
   const adjacentEnemy = () =>
     enemies.find((e) => e.alive && Math.abs(player.x - e.x) <= 1 && Math.abs(player.z - e.z) <= 1) || null;
 
-  function checkCombatTrigger() {
+  // Start (or refuse to start) a fight. `engaged` is everyone joining now,
+  // `primary` the coworker who triggered it (drives the flavor line + facing),
+  // `opening` an optional { actionId, target } fired as the first move when the
+  // fight is kicked off from the persistent hotbar.
+  function beginCombat({ engaged, primary, opening = null }) {
     if (!sheet || inCombat || gameOver || !player.entity) return;
-    const en = adjacentEnemy();
-    if (!en) return;
     player.clearPath();
     for (const e of enemies) e.clearPath(); // freeze any in-flight wander
     pendingAction = null;
+    armedOoc = null;
+    hotbar?.setArmed(null);
+    dialogue.close();
     inCombat = true;
     ui.hideMenu();
     loot.hideLabels(); // no browsing the shelves mid-fight
+    clearHoverHighlight();
+    setCursor(null);
     // Everyone close enough joins the brawl (those further than 2 tiles are
     // surprised and lose their first turn - see combat.js). Bystanders
     // outside the radius join later if attacked (combat.js joinCombat).
-    const engaged = enemies.filter((e) =>
-      e.alive && Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= ENGAGE_RADIUS);
-    player.faceToward(en.x, en.z);
-    en.faceToward(player.x, player.z);
-    ui.say(engaged.length > 1
-      ? `${en.def.name} has noticed you. So have ${engaged.length - 1} other${engaged.length > 2 ? 's' : ''}.`
-      : `${en.def.name} has noticed you.`);
+    player.faceToward(primary.x, primary.z);
+    primary.faceToward(player.x, player.z);
+    const live = engaged.filter((e) => e.alive).length;
+    ui.say(live > 1
+      ? `${primary.def.name} has noticed you. So have ${live - 1} other${live > 2 ? 's' : ''}.`
+      : `${primary.def.name} has noticed you.`);
     combat = startCombat({
       app,
       sheet,
       player,
       engaged,
+      opening,
       world: {
         isWalkable,
         findPath: (sx, sz, tx, tz) => findPath(isWalkable, sx, sz, tx, tz, hazardCost, grid.stepOpen),
@@ -511,6 +737,28 @@ function startGame(level) {
         },
       },
     });
+  }
+
+  // Proximity trigger: an adjacent coworker starts the fight (walk into range,
+  // or get cornered). Everyone within the engage radius joins.
+  function checkCombatTrigger() {
+    if (!sheet || inCombat || gameOver || !player.entity) return;
+    const en = adjacentEnemy();
+    if (!en) return;
+    const engaged = enemies.filter((e) =>
+      e.alive && Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= ENGAGE_RADIUS);
+    beginCombat({ engaged, primary: en });
+  }
+
+  // Hotbar trigger: an armed attack, aimed at a coworker, opens combat with
+  // that move. The clicked target joins even if it's beyond the engage radius
+  // (a thrown opener can reach further than the auto-engage does).
+  function engageWithAction(en, actionId) {
+    if (!sheet || inCombat || gameOver || !en?.alive) return;
+    const engaged = enemies.filter((e) =>
+      e.alive && Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= ENGAGE_RADIUS);
+    if (!engaged.includes(en)) engaged.push(en);
+    beginCombat({ engaged, primary: en, opening: { actionId, target: en } });
   }
 
   // Tile effects (data-driven from TILE_TYPES[..].onEnter) fire per step.
@@ -636,18 +884,30 @@ function startGame(level) {
     canvas: document.getElementById('app'),
     focus: grid.playerSpawn,
     onAnyLeftPress: () => ui.hideMenu(),
-    onLeftClickTile: (tile, point) => {
-      if (!tile || !sheet || gameOver) return;
+    onLeftClickTile: (tile, point, sx, sy) => {
+      if (!sheet || gameOver) return;
+      // The interactable ENTITY under the cursor wins over the floor tile
+      // behind it - this is what finally makes a click on the tall door mesh
+      // (or a standing enemy) land on the thing you aimed at.
+      const hit = picking.pick(controls.cameraEntity, sx, sy);
       if (inCombat) {
-        const en = enemyAt(tile.x, tile.z);
+        const en = (hit && hit.kind === 'enemy' && hit.ref.alive) ? hit.ref
+          : (tile ? enemyAt(tile.x, tile.z) : null);
         if (en) combat?.handleEnemyClick(en);
-        else combat?.handleTileClick(tile, point);
+        else if (tile) combat?.handleTileClick(tile, point);
         return;
       }
+      if (dialogue.visible) return; // talking: clicks belong to the panel
+      if (hit && dispatchHit(hit)) return;
+      if (!tile) return;
+      // Ground fallback - also catches flat targets the pick ray skims over: a
+      // door edge clicked on the floor, corpses, dropped items.
       const en = enemyAt(tile.x, tile.z);
+      const npc = npcAt(tile.x, tile.z);
       const corpse = loot.corpseAt(tile.x, tile.z);
       const doorKey = doorNearPoint(point);
-      if (en) confront(en);
+      if (en) attackOrConfront(en);
+      else if (npc) approachAndDo(npc.x, npc.z, () => dialogue.open(npc));
       else if (doorKey) approachDoor(doorKey);
       else if (grid.defAt(tile.x, tile.z).loot) {
         approachAndDo(tile.x, tile.z, () => loot.lootContainer(tile.x, tile.z));
@@ -658,11 +918,22 @@ function startGame(level) {
       } else moveTo(tile, point);
     },
     onHover: (point, sx, sy) => {
-      if (inCombat && combat) combat.handleHover(point, sx, sy);
+      if (inCombat && combat) { combat.handleHover(point, sx, sy); return; }
+      if (!sheet || gameOver || dialogue.visible) { clearHoverHighlight(); setCursor(null); return; }
+      worldHover(point, sx, sy);
     },
     onRightClickTile: (tile, sx, sy, point) => {
-      if (!tile || !sheet || inCombat || gameOver) return;
-      const doorKey = doorNearPoint(point);
+      if (!sheet || inCombat || gameOver || dialogue.visible) return;
+      const hit = picking.pick(controls.cameraEntity, sx, sy);
+      if (hit && hit.kind === 'npc') {
+        ui.showMenu(sx, sy, [
+          { label: `Talk to ${hit.ref.def.name}`, action: () => approachAndDo(hit.ref.x, hit.ref.z, () => dialogue.open(hit.ref)) },
+          { label: 'Examine', action: () => ui.say(hit.ref.def.examine || 'A coworker. Non-hostile, for now.') },
+        ]);
+        return;
+      }
+      if (!tile) return;
+      const doorKey = (hit && hit.kind === 'door') ? hit.ref : doorNearPoint(point);
       if (doorKey) {
         const open = grid.doors.get(doorKey).open;
         ui.showMenu(sx, sy, [
@@ -676,7 +947,7 @@ function startGame(level) {
         ]);
         return;
       }
-      const en = enemyAt(tile.x, tile.z);
+      const en = (hit && hit.kind === 'enemy' && hit.ref.alive) ? hit.ref : enemyAt(tile.x, tile.z);
       if (en) {
         ui.showMenu(sx, sy, [
           { label: `Confront ${en.def.name}`, action: () => confront(en) },
@@ -762,6 +1033,10 @@ function startGame(level) {
       if (!e.repeat && sheet && !inCombat && !gameOver) loot.showLabels();
     } else if ((e.key === 'i' || e.key === 'I') && sheet && !gameOver) {
       loot.togglePanel(sheet);
+    } else if (/^[1-9]$/.test(e.key) && sheet && !inCombat && !gameOver && !dialogue.visible) {
+      // Number keys arm the matching hotbar slot (out-of-combat targeting).
+      const id = offensiveActionIds()[Number(e.key) - 1];
+      if (id) toggleOocArm(id);
     }
   });
   window.addEventListener('keyup', (e) => {
@@ -818,6 +1093,16 @@ function startGame(level) {
       if (en.x !== beforeX || en.z !== beforeZ) anyoneMoved = true;
     }
     if (anyoneMoved) checkCombatTrigger(); // did someone just corner the player?
+    for (const npc of npcs) npc.update(dt); // idle in place, ease their facing
+    // Persistent hotbar: visible only when it can act; ammo counts refresh
+    // when they change (the gate keeps DOM writes off the hot path). Armed
+    // out-of-combat target rings redraw each frame, like combat's own.
+    if (hotbar) {
+      const show = !!sheet && !inCombat && !gameOver && !dialogue.visible;
+      hotbar.setVisible(show);
+      if (show && sheet.paper !== hotbarPaper) { hotbarPaper = sheet.paper; hotbar.refresh(sheet); }
+      if (show && armedOoc) drawOocTargets();
+    }
     if (!gameOver) runtime.tick(dt); // fire waits for no one, combat included
     animateSurfaces(dt);
     // The loot overlay tracks the world while held (the camera keeps easing).
@@ -878,6 +1163,7 @@ function startGame(level) {
     sheet.gum ??= 0;
     spawnPlayerModel();
     loot.refreshPanel(sheet);
+    buildHotbar();
     ui.say(`${grid.name}. Keep going.`);
   } else {
     // The carousel: frame the spawn tile close and head-on (eye-ish level,
@@ -910,6 +1196,12 @@ function startGame(level) {
       const s = worldToScreenCss(app, controls.cameraEntity, x, 0, z);
       return { x: s.x, y: s.y };
     },
+    // Project an arbitrary world point (y too), so tests can aim at a tall
+    // mesh - a door panel, an enemy's body - not just the floor under it.
+    project3(x, y, z) {
+      const s = worldToScreenCss(app, controls.cameraEntity, x, y, z);
+      return { x: s.x, y: s.y };
+    },
     get inCombat() { return inCombat; },
     get gameOver() { return gameOver; },
     get lastPath() { return lastPath; },
@@ -929,5 +1221,11 @@ function startGame(level) {
         return { name: e.def.name, x: e.x, z: e.z, px: p?.x, pz: p?.z, alive: e.alive };
       });
     },
+    get npcs() { return npcs.map((n) => ({ name: n.def.name, x: n.x, z: n.z })); },
+    // Out-of-combat targeting + hover state, for the e2e suite.
+    get armed() { return armedOoc; },
+    get hoverKind() { return hoverKind; },
+    get cursor() { return canvasEl ? canvasEl.style.cursor : ''; },
+    get dialogueOpen() { return dialogue.visible; },
   };
 }

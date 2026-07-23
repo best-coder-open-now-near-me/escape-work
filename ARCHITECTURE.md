@@ -25,6 +25,7 @@ src/
     classes.js         player classes: base stats + action ids
     actions.js         combat actions: attack/defend/heal definitions
     items.js           items + container loot tables (heal/ammo/bonusDmg/flavor)
+    npcs.js            non-hostile actors you TALK to: name, model, dialogue tree
   grid.js            Level parsing, terrain + edge-wall queries (pure logic)
   pathfinding.js     8-dir Dijkstra, string-pulling smoother, free-point
                      clamping, distance-budget truncation      (pure logic)
@@ -40,6 +41,8 @@ src/
   fx.js              Cosmetic combat FX (projectiles, damage popups) and the
                      world -> CSS-pixel projection every DOM overlay uses
   controls.js        Camera rig + mouse -> semantic input (click tile, menu)
+  picking.js         Screen pixel -> interactable ENTITY under it (ray vs the
+                     registered doors/enemies/NPCs/props), not just the floor
   combat.js          Tactical on-map combat: AP turns, movement, multi-enemy,
                      ranged/melee, enemy AI phase - all costs from data
   looting.js         Containers, bodies, loose items, pockets, Alt overlay
@@ -58,9 +61,9 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - `data/*` imports nothing.
 - `grid`, `pathfinding`, `stats`, `surfaces-runtime` are pure JS (no
   PlayCanvas, no DOM) - unit tested in isolation (tests/unit).
-- `scene`, `shading`, `tile-renderer`, `models`, `controls`, `actors` touch
-  PlayCanvas; `ui`, `combat`, `looting` touch the DOM; `fx` touches both
-  (world-tracking popups).
+- `scene`, `shading`, `tile-renderer`, `models`, `controls`, `picking`,
+  `actors` touch PlayCanvas; `ui`, `combat`, `looting` touch the DOM; `fx`
+  touches both (world-tracking popups).
 - Only `main.js` sees everything. It owns game state (`inCombat`, `gameOver`)
   and game flow (what a click means, when combat starts, tile effects).
 - Enemy AI decisions (pathing costs, wander avoidance) use a talent-free
@@ -90,6 +93,34 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   up and toggle it; state lives in `grid.doors`, visuals re-render via
   `scene.refreshDoor`. Enemies don't open doors. The editor has a door
   brush next to the partition brush.
+- **Left-click is contextual (Divinity-style): the target picks the verb.**
+  `picking.js` ray-tests the cursor against registered interactable holders
+  (doors, living enemies, NPCs, rummageable props) and returns the nearest
+  hit; `main.js`'s `dispatchHit` maps its `kind` to a verb - attack a
+  coworker, talk to an NPC, open a door, rummage a prop - falling back to the
+  ground tile (`doorNearPoint`, corpses, dropped items, then walk-here) when
+  the ray misses. This is what makes a click on a TALL mesh land on the object
+  and not the floor a tile behind it (the old ground-plane-only projection
+  silently missed raised doors); it also drives the hover cursor and the
+  BG3-style coloured outline (`shading.addHighlight`/`setHighlight`, one shell
+  per interactable, coloured by kind). Register a holder as it's created;
+  destroyed holders auto-unregister.
+- **Attacks are available outside combat via the persistent hotbar.** The
+  offensive slice of the sheet's actions (attacks, shove, throws) lives on an
+  always-on bar (`ui.createHotbar`, ids `#hotbar-act-<id>` so they never
+  collide with combat's `#act-<id>`; number keys 1-9 arm slots). Arming an
+  action and clicking a coworker opens combat with that move as the opening
+  strike: `main.js` `engageWithAction` -> `beginCombat({opening})` ->
+  `startCombat({opening})`, which reuses combat's own `handleEnemyClick`
+  (melee walks up, a throw checks range/line/ammo). Heal/defend stay
+  combat-only - reactive actions with no meaning when nobody's swinging.
+- **NPCs are talkable coworkers** (`data/npcs.js`): non-hostile actors
+  (`NpcActor`) that stand on the map, block movement like any body, and open a
+  small dialogue tree on left-click (`ui.createDialoguePanel`; the tree is
+  `{ start, nodes: { text, options:[{label,next}] } }`, `next:null` ends it).
+  They live in their own `npcs` array, never in `enemies`, so combat never
+  touches them. (The editor doesn't paint NPCs yet - it normalises unknown
+  actor chars to floor, so re-exporting a level in the editor drops them.)
 - **Movement is free-form, the grid is the data model.** Actors stand at
   continuous points (a click walks you to the exact spot, clamped clear of
   walls by `clampToClearance`); routes come from grid Dijkstra and are
@@ -113,13 +144,18 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   local Chromium to skip Playwright's browser download.
 - **Debug/test surface**: `window.__game` / `window.__combat` /
   `window.__editor` expose read-only state; the e2e tests assert against
-  them and click through their `project()` helpers (CSS pixels). Keep them
-  in sync when adding state.
+  them and click through their `project()` / `project3()` helpers (CSS
+  pixels - `project3` aims at a world point at any height, for tall meshes).
+  `__game` also exposes `npcs`, `armed` (hotbar), `hoverKind`, `cursor`, and
+  `dialogueOpen`. Keep them in sync when adding state.
 
 ## Growth paths (where things plug in)
 
 - **New enemy**: entry in `data/enemies.js` + character in a level's `actors`
   legend + a .glb in `assets/characters/`.
+- **New NPC (talkable)**: entry in `data/npcs.js` (name, model, dialogue tree)
+  + character in a level's `actors` legend. It stands, blocks movement, and
+  talks on left-click; it never fights. Reuses a character `.glb`.
 - **New hazard/tile**: entry in `data/tiles.js` + character in `tiles` legend.
 - **New surface** (the Divinity layer): entry in `data/surfaces.js` + a tile
   type carrying it. Surfaces slow, damage, bleed, arm you, trip you
