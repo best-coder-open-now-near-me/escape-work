@@ -18,9 +18,15 @@ export const INV_CAP = 10;
 export function createLooting({ app, grid, runtime, player, enemies, getSheet, isInCombat, isGameOver, approachAndDo, extraEntries = null }) {
   const containerLoot = new Map(); // "x,z" -> remaining item ids (rolled on first rummage)
   const looseItems = []; // { x, z, id, entity } - dropped/overflowed floor items
+  const harvestedPaper = new Set(); // "x,z" of paper drifts already gathered for ammo
 
   const itemName = (id) => ITEMS[id]?.name || id;
   const looseAt = (x, z) => looseItems.filter((li) => li.x === x && li.z === z);
+  // Live, still-gatherable paper: a paper drift (not burning/burnt - runtime
+  // reports 'fire'/null for those) that hasn't been picked clean yet. The
+  // sheets stay and keep cutting after harvest; only the ammo is spent.
+  const paperHarvestable = (x, z) =>
+    runtime.surfaceAt(x, z) === 'paper' && !harvestedPaper.has(x + ',' + z);
   const corpseAt = (x, z) =>
     enemies.find((e) => !e.alive && e.loot?.length && e.x === x && e.z === z) || null;
 
@@ -52,7 +58,7 @@ export function createLooting({ app, grid, runtime, player, enemies, getSheet, i
     }
     let msg = `${from}: ${taken.length ? taken.join(', ') : 'nothing'}.`;
     if (overflowed) msg += ' Pockets full - the rest hits the floor.';
-    ui.say(msg);
+    ui.toast(msg);
     invPanel.refresh(sheet);
   }
 
@@ -65,7 +71,7 @@ export function createLooting({ app, grid, runtime, player, enemies, getSheet, i
     const key = x + ',' + z;
     if (!containerLoot.has(key)) containerLoot.set(key, rollLoot(LOOT_TABLES[def.loot]));
     const items = containerLoot.get(key);
-    if (!items.length) { ui.say(`${def.label}: nothing left but disappointment.`); return; }
+    if (!items.length) { ui.toast(`${def.label}: nothing left but disappointment.`); return; }
     containerLoot.set(key, []);
     receiveItems(items, def.label);
   }
@@ -73,7 +79,7 @@ export function createLooting({ app, grid, runtime, player, enemies, getSheet, i
   function lootBody(en) {
     if (!en || en.alive || isInCombat() || isGameOver()) return;
     const items = en.loot || [];
-    if (!items.length) { ui.say(`${en.def.name} has nothing left to give. Fitting.`); return; }
+    if (!items.length) { ui.toast(`${en.def.name} has nothing left to give. Fitting.`); return; }
     en.loot = [];
     receiveItems(items, `${en.def.name}'s pockets`);
   }
@@ -89,6 +95,30 @@ export function createLooting({ app, grid, runtime, player, enemies, getSheet, i
       ids.push(li.id);
     }
     receiveItems(ids, 'Picked up');
+  }
+
+  // Gather a contiguous paper patch into throw ammo, once. Each still-loose
+  // tile yields one sheet (up to the pocket cap); the tiles are marked spent so
+  // the drift can't be farmed, but the sheets themselves stay on the floor and
+  // keep cutting anyone who walks them.
+  function harvestPaperPatch(patch) {
+    const sheet = getSheet();
+    if (!sheet || isInCombat() || isGameOver()) return;
+    let sheets = 0;
+    for (const [x, z] of patch) {
+      if (!paperHarvestable(x, z)) continue;
+      harvestedPaper.add(x + ',' + z);
+      sheets += 1;
+    }
+    if (!sheets) return;
+    const before = sheet.paper;
+    sheet.paper = Math.min(PAPER_CAP, sheet.paper + sheets);
+    const pocketed = sheet.paper - before;
+    ui.say(pocketed > 0
+      ? `You gather the loose sheets. (+${pocketed} 📄${pocketed < sheets ? ' — pockets full' : ''})`
+      : 'Your pockets already bulge with paper.');
+    ui.updateStatsHud(sheet);
+    if (lootLabels.visible) showLabels(); // that patch is spent now
   }
 
   function useItem(i) {
@@ -164,6 +194,48 @@ export function createLooting({ app, grid, runtime, player, enemies, getSheet, i
         onClick: () => approachAndDo(en.x, en.z, () => lootBody(en)),
       });
     }
+    // Harvestable paper: one label per contiguous drift near the player
+    // (4-connected flood fill, bounded to the near window). Clicking walks to
+    // the patch's nearest tile and gathers the whole drift's ammo at once.
+    const visited = new Set();
+    for (let z = 0; z < grid.height; z++) {
+      for (let x = 0; x < grid.width; x++) {
+        if (visited.has(x + ',' + z) || !near(x, z) || !paperHarvestable(x, z)) continue;
+        const patch = [];
+        let sx = 0;
+        let sz = 0;
+        const stack = [[x, z]];
+        visited.add(x + ',' + z);
+        while (stack.length) {
+          const [cx, cz] = stack.pop();
+          patch.push([cx, cz]);
+          sx += cx;
+          sz += cz;
+          for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = cx + dx;
+            const nz = cz + dz;
+            if (!visited.has(nx + ',' + nz) && near(nx, nz) && paperHarvestable(nx, nz)) {
+              visited.add(nx + ',' + nz);
+              stack.push([nx, nz]);
+            }
+          }
+        }
+        const n = patch.length;
+        // Approach the patch tile nearest the player; label sits at its centre.
+        let target = patch[0];
+        let bestD = Infinity;
+        for (const [px, pz] of patch) {
+          const d = Math.max(Math.abs(px - player.x), Math.abs(pz - player.z));
+          if (d < bestD) { bestD = d; target = [px, pz]; }
+        }
+        out.push({
+          icon: '📄',
+          text: n > 1 ? `Loose paper ×${n}` : 'Loose paper',
+          world: { x: sx / n, y: 0.3, z: sz / n },
+          onClick: () => approachAndDo(target[0], target[1], () => harvestPaperPatch(patch)),
+        });
+      }
+    }
     if (extraEntries) out.push(...extraEntries());
     return out;
   }
@@ -184,6 +256,7 @@ export function createLooting({ app, grid, runtime, player, enemies, getSheet, i
     debug: {
       looseItems: () => looseItems.map((li) => ({ x: li.x, z: li.z, id: li.id })),
       containerLootAt: (x, z) => (containerLoot.has(x + ',' + z) ? [...containerLoot.get(x + ',' + z)] : null),
+      harvestedPaper: () => [...harvestedPaper],
     },
   };
 }

@@ -55,10 +55,11 @@ export const SURFACES = {
     flammable: true,
     color: [0.93, 0.91, 0.83],
     pathCost: 2,
-    // bleed: keep taking 1 damage for the next N tiles entered.
-    // ammo: pocket paper projectiles for combat throws.
-    onEnter: { amount: 1, bleed: 2, ammo: 1, message: 'Paper cuts! -1 HP. You pocket some ammunition. (+1 paper)' },
-    examine: 'A drift of shredded TPS reports. Sharp edges. Free ammo?',
+    // Cuts on every step (bleed: keep losing 1 HP for the next N tiles). The
+    // ammo isn't picked up by walking - you gather a drift once via the Alt
+    // loot overlay, so a Mail Room can't farm their own cone for endless paper.
+    onEnter: { amount: 1, bleed: 2, message: 'Paper cuts! -1 HP. The edges keep biting.' },
+    examine: 'A drift of shredded TPS reports. Sharp edges. Gather it (Alt) for ammo.',
   },
 };
 

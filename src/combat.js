@@ -58,7 +58,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // world: { isWalkable, findPath(sx,sz,tx,tz), hasLos(ax,az,bx,bz),
   //          stepOpen(x,z,nx,nz), surfaceIdAt(x,z), enemySurfDamage(x,z) }
   // fx:    { projectile(from,to,kind), damageText(x,z,text,color) } - cosmetic
-  // callbacks: { say, updateHud, onEnemyKilled(en), onWin, onLose }
+  // callbacks: { say, updateHud, onRound, onEnemyKilled(en), onWin, onLose }
   const talentFxOf = (m) => m.sheet.talent?.effects || {};
   const throwableIds = Object.keys(ACTIONS).filter((id) => ACTIONS[id].ammoCost);
   // Everyone can shove - it's an office, not a fencing academy.
@@ -624,6 +624,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       m.ap = m.sheet.maxAp;
       m.defended = false;
     }
+    callbacks.onRound?.(); // a full round elapsed - age fire/smoke one turn
     log('Your turn.');
     refresh();
   }

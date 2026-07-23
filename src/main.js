@@ -82,7 +82,12 @@ function startGame(level) {
   // hoisted from below.
   const runtime = createSurfaceRuntime({
     grid,
-    hooks: { addFlame: scene.addFlame, hideSurfaceVisual: scene.hideSurfaceVisual },
+    hooks: {
+      addFlame: scene.addFlame,
+      hideSurfaceVisual: scene.hideSurfaceVisual,
+      addSmoke: scene.addSmoke,
+      removeSmoke: scene.removeSmoke,
+    },
     onExplosion: handleExplosion,
   });
 
@@ -107,12 +112,14 @@ function startGame(level) {
   let hotbar = null; // persistent attack bar (built once a class is picked)
   let hotbarPaper = -1; // last paper count the hotbar rendered (refresh gate)
   let pendingGodPick = null; // god-mode click-to-place callback (see window.__god)
+  let oocTurnClock = 0; // out-of-combat real-time accrued toward the next fire/smoke turn
 
   // --- gameplay tuning --------------------------------------------------------
   const ENGAGE_RADIUS = 4; // Chebyshev tiles within which enemies join a fight
   const EXPLOSION_DAMAGE = 8; // shrapnel to the player standing beside a printer
   const VICTORY_HEAL = 5; // the breather after winning a fight
   const STAIRWELL_HEAL = 6; // the breather between floors
+  const OOC_TURN_SECONDS = 1.6; // out-of-combat seconds that count as one fire/smoke turn
 
   // Looting (containers, bodies, pockets, the Alt overlay) lives in its own
   // module; approachAndDo is hoisted, so wiring it here is safe.
@@ -264,7 +271,7 @@ function startGame(level) {
     spawnPlayerModel();
     loot.refreshPanel(sheet);
     buildHotbar();
-    ui.say(`${sheet.className}. Now get out of here. (Alt shows loot, I opens pockets, 1-9 to aim an attack.)`);
+    ui.say(`${sheet.className}. Now get out of here.`); // hotkeys live in the HUD strip
   }
 
   // Every way to die funnels through here: freeze the world, drop any active
@@ -317,12 +324,26 @@ function startGame(level) {
     if (sheet) ui.updateStatsHud(sheet);
   }
 
+  // Who can start a fire: the Middle Manager's Smoker lighter (unlimited), or
+  // anyone carrying a book of matches (consumed one per light).
+  const hasLighter = () => !!sheet?.talent?.effects?.hasLighter;
+  const canIgnite = () => hasLighter() || !!sheet?.inventory?.includes('matches');
+  const igniteVerb = () => (hasLighter() ? 'Flick the lighter' : 'Strike a match');
+
   function igniteAt(x, z) {
+    if (!canIgnite()) return;
     const wasProp = !!grid.defAt(x, z).ignitable;
     if (runtime.ignite(x, z)) {
+      if (!hasLighter()) {
+        const i = sheet.inventory.indexOf('matches');
+        if (i >= 0) sheet.inventory.splice(i, 1); // a match is spent
+        loot.refreshPanel(sheet);
+      }
       ui.say(wasProp
         ? 'You introduce the trash can to fire. It goes about as expected.'
-        : 'A flick of the lighter. The paperwork ascends.');
+        : hasLighter()
+          ? 'A flick of the lighter. The paperwork ascends.'
+          : 'A match flares, then the paperwork. Ashes to ashes.');
     }
   }
 
@@ -470,8 +491,12 @@ function startGame(level) {
   // --- targeting, hover highlight, cursor --------------------------------------
   const THROW_RANGE = 5; // must match combat.js
   const cheb = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.z - b.z));
+  // A sight line for throws: open terrain that ISN'T hazed by smoke. Smoke
+  // hangs floor-to-ceiling for a couple of turns and breaks line of sight;
+  // movement ignores it, so this is separate from terrainOpen.
+  const sightClear = (x, z) => grid.terrainOpen(x, z) && !runtime.isSmoke(x, z);
   // Throws sail over chest-high partitions but not closed doors (grid.sightOpen).
-  const hasLos = (a, b) => segmentClear(grid.terrainOpen, a.x, a.z, b.x, b.z, grid.sightOpen);
+  const hasLos = (a, b) => segmentClear(sightClear, a.x, a.z, b.x, b.z, grid.sightOpen);
   const throwAmmoCost = (id) => {
     const base = ACTIONS[id].ammoCost || 0;
     const disc = sheet?.talent?.effects?.paperAmmoDiscount || 0;
@@ -497,6 +522,64 @@ function startGame(level) {
     loot: [1.0, 0.82, 0.4],
     interact: [0.5, 0.8, 1.0],
   };
+  const rgbCss = ([r, g, b]) => `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
+
+  // Aggression dot colours (data/enemies.js `aggression`): whether a coworker
+  // will start a fight. Green = won't initiate, yellow = talks first, red =
+  // straight to battle. Tints both the enemy's flanking dots and the banner
+  // border, so the banner reads as one aggression signal.
+  const AGGRO = {
+    green: 'rgb(111, 200, 111)',
+    yellow: 'rgb(224, 178, 58)',
+    red: 'rgb(224, 80, 58)',
+  };
+  const aggroColor = (en) => AGGRO[en.def.aggression] || AGGRO.red;
+
+  // The top focus banner's label for whatever the cursor is over: an
+  // interactable entity, or a flat target the pick ray skims (a corpse,
+  // dropped item, container, or door edge on the floor). Null over bare floor -
+  // nothing worth naming. Mirrors dispatchHit/cursorFor so the banner always
+  // describes the verb a click would actually take.
+  function focusInfoFor(hit, point) {
+    if (hit) {
+      const { kind, ref } = hit;
+      if (kind === 'enemy') {
+        if (ref.alive) {
+          const ag = aggroColor(ref);
+          return { name: ref.def.name, sub: `HP ${ref.hp}/${ref.def.hp}`, color: ag, dotColor: ag };
+        }
+        return { name: ref.def.name, sub: ref.loot?.length ? 'Body · lootable' : 'Body · picked clean', color: rgbCss(HL.loot) };
+      }
+      if (kind === 'npc') return { name: ref.def.name, sub: 'Coworker · talk', color: rgbCss(HL.npc) };
+      if (kind === 'door') {
+        const open = grid.doors.get(ref)?.open;
+        return { name: open ? 'Door · open' : 'Door · closed', sub: open ? 'Close' : 'Open', color: rgbCss(HL.interact) };
+      }
+      if (kind === 'prop') {
+        const def = grid.defAt(ref.x, ref.z);
+        const sub = def.loot ? 'Rummage' : def.explosive ? 'Volatile' : def.ignitable ? 'Flammable' : 'Object';
+        return { name: def.label || 'Object', sub, color: rgbCss(def.loot ? HL.loot : HL.interact) };
+      }
+    }
+    if (point) {
+      const tx = Math.round(point.x);
+      const tz = Math.round(point.z);
+      const corpse = loot.corpseAt(tx, tz);
+      if (corpse) return { name: corpse.def.name, sub: 'Body · lootable', color: rgbCss(HL.loot) };
+      const loose = loot.looseAt(tx, tz);
+      if (loose.length) {
+        const extra = loose.length > 1 ? ` +${loose.length - 1}` : '';
+        return { name: loot.itemName(loose[0].id) + extra, sub: 'Pick up', color: rgbCss(HL.loot) };
+      }
+      const doorKey = doorNearPoint(point);
+      if (doorKey) {
+        const open = grid.doors.get(doorKey)?.open;
+        return { name: open ? 'Door · open' : 'Door · closed', sub: open ? 'Close' : 'Open', color: rgbCss(HL.interact) };
+      }
+      if (grid.defAt(tx, tz).loot) return { name: grid.defAt(tx, tz).label, sub: 'Rummage', color: rgbCss(HL.loot) };
+    }
+    return null;
+  }
   const canvasEl = document.getElementById('app');
   const hlShells = new WeakMap(); // holder entity -> highlight shell (or null)
   let hoverEntity = null;
@@ -553,6 +636,7 @@ function startGame(level) {
     if (hit) setHoverHighlight(hit.entity, colorForHit(hit));
     else clearHoverHighlight();
     setCursor(cursorFor(hit, point));
+    ui.setFocusBanner(focusInfoFor(hit, point));
   }
 
   // Immediate-mode target rings for an armed hotbar action (redrawn each frame
@@ -608,6 +692,7 @@ function startGame(level) {
       loot.hideLabels();
       clearHoverHighlight();
       setCursor(null);
+      ui.setFocusBanner(null);
       renderDialogueNode(npc.def.dialogue.start);
     },
     close() { dialogueNpc = null; dialoguePanel.hide(); },
@@ -686,6 +771,7 @@ function startGame(level) {
     loot.hideLabels(); // no browsing the shelves mid-fight
     clearHoverHighlight();
     setCursor(null);
+    ui.setFocusBanner(null);
     // Everyone close enough joins the brawl (those further than 2 tiles are
     // surprised and lose their first turn - see combat.js). Bystanders
     // outside the radius join later if attacked (combat.js joinCombat).
@@ -723,8 +809,9 @@ function startGame(level) {
         approach: approachTo,
         // Partitions (edge walls) are chest height: they block movement but
         // not throws - lob paper right over the cubicle wall. Closed doors go
-        // floor to frame, so they DO stop throws (grid.sightOpen).
-        hasLos: (ax, az, bx, bz) => segmentClear(grid.terrainOpen, ax, az, bx, bz, grid.sightOpen),
+        // floor to frame, so they DO stop throws (grid.sightOpen); so does smoke
+        // (sightClear).
+        hasLos: (ax, az, bx, bz) => segmentClear(sightClear, ax, az, bx, bz, grid.sightOpen),
         stepOpen: grid.stepOpen,
         surfaceIdAt: (x, z) => runtime.surfaceAt(x, z),
         isElectrified: (x, z) => grid.isElectrified(x, z),
@@ -747,6 +834,9 @@ function startGame(level) {
       callbacks: {
         say: ui.say,
         updateHud: () => ui.updateStatsHud(sheet),
+        // One combat round = one fire/smoke turn (combat.js calls this as it
+        // hands the turn back to the player).
+        onRound: () => runtime.advanceTurn(),
         onEnemyKilled: awardKill,
         onWin: () => {
           inCombat = false;
@@ -880,7 +970,7 @@ function startGame(level) {
       } else if (sfx.amount) {
         ui.say(ms.talent?.effects?.shockImmune && grid.isElectrified(x, z)
           ? 'The water crackles. Your ESD soles rate this a non-event. 0 damage.'
-          : 'You glide across the drift, harvesting ammunition. The edges respect a master. (+1 paper)');
+          : 'You glide across the drift; the edges respect a master. Not a scratch.');
         ui.updateStatsHud(sheet);
       } else if (sfx.message && !sfx.applies) {
         ui.say(sfx.message);
@@ -969,8 +1059,8 @@ function startGame(level) {
       } else moveTo(tile, point);
     },
     onHover: (point, sx, sy) => {
-      if (inCombat && combat) { combat.handleHover(point, sx, sy); return; }
-      if (!sheet || gameOver || dialogue.visible) { clearHoverHighlight(); setCursor(null); return; }
+      if (inCombat && combat) { combat.handleHover(point, sx, sy); ui.setFocusBanner(null); return; }
+      if (!sheet || gameOver || dialogue.visible) { clearHoverHighlight(); setCursor(null); ui.setFocusBanner(null); return; }
       worldHover(point, sx, sy);
     },
     onRightClickTile: (tile, sx, sy, point) => {
@@ -1030,11 +1120,11 @@ function startGame(level) {
             action: () => approachAndDo(corpse.x, corpse.z, () => loot.lootBody(corpse)),
           });
         }
-        // The Smoker's lighter turns any flammable surface into an option.
-        if (sheet?.talent?.effects?.hasLighter
-          && surfId && SURFACES[surfId].flammable && !runtime.isBurning(tile.x, tile.z)) {
+        // A lighter (Smoker) or a book of matches turns a flammable surface
+        // into an option.
+        if (canIgnite() && surfId && SURFACES[surfId].flammable && !runtime.isBurning(tile.x, tile.z)) {
           items.unshift({
-            label: 'Flick the lighter',
+            label: igniteVerb(),
             action: () => approachAndDo(tile.x, tile.z, () => igniteAt(tile.x, tile.z)),
           });
         }
@@ -1046,9 +1136,9 @@ function startGame(level) {
             ? 'The trash can is thoroughly on fire. Somewhere, an alarm should be going off.'
             : 'A trash can. Sixty percent paper, forty percent regret.'),
         }];
-        if (runtime.ignitable(tile.x, tile.z)) {
+        if (canIgnite() && runtime.ignitable(tile.x, tile.z)) {
           items.unshift({
-            label: 'Set it on fire (why not)',
+            label: igniteVerb(),
             action: () => approachAndDo(tile.x, tile.z, () => igniteAt(tile.x, tile.z)),
           });
         }
@@ -1148,6 +1238,10 @@ function startGame(level) {
     }
     if (anyoneMoved) checkCombatTrigger(); // did someone just corner the player?
     for (const npc of npcs) npc.update(dt); // idle in place, ease their facing
+    // The bottom narrator box gets general narration only when nothing else
+    // owns the bottom of the screen: not mid-fight (combat has its own log),
+    // not mid-conversation (the dialogue panel is up), not pre-class-pick.
+    ui.setNarrationGate(!!sheet && !inCombat && !gameOver && !dialogue.visible);
     // Persistent hotbar: visible only when it can act; ammo counts refresh
     // when they change (the gate keeps DOM writes off the hot path). Armed
     // out-of-combat target rings redraw each frame, like combat's own.
@@ -1157,7 +1251,16 @@ function startGame(level) {
       if (show && sheet.paper !== hotbarPaper) { hotbarPaper = sheet.paper; hotbar.refresh(sheet); }
       if (show && armedOoc) drawOocTargets();
     }
-    if (!gameOver) runtime.tick(dt); // fire waits for no one, combat included
+    // Fire/smoke age in TURNS. In combat, combat.js advances one per round (via
+    // the onRound callback in beginCombat). Out of combat there are no rounds, so
+    // a real-time clock stands in - about one turn per OOC_TURN_SECONDS.
+    if (!gameOver && !inCombat) {
+      oocTurnClock += dt;
+      while (oocTurnClock >= OOC_TURN_SECONDS) {
+        oocTurnClock -= OOC_TURN_SECONDS;
+        runtime.advanceTurn();
+      }
+    }
     animateSurfaces(dt);
     // The loot overlay tracks the world while held (the camera keeps easing).
     if (loot.labelsVisible) {
@@ -1166,18 +1269,11 @@ function startGame(level) {
         return s.behind ? null : s;
       });
     }
-    // Follow the player, gently biased toward the map centre so corner spawns
-    // don't leave half the frame empty. Track the entity's CONTINUOUS position
-    // (player.x/z is the logical tile, which jumps a whole tile at a time and
-    // makes the camera step along with the walk).
+    // Follow the player, keeping them centred in frame. Track the entity's
+    // CONTINUOUS position (player.x/z is the logical tile, which jumps a whole
+    // tile at a time and makes the camera step along with the walk).
     const pp = player.entity ? player.entity.getPosition() : player;
-    // While the class carousel is up (no sheet yet), look dead at the
-    // candidate so they sit centred in frame; in play, bias toward the map
-    // centre so corner spawns don't leave half the frame empty.
-    controls.follow(sheet ? {
-      x: pp.x * 0.82 + ((grid.width - 1) / 2) * 0.18,
-      z: pp.z * 0.82 + ((grid.height - 1) / 2) * 0.18,
-    } : { x: pp.x, z: pp.z }, dt);
+    controls.follow({ x: pp.x, z: pp.z }, dt);
     updateWallFade(controls.cameraEntity, player.entity ? player.entity.getPosition() : null);
   });
 
@@ -1205,7 +1301,7 @@ function startGame(level) {
         location.reload();
       },
     },
-  ]);
+  ], ['Alt — show loot', 'I — open pockets', '1–9 — aim an attack']);
   if (restoredProgress) {
     // Continuing a campaign run: same party, next floor - no picker. Field
     // backfills for older saves live in parseProgress. Only the leader gets
@@ -1263,6 +1359,9 @@ function startGame(level) {
     get stats() { return sheet ? { ...sheet } : null; },
     get playerSpeed() { return player.speed; },
     get burning() { return runtime.burningCount; },
+    get smoking() { return runtime.smokingCount; },
+    isSmoke: (x, z) => runtime.isSmoke(x, z),
+    losClear: (ax, az, bx, bz) => hasLos({ x: ax, z: az }, { x: bx, z: bz }),
     get inventory() { return sheet ? [...sheet.inventory] : []; },
     get looseItems() { return loot.debug.looseItems(); },
     get lootLabelCount() { return document.querySelectorAll('.loot-label').length; },
@@ -1343,6 +1442,10 @@ function startGame(level) {
     // ground (handled in onLeftClickTile) fires it with the picked tile/point.
     armPick(cb) { pendingGodPick = cb; },
     get picking() { return !!pendingGodPick; },
+    // Step the fire/smoke lifecycle one turn (what a combat round does) - a
+    // deterministic handle for the god panel and tests, independent of the
+    // out-of-combat real-time clock.
+    advanceFireTurn() { runtime.advanceTurn(); },
   };
   installGodMode(window.__god);
 }

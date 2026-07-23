@@ -12,15 +12,23 @@
       pointer-events: none; color: #f0f0f5;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     }
-    #hud h1 { margin: 0; font-size: 22px; letter-spacing: 3px; font-weight: 700; }
-    #hud p  { margin: 6px 0 0; font-size: 13px; letter-spacing: 1px; opacity: .65; }
+    #hud p  { margin: 0 0 5px; font-size: 13px; letter-spacing: 1px; opacity: .65; }
+    /* Player stats live bottom-left now (BG3-style corner readout); the top
+       centre is reserved for the focused-object banner. */
+    #stats {
+      position: fixed; left: 12px; bottom: 14px; margin: 0; text-align: left;
+      opacity: .92; letter-spacing: .5px; padding: 5px 11px; border-radius: 7px;
+      background: rgba(20,20,32,.72); border: 1px solid #3a3a52;
+    }
+    /* Kept in the DOM as the current-narration source (tests + accessibility);
+       narration surfaces visibly in the bottom narrator box now. */
+    #subtitle { display: none; }
   </style>
 </head>
 <body>
   <div id="hud">
-    <h1>ESCAPE&nbsp;WORK</h1>
-    <p id="subtitle">loading&hellip;</p>
     <p id="stats"></p>
+    <p id="subtitle">loading&hellip;</p>
   </div>
   <canvas id="app"></canvas>
   <script src="playcanvas.min.js"></script>
