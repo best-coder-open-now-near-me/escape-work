@@ -162,8 +162,10 @@ level's legend places them (spawn-time check against the party roster).
    out-of-combat portrait switching, picking kind. After this PR you can
    recruit the intern, walk the floor as a duo, and swap who you control —
    but combat still only fields whoever is leader when it starts.
-3. **Party combat.** Per-member combat state + active-member switching, enemy
-   targeting, downed/revive, party wipe, strip/UI. The core payoff PR.
+3. **Party combat.** ✅ Landed. Per-member combat state + active-member
+   switching (portraits, Tab, clicking a body), enemy targeting,
+   downed/revive with automatic handoff when the controlled member falls
+   (in combat and out), party-wipe-only defeat, strip/UI. The core payoff PR.
 4. **Persistence + polish.** Party across floors, help-up interaction out of
    combat, god-mode/debug surface, XP fan-out, victory/stairwell heals for
    all, examine/dialogue for recruited companions.

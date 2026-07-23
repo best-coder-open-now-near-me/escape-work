@@ -152,12 +152,20 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   **Following**: out of combat, followers path to a free tile beside the
   leader on a small repath cadence - costed by their OWN talents, pass-through
   for the rest of the party, never parking on a tile that hurts them.
-  **Leader switching**: clicking a party-bar portrait (`ui.createPartyBar`,
-  `#party-slot-<i>`) re-keys the `sheet`/`player` bindings - camera, hotbar,
-  HUD, pockets, menu verbs and the follower set all follow. **Downed**: a
-  companion at 0 HP topples and sits out (the run only ends when the LEADER
-  falls); they're back at 1 HP after a victory, a stairwell, or a walk-up
-  hand up.
+  **Switching**: clicking a party-bar portrait (`ui.createPartyBar`,
+  `#party-slot-<i>`), pressing Tab, or clicking a member's body switches who
+  you control - out of combat that re-keys the `sheet`/`player` bindings
+  (camera, hotbar, HUD, pockets, menu verbs, follower set); in combat it
+  moves combat's `active` pointer (their action bar, their AP - switching is
+  free and reversible, DOS-style), and when the fight ends the out-of-combat
+  bindings follow whoever had the floor (`syncLeaderBindings`). **Downed**:
+  a member at 0 HP topples and sits out; the run only ends on a party WIPE.
+  If the member you're controlling falls, a survivor steps up on the spot -
+  in combat via `combat.notifyMemberDown`/the enemy-attack handoff, outside
+  it via `forceLeader`. The downed are back at 1 HP after a victory, a
+  stairwell, or a walk-up hand up (the leader's actor registers in picking
+  as kind `party` so a downed ex-leader is clickable; clicks on your own
+  healthy body fall through to the ground).
 - **Actors**: extend `GridActor` for anything that lives on the grid and owns
   a model (it provides smoothed waypoint-path movement, shove glides via
   `pushTo`, and facing). The holder entity

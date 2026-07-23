@@ -30,7 +30,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     for (const id of m.sheet.actions) if (ACTIONS[id].uses) usesLeft[id] = ACTIONS[id].uses;
     return { sheet: m.sheet, actor: m.actor, ap: m.sheet.maxAp, defended: false, usesLeft };
   });
-  const active = members[party.active];
+  let active = members[party.active];
   const livingMembers = () => members.filter((m) => m.sheet.hp > 0 && m.actor);
   // Enemies pick on the nearest living member; ties go to the bloodied one.
   function pickTarget(en) {
@@ -301,6 +301,55 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   }
   buildActionBar();
 
+  // The raw handoff: point everything at another member. party.active moves
+  // with it so the portrait bar highlights - and so the out-of-combat leader
+  // bindings follow whoever had the floor when the fight ends (main.js
+  // syncLeaderBindings).
+  function applyActive(i) {
+    party.active = i;
+    active = members[i];
+    armed = null;
+    pendingMelee = null;
+    hidePreview();
+    buildActionBar();
+    refresh();
+  }
+  // Hand control to another member mid-fight (portrait click, Tab, or a click
+  // on their body). Their AP pool is wherever they left it - switching is
+  // free and reversible, the Divinity courtesy.
+  function setActive(i) {
+    const m = members[i];
+    if (phase !== 'player' || !m || m === active || m.sheet.hp <= 0 || !m.actor) return;
+    if (active.actor.moving) return; // let the current walk land first
+    applyActive(i);
+    log(`${m.sheet.name} has the floor.`);
+  }
+  function cycleActive() {
+    for (let step = 1; step < members.length; step++) {
+      const i = (members.indexOf(active) + step) % members.length;
+      if (members[i].sheet.hp > 0 && members[i].actor) { setActive(i); return; }
+    }
+  }
+  // A member dropped to 0 HP outside the enemy phase (fire under a combat
+  // walk) - main.js reports it here. Topple them, hand off if it was the
+  // active member, defeat only on a wipe.
+  function notifyMemberDown() {
+    for (const m of members) {
+      if (m.sheet.hp > 0 || m.toppled) continue;
+      m.toppled = true;
+      m.actor?.clearPath();
+      if (m.actor) m.actor.fx = { kind: 'death', t: 0 };
+    }
+    if (!livingMembers().length) { defeat(); return; }
+    if (active.sheet.hp <= 0) {
+      const i = members.findIndex((m) => m.sheet.hp > 0 && m.actor);
+      log(`${active.sheet.name} goes down! ${members[i].sheet.name} steps up.`);
+      applyActive(i);
+    } else {
+      refresh();
+    }
+  }
+
   const el = (id) => panel.querySelector('#' + id);
   function log(text) {
     el('combat-log').textContent = text;
@@ -329,10 +378,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       b.style.borderColor = ((a.type === 'attack' || a.type === 'shove') && id === armed) ? '#8adf76' : '#3a3a52';
     }
     endBtn.disabled = phase !== 'player';
-    // One member reads as "You"; a real party lists everyone by name.
+    // One member reads as "You"; a real party lists everyone by name, the
+    // downed marked as such.
     strip.innerHTML = `<div style="font-weight:700; margin-bottom:5px;">COMBAT</div>` +
-      members.map((m) =>
-        `<div>${members.length === 1 ? 'You' : m.sheet.name} &middot; ${m.sheet.hp}/${m.sheet.maxHp}</div>`).join('') +
+      members.map((m) => {
+        const label = members.length === 1 ? 'You' : m.sheet.name;
+        const state = m.sheet.hp <= 0 ? 'DOWN' : `${m.sheet.hp}/${m.sheet.maxHp}`;
+        return `<div>${label} &middot; ${state}</div>`;
+      }).join('') +
       engaged.filter((e) => e.alive).map((e) =>
         `<div style="opacity:.9">${e.def.name} &middot; ${e.hp}/${e.def.hp}</div>`).join('');
     callbacks.updateHud();
@@ -650,13 +703,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     log(line);
     refresh();
     if (dead) {
-      // Until in-combat switching lands, losing the member you're CONTROLLING
-      // loses the fight; a follower just goes down (topple, out of the
-      // rotation, back at 1 HP if the survivors win).
-      if (target === active || !livingMembers().length) { defeat(); return; }
+      target.toppled = true;
       target.actor.clearPath();
       target.actor.fx = { kind: 'death', t: 0 };
-      log(`${target.sheet.name} is out cold.`);
+      if (!livingMembers().length) { defeat(); return; } // party wipe - the only true loss
+      if (target === active) {
+        // The member you were controlling fell - a survivor steps up so the
+        // fight goes on.
+        const i = members.findIndex((m) => m.sheet.hp > 0 && m.actor);
+        log(`${target.sheet.name} goes down! ${members[i].sheet.name} steps up.`);
+        applyActive(i);
+      } else {
+        log(`${target.sheet.name} is out cold.`);
+      }
     }
   }
 
@@ -822,6 +881,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     handleTileClick,
     handleEnemyClick,
     handleHover,
+    setActive,
+    cycleActive,
+    notifyMemberDown,
     // main.js detected a slip mid-walk (tile effects live there) - narrate it
     notifySlip: () => log('You slip in the water. The rest of that movement is a donation.'),
     abort: cleanup, // for deaths resolved outside combat (surfaces, explosions)

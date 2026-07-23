@@ -1,7 +1,8 @@
 // The party: recruit the intern through dialogue, watch him follow, hand him
-// the lead from the party bar - and prove old single-sheet saves still load.
+// the lead from the party bar, fight as either member - and prove old
+// single-sheet saves still load.
 import { test, expect } from '@playwright/test';
-import { bootStash, clickWorld, waitStill } from './helpers.js';
+import { bootStash, clickWorld, waitStill, combatOrWalkDone } from './helpers.js';
 
 // A small arena: the intern one tile from spawn, open floor to walk.
 const LEVEL = {
@@ -18,19 +19,38 @@ const LEVEL = {
   ],
 };
 
+// The same arena with a Manager equidistant from both members - combat's
+// nearest-target tiebreak (lowest HP) makes his focus controllable.
+const COMBAT_LEVEL = {
+  name: 'Party Combat Floor',
+  tiles: { '#': 'wall', '.': 'floor', '>': 'exit' },
+  actors: { '@': 'player', N: 'it-intern', M: 'manager' },
+  map: [
+    '##########',
+    '#........#',
+    '#.@N.....#',
+    '#........#',
+    '#..M....>#',
+    '##########',
+  ],
+};
+
+// Recruit the intern via the dialogue tree (assumes he stands adjacent).
+async function recruitIntern(page) {
+  expect(await clickWorld(page, 3, 2)).toBe(true);
+  await page.waitForFunction(() => window.__game.dialogueOpen, null, { timeout: 20_000 });
+  await page.click('button.dialogue-option:has-text("Come with me")');
+  await page.click('button.dialogue-option:has-text("Stick close")');
+  expect(await page.evaluate(() => window.__game.party.length)).toBe(2);
+}
+
 test('recruit the intern, he follows, and the party bar hands him the lead', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, LEVEL);
 
   // Talk to the intern (adjacent, so the dialogue opens without a walk).
-  expect(await clickWorld(page, 3, 2)).toBe(true);
-  await page.waitForFunction(() => window.__game.dialogueOpen, null, { timeout: 20_000 });
-
-  // Take the recruit option, then close out the confirmation node.
-  await page.click('button.dialogue-option:has-text("Come with me")');
-  await page.click('button.dialogue-option:has-text("Stick close")');
+  await recruitIntern(page);
   const party = await page.evaluate(() => window.__game.party);
-  expect(party.length).toBe(2);
   expect(party[0].active).toBe(true);
   expect(await page.evaluate(() => window.__game.npcs.length)).toBe(0); // he's ours now
 
@@ -58,6 +78,37 @@ test('recruit the intern, he follows, and the party bar hands him the lead', asy
   const after = await page.evaluate(() => window.__game.party);
   expect(Math.max(Math.abs(after[1].x - 2), Math.abs(after[1].z - 3))).toBeLessThanOrEqual(1);
   expect(Math.max(Math.abs(after[0].x - after[1].x), Math.abs(after[0].z - after[1].z))).toBeLessThanOrEqual(3);
+});
+
+test('party combat: switch the active member, and the fight survives the leader going down', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, COMBAT_LEVEL);
+  await recruitIntern(page);
+
+  // Pick the fight: click the Manager, walk up, combat triggers on arrival.
+  expect(await clickWorld(page, 3, 4)).toBe(true);
+  expect(await combatOrWalkDone(page, 30_000)).toBe(true);
+  expect(await page.evaluate(() => window.__combat.party.length)).toBe(2);
+
+  // Portrait click hands the intern the floor: his action bar, his AP.
+  await page.click('#party-slot-1');
+  await expect.poll(() => page.evaluate(() => window.__combat.party[1].active)).toBe(true);
+  await expect(page.locator('#act-reboot')).toBeVisible(); // the intern's kit
+  // ...and back.
+  await page.click('#party-slot-0');
+  await expect.poll(() => page.evaluate(() => window.__combat.party[0].active)).toBe(true);
+
+  // Wound the controlled leader to 1 HP (live god handle) and hand the round
+  // over: the Manager targets the bloodied nearest member, the leader drops,
+  // and the intern steps up instead of the fight ending.
+  await page.evaluate(() => { window.__god.player.hp = 1; window.__combat.refresh(); });
+  await page.click('#combat-end-turn');
+  await expect.poll(
+    () => page.evaluate(() => window.__combat.party[0].hp === 0 && window.__combat.party[1].active),
+    { timeout: 90_000 },
+  ).toBe(true);
+  expect(await page.evaluate(() => window.__game.inCombat)).toBe(true); // no defeat
+  expect(await page.evaluate(() => window.__combat.phase)).not.toBe('done');
 });
 
 test('a legacy single-sheet save loads as a one-member party', async ({ page }) => {

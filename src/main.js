@@ -151,6 +151,7 @@ function startGame(level) {
       combat = null;
     }
     inCombat = false;
+    syncLeaderBindings();
   }
 
   const enemyAt = (x, z) => enemies.find((e) => e.alive && e.x === x && e.z === z) || null;
@@ -246,8 +247,13 @@ function startGame(level) {
 
   // --- game flow ----------------------------------------------------------------
   function spawnPlayerModel() {
+    // Registered as a `party` interactable like any companion, so a downed
+    // ex-leader can be clicked for a hand up. Clicks on a healthy ACTIVE
+    // member fall through to the ground (dispatchHit) - your own body is not
+    // a target.
     placeModel(app, `assets/characters/${sheet.model}.glb`, player.x, player.z, {
-      lift, rotY: 90, animate: true, onReady: (e) => { applyCharacterProportions(e); player.attach(e); },
+      lift, rotY: 90, animate: true,
+      onReady: (e) => { applyCharacterProportions(e); player.attach(e); picking.register(e, 'party', player); },
     });
     ui.updateStatsHud(sheet);
   }
@@ -298,11 +304,51 @@ function startGame(level) {
     ui.showLoseScreen(message);
   }
 
-  // A leader death ends the run; a companion just goes down - breathing, out
-  // of action, back up at 1 HP after a victory, a stairwell, or a hand up.
+  // A member at 0 HP goes down - breathing, out of action, back at 1 HP
+  // after a victory, a stairwell, or a hand up. The run only ends on a party
+  // WIPE: if the fallen member was the one being controlled, a survivor
+  // takes over on the spot (in combat, combat.js owns that handoff).
   function downOrLose(member, message) {
-    if (member === partyLeader(party)) loseGame(message);
-    else downCompanion(member);
+    const others = party.members.some((m) => m !== member && m.sheet.hp > 0 && m.actor);
+    if (!others) {
+      loseGame(message);
+      return;
+    }
+    downCompanion(member);
+    if (inCombat && combat) combat.notifyMemberDown();
+    else if (member === partyLeader(party)) forceLeader();
+  }
+
+  // Emergency handoff (the controlled member dropped out of combat): the
+  // first living member takes over, no questions asked.
+  function forceLeader() {
+    const i = party.members.findIndex((m) => m.sheet.hp > 0 && m.actor);
+    if (i < 0 || i === party.active) return;
+    const m = party.members[i];
+    party.active = i;
+    sheet = m.sheet;
+    player = m.actor;
+    pendingAction = null;
+    armedOoc = null;
+    buildHotbar();
+    ui.updateStatsHud(sheet);
+    loot.refreshPanel(sheet);
+    ui.say(`${m.sheet.name} takes over.`);
+  }
+
+  // Combat may have handed control to another member; when the dust settles
+  // the out-of-combat bindings follow whoever was active.
+  function syncLeaderBindings() {
+    if (!party) return;
+    const lead = partyLeader(party);
+    if (sheet === lead.sheet || !lead.actor) return;
+    sheet = lead.sheet;
+    player = lead.actor;
+    pendingAction = null;
+    armedOoc = null;
+    buildHotbar();
+    ui.updateStatsHud(sheet);
+    loot.refreshPanel(sheet);
   }
   function downCompanion(m) {
     m.actor?.clearPath();
@@ -591,8 +637,9 @@ function startGame(level) {
       if (kind === 'npc') return { name: ref.def.name, sub: 'Coworker · talk', color: rgbCss(HL.npc) };
       if (kind === 'party') {
         const m = memberOf(ref);
-        const sub = m && m.sheet.hp <= 0 ? 'Down · help up' : `Party · HP ${m?.sheet.hp}/${m?.sheet.maxHp}`;
-        return { name: ref.def.name, sub, color: rgbCss(HL.party) };
+        if (!m || (m === partyLeader(party) && m.sheet.hp > 0)) return null; // yourself: not news
+        const sub = m.sheet.hp <= 0 ? 'Down · help up' : `Party · HP ${m.sheet.hp}/${m.sheet.maxHp}`;
+        return { name: m.sheet.name, sub, color: rgbCss(HL.party) };
       }
       if (kind === 'door') {
         const open = grid.doors.get(ref)?.open;
@@ -719,8 +766,10 @@ function startGame(level) {
     if (kind === 'npc') { approachAndDo(ref.x, ref.z, () => dialogue.open(ref)); return true; }
     if (kind === 'party') {
       const m = memberOf(ref);
-      if (m && m.sheet.hp <= 0) approachAndDo(ref.x, ref.z, () => helpUp(m));
-      else approachAndDo(ref.x, ref.z, () => dialogue.open(ref));
+      if (!m) return false;
+      if (m.sheet.hp <= 0) { approachAndDo(ref.x, ref.z, () => helpUp(m)); return true; }
+      if (m === partyLeader(party)) return false; // your own body: a ground click
+      approachAndDo(ref.x, ref.z, () => dialogue.open(ref));
       return true;
     }
     if (kind === 'enemy') {
@@ -826,7 +875,11 @@ function startGame(level) {
   // move, the hotbar (rebuilt - different sheets bring different actions), the
   // HUD, pathing costs, menu verbs, and the follower set. The outgoing leader
   // stops walking and their pending walk-up dies with the handoff.
-  const partyBar = ui.createPartyBar({ onSelect: (i) => switchLeader(i) });
+  // In combat the portraits switch the ACTIVE combatant; out of it, the
+  // leader. Same bar, same click, right verb for the moment.
+  const partyBar = ui.createPartyBar({
+    onSelect: (i) => (inCombat && combat ? combat.setActive(i) : switchLeader(i)),
+  });
   let partyBarKey = ''; // last rendered roster state (refresh gate)
   function switchLeader(i) {
     if (!party || inCombat || gameOver || dialogue.visible) return;
@@ -842,6 +895,14 @@ function startGame(level) {
     ui.updateStatsHud(sheet);
     loot.refreshPanel(sheet);
     ui.say(`You take point as ${m.sheet.name}.`);
+  }
+  function cycleLeader() {
+    if (!party || party.members.length < 2) return;
+    for (let step = 1; step < party.members.length; step++) {
+      const i = (party.active + step) % party.members.length;
+      const m = party.members[i];
+      if (m.sheet.hp > 0 && m.actor) { switchLeader(i); return; }
+    }
   }
   function toggleOocArm(id) {
     if (!sheet || inCombat || gameOver || dialogue.visible || !ACTIONS[id]) return;
@@ -949,6 +1010,7 @@ function startGame(level) {
         onWin: () => {
           inCombat = false;
           combat = null;
+          syncLeaderBindings(); // control stays with whoever had the floor
           // A breather after every victory, so back-to-back fights aren't a
           // death spiral - wounds still carry over, just less brutally. The
           // whole party catches its breath, and the downed come to at 1 HP.
@@ -1144,8 +1206,16 @@ function startGame(level) {
       if (inCombat) {
         if (!tile) return;
         const en = enemyAt(tile.x, tile.z);
-        if (en) combat?.handleEnemyClick(en);
-        else combat?.handleTileClick(tile, point);
+        if (en) { combat?.handleEnemyClick(en); return; }
+        // Clicking another member's body hands them the floor (their own
+        // tile stays a ground click - purge self-casts, shuffles).
+        const pm = party?.members.find((m) =>
+          m.actor && m.sheet.hp > 0 && m.actor.x === tile.x && m.actor.z === tile.z);
+        if (pm && pm !== partyLeader(party)) {
+          combat?.setActive(party.members.indexOf(pm));
+          return;
+        }
+        combat?.handleTileClick(tile, point);
         return;
       }
       if (dialogue.visible) return; // talking: clicks belong to the panel
@@ -1189,17 +1259,22 @@ function startGame(level) {
       }
       if (hit && hit.kind === 'party') {
         const m = memberOf(hit.ref);
-        const items = [];
-        if (m && m.sheet.hp <= 0) {
-          items.push({ label: `Help ${hit.ref.def.name} up`, action: () => approachAndDo(hit.ref.x, hit.ref.z, () => helpUp(m)) });
-        } else if (m) {
-          items.push({ label: `Talk to ${hit.ref.def.name}`, action: () => approachAndDo(hit.ref.x, hit.ref.z, () => dialogue.open(hit.ref)) });
-          const i = party.members.indexOf(m);
-          if (i !== party.active) items.push({ label: `Switch to ${hit.ref.def.name}`, action: () => switchLeader(i) });
+        // Your own healthy body falls through to the ordinary tile menu.
+        if (m && (m !== partyLeader(party) || m.sheet.hp <= 0)) {
+          const items = [];
+          if (m.sheet.hp <= 0) {
+            items.push({ label: `Help ${m.sheet.name} up`, action: () => approachAndDo(hit.ref.x, hit.ref.z, () => helpUp(m)) });
+          } else {
+            if (hit.ref.def?.dialogue || hit.ref.def?.recruitedDialogue) {
+              items.push({ label: `Talk to ${m.sheet.name}`, action: () => approachAndDo(hit.ref.x, hit.ref.z, () => dialogue.open(hit.ref)) });
+            }
+            const i = party.members.indexOf(m);
+            if (i !== party.active) items.push({ label: `Switch to ${m.sheet.name}`, action: () => switchLeader(i) });
+          }
+          items.push({ label: 'Examine', action: () => ui.say(hit.ref.def?.examine || 'One of yours. Holding up, mostly.') });
+          ui.showMenu(sx, sy, items);
+          return;
         }
-        items.push({ label: 'Examine', action: () => ui.say(hit.ref.def.examine || 'One of yours. Holding up, mostly.') });
-        ui.showMenu(sx, sy, items);
-        return;
       }
       if (!tile) return;
       const doorKey = (hit && hit.kind === 'door') ? hit.ref : doorNearPoint(point);
@@ -1306,6 +1381,12 @@ function startGame(level) {
       // Number keys arm the matching hotbar slot (out-of-combat targeting).
       const id = offensiveActionIds()[Number(e.key) - 1];
       if (id) toggleOocArm(id);
+    } else if (e.key === 'Tab' && sheet && !gameOver && !dialogue.visible) {
+      // Tab cycles who you control - the active combatant mid-fight, the
+      // leader outside one.
+      e.preventDefault();
+      if (inCombat) combat?.cycleActive();
+      else cycleLeader();
     }
   });
   window.addEventListener('keyup', (e) => {
