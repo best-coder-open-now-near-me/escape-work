@@ -409,7 +409,8 @@ function startGame(level) {
     if (!party) return;
     if (dead.summoned) return; // summoned minions pay no XP (SUMMON_PLAN #6)
     for (const m of gainXpAll(party, dead.def.xp)) {
-      ui.say(`Promotion! Level ${m.sheet.level}: fully rested, +1 damage.`);
+      const pts = m.sheet.attrPoints;
+      ui.say(`Promotion! ${m.sheet.name} reaches level ${m.sheet.level} - ${pts} point${pts === 1 ? '' : 's'} to spend.`);
     }
     ui.updateStatsHud(sheet);
   }

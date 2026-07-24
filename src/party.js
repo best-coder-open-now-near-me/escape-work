@@ -7,7 +7,7 @@
 import { gainXp, createSheetFrom, ensureAttributes } from './stats.js';
 
 export const PARTY_CAP = 3; // leader + 2 companions - see PARTY_PLAN.md
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3; // v3 adds attributes + banked points (PROGRESSION_PLAN.md)
 
 export function createParty(sheet, actor = null) {
   return { members: [{ sheet, actor }], active: 0 };
@@ -60,6 +60,7 @@ function normalizeSheet(sheet) {
   sheet.bleed ??= 0;
   sheet.gum ??= 0;
   sheet.name ??= sheet.className;
+  sheet.attrPoints ??= 0; // pre-M2 saves never banked any
   ensureAttributes(sheet); // pre-attribute saves get their class spread + derive
   return sheet;
 }

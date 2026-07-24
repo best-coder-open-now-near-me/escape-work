@@ -5,7 +5,7 @@ import {
   createParty, leader, addMember, livingMembers, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP, SAVE_VERSION,
 } from '../../src/party.js';
-import { createSheet } from '../../src/stats.js';
+import { createSheet, PROGRESSION } from '../../src/stats.js';
 import { COMPANIONS } from '../../src/data/companions.js';
 
 test('createParty starts with the leader as its only member', () => {
@@ -89,13 +89,16 @@ test('parseProgress clamps a bad active index to the leader', () => {
   assert.equal(parseProgress(saved).active, 0);
 });
 
-test('createCompanionSheet joins at the given level, fully rested', () => {
+test('createCompanionSheet joins at the given level, fully rested, points banked', () => {
   const def = COMPANIONS['it-intern'];
   const s = createCompanionSheet(def, 'it-intern', 3);
   assert.equal(s.companionId, 'it-intern');
   assert.equal(s.name, def.name);
   assert.equal(s.level, 3);
-  assert.equal(s.bonusDmg, def.bonusDmg + 2); // one +1 per promotion
+  assert.equal(s.bonusDmg, def.bonusDmg); // no auto-damage; growth is via points
+  // Two promotions (1->2->3) bank their points; nothing auto-allocates, so the
+  // recruit arrives with a lit level-up pip for the player to spend.
+  assert.equal(s.attrPoints, 2 * PROGRESSION.ATTR_PER_LEVEL);
   assert.equal(s.hp, s.maxHp);
   assert.equal(s.classId, undefined); // a companion is not a picked class
 });

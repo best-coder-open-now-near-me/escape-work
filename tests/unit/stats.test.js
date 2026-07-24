@@ -3,7 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createSheet, gainXp, damageBonus, applyDamage,
-  recomputeDerived, ensureAttributes, PROGRESSION, ATTR_KEYS,
+  recomputeDerived, ensureAttributes, spendAttrPoint, deflect,
+  PROGRESSION, ATTR_KEYS,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 
@@ -34,7 +35,8 @@ test('gainXp promotes once, fully heals, and grows the next bar', () => {
   assert.equal(promoted, true);
   assert.equal(s.level, 2);
   assert.equal(s.hp, s.maxHp);
-  assert.equal(s.bonusDmg, 1);
+  assert.equal(s.bonusDmg, 0); // damage no longer rises automatically (M2)
+  assert.equal(s.attrPoints, PROGRESSION.ATTR_PER_LEVEL); // it banks points instead
   assert.equal(s.xpNext, Math.round(before * 1.5));
 });
 
@@ -47,6 +49,7 @@ test('gainXp chains multiple promotions from one windfall', () => {
 
 test('damageBonus counts only the single best carried item', () => {
   const s = createSheet('office-drone');
+  s.attr.savvy = 0; // isolate the item/flat logic from the Savvy term
   s.inventory = ['stapler', 'red-stapler', 'stapler'];
   assert.equal(damageBonus(s), 2); // red stapler wins; they do not stack
   s.bonusDmg = 3;
@@ -105,4 +108,49 @@ test('ensureAttributes backfills a pre-attribute sheet, preserving its stats', (
   assert.equal(legacy.maxHp, 28); // derivation reproduces the saved max
   assert.equal(legacy.maxAp, 5);
   assert.equal(legacy.hp, 12);    // current hp untouched
+});
+
+// --- attribute points (milestone 2: spending, and the derived combat effects)
+
+test('gainXp banks attribute points instead of raising damage', () => {
+  const s = createSheet('office-drone');
+  const dmg0 = s.bonusDmg;
+  gainXp(s, s.xpNext); // one promotion
+  assert.equal(s.level, 2);
+  assert.equal(s.bonusDmg, dmg0); // no automatic damage bump
+  assert.equal(s.attrPoints, PROGRESSION.ATTR_PER_LEVEL);
+});
+
+test('spendAttrPoint raises the attribute, re-derives, and drains the pool', () => {
+  const s = createSheet('office-drone');
+  s.attrPoints = 1;
+  const hp0 = s.maxHp, grit0 = s.attr.grit;
+  assert.equal(spendAttrPoint(s, 'grit'), true);
+  assert.equal(s.attr.grit, grit0 + 1);
+  assert.equal(s.maxHp, hp0 + PROGRESSION.HP_PER_GRIT); // derived stat followed
+  assert.equal(s.attrPoints, 0);
+});
+
+test('spendAttrPoint refuses an empty pool or an unknown attribute', () => {
+  const s = createSheet('office-drone');
+  s.attrPoints = 1;
+  assert.equal(spendAttrPoint(s, 'charisma'), false); // not one of the four
+  assert.equal(s.attrPoints, 1);
+  assert.equal(spendAttrPoint(s, 'grit'), true);
+  assert.equal(spendAttrPoint(s, 'grit'), false); // pool now empty
+});
+
+test('damageBonus includes the Savvy term', () => {
+  const s = createSheet('it-support'); // savvy 8
+  assert.equal(damageBonus(s), Math.floor(8 / PROGRESSION.DMG_PER_SAVVY));
+  s.attr.savvy = 0;
+  assert.equal(damageBonus(s), 0);
+});
+
+test('deflect scales with Composure, zero when there is none', () => {
+  const s = createSheet('office-drone');
+  s.attr.composure = 0;
+  assert.equal(deflect(s), 0);
+  s.attr.composure = PROGRESSION.COMP_PER_DEFLECT * 2;
+  assert.equal(deflect(s), 2);
 });

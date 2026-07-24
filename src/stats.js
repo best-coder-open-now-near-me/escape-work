@@ -95,6 +95,7 @@ export function createSheetFrom(block, extra = {}) {
     maxAp: block.ap,
     attr, // the four office attributes - the source maxHp/maxAp derive from
     base, // innate floor; growth stacks on top (recomputeDerived)
+    attrPoints: 0, // unspent attribute points, banked by gainXp, spent by hand
     level: 1,
     xp: 0,
     xpNext: 10,
@@ -137,16 +138,28 @@ export function unitCombat(def) {
   };
 }
 
-// Total damage bonus: levels/class plus the best carried item (you can only
-// wield one stapler at a time, however many you hoard).
+// Total damage bonus: Savvy (the office damage stat) + any flat class/item
+// bonus. `bonusDmg` is the class/legacy flat bump (0 for every current class -
+// damage now grows by spending points into Savvy, not automatically per level);
+// the best carried item still counts (one stapler at a time, however many you
+// hoard).
 export function damageBonus(sheet) {
   let item = 0;
   for (const id of sheet.inventory || []) item = Math.max(item, ITEMS[id]?.bonusDmg || 0);
-  return (sheet.bonusDmg || 0) + item;
+  const savvy = Math.floor((sheet.attr?.savvy || 0) / PROGRESSION.DMG_PER_SAVVY);
+  return (sheet.bonusDmg || 0) + savvy + item;
 }
 
-// Returns true when the character levelled up ("got promoted"). Level-ups
-// fully heal and add +1 damage.
+// Composure buys flat damage mitigation - a small amount shaved off every
+// incoming hit (one point of damage always lands, so it never fully negates).
+export function deflect(sheet) {
+  return Math.floor((sheet.attr?.composure || 0) / PROGRESSION.COMP_PER_DEFLECT);
+}
+
+// Returns true when the character levelled up ("got promoted"). Level-ups fully
+// heal and BANK attribute points; the player spends them on the level-up screen
+// (companions included - nothing auto-allocates). Damage no longer rises
+// automatically - it comes from spending those points into Savvy.
 export function gainXp(sheet, amount) {
   sheet.xp += amount;
   let promoted = false;
@@ -154,11 +167,21 @@ export function gainXp(sheet, amount) {
     sheet.xp -= sheet.xpNext;
     sheet.xpNext = Math.round(sheet.xpNext * 1.5);
     sheet.level += 1;
-    sheet.bonusDmg += 1;
+    sheet.attrPoints = (sheet.attrPoints || 0) + PROGRESSION.ATTR_PER_LEVEL;
     sheet.hp = sheet.maxHp;
     promoted = true;
   }
   return promoted;
+}
+
+// Spend one banked attribute point raising `attr` by 1, then re-derive. Returns
+// false (and changes nothing) if the pool is empty or the attribute unknown.
+export function spendAttrPoint(sheet, attr) {
+  if (!ATTR_KEYS.includes(attr) || (sheet.attrPoints || 0) <= 0) return false;
+  sheet.attr[attr] += 1;
+  sheet.attrPoints -= 1;
+  recomputeDerived(sheet);
+  return true;
 }
 
 export function applyDamage(sheet, amount) {
