@@ -217,10 +217,19 @@ map seeds `{}`.
    multiply `*Mult`, sum other numerics), dot tick + expiry, turn/step clocks
    not cross-ticking, and the clock/harmful/purge sweeps. Nothing imports them
    yet - zero observable change. Unit 127→138.
-2. **Turn-clock incumbents.** `surprised` + `deflecting` reimplemented on the
-   framework; purge generalizes to `clearStatuses`; combat-end sweep. The
-   existing surprise/deflect e2e behavior is the regression guard — same
-   logs, same outcomes.
+2. **Turn-clock incumbents.** ✅ Landed. `surprised` (unit flag) and
+   `deflecting` (the member `defended` boolean) now live in the status map:
+   `beginTurn` ticks turn-clock statuses generically (a `skipTurn` status costs
+   a unit its turn; every turn-clock duration decrements, so Deflect expires at
+   the member's next turn instead of a hand-reset `defended = false`); the
+   defend action calls `applyStatus(sheet, 'deflecting')`; `aiAttack` reads
+   `statusFx(m.sheet).incomingMult` for the halving; the surprise accuracy bonus
+   reads `hasStatus(en, 'surprised')`; purge (`reboot`, self and enemy) is now
+   `clearStatuses`; `cleanup` sweeps turn-clock statuses from every combatant
+   (step-clock persists). Added `removeStatus` to the runtime for the
+   `__combat.defended` setter. The old `m.defended`/`en.surprised` fields are
+   gone (a `src`-wide grep confirms only a comment remains). Unit 139/139; e2e
+   green (hit/game/classes/party/summons, 18 tests) — same logs, same outcomes.
 3. **Step-clock incumbents.** `gum` + `bleed` migrate; the read-site audit
    (grep `\.gum|\.bleed|gummed|defended` — the list in "Where we are today"
    is the checklist); save v4 migration; AI gum becomes duration-based

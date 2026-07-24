@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applyStatus, hasStatus, statusLeft, statusFx,
-  tickTurn, tickStep, clearStatuses, statusList,
+  tickTurn, tickStep, clearStatuses, removeStatus, statusList,
 } from '../../src/statuses.js';
 
 test('applyStatus applies a status at its default duration', () => {
@@ -120,6 +120,15 @@ test('clearStatuses: clock sweep, harmful-only, and full purge', () => {
   const removed = clearStatuses(purge);              // purge wipes everything
   assert.equal(removed.length, 3);
   assert.deepEqual(statusList(purge), []);
+});
+
+test('removeStatus drops one status and reports whether it was there', () => {
+  const t = {};
+  applyStatus(t, 'gum'); applyStatus(t, 'bleed');
+  assert.equal(removeStatus(t, 'gum'), true);
+  assert.equal(hasStatus(t, 'gum'), false);
+  assert.equal(hasStatus(t, 'bleed'), true); // the other survives
+  assert.equal(removeStatus(t, 'gum'), false); // already gone
 });
 
 test('statusList snapshots id, display fields, and remaining', () => {

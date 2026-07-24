@@ -12,6 +12,7 @@ import { ACTIONS } from './data/actions.js';
 import { SURFACES, GUM } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, HIT } from './stats.js';
+import { applyStatus, hasStatus, statusFx, tickTurn, clearStatuses, removeStatus } from './statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { buildInitiativeOrder, rollInitiative, insertionIndex } from './initiative.js';
 
@@ -31,7 +32,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     for (const id of m.sheet.actions) if (ACTIONS[id].uses) usesLeft[id] = ACTIONS[id].uses;
     // `done` marks a member End Turn has passed - it gates the auto-advance,
     // never the member (switch back manually and they can still act).
-    return { sheet: m.sheet, actor: m.actor, ap: m.sheet.maxAp, defended: false, done: false, usesLeft };
+    return { sheet: m.sheet, actor: m.actor, ap: m.sheet.maxAp, done: false, usesLeft };
   });
   let active = members[party.active];
   // Everyone you control: party members plus any summons you've conjured
@@ -55,7 +56,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // turn realizing what's happening, so group openings don't alpha-strike you.
   for (const en of engaged) {
     const t = pickTarget(en);
-    en.surprised = !t || cheb(en.x, en.z, t.actor.x, t.actor.z) > SURPRISE_RADIUS;
+    if (!t || cheb(en.x, en.z, t.actor.x, t.actor.z) > SURPRISE_RADIUS) applyStatus(en, 'surprised');
   }
   // A bystander outside the engagement radius who gets attacked anyway joins
   // the fight - surprised, so they lose the turn they spend taking offense.
@@ -63,7 +64,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function joinCombat(en) {
     if (engaged.includes(en)) return;
     engaged.push(en);
-    en.surprised = true;
+    applyStatus(en, 'surprised');
     insertSlot(unitSlot(en)); // takes an initiative slot; surprised, so loses turn one
   }
   // world: { isWalkable, findPath(sx,sz,tx,tz), hasLos(ax,az,bx,bz),
@@ -215,7 +216,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (!a || a.type !== 'attack' || a.cone) { costTag.style.display = 'none'; return; }
     const en = enemyAtPoint(point);
     if (!en) { costTag.style.display = 'none'; return; }
-    const acc = accuracy(active.sheet) + (en.surprised ? HIT.SURPRISE_ACC_BONUS : 0);
+    const acc = accuracy(active.sheet) + (hasStatus(en, 'surprised') ? HIT.SURPRISE_ACC_BONUS : 0);
     hoverHitChance = hitChance(acc, en.def.dodge || 0);
     costTag.textContent = `${Math.round(hoverHitChance * 100)}% to hit`;
     costTag.style.left = `${sx + 14}px`;
@@ -483,6 +484,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   }
 
   function cleanup() {
+    // Turn-clock statuses (Deflect, surprise, and later stun/burn) are
+    // combat-scoped - there are no turns on the map, so sweep them from every
+    // combatant as the fight ends. Step-clock statuses (gum/bleed) persist.
+    for (const m of members) clearStatuses(m.sheet, { clock: 'turn' });
+    for (const e of engaged) clearStatuses(e, { clock: 'turn' });
     phase = 'done';
     app.off('update', update);
     panel.remove();
@@ -524,7 +530,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     active.ap -= a.ap;
     // The attack roll: a miss spends the cost above and does nothing else - no
     // damage, no purge. A surprised target is easier to hit (HIT_PLAN #6).
-    const acc = accuracy(active.sheet) + (en.surprised ? HIT.SURPRISE_ACC_BONUS : 0);
+    const acc = accuracy(active.sheet) + (hasStatus(en, 'surprised') ? HIT.SURPRISE_ACC_BONUS : 0);
     if (!resolveHit(acc, en.def.dodge || 0)) {
       fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
       log(a.missLog || `${a.log} It misses.`);
@@ -538,9 +544,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b');
     let line = `${a.log} ${dmg} damage!`;
     // A purge (reboot) wipes the target's statuses - good and bad alike.
-    if (a.purge && !died && en.surprised) {
-      en.surprised = false;
-      line += ' Their surprise is power-cycled away.';
+    if (a.purge && !died) {
+      const woke = hasStatus(en, 'surprised');
+      clearStatuses(en);
+      if (woke) line += ' Their surprise is power-cycled away.';
     }
     log(line);
     if (died) callbacks.onEnemyKilled(en);
@@ -568,7 +575,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // Roll per target. A dodged envelope flies but doesn't land; the wedge's
       // `leaves` surface still carpets below (HIT_PLAN #4). A surprised target
       // is easier to catch.
-      const acc = accuracy(active.sheet) + (en.surprised ? HIT.SURPRISE_ACC_BONUS : 0);
+      const acc = accuracy(active.sheet) + (hasStatus(en, 'surprised') ? HIT.SURPRISE_ACC_BONUS : 0);
       if (!resolveHit(acc, en.def.dodge || 0)) {
         fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
         continue;
@@ -708,8 +715,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         if (active.ap < a.ap) { log('Not enough AP.'); return; }
         active.ap -= a.ap;
         const hadBleed = active.sheet.bleed > 0;
-        active.sheet.bleed = 0;
-        active.defended = false;
+        active.sheet.bleed = 0;       // old field (migrates to a status in M3)
+        clearStatuses(active.sheet);  // wipes Deflect now; bleed/gum when they migrate
         armed = null;
         log(hadBleed
           ? 'You turn yourself off and on again. The bleeding stops. So does everything else.'
@@ -750,9 +757,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
       refresh();
     } else if (a.type === 'defend') {
-      if (active.defended) { log('You are already deflecting. Save the AP.'); return; }
+      if (hasStatus(active.sheet, 'deflecting')) { log('You are already deflecting. Save the AP.'); return; }
       active.ap -= a.ap;
-      active.defended = true;
+      applyStatus(active.sheet, 'deflecting');
       log(a.log);
       refresh();
     } else if (a.type === 'heal') {
@@ -813,9 +820,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (!livingParty().length) { defeat(); return; }
     const s = order[turnPtr];
     if (!slotAlive(s)) { advanceTurn(); return; } // a corpse/downed slot - skip
-    if (!s.member && s.unit.surprised) {
+    // Turn-clock statuses tick at the top of the owner's turn: a skipTurn status
+    // (surprise now, stun in M4) costs them the turn, and every turn-clock
+    // duration decrements - so a member's Deflect expires when their next turn
+    // begins (was: s.member.defended = false), and a surprised unit's flag
+    // clears after it burns this one. (Turn-clock dot damage lands here once M4
+    // sources burning.)
+    const carrier = s.member ? s.member.sheet : s.unit;
+    const skipUnit = !s.member && !!statusFx(s.unit).skipTurn;
+    tickTurn(carrier);
+    if (skipUnit) {
       // Caught off guard: they spend the turn realizing what's happening.
-      s.unit.surprised = false;
       phase = 'ai';
       acting = { unit: s.unit, ap: 0, wait: 0.6 };
       log(`${s.unit.def.name} is still grabbing their lanyard.`);
@@ -825,7 +840,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (s.member) {
       makeActive(s.member);
       s.member.ap = s.member.sheet.maxAp; // full AP at the top of your turn
-      s.member.defended = false;
       phase = 'player';
       const solo = members.length === 1;
       log(solo ? 'Your turn.' : `${s.member.sheet.name}'s turn.`);
@@ -863,14 +877,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     for (const rec of spawned) {
       if (team === 'enemy') {
         if (!engaged.includes(rec)) engaged.push(rec);
-        rec.surprised = true;
+        applyStatus(rec, 'surprised');
         insertSlot(unitSlot(rec));
       } else {
         const usesLeft = {};
         for (const id of rec.sheet.actions) if (ACTIONS[id].uses) usesLeft[id] = ACTIONS[id].uses;
         const m = {
           sheet: rec.sheet, actor: rec.actor, ap: rec.sheet.maxAp,
-          defended: false, done: false, usesLeft, isSummon: true, summonedBy: summoner,
+          done: false, usesLeft, isSummon: true, summonedBy: summoner,
         };
         members.push(m);
         insertSlot(memberSlot(m)); // slots in by its own roll; acts when its turn comes
@@ -900,11 +914,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
       let line = atk.log;
       // Composure soaks a flat slice off the hit (one point always lands),
-      // before the Deflect Blame stance halves whatever is left.
+      // before the Deflect Blame stance (incomingMult) halves whatever is left.
       const soak = deflect(m.sheet);
       if (soak > 0) dmg = Math.max(1, dmg - soak);
-      if (m.defended) {
-        dmg = Math.max(1, Math.ceil(dmg / 2));
+      const inMult = statusFx(m.sheet).incomingMult ?? 1;
+      if (inMult < 1) {
+        dmg = Math.max(1, Math.ceil(dmg * inMult));
         line += ` You deflect - only ${dmg} damage.`;
       } else {
         line += ` ${dmg} damage.`;
@@ -1097,8 +1112,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     get armed() { return armed; },
     get enemies() { return engaged.map((e) => ({ name: e.def.name, x: e.x, z: e.z, hp: e.hp, alive: e.alive })); },
     get maxAp() { return active.sheet.maxAp; },
-    get defended() { return active.defended; },
-    set defended(v) { active.defended = !!v; refresh(); },
+    get defended() { return hasStatus(active.sheet, 'deflecting'); },
+    set defended(v) {
+      if (v) applyStatus(active.sheet, 'deflecting');
+      else removeStatus(active.sheet, 'deflecting');
+      refresh();
+    },
     // The hit-roll pin (HIT_PLAN.md): true = always hit, false = always miss,
     // null = roll honestly. The e2e suite sets it to make combat deterministic.
     get forceHit() { return forceHit; },

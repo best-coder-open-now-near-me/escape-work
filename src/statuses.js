@@ -111,6 +111,15 @@ export function clearStatuses(target, { harmfulOnly = false, clock = null } = {}
   return removed;
 }
 
+// Remove a single status by id. Returns whether it was present.
+export function removeStatus(target, id) {
+  if (target?.statuses && target.statuses[id]) {
+    delete target.statuses[id];
+    return true;
+  }
+  return false;
+}
+
 // A UI/debug snapshot of the live statuses: id, display fields, and remaining.
 export function statusList(target) {
   const map = target?.statuses;
