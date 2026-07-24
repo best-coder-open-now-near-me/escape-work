@@ -43,6 +43,7 @@ export const ENEMY_TYPES = {
     ap: 5,
     attackAp: 3,
     xp: 10,
+    accuracy: 0.05, // sharper aim than the base coworkers (HIT_PLAN)
     aggression: 'red', // descended from the floors above; negotiation is beneath him
     examine: 'An Executive, down from the floors above. The air pressure changes around him.',
     loot: [
@@ -106,6 +107,7 @@ export const ENEMY_TYPES = {
     ap: 5,
     attackAp: 3,
     xp: 15,
+    accuracy: 0.05, // escalates efficiently (HIT_PLAN)
     aggression: 'red',
     examine: 'A Senior Manager. Same energy, more direct reports. Radiates escalation.',
     loot: [
@@ -129,6 +131,8 @@ export const ENEMY_TYPES = {
     ap: 5,
     attackAp: 3,
     xp: 22,
+    accuracy: 0.10, // knows exactly where it'll hurt (HIT_PLAN)
+    dodge: 0.05,    // and is hard to pin down - flew in, will fly out
     aggression: 'red',
     examine: 'A Regional Executive. Flew in for the day. Knows your name, not your work.',
     loot: [

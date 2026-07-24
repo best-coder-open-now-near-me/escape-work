@@ -154,6 +154,11 @@ export const ENEMY_SCALING = {
   XP_GROWTH: 0.15,  // +15% XP reward per level above native
   DMG_PER: 2,       // +1 to each attack's min/max per this many levels
   AP_PER: 3,        // +1 AP per this many levels
+  // A deep floor also makes enemies a touch more ACCURATE (they've seen your
+  // moves) - a small, capped nudge on top of any innate accuracy. Dodge is left
+  // an identity trait of the seniority variants, not something depth grows.
+  ACC_PER: 4,       // +1 accuracy step (HIT.STEP) per this many levels above native
+  ACC_STEP_CAP: 2,  // scaling adds at most this many accuracy steps
 };
 
 // A scaled copy of an enemy def at `level` (clamped to >= its native level). At
@@ -165,12 +170,15 @@ export function scaleEnemy(def, level) {
   if (d === 0) return def;
   const bump = Math.floor(d / ENEMY_SCALING.DMG_PER);
   const hp = Math.round((def.hp ?? def.maxHp) * (1 + ENEMY_SCALING.HP_GROWTH * d));
+  const accSteps = Math.min(ENEMY_SCALING.ACC_STEP_CAP, Math.floor(d / ENEMY_SCALING.ACC_PER));
   const out = {
     ...def,
     level,
     ap: (def.ap || 0) + Math.floor(d / ENEMY_SCALING.AP_PER),
     xp: Math.round((def.xp || 0) * (1 + ENEMY_SCALING.XP_GROWTH * d)),
     attacks: (def.attacks || []).map((a) => ({ ...a, min: a.min + bump, max: a.max + bump })),
+    // Innate accuracy plus the depth nudge; dodge (if any) rides along via spread.
+    accuracy: (def.accuracy || 0) + accSteps * HIT.STEP,
   };
   // Scale whichever HP field the def carries - enemies spell it `hp`, a
   // class-backed unit `maxHp` (EnemyActor/unitCombat prefer maxHp), so keep both

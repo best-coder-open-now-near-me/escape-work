@@ -210,9 +210,22 @@ None. Accuracy/dodge are derived, never stored; no save-version bump.
    `hit.spec.js` case hovers a target, reads the shown percentage, then swings
    it and asserts the chance that rolled equals the chance previewed. Unit
    124/124, e2e hit 3/3.
-4. **Balance + enemy identity.** Innate acc/dodge on the variant enemies,
-   `scaleEnemy` growth, a numbers pass on damage (see risk #1). Stretch items
-   live here or later: crits, the shove contest, dodge-vs-cone rules.
+4. **Enemy identity + scaling.** ✅ Landed (mechanics). Innate acc/dodge on the
+   seniority variants: `executive` +5% acc, `senior-manager` +5% acc,
+   `regional-executive` +10% acc / +5% dodge (the base coworkers and the
+   applicant stay 0/0). `scaleEnemy` adds a small, capped **accuracy** nudge
+   with depth (`ACC_PER: 4`, `ACC_STEP_CAP: 2` in `ENEMY_SCALING`) on top of any
+   innate value; dodge is left an identity trait, not depth-grown. Unit 127/127
+   (three new: innate acc/dodge through `unitCombat`, the capped depth nudge,
+   the nudge stacking on innate accuracy without mutating the base def).
+   - **Deferred to playtest (the numbers pass):** the ~15% symmetric whiff
+     lengthens fights without changing win-probability much (risk #1). A blind
+     damage/HP rebalance would be guesswork without feel-testing, so the tuning
+     knobs are all in place (`HIT`, `ENEMY_SCALING`, per-enemy acc/dodge, the
+     god pins) but the actual numbers wait for a playtest pass rather than
+     shipping unvalidated. Stretch items stay out of scope: crits (the roll site
+     is written for a second threshold), the Hustle-vs-Hustle shove contest, and
+     cone-specific dodge rules.
 
 ## Testing
 

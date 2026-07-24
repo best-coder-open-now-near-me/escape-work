@@ -248,6 +248,32 @@ test('scaleEnemy grows AP once the gap reaches AP_PER levels', () => {
   assert.equal(m.ap, 5); // base def untouched
 });
 
+test('variant enemies carry innate accuracy/dodge through unitCombat', () => {
+  const x = unitCombat(ENEMY_TYPES['regional-executive']);
+  assert.ok(x.accuracy > 0, 'regional exec is accurate');
+  assert.ok(x.dodge > 0, 'regional exec is evasive');
+  assert.equal(unitCombat(ENEMY_TYPES.manager).accuracy, 0); // the base tier stays plain
+  assert.equal(unitCombat(ENEMY_TYPES.manager).dodge, 0);
+});
+
+test('scaleEnemy nudges accuracy up on deep floors, capped', () => {
+  const m = ENEMY_TYPES.manager; // native level 1, accuracy 0
+  const near = scaleEnemy(m, m.level + ENEMY_SCALING.ACC_PER - 1); // one short of a step
+  assert.equal(near.accuracy, 0);
+  const one = scaleEnemy(m, m.level + ENEMY_SCALING.ACC_PER); // exactly one step
+  assert.ok(Math.abs(one.accuracy - HIT.STEP) < 1e-9);
+  const far = scaleEnemy(m, m.level + ENEMY_SCALING.ACC_PER * 20); // way past the cap
+  assert.ok(Math.abs(far.accuracy - ENEMY_SCALING.ACC_STEP_CAP * HIT.STEP) < 1e-9);
+  assert.equal(m.accuracy ?? 0, 0); // the base def is not mutated
+});
+
+test('scaleEnemy adds the depth nudge on top of innate accuracy', () => {
+  const x = ENEMY_TYPES['regional-executive']; // native 4, innate accuracy 0.10
+  const scaled = scaleEnemy(x, x.level + ENEMY_SCALING.ACC_PER); // +1 step
+  assert.ok(Math.abs(scaled.accuracy - (x.accuracy + HIT.STEP)) < 1e-9);
+  assert.ok(Math.abs(scaled.dodge - x.dodge) < 1e-9); // dodge is identity, unscaled
+});
+
 test('scaleEnemy scales the maxHp field for a class-backed AI unit', () => {
   // The applicant class spells max HP `maxHp` (not `hp`); scaleEnemy must scale
   // that field and never invent a phantom `hp` (stats.js unitCombat prefers maxHp).
