@@ -201,8 +201,10 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   them and click through their `project()` / `project3()` helpers (CSS
   pixels - `project3` aims at a world point at any height, for tall meshes).
   `__game` also exposes `npcs`, `party`, `summons`, `armed` (hotbar),
-  `hoverKind`, `cursor`, and `dialogueOpen`; `__combat` exposes `summons` and a
-  `summonAlly(archetypeId, n)` test hook. Keep them in sync when adding state. `window.__god` is the
+  `hoverKind`, `cursor`, and `dialogueOpen`; `__combat` exposes `summons`, a
+  `summonAlly(archetypeId, n)` test hook, and `forceHit` (the hit-roll pin:
+  `true` always hits, `false` always misses, `null` rolls honestly - the e2e
+  suite sets it to make combat deterministic). Keep them in sync when adding state. `window.__god` is the
   exception: it hands out LIVE references and mutators for the god-mode panel
   (god.js) to edit runtime state in place - including the party
   (`__god.party`, `switchTo`, `reviveMember`, `recruit`; the panel's Player
@@ -279,7 +281,14 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   damage, and act in a sequenced AI phase. The player can Shove (2 AP): push
   an adjacent enemy one tile away - into a wall for a slam, or into whatever
   surface is waiting for them. Fire keeps burning during combat; printer
-  explosions still resolve (combat prunes the dead).
+  explosions still resolve (combat prunes the dead). Attacks roll TO HIT
+  (HIT_PLAN.md): a DOS2-style `hitChance = BASE + accuracy(attacker) -
+  dodge(defender)` (accuracy from Savvy, dodge from Hustle, derived in
+  `stats.js`; enemies carry innate `accuracy`/`dodge` through `unitCombat`),
+  clamped so a whiff and a hit are always possible. A miss spends the AP/ammo
+  and does nothing else - no damage, no on-hit rider. Shove auto-hits
+  (positioning, not damage). `combat.js resolveHit` owns the roll against an
+  injectable `rng`, pinnable via `__combat.forceHit` for deterministic tests.
 - **Summons** (SUMMON_PLAN.md): a combat action `type: 'summon'`, or an enemy's
   `summon` descriptor, conjures temporary combatants on the summoner's side. The
   `archetype` id resolves from CLASSES (or ENEMY_TYPES); the `applicant` class is

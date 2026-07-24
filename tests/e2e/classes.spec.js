@@ -63,6 +63,9 @@ test('Mail Room: Bulk Mail cones damage and leave paper drifts', async ({ page }
   });
   const paperBefore = await paperNear();
   const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
+  // The cone rolls to hit per target now (HIT_PLAN) - pin it so the fired cone
+  // reliably damages this foe.
+  await page.evaluate(() => { window.__combat.forceHit = true; });
   await page.click('#act-mail-cone');
   await page.waitForTimeout(800); // camera settle before projecting
   expect(await clickWorld(page, foe.x, foe.z)).toBe(true);

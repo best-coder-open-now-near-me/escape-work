@@ -37,18 +37,19 @@ export const PROGRESSION = {
 // rest of the sheet uses. Enemies aren't sheets, so their innate accuracy/dodge
 // ride through unitCombat(def).
 //
-// MILESTONE 1 ships this INERT: BASE and both clamp bounds are 1.0, so
-// hitChance is identically 1.0 for any inputs and nothing can miss yet. The
-// wiring (combat.js resolveHit) lands now so it can be proven behavior-neutral;
-// a follow-up flips these constants live and turns misses into real events.
+// The model is LIVE (milestone 2): a base 85% hit, nudged ±5% per accuracy/
+// dodge step, clamped to [35%, 95%] so a 1-in-20 whiff always remains and a
+// stacked dodge is never unhittable. Milestone 1 shipped the same machinery
+// with BASE/clamps pinned to 1.0 (nothing could miss) to prove the wiring
+// behavior-neutral first; these are the constants that turn misses on.
 export const HIT = {
-  BASE: 1.0,             // hit chance before any modifiers (M1: inert)
+  BASE: 0.85,            // hit chance before any modifiers
   ACC_PER_SAVVY: 3,      // every N Savvy = one accuracy step
   DODGE_PER_HUSTLE: 3,   // every N Hustle = one dodge step
   STEP: 0.05,            // one step = ±5% hit chance
-  CLAMP_LO: 1.0,         // M1: floor at 1.0 too, so a stacked dodge can't miss
-  CLAMP_HI: 1.0,         // M1: cap at 1.0 (live model caps below 1 for the whiff)
-  SURPRISE_ACC_BONUS: 0.15, // attacking a surprised target (applied by combat)
+  CLAMP_LO: 0.35,        // a stacked dodge build is never unhittable
+  CLAMP_HI: 0.95,        // a universal 1-in-20 whiff, even fully buffed
+  SURPRISE_ACC_BONUS: 0.15, // attacking a surprised target (applied by combat, M3)
 };
 
 export const ATTR_KEYS = ['grit', 'hustle', 'savvy', 'composure'];

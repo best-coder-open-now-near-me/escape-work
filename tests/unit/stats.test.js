@@ -309,24 +309,25 @@ test('accuracy/dodge tolerate a sheet with no attributes', () => {
   assert.equal(dodge({}), 0);
 });
 
+test('hitChance is BASE with no edge, and shifts by accuracy and dodge', () => {
+  assert.equal(hitChance(0, 0), HIT.BASE);
+  assert.ok(Math.abs(hitChance(HIT.STEP, 0) - (HIT.BASE + HIT.STEP)) < 1e-9);
+  assert.ok(Math.abs(hitChance(0, HIT.STEP) - (HIT.BASE - HIT.STEP)) < 1e-9);
+  assert.ok(Math.abs(hitChance(HIT.STEP, HIT.STEP) - HIT.BASE) < 1e-9); // acc & dodge cancel
+});
+
 test('hitChance engages both clamp bounds', () => {
   // A big accuracy edge clamps down to CLAMP_HI; a big dodge edge clamps up to
-  // CLAMP_LO. Under the milestone-1 (inert) constants both bounds are 1.0.
+  // CLAMP_LO - the universal-whiff cap and the never-unhittable floor.
   assert.equal(hitChance(0.5, 0), HIT.CLAMP_HI);
   assert.equal(hitChance(0, 0.9), HIT.CLAMP_LO);
 });
 
-test('milestone 1 ships HIT inert: every computed chance is 1', () => {
-  assert.equal(HIT.BASE, 1);
-  assert.equal(HIT.CLAMP_LO, 1);
-  assert.equal(HIT.CLAMP_HI, 1);
-  for (const acc of [0, 0.1, 0.3]) {
-    for (const dge of [0, 0.15, 0.5]) {
-      for (const mod of [-0.3, 0, 0.2]) {
-        assert.equal(hitChance(acc, dge, mod), 1, `acc ${acc} dge ${dge} mod ${mod}`);
-      }
-    }
-  }
+test('the live HIT constants keep a universal miss and a hit floor', () => {
+  assert.ok(HIT.BASE < 1);           // even an unbuffed swing can miss
+  assert.ok(HIT.CLAMP_HI < 1);       // a 1-in-20 whiff always remains
+  assert.ok(HIT.CLAMP_LO > 0);       // a stacked dodge is never unhittable
+  assert.ok(HIT.CLAMP_LO < HIT.CLAMP_HI);
 });
 
 test('rollHit lands when the rng falls under the chance', () => {

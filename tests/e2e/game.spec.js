@@ -92,6 +92,9 @@ test('confronting a coworker starts combat and an attack lands', async ({ page }
     foe = await findFoe();
   }
   expect(foe).toBeTruthy();
+  // Attacks can miss now (HIT_PLAN) - pin the roll so this damage assertion
+  // isn't a coin flip.
+  await page.evaluate(() => { window.__combat.forceHit = true; });
   // Arm the basic attack and click the target. The camera keeps easing after
   // combat walks, so a projection taken mid-ease can round to the wrong tile
   // (which lowers the attack instead) - settle, then retry a couple times.

@@ -26,12 +26,12 @@ export const ENEMY_TYPES = {
       { item: 'cold-coffee', chance: 0.5 },
     ],
     attacks: [
-      { min: 2, max: 3, log: 'The Manager schedules a "quick sync".' },
-      { min: 2, max: 3, log: 'The Manager asks for "just one more thing".' },
-      { min: 2, max: 3, log: 'The Manager CCs your skip-level.' },
-      { min: 2, max: 4, log: '"Per my last email..."' },
+      { min: 2, max: 3, log: 'The Manager schedules a "quick sync".', missLog: 'You decline the "quick sync". It never lands.' },
+      { min: 2, max: 3, log: 'The Manager asks for "just one more thing".', missLog: 'The "one more thing" gets lost in your inbox.' },
+      { min: 2, max: 3, log: 'The Manager CCs your skip-level.', missLog: 'The CC bounces - wrong distribution list.' },
+      { min: 2, max: 4, log: '"Per my last email..."', missLog: 'Per your last email, you were already out of office.' },
       // applies: 'gum' - sticks gum to the target's shoe (see GUM in surfaces.js)
-      { min: 1, max: 2, log: 'The Manager parks his gum on your shoe. A power move.', applies: 'gum' },
+      { min: 1, max: 2, log: 'The Manager parks his gum on your shoe. A power move.', applies: 'gum', missLog: 'The Manager reaches for your shoe and misses. Reprieve.' },
     ],
   },
   executive: {

@@ -78,13 +78,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const base = ACTIONS[id].ammoCost || 0;
     return base > 1 ? Math.max(1, base - (talentFxOf(active).paperAmmoDiscount || 0)) : base;
   };
+  // A debug/test pin (exposed as window.__combat.forceHit): true forces every
+  // roll to hit, false forces a miss, null (the default) rolls honestly. It
+  // lets the e2e suite make combat deterministic and a tester slam hit rates
+  // live - the same "pin a value" affordance the god panel gives other state.
+  let forceHit = null;
   // One attack roll (HIT_PLAN.md): base + attacker accuracy - defender dodge +
-  // mods, rolled against combat's injectable `rng`. MILESTONE 1 ships the HIT
-  // constants inert (hitChance is identically 1), so this always returns true
-  // and the miss branches below never fire - the wiring lands provably
-  // behavior-neutral, and a follow-up flips the constants to turn misses live.
+  // mods, rolled against combat's injectable `rng` (unless pinned above).
   const resolveHit = (accFrac, dodgeFrac, mods = 0) =>
-    rollHit(hitChance(accFrac, dodgeFrac, mods), rng);
+    (forceHit !== null ? forceHit : rollHit(hitChance(accFrac, dodgeFrac, mods), rng));
   const MISS_COLOR = '#b8c0d0';
   // Movement cost per unit distance, derived from the surface's `slow`
   // multiplier (0.5 => twice the AP) - one number in data drives both walk
@@ -850,7 +852,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // already committed by the caller.
       if (!resolveHit(unit.def.accuracy || 0, dodge(m.sheet))) {
         fx.damageText(m.actor.x, m.actor.z, 'MISS', MISS_COLOR);
-        log(atk.missLog || `${atk.log} It misses.`);
+        log(atk.missLog || `${unit.def.name}'s attack goes wide.`);
         refresh();
         return;
       }
@@ -1055,6 +1057,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     get maxAp() { return active.sheet.maxAp; },
     get defended() { return active.defended; },
     set defended(v) { active.defended = !!v; refresh(); },
+    // The hit-roll pin (HIT_PLAN.md): true = always hit, false = always miss,
+    // null = roll honestly. The e2e suite sets it to make combat deterministic.
+    get forceHit() { return forceHit; },
+    set forceHit(v) { forceHit = v == null ? null : !!v; },
     get usesLeft() { return active.usesLeft; }, // live { actionId: count } - edit in place, then call refresh()
     get party() {
       return members.map((m) => ({ name: m.sheet.name, hp: m.sheet.hp, ap: m.ap, active: m === active }));

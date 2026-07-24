@@ -190,11 +190,16 @@ None. Accuracy/dodge are derived, never stored; no save-version bump.
    - **Note:** the surprise accuracy bonus (`SURPRISE_ACC_BONUS`) constant
      ships now but is not yet read at the call sites — it lands with the live
      flip in milestone 3, kept out of M1 to hold the diff provably inert.
-2. **Turn it on.** Constants go live (0.85 base); miss handling (popup, logs,
-   no riders); `missLog` lines authored for the shipped actions + enemy
-   attacks; the god pin; e2e specs that assert damage set `forceHit = true`,
-   plus new specs: a pinned miss deals 0 and still spends AP/ammo; a pinned
-   miss does not apply gum.
+2. **Turn it on.** ✅ Landed. Constants went live (0.85 base, clamp
+   [0.35, 0.95]); the M1 miss branches now fire (MISS popup, miss line, no
+   damage/riders/flinch); `missLog` lines authored for every player attack and
+   the flagship Manager's attacks (a readable `"<name>'s attack goes wide."`
+   fallback covers the rest); the `forceHit` pin lands on `window.__combat`
+   (`true`/`false`/`null`). e2e: the three damage-asserting specs
+   (game swing, Mail Room cone, party downed) pin `forceHit = true`; a new
+   `hit.spec.js` proves a pinned miss deals 0 damage while still spending the
+   attack AP, and that a pinned miss sticks no gum. Unit 124/124 (the inert
+   guard swapped for live formula/clamp assertions).
 3. **The odds on screen.** Hover hit% in the cost tag; `SURPRISE_ACC_BONUS`;
    `__combat.lastRoll`; e2e asserts the previewed chance equals the pure
    `hitChance` for the same pair.

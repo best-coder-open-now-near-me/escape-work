@@ -25,6 +25,7 @@ export const ACTIONS = {
     min: 3,
     max: 5,
     log: 'You send a passive-aggressive email.',
+    missLog: 'Your passive-aggressive email lands in their spam folder.',
   },
   defend: {
     type: 'defend',
@@ -49,6 +50,7 @@ export const ACTIONS = {
     min: 2,
     max: 4,
     log: 'You delegate the problem back to them.',
+    missLog: 'They delegate it right back. Nothing lands.',
   },
   'own-calendar': {
     type: 'defend',
@@ -78,6 +80,7 @@ export const ACTIONS = {
     // armed to self-cast.
     purge: true,
     log: 'You power-cycle their whole workflow.',
+    missLog: 'The reboot hangs on a spinning beach ball. Nothing happens.',
   },
   firewall: {
     type: 'defend',
@@ -143,6 +146,7 @@ export const ACTIONS = {
     min: 1,
     max: 3,
     log: 'The applicant slaps a résumé across the desk.',
+    missLog: 'The applicant\'s résumé sails wide. Unqualified.',
   },
 
   // --- Human Resources ----------------------------------------------------------
@@ -170,6 +174,7 @@ export const ACTIONS = {
     max: 4,
     footwork: true, // disabled while gum is on the shoe
     log: 'You deliver OSHA-approved footwear at speed.',
+    missLog: 'The steel toe whistles past. A near miss, OSHA-wise.',
   },
   cigarette: {
     type: 'heal',
@@ -190,6 +195,7 @@ export const ACTIONS = {
     min: 2,
     max: 4,
     log: 'You wad up a TPS report and bean them.',
+    missLog: 'The wad sails past their ear and into a cubicle.',
   },
   'paper-airplane': {
     type: 'attack',
@@ -199,5 +205,6 @@ export const ACTIONS = {
     min: 4,
     max: 6,
     log: 'You fold a dart and send it. Right in the lanyard.',
+    missLog: 'The dart banks left and augers into a monitor.',
   },
 };

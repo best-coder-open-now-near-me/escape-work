@@ -133,6 +133,8 @@ test('party combat: initiative interleaves the party and enemies; both members a
   // Party-wipe-only defeat: wound one member to 1 HP; when the Manager drops
   // them, the fight continues because the other still stands (their slot is
   // simply skipped when it comes around).
+  // Force enemy hits so the wounded member reliably drops (attacks can miss now).
+  await page.evaluate(() => { window.__combat.forceHit = true; });
   await page.evaluate(() => { window.__god.party.members[0].sheet.hp = 1; window.__combat.refresh(); });
   await expect.poll(async () => {
     if (await page.evaluate(() => window.__combat?.phase) === 'player') await page.click('#combat-end-turn').catch(() => {});
