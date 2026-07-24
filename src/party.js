@@ -4,10 +4,11 @@
 // the character the player controls out of combat, and whose turn state is
 // live in combat. Today the roster holds one member; recruitment
 // (data/companions.js) grows it.
-import { gainXp, createSheetFrom, ensureAttributes } from './stats.js';
+import { gainXp, createSheetFrom, ensureAttributes, EQUIP_SLOTS } from './stats.js';
+import { ITEMS } from './data/items.js';
 
 export const PARTY_CAP = 3; // leader + 2 companions - see PARTY_PLAN.md
-export const SAVE_VERSION = 4; // v4 moves gum/bleed into the status map (STATUS_PLAN.md)
+export const SAVE_VERSION = 5; // v5 adds equipment slots (EQUIPMENT_PLAN.md)
 
 export function createParty(sheet, actor = null) {
   return { members: [{ sheet, actor }], active: 0 };
@@ -71,6 +72,23 @@ function normalizeSheet(sheet) {
   sheet.attrPoints ??= 0; // pre-M2 saves never banked any
   sheet.classPoints ??= 0;
   sheet.perks ??= []; // taken track nodes; effects are already baked into the sheet
+  // v5: equipment slots. The old "best carried stapler counts" rule became a
+  // real weapon slot - auto-equip the best weapon still loose in the bag so no
+  // migrated character loses the damage it used to get for free.
+  sheet.equipped ??= { weapon: null, outfit: null, trinket: null };
+  for (const slot of EQUIP_SLOTS) sheet.equipped[slot] ??= null;
+  if (!sheet.equipped.weapon) {
+    let best = null;
+    let bestDmg = 0;
+    for (const id of sheet.inventory) {
+      const it = ITEMS[id];
+      if (it?.slot === 'weapon' && (it.stats?.dmg || 0) > bestDmg) { best = id; bestDmg = it.stats.dmg; }
+    }
+    if (best) {
+      sheet.equipped.weapon = best;
+      sheet.inventory.splice(sheet.inventory.indexOf(best), 1); // out of the bag, into the slot
+    }
+  }
   ensureAttributes(sheet); // pre-attribute saves get their class spread + derive
   return sheet;
 }

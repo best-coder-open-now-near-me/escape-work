@@ -5,7 +5,7 @@ import {
   createParty, leader, addMember, livingMembers, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP, SAVE_VERSION,
 } from '../../src/party.js';
-import { createSheet, spendClassPoint, PROGRESSION } from '../../src/stats.js';
+import { createSheet, spendClassPoint, damageBonus, PROGRESSION } from '../../src/stats.js';
 import { COMPANIONS } from '../../src/data/companions.js';
 
 test('createParty starts with the leader as its only member', () => {
@@ -91,6 +91,24 @@ test('v3->v4 migration moves in-flight gum/bleed counters into the status map', 
   assert.equal(s.bleed, undefined);
   assert.equal(s.statuses.gum.left, 12); // carried across as status entries
   assert.equal(s.statuses.bleed.left, 2);
+});
+
+test('v4->v5 migration auto-equips the best carried weapon, preserving its damage', () => {
+  const v4 = {
+    version: 4, levelId: 'level2', active: 0,
+    party: [{
+      classId: 'office-drone', className: 'Office Drone', hp: 22, maxHp: 22, level: 1,
+      inventory: ['stapler', 'red-stapler', 'cold-coffee'],
+    }],
+  };
+  const s = parseProgress(v4).sheets[0];
+  assert.equal(s.equipped.weapon, 'red-stapler');  // the best weapon auto-equips
+  assert.ok(!s.inventory.includes('red-stapler')); // moved out of the bag
+  assert.ok(s.inventory.includes('stapler'));      // the lesser one stays loose (does nothing)
+  assert.ok(s.inventory.includes('cold-coffee'));  // non-weapons untouched
+  // damage preserved: office-drone's Savvy 5 gives +1, the equipped red stapler
+  // +2 - exactly what the old best-in-bag rule (Savvy +1, best bonusDmg +2) gave.
+  assert.equal(damageBonus(s), 3);
 });
 
 test('a non-zero active leader survives the save round-trip', () => {

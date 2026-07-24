@@ -54,6 +54,11 @@ export const HIT = {
 
 export const ATTR_KEYS = ['grit', 'hustle', 'savvy', 'composure'];
 
+// Equipment slots (EQUIPMENT_PLAN.md): one damage choice, one defense choice,
+// one wildcard. Rendered as In Hand / Dress Code / Flair. An item's `slot`
+// (data/items.js) says where it goes; `stats` fold into the derived numbers.
+export const EQUIP_SLOTS = ['weapon', 'outfit', 'trinket'];
+
 // A clean {grit,hustle,savvy,composure} object from any partial source.
 export function normalizeAttr(src = {}) {
   const attr = {};
@@ -75,9 +80,15 @@ function baseFrom(maxHp, maxAp, attr) {
 // creation, save-load backfill, and (later) every point spend. hp is clamped
 // down to a shrunken max but never raised - healing is the caller's job.
 export function recomputeDerived(sheet) {
-  const { attr, base } = sheet;
-  sheet.maxHp = base.hp + attr.grit * PROGRESSION.HP_PER_GRIT;
-  sheet.maxAp = base.ap + Math.floor(attr.hustle / PROGRESSION.AP_PER_HUSTLE);
+  const { base } = sheet;
+  // Equipped gear folds in here too: attrBonus lifts the attributes maxHp/maxAp
+  // derive from, and flat maxHp/maxAp add on top (EQUIPMENT_PLAN.md). No gear =
+  // no change, so the attribute math stays exactly as it was.
+  const gear = equippedStats(sheet);
+  const grit = (sheet.attr.grit || 0) + (gear.attrBonus.grit || 0);
+  const hustle = (sheet.attr.hustle || 0) + (gear.attrBonus.hustle || 0);
+  sheet.maxHp = base.hp + grit * PROGRESSION.HP_PER_GRIT + gear.maxHp;
+  sheet.maxAp = base.ap + Math.floor(hustle / PROGRESSION.AP_PER_HUSTLE) + gear.maxAp;
   if (sheet.hp > sheet.maxHp) sheet.hp = sheet.maxHp;
   return sheet;
 }
@@ -130,6 +141,7 @@ export function createSheetFrom(block, extra = {}) {
     talent: block.talent || null,
     paper: 0, // thrown-weapon ammo, picked up from paper spills
     statuses: {}, // active status effects (statuses.js) - gum, bleed, and the rest
+    equipped: { weapon: null, outfit: null, trinket: null }, // worn gear (EQUIPMENT_PLAN)
     inventory: [], // looted item ids (data/items.js) - persists across floors
     ...extra,
   };
@@ -217,41 +229,75 @@ export function unitCombat(def) {
   };
 }
 
-// Total damage bonus: Savvy (the office damage stat) + any flat class/item
-// bonus. `bonusDmg` is the class/legacy flat bump (0 for every current class -
-// damage now grows by spending points into Savvy, not automatically per level);
-// the best carried item still counts (one stapler at a time, however many you
-// hoard).
+// The summed bonuses of everything the sheet has equipped (EQUIPMENT_PLAN.md).
+// One read the derivations fold in, so a weapon's damage, an outfit's soak, a
+// trinket's attribute bump all reach the numbers the same way. Empty for an
+// unequipped sheet.
+export function equippedStats(sheet) {
+  const out = { dmg: 0, soak: 0, maxHp: 0, maxAp: 0, acc: 0, dodge: 0, attrBonus: {} };
+  const eq = sheet.equipped || {};
+  for (const slot of EQUIP_SLOTS) {
+    const st = ITEMS[eq[slot]]?.stats;
+    if (!st) continue;
+    out.dmg += st.dmg || 0;
+    out.soak += st.soak || 0;
+    out.maxHp += st.maxHp || 0;
+    out.maxAp += st.maxAp || 0;
+    out.acc += st.acc || 0;
+    out.dodge += st.dodge || 0;
+    for (const k in st.attrBonus || {}) out.attrBonus[k] = (out.attrBonus[k] || 0) + st.attrBonus[k];
+  }
+  return out;
+}
+
+// A sheet's attributes with equipped `attrBonus` folded in - the "effective"
+// spread every attribute-derived number reads, so a +1 Savvy mug lifts damage
+// AND accuracy for free. Falls through to the raw attr when no gear bends it.
+export function effectiveAttr(sheet) {
+  const gear = equippedStats(sheet).attrBonus;
+  const a = sheet.attr || {};
+  if (!Object.keys(gear).length) return a;
+  const out = { ...a };
+  for (const k in gear) out[k] = (out[k] || 0) + gear[k];
+  return out;
+}
+
+// Total damage bonus: Savvy (the office damage stat) + the equipped weapon's
+// `dmg` + any flat class bump. `bonusDmg` is the class/legacy flat bump (0 for
+// every current class - damage now grows by spending points into Savvy). The
+// old "best carried stapler counts" rule is gone: a weapon only counts in hand.
 export function damageBonus(sheet) {
-  let item = 0;
-  for (const id of sheet.inventory || []) item = Math.max(item, ITEMS[id]?.bonusDmg || 0);
-  const savvy = Math.floor((sheet.attr?.savvy || 0) / PROGRESSION.DMG_PER_SAVVY);
-  return (sheet.bonusDmg || 0) + savvy + item;
+  const savvy = Math.floor((effectiveAttr(sheet).savvy || 0) / PROGRESSION.DMG_PER_SAVVY);
+  return (sheet.bonusDmg || 0) + savvy + equippedStats(sheet).dmg;
 }
 
 // Composure buys flat damage mitigation - a small amount shaved off every
 // incoming hit (one point of damage always lands, so it never fully negates).
+// Outfit/trinket `soak` stacks on top.
 export function deflect(sheet) {
-  return Math.floor((sheet.attr?.composure || 0) / PROGRESSION.COMP_PER_DEFLECT);
+  return Math.floor((effectiveAttr(sheet).composure || 0) / PROGRESSION.COMP_PER_DEFLECT)
+    + equippedStats(sheet).soak;
 }
 
 // Composure also shakes off applied statuses faster - it shortens the sticky
 // ones (a combat gum flick) by this many turns. Poise on a different axis.
 export function statusResist(sheet) {
-  return Math.floor((sheet.attr?.composure || 0) / PROGRESSION.COMP_PER_DEFLECT);
+  return Math.floor((effectiveAttr(sheet).composure || 0) / PROGRESSION.COMP_PER_DEFLECT);
 }
 
-// A sheet's accuracy: how much its Savvy adds to the hit chance, as a fraction
-// (0.05 per step). Layered onto the attacker side of hitChance.
+// A sheet's accuracy: how much its Savvy (+ gear acc) adds to the hit chance,
+// as a fraction (0.05 per step). Layered onto the attacker side of hitChance.
 export function accuracy(sheet) {
-  return Math.floor((sheet.attr?.savvy || 0) / HIT.ACC_PER_SAVVY) * HIT.STEP;
+  return Math.floor((effectiveAttr(sheet).savvy || 0) / HIT.ACC_PER_SAVVY) * HIT.STEP
+    + equippedStats(sheet).acc;
 }
 
-// A sheet's dodge: how much its Hustle subtracts from an attacker's hit chance,
-// as a fraction. Hustle already buys AP and initiative; this is its defensive
-// second job, completing the two-jobs-per-attribute symmetry (HIT_PLAN #2).
+// A sheet's dodge: how much its Hustle (+ gear dodge) subtracts from an
+// attacker's hit chance, as a fraction. Hustle already buys AP and initiative;
+// this is its defensive second job (HIT_PLAN #2).
 export function dodge(sheet) {
-  return Math.floor((sheet.attr?.hustle || 0) / HIT.DODGE_PER_HUSTLE) * HIT.STEP;
+  return Math.floor((effectiveAttr(sheet).hustle || 0) / HIT.DODGE_PER_HUSTLE) * HIT.STEP
+    + equippedStats(sheet).dodge;
 }
 
 // The chance an attack lands: base + attacker accuracy - defender dodge + any
@@ -381,6 +427,40 @@ export function spendClassPoint(sheet, nodeId) {
   sheet.classPoints -= (node.cost || 1);
   recomputeDerived(sheet);
   creditNewHp(sheet, maxHpBefore); // a Grit node's extra HP arrives undamaged
+  return true;
+}
+
+// --- equipment (EQUIPMENT_PLAN.md) ------------------------------------------
+// Equip the inventory item at index `i` into its slot: the incumbent (if any)
+// returns to the bag, the item leaves the bag for the slot, derived numbers
+// refresh, and any fresh max-HP capacity is credited (a Grit/maxHp piece
+// arrives undamaged). Returns false, changing nothing, for a non-equippable
+// item or a bad index.
+export function equipItem(sheet, i) {
+  const id = sheet.inventory?.[i];
+  const def = ITEMS[id];
+  if (!def || !EQUIP_SLOTS.includes(def.slot)) return false;
+  sheet.equipped = sheet.equipped || { weapon: null, outfit: null, trinket: null };
+  const maxHpBefore = sheet.maxHp;
+  const prev = sheet.equipped[def.slot];
+  sheet.inventory.splice(i, 1);          // out of the bag...
+  sheet.equipped[def.slot] = id;         // ...into the slot
+  if (prev) sheet.inventory.push(prev);  // the displaced piece returns to the bag
+  recomputeDerived(sheet);
+  creditNewHp(sheet, maxHpBefore);
+  return true;
+}
+
+// Unequip the item in `slot` back to the bag. Refused (returns false, nothing
+// moves) when the bag is at `invCap`, so gear never vanishes. Recompute clamps
+// hp down to any max the removal shrank.
+export function unequipItem(sheet, slot, invCap = Infinity) {
+  const id = sheet.equipped?.[slot];
+  if (!id) return false;
+  if ((sheet.inventory?.length || 0) >= invCap) return false; // no room - politely refuse
+  sheet.equipped[slot] = null;
+  (sheet.inventory = sheet.inventory || []).push(id);
+  recomputeDerived(sheet);
   return true;
 }
 

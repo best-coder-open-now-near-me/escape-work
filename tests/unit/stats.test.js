@@ -6,7 +6,8 @@ import {
   recomputeDerived, ensureAttributes, spendAttrPoint, deflect,
   spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist,
   accuracy, dodge, hitChance, rollHit, unitCombat,
-  PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT,
+  equipItem, unequipItem, equippedStats,
+  PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
@@ -51,11 +52,14 @@ test('gainXp chains multiple promotions from one windfall', () => {
   assert.equal(s.xp, 0);
 });
 
-test('damageBonus counts only the single best carried item', () => {
+test('damageBonus counts the equipped weapon, not a bagful of staplers', () => {
   const s = createSheet('office-drone');
-  s.attr.savvy = 0; // isolate the item/flat logic from the Savvy term
+  s.attr.savvy = 0; recomputeDerived(s); // isolate the item/flat logic from Savvy
   s.inventory = ['stapler', 'red-stapler', 'stapler'];
-  assert.equal(damageBonus(s), 2); // red stapler wins; they do not stack
+  assert.equal(damageBonus(s), 0); // carried staplers no longer count - only in hand
+  assert.equal(equipItem(s, 1), true); // equip the red stapler
+  assert.equal(s.equipped.weapon, 'red-stapler');
+  assert.equal(damageBonus(s), 2); // now its dmg counts
   s.bonusDmg = 3;
   assert.equal(damageBonus(s), 5);
 });
@@ -371,4 +375,64 @@ test('unitCombat passes innate accuracy/dodge through, defaulting to 0', () => {
   const sharp = unitCombat({ name: 'y', hp: 5, ap: 4, accuracy: 0.1, dodge: 0.05 });
   assert.equal(sharp.accuracy, 0.1);
   assert.equal(sharp.dodge, 0.05);
+});
+
+// --- equipment (EQUIPMENT_PLAN.md milestone 1) ------------------------------
+
+test('a fresh sheet has empty equipment slots', () => {
+  const s = createSheet('office-drone');
+  assert.deepEqual(s.equipped, { weapon: null, outfit: null, trinket: null });
+  assert.deepEqual(equippedStats(s).attrBonus, {});
+  assert.equal(equippedStats(s).dmg, 0);
+});
+
+test('equipItem validates the slot and swaps the incumbent back to the bag', () => {
+  const s = createSheet('office-drone');
+  s.inventory = ['stapler', 'red-stapler'];
+  assert.equal(equipItem(s, 0), true);        // equip the plain stapler
+  assert.equal(s.equipped.weapon, 'stapler');
+  assert.ok(!s.inventory.includes('stapler')); // left the bag
+  // equipping into the same slot returns the old occupant to the bag
+  const i = s.inventory.indexOf('red-stapler');
+  assert.equal(equipItem(s, i), true);
+  assert.equal(s.equipped.weapon, 'red-stapler');
+  assert.ok(s.inventory.includes('stapler')); // the plain stapler came back
+  assert.equal(equippedStats(s).dmg, 2);
+});
+
+test('equipItem refuses a non-equippable item', () => {
+  const s = createSheet('office-drone');
+  s.inventory = ['cold-coffee']; // a consumable, no slot
+  assert.equal(equipItem(s, 0), false);
+  assert.equal(s.equipped.weapon, null);
+  assert.ok(s.inventory.includes('cold-coffee')); // untouched
+});
+
+test('unequipItem returns gear to the bag, and refuses when the bag is full', () => {
+  const s = createSheet('office-drone');
+  s.inventory = ['red-stapler'];
+  equipItem(s, 0);
+  assert.equal(s.inventory.length, 0);
+  assert.equal(unequipItem(s, 'weapon', 10), true);
+  assert.equal(s.equipped.weapon, null);
+  assert.ok(s.inventory.includes('red-stapler'));
+  // a full bag politely refuses - the gear never vanishes
+  equipItem(s, s.inventory.indexOf('red-stapler'));
+  s.inventory = new Array(10).fill('paper-wad'); // at INV_CAP
+  assert.equal(unequipItem(s, 'weapon', 10), false);
+  assert.equal(s.equipped.weapon, 'red-stapler'); // still equipped
+});
+
+test('equipping a dmg-only weapon leaves maxHp and deflect untouched', () => {
+  const s = createSheet('office-drone');
+  const hp0 = s.maxHp, def0 = deflect(s);
+  s.inventory = ['red-stapler'];
+  equipItem(s, 0);
+  assert.equal(s.maxHp, hp0);      // a stapler is pure damage
+  assert.equal(deflect(s), def0);
+  assert.equal(damageBonus(s) - (Math.floor((s.attr.savvy) / PROGRESSION.DMG_PER_SAVVY)), 2);
+});
+
+test('EQUIP_SLOTS is the three-slot set', () => {
+  assert.deepEqual(EQUIP_SLOTS, ['weapon', 'outfit', 'trinket']);
 });

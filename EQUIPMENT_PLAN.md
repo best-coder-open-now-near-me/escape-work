@@ -211,12 +211,21 @@ untouched.
 
 ## Milestones (each a PR that keeps `npm test` + e2e green)
 
-1. **The seam, behavior-preserved.** `slot`/`stats` on the two staplers;
-   `equipped` on the sheet; `equipItem`/`unequipItem`; the derivation folds;
-   the migration auto-equip; save bump. Unit-guarded invariant: a migrated
-   sheet's `damageBonus`/`deflect`/`maxHp`/`maxAp` are byte-identical to
-   before (the auto-equip reproduces the best-in-bag rule exactly). No UI
-   yet — nothing observable changes.
+1. **The seam, behavior-preserved.** ✅ Landed. `slot: 'weapon'` + `stats: {dmg}`
+   on both staplers (their `bonusDmg` retired); `equipped: {weapon, outfit,
+   trinket}` on the sheet; `equipItem`/`unequipItem`/`equippedStats`/
+   `effectiveAttr` in `stats.js`; the derivation folds gear through
+   `recomputeDerived` (attrBonus + maxHp/maxAp), `damageBonus` (weapon dmg,
+   best-in-bag scan deleted), `deflect` (soak), and `accuracy`/`dodge`
+   (acc/dodge) — all no-ops without gear, so the attribute math is unchanged.
+   Save **v5**; `normalizeSheet` auto-equips the best carried weapon so a
+   migrated character keeps the exact damage the old best-in-bag rule gave
+   (unit-guarded). Unit 140→147; e2e 12/12 (looting + combat + save migration).
+   - **Intended change (decision #5):** the "carried stapler auto-boosts" rule
+     is *deleted*, not just moved — a weapon only counts **in hand**. Saved
+     characters are made whole by the migration; a freshly-looted weapon does
+     nothing until it's equipped, which the M2 verb enables. No UI this
+     milestone.
 2. **The verbs.** Pockets Equip/Unequip + the equipped strip; out-of-combat
    gate; character-sheet display; god hooks. e2e: loot a stapler → equip it →
    `damageBonus` rises → unequip with full pockets is refused politely.

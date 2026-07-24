@@ -7,8 +7,11 @@
 //   heal       - using it restores HP (consumed)
 //   ammo       - using it adds paper ammo, capped at PAPER_CAP in stats.js
 //                (consumed)
-//   bonusDmg   - passive damage bonus while it's in your pockets (the best
-//                single item counts - you can only wield one stapler)
+//   slot       - equippable slot: 'weapon' | 'outfit' | 'trinket'. Equipping
+//                moves the item out of the bag into sheet.equipped[slot].
+//   stats      - equipped bonuses folded into derived numbers (stats.js
+//                equippedStats): dmg, soak, maxHp, maxAp, acc, dodge,
+//                attrBonus:{grit,hustle,savvy,composure}
 //   examine    - flavor line (items with no use are pure office archaeology)
 //   useLog     - said when the item is consumed
 export const ITEMS = {
@@ -52,14 +55,16 @@ export const ITEMS = {
   stapler: {
     name: 'Stapler',
     icon: '🖇️',
-    bonusDmg: 1,
-    examine: 'A desk weapon of legitimate business. +1 damage while carried.',
+    slot: 'weapon',
+    stats: { dmg: 1 },
+    examine: 'A desk weapon of legitimate business. +1 damage in hand.',
   },
   'red-stapler': {
     name: 'Red Stapler',
     icon: '🧷',
-    bonusDmg: 2,
-    examine: 'THE red stapler. Someone has been looking for this since 1999. +2 damage while carried.',
+    slot: 'weapon',
+    stats: { dmg: 2 },
+    examine: 'THE red stapler. Someone has been looking for this since 1999. +2 damage in hand.',
   },
   'toner-cartridge': {
     name: 'Toner Cartridge',
