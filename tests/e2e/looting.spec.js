@@ -2,7 +2,7 @@
 // pockets panel, dropping to the floor, Alt-label pickup, consumables - and
 // a full fight so a body can be looted.
 import { test, expect } from '@playwright/test';
-import { bootAndPick, clickWorld, waitStill, enterCombat, endTurnUntilPlayer, stableProject } from './helpers.js';
+import { bootAndPick, clickWorld, waitStill, enterCombat, endTurnUntilPlayer, stableProject, waitForPlayerTurn } from './helpers.js';
 
 test('desk rummage, drop, Alt pickup, and consumable use', async ({ page }) => {
   test.setTimeout(300_000);
@@ -67,8 +67,13 @@ test('a fallen coworker leaves a lootable body', async ({ page }) => {
   await enterCombat(page);
 
   // Grind the fight down: attack the nearest living enemy, patch up with the
-  // class heal when hurt, end turn when out of AP.
-  for (let round = 0; round < 60; round++) {
+  // class heal when hurt, end turn when out of AP. Under initiative the AI
+  // takes many separate turns between yours, so wait past them with
+  // waitForPlayerTurn (rather than burning loop budget polling) - every
+  // iteration is then a real player action.
+  for (let round = 0; round < 50; round++) {
+    if (await page.evaluate(() => !window.__game.inCombat || window.__game.gameOver)) break;
+    await waitForPlayerTurn(page).catch(() => {});
     const st = await page.evaluate(() => ({
       inCombat: window.__game.inCombat,
       gameOver: window.__game.gameOver,
@@ -79,7 +84,7 @@ test('a fallen coworker leaves a lootable body', async ({ page }) => {
       foes: window.__combat?.enemies || [],
     }));
     if (!st.inCombat || st.gameOver) break;
-    if (st.phase !== 'player') { await page.waitForTimeout(700); continue; }
+    if (st.phase !== 'player') { await page.waitForTimeout(500); continue; }
     if (st.hp <= 9 && st.ap >= 2) {
       const healed = await page.evaluate(() => {
         const b = [...document.querySelectorAll('#combat-actions button')]
