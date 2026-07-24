@@ -350,10 +350,19 @@ trusted from disk). Migration in `party.js`:
      one node type needing a combat-side action accessor (`resolveAction`). Held
      out of M3 to keep it a zero-combat-change milestone; it can land with M4's
      balance pass.
-4. **Enemy tiers + floor curve.** `level` on every enemy, `scaleEnemy`, the
-   `depth` field on levels, seniority variant entries (Senior Manager, Regional
-   Executive), scaled XP, level in examine/banner. Place variants on floor 2 and
-   rebalance floors 1–2 for the now-stronger party.
+4. **Enemy tiers + floor curve.** ✅ Landed. `level` on every enemy;
+   `scaleEnemy(def, level)` + `effectiveLevel(def, depth)` in stats.js (pure,
+   returns a scaled def that flows through `unitCombat`/`EnemyActor` unchanged —
+   identical at the native tier); the `depth` field on both shipped levels; two
+   seniority variant entries (`senior-manager` L3, `regional-executive` L4)
+   reusing existing rigs; XP scales with level; the focus banner shows `Lv N`.
+   Spawn wiring uses `scaleEnemy(base, max(nativeLevel, floorDepth))` (game +
+   god `spawnEnemy`); `__game.enemies` exposes `level`/`hp`/`maxHp`. Floor 2 is
+   `depth: 2` (base coworkers +1 tier) and gains a Senior Manager patroller.
+   Unit 91/91; `progression.spec.js` asserts a deep-floor Manager scales up.
+   - **Rebalance note:** floor 1 stays `depth: 1` (the party-forming floor,
+     unscaled). Deeper rebalance + the `regional-executive` placement wait for
+     floors that don't exist yet (a natural M5 content item).
 5. **Polish.** The character-sheet inspect panel (**C**), god-panel
    progression editing, an on-theme respec if it earns its keep, and a content
    pass (a deeper floor to show the curve off). Elite modifiers (#12) can ride
@@ -366,8 +375,9 @@ trusted from disk). Migration in `party.js`:
     `gainXp` grants points (not raw damage) on the right cadence; spend
     validation (bad attr, insufficient points, unmet prereq); `damageBonus`
     includes Savvy; deflect/status-resist helpers.
-  - `progression.test.js` — `scaleEnemy` monotonicity (hp/xp grow with level),
-    `effectiveLevel = max(level, depth)`, base-tier identity at native level.
+  - `stats.test.js` (enemy curve) — `scaleEnemy` monotonicity (hp/xp/damage grow
+    with level), `effectiveLevel = max(nativeLevel, depth)`, and same-reference
+    identity at the native tier (base enemies stay byte-identical).
   - `party.test.js` — save **v1→v3** and **v2→v3** migration; a recruit made via
     `createCompanionSheet` at the leader's level arrives with the expected points
     banked (nothing auto-spent).

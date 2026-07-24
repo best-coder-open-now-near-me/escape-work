@@ -14,6 +14,7 @@ export const ENEMY_TYPES = {
     char: 'M',
     name: 'The Manager',
     model: 'manager',
+    level: 1, // native tier; a floor deeper than this scales him up (stats.scaleEnemy)
     hp: 14,
     ap: 5,
     attackAp: 3, // AP one swing costs them in combat
@@ -37,6 +38,7 @@ export const ENEMY_TYPES = {
     char: 'E',
     name: 'The Executive',
     model: 'midmanager',
+    level: 2, // descended from the floors above - a tier over the base Manager
     hp: 18,
     ap: 5,
     attackAp: 3,
@@ -59,6 +61,7 @@ export const ENEMY_TYPES = {
     char: 'H',
     name: 'HR Representative',
     model: 'hr',
+    level: 1,
     hp: 12,
     ap: 6,
     attackAp: 3,
@@ -86,5 +89,56 @@ export const ENEMY_TYPES = {
       ap: 3,
       log: 'HR posts the role internally. Applicants materialize, résumés in hand.',
     },
+  },
+
+  // --- seniority variants (higher native tier) --------------------------------
+  // Tougher relatives of the base coworkers: new data entries reusing existing
+  // rigs, with a higher native `level` (beefier base stats, better loot, meaner
+  // lines). The floor curve (stats.scaleEnemy) scales THESE too on floors past
+  // their tier; place them where a floor wants a step up. Nothing else is code.
+  'senior-manager': {
+    char: 'G',
+    name: 'Senior Manager',
+    model: 'manager', // reuses the Manager rig until a dedicated .glb lands
+    level: 3,
+    hp: 22,
+    ap: 5,
+    attackAp: 3,
+    xp: 15,
+    aggression: 'red',
+    examine: 'A Senior Manager. Same energy, more direct reports. Radiates escalation.',
+    loot: [
+      { item: 'performance-review', chance: 1 },
+      { item: 'red-stapler', chance: 0.3 },
+      { item: 'cold-coffee', chance: 0.5 },
+    ],
+    attacks: [
+      { min: 3, max: 4, log: 'The Senior Manager loops in their manager.' },
+      { min: 3, max: 5, log: 'The Senior Manager moves the goalposts, then the deadline.' },
+      { min: 2, max: 4, log: '"Let\'s take this offline." (It is never taken offline.)' },
+      { min: 1, max: 2, log: 'The Senior Manager parks premium gum on your shoe.', applies: 'gum' },
+    ],
+  },
+  'regional-executive': {
+    char: 'X',
+    name: 'Regional Executive',
+    model: 'midmanager',
+    level: 4,
+    hp: 30,
+    ap: 5,
+    attackAp: 3,
+    xp: 22,
+    aggression: 'red',
+    examine: 'A Regional Executive. Flew in for the day. Knows your name, not your work.',
+    loot: [
+      { item: 'performance-review', chance: 1 },
+      { item: 'red-stapler', chance: 0.5 },
+      { item: 'cold-coffee', chance: 0.5 },
+    ],
+    attacks: [
+      { min: 4, max: 6, log: 'The Regional Executive announces a "strategic realignment".' },
+      { min: 3, max: 6, log: 'The Regional Executive sunsets your entire team.' },
+      { min: 3, max: 5, log: 'The Regional Executive asks for a number you do not have.' },
+    ],
   },
 };

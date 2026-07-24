@@ -1,6 +1,7 @@
 {
   "name": "Floor 1 — Cubicle Row",
   "next": "level2",
+  "depth": 1,
   "tiles": {
     "#": "wall",
     ".": "floor",

@@ -14,7 +14,7 @@ import { CLASSES } from './data/classes.js';
 import { ACTIONS } from './data/actions.js';
 import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
-import { createSheet, applyDamage, spendAttrPoint, spendClassPoint, classTrack, PAPER_CAP } from './stats.js';
+import { createSheet, applyDamage, spendAttrPoint, spendClassPoint, classTrack, scaleEnemy, effectiveLevel, PAPER_CAP } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP,
@@ -103,7 +103,13 @@ function startGame(level) {
   let party = null;
   let sheet = null;
   let player = new PlayerActor(grid.playerSpawn.x, grid.playerSpawn.z);
-  const enemies = grid.enemySpawns.map((s) => new EnemyActor(s.x, s.z, s.type, ENEMY_TYPES[s.type]));
+  // Enemies scale to the floor's depth: a base coworker on a deep floor is
+  // tougher, a seniority variant keeps its tier on a shallow one (stats.js).
+  const floorDepth = level.depth || 1;
+  const enemies = grid.enemySpawns.map((s) => {
+    const base = ENEMY_TYPES[s.type];
+    return new EnemyActor(s.x, s.z, s.type, scaleEnemy(base, effectiveLevel(base, floorDepth)));
+  });
   // Player-team summons (SUMMON_PLAN.md): temporary AI allies conjured mid-fight
   // by a summon power. Not party members, not saved - they live only for the
   // combat and are despawned when it ends. They block enemies (like the party)
@@ -679,7 +685,7 @@ function startGame(level) {
       if (kind === 'enemy') {
         if (ref.alive) {
           const ag = aggroColor(ref);
-          return { name: ref.def.name, sub: `HP ${ref.hp}/${ref.maxHp}`, color: ag, dotColor: ag };
+          return { name: ref.def.name, sub: `Lv ${ref.def.level || 1} · HP ${ref.hp}/${ref.maxHp}`, color: ag, dotColor: ag };
         }
         return { name: ref.def.name, sub: ref.loot?.length ? 'Body · lootable' : 'Body · picked clean', color: rgbCss(HL.loot) };
       }
@@ -1924,7 +1930,8 @@ function startGame(level) {
         // suite uses this to avoid wasting engage attempts on them.
         const reachable = e.alive
           && (cheb(player, e) <= 1 || !!bestApproachPath(e.x, e.z));
-        return { name: e.def.name, x: e.x, z: e.z, px: p?.x, pz: p?.z, alive: e.alive, reachable };
+        return { name: e.def.name, x: e.x, z: e.z, px: p?.x, pz: p?.z, alive: e.alive, reachable,
+          level: e.def.level || 1, hp: e.hp, maxHp: e.maxHp };
       });
     },
     get npcs() { return npcs.map((n) => ({ name: n.def.name, x: n.x, z: n.z })); },
@@ -1991,8 +1998,9 @@ function startGame(level) {
     // Resolves an ENEMY_TYPES id or a class archetype (e.g. 'applicant'), so a
     // tester can drop class-based units to feel out balance.
     spawnEnemy(typeId, x, z) {
-      const def = ENEMY_TYPES[typeId] || CLASSES[typeId];
-      if (!def) return null;
+      const base = ENEMY_TYPES[typeId] || CLASSES[typeId];
+      if (!base) return null;
+      const def = scaleEnemy(base, effectiveLevel(base, floorDepth)); // match the floor
       const en = new EnemyActor(x, z, typeId, def);
       enemies.push(en);
       placeModel(app, `assets/characters/${def.model}.glb`, x, z, {

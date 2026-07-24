@@ -69,4 +69,11 @@ for (const f of files) {
       assert.ok(files.includes(`${data.next}.json`), `next="${data.next}" ships`);
     }
   });
+
+  test(`${f} depth, if set, is a positive integer`, () => {
+    const data = load(f);
+    if ('depth' in data) {
+      assert.ok(Number.isInteger(data.depth) && data.depth >= 1, 'depth is a positive integer');
+    }
+  });
 }

@@ -63,3 +63,25 @@ test('class points learn track nodes (attr bonus, then a prereq-gated action)', 
   await page.click('#lvlup-done');
   await expect(page.locator('#levelup-screen')).toHaveCount(0);
 });
+
+test('a floor deeper than an enemy tier scales that enemy up', async ({ page }) => {
+  test.setTimeout(120_000);
+  // The Manager is native level 1; on a depth-3 floor he spawns at level 3 with
+  // more than his base 14 HP (stats.scaleEnemy / effectiveLevel).
+  const DEEP_LEVEL = {
+    name: 'Deep Floor',
+    depth: 3,
+    tiles: { '#': 'wall', '.': 'floor', '>': 'exit' },
+    actors: { '@': 'player', M: 'manager' },
+    map: [
+      '########',
+      '#@...M>#',
+      '########',
+    ],
+  };
+  await bootStash(page, DEEP_LEVEL);
+  const foe = await page.evaluate(() =>
+    window.__game.enemies.find((e) => e.name === 'The Manager'));
+  expect(foe.level).toBe(3);
+  expect(foe.maxHp).toBeGreaterThan(14); // base Manager is 14 HP at level 1
+});

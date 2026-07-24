@@ -4,10 +4,11 @@ import assert from 'node:assert/strict';
 import {
   createSheet, gainXp, damageBonus, applyDamage,
   recomputeDerived, ensureAttributes, spendAttrPoint, deflect,
-  spendClassPoint, classTrack,
+  spendClassPoint, classTrack, scaleEnemy, effectiveLevel,
   PROGRESSION, ATTR_KEYS,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
+import { ENEMY_TYPES } from '../../src/data/enemies.js';
 
 test('createSheet copies class stats and starts clean', () => {
   const s = createSheet('office-drone');
@@ -203,4 +204,30 @@ test('classTrack returns the sheet class own nodes', () => {
   const ids = classTrack(createSheet('middle-manager')).map((n) => n.id);
   assert.ok(ids.includes('mgr-stonewall'));
   assert.ok(!ids.includes('drone-thick-skin'));
+});
+
+// --- enemy tiers + floor curve (milestone 4) --------------------------------
+
+test('scaleEnemy returns the def unchanged at its native level', () => {
+  const m = ENEMY_TYPES.manager; // level 1
+  assert.equal(scaleEnemy(m, 1), m); // same reference - byte-identical
+  assert.equal(scaleEnemy(m, m.level), m);
+});
+
+test('scaleEnemy grows hp, xp, and damage with level, leaving the base def intact', () => {
+  const m = ENEMY_TYPES.manager; // level 1, hp 14, xp 8
+  const s = scaleEnemy(m, 3);
+  assert.equal(s.level, 3);
+  assert.ok(s.hp > m.hp, 'hp grows');
+  assert.ok(s.xp > m.xp, 'xp grows');
+  assert.ok(s.attacks[0].max >= m.attacks[0].max, 'damage grows');
+  assert.equal(m.hp, 14); // the registry entry is not mutated
+  assert.equal(s.maxHp, undefined); // enemies carry `hp`, not `maxHp`
+});
+
+test('effectiveLevel never drops below the native tier', () => {
+  const senior = ENEMY_TYPES['senior-manager']; // level 3
+  assert.equal(effectiveLevel(senior, 2), 3); // shallow floor keeps its tier
+  assert.equal(effectiveLevel(senior, 5), 5); // deep floor scales up
+  assert.equal(effectiveLevel(ENEMY_TYPES.manager, 4), 4);
 });

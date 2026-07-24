@@ -123,6 +123,47 @@ export function createSheet(classId) {
   return createSheetFrom(cls, { classId });
 }
 
+// Enemy progression is a CURVE, not points (they aren't sheets). An enemy's
+// native `level` is its tier; placed on a floor deeper than that tier it scales
+// up. Mirrors the player's "level -> stats" shape but stays a pure function, so
+// a scaled def flows through unitCombat/EnemyActor unchanged (PROGRESSION_PLAN.md).
+export const ENEMY_SCALING = {
+  HP_GROWTH: 0.15,  // +15% max HP per level above native
+  XP_GROWTH: 0.15,  // +15% XP reward per level above native
+  DMG_PER: 2,       // +1 to each attack's min/max per this many levels
+  AP_PER: 3,        // +1 AP per this many levels
+};
+
+// A scaled copy of an enemy def at `level` (clamped to >= its native level). At
+// the native level the def is returned UNCHANGED (same reference), so base
+// enemies on their home floor are byte-identical to before this system.
+export function scaleEnemy(def, level) {
+  const native = def.level || 1;
+  const d = Math.max(0, (level ?? native) - native);
+  if (d === 0) return def;
+  const bump = Math.floor(d / ENEMY_SCALING.DMG_PER);
+  const hp = Math.round((def.hp ?? def.maxHp) * (1 + ENEMY_SCALING.HP_GROWTH * d));
+  const out = {
+    ...def,
+    level,
+    ap: (def.ap || 0) + Math.floor(d / ENEMY_SCALING.AP_PER),
+    xp: Math.round((def.xp || 0) * (1 + ENEMY_SCALING.XP_GROWTH * d)),
+    attacks: (def.attacks || []).map((a) => ({ ...a, min: a.min + bump, max: a.max + bump })),
+  };
+  // Scale whichever HP field the def carries - enemies spell it `hp`, a
+  // class-backed unit `maxHp` (EnemyActor/unitCombat prefer maxHp), so keep both
+  // consistent when present.
+  if (def.hp != null) out.hp = hp;
+  if (def.maxHp != null) out.maxHp = hp;
+  if (def.hp == null && def.maxHp == null) out.hp = hp;
+  return out;
+}
+
+// The level an enemy actually spawns at on a floor of the given depth: never
+// below its native tier, so a high variant keeps its tier on a shallow floor
+// and a base enemy scales up on a deep one.
+export const effectiveLevel = (def, depth) => Math.max(def.level || 1, depth || 1);
+
 // Normalize any unit archetype - an ENEMY_TYPES def or a class - into the
 // combat stats the AI reads. The only field that differs by registry is max
 // HP (enemies spell it `hp`, classes `maxHp`); everything else already lines
