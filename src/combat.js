@@ -109,7 +109,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // d20 + `initMod` and sorts; `turnPtr` is whose turn it is.
   const initRng = () => Math.random();
   const memberSlot = (m) => ({ member: m, team: 'player', initMod: m.sheet.attr?.hustle ?? 0 });
-  const unitSlot = (u) => ({ unit: u, team: u.team === 'player' ? 'player' : 'enemy', initMod: u.def.ap || 0 });
+  // AI-driven units are always enemy-side; player-side summons are members
+  // (memberSlot), never units.
+  const unitSlot = (u) => ({ unit: u, team: 'enemy', initMod: u.def.ap || 0 });
   const slotActor = (s) => (s.member ? s.member.actor : s.unit);
   const slotAlive = (s) => (s.member ? s.member.sheet.hp > 0 && !!s.member.actor : !!s.unit.alive);
   const slotName = (s) => (s.member ? s.member.sheet.name : s.unit.def.name);
@@ -425,7 +427,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           + `${cur ? '▸ ' : '&nbsp;&nbsp;'}${slotName(s)} &middot; ${dead ? '—' : hp}`
           + ` <span style="opacity:.6">(${s.init})</span></div>`;
       }).join('');
-    callbacks.updateHud();
+    // Reflect the ACTING member on the persistent HUD, not the leader - in a
+    // multi-member fight you control whoever's turn it is (their HP, their gum/
+    // bleed chips). Out of combat, main.js's callback falls back to the leader.
+    callbacks.updateHud(active.sheet);
   }
 
   function cleanup() {
@@ -804,11 +809,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return spawned.length;
   }
 
-  // One AI unit's swing at its target. A party member takes it on their sheet
-  // (deflect, gum, and the downed/handoff/party-wipe rules); a bare actor - an
-  // enemy struck by a player summon, or a player summon struck by an enemy -
-  // takes it through takeDamage, with no downed courtesy (a spent minion just
-  // falls, never a game-over).
+  // One AI unit's swing at its target. AI only ever drives ENEMIES (player-side
+  // summons are player-controlled members - resolveSummon), and pickTarget only
+  // ever returns a party-side member, so the hit always lands on a member's
+  // sheet (deflect, gum, and the downed/handoff/party-wipe rules).
   function aiAttack(unit, target) {
     const atk = unit.def.attacks[rand(0, unit.def.attacks.length - 1)];
     let dmg = rand(atk.min, atk.max);
@@ -851,17 +855,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           party.active = members.indexOf(active);
         }
       }
-      return;
     }
-    // Bare actor: an enemy (a player summon's swing) or a player summon (an
-    // enemy's swing). takeDamage flinches on a hit and topples on a kill.
-    const a = target.actor;
-    const died = a.takeDamage(dmg);
-    fx.damageText(a.x, a.z, `-${dmg}`, '#ffd76b');
-    log(`${atk.log} ${dmg} damage.`);
-    if (died && unit.team === 'player') callbacks.onEnemyKilled(a);
-    refresh();
-    if (unit.team === 'player' && !engaged.some((e) => e.alive)) victory();
   }
 
   // Route toward the cheapest target-adjacent tile and walk it in ONE smooth
@@ -898,7 +892,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           fx.damageText(x, z, `-${surf}`, '#ffd76b');
           log(`${unit.def.name} stumbles through the hazard. -${surf}.`);
           if (died) {
-            if (unit.team !== 'player') callbacks.onEnemyKilled(unit);
+            callbacks.onEnemyKilled(unit);
             refresh();
           }
         }
@@ -963,14 +957,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return;
     }
     const target = pickTarget(unit);
-    if (!target) {
-      // An enemy with no living player-side target means a party wipe; a
-      // player summon with no enemies just yields its turn (victory already
-      // fired from the kill that emptied them).
-      if (unit.team !== 'player') { defeat(); return; }
-      advanceTurn();
-      return;
-    }
+    if (!target) { defeat(); return; } // no living player-side target = party wipe
     // A summoner reinforces before it wades in: off cooldown, able to afford
     // the post, and under its live cap (resolveSummon returns 0 when full, so a
     // maxed HR just fights). Posting the req is the whole beat. Enemy-side only
