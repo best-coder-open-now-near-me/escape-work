@@ -5,7 +5,7 @@ import {
   createParty, leader, addMember, livingMembers, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP, SAVE_VERSION,
 } from '../../src/party.js';
-import { createSheet, PROGRESSION } from '../../src/stats.js';
+import { createSheet, spendClassPoint, PROGRESSION } from '../../src/stats.js';
 import { COMPANIONS } from '../../src/data/companions.js';
 
 test('createParty starts with the leader as its only member', () => {
@@ -117,6 +117,19 @@ test('every companion recruit option leads to a real node', () => {
     }
     assert.ok(def.actions.length, `${id} brings combat actions`);
   }
+});
+
+test('class-track perks persist through a save without double-applying', () => {
+  const party = createParty(createSheet('office-drone'));
+  const s = leader(party).sheet;
+  s.classPoints = 1;
+  spendClassPoint(s, 'drone-thick-skin'); // +1 Grit, baked into attr
+  const grit = s.attr.grit, hp = s.maxHp;
+  const saved = JSON.parse(JSON.stringify(serializeProgress(party, 'level1')));
+  const loaded = parseProgress(saved).sheets[0];
+  assert.deepEqual(loaded.perks, ['drone-thick-skin']);
+  assert.equal(loaded.attr.grit, grit); // effect is NOT re-applied on load
+  assert.equal(loaded.maxHp, hp);
 });
 
 test('parseProgress rejects records in no known format', () => {

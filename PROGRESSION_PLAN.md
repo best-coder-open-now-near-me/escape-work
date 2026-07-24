@@ -333,10 +333,23 @@ trusted from disk). Migration in `party.js`:
    - **Scoping note:** floor-transition reloads the page, so instead of a
      cross-reload auto-open, banked points **persist in the save** and the pip
      re-lights on the next floor — the same "spend when you like" affordance.
-3. **Class points + the ability track.** `track` data on all four classes;
-   `actionMods`/`upgradeAction` in combat; `grantsAction`/`talent`/`attrBonus`
-   nodes; the class-point half of the level-up screen; perks persisted and
-   re-applied on load.
+3. **Class points + the ability track.** ✅ Landed. `track` data on all five
+   classes + both companions; `grantsAction`/`talent`/`attrBonus` nodes;
+   `spendClassPoint` + `classTrack`/`nodeAvailable`; the class-point half of the
+   level-up screen (`#lvlup-node-<id>`, with taken/locked/unaffordable states);
+   the pip + `openLevelUps` now count class points too. Unit 86/86,
+   `progression.spec.js` covers learning an attrBonus node and a prereq-gated
+   `grantsAction`.
+   - **Design:** effects are **baked at spend** (a node's effect writes straight
+     into `attr`/`actions`/`talent.effects`), so every existing read site
+     (`talentFxOf`, the stepping/ignite checks, the hotbar) picks them up with
+     **zero combat.js changes**. Perks are recorded and the baked state is what
+     persists, so nothing is re-applied on load — no double-apply. (Revised from
+     the plan's "re-applied on load": bake-and-persist is simpler and safe.)
+   - **Deferred:** `upgradeAction` (patching an action's `min/max/ap/uses`) — the
+     one node type needing a combat-side action accessor (`resolveAction`). Held
+     out of M3 to keep it a zero-combat-change milestone; it can land with M4's
+     balance pass.
 4. **Enemy tiers + floor curve.** `level` on every enemy, `scaleEnemy`, the
    `depth` field on levels, seniority variant entries (Senior Manager, Regional
    Executive), scaled XP, level in examine/banner. Place variants on floor 2 and

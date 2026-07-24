@@ -248,6 +248,14 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   Effects the code understands: paperDamageBonus, paperAmmoDiscount,
   paperCutImmune, shockImmune, slipImmune, surfaceDamageResist, hasLighter,
   grantsAction.
+- **Class ability track** (`data/classes.js`/`companions.js` `track`, spent with
+  class points): a list of `{ id, name, cost, requires?, effect }` nodes. A new
+  node is a data entry — its `effect` reuses known shapes (`attrBonus`,
+  `talent`, `grantsAction`), and `spendClassPoint` (stats.js) **bakes** it into
+  the sheet's `attr`/`actions`/`talent.effects` in place, so every existing read
+  site honors it with no systems change. `sheet.perks` records what's taken (the
+  baked state persists; nothing is re-applied on load). Node ids are globally
+  unique.
 - **Thrown weapons**: actions with `ammoCost` (paper balls/airplanes) join the
   combat bar automatically; ammo (sheet.paper) is picked up from paper spills.
   Throws render as arcing projectiles with fading trails (`throwProjectile` in

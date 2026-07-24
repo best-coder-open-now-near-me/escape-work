@@ -14,7 +14,7 @@ import { CLASSES } from './data/classes.js';
 import { ACTIONS } from './data/actions.js';
 import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
-import { createSheet, applyDamage, spendAttrPoint, PAPER_CAP } from './stats.js';
+import { createSheet, applyDamage, spendAttrPoint, spendClassPoint, classTrack, PAPER_CAP } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP,
@@ -970,22 +970,43 @@ function startGame(level) {
   // pip by the HUD covers the leader (and the solo case); the party bar carries
   // a pip per companion.
   const levelUpPip = ui.createLevelUpPip({ onOpen: openLevelUps });
+  const pending = (s) => (s.attrPoints || 0) + (s.classPoints || 0); // either pool
+  // A short human blurb for a track node's effect, for the screen.
+  function describeNode(effect = {}) {
+    const bits = [];
+    if (effect.attrBonus) for (const [k, v] of Object.entries(effect.attrBonus)) bits.push(`+${v} ${k[0].toUpperCase() + k.slice(1)}`);
+    if (effect.grantsAction) bits.push(`Unlock ${ACTIONS[effect.grantsAction]?.label || effect.grantsAction}`);
+    if (effect.talent) for (const [k, v] of Object.entries(effect.talent)) bits.push(typeof v === 'number' ? `+${v} ${k}` : k);
+    return bits.join(' · ') || 'A perk.';
+  }
+  // The sheet's track as screen view-models (taken / locked / affordable).
+  function trackNodesFor(sheet_) {
+    return classTrack(sheet_).map((n) => ({
+      id: n.id, name: n.name, cost: n.cost || 1, desc: describeNode(n.effect),
+      taken: (sheet_.perks || []).includes(n.id),
+      locked: !!(n.requires && !n.requires.every((r) => (sheet_.perks || []).includes(r))),
+      affordable: (sheet_.classPoints || 0) >= (n.cost || 1),
+    }));
+  }
   function refreshProgressUi() {
-    if (sheet) ui.updateStatsHud(sheet);
+    if (sheet) { ui.updateStatsHud(sheet); buildHotbar(); } // a learned action joins the bar
     partyBarKey = ''; // force the bar to re-render its pips next frame
-    levelUpPip.refresh(!inCombat && !gameOver && sheet ? (sheet.attrPoints || 0) : 0);
+    levelUpPip.refresh(!inCombat && !gameOver && sheet ? pending(sheet) : 0);
   }
   function openLevelUpFor(member, after) {
     if (!member) { after?.(); return; }
     ui.showLevelUpScreen(member.sheet, {
       onSpend: (attr) => { spendAttrPoint(member.sheet, attr); refreshProgressUi(); },
+      onLearn: (nodeId) => { spendClassPoint(member.sheet, nodeId); refreshProgressUi(); },
+      nodesFor: () => trackNodesFor(member.sheet),
       onDone: () => { refreshProgressUi(); after?.(); },
     });
   }
-  // Page through every member still holding points, one screen at a time.
+  // Page through every member still holding points (of either type), one screen
+  // at a time.
   function openLevelUps() {
     if (!party) return;
-    const queue = party.members.filter((m) => (m.sheet.attrPoints || 0) > 0);
+    const queue = party.members.filter((m) => pending(m.sheet) > 0);
     let i = 0;
     const next = () => (i < queue.length ? openLevelUpFor(queue[i++], next) : refreshProgressUi());
     next();
@@ -1750,12 +1771,12 @@ function startGame(level) {
     if (party) {
       const cp = inCombat && combat ? combat.party : null;
       const key = party.members
-        .map((m, i) => `${m.sheet.name}:${m.sheet.hp}/${m.sheet.maxHp}${i === party.active ? '*' : ''}${cp ? ':' + cp[i].ap : ''}:${m.sheet.attrPoints || 0}p`)
+        .map((m, i) => `${m.sheet.name}:${m.sheet.hp}/${m.sheet.maxHp}${i === party.active ? '*' : ''}${cp ? ':' + cp[i].ap : ''}:${m.sheet.attrPoints || 0}/${m.sheet.classPoints || 0}p`)
         .join('|');
       if (key !== partyBarKey) { partyBarKey = key; partyBar.refresh(party, cp); }
       partyBar.setVisible(party.members.length > 1 && !gameOver);
       // The HUD level-up pip tracks the leader's banked points, out of combat.
-      levelUpPip.refresh(!inCombat && !gameOver && !dialogue.visible && sheet ? (sheet.attrPoints || 0) : 0);
+      levelUpPip.refresh(!inCombat && !gameOver && !dialogue.visible && sheet ? pending(sheet) : 0);
     }
     // Fire/smoke age in TURNS. In combat, combat.js advances one per round (via
     // the onRound callback in beginCombat). Out of combat there are no rounds, so
@@ -1914,6 +1935,7 @@ function startGame(level) {
       return party ? party.members.map((m, i) => ({
         name: m.sheet.name, hp: m.sheet.hp, maxHp: m.sheet.maxHp,
         level: m.sheet.level, attrPoints: m.sheet.attrPoints || 0,
+        classPoints: m.sheet.classPoints || 0, perks: [...(m.sheet.perks || [])],
         x: m.actor?.x, z: m.actor?.z, active: i === party.active,
       })) : [];
     },

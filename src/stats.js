@@ -98,7 +98,8 @@ export function createSheetFrom(block, extra = {}) {
     attr, // the four office attributes - the source maxHp/maxAp derive from
     base, // innate floor; growth stacks on top (recomputeDerived)
     attrPoints: 0, // unspent attribute points, banked by gainXp, spent by hand
-    classPoints: 0, // unspent class points, banked alongside (spent on the track, M3)
+    classPoints: 0, // unspent class points, banked alongside (spent on the track)
+    perks: [], // class-track node ids taken; each node's effect is baked in place
     level: 1,
     xp: 0,
     xpNext: 10,
@@ -184,6 +185,74 @@ export function spendAttrPoint(sheet, attr) {
   if (!ATTR_KEYS.includes(attr) || (sheet.attrPoints || 0) <= 0) return false;
   sheet.attr[attr] += 1;
   sheet.attrPoints -= 1;
+  recomputeDerived(sheet);
+  return true;
+}
+
+// --- the class ability track (class points) ---------------------------------
+// A track node is data on a class/companion (`track: [{ id, name, cost,
+// requires?, effect }]`); its `effect` reuses the shapes the engine already
+// understands, so spending a class point BAKES the effect into the sheet in
+// place and every existing read site picks it up - no combat/stepping changes:
+//   grantsAction: '<id>'      -> pushed onto sheet.actions (hotbar/combat render it)
+//   attrBonus: { <attr>: n }  -> added to sheet.attr (recompute/damage/deflect read it)
+//   talent: { <effect>: v }   -> merged into sheet.talent.effects (talentFxOf et al.)
+// The perk id is recorded so the screen can grey a taken node; the baked state
+// is what persists, so nothing is re-applied on load (no double-apply).
+// (`upgradeAction` - patching an action's numbers - is deferred; it needs a
+// combat-side action accessor. See PROGRESSION_PLAN.md.)
+const TRACK_NODES = {};
+for (const reg of [CLASSES, COMPANIONS]) {
+  for (const def of Object.values(reg)) {
+    for (const node of def.track || []) TRACK_NODES[node.id] = node;
+  }
+}
+
+export const trackNode = (id) => TRACK_NODES[id] || null;
+
+// The track the sheet's own class/companion offers.
+export function classTrack(sheet) {
+  const def = (sheet.classId && CLASSES[sheet.classId])
+    || (sheet.companionId && COMPANIONS[sheet.companionId]) || null;
+  return def?.track || [];
+}
+
+// A node is available when it isn't already taken, its prereqs are met, and the
+// pool covers its cost.
+export function nodeAvailable(sheet, node) {
+  if (!node) return false;
+  const perks = sheet.perks || [];
+  if (perks.includes(node.id)) return false;
+  if ((sheet.classPoints || 0) < (node.cost || 1)) return false;
+  if (node.requires && !node.requires.every((r) => perks.includes(r))) return false;
+  return true;
+}
+
+function bakeNodeEffect(sheet, effect = {}) {
+  if (effect.grantsAction && !sheet.actions.includes(effect.grantsAction)) {
+    sheet.actions.push(effect.grantsAction);
+  }
+  if (effect.attrBonus) {
+    for (const k of ATTR_KEYS) sheet.attr[k] += effect.attrBonus[k] || 0;
+  }
+  if (effect.talent) {
+    const base = sheet.talent?.effects || {};
+    const merged = { ...base };
+    for (const [k, v] of Object.entries(effect.talent)) {
+      merged[k] = typeof v === 'number' ? (merged[k] || 0) + v : v;
+    }
+    sheet.talent = { name: sheet.talent?.name || 'Training', blurb: sheet.talent?.blurb || '', effects: merged };
+  }
+}
+
+// Spend class points on a track node: validate, bake its effect, record the
+// perk, re-derive. Returns false (changing nothing) if it isn't available.
+export function spendClassPoint(sheet, nodeId) {
+  const node = TRACK_NODES[nodeId];
+  if (!nodeAvailable(sheet, node)) return false;
+  bakeNodeEffect(sheet, node.effect);
+  (sheet.perks = sheet.perks || []).push(nodeId);
+  sheet.classPoints -= (node.cost || 1);
   recomputeDerived(sheet);
   return true;
 }

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   createSheet, gainXp, damageBonus, applyDamage,
   recomputeDerived, ensureAttributes, spendAttrPoint, deflect,
+  spendClassPoint, classTrack,
   PROGRESSION, ATTR_KEYS,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
@@ -155,4 +156,51 @@ test('deflect scales with Composure, zero when there is none', () => {
   assert.equal(deflect(s), 0);
   s.attr.composure = PROGRESSION.COMP_PER_DEFLECT * 2;
   assert.equal(deflect(s), 2);
+});
+
+// --- class points + the ability track (milestone 3) -------------------------
+
+test('spendClassPoint on an attrBonus node raises the attribute and derives', () => {
+  const s = createSheet('office-drone');
+  s.classPoints = 1;
+  const grit0 = s.attr.grit, hp0 = s.maxHp;
+  assert.equal(spendClassPoint(s, 'drone-thick-skin'), true); // +1 Grit
+  assert.equal(s.attr.grit, grit0 + 1);
+  assert.equal(s.maxHp, hp0 + PROGRESSION.HP_PER_GRIT); // derived followed
+  assert.equal(s.classPoints, 0);
+  assert.ok(s.perks.includes('drone-thick-skin'));
+});
+
+test('spendClassPoint grants an action onto the sheet (respecting prereqs)', () => {
+  const s = createSheet('office-drone');
+  s.classPoints = 2;
+  assert.ok(!s.actions.includes('kick'));
+  assert.equal(spendClassPoint(s, 'drone-seminar'), false); // prereq not met yet
+  assert.equal(spendClassPoint(s, 'drone-thick-skin'), true);
+  assert.equal(spendClassPoint(s, 'drone-seminar'), true); // now unlocks the kick
+  assert.ok(s.actions.includes('kick'));
+});
+
+test('spendClassPoint merges a numeric talent effect', () => {
+  const s = createSheet('office-drone'); // Origami Specialist: paperDamageBonus 2
+  s.classPoints = 1;
+  const before = s.talent.effects.paperDamageBonus || 0;
+  assert.equal(spendClassPoint(s, 'drone-sharp-folds'), true); // +1
+  assert.equal(s.talent.effects.paperDamageBonus, before + 1);
+});
+
+test('spendClassPoint refuses unknown nodes, empty pool, and double-takes', () => {
+  const s = createSheet('office-drone');
+  s.classPoints = 1;
+  assert.equal(spendClassPoint(s, 'nope'), false);
+  assert.equal(spendClassPoint(s, 'drone-thick-skin'), true);
+  assert.equal(spendClassPoint(s, 'drone-thick-skin'), false); // already taken
+  s.classPoints = 0;
+  assert.equal(spendClassPoint(s, 'drone-sharp-folds'), false); // no points
+});
+
+test('classTrack returns the sheet class own nodes', () => {
+  const ids = classTrack(createSheet('middle-manager')).map((n) => n.id);
+  assert.ok(ids.includes('mgr-stonewall'));
+  assert.ok(!ids.includes('drone-thick-skin'));
 });

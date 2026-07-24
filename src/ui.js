@@ -530,12 +530,14 @@ export function createPartyBar({ onSelect, onLevelUp }) {
             background:${down ? '#5a2a2a' : s.hp / s.maxHp > 0.4 ? '#6fc86f' : '#e0b23a'}; border-radius:2px;"></div>
         </div>`;
       slot.onclick = () => onSelect(i);
-      // Level-up pip: a living member with banked points wears a badge; clicking
-      // it opens their allocation screen (without switching control to them).
-      if (!down && (s.attrPoints || 0) > 0 && onLevelUp) {
+      // Level-up pip: a living member with banked points (of either type) wears
+      // a badge; clicking it opens their allocation screen (without switching
+      // control to them).
+      const pending = (s.attrPoints || 0) + (s.classPoints || 0);
+      if (!down && pending > 0 && onLevelUp) {
         const pip = document.createElement('button');
         pip.id = 'party-lvlup-' + i;
-        pip.textContent = `⬆ Level Up (${s.attrPoints})`;
+        pip.textContent = `⬆ Level Up (${pending})`;
         Object.assign(pip.style, {
           marginTop: '5px', width: '100%', padding: '3px 6px', borderRadius: '6px',
           border: '1px solid #8adf76', background: '#3a5a34', color: '#eafbe6',
@@ -580,10 +582,11 @@ export function createLevelUpPip({ onOpen }) {
   };
 }
 
-// The allocation screen (attributes; the class track lands in a later
-// milestone). Dumb like the dialogue panel: main.js owns spendAttrPoint and
-// hands over a sheet + an onSpend(attr) callback, and we re-read the (mutated)
-// sheet to redraw. onDone fires when the player closes it.
+// The allocation screen: attribute steppers + the class ability track. Dumb
+// like the dialogue panel - main.js owns spendAttrPoint/spendClassPoint and
+// hands over the sheet + callbacks (and a `nodesFor()` returning the current
+// track view-models); we re-read the mutated sheet to redraw. onDone fires when
+// the player closes it.
 const LEVELUP_ATTRS = [
   { key: 'grit', label: 'Grit', blurb: 'Toughness — raises max HP.' },
   { key: 'hustle', label: 'Hustle', blurb: 'Tempo — raises max AP (move + actions).' },
@@ -591,7 +594,7 @@ const LEVELUP_ATTRS = [
   { key: 'composure', label: 'Composure', blurb: 'Poise — softens incoming hits.' },
 ];
 
-export function showLevelUpScreen(sheet, { onSpend, onDone } = {}) {
+export function showLevelUpScreen(sheet, { onSpend, onLearn, nodesFor, onDone } = {}) {
   document.getElementById('levelup-screen')?.remove();
   const host = document.createElement('div');
   host.id = 'levelup-screen';
@@ -604,17 +607,25 @@ export function showLevelUpScreen(sheet, { onSpend, onDone } = {}) {
   document.body.appendChild(host);
 
   function render() {
-    const pts = sheet.attrPoints || 0;
+    const ap = sheet.attrPoints || 0;
+    const cp = sheet.classPoints || 0;
+    const nodes = nodesFor ? nodesFor() : [];
+    const pending = ap + cp;
     host.innerHTML = `
       <div style="background:#232334; border:1px solid #3a3a52; border-radius:12px;
-        padding:22px 26px; min-width:360px; box-shadow:0 12px 40px rgba(0,0,0,.6);">
+        padding:22px 26px; min-width:380px; max-width:460px; max-height:86vh; overflow:auto;
+        box-shadow:0 12px 40px rgba(0,0,0,.6);">
         <div style="font-weight:700; letter-spacing:1px; color:#8adf76;">LEVEL UP</div>
-        <div style="opacity:.8; margin:2px 0 14px;">${sheet.name} · Level ${sheet.level}
-          &nbsp;·&nbsp; <span id="lvlup-points">${pts}</span> point${pts === 1 ? '' : 's'} to spend</div>
+        <div style="opacity:.8; margin:2px 0 12px;">${sheet.name} · Level ${sheet.level}</div>
+        <div style="font-size:12px; opacity:.75; margin-bottom:6px;">Attribute points:
+          <b id="lvlup-points">${ap}</b></div>
         <div id="lvlup-rows" style="display:flex; flex-direction:column; gap:8px;"></div>
-        <div style="margin-top:14px; opacity:.65; font-size:12px;">Derived: HP ${sheet.maxHp} · AP ${sheet.maxAp}</div>
-        <div style="margin-top:14px; text-align:right;">
-          ${button('lvlup-done', pts > 0 ? 'Spend later' : 'Done')}</div>
+        <div style="margin-top:10px; opacity:.65; font-size:12px;">Derived: HP ${sheet.maxHp} · AP ${sheet.maxAp}</div>
+        ${nodes.length ? `<div style="font-size:12px; opacity:.75; margin:16px 0 6px;
+            border-top:1px solid #3a3a52; padding-top:12px;">Class points: <b id="lvlup-cp">${cp}</b></div>
+          <div id="lvlup-track" style="display:flex; flex-direction:column; gap:6px;"></div>` : ''}
+        <div style="margin-top:16px; text-align:right;">
+          ${button('lvlup-done', pending > 0 ? 'Spend later' : 'Done')}</div>
       </div>`;
     const rows = host.querySelector('#lvlup-rows');
     for (const info of LEVELUP_ATTRS) {
@@ -632,9 +643,9 @@ export function showLevelUpScreen(sheet, { onSpend, onDone } = {}) {
       plus.textContent = '+';
       Object.assign(plus.style, BUTTON_CHROME, {
         width: '32px', height: '32px', borderRadius: '7px', fontSize: '19px', lineHeight: '1',
-        opacity: pts > 0 ? '1' : '.4', cursor: pts > 0 ? 'pointer' : 'default',
+        opacity: ap > 0 ? '1' : '.4', cursor: ap > 0 ? 'pointer' : 'default',
       });
-      plus.disabled = pts <= 0;
+      plus.disabled = ap <= 0;
       plus.onclick = () => {
         if ((sheet.attrPoints || 0) <= 0) return;
         onSpend?.(info.key);
@@ -642,6 +653,39 @@ export function showLevelUpScreen(sheet, { onSpend, onDone } = {}) {
       };
       row.appendChild(plus);
       rows.appendChild(row);
+    }
+    const track = host.querySelector('#lvlup-track');
+    if (track) {
+      for (const n of nodes) {
+        const row = document.createElement('div');
+        Object.assign(row.style, {
+          display: 'flex', alignItems: 'center', gap: '10px',
+          padding: '6px 9px', borderRadius: '7px', background: '#2a2a3e',
+          opacity: n.taken ? '.6' : '1',
+        });
+        row.innerHTML = `<div style="flex:1;">
+          <div style="font-weight:600;">${n.name}</div>
+          <div style="opacity:.6; font-size:12px;">${n.desc}</div></div>`;
+        const btn = document.createElement('button');
+        btn.id = 'lvlup-node-' + n.id;
+        Object.assign(btn.style, BUTTON_CHROME, { padding: '5px 10px', borderRadius: '7px', fontSize: '12px' });
+        if (n.taken) {
+          btn.textContent = '✓ Taken';
+        } else if (n.locked) {
+          btn.textContent = 'Locked';
+        } else if (!n.affordable) {
+          btn.textContent = `Learn (${n.cost})`;
+        } else {
+          btn.textContent = `Learn (${n.cost})`;
+          btn.onclick = () => { onLearn?.(n.id); render(); };
+        }
+        const actionable = !n.taken && !n.locked && n.affordable;
+        btn.disabled = !actionable;
+        btn.style.opacity = actionable ? '1' : '.45';
+        btn.style.cursor = actionable ? 'pointer' : 'default';
+        row.appendChild(btn);
+        track.appendChild(row);
+      }
     }
     host.querySelector('#lvlup-done').onclick = () => { host.remove(); onDone?.(); };
   }

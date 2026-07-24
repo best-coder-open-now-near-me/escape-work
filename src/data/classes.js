@@ -22,6 +22,13 @@ export const CLASSES = {
     // derives maxHp/maxAp/damage from (stats.js recomputeDerived). Calibrated so
     // level-1 stats equal the maxHp/ap above; the Drone is deliberately even.
     attr: { grit: 5, hustle: 5, savvy: 5, composure: 5 },
+    // Class ability track: spend class points (level-up screen) to bake these in.
+    // `effect` reuses the engine's known shapes (attrBonus / talent / grantsAction).
+    track: [
+      { id: 'drone-thick-skin', name: 'Thick Skin', cost: 1, effect: { attrBonus: { grit: 1 } } },
+      { id: 'drone-sharp-folds', name: 'Sharp Folds', cost: 1, effect: { talent: { paperDamageBonus: 1 } } },
+      { id: 'drone-seminar', name: 'Self-Defense Seminar', cost: 1, requires: ['drone-thick-skin'], effect: { grantsAction: 'kick' } },
+    ],
     actions: ['attack', 'defend', 'coffee'],
     talent: {
       name: 'Origami Specialist',
@@ -38,6 +45,11 @@ export const CLASSES = {
     ap: 5,
     bonusDmg: 0,
     attr: { grit: 8, hustle: 3, savvy: 4, composure: 7 }, // tanky, unhurried
+    track: [
+      { id: 'mgr-stonewall', name: 'Stonewall', cost: 1, effect: { attrBonus: { composure: 1 } } },
+      { id: 'mgr-reorg', name: 'Reorg Survivor', cost: 1, effect: { attrBonus: { grit: 1 } } },
+      { id: 'mgr-traction', name: 'Corner-Office Traction', cost: 1, requires: ['mgr-stonewall'], effect: { talent: { slipImmune: true } } },
+    ],
     actions: ['delegate', 'own-calendar', 'espresso'],
     talent: {
       name: 'Smoker',
@@ -54,6 +66,11 @@ export const CLASSES = {
     ap: 6,
     bonusDmg: 0,
     attr: { grit: 6, hustle: 8, savvy: 4, composure: 4 }, // fast on his feet
+    track: [
+      { id: 'mail-cart-legs', name: 'Cart Legs', cost: 1, effect: { attrBonus: { hustle: 1 } } },
+      { id: 'mail-routes', name: 'Route Knowledge', cost: 1, effect: { attrBonus: { savvy: 1 } } },
+      { id: 'mail-dock-boots', name: 'Dock Boots', cost: 1, requires: ['mail-cart-legs'], effect: { grantsAction: 'kick' } },
+    ],
     actions: ['mail-cone', 'return-to-sender', 'snack-cart'],
     talent: {
       name: 'Warehouse Soles',
@@ -70,6 +87,11 @@ export const CLASSES = {
     ap: 7,
     bonusDmg: 0,
     attr: { grit: 3, hustle: 6, savvy: 8, composure: 3 }, // glass cannon
+    track: [
+      { id: 'it-root', name: 'Root Access', cost: 1, effect: { attrBonus: { savvy: 1 } } },
+      { id: 'it-ergonomic', name: 'Ergonomic Chair', cost: 1, effect: { attrBonus: { grit: 1 } } },
+      { id: 'it-server-breaks', name: 'Server-Room Breaks', cost: 1, effect: { grantsAction: 'cigarette' } },
+    ],
     actions: ['reboot', 'firewall', 'energy-drink'],
     // (An anti-slip footwear talent is reserved for a future talent-choice
     // system - the engine already honors slipImmune. Until then, gum on your
@@ -90,6 +112,11 @@ export const CLASSES = {
     ap: 6,
     bonusDmg: 0,
     attr: { grit: 5, hustle: 5, savvy: 4, composure: 8 }, // unflappable support
+    track: [
+      { id: 'hr-candor', name: 'Radical Candor', cost: 1, effect: { attrBonus: { composure: 1 } } },
+      { id: 'hr-read-room', name: 'Reading the Room', cost: 1, effect: { attrBonus: { savvy: 1 } } },
+      { id: 'hr-tenure', name: 'Untouchable Tenure', cost: 1, requires: ['hr-candor'], effect: { attrBonus: { grit: 1 } } },
+    ],
     // Post the Role summons applicants to fight for you; Deflect Blame and
     // Coffee Break round out a support kit that survives while the temps swing.
     actions: ['summon-applicants', 'defend', 'coffee'],

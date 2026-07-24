@@ -62,6 +62,7 @@ function normalizeSheet(sheet) {
   sheet.name ??= sheet.className;
   sheet.attrPoints ??= 0; // pre-M2 saves never banked any
   sheet.classPoints ??= 0;
+  sheet.perks ??= []; // taken track nodes; effects are already baked into the sheet
   ensureAttributes(sheet); // pre-attribute saves get their class spread + derive
   return sheet;
 }

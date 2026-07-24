@@ -39,3 +39,27 @@ test('banked attribute points spend on the level-up screen and raise derived sta
   await expect(page.locator('#levelup-screen')).toHaveCount(0);
   await expect(page.locator('#levelup-pip')).toBeHidden();
 });
+
+test('class points learn track nodes (attr bonus, then a prereq-gated action)', async ({ page }) => {
+  test.setTimeout(120_000);
+  await bootStash(page, SOLO_LEVEL); // office-drone track
+
+  await page.evaluate(() => { window.__god.player.classPoints = 2; });
+  await page.click('#levelup-pip'); // the pip lights for class points too
+  await expect(page.locator('#levelup-screen')).toBeVisible();
+
+  // Thick Skin: +1 Grit, baked onto the sheet.
+  const grit0 = await page.evaluate(() => window.__god.player.attr.grit);
+  await page.click('#lvlup-node-drone-thick-skin');
+  await expect.poll(() => page.evaluate(() => window.__god.player.attr.grit)).toBe(grit0 + 1);
+  expect(await page.evaluate(() => window.__god.player.perks.includes('drone-thick-skin'))).toBe(true);
+
+  // Its prereq now met, Self-Defense Seminar unlocks the Steel-Toe Kick action.
+  expect(await page.evaluate(() => window.__god.player.actions.includes('kick'))).toBe(false);
+  await page.click('#lvlup-node-drone-seminar');
+  await expect.poll(() => page.evaluate(() => window.__god.player.actions.includes('kick'))).toBe(true);
+  expect(await page.evaluate(() => window.__god.player.classPoints)).toBe(0);
+
+  await page.click('#lvlup-done');
+  await expect(page.locator('#levelup-screen')).toHaveCount(0);
+});
