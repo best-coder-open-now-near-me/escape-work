@@ -16,8 +16,12 @@ const _projOut = new pc.Vec3();
 export function worldToScreenCss(app, cameraEntity, wx, wy, wz) {
   cameraEntity.camera.worldToScreen(_projIn.set(wx, wy, wz), _projOut);
   const canvas = app.graphicsDevice.canvas;
-  const s = canvas.clientWidth ? canvas.clientWidth / canvas.width : 1;
-  return { x: _projOut.x * s, y: _projOut.y * s, behind: _projOut.z < 0 };
+  // Device->CSS scale per axis. Under RESOLUTION_AUTO both factors equal the
+  // DPR, but scaling each axis by its own dimension keeps overlays correct if
+  // the canvas ever letterboxes (non-uniform device/CSS ratio).
+  const sx = canvas.clientWidth ? canvas.clientWidth / canvas.width : 1;
+  const sy = canvas.clientHeight ? canvas.clientHeight / canvas.height : 1;
+  return { x: _projOut.x * sx, y: _projOut.y * sy, behind: _projOut.z < 0 };
 }
 
 let fxMats = null;
@@ -133,6 +137,10 @@ export function spawnDamageText(app, cameraEntity, wx, wy, wz, text, color = '#f
       return;
     }
     const s = worldToScreenCss(app, cameraEntity, wx, wy + 0.6 + k * 0.85, wz);
+    // A point behind the camera projects to a mirrored/garbage screen position -
+    // hide the popup that frame rather than flash it somewhere wrong (matches
+    // the loot-label projection guard).
+    if (s.behind) { div.style.opacity = '0'; return; }
     div.style.left = s.x + 'px';
     div.style.top = s.y + 'px';
     div.style.opacity = String(1 - k * k);
