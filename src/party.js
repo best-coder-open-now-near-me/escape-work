@@ -61,6 +61,7 @@ function normalizeSheet(sheet) {
   sheet.gum ??= 0;
   sheet.name ??= sheet.className;
   sheet.attrPoints ??= 0; // pre-M2 saves never banked any
+  sheet.classPoints ??= 0;
   ensureAttributes(sheet); // pre-attribute saves get their class spread + derive
   return sheet;
 }

@@ -22,10 +22,12 @@ export const PAPER_CAP = 8;
 export const PROGRESSION = {
   HP_PER_GRIT: 2,       // each point of Grit adds this much max HP
   AP_PER_HUSTLE: 4,     // every N points of Hustle adds +1 max AP (AP is precious)
-  DMG_PER_SAVVY: 3,     // every N points of Savvy adds +1 attack damage (later)
-  COMP_PER_DEFLECT: 4,  // every N points of Composure softens a hit by 1 (later)
-  ATTR_PER_LEVEL: 2,    // attribute points granted per level-up (later)
-  CP_EVERY: 2,          // a class point every N levels (later)
+  DMG_PER_SAVVY: 3,     // every N points of Savvy adds +1 attack damage
+  COMP_PER_DEFLECT: 4,  // every N points of Composure softens a hit by 1
+  // One point of EACH type every level - a flat, consistent cadence, not
+  // "attributes fast, class points slow".
+  ATTR_PER_LEVEL: 1,    // attribute points banked per level-up
+  CP_PER_LEVEL: 1,      // class points banked per level-up (spent on the track, M3)
 };
 
 export const ATTR_KEYS = ['grit', 'hustle', 'savvy', 'composure'];
@@ -96,6 +98,7 @@ export function createSheetFrom(block, extra = {}) {
     attr, // the four office attributes - the source maxHp/maxAp derive from
     base, // innate floor; growth stacks on top (recomputeDerived)
     attrPoints: 0, // unspent attribute points, banked by gainXp, spent by hand
+    classPoints: 0, // unspent class points, banked alongside (spent on the track, M3)
     level: 1,
     xp: 0,
     xpNext: 10,
@@ -168,6 +171,7 @@ export function gainXp(sheet, amount) {
     sheet.xpNext = Math.round(sheet.xpNext * 1.5);
     sheet.level += 1;
     sheet.attrPoints = (sheet.attrPoints || 0) + PROGRESSION.ATTR_PER_LEVEL;
+    sheet.classPoints = (sheet.classPoints || 0) + PROGRESSION.CP_PER_LEVEL;
     sheet.hp = sheet.maxHp;
     promoted = true;
   }

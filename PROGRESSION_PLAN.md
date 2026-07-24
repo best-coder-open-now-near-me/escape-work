@@ -98,7 +98,7 @@ you build it from scratch, which is the point, not a chore to skip.
 | 3 | Enemy progression | **Tiered variants + floor curve** | Named seniority variants are pure `data/enemies.js` content (content-is-data); the floor curve keeps even the base three relevant at depth. Floor-scaling-only was simpler but every floor fights the same three faces; elite modifiers are attractive and **kept as a stretch item** (#12), orthogonal to depth. |
 | 4 | Attributes are the source, numbers are derived | Store the four attributes (+ a small per-class residual base); compute `maxHp`, `maxAp`, `damageBonus`, deflect from them via `recomputeDerived(sheet)` | Keeps `combat.js`/`ui.js` readers of `sheet.maxHp`/`sheet.maxAp` working unchanged — only *writers* of attributes call recompute. A pure-getter model was cleaner in theory but would touch every reader and complicate the save. `hp` still mutates in combat and clamps to the recomputed `maxHp`. |
 | 5 | Regression-preserving calibration | Milestone 1 picks per-class base attributes **and** a residual `base:{hp,ap}` so every class's level-1 derived `maxHp`/`maxAp` **exactly equals today's constants** | The residual guarantees any target value is reachable (`maxHp = base.hp + grit·HP_PER_GRIT`), so the boring foundational refactor changes zero observable numbers — the same invariant that kept `PARTY_PLAN.md` milestone 1 green. |
-| 6 | Point cadence | **2 attribute points / level**; **1 class point every 2 levels** (levels 2, 4, 6…). All cadence numbers live in one tunable `PROGRESSION` block | Starting proposal, balance-owned. Round numbers, easy to reason about, easy to pin in the god panel. |
+| 6 | Point cadence | **One point of each type, every level**: +1 attribute point and +1 class point per level-up (`ATTR_PER_LEVEL = CP_PER_LEVEL = 1`). All cadence numbers live in one tunable `PROGRESSION` block | A flat, consistent distribution — no "attributes fast, class points slow" split (an earlier draft's 2/level + 1-per-2-levels). Easy to reason about, easy to pin in the god panel. |
 | 7 | Companion allocation | **You build the whole party, and nothing auto-allocates.** Every member — leader and companion — banks points and you spend them on the level-up screen. A recruit joins at your level with those levels' points already banked; its **party-bar portrait shows the level-up pip** so you build it from scratch, same as any level-up | One rule, zero special cases. Points **bank** rather than forcing a modal, so a member with unspent points is just a pip you clear when you like — never three screens per kill (the only argument auto-allocation ever had). A fresh recruit being briefly unbuilt is a feature: you decide how it's specced. Drops the `autoAllocate` catch-up entirely — no allocation code at all. *Revised twice: auto-allocate-all → catch-up-only → none.* |
 | 8 | When you spend | Points **bank** on the sheet the instant you level; the allocation screen is deferred to a safe moment (combat end, floor transition) and openable any time points are pending | Opening a modal mid-swing breaks tactical flow. Banking + a HUD "Level Up!" pip matches BG3's rest-to-level rhythm and sidesteps a combat/modal interleave bug surface. Level-ups still **full-heal on the spot** — that moment stays. |
 | 9 | No respec (v1) | Allocation is one-way; no rebuild screen yet | Ships the core loop faster. A "Visit HR to refile your paperwork" respec is an obvious, on-theme later add; noted in open questions. |
@@ -112,14 +112,14 @@ Earned on level-up, spent on the level-up screen, banked until spent.
 
 ```
 LEVEL UP → Lv 4                     (full heal fires immediately)
-  +2 attribute points
+  +1 attribute point
       Grit ▸  Hustle ▸  Savvy ▸  Composure ▸
-  Class point available (every 2nd level)
+  +1 class point
       ○ Upgrade Bulk Mail (+1 dmg)   ○ Unlock Steel-Toe Kick   ○ +1 Grit talent
 ```
 
-- **Attribute points** (`sheet.attrPoints`): 1:1 into one of the four
-  attributes. `spendAttrPoint(sheet, attr)` validates and calls
+- **Attribute points** (`sheet.attrPoints`): +1 per level; spent 1:1 into one of
+  the four attributes. `spendAttrPoint(sheet, attr)` validates and calls
   `recomputeDerived`.
 - **Class points** (`sheet.classPoints`): spent on the class **track** (below).
   `spendClassPoint(sheet, nodeId)` checks cost + prerequisites, records the node
@@ -240,9 +240,9 @@ floor — placing the base `M` on a deep floor already scales.
   `actionMods` from the block; calls `recomputeDerived`.
 - `recomputeDerived(sheet)` — sets `maxHp`/`maxAp`/`bonusDmg` from base residual
   + attributes + perk `attrBonus`; clamps `hp ≤ maxHp`.
-- `gainXp` — on level: `attrPoints += ATTR_PER_LEVEL`; `classPoints += 1` on the
-  cadence; full-heal; **stop the automatic `bonusDmg += 1`** (that value now
-  comes from Savvy). Returns richer promotion info (new level, points granted).
+- `gainXp` — on level: `attrPoints += ATTR_PER_LEVEL`; `classPoints +=
+  CP_PER_LEVEL` (both = 1, banked every level); full-heal; **stop the automatic
+  `bonusDmg += 1`** (that value now comes from Savvy).
 - `spendAttrPoint(sheet, attr)`, `spendClassPoint(sheet, nodeId)` — validate,
   apply, recompute.
 - `damageBonus(sheet)` — existing sum `+ floor(savvy/DMG_PER_SAVVY)`.
@@ -318,9 +318,10 @@ trusted from disk). Migration in `party.js`:
    `gainXp` unchanged this milestone. `ensureAttributes` backfills older saves.
    Unit 75→80 green, build clean, e2e 31/31 (the 1 failure was a pre-existing
    `recruitIntern` dialogue-click flake, proven by sibling tests passing).
-2. **Attribute points + the level-up screen.** ✅ Landed. `gainXp` banks
-   `ATTR_PER_LEVEL` points instead of the auto `+1 dmg`; `spendAttrPoint`
-   validates + `recomputeDerived`s. Savvy drives damage (`damageBonus`),
+2. **Attribute points + the level-up screen.** ✅ Landed. `gainXp` banks one
+   point of each type per level (`attrPoints`/`classPoints`) instead of the auto
+   `+1 dmg`; `spendAttrPoint` validates + `recomputeDerived`s. Class points bank
+   from here but aren't spendable until M3's track. Savvy drives damage (`damageBonus`),
    Composure grants flat deflect in combat's member-hit path. `showLevelUpScreen`
    (attribute steppers), a HUD `#levelup-pip` for the leader + a per-portrait pip
    on the party bar, auto-open on victory, and the flow pages the whole party;

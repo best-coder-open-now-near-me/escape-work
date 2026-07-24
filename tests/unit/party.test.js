@@ -99,6 +99,7 @@ test('createCompanionSheet joins at the given level, fully rested, points banked
   // Two promotions (1->2->3) bank their points; nothing auto-allocates, so the
   // recruit arrives with a lit level-up pip for the player to spend.
   assert.equal(s.attrPoints, 2 * PROGRESSION.ATTR_PER_LEVEL);
+  assert.equal(s.classPoints, 2 * PROGRESSION.CP_PER_LEVEL);
   assert.equal(s.hp, s.maxHp);
   assert.equal(s.classId, undefined); // a companion is not a picked class
 });

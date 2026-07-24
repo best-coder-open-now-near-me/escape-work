@@ -36,7 +36,8 @@ test('gainXp promotes once, fully heals, and grows the next bar', () => {
   assert.equal(s.level, 2);
   assert.equal(s.hp, s.maxHp);
   assert.equal(s.bonusDmg, 0); // damage no longer rises automatically (M2)
-  assert.equal(s.attrPoints, PROGRESSION.ATTR_PER_LEVEL); // it banks points instead
+  assert.equal(s.attrPoints, PROGRESSION.ATTR_PER_LEVEL); // one of each type per level
+  assert.equal(s.classPoints, PROGRESSION.CP_PER_LEVEL);
   assert.equal(s.xpNext, Math.round(before * 1.5));
 });
 
@@ -119,6 +120,7 @@ test('gainXp banks attribute points instead of raising damage', () => {
   assert.equal(s.level, 2);
   assert.equal(s.bonusDmg, dmg0); // no automatic damage bump
   assert.equal(s.attrPoints, PROGRESSION.ATTR_PER_LEVEL);
+  assert.equal(s.classPoints, PROGRESSION.CP_PER_LEVEL); // one of each, every level
 });
 
 test('spendAttrPoint raises the attribute, re-derives, and drains the pool', () => {
