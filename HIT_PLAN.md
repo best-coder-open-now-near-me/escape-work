@@ -200,9 +200,16 @@ None. Accuracy/dodge are derived, never stored; no save-version bump.
    `hit.spec.js` proves a pinned miss deals 0 damage while still spending the
    attack AP, and that a pinned miss sticks no gum. Unit 124/124 (the inert
    guard swapped for live formula/clamp assertions).
-3. **The odds on screen.** Hover hit% in the cost tag; `SURPRISE_ACC_BONUS`;
-   `__combat.lastRoll`; e2e asserts the previewed chance equals the pure
-   `hitChance` for the same pair.
+3. **The odds on screen.** ✅ Landed. While a single-target attack is armed,
+   hovering a live enemy shows `NN% to hit` in the existing cost tag
+   (`showHitPreview`/`enemyAtPoint` in combat.js; cones and shove show none -
+   the wedge and auto-hit are their own feedback). `SURPRISE_ACC_BONUS` is now
+   read at the `performOn`/`fireCone` call sites and mirrored in the preview, so
+   an ambushed target is measurably easier to hit. `__combat.lastRoll`
+   (`{ chance, hit }`) and `__combat.hoverHitChance` are exposed; a new
+   `hit.spec.js` case hovers a target, reads the shown percentage, then swings
+   it and asserts the chance that rolled equals the chance previewed. Unit
+   124/124, e2e hit 3/3.
 4. **Balance + enemy identity.** Innate acc/dodge on the variant enemies,
    `scaleEnemy` growth, a numbers pass on damage (see risk #1). Stretch items
    live here or later: crits, the shove contest, dodge-vs-cone rules.

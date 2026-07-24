@@ -11,7 +11,7 @@
 import { ACTIONS } from './data/actions.js';
 import { SURFACES, GUM } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
-import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge } from './stats.js';
+import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, HIT } from './stats.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { buildInitiativeOrder, rollInitiative, insertionIndex } from './initiative.js';
 
@@ -83,10 +83,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // lets the e2e suite make combat deterministic and a tester slam hit rates
   // live - the same "pin a value" affordance the god panel gives other state.
   let forceHit = null;
+  let lastRoll = null; // { chance, hit } of the most recent attack roll (debug/e2e)
   // One attack roll (HIT_PLAN.md): base + attacker accuracy - defender dodge +
-  // mods, rolled against combat's injectable `rng` (unless pinned above).
-  const resolveHit = (accFrac, dodgeFrac, mods = 0) =>
-    (forceHit !== null ? forceHit : rollHit(hitChance(accFrac, dodgeFrac, mods), rng));
+  // mods, rolled against combat's injectable `rng` (unless pinned above). The
+  // computed chance and outcome are stashed on `lastRoll` for the debug surface.
+  const resolveHit = (accFrac, dodgeFrac, mods = 0) => {
+    const chance = hitChance(accFrac, dodgeFrac, mods);
+    const hit = forceHit !== null ? forceHit : rollHit(chance, rng);
+    lastRoll = { chance, hit };
+    return hit;
+  };
   const MISS_COLOR = '#b8c0d0';
   // Movement cost per unit distance, derived from the surface's `slow`
   // multiplier (0.5 => twice the AP) - one number in data drives both walk
@@ -180,17 +186,50 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const PREVIEW_FAR = new pc.Color(0.85, 0.28, 0.24);
   let preview = null; // { reach: [[x,z],...], tail: [[x,z],...] | null }
   let aimPoint = null; // hover point while a cone attack is armed
+  let hoverHitChance = null; // to-hit chance shown for the enemy under an armed cursor
 
   function hidePreview() {
     preview = null;
+    hoverHitChance = null;
     costTag.style.display = 'none';
+  }
+
+  // The live enemy under a hover point, if any (within a tile's reach of it).
+  function enemyAtPoint(point) {
+    let best = null;
+    for (const en of world.liveEnemies()) {
+      if (!en.entity) continue;
+      const d = Math.hypot(en.x - point.x, en.z - point.z);
+      if (d < 0.7 && (!best || d < best.d)) best = { en, d };
+    }
+    return best?.en || null;
+  }
+
+  // While a single-target attack is armed, the cost tag shows the to-hit chance
+  // for the enemy under the cursor - the rings show range/validity, this shows
+  // the odds (DOS2's most load-bearing bit of UI). A cone's wedge is its own
+  // feedback and a shove auto-hits, so neither shows a percentage.
+  function showHitPreview(point, sx, sy) {
+    hoverHitChance = null;
+    const a = ACTIONS[armed];
+    if (!a || a.type !== 'attack' || a.cone) { costTag.style.display = 'none'; return; }
+    const en = enemyAtPoint(point);
+    if (!en) { costTag.style.display = 'none'; return; }
+    const acc = accuracy(active.sheet) + (en.surprised ? HIT.SURPRISE_ACC_BONUS : 0);
+    hoverHitChance = hitChance(acc, en.def.dodge || 0);
+    costTag.textContent = `${Math.round(hoverHitChance * 100)}% to hit`;
+    costTag.style.left = `${sx + 14}px`;
+    costTag.style.top = `${sy + 14}px`;
+    costTag.style.display = 'block';
   }
 
   function handleHover(point, sx, sy) {
     // While aiming, target rings replace the movement trail entirely.
     // Cone attacks additionally track the cursor - the wedge follows it.
     if (armed && ACTIONS[armed].cone) aimPoint = point;
-    if (phase !== 'player' || active.actor.moving || !point || armed) { hidePreview(); return; }
+    if (phase !== 'player' || active.actor.moving || !point) { hidePreview(); return; }
+    // Armed: the movement trail yields to the to-hit readout over a target.
+    if (armed) { showHitPreview(point, sx, sy); return; }
     const tx = Math.round(point.x);
     const tz = Math.round(point.z);
     if (!world.isWalkable(tx, tz)) { hidePreview(); return; } // enemies/walls: no route preview
@@ -483,9 +522,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       active.actor.lunge(en.x, en.z);
     }
     active.ap -= a.ap;
-    // The attack roll. Inert under M1 constants (always hits); when live, a miss
-    // spends the cost above and does nothing else - no damage, no purge.
-    if (!resolveHit(accuracy(active.sheet), en.def.dodge || 0)) {
+    // The attack roll: a miss spends the cost above and does nothing else - no
+    // damage, no purge. A surprised target is easier to hit (HIT_PLAN #6).
+    const acc = accuracy(active.sheet) + (en.surprised ? HIT.SURPRISE_ACC_BONUS : 0);
+    if (!resolveHit(acc, en.def.dodge || 0)) {
       fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
       log(a.missLog || `${a.log} It misses.`);
       armed = null;
@@ -525,9 +565,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (!world.hasLos(active.actor.x, active.actor.z, en.x, en.z)) continue;
       joinCombat(en); // a bystander caught in the mail joins the fight
       fx.projectile({ x: active.actor.x, z: active.actor.z }, { x: en.x, z: en.z }, 'plane');
-      // Roll per target (inert under M1). A dodged envelope flies but doesn't
-      // land; the wedge's `leaves` surface still carpets below (HIT_PLAN #4).
-      if (!resolveHit(accuracy(active.sheet), en.def.dodge || 0)) {
+      // Roll per target. A dodged envelope flies but doesn't land; the wedge's
+      // `leaves` surface still carpets below (HIT_PLAN #4). A surprised target
+      // is easier to catch.
+      const acc = accuracy(active.sheet) + (en.surprised ? HIT.SURPRISE_ACC_BONUS : 0);
+      if (!resolveHit(acc, en.def.dodge || 0)) {
         fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
         continue;
       }
@@ -1061,6 +1103,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // null = roll honestly. The e2e suite sets it to make combat deterministic.
     get forceHit() { return forceHit; },
     set forceHit(v) { forceHit = v == null ? null : !!v; },
+    // The most recent attack roll { chance, hit }, and the to-hit chance the
+    // armed-hover preview is currently showing - both for the e2e suite to
+    // assert the previewed odds match the math that actually rolls.
+    get lastRoll() { return lastRoll; },
+    get hoverHitChance() { return hoverHitChance; },
     get usesLeft() { return active.usesLeft; }, // live { actionId: count } - edit in place, then call refresh()
     get party() {
       return members.map((m) => ({ name: m.sheet.name, hp: m.sheet.hp, ap: m.ap, active: m === active }));

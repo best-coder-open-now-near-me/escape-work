@@ -83,3 +83,48 @@ test('a forced miss applies no status - the Manager sticks no gum', async ({ pag
   expect(hp).toBe(maxHp); // misses dealt no damage
   expect(gum).toBe(0);    // and stuck no gum
 });
+
+test('the armed hover shows a to-hit percentage that matches the roll', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, DUEL_ARENA, 'office-drone');
+  await enterCombat(page);
+
+  const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
+  const foeHp = () => page.evaluate(([x, z]) =>
+    window.__combat.enemies.find((e) => e.x === x && e.z === z)?.hp, [foe.x, foe.z]);
+
+  // Arm the attack, then hover the Manager until the to-hit readout appears.
+  if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#act-attack');
+  let chance = null;
+  for (let i = 0; i < 8 && chance == null; i++) {
+    await page.waitForTimeout(500);
+    if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#act-attack');
+    const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
+    await page.mouse.move(fp.x, fp.y);
+    await page.waitForTimeout(150);
+    chance = await page.evaluate(() => window.__combat.hoverHitChance);
+  }
+  expect(typeof chance).toBe('number');
+  expect(chance).toBeGreaterThan(0);
+  // The cost tag shows the rounded percentage of that chance.
+  await expect(page.locator('#combat-move-cost')).toContainText(`${Math.round(chance * 100)}%`);
+
+  // Now actually swing that target (pinned to hit): the chance the roll used is
+  // the same chance the preview promised.
+  await page.evaluate(() => { window.__combat.forceHit = true; });
+  const hp0 = foe.hp;
+  let landed = false;
+  for (let i = 0; i < 6 && !landed; i++) {
+    await page.waitForTimeout(600);
+    if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#act-attack');
+    const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
+    await page.mouse.click(fp.x, fp.y);
+    await page.waitForTimeout(300);
+    const hp = await foeHp();
+    landed = hp != null && hp < hp0; // a pinned-hit swing dropped the foe's HP
+  }
+  expect(landed).toBe(true);
+  // lastRoll is my swing's (still my turn - no enemy has rolled since).
+  const rollChance = await page.evaluate(() => window.__combat.lastRoll.chance);
+  expect(rollChance).toBeCloseTo(chance, 6); // preview == the chance that rolled
+});
