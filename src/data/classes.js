@@ -9,6 +9,13 @@
 //   AI-combat fields (attacks, attackAp, xp, loot) - read via stats.js
 //     unitCombat when a class backs an AI-DRIVEN unit (a summon, later an
 //     enemy) instead of a player. Player classes omit them and are unchanged.
+//
+// startGear (EQUIPMENT_PLAN): { slot: itemId } worn from character creation, so
+// a new character's equipment listing is furnished with one signature piece
+// instead of four empty rows. Seeded by stats.createSheetFrom (createSheet
+// only - migrations and companions omit it). Kept curve-neutral: none of these
+// touch maxHp/maxAp (Grit/Hustle), so each class's headline HP/AP stay exact -
+// the signature piece flavours a slot, it doesn't inflate the sheet.
 export const CLASSES = {
   'office-drone': {
     name: 'Office Drone',
@@ -18,6 +25,7 @@ export const CLASSES = {
     maxHp: 22,
     ap: 6,
     bonusDmg: 0,
+    startGear: { trinket: 'stress-ball' }, // the grief-squeezed desk companion
     // Office attributes (Grit/Hustle/Savvy/Composure) - the source the sheet
     // derives maxHp/maxAp/damage from (stats.js recomputeDerived). Calibrated so
     // level-1 stats equal the maxHp/ap above; the Drone is deliberately even.
@@ -44,6 +52,7 @@ export const CLASSES = {
     maxHp: 28,
     ap: 5,
     bonusDmg: 0,
+    startGear: { outfit: 'company-fleece' }, // padded, logo-embroidered, tank-adjacent
     attr: { grit: 8, hustle: 3, savvy: 4, composure: 7 }, // tanky, unhurried
     track: [
       { id: 'mgr-stonewall', name: 'Stonewall', cost: 1, effect: { attrBonus: { composure: 1 } } },
@@ -65,6 +74,7 @@ export const CLASSES = {
     maxHp: 24,
     ap: 6,
     bonusDmg: 0,
+    startGear: { shoes: 'warehouse-boots' }, // the Dock Boots the track later doubles down on
     attr: { grit: 6, hustle: 8, savvy: 4, composure: 4 }, // fast on his feet
     track: [
       { id: 'mail-cart-legs', name: 'Cart Legs', cost: 1, effect: { attrBonus: { hustle: 1 } } },
@@ -86,6 +96,7 @@ export const CLASSES = {
     maxHp: 17,
     ap: 7,
     bonusDmg: 0,
+    startGear: { weapon: 'letter-opener' }, // precise, low-punch - a glass cannon's scalpel
     attr: { grit: 3, hustle: 6, savvy: 8, composure: 3 }, // glass cannon
     track: [
       { id: 'it-root', name: 'Root Access', cost: 1, effect: { attrBonus: { savvy: 1 } } },
@@ -111,6 +122,7 @@ export const CLASSES = {
     maxHp: 20,
     ap: 6,
     bonusDmg: 0,
+    startGear: { outfit: 'interview-blazer' }, // poise you can wear (composure the HR way)
     attr: { grit: 5, hustle: 5, savvy: 4, composure: 8 }, // unflappable support
     track: [
       { id: 'hr-candor', name: 'Radical Candor', cost: 1, effect: { attrBonus: { composure: 1 } } },

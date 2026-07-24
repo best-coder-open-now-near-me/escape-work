@@ -279,6 +279,25 @@ untouched.
      cost (decision #6), and the cross-cutting numbers/balance pass all three
      plans defer to playtest.
 
+6. **Starting gear.** ✅ Landed. The equipment listing was furnished by loot
+   only, so a freshly-picked class showed four empty slots — the system was
+   invisible until you found something. Each playable class now declares a
+   `startGear: { slot: itemId }` (data/classes.js), seeded by
+   `stats.createSheetFrom` into the sheet's `equipped` at creation. One
+   signature piece each: the Drone's grief-squeezed **stress ball**, the
+   Manager's padded **company fleece**, the Mail Room's **warehouse boots** (the
+   Dock Boots its own track doubles down on), IT's precise **letter opener**,
+   and HR's **interview blazer** (poise you can wear). Kept deliberately
+   **curve-neutral** — every piece avoids Grit/Hustle/maxHp/maxAp, so the
+   headline HP/AP the class picker advertises stay *exact* (the "reproduce every
+   class" invariant is untouched); the piece flavours a slot, it doesn't buff
+   the sheet. `startGear` lives only on the picked-class path: migrations
+   (`party.normalizeSheet`) and companions/summons reach `createSheetFrom`
+   without it, so old saves and recruits are unchanged. Unit adds a
+   startGear-per-class test (valid item, right slot, on-curve); no e2e change —
+   every existing spec that boots a class still passes, the chosen pieces sit in
+   slots the specs don't assert against.
+
 ## Testing
 
 - **Unit** (`tests/unit/stats.test.js`): equip validates slot and swaps the

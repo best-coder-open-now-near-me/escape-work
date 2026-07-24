@@ -153,6 +153,7 @@ test('spendAttrPoint refuses an empty pool or an unknown attribute', () => {
 
 test('damageBonus includes the Savvy term', () => {
   const s = createSheet('it-support'); // savvy 8
+  s.equipped.weapon = null; recomputeDerived(s); // set aside IT's starting letter-opener to isolate Savvy
   assert.equal(damageBonus(s), Math.floor(8 / PROGRESSION.DMG_PER_SAVVY));
   s.attr.savvy = 0;
   assert.equal(damageBonus(s), 0);
@@ -381,11 +382,11 @@ test('unitCombat passes innate accuracy/dodge through, defaulting to 0', () => {
 
 // --- equipment (EQUIPMENT_PLAN.md milestone 1) ------------------------------
 
-test('a fresh sheet has empty equipment slots', () => {
-  const s = createSheet('office-drone');
-  assert.deepEqual(s.equipped, { weapon: null, outfit: null, trinket: null, shoes: null });
-  assert.deepEqual(equippedStats(s).attrBonus, {});
-  assert.equal(equippedStats(s).dmg, 0);
+test('a fresh sheet seeds all four slots, filling only its class startGear', () => {
+  const s = createSheet('office-drone'); // the Drone ships a stress-ball trinket
+  assert.deepEqual(s.equipped, { weapon: null, outfit: null, trinket: 'stress-ball', shoes: null });
+  assert.deepEqual(equippedStats(s).attrBonus, { composure: 1 }); // the trinket folds through
+  assert.equal(equippedStats(s).dmg, 0); // a trinket, no weapon damage
 });
 
 test('equipItem validates the slot and swaps the incumbent back to the bag', () => {
@@ -485,6 +486,7 @@ test('gear attrBonus flows through every attribute derivation', () => {
   assert.ok(dodge(s) > dodge0);
   // A Composure outfit lifts deflect once it crosses a threshold.
   const c = createSheet('office-drone');
+  c.equipped.trinket = null; // set aside the Drone's starting stress-ball (+1 composure) to isolate the threshold
   c.attr.composure = 2 * PROGRESSION.COMP_PER_DEFLECT - 1; // deflect floor = 1
   recomputeDerived(c);
   const def0 = deflect(c);
@@ -501,6 +503,24 @@ test('every equippable item declares a valid slot, stat vocabulary, and weapon s
     for (const k of Object.keys(def.stats || {})) assert.ok(STAT_KEYS.has(k), `${id} stat key ${k}`);
     for (const k of Object.keys(def.stats?.attrBonus || {})) assert.ok(ATTR_KEYS.includes(k), `${id} attrBonus ${k}`);
     if (def.slot === 'weapon') assert.ok(ACTIONS[def.attack], `${id} weapon swing ${def.attack} exists`);
+  }
+});
+
+test('every playable class walks in wearing its startGear, curve-neutral', () => {
+  for (const [id, cls] of Object.entries(CLASSES)) {
+    if (cls.playable === false) continue; // applicant is AI-driven, never a picked sheet
+    assert.ok(cls.startGear, `${id} furnishes a starting slot`); // a new character is never naked
+    const s = createSheet(id);
+    for (const [slot, itemId] of Object.entries(cls.startGear)) {
+      assert.ok(ITEMS[itemId], `${id} startGear item ${itemId} exists`);
+      assert.equal(ITEMS[itemId].slot, slot, `${id} startGear ${itemId} fits ${slot}`);
+      assert.equal(s.equipped[slot], itemId, `${id} starts with ${itemId} in ${slot}`);
+    }
+    // Curve-neutral: the signature piece never bends the headline HP/AP - those
+    // stay exactly the class's declared numbers (only Grit/Hustle move them).
+    assert.equal(s.maxHp, cls.maxHp, `${id} startGear leaves maxHp on curve`);
+    assert.equal(s.maxAp, cls.ap, `${id} startGear leaves maxAp on curve`);
+    assert.equal(s.hp, cls.maxHp, `${id} still starts at full`);
   }
 });
 

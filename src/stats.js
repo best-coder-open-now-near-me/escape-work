@@ -142,7 +142,11 @@ export function createSheetFrom(block, extra = {}) {
     talent: block.talent || null,
     paper: 0, // thrown-weapon ammo, picked up from paper spills
     statuses: {}, // active status effects (statuses.js) - gum, bleed, and the rest
-    equipped: Object.fromEntries(EQUIP_SLOTS.map((s) => [s, null])), // worn gear (EQUIPMENT_PLAN)
+    // Worn gear (EQUIPMENT_PLAN). A class can furnish a slot from creation via
+    // `startGear` ({ slot: itemId }); everything else starts empty. Migrations
+    // and companions reach this through their own paths and carry no startGear,
+    // so only a freshly-picked class walks in wearing its signature piece.
+    equipped: Object.fromEntries(EQUIP_SLOTS.map((s) => [s, block.startGear?.[s] || null])),
     inventory: [], // looted item ids (data/items.js) - persists across floors
     ...extra,
   };
