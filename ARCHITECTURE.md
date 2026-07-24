@@ -49,8 +49,11 @@ src/
   controls.js        Camera rig + mouse -> semantic input (click tile, menu)
   picking.js         Screen pixel -> interactable ENTITY under it (ray vs the
                      registered doors/enemies/NPCs/props), not just the floor
-  combat.js          Tactical on-map combat: AP turns, movement, multi-enemy,
-                     ranged/melee, enemy AI phase - all costs from data
+  combat.js          Tactical on-map combat: per-unit INITIATIVE order, AP
+                     turns, movement, ranged/melee, AI-driven units - costs
+                     from data
+  initiative.js      Combat turn order: d20 + speed roll, sort, joiner
+                     insertion                                (pure logic)
   looting.js         Containers, bodies, loose items, pockets, Alt overlay
   ui.js              All DOM: HUD, context menu, overlays, shared chrome
   god.js             God-mode tweak panel (` / F8): live-reflects the sheet,

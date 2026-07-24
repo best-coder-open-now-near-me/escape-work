@@ -164,7 +164,18 @@ export async function enterCombat(page) {
   expect(inCombat).toBe(true);
 }
 
-// End the enemy phase and wait for the turn to come back around.
+// Wait until it's a party member's turn (phase 'player'). Under initiative an
+// enemy can win the roll and act first, so a fresh fight may open on an AI
+// turn - a test that wants to act must wait for control to come around.
+export async function waitForPlayerTurn(page, timeout = 90_000) {
+  await expect.poll(
+    () => page.evaluate(() => window.__combat?.phase),
+    { timeout },
+  ).toBe('player');
+}
+
+// End the current member's turn and wait for control to come back around
+// (initiative runs the AI turns in between).
 export async function endTurnUntilPlayer(page) {
   await page.click('#combat-end-turn');
   await expect.poll(
