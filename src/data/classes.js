@@ -142,7 +142,10 @@ export const CLASSES = {
     maxHp: 5,
     ap: 4,
     bonusDmg: 0,
-    actions: [], // AI-driven: it swings from `attacks`, never an action bar
+    // Player-controlled summons swing from `actions` (an action bar) like any
+    // member; enemy-side AI summons roll from `attacks` below instead. The
+    // applicant carries both - the superset a shared archetype needs.
+    actions: ['resume-slap'],
     talent: null,
     // AI-combat fields (read only for AI-driven class units):
     attackAp: 3,

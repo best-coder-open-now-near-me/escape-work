@@ -10,6 +10,25 @@ hard half of a friendly-combat layer: per-member AP, downed/revive, party-wipe
 defeat, and enemies targeting the nearest living party member. Summoning adds
 the *other* half — a generic **faction** so both sides can field AI units.
 
+## Revision — player summons are player-CONTROLLED (post-initiative)
+
+The milestones below shipped player summons as **AI allies** (an `allies`
+phase, decision #1: "temporary AI unit… uncontrolled"). Two things changed
+after: the combat model moved to **per-unit initiative** (`initiative.js` — one
+interleaved turn order, no side phases), and the direction became explicit —
+player summons should be **controlled like Divinity/BG**, not autopilot.
+
+So a player-side summon is now a **temporary combat MEMBER**: a real
+`createSheetFrom(applicant)` sheet on a `CompanionActor` body, appended to
+combat's `members` with a `{member}` initiative slot, so you drive it on its
+own turn (its own action bar — *Résumé Slap* — and AP). It's still outside
+`party.members` (not counted against the cap, not saved, despawned at fight's
+end), and a summon falling is still never a game-over (`livingParty` gates
+defeat). Enemy-side summons are unchanged — they stay AI. This **reverses
+decision #1 for the player side** and retires the `allies` phase; the faction
+tag, caps/cooldowns, anti-farm, and placement all still hold. Details live in
+`ARCHITECTURE.md` (**Summons**).
+
 ## Direction: the class as the shared unit archetype
 
 A steer that shapes this plan: **a class is becoming the shared identity for

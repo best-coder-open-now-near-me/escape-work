@@ -15,7 +15,7 @@ import { ACTIONS } from './data/actions.js';
 import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
 import {
-  createSheet, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
+  createSheet, createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
   scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP,
 } from './stats.js';
 import {
@@ -113,10 +113,12 @@ function startGame(level) {
     const base = ENEMY_TYPES[s.type];
     return new EnemyActor(s.x, s.z, s.type, scaleEnemy(base, effectiveLevel(base, floorDepth)));
   });
-  // Player-team summons (SUMMON_PLAN.md): temporary AI allies conjured mid-fight
-  // by a summon power. Not party members, not saved - they live only for the
-  // combat and are despawned when it ends. They block enemies (like the party)
-  // but are pass-through for the party.
+  // Player-team summons (SUMMON_PLAN.md): temporary combatants conjured
+  // mid-fight by a summon power. You CONTROL them like party members - each is
+  // a { sheet, actor } pair (HP on the sheet, a CompanionActor body), taking
+  // its own initiative turn. Not party members, not saved, not counted against
+  // the party cap - they live only for the combat and are despawned when it
+  // ends. They block enemies (like the party) but are pass-through for the party.
   const summons = [];
   // Non-hostile coworkers you talk to (data/npcs.js) - separate from `enemies`
   // so combat never engages them and they take no turns.
@@ -173,7 +175,7 @@ function startGame(level) {
   // or abort) they vanish. Destroying the entity auto-unregisters it from
   // picking (see ARCHITECTURE.md).
   function despawnSummons() {
-    for (const s of summons) s.entity?.destroy();
+    for (const s of summons) s.actor.entity?.destroy();
     summons.length = 0;
   }
 
@@ -188,7 +190,7 @@ function startGame(level) {
   // A living player-team summon on this tile. Summons block enemies (folded
   // into enemy pathing/occupancy below) but stay pass-through for the party -
   // isWalkable deliberately ignores them, so members walk right through.
-  const summonAt = (x, z) => summons.some((s) => s.alive && s.x === x && s.z === z);
+  const summonAt = (x, z) => summons.some((s) => s.sheet.hp > 0 && s.actor.x === x && s.actor.z === z);
   // NPCs stand on their tile and block movement like any body.
   const isWalkable = (x, z) => grid.terrainOpen(x, z) && !enemyAt(x, z) && !npcAt(x, z);
   // Surface queries, consulting the runtime (fire) before static state.
@@ -832,8 +834,8 @@ function startGame(level) {
       drawRing(p.x, p.z, 0.5, RING_HOSTILE);
     }
     for (const s of summons) {
-      if (!s.alive || !s.entity) continue;
-      const p = s.entity.getPosition();
+      if (s.sheet.hp <= 0 || !s.actor.entity) continue;
+      const p = s.actor.entity.getPosition();
       drawRing(p.x, p.z, 0.42, RING_PARTY); // your summons ring as friendly
     }
     for (const npc of npcs) {
@@ -1162,36 +1164,37 @@ function startGame(level) {
         // Anyone alive is a legal target - bystanders outside the initial
         // engagement get pulled in when attacked.
         liveEnemies: () => enemies.filter((e) => e.alive),
-        // Living player-team summons - the enemy's extra targets and the ally
-        // phase's queue (combat.js).
-        liveAllies: () => summons.filter((s) => s.alive),
         // Summon reinforcements: drop up to `n` archetype units (a class id -
         // e.g. 'applicant' - or an ENEMY_TYPES id) on the nearest free tiles
-        // around `summoner`, wire their models, and file them into the roster
-        // for `team`. Enemy-team summons join `enemies`, so every existing
-        // enemy system (rendering, pruning, liveEnemies, looting) applies for
-        // free; player-team summons join `summons` (stepped by the update loop,
-        // despawned at combat end) and register as a non-selectable 'summon'
-        // kind so a click falls through to the ground. Returns the tagged
-        // actors; combat.js resolveSummon slots them into the fight.
+        // around `summoner`, wire their models, and hand them back for combat.js
+        // to slot into the fight.
+        //   enemy team -> an EnemyActor filed into `enemies` (AI-driven); every
+        //     existing enemy system applies for free. Returned as the actor.
+        //   player team -> a { sheet, actor } pair filed into `summons`: a real
+        //     character sheet (HP, AP, actions) on a CompanionActor body, so
+        //     it's CONTROLLED like a party member on its initiative turn. The
+        //     actor registers as a 'summon' pick kind (contextual clicks in
+        //     combat select it, like a teammate).
         spawnSummon: (archetypeId, team, summoner, n) => {
           const def = CLASSES[archetypeId] || ENEMY_TYPES[archetypeId];
           if (!def) return [];
           const ally = team === 'player';
           const out = [];
           for (const [x, z] of freeTilesNear(summoner.x, summoner.z, n)) {
-            const a = new EnemyActor(x, z, archetypeId, def,
-              { team, summoned: true, summonedBy: summoner });
-            (ally ? summons : enemies).push(a);
+            const actor = ally
+              ? new CompanionActor(x, z, archetypeId, def)
+              : new EnemyActor(x, z, archetypeId, def, { team, summoned: true, summonedBy: summoner });
+            const rec = ally ? { sheet: createSheetFrom(def, { summon: true }), actor } : actor;
+            (ally ? summons : enemies).push(rec);
             placeModel(app, `assets/characters/${def.model}.glb`, x, z, {
               lift, rotY: ally ? 90 : -90, animate: true,
               onReady: (e) => {
                 applyCharacterProportions(e);
-                a.attach(e);
-                picking.register(e, ally ? 'summon' : 'enemy', a);
+                actor.attach(e);
+                picking.register(e, ally ? 'summon' : 'enemy', actor);
               },
             });
-            out.push(a);
+            out.push(rec);
           }
           return out;
         },
@@ -1397,6 +1400,36 @@ function startGame(level) {
     checkCombatTrigger();
   }
 
+  // A player summon's per-tile effects during its combat moves - the member
+  // stepping's smaller cousin. Surface damage, gum and paper land on the
+  // summon's own sheet; there's no exit, no leader, no bleed-to-lose. A summon
+  // that falls just topples - combat.notifyMemberDown skips its initiative slot
+  // and hands you a survivor if it was the one you were driving.
+  function onSummonStep(s, x, z, done, changed) {
+    if (!changed) return;
+    const ms = s.sheet;
+    const actor = s.actor;
+    const sfx = surfEffect(x, z);
+    if (sfx) {
+      if (sfx.ammo) ms.paper = Math.min(PAPER_CAP, ms.paper + sfx.ammo);
+      if (sfx.applies === 'gum' && stickGum(x, z)) ms.gum = GUM.steps;
+      const amount = effectiveSurfDamage(x, z, ms);
+      if (amount > 0) {
+        if (sfx.bleed) ms.bleed = Math.max(ms.bleed, sfx.bleed);
+        const dead = applyDamage(ms, amount);
+        actor.flinch();
+        vfx.damageText(x, z, `-${amount}`);
+        if (dead) { if (inCombat && combat) combat.notifyMemberDown(); return; }
+      }
+    }
+    if (ms.bleed > 0) {
+      ms.bleed -= 1;
+      const bled = applyDamage(ms, 1);
+      vfx.damageText(x, z, '-1');
+      if (bled && inCombat && combat) combat.notifyMemberDown();
+    }
+  }
+
   // --- input --------------------------------------------------------------------
   const controls = createControls({
     app,
@@ -1417,10 +1450,12 @@ function startGame(level) {
       // previews, AP, target rings) is all tile/ground-keyed, and a click must
       // hit the enemy on the CLICKED tile, not whichever body the ray grazes.
       if (inCombat) {
-        // Initiative: you control the member whose turn it is - combat points
-        // party.active at them. Clicks target enemies or drive that member;
-        // there's no switching (each member acts only on its own turn).
-        const actingActor = party?.members[party.active]?.actor || player;
+        // Initiative: you control whoever's turn it is - a party member or a
+        // summon you conjured. combat.actingActor is that body (party.active
+        // can't point at a summon, which lives outside the roster). Clicks
+        // target enemies or drive that unit; no switching (each acts on its
+        // own turn).
+        const actingActor = combat?.actingActor || party?.members[party.active]?.actor || player;
         // The acting member's OWN tile wins first: a self-cast (purge on
         // yourself) or a shuffle-in-place must not be stolen by an adjacent
         // enemy's tall body mesh overlapping the click.
@@ -1757,9 +1792,12 @@ function startGame(level) {
       if (en.x !== beforeX || en.z !== beforeZ) anyoneMoved = true;
     }
     if (anyoneMoved) checkCombatTrigger(); // did someone just corner the player?
-    // Player-team summons walk their combat paths and animate the same way;
-    // world.paused stops any wander (they only exist mid-fight anyway).
-    for (const s of summons) s.update(dt, world);
+    // Player-team summons walk their combat paths and animate like a member;
+    // each one's tile effects run against its own sheet (onSummonStep). They
+    // only exist mid-fight, so there's no wander to gate.
+    for (const s of summons) {
+      s.actor.update(dt, (x, z, done, changed) => onSummonStep(s, x, z, done, changed));
+    }
     for (const npc of npcs) npc.update(dt); // idle in place, ease their facing
     // The bottom narrator box gets general narration only when nothing else
     // owns the bottom of the screen: not mid-fight (combat has its own log),
@@ -1942,7 +1980,8 @@ function startGame(level) {
     },
     get npcs() { return npcs.map((n) => ({ name: n.def.name, x: n.x, z: n.z })); },
     get summons() {
-      return summons.filter((s) => s.alive).map((s) => ({ name: s.def.name, x: s.x, z: s.z, hp: s.hp }));
+      return summons.filter((s) => s.sheet.hp > 0)
+        .map((s) => ({ name: s.actor.def.name, x: s.actor.x, z: s.actor.z, hp: s.sheet.hp }));
     },
     get party() {
       return party ? party.members.map((m, i) => ({

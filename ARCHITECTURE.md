@@ -244,9 +244,10 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   `maxHp`/`maxAp` are recomputed from `attr` + an innate `base` floor by
   `recomputeDerived(sheet)`; **never assign `sheet.maxHp`/`sheet.maxAp` directly**
   (they'd drift on the next recompute). Any code that changes an attribute calls
-  `recomputeDerived`. AI-driven units (enemies, summons) are NOT sheets — they
-  read stats through `unitCombat(def)` and scale on the enemy curve, not
-  attributes.
+  `recomputeDerived`. AI-driven units (enemies, and enemy-side summons) are NOT
+  sheets — they read stats through `unitCombat(def)` and scale on the enemy
+  curve, not attributes. (A PLAYER-side summon is the exception: it's a
+  controllable temporary member with a real sheet — see **Summons** below.)
 - **Talents**: per-class in `data/classes.js` (shown on the resume cards).
   Effects the code understands: paperDamageBonus, paperAmmoDiscount,
   paperCutImmune, shockImmune, slipImmune, surfaceDamageResist, hasLighter,
@@ -280,21 +281,28 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   surface is waiting for them. Fire keeps burning during combat; printer
   explosions still resolve (combat prunes the dead).
 - **Summons** (SUMMON_PLAN.md): a combat action `type: 'summon'`, or an enemy's
-  `summon` descriptor, conjures temporary AI units on the summoner's side. A
-  unit is an `archetype` id resolved from CLASSES (or ENEMY_TYPES) through
-  `stats.js` `unitCombat` - the `applicant` class is the first (weak,
-  `playable: false`, worth no XP or loot, so a summoner is a spawner not a
-  farm). Every AI combatant carries a `team` (`'player'`/`'enemy'`); combat.js's
-  one AI driver hunts the nearest hostile on the OPPOSITE team, so enemies
-  target the party AND your summons, and your summons target enemies. Player
-  summons act on the `allies` phase (player -> allies -> enemies), live in
-  main.js's `summons` list (they block enemies but stay pass-through for the
-  party), ring friendly on Ctrl, and are despawned when the fight ends - never
-  saved, and their death is never a game-over. Enemy summons join `enemies` and
-  reuse every enemy system. Caps + cooldowns are data: the HR enemy's `summon`
-  (data/enemies.js) and the HR class's Post the Role (`summon-applicants`,
-  data/actions.js). `world.spawnSummon` + `freeTilesNear` (main.js) place them;
-  `resolveSummon` (combat.js) enforces the live cap.
+  `summon` descriptor, conjures temporary combatants on the summoner's side. The
+  `archetype` id resolves from CLASSES (or ENEMY_TYPES); the `applicant` class is
+  the first (weak, `playable: false`, worth no XP or loot, so a summoner is a
+  spawner not a farm). The two sides differ by who drives them:
+  - **Enemy-side summons are AI.** They join `enemies`, take a `{unit}`
+    initiative slot, and reuse every enemy system (the combat AI targets the
+    nearest member via `unitCombat`/`def.attacks`).
+  - **Player-side summons are YOURS to control** — Divinity/BG style. Each is a
+    temporary MEMBER: a real `createSheetFrom(applicant)` sheet (HP/AP/actions)
+    on a `CompanionActor` body, appended to combat's `members` with a `{member}`
+    initiative slot, so `beginTurn` hands YOU control on its turn (its own action
+    bar - Résumé Slap - and AP). It's NOT in `party.members` (outside the cap,
+    unsaved, so `party.active` never points at it - combat exposes
+    `actingActor`); it lives in main.js's `summons` list as `{ sheet, actor }`,
+    stepped like a member (`onSummonStep` for surfaces), blocks enemies but is
+    pass-through for the party, rings friendly on Ctrl, and is despawned when the
+    fight ends. A summon falling is never a game-over (`livingParty` gates
+    defeat - a party WIPE of real members only).
+  Caps + cooldowns are data: the HR enemy's `summon` (data/enemies.js) and the
+  HR class's Post the Role (`summon-applicants`, data/actions.js).
+  `world.spawnSummon` + `freeTilesNear` (main.js) place them; `resolveSummon`
+  (combat.js) enforces the live cap and files each onto the right side.
 - **New furniture/prop**: a tile entry with `model` (a .glb under `assets/`) and
   `solid: true` - it blocks movement and renders as the model in both game and
   editor. Props are level data, never hardcoded set dressing.

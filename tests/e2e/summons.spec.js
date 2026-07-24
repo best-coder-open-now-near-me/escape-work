@@ -1,7 +1,7 @@
-// Enemy HR's summon power, in a bespoke arena: hand HR the round and it posts
-// the role - applicants materialize and join the engaged enemies, capped
-// (SUMMON_PLAN.md milestone 1). The player-side summon and its ally phase land
-// in later milestones with their own specs.
+// Summons, in bespoke arenas. Enemy HR posts the role and its applicants join
+// the engaged enemies as AI. A player summon is the opposite: a temporary
+// MEMBER you control - it takes its own initiative turn in PLAYER phase, with
+// its own action bar - not an autopilot ally (SUMMON_PLAN.md).
 import { test, expect } from '@playwright/test';
 import { bootStash, enterCombat } from './helpers.js';
 
@@ -67,49 +67,55 @@ const MELEE_ARENA = {
   ],
 };
 
-const managerHp = (page) => page.evaluate(() => {
-  const m = (window.__combat?.enemies || []).find((e) => e.name === 'The Manager' && e.alive);
-  return m ? m.hp : null;
+// The current initiative slot: its name, whose side, and whether it's a
+// controllable member. Null between states.
+const currentSlot = (page) => page.evaluate(() => {
+  const c = window.__combat;
+  if (!c) return null;
+  const o = c.order.find((s) => s.current);
+  return o ? { name: o.name, member: o.member, team: o.team, phase: c.phase } : null;
 });
 
-test('a player-summoned ally fights for you, then vanishes when the fight ends', async ({ page }) => {
+test('a player summon is a controllable member, then vanishes when the fight ends', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, MELEE_ARENA, 'office-drone');
   await enterCombat(page);
 
-  // Summon applicants onto the player's side (the M3 action drives this in
-  // game; here the debug hook stands in). They're summons, not enemies - and
-  // a couple of them so the Manager (which targets the nearest, lowest-HP
-  // hostile) can't pick off a lone ally before any of them swings.
+  // Summon applicants onto the player's side (the HR action drives this in
+  // game; the debug hook stands in). Three of them, so the Manager can't pick
+  // off a lone one before its turn comes up. They're summons, not enemies.
   await page.evaluate(() => window.__combat.summonAlly('applicant', 3));
   expect(await page.evaluate(() => window.__game.summons.length)).toBeGreaterThanOrEqual(1);
   expect(await page.evaluate(() =>
     (window.__combat.enemies || []).some((e) => e.name === 'Applicant'))).toBe(false);
-  // Each ally takes a slot in the ONE initiative order (proof they'll act).
-  expect(await page.evaluate(() =>
-    window.__combat.order.some((o) => !o.member && o.team === 'player'))).toBe(true);
+  // Each applicant takes a PLAYER-team MEMBER slot in the one initiative order
+  // (member: true) - a controllable unit, not an AI ally (member: false).
+  expect(await page.evaluate(() => window.__combat.order.some(
+    (o) => o.name === 'Applicant' && o.member && o.team === 'player'))).toBe(true);
 
-  const hp0 = await managerHp(page);
-  expect(hp0).toBeGreaterThan(0);
-
-  // Drive the fight: end each of the player's turns and let the AI act. On an
-  // ally's own initiative turn it advances on the Manager and swings, so the
-  // Manager is bloodied by an attacker that is NOT the player - proof the
-  // allies fight for you. Keep the player standing (god top-up) so the fight
-  // lasts long enough; the point is a NON-player attacker landing a blow.
-  let hurt = false;
-  for (let i = 0; i < 14 && !hurt; i++) {
+  // Drive the order: end each real member's turn, wait through the AI's, and
+  // catch an applicant's OWN turn. Landing on it in PLAYER phase, with its
+  // Résumé Slap on the bar, is the proof that YOU control the summon.
+  let controlled = false;
+  for (let i = 0; i < 24 && !controlled; i++) {
     if (!(await page.evaluate(() => !!window.__combat))) break; // fight ended
     await page.evaluate(() => { if (window.__god.player) window.__god.player.hp = window.__god.player.maxHp; });
-    if (await page.evaluate(() => window.__combat?.phase === 'player')) await page.click('#combat-end-turn').catch(() => {});
-    await page.waitForTimeout(1600); // let the AI turns play out
-    const hp = await managerHp(page);
-    if (hp !== null && hp < hp0) hurt = true;
+    const cur = await currentSlot(page);
+    if (!cur) { await page.waitForTimeout(400); continue; }
+    if (cur.phase === 'player' && cur.name === 'Applicant') {
+      controlled = true;
+      await expect(page.locator('#act-resume-slap')).toBeVisible(); // the summon's own bar
+    } else if (cur.phase === 'player') {
+      await page.click('#combat-end-turn').catch(() => {}); // a real member - pass the turn
+      await page.waitForTimeout(400);
+    } else {
+      await page.waitForTimeout(500); // an AI enemy is acting
+    }
   }
-  expect(hurt).toBe(true);
+  expect(controlled).toBe(true);
 
-  // End the fight (force-kill the remaining coworkers): the summon is a combat
-  // effect, so victory despawns it - no lingering applicants on the floor.
+  // End the fight (force-kill the remaining coworkers): summons are a combat
+  // effect, so victory despawns them - no lingering applicants on the floor.
   await page.evaluate(() => window.__god.enemies.forEach((e) => e.alive && e.die()));
   await expect.poll(() => page.evaluate(() => window.__game.summons.length),
     { timeout: 20_000 }).toBe(0);
