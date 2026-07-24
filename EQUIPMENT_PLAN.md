@@ -226,9 +226,15 @@ untouched.
      characters are made whole by the migration; a freshly-looted weapon does
      nothing until it's equipped, which the M2 verb enables. No UI this
      milestone.
-2. **The verbs.** Pockets Equip/Unequip + the equipped strip; out-of-combat
-   gate; character-sheet display; god hooks. e2e: loot a stapler → equip it →
-   `damageBonus` rises → unequip with full pockets is refused politely.
+2. **The verbs.** ✅ Landed. The pockets panel grows an **equipped strip**
+   (three labeled slots, `#equip-slot-<slot>` + a `Stow` button
+   `#equip-unequip-<slot>`) and an **Equip** verb on any gear row
+   (`#inv-equip-<i>`); `looting.js` gates both to out-of-combat, narrates, and
+   refreshes. The character sheet (C) gained an EQUIPPED section. e2e
+   (`equipment.spec.js`): equip a weapon from the pockets → it lands in the
+   slot and leaves the bag → stow it back; and a full-bag unstow is refused
+   politely (the weapon stays, nothing vanishes). Unit 147/147; e2e 6/6
+   (equipment + looting + char-sheet regressions).
 3. **The basic weapon attack** (promoted from stretch, decision #7). The
    computed `sheet.actions + equippedAction(sheet)` list; a weapon defines the
    swing's `min`/`max`; bare-hands default. The action appears on the combat

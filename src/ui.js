@@ -1,6 +1,7 @@
 // All DOM-facing UI: the HUD lines, the right-click context menu, and the
 // win/lose overlays. Nothing in here knows about PlayCanvas.
 import { statusList } from './statuses.js';
+import { EQUIP_SLOTS } from './stats.js';
 
 // Shared chrome for floating panels and buttons - combat.js and the editor
 // build their own DOM but should look like the rest of the UI, so the
@@ -338,7 +339,10 @@ export function createLootLabels() {
 // The pockets. Toggled with I or the bag button. Rows come straight from the
 // item registry; `usable` items get Use, flavor items get Examine, everything
 // can be dropped (dropping creates a loose floor item the Alt overlay sees).
-export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine }) {
+// Equip-slot display names (In Hand / Dress Code / Flair).
+const SLOT_LABELS = { weapon: 'In Hand', outfit: 'Dress Code', trinket: 'Flair' };
+
+export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onEquip, onUnequip }) {
   const bag = document.createElement('button');
   bag.id = 'inventory-btn';
   bag.textContent = '🎒';
@@ -372,10 +376,49 @@ export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine }) {
     return b;
   };
 
+  // The three equipped slots, above the pockets: each names its slot and shows
+  // the worn item (or a dash), with an Unequip button when occupied. Stable ids
+  // #equip-slot-<slot> / #equip-unequip-<slot> for the e2e suite.
+  function renderEquipStrip(sheet) {
+    const eq = sheet?.equipped || {};
+    const wrap = document.createElement('div');
+    wrap.id = 'equip-strip';
+    wrap.style.margin = '0 0 9px';
+    for (const slot of EQUIP_SLOTS) {
+      const id = eq[slot];
+      const def = id ? ITEMS[id] : null;
+      const row = document.createElement('div');
+      row.id = `equip-slot-${slot}`;
+      row.dataset.item = id || '';
+      Object.assign(row.style, {
+        display: 'flex', alignItems: 'center', gap: '7px', padding: '3px 2px',
+      });
+      const label = document.createElement('div');
+      label.textContent = SLOT_LABELS[slot];
+      Object.assign(label.style, { width: '70px', opacity: '.6', fontSize: '11px' });
+      row.appendChild(label);
+      const item = document.createElement('div');
+      item.style.flex = '1';
+      item.textContent = def ? `${def.icon || '📦'} ${def.name}` : '—';
+      if (!def) item.style.opacity = '.45';
+      item.title = def?.examine || '';
+      row.appendChild(item);
+      if (def && onUnequip) {
+        const un = smallBtn('Stow', 'Unequip to pockets');
+        un.id = `equip-unequip-${slot}`;
+        un.onclick = () => onUnequip(slot);
+        row.appendChild(un);
+      }
+      wrap.appendChild(row);
+    }
+    panel.appendChild(wrap);
+  }
+
   function refresh(sheet) {
     const inv = sheet?.inventory || [];
     panel.innerHTML = `<div style="font-weight:700; letter-spacing:1px; margin-bottom:7px;">
       POCKETS <span style="opacity:.6; font-weight:400;">${inv.length}/${cap} · 📄 ${sheet?.paper ?? 0}</span></div>`;
+    if (sheet?.equipped) renderEquipStrip(sheet);
     if (!inv.length) {
       const empty = document.createElement('div');
       empty.style.opacity = '.6';
@@ -396,7 +439,14 @@ export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine }) {
       name.style.flex = '1';
       name.title = def?.examine || '';
       row.appendChild(name);
-      if (def?.heal || def?.ammo) {
+      // Equippable gear gets Equip; a consumable gets Use; everything else,
+      // Examine. Drop is always available.
+      if (def?.slot && onEquip) {
+        const eq = smallBtn('Equip', `Equip to ${SLOT_LABELS[def.slot] || def.slot}`);
+        eq.id = `inv-equip-${i}`;
+        eq.onclick = () => onEquip(i);
+        row.appendChild(eq);
+      } else if (def?.heal || def?.ammo) {
         const use = smallBtn('Use', def.heal ? `+${def.heal} HP` : `+${def.ammo} paper`);
         use.id = `inv-use-${i}`;
         use.onclick = () => onUse(i);
@@ -737,6 +787,8 @@ export function createCharacterSheet({ onLevelUp } = {}) {
       <div style="${label}">DERIVED</div>
       ${row('HP', `${vm.hp}/${vm.maxHp}`)}${row('AP', vm.maxAp)}
       ${row('Damage bonus', `+${vm.damageBonus}`)}${row('Deflect', vm.deflect)}
+      ${vm.equipped ? `<div style="${label}">EQUIPPED</div>`
+        + EQUIP_SLOTS.map((slot) => row(SLOT_LABELS[slot], vm.equipped[slot] || '—')).join('') : ''}
       ${vm.talent ? `<div style="${label}">TALENT</div><div style="opacity:.85;">${vm.talent.name}</div>` : ''}
       <div style="${label}">PERKS</div>${perks}
       ${pending ? `<button id="charsheet-levelup" style="margin-top:12px; width:100%; padding:7px;

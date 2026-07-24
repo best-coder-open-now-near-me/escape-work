@@ -8,7 +8,7 @@
 // accessors): getActor, getSheet, isInCombat, isGameOver - plus approachAndDo
 // so overlay clicks walk the leader in.
 import { ITEMS, LOOT_TABLES, rollLoot } from './data/items.js';
-import { PAPER_CAP } from './stats.js';
+import { PAPER_CAP, equipItem, unequipItem } from './stats.js';
 import { placeDroppedItem } from './tile-renderer.js';
 import * as ui from './ui.js';
 
@@ -35,6 +35,8 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     onUse: (i) => useItem(i),
     onDrop: (i) => dropItem(i),
     onExamine: (i) => ui.say(ITEMS[getSheet().inventory[i]]?.examine || 'It is what it is.'),
+    onEquip: (i) => equip(i),
+    onUnequip: (slot) => unequip(slot),
   });
   const lootLabels = ui.createLootLabels();
 
@@ -140,6 +142,41 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     ui.say(def.useLog || `You use the ${itemName(id)}.`);
     ui.updateStatsHud(sheet);
     invPanel.refresh(sheet);
+  }
+
+  // Equip the item at pocket index `i` into its slot; the incumbent (if any)
+  // swaps back to the bag. Out of combat only - swapping gear mid-fight would
+  // change your derived numbers under the initiative order (EQUIPMENT decision
+  // #6). The stat fold is stats.js's job; here we gate, narrate, and refresh.
+  function equip(i) {
+    const sheet = getSheet();
+    if (!sheet || i >= sheet.inventory.length) return;
+    if (isInCombat()) { ui.say('Not mid-fight - swap your kit on your own time.'); return; }
+    const id = sheet.inventory[i];
+    if (equipItem(sheet, i)) {
+      ui.say(`You equip the ${itemName(id)}.`);
+      ui.updateStatsHud(sheet);
+      invPanel.refresh(sheet);
+    } else {
+      ui.say('That is not something you can equip.');
+    }
+  }
+
+  // Unequip a slot back to the pockets - refused politely when the bag is full
+  // (INV_CAP), so gear never vanishes.
+  function unequip(slot) {
+    const sheet = getSheet();
+    if (!sheet) return;
+    if (isInCombat()) { ui.say('Not mid-fight - swap your kit on your own time.'); return; }
+    const id = sheet.equipped?.[slot];
+    if (!id) return;
+    if (unequipItem(sheet, slot, INV_CAP)) {
+      ui.say(`You stow the ${itemName(id)}.`);
+      ui.updateStatsHud(sheet);
+      invPanel.refresh(sheet);
+    } else {
+      ui.say('Pockets are full - nowhere to stow it.');
+    }
   }
 
   function dropItem(i) {

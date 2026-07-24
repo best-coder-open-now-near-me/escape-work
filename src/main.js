@@ -10,13 +10,14 @@ import { LEVELS, FIRST_LEVEL } from './data/levels.js';
 import { SURFACES, ELECTRIFIED, FIRE } from './data/surfaces.js';
 import { createSurfaceRuntime } from './surfaces-runtime.js';
 import { ENEMY_TYPES } from './data/enemies.js';
+import { ITEMS } from './data/items.js';
 import { CLASSES } from './data/classes.js';
 import { ACTIONS } from './data/actions.js';
 import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
 import {
   createSheet, createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
-  scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP,
+  scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS,
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
@@ -1011,6 +1012,7 @@ function startGame(level) {
       name: s.name, className: s.className, level: s.level, xp: s.xp, xpNext: s.xpNext,
       attr: { ...s.attr }, hp: s.hp, maxHp: s.maxHp, maxAp: s.maxAp,
       damageBonus: damageBonus(s), deflect: deflect(s),
+      equipped: Object.fromEntries(EQUIP_SLOTS.map((slot) => [slot, ITEMS[s.equipped?.[slot]]?.name || null])),
       talent: s.talent ? { name: s.talent.name } : null,
       perks: (s.perks || []).map((id) => trackNode(id)?.name || id),
       attrPoints: s.attrPoints || 0, classPoints: s.classPoints || 0,
