@@ -26,6 +26,8 @@ export const ITEMS = {
     useLog: 'You drink someone\'s cold coffee. It helps, somehow. +2 HP.',
     examine: 'A mug that says WORLD\'S OKAYEST EMPLOYEE. Still half full.',
   },
+  // NB: there is also an `energy-drink` ACTION (data/actions.js, IT's heal).
+  // Same id, separate registry, never cross-looked-up - see the note there.
   'energy-drink': {
     name: 'Loose Energy Drink',
     icon: '🥫',

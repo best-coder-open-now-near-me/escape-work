@@ -142,6 +142,11 @@ export const CLASSES = {
     maxHp: 5,
     ap: 4,
     bonusDmg: 0,
+    // Explicit zeros keep the source-of-truth rule (every class carries `attr`)
+    // without changing behavior: base is solved to reproduce maxHp/ap, and a
+    // zero spread means no Savvy damage, no Composure deflect, +0 initiative -
+    // exactly what the applicant had when it omitted the block.
+    attr: { grit: 0, hustle: 0, savvy: 0, composure: 0 },
     // Player-controlled summons swing from `actions` (an action bar) like any
     // member; enemy-side AI summons roll from `attacks` below instead. The
     // applicant carries both - the superset a shared archetype needs.
