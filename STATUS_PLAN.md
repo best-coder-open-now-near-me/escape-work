@@ -208,9 +208,15 @@ map seeds `{}`.
 
 ## Milestones (each a PR that keeps `npm test` + e2e green)
 
-1. **Registry + runtime, inert.** `data/statuses.js`, `src/statuses.js`, full
-   unit coverage (apply/refresh/resist/immune/tick/expire/aggregate). Nothing
-   imports them yet. Zero observable change.
+1. **Registry + runtime, inert.** ✅ Landed. `data/statuses.js` (the seven
+   entries: the four incumbents + stun/burning/blinded) and `src/statuses.js`
+   (`applyStatus`/`hasStatus`/`statusLeft`/`statusFx`/`tickTurn`/`tickStep`/
+   `clearStatuses`/`statusList`). Full unit coverage: default-duration apply,
+   refresh-to-max (no stacking), resist-with-floor, immunity (`statusImmune`
+   list + `paperCutImmune` alias), the `statusFx` merge rules (OR booleans,
+   multiply `*Mult`, sum other numerics), dot tick + expiry, turn/step clocks
+   not cross-ticking, and the clock/harmful/purge sweeps. Nothing imports them
+   yet - zero observable change. Unit 127→138.
 2. **Turn-clock incumbents.** `surprised` + `deflecting` reimplemented on the
    framework; purge generalizes to `clearStatuses`; combat-end sweep. The
    existing surprise/deflect e2e behavior is the regression guard — same
