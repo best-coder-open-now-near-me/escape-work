@@ -30,6 +30,27 @@ export const PROGRESSION = {
   CP_PER_LEVEL: 1,      // class points banked per level-up (spent on the track, M3)
 };
 
+// --- the to-hit / defense model (HIT_PLAN.md) -------------------------------
+// A DOS2-style percentage hit model: hitChance = BASE + accuracy(attacker) -
+// dodge(defender) + mods, clamped. Accuracy derives from Savvy, dodge from
+// Hustle - the same "attributes are the source, numbers are derived" shape the
+// rest of the sheet uses. Enemies aren't sheets, so their innate accuracy/dodge
+// ride through unitCombat(def).
+//
+// MILESTONE 1 ships this INERT: BASE and both clamp bounds are 1.0, so
+// hitChance is identically 1.0 for any inputs and nothing can miss yet. The
+// wiring (combat.js resolveHit) lands now so it can be proven behavior-neutral;
+// a follow-up flips these constants live and turns misses into real events.
+export const HIT = {
+  BASE: 1.0,             // hit chance before any modifiers (M1: inert)
+  ACC_PER_SAVVY: 3,      // every N Savvy = one accuracy step
+  DODGE_PER_HUSTLE: 3,   // every N Hustle = one dodge step
+  STEP: 0.05,            // one step = ±5% hit chance
+  CLAMP_LO: 1.0,         // M1: floor at 1.0 too, so a stacked dodge can't miss
+  CLAMP_HI: 1.0,         // M1: cap at 1.0 (live model caps below 1 for the whiff)
+  SURPRISE_ACC_BONUS: 0.15, // attacking a surprised target (applied by combat)
+};
+
 export const ATTR_KEYS = ['grit', 'hustle', 'savvy', 'composure'];
 
 // A clean {grit,hustle,savvy,composure} object from any partial source.
@@ -180,6 +201,11 @@ export function unitCombat(def) {
     attacks: def.attacks || [],
     xp: def.xp ?? 0,
     loot: def.loot || [],
+    // Innate hit-chance stats for AI units (fractions, default 0). Enemies
+    // aren't sheets, so this is the seam their accuracy/dodge ride through -
+    // the same passthrough every other unit stat uses (HIT_PLAN.md).
+    accuracy: def.accuracy || 0,
+    dodge: def.dodge || 0,
   };
 }
 
@@ -205,6 +231,37 @@ export function deflect(sheet) {
 // ones (a combat gum flick) by this many turns. Poise on a different axis.
 export function statusResist(sheet) {
   return Math.floor((sheet.attr?.composure || 0) / PROGRESSION.COMP_PER_DEFLECT);
+}
+
+// A sheet's accuracy: how much its Savvy adds to the hit chance, as a fraction
+// (0.05 per step). Layered onto the attacker side of hitChance.
+export function accuracy(sheet) {
+  return Math.floor((sheet.attr?.savvy || 0) / HIT.ACC_PER_SAVVY) * HIT.STEP;
+}
+
+// A sheet's dodge: how much its Hustle subtracts from an attacker's hit chance,
+// as a fraction. Hustle already buys AP and initiative; this is its defensive
+// second job, completing the two-jobs-per-attribute symmetry (HIT_PLAN #2).
+export function dodge(sheet) {
+  return Math.floor((sheet.attr?.hustle || 0) / HIT.DODGE_PER_HUSTLE) * HIT.STEP;
+}
+
+// The chance an attack lands: base + attacker accuracy - defender dodge + any
+// flat modifiers (surprise, and later status/equipment terms), clamped to the
+// HIT bounds. `acc`/`dge`/`mods` are fractions (0.05 = 5%). A pure function of
+// its inputs and the HIT constants - combat reads it, the god panel can pin the
+// constants, tests assert the math.
+export function hitChance(acc, dge, mods = 0) {
+  const raw = HIT.BASE + (acc || 0) - (dge || 0) + (mods || 0);
+  return Math.min(HIT.CLAMP_HI, Math.max(HIT.CLAMP_LO, raw));
+}
+
+// Roll a hit against a chance in [0, 1]. `rng` returns a float in [0, 1) - the
+// same injectable-rng shape initiative.js uses, so combat can feed a seeded or
+// pinned source and tests stay deterministic. A hit is rng() < chance, so
+// chance 1 always hits and chance 0 never does.
+export function rollHit(chance, rng = Math.random) {
+  return rng() < chance;
 }
 
 // Returns true when the character levelled up ("got promoted"). Level-ups fully

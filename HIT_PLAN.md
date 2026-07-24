@@ -175,12 +175,21 @@ None. Accuracy/dodge are derived, never stored; no save-version bump.
 
 ## Milestones (each a PR that keeps `npm test` + e2e green)
 
-1. **The machinery, inert.** `HIT` block + the four pure helpers + `unitCombat`
-   pass-through, `startCombat({ rng })`, and the `resolveHit` call sites wired
-   in `performOn`/`fireCone`/`aiAttack` — **with `BASE: 1.0, CLAMP_LO: 1.0`**
-   so every roll still hits. Unit tests pin the math (chance formula, clamps,
-   rng edge cases); a unit guard asserts the shipped constants make
-   `hitChance` ≡ 1 this milestone. Zero observable change.
+1. **The machinery, inert.** ✅ Landed. `HIT` block + the four pure helpers
+   (`accuracy`/`dodge`/`hitChance`/`rollHit`) + `unitCombat` acc/dodge
+   pass-through in `stats.js`; `startCombat({ rng })`; a `resolveHit` helper
+   wired into `performOn`/`fireCone`/`aiAttack` — **shipped with `BASE`,
+   `CLAMP_LO`, and `CLAMP_HI` all `1.0`**, so `hitChance` is identically 1 and
+   every roll hits. The miss branches are written **complete** (spend AP/ammo,
+   `MISS` popup, a generic fallback line, skip damage + riders + flinch) but
+   dormant, so the follow-up is purely data/content: flip the constants, author
+   per-action `missLog`, add the god pin + e2e. Unit 123/123 (8 new: step math,
+   both clamp bounds, the inert guard, `rollHit` rng edges, `unitCombat`
+   defaults); build clean; combat e2e green (the inert invariant). Zero
+   observable change.
+   - **Note:** the surprise accuracy bonus (`SURPRISE_ACC_BONUS`) constant
+     ships now but is not yet read at the call sites — it lands with the live
+     flip in milestone 3, kept out of M1 to hold the diff provably inert.
 2. **Turn it on.** Constants go live (0.85 base); miss handling (popup, logs,
    no riders); `missLog` lines authored for the shipped actions + enemy
    attacks; the god pin; e2e specs that assert damage set `forceHit = true`,

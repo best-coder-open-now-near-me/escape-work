@@ -11,7 +11,7 @@
 import { ACTIONS } from './data/actions.js';
 import { SURFACES, GUM } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
-import { damageBonus, applyDamage, deflect, statusResist } from './stats.js';
+import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge } from './stats.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { buildInitiativeOrder, rollInitiative, insertionIndex } from './initiative.js';
 
@@ -21,7 +21,7 @@ const cheb = (ax, az, bx, bz) => Math.max(Math.abs(ax - bx), Math.abs(az - bz));
 const THROW_RANGE = 5;
 const SURPRISE_RADIUS = 2; // engaged from beyond this = loses the first turn
 
-export function startCombat({ app, party, engaged, world, fx, callbacks, opening = null }) {
+export function startCombat({ app, party, engaged, world, fx, callbacks, opening = null, rng = Math.random }) {
   // Per-member turn state: every party member fights with their own AP pool,
   // deflect stance and limited-use counters. `active` is whose action bar,
   // previews and clicks are live - with one member that is simply "you";
@@ -78,6 +78,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const base = ACTIONS[id].ammoCost || 0;
     return base > 1 ? Math.max(1, base - (talentFxOf(active).paperAmmoDiscount || 0)) : base;
   };
+  // One attack roll (HIT_PLAN.md): base + attacker accuracy - defender dodge +
+  // mods, rolled against combat's injectable `rng`. MILESTONE 1 ships the HIT
+  // constants inert (hitChance is identically 1), so this always returns true
+  // and the miss branches below never fire - the wiring lands provably
+  // behavior-neutral, and a follow-up flips the constants to turn misses live.
+  const resolveHit = (accFrac, dodgeFrac, mods = 0) =>
+    rollHit(hitChance(accFrac, dodgeFrac, mods), rng);
+  const MISS_COLOR = '#b8c0d0';
   // Movement cost per unit distance, derived from the surface's `slow`
   // multiplier (0.5 => twice the AP) - one number in data drives both walk
   // speed and AP pricing, for everyone. Gum on a shoe surcharges every step;
@@ -462,16 +470,28 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return;
     }
     joinCombat(en); // attacking a bystander drags them into the fight
-    let dmg = rand(a.min, a.max) + damageBonus(active.sheet); // carried staplers count
+    // Spend the cost first: a miss still burns the AP and the paper (HIT_PLAN
+    // #4). The projectile/lunge also fires either way - the swing happened, it
+    // just may not land.
     if (a.ammoCost) {
       active.sheet.paper -= ammoCostOf(id);
-      dmg += talentFxOf(active).paperDamageBonus || 0;
       fx.projectile({ x: active.actor.x, z: active.actor.z }, { x: en.x, z: en.z },
         id === 'paper-airplane' ? 'plane' : 'ball');
     } else {
       active.actor.lunge(en.x, en.z);
     }
     active.ap -= a.ap;
+    // The attack roll. Inert under M1 constants (always hits); when live, a miss
+    // spends the cost above and does nothing else - no damage, no purge.
+    if (!resolveHit(accuracy(active.sheet), en.def.dodge || 0)) {
+      fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
+      log(a.missLog || `${a.log} It misses.`);
+      armed = null;
+      refresh();
+      return;
+    }
+    let dmg = rand(a.min, a.max) + damageBonus(active.sheet); // carried staplers count
+    if (a.ammoCost) dmg += talentFxOf(active).paperDamageBonus || 0;
     const died = en.takeDamage(dmg);
     fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b');
     let line = `${a.log} ${dmg} damage!`;
@@ -502,8 +522,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (!test(en.x, en.z)) continue;
       if (!world.hasLos(active.actor.x, active.actor.z, en.x, en.z)) continue;
       joinCombat(en); // a bystander caught in the mail joins the fight
-      const dmg = rand(a.min, a.max) + damageBonus(active.sheet);
       fx.projectile({ x: active.actor.x, z: active.actor.z }, { x: en.x, z: en.z }, 'plane');
+      // Roll per target (inert under M1). A dodged envelope flies but doesn't
+      // land; the wedge's `leaves` surface still carpets below (HIT_PLAN #4).
+      if (!resolveHit(accuracy(active.sheet), en.def.dodge || 0)) {
+        fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
+        continue;
+      }
+      const dmg = rand(a.min, a.max) + damageBonus(active.sheet);
       const died = en.takeDamage(dmg);
       fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b');
       hits += 1;
@@ -819,6 +845,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     unit.lunge(target.actor.x, target.actor.z);
     if (target.member) {
       const m = target.member;
+      // The attack roll (inert under M1). A miss skips damage, the deflect
+      // interaction, the flinch, and any applied status; the enemy's AP was
+      // already committed by the caller.
+      if (!resolveHit(unit.def.accuracy || 0, dodge(m.sheet))) {
+        fx.damageText(m.actor.x, m.actor.z, 'MISS', MISS_COLOR);
+        log(atk.missLog || `${atk.log} It misses.`);
+        refresh();
+        return;
+      }
       let line = atk.log;
       // Composure soaks a flat slice off the hit (one point always lands),
       // before the Deflect Blame stance halves whatever is left.

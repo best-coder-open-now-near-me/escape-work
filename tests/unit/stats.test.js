@@ -5,7 +5,8 @@ import {
   createSheet, gainXp, damageBonus, applyDamage,
   recomputeDerived, ensureAttributes, spendAttrPoint, deflect,
   spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist,
-  PROGRESSION, ATTR_KEYS, ENEMY_SCALING,
+  accuracy, dodge, hitChance, rollHit, unitCombat,
+  PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
@@ -281,4 +282,66 @@ test('spending a non-HP attribute leaves current HP untouched', () => {
   s.attrPoints = 1;
   assert.equal(spendAttrPoint(s, 'savvy'), true); // no maxHp change
   assert.equal(s.hp, 10);
+});
+
+// --- the to-hit / defense model (HIT_PLAN.md milestone 1) --------------------
+
+test('accuracy derives from Savvy in STEP-sized increments', () => {
+  const s = createSheet('office-drone');
+  s.attr.savvy = 0;
+  assert.equal(accuracy(s), 0);
+  s.attr.savvy = HIT.ACC_PER_SAVVY;         // exactly one step
+  assert.equal(accuracy(s), HIT.STEP);
+  s.attr.savvy = HIT.ACC_PER_SAVVY * 2 + 1; // two steps; the remainder is dropped
+  assert.equal(accuracy(s), Math.floor(s.attr.savvy / HIT.ACC_PER_SAVVY) * HIT.STEP);
+});
+
+test('dodge derives from Hustle in STEP-sized increments', () => {
+  const s = createSheet('office-drone');
+  s.attr.hustle = 0;
+  assert.equal(dodge(s), 0);
+  s.attr.hustle = HIT.DODGE_PER_HUSTLE;
+  assert.equal(dodge(s), HIT.STEP);
+});
+
+test('accuracy/dodge tolerate a sheet with no attributes', () => {
+  assert.equal(accuracy({}), 0);
+  assert.equal(dodge({}), 0);
+});
+
+test('hitChance engages both clamp bounds', () => {
+  // A big accuracy edge clamps down to CLAMP_HI; a big dodge edge clamps up to
+  // CLAMP_LO. Under the milestone-1 (inert) constants both bounds are 1.0.
+  assert.equal(hitChance(0.5, 0), HIT.CLAMP_HI);
+  assert.equal(hitChance(0, 0.9), HIT.CLAMP_LO);
+});
+
+test('milestone 1 ships HIT inert: every computed chance is 1', () => {
+  assert.equal(HIT.BASE, 1);
+  assert.equal(HIT.CLAMP_LO, 1);
+  assert.equal(HIT.CLAMP_HI, 1);
+  for (const acc of [0, 0.1, 0.3]) {
+    for (const dge of [0, 0.15, 0.5]) {
+      for (const mod of [-0.3, 0, 0.2]) {
+        assert.equal(hitChance(acc, dge, mod), 1, `acc ${acc} dge ${dge} mod ${mod}`);
+      }
+    }
+  }
+});
+
+test('rollHit lands when the rng falls under the chance', () => {
+  assert.equal(rollHit(0.5, () => 0.49), true);  // just under -> hit
+  assert.equal(rollHit(0.5, () => 0.5), false);  // exactly at -> miss
+  assert.equal(rollHit(0.5, () => 0.51), false); // just over -> miss
+  assert.equal(rollHit(1, () => 0.999), true);   // a certain hit never whiffs
+  assert.equal(rollHit(0, () => 0), false);      // an impossible hit never lands
+});
+
+test('unitCombat passes innate accuracy/dodge through, defaulting to 0', () => {
+  const bare = unitCombat({ name: 'x', hp: 5, ap: 4 });
+  assert.equal(bare.accuracy, 0);
+  assert.equal(bare.dodge, 0);
+  const sharp = unitCombat({ name: 'y', hp: 5, ap: 4, accuracy: 0.1, dodge: 0.05 });
+  assert.equal(sharp.accuracy, 0.1);
+  assert.equal(sharp.dodge, 0.05);
 });
