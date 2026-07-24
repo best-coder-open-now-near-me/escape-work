@@ -7,7 +7,7 @@
 // classes, actions) is data in src/data/; levels are hand-editable JSON - or
 // paintable in the built-in editor (#editor / the link on the class picker).
 import { LEVELS, FIRST_LEVEL } from './data/levels.js';
-import { SURFACES, ELECTRIFIED, FIRE, GUM } from './data/surfaces.js';
+import { SURFACES, ELECTRIFIED, FIRE } from './data/surfaces.js';
 import { createSurfaceRuntime } from './surfaces-runtime.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { CLASSES } from './data/classes.js';
@@ -22,6 +22,7 @@ import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP,
 } from './party.js';
+import { applyStatus, statusFx, hasStatus, tickStep, statusLeft } from './statuses.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel } from './scene.js';
@@ -1324,16 +1325,25 @@ function startGame(level) {
         }
       }
     }
-    // Paper-cut bleeding drips on every tile entered while it lasts.
-    if (changed && ms.bleed > 0) {
-      ms.bleed -= 1;
-      const bled = applyDamage(ms, 1);
-      vfx.damageText(x, z, '-1');
-      ui.say('You drip on the carpet. -1 HP.');
-      ui.updateStatsHud(sheet);
-      if (bled) {
-        downOrLose(member, 'Death by a thousand paper cuts. Well - several.');
-        return;
+    // Step-clock statuses tick on every tile entered: bleed drips its dot, gum
+    // wears down. Capture slip-proofing BEFORE the tick so the tile gum wears
+    // off on still keeps its traction.
+    const wasSlipProof = !!statusFx(ms).slipProof;
+    if (changed) {
+      const { damage, expired } = tickStep(ms);
+      if (damage > 0) {
+        const bled = applyDamage(ms, damage);
+        vfx.damageText(x, z, `-${damage}`);
+        ui.say('You drip on the carpet. -1 HP.');
+        ui.updateStatsHud(sheet);
+        if (bled) {
+          downOrLose(member, 'Death by a thousand paper cuts. Well - several.');
+          return;
+        }
+      }
+      if (expired.includes('gum')) {
+        ui.say('The gum finally lets go of your sole. Freedom.');
+        ui.updateStatsHud(sheet);
       }
     }
     // Surface effects (data/surfaces.js): fire and electrified pools hurt,
@@ -1347,14 +1357,14 @@ function startGame(level) {
       }
       // Gum on shoe: slowed, no kicking, but genuine traction (can't slip).
       if (sfx.applies === 'gum' && stickGum(x, z)) {
-        const had = ms.gum > 0;
-        ms.gum = GUM.steps;
+        const had = hasStatus(ms, 'gum');
+        applyStatus(ms, 'gum');
         ui.say(had ? 'More gum. You are building a collection.' : sfx.message);
         ui.updateStatsHud(sheet);
       }
       const amount = effectiveSurfDamage(x, z, ms);
       if (amount > 0) {
-        if (sfx.bleed) ms.bleed = Math.max(ms.bleed, sfx.bleed);
+        if (sfx.bleed) applyStatus(ms, 'bleed', { duration: sfx.bleed });
         const dead = applyDamage(ms, amount);
         actor.flinch();
         vfx.damageText(x, z, `-${amount}`);
@@ -1377,7 +1387,7 @@ function startGame(level) {
     // walk right there. In combat the movement AP already spent stays spent -
     // that IS the penalty. slipImmune tread never slips; neither does a
     // gummed shoe - gum is traction.
-    if (changed && !gameOver && !ms.talent?.effects?.slipImmune && !(ms.gum > 0)) {
+    if (changed && !gameOver && !ms.talent?.effects?.slipImmune && !(wasSlipProof || statusFx(ms).slipProof)) {
       const chance = slipChanceAt(x, z);
       if (chance && Math.random() < chance) {
         actor.clearPath();
@@ -1385,14 +1395,6 @@ function startGame(level) {
         vfx.damageText(x, z, 'slip!', '#8ad4df');
         if (inCombat) combat?.notifySlip();
         else ui.say('The floor was, in fact, wet. You go down. Gracefully? No.');
-      }
-    }
-    // Gum wears off with mileage.
-    if (changed && ms.gum > 0) {
-      ms.gum -= 1;
-      if (ms.gum === 0) {
-        ui.say('The gum finally lets go of your sole. Freedom.');
-        ui.updateStatsHud(sheet);
       }
     }
     // Walk-up interactions (lighting trash cans) fire on deliberate arrival.
@@ -1417,20 +1419,21 @@ function startGame(level) {
     const sfx = surfEffect(x, z);
     if (sfx) {
       if (sfx.ammo) ms.paper = Math.min(PAPER_CAP, ms.paper + sfx.ammo);
-      if (sfx.applies === 'gum' && stickGum(x, z)) ms.gum = GUM.steps;
+      if (sfx.applies === 'gum' && stickGum(x, z)) applyStatus(ms, 'gum');
       const amount = effectiveSurfDamage(x, z, ms);
       if (amount > 0) {
-        if (sfx.bleed) ms.bleed = Math.max(ms.bleed, sfx.bleed);
+        if (sfx.bleed) applyStatus(ms, 'bleed', { duration: sfx.bleed });
         const dead = applyDamage(ms, amount);
         actor.flinch();
         vfx.damageText(x, z, `-${amount}`);
         if (dead) { if (inCombat && combat) combat.notifyMemberDown(); return; }
       }
     }
-    if (ms.bleed > 0) {
-      ms.bleed -= 1;
-      const bled = applyDamage(ms, 1);
-      vfx.damageText(x, z, '-1');
+    // Step-clock statuses tick per tile (bleed's dot, gum wearing down).
+    const { damage } = tickStep(ms);
+    if (damage > 0) {
+      const bled = applyDamage(ms, damage);
+      vfx.damageText(x, z, `-${damage}`);
       if (bled && inCombat && combat) combat.notifyMemberDown();
     }
   }
@@ -1704,7 +1707,7 @@ function startGame(level) {
   function memberSpeed(m) {
     let s = BASE_SPEED
       * (SURFACES[runtime.surfaceAt(m.actor.x, m.actor.z)]?.slow || 1)
-      * (m.sheet.gum > 0 ? GUM.slow : 1);
+      * (statusFx(m.sheet).speedMult ?? 1);
     const lead = partyLeader(party);
     if (m !== lead && lead.actor
       && Math.max(Math.abs(m.actor.x - lead.actor.x), Math.abs(m.actor.z - lead.actor.z)) > FOLLOW_NEAR + 1) {
@@ -1958,7 +1961,11 @@ function startGame(level) {
     get gameOver() { return gameOver; },
     get lastPath() { return lastPath; },
     get fadedWallCount() { return walls.filter((w) => w.faded).length; },
-    get stats() { return sheet ? { ...sheet } : null; },
+    get stats() {
+      // gum/bleed now live in the status map; expose them as counts so the
+      // debug/e2e reads (window.__game.stats.gum) keep working.
+      return sheet ? { ...sheet, gum: statusLeft(sheet, 'gum'), bleed: statusLeft(sheet, 'bleed') } : null;
+    },
     get playerSpeed() { return player.speed; },
     get burning() { return runtime.burningCount; },
     get smoking() { return runtime.smokingCount; },

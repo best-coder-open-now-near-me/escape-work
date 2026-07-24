@@ -1,5 +1,6 @@
 // All DOM-facing UI: the HUD lines, the right-click context menu, and the
 // win/lose overlays. Nothing in here knows about PlayCanvas.
+import { statusList } from './statuses.js';
 
 // Shared chrome for floating panels and buttons - combat.js and the editor
 // build their own DOM but should look like the rest of the UI, so the
@@ -201,10 +202,10 @@ function ensureStatusList() {
 }
 
 function effectChips(sheet) {
-  const chips = [];
-  if (sheet.gum > 0) chips.push({ icon: '🍬', label: 'Gum on shoe', good: false });
-  if (sheet.bleed > 0) chips.push({ icon: '🩸', label: 'Bleeding', good: false });
-  return chips;
+  // Any active status renders a chip generically (STATUS_PLAN): buffs green,
+  // debuffs amber, remaining count trailing. Gum and bleed out of combat, plus
+  // Deflect and the rest during a fight.
+  return statusList(sheet).map((s) => ({ icon: s.icon, label: s.name, left: s.left, good: !s.harmful }));
 }
 
 function renderStatusEffects(sheet) {

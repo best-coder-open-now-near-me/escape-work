@@ -71,13 +71,26 @@ test('parseProgress migrates a legacy single-sheet save and backfills fields', (
   assert.equal(s.hp, 9);
   assert.deepEqual(s.inventory, []);
   assert.equal(s.paper, 0);
-  assert.equal(s.bleed, 0);
-  assert.equal(s.gum, 0);
+  assert.deepEqual(s.statuses, {}); // v4: gum/bleed live in the status map now
+  assert.equal(s.gum, undefined);   // the old numeric fields are gone
+  assert.equal(s.bleed, undefined);
   assert.equal(s.name, 'Office Drone'); // name backfills from the class
   for (const k of ['grit', 'hustle', 'savvy', 'composure']) {
     assert.equal(typeof s.attr[k], 'number', `attr.${k} backfilled`);
   }
   assert.equal(s.maxHp, 22); // derivation preserves the saved max HP
+});
+
+test('v3->v4 migration moves in-flight gum/bleed counters into the status map', () => {
+  const v3 = {
+    version: 3, levelId: 'level2', active: 0,
+    party: [{ classId: 'office-drone', className: 'Office Drone', hp: 20, maxHp: 22, level: 1, gum: 12, bleed: 2 }],
+  };
+  const s = parseProgress(v3).sheets[0];
+  assert.equal(s.gum, undefined);   // the numeric fields are gone
+  assert.equal(s.bleed, undefined);
+  assert.equal(s.statuses.gum.left, 12); // carried across as status entries
+  assert.equal(s.statuses.bleed.left, 2);
 });
 
 test('a non-zero active leader survives the save round-trip', () => {

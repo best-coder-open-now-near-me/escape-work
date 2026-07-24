@@ -64,7 +64,7 @@ test('a forced miss applies no status - the Manager sticks no gum', async ({ pag
     window.__combat.forceHit = false;
     const s = window.__god.player;
     s.hp = s.maxHp;
-    s.gum = 0;
+    if (s.statuses) delete s.statuses.gum; // gum is a status now
     window.__combat.refresh();
   });
   // The Manager swings on each of its turns - including its gum-flick attack -
@@ -79,9 +79,9 @@ test('a forced miss applies no status - the Manager sticks no gum', async ({ pag
   // The office drone weathered a full assault untouched: no HP lost, no gum stuck.
   const hp = await page.evaluate(() => window.__god.player.hp);
   const maxHp = await page.evaluate(() => window.__god.player.maxHp);
-  const gum = await page.evaluate(() => window.__god.player.gum);
-  expect(hp).toBe(maxHp); // misses dealt no damage
-  expect(gum).toBe(0);    // and stuck no gum
+  const gummed = await page.evaluate(() => !!window.__god.player.statuses?.gum);
+  expect(hp).toBe(maxHp);  // misses dealt no damage
+  expect(gummed).toBe(false); // and stuck no gum (the status was never applied)
 });
 
 test('the armed hover shows a to-hit percentage that matches the roll', async ({ page }) => {

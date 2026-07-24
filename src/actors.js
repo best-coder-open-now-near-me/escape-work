@@ -10,6 +10,7 @@
 const pc = window.pc;
 import { rollLoot } from './data/items.js';
 import { GUM } from './data/surfaces.js';
+import { applyStatus, hasStatus, statusFx } from './statuses.js';
 
 const wrapAngle = (a) => (((a + 180) % 360) + 360) % 360 - 180;
 const TURN_RATE = 10; // how quickly facing eases toward the heading
@@ -400,11 +401,15 @@ export class EnemyActor extends GridActor {
       // Wet floors are slippery for everyone - a slip ends the amble there.
       // Gum wads stick to wanderers too: slow forever, but never slip again.
       this.onTile = (x, z, done, changed) => {
-        if (changed && !this.gummed && world.stickGum(x, z)) {
-          this.gummed = true;
+        // Gum is a status now (statuses.js), shared with the combat unit so a
+        // wanderer that steps in a wad is still gummed when a fight starts. Like
+        // combat, an actor's gum is permanent - applied once, slowing its amble
+        // and granting traction for good.
+        if (changed && !hasStatus(this, 'gum') && world.stickGum(x, z)) {
+          applyStatus(this, 'gum');
           this.speed *= GUM.slow;
         }
-        if (changed && !this.gummed && world.slips(x, z)) {
+        if (changed && !statusFx(this).slipProof && world.slips(x, z)) {
           this.clearPath();
           this.flinch();
         }

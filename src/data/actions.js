@@ -11,7 +11,7 @@
 // Modifiers:
 //   purge (on an attack) - hitting a target also wipes their status effects,
 //   harmful and helpful alike; click your own tile while armed to self-cast
-//   footwork - unusable while gum is stuck to the shoe (sheet.gum > 0)
+//   footwork - unusable while gum is stuck to the shoe (the 'gum' status)
 //   cone { range, halfAngle } (on an attack) - aimed at any clicked point:
 //   hits every enemy in the wedge (needs line of sight), rolls damage per
 //   target. `leaves: '<tileType>'` carpets the wedge's plain floor with that

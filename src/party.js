@@ -7,7 +7,7 @@
 import { gainXp, createSheetFrom, ensureAttributes } from './stats.js';
 
 export const PARTY_CAP = 3; // leader + 2 companions - see PARTY_PLAN.md
-export const SAVE_VERSION = 3; // v3 adds attributes + banked points (PROGRESSION_PLAN.md)
+export const SAVE_VERSION = 4; // v4 moves gum/bleed into the status map (STATUS_PLAN.md)
 
 export function createParty(sheet, actor = null) {
   return { members: [{ sheet, actor }], active: 0 };
@@ -60,8 +60,13 @@ export function serializeProgress(party, levelId) {
 function normalizeSheet(sheet) {
   sheet.inventory ||= []; // saves from before pockets existed
   sheet.paper ??= 0;
-  sheet.bleed ??= 0;
-  sheet.gum ??= 0;
+  // v4: gum/bleed moved from numeric sheet fields into the status map. Carry any
+  // in-flight step-clock counters from an older save across, then drop them.
+  sheet.statuses ??= {};
+  if (sheet.gum > 0 && !sheet.statuses.gum) sheet.statuses.gum = { left: sheet.gum };
+  if (sheet.bleed > 0 && !sheet.statuses.bleed) sheet.statuses.bleed = { left: sheet.bleed };
+  delete sheet.gum;
+  delete sheet.bleed;
   sheet.name ??= sheet.className;
   sheet.attrPoints ??= 0; // pre-M2 saves never banked any
   sheet.classPoints ??= 0;

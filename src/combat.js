@@ -104,7 +104,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const slow = SURFACES[world.surfaceIdAt(x, z)]?.slow;
     return slow ? 1 / slow : 1;
   };
-  const stepCost = (x, z) => surfaceStepCost(x, z) * (active.sheet.gum > 0 ? GUM.moveCost : 1);
+  const stepCost = (x, z) => surfaceStepCost(x, z) * (statusFx(active.sheet).moveCostMult ?? 1);
   // AP is spent in tenths now that movement charges by distance.
   const roundAp = (v) => Math.round(v * 10) / 10;
   const fmtAp = (v) => String(roundAp(v)).replace(/\.0$/, '');
@@ -454,7 +454,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const affordable = phase === 'player' && active.ap >= a.ap
         && (!a.uses || active.usesLeft[id] > 0)
         && (!a.ammoCost || active.sheet.paper >= ammoCostOf(id))
-        && !(a.footwork && active.sheet.gum > 0); // no kicking with gum on the shoe
+        && !(a.footwork && statusFx(active.sheet).noFootwork); // no kicking with gum on the shoe
       b.disabled = !affordable;
       b.style.opacity = affordable ? '1' : '.4';
       b.style.borderColor = ((a.type === 'attack' || a.type === 'shove') && id === armed) ? '#8adf76' : '#3a3a52';
@@ -510,7 +510,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function performOn(id, en) {
     const a = ACTIONS[id];
     // Footwork actions (the kick) need an un-gummed shoe.
-    if (a.footwork && active.sheet.gum > 0) {
+    if (a.footwork && statusFx(active.sheet).noFootwork) {
       log('You wind up the kick... the gum disagrees. Pick something else.');
       armed = null;
       refresh();
@@ -714,9 +714,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (a.purge && tile.x === active.actor.x && tile.z === active.actor.z) {
         if (active.ap < a.ap) { log('Not enough AP.'); return; }
         active.ap -= a.ap;
-        const hadBleed = active.sheet.bleed > 0;
-        active.sheet.bleed = 0;       // old field (migrates to a status in M3)
-        clearStatuses(active.sheet);  // wipes Deflect now; bleed/gum when they migrate
+        const hadBleed = hasStatus(active.sheet, 'bleed');
+        clearStatuses(active.sheet);  // reboot wipes every status - Deflect, bleed, gum
         armed = null;
         log(hadBleed
           ? 'You turn yourself off and on again. The bleeding stops. So does everything else.'
@@ -928,7 +927,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const dead = applyDamage(m.sheet, dmg);
       fx.damageText(m.actor.x, m.actor.z, `-${dmg}`);
       if (atk.applies === 'gum') {
-        m.sheet.gum = Math.max(1, GUM.steps - statusResist(m.sheet)); // Composure shrugs some off
+        applyStatus(m.sheet, 'gum', {}, statusResist(m.sheet)); // Composure shrugs some off
         line += ' Gum. On your shoe.';
       }
       log(line);
@@ -975,7 +974,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // AI units pay the same surface movement tax the player does, plus their
     // own gum surcharge if they've stepped in a wad.
     const { points, cost } = truncateByBudget(s, budget,
-      (x, z) => surfaceStepCost(x, z) * (unit.gummed ? GUM.moveCost : 1));
+      (x, z) => surfaceStepCost(x, z) * (statusFx(unit).moveCostMult ?? 1));
     if (points.length < 2 || cost < 0.05) return 0;
     unit.onTile = (x, z, done, changed) => {
       if (changed) {
@@ -990,14 +989,18 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
             refresh();
           }
         }
-        // gum wads stick to AI units too: slowed for good, but sure-footed
-        if (unit.alive && !unit.gummed && world.stickGum(x, z)) {
-          unit.gummed = true;
+        // gum wads stick to AI units too: it taxes their movement AP (via the
+        // status's moveCostMult) and grants traction. Like today, an AI unit's
+        // gum is for keeps - the status is applied once and never ticked, so it
+        // stays slowed and sure-footed for the rest of the fight.
+        if (unit.alive && !hasStatus(unit, 'gum') && world.stickGum(x, z)) {
+          applyStatus(unit, 'gum');
           unit.speed *= GUM.slow;
           log(`${unit.def.name} steps in gum. It's theirs now.`);
         }
-        // wet floor: a slip ends their whole turn (they spend it getting up)
-        if (unit.alive && !unit.gummed && Math.random() < (world.slipChanceAt(x, z) || 0)) {
+        // wet floor: a slip ends their whole turn (they spend it getting up).
+        // Gum is traction (slipProof), so a gummed unit can't slip.
+        if (unit.alive && !statusFx(unit).slipProof && Math.random() < (world.slipChanceAt(x, z) || 0)) {
           unit.clearPath();
           unit.flinch();
           unit.slipped = true;

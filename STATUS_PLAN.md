@@ -230,10 +230,30 @@ map seeds `{}`.
    `__combat.defended` setter. The old `m.defended`/`en.surprised` fields are
    gone (a `src`-wide grep confirms only a comment remains). Unit 139/139; e2e
    green (hit/game/classes/party/summons, 18 tests) — same logs, same outcomes.
-3. **Step-clock incumbents.** `gum` + `bleed` migrate; the read-site audit
-   (grep `\.gum|\.bleed|gummed|defended` — the list in "Where we are today"
-   is the checklist); save v4 migration; AI gum becomes duration-based
-   (called out below). Chips UI reads the registry.
+3. **Step-clock incumbents.** ✅ Landed. `gum` and `bleed` now live in the
+   status map; the numeric `sheet.gum`/`sheet.bleed` fields are gone. The
+   read-site audit swept all four modules: `combat.js` (`stepCost` →
+   `moveCostMult`, the footwork gate → `noFootwork`, the AI gum flick →
+   `applyStatus` with resist, the reboot self-purge → `clearStatuses`),
+   `main.js` (`onMemberStep`/`onSummonStep` collapse their gum/bleed ticks into
+   one `tickStep` returning dot damage, surface gum/bleed apply via
+   `applyStatus`, slip-proofing and `memberSpeed` read `statusFx`), `actors.js`
+   (the out-of-combat wander gum shares the same status so a gummed wanderer is
+   still gummed entering a fight), and `ui.js` (chips render from `statusList`).
+   Save bumped to **v4**: `normalizeSheet` carries in-flight numeric gum/bleed
+   into the map (`party.test.js` covers v1→v4 and a v3→v4 counter migration).
+   `__game.stats` exposes computed `gum`/`bleed` counts so the e2e reads keep
+   working. Unit 140/140; e2e green (surfaces gum/traction/wear-off + the combat
+   suite, 24 tests).
+   - **Deliberate scoping:** AI/wander gum stays **permanent** (the status is
+     applied once and never ticked), exactly as before — chosen over the plan's
+     "duration-based AI gum" to avoid the `unit.speed` restore problem and keep
+     wander/combat behavior identical. The member's gum still wears off with
+     mileage.
+   - **Intended behavior change (decision #8):** the reboot's purge now also
+     clears gum (it's a status, and `clearStatuses` wipes the map) — previously
+     gum survived a reboot. On-theme and covered by the documented purge
+     contract.
 4. **New content.** `stunned` (wall-slam shove + a `regional-executive`
    attack `applies`), `burning` (fire tiles), `blinded` (a new printer-themed
    source — e.g. thrown `toner-cartridge` finally earning its slot as a
