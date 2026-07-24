@@ -11,7 +11,7 @@
 import { ACTIONS } from './data/actions.js';
 import { SURFACES, GUM } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
-import { damageBonus, applyDamage, deflect } from './stats.js';
+import { damageBonus, applyDamage, deflect, statusResist } from './stats.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 
 const pc = window.pc;
@@ -797,7 +797,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const dead = applyDamage(m.sheet, dmg);
       fx.damageText(m.actor.x, m.actor.z, `-${dmg}`);
       if (atk.applies === 'gum') {
-        m.sheet.gum = GUM.steps;
+        m.sheet.gum = Math.max(1, GUM.steps - statusResist(m.sheet)); // Composure shrugs some off
         line += ' Gum. On your shoe.';
       }
       log(line);

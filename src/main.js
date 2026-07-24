@@ -14,7 +14,10 @@ import { CLASSES } from './data/classes.js';
 import { ACTIONS } from './data/actions.js';
 import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
-import { createSheet, applyDamage, spendAttrPoint, spendClassPoint, classTrack, scaleEnemy, effectiveLevel, PAPER_CAP } from './stats.js';
+import {
+  createSheet, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
+  scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP,
+} from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP,
@@ -994,10 +997,24 @@ function startGame(level) {
       affordable: (sheet_.classPoints || 0) >= (n.cost || 1),
     }));
   }
+  // Read-only character sheet (press C). A plain view-model - main owns the
+  // derived math (damageBonus/deflect) and the perk names.
+  const charSheet = ui.createCharacterSheet({ onLevelUp: () => openLevelUps() });
+  function charSheetVm(s) {
+    return {
+      name: s.name, className: s.className, level: s.level, xp: s.xp, xpNext: s.xpNext,
+      attr: { ...s.attr }, hp: s.hp, maxHp: s.maxHp, maxAp: s.maxAp,
+      damageBonus: damageBonus(s), deflect: deflect(s),
+      talent: s.talent ? { name: s.talent.name } : null,
+      perks: (s.perks || []).map((id) => trackNode(id)?.name || id),
+      attrPoints: s.attrPoints || 0, classPoints: s.classPoints || 0,
+    };
+  }
   function refreshProgressUi() {
     if (sheet) { ui.updateStatsHud(sheet); buildHotbar(); } // a learned action joins the bar
     partyBarKey = ''; // force the bar to re-render its pips next frame
     levelUpPip.refresh(!inCombat && !gameOver && sheet ? pending(sheet) : 0);
+    if (sheet) charSheet.refresh(charSheetVm(sheet)); // keep an open sheet live
   }
   function openLevelUpFor(member, after) {
     if (!member) { after?.(); return; }
@@ -1030,6 +1047,7 @@ function startGame(level) {
     buildHotbar(); // their attacks, their ammo count
     ui.updateStatsHud(sheet);
     loot.refreshPanel(sheet);
+    charSheet.refresh(charSheetVm(sheet)); // an open sheet follows control
     ui.say(`You take point as ${m.sheet.name}.`);
   }
   function cycleLeader() {
@@ -1631,6 +1649,9 @@ function startGame(level) {
       e.preventDefault();
       if (inCombat) combat?.cycleActive();
       else cycleLeader();
+    } else if ((e.key === 'c' || e.key === 'C') && sheet && !gameOver && !dialogue.visible) {
+      // The read-only character sheet for whoever you're controlling.
+      charSheet.toggle(charSheetVm(sheet));
     }
   });
   window.addEventListener('keyup', (e) => {

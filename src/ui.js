@@ -693,6 +693,72 @@ export function showLevelUpScreen(sheet, { onSpend, onLearn, nodesFor, onDone } 
   return { close: () => host.remove(), get open() { return !!document.getElementById('levelup-screen'); } };
 }
 
+// A read-only character sheet (toggle with C): attributes, the stats they
+// derive, talent, and learned perks. main.js hands over a plain view-model
+// (it owns the derived math); a "Spend points" button routes back to the
+// level-up screen when points are banked.
+const CHARSHEET_ATTRS = [['grit', 'Grit'], ['hustle', 'Hustle'], ['savvy', 'Savvy'], ['composure', 'Composure']];
+
+export function createCharacterSheet({ onLevelUp } = {}) {
+  const host = document.createElement('div');
+  host.id = 'character-sheet';
+  Object.assign(host.style, PANEL_CHROME, {
+    position: 'fixed', right: '12px', top: '54px', zIndex: '24', display: 'none',
+    width: '250px', maxHeight: '82vh', overflow: 'auto', borderRadius: '12px',
+    padding: '15px 17px', userSelect: 'none', font: '13px system-ui, sans-serif',
+  });
+  host.onmousedown = (e) => e.stopPropagation();
+  document.body.appendChild(host);
+
+  const label = 'font-size:11px; letter-spacing:1px; opacity:.55; margin:12px 0 4px;';
+  const row = (name, val) => `<div style="display:flex; justify-content:space-between; padding:1px 0;">
+    <span style="opacity:.85;">${name}</span><b>${val}</b></div>`;
+
+  function render(vm) {
+    const pending = (vm.attrPoints || 0) + (vm.classPoints || 0);
+    const xpPct = Math.max(0, Math.min(100, Math.round((vm.xp / vm.xpNext) * 100)));
+    const attrRows = CHARSHEET_ATTRS.map(([k, l]) =>
+      `<div style="display:flex; justify-content:space-between; padding:1px 0;">
+        <span style="opacity:.85;">${l}</span><b id="charsheet-attr-${k}">${vm.attr[k] ?? 0}</b></div>`).join('');
+    const perks = vm.perks.length
+      ? vm.perks.map((n) => `<div style="opacity:.82;">• ${n}</div>`).join('')
+      : '<div style="opacity:.45;">None yet</div>';
+    host.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+        <div style="font-weight:700; color:#8adf76;">${vm.name}</div>
+        <button id="charsheet-close" style="border:none; background:none; color:#aaa;
+          font-size:15px; cursor:pointer; line-height:1;">✕</button></div>
+      <div style="opacity:.7; font-size:12px; margin-bottom:8px;">${vm.className} · Level ${vm.level}</div>
+      <div style="height:4px; background:#1a1a28; border-radius:2px;">
+        <div style="height:100%; width:${xpPct}%; background:#6f87d8; border-radius:2px;"></div></div>
+      <div style="opacity:.5; font-size:11px; margin-top:3px;">XP ${vm.xp}/${vm.xpNext}</div>
+      <div style="${label}">ATTRIBUTES</div>${attrRows}
+      <div style="${label}">DERIVED</div>
+      ${row('HP', `${vm.hp}/${vm.maxHp}`)}${row('AP', vm.maxAp)}
+      ${row('Damage bonus', `+${vm.damageBonus}`)}${row('Deflect', vm.deflect)}
+      ${vm.talent ? `<div style="${label}">TALENT</div><div style="opacity:.85;">${vm.talent.name}</div>` : ''}
+      <div style="${label}">PERKS</div>${perks}
+      ${pending ? `<button id="charsheet-levelup" style="margin-top:12px; width:100%; padding:7px;
+        border-radius:8px; border:1px solid #8adf76; background:#3a5a34; color:#eafbe6;
+        font:inherit; font-weight:700; cursor:pointer;">⬆ Spend ${pending} point${pending === 1 ? '' : 's'}</button>` : ''}
+      <div style="opacity:.4; font-size:11px; margin-top:10px;">Press C to close</div>`;
+    host.querySelector('#charsheet-close').onclick = () => hide();
+    const lu = host.querySelector('#charsheet-levelup');
+    if (lu && onLevelUp) lu.onclick = () => { hide(); onLevelUp(); };
+  }
+  function hide() { host.style.display = 'none'; }
+  function toggle(vm) {
+    if (host.style.display !== 'none') { hide(); return; }
+    render(vm);
+    host.style.display = 'block';
+  }
+  return {
+    toggle, hide,
+    refresh(vm) { if (host.style.display !== 'none') render(vm); },
+    get visible() { return host.style.display !== 'none'; },
+  };
+}
+
 // --- dialogue -----------------------------------------------------------------
 // The minimal talking layer: a bottom panel with the speaker's name, a line,
 // and one button per response. Dumb by design - main.js owns the dialogue tree

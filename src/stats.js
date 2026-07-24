@@ -201,6 +201,12 @@ export function deflect(sheet) {
   return Math.floor((sheet.attr?.composure || 0) / PROGRESSION.COMP_PER_DEFLECT);
 }
 
+// Composure also shakes off applied statuses faster - it shortens the sticky
+// ones (a combat gum flick) by this many turns. Poise on a different axis.
+export function statusResist(sheet) {
+  return Math.floor((sheet.attr?.composure || 0) / PROGRESSION.COMP_PER_DEFLECT);
+}
+
 // Returns true when the character levelled up ("got promoted"). Level-ups fully
 // heal and BANK attribute points; the player spends them on the level-up screen
 // (companions included - nothing auto-allocates). Damage no longer rises

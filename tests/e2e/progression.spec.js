@@ -85,3 +85,14 @@ test('a floor deeper than an enemy tier scales that enemy up', async ({ page }) 
   expect(foe.level).toBe(3);
   expect(foe.maxHp).toBeGreaterThan(14); // base Manager is 14 HP at level 1
 });
+
+test('the character sheet toggles with C and shows attributes', async ({ page }) => {
+  test.setTimeout(120_000);
+  await bootStash(page, SOLO_LEVEL); // office-drone (Grit 5)
+  await expect(page.locator('#character-sheet')).toBeHidden();
+  await page.keyboard.press('c');
+  await expect(page.locator('#character-sheet')).toBeVisible();
+  await expect(page.locator('#charsheet-attr-grit')).toHaveText('5');
+  await page.keyboard.press('c');
+  await expect(page.locator('#character-sheet')).toBeHidden();
+});

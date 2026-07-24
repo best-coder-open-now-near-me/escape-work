@@ -363,10 +363,19 @@ trusted from disk). Migration in `party.js`:
    - **Rebalance note:** floor 1 stays `depth: 1` (the party-forming floor,
      unscaled). Deeper rebalance + the `regional-executive` placement wait for
      floors that don't exist yet (a natural M5 content item).
-5. **Polish.** The character-sheet inspect panel (**C**), god-panel
-   progression editing, an on-theme respec if it earns its keep, and a content
-   pass (a deeper floor to show the curve off). Elite modifiers (#12) can ride
-   here or wait.
+5. **Polish.** 🚧 In progress. **Landed:** the character-sheet inspect panel
+   (**C**) — read-only attributes, derived stats (HP/AP/damage bonus/deflect),
+   talent, learned perks, an XP bar, and a "Spend points" shortcut when points
+   are banked; it follows control on a leader switch. And **Composure's
+   status-resist** (deferred from M2): a combat gum flick is shortened by
+   `floor(composure/COMP_PER_DEFLECT)` turns (min 1), scoped to combat so the
+   gum *surface* mechanic is untouched. Unit 92/92; `progression.spec.js` toggles
+   the sheet with C. **Remaining (pick-list):** `upgradeAction` track nodes (the
+   deferred M3 node type — needs a combat action accessor), an on-theme
+   "refile with HR" respec, a god-panel attribute editor (points are already
+   editable primitives; this adds `attr`/perk tooling), a content pass (a deeper
+   floor + the `regional-executive` placement to show the curve off), and elite
+   modifiers (#12).
 
 ## Testing
 

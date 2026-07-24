@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   createSheet, gainXp, damageBonus, applyDamage,
   recomputeDerived, ensureAttributes, spendAttrPoint, deflect,
-  spendClassPoint, classTrack, scaleEnemy, effectiveLevel,
+  spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist,
   PROGRESSION, ATTR_KEYS,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
@@ -157,6 +157,14 @@ test('deflect scales with Composure, zero when there is none', () => {
   assert.equal(deflect(s), 0);
   s.attr.composure = PROGRESSION.COMP_PER_DEFLECT * 2;
   assert.equal(deflect(s), 2);
+});
+
+test('statusResist scales with Composure (shorter applied statuses)', () => {
+  const s = createSheet('office-drone');
+  s.attr.composure = 0;
+  assert.equal(statusResist(s), 0);
+  s.attr.composure = PROGRESSION.COMP_PER_DEFLECT * 3;
+  assert.equal(statusResist(s), 3);
 });
 
 // --- class points + the ability track (milestone 3) -------------------------
