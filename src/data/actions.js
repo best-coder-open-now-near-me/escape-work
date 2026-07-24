@@ -128,6 +128,19 @@ export const ACTIONS = {
     log: 'You shove them.',
   },
 
+  // --- applicants (player-controlled summons) -----------------------------------
+  // A summoned applicant you control swings with this (its AI-summon twin on
+  // the enemy side rolls from the class's `attacks` instead). Cheap and weak -
+  // a disposable body, not a bruiser.
+  'resume-slap': {
+    type: 'attack',
+    ap: 3,
+    label: 'Résumé Slap',
+    min: 1,
+    max: 3,
+    log: 'The applicant slaps a résumé across the desk.',
+  },
+
   // --- Human Resources ----------------------------------------------------------
   // The HR class's power (SUMMON_PLAN.md): post the role and applicants report
   // for duty on your side. `archetype` is the unit (the applicant class),

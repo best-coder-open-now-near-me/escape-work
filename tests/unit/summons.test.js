@@ -34,11 +34,13 @@ test('unitCombat defaults xp/loot for a player class with no AI fields', () => {
   assert.deepEqual(c.loot, []);
 });
 
-test('the applicant is a non-playable AI archetype', () => {
+test('the applicant is a non-playable archetype with BOTH kits', () => {
   const a = CLASSES.applicant;
   assert.equal(a.playable, false); // kept out of the class picker
-  assert.deepEqual(a.actions, []); // AI-driven: swings from `attacks`, no bar
-  assert.ok(a.attacks.length > 0 && typeof a.attackAp === 'number');
+  // The superset a shared archetype needs: `actions` for a player-controlled
+  // summon's action bar, `attacks`/`attackAp` for its AI-summon twin.
+  assert.ok(a.actions.length > 0, 'has a player-facing action bar');
+  assert.ok(a.attacks.length > 0 && typeof a.attackAp === 'number', 'has an AI attack set');
 });
 
 test('applicants are anti-farm: no XP, no loot', () => {

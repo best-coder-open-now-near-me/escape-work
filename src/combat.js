@@ -34,31 +34,22 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return { sheet: m.sheet, actor: m.actor, ap: m.sheet.maxAp, defended: false, done: false, usesLeft };
   });
   let active = members[party.active];
+  // Everyone you control: party members plus any summons you've conjured
+  // (temporary members, appended by resolveSummon). `livingParty` is the real
+  // roster only - a party WIPE (no real member standing) is the sole game-over;
+  // a summon falling never is, and a lone summon can't stave off defeat.
   const livingMembers = () => members.filter((m) => m.sheet.hp > 0 && m.actor);
-  const liveAllies = () => (world.liveAllies ? world.liveAllies() : []); // player-team summons
-  // Everything an AI unit could swing at on the far side. An enemy hunts the
-  // party AND any player-team summons; a player-team summon hunts the enemies.
-  // A target wraps { actor, member }: `member` is set only for a party member
-  // (its sheet takes the hit, with the downed/handoff rules); a bare actor - an
-  // enemy, or a summon on either side - takes damage through takeDamage.
-  const targetHp = (t) => (t.member ? t.member.sheet.hp : t.actor.hp);
-  function hostilesFor(unit) {
-    if (unit.team === 'player') return world.liveEnemies().map((a) => ({ actor: a, member: null }));
-    return [
-      ...livingMembers().map((m) => ({ actor: m.actor, member: m })),
-      ...liveAllies().map((a) => ({ actor: a, member: null })),
-    ];
-  }
-  // Nearest hostile (Chebyshev), ties broken by lowest HP - the rule the
-  // party's enemies always used, now team-agnostic so summons on either side
-  // pick targets the same way.
+  const livingParty = () => members.filter((m) => m.sheet.hp > 0 && m.actor && !m.isSummon);
+  // The AI enemies hunt the whole player side - members and summons alike, all
+  // members now. A target wraps { actor, member }; combat reads `member` to take
+  // the hit on its sheet (deflect, gum, the downed rules).
   function pickTarget(unit) {
     let best = null;
-    for (const t of hostilesFor(unit)) {
-      const d = cheb(unit.x, unit.z, t.actor.x, t.actor.z);
-      if (!best || d < best.d || (d === best.d && targetHp(t) < targetHp(best.t))) best = { t, d };
+    for (const m of livingMembers()) {
+      const d = cheb(unit.x, unit.z, m.actor.x, m.actor.z);
+      if (!best || d < best.d || (d === best.d && m.sheet.hp < best.m.sheet.hp)) best = { m, d };
     }
-    return best?.t || null;
+    return best ? { actor: best.m.actor, member: best.m } : null;
   }
   // Enemies pulled in from a distance are surprised - they spend their first
   // turn realizing what's happening, so group openings don't alpha-strike you.
@@ -355,7 +346,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // control each member only when its own turn comes up.
   function makeActive(m) {
     active = m;
-    party.active = members.indexOf(m);
+    // A summon lives outside party.members, so it can't be party.active - leave
+    // that pointing at the real member who last held the floor (the post-combat
+    // leader). The initiative tracker shows whose turn it actually is.
+    if (!m.isSummon) party.active = members.indexOf(m);
     armed = null;
     pendingMelee = null;
     hidePreview();
@@ -371,7 +365,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       m.actor?.clearPath();
       if (m.actor) m.actor.fx = { kind: 'death', t: 0 };
     }
-    if (!livingMembers().length) { defeat(); return; }
+    if (!livingParty().length) { defeat(); return; } // party wipe - the only loss
     if (phase === 'player' && active.sheet.hp <= 0) {
       log(`${active.sheet.name} goes down!`);
       advanceTurn();
@@ -389,7 +383,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Name whose turn it is (initiative interleaves your members with the
     // enemies). "YOUR TURN — Name" on a member you control; "Name's turn" on
     // an AI unit.
-    const solo = members.length === 1 && !liveAllies().length;
+    const solo = members.length === 1;
     el('combat-turn').textContent = phase === 'player'
       ? (solo ? 'YOUR TURN' : `YOUR TURN — ${active.sheet.name}`)
       : phase === 'ai' && acting ? `${acting.unit.def.name}'s turn` : '';
@@ -741,7 +735,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function beginTurn() {
     // The fight can end on the boundary (a kill emptied one side).
     if (!engaged.some((e) => e.alive)) { victory(); return; }
-    if (!livingMembers().length) { defeat(); return; }
+    if (!livingParty().length) { defeat(); return; }
     const s = order[turnPtr];
     if (!slotAlive(s)) { advanceTurn(); return; } // a corpse/downed slot - skip
     if (!s.member && s.unit.surprised) {
@@ -758,7 +752,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       s.member.ap = s.member.sheet.maxAp; // full AP at the top of your turn
       s.member.defended = false;
       phase = 'player';
-      const solo = members.length === 1 && !liveAllies().length;
+      const solo = members.length === 1;
       log(solo ? 'Your turn.' : `${s.member.sheet.name}'s turn.`);
       refresh();
       return;
@@ -770,24 +764,42 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
 
   // --- summons ----------------------------------------------------------------
   // Live minions a summoner still has on the board - the cap counts these.
-  // Enemy-team summons live in the shared enemy list (world.liveEnemies);
-  // player-team summons arrive with the ally phase (M2).
+  // Enemy-team summons are AI actors in the shared enemy list; player-team
+  // summons are temporary MEMBERS (below), tagged with who conjured them.
   function liveSummonsOf(summoner) {
-    return [...world.liveEnemies(), ...liveAllies()].filter((e) => e.summonedBy === summoner).length;
+    const enemySummons = world.liveEnemies().filter((e) => e.summonedBy === summoner).length;
+    const playerSummons = members.filter((m) =>
+      m.isSummon && m.sheet.hp > 0 && m.summonedBy === summoner).length;
+    return enemySummons + playerSummons;
   }
   // Post the req: spawn up to the descriptor's `count` for `team` beside the
-  // summoner, never past its live `cap`. Enemy-team arrivals join `engaged` so
-  // they count toward victory and queue next round - they don't act the turn
-  // they're summoned. Returns how many actually showed up.
+  // summoner, never past its live `cap`. Returns how many actually showed up.
+  //   enemy team -> AI actors: join `engaged` (counted for victory, queued next
+  //     round) and take a `{unit}` initiative slot, surprised so they don't act
+  //     the turn they're posted.
+  //   player team -> temporary MEMBERS you control: a real sheet + body, its own
+  //     action bar and AP, a `{member}` initiative slot. Not in party.members
+  //     (outside the cap, unsaved); combat owns them, despawned at fight's end.
   function resolveSummon(summoner, team, d) {
     const room = (d.cap ?? d.count) - liveSummonsOf(summoner);
     const n = Math.min(d.count, Math.max(0, room));
     if (n <= 0) return 0;
     const spawned = world.spawnSummon(d.archetype, team, summoner, n) || [];
-    for (const a of spawned) {
-      if (team === 'enemy' && !engaged.includes(a)) engaged.push(a);
-      a.surprised = true; // fresh arrivals don't act the turn they're posted
-      insertSlot(unitSlot(a)); // ...but they take an initiative slot for next round
+    for (const rec of spawned) {
+      if (team === 'enemy') {
+        if (!engaged.includes(rec)) engaged.push(rec);
+        rec.surprised = true;
+        insertSlot(unitSlot(rec));
+      } else {
+        const usesLeft = {};
+        for (const id of rec.sheet.actions) if (ACTIONS[id].uses) usesLeft[id] = ACTIONS[id].uses;
+        const m = {
+          sheet: rec.sheet, actor: rec.actor, ap: rec.sheet.maxAp,
+          defended: false, done: false, usesLeft, isSummon: true, summonedBy: summoner,
+        };
+        members.push(m);
+        insertSlot(memberSlot(m)); // slots in by its own roll; acts when its turn comes
+      }
     }
     return spawned.length;
   }
@@ -827,15 +839,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         m.toppled = true;
         m.actor.clearPath();
         m.actor.fx = { kind: 'death', t: 0 };
-        if (!livingMembers().length) { defeat(); return; } // party wipe - the only true loss
-        log(`${m.sheet.name} is out cold. They'll sit the rest of this one out.`);
-        // Keep `active` (the sheet the HUD reflects, and the post-combat
-        // leader) on someone still standing. Their initiative slot is simply
-        // skipped when it comes around.
+        if (!livingParty().length) { defeat(); return; } // party wipe - the only true loss
+        log(m.isSummon
+          ? `${m.sheet.name} is dismissed - back to the applicant pool.`
+          : `${m.sheet.name} is out cold. They'll sit the rest of this one out.`);
+        // Keep `active` (the sheet the HUD reflects, and the post-combat leader)
+        // on a real member still standing - never a summon, which despawns.
+        // Their initiative slot is simply skipped when it comes around.
         if (m === active) {
-          const alive = livingMembers()[0];
-          active = alive;
-          party.active = members.indexOf(alive);
+          active = livingParty()[0];
+          party.active = members.indexOf(active);
         }
       }
       return;
@@ -1034,7 +1047,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     },
     get turn() { return order[turnPtr] ? slotName(order[turnPtr]) : null; },
     get summons() {
-      return liveAllies().map((s) => ({ name: s.def.name, x: s.x, z: s.z, hp: s.hp }));
+      return members.filter((m) => m.isSummon && m.sheet.hp > 0)
+        .map((m) => ({ name: m.sheet.name, x: m.actor.x, z: m.actor.z, hp: m.sheet.hp }));
     },
     // Test/debug: drop a player-team summon beside the active member, as the
     // HR class's Post the Role will (M3). Bypasses caps - callers set the count.
@@ -1047,6 +1061,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     handleEnemyClick,
     handleHover,
     notifyMemberDown,
+    // The body whose turn it is - a party member OR a summon you're driving.
+    // main.js needs this because party.active can't point at a summon.
+    get actingActor() { return active.actor; },
     // Per-member turn snapshot, for the party bar's in-combat AP readout.
     get party() {
       return members.map((m) => ({ name: m.sheet.name, hp: m.sheet.hp, ap: m.ap, active: m === active }));
