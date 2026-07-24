@@ -247,9 +247,22 @@ untouched.
    bars via a new `onGearChange` host hook. Unit 148/148; e2e: the basic punch
    is always on the bar, equipping a stapler swaps it for `staple-jab`, stowing
    it reverts to punch.
-4. **The content pass.** The item list above (± what playtesting wants),
-   loot-table + enemy-drop placement, `acc`/`dodge` gear if HIT_PLAN has
-   landed. Numbers pass with the god panel.
+4. **The content pass.** ✅ Landed. Six new pieces across all three slots: the
+   `letter-opener` (weapon: dmg 1 + acc 0.05, a quick 2-AP `letter-opener-stab`
+   swing), `company-fleece` (outfit: soak 1), `interview-blazer` (outfit:
+   +2 Composure), `laminated-lanyard` (trinket: +1 Hustle), `stress-ball`
+   (trinket: +1 Composure), and the `okayest-mug` (trinket: +2 maxHp). Placed
+   in the desk loot table and on enemy bodies (Executives/Regional Execs drop
+   the blazer, HR the lanyard, Managers the fleece). This is the content that
+   finally exercises the M1 folds — unit tests now cover soak→deflect,
+   maxHp→cap+credit, weapon acc→accuracy, and attrBonus flowing through dodge
+   and deflect, plus a registry lint (every gear item's slot/stat-keys/weapon
+   swing is valid). Unit 148→153; e2e adds an outfit/trinket slot test (each
+   fills its own slot, the mug lifts maxHp in-game). e2e 6/6 (equipment +
+   looting).
+   - **Deferred to playtest (the numbers pass):** the exact stat values and
+     drop chances want feel-testing, same posture as HIT's whiff and STATUS's
+     fire tuning. The knobs are all data; the god panel makes it a live session.
 5. **Stretch (each its own small PR, in whatever order demand dictates):**
    on-hit procs via STATUS_PLAN (decision #8) — now unblocked, the framework
    landed; in-combat swap for `EQUIP_AP` (decision #6); a shoes slot if

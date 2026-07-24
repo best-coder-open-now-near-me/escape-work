@@ -63,3 +63,23 @@ test('a basic weapon attack is always on the bar; the weapon defines it', async 
   await expect(page.locator('#hotbar-act-punch')).toBeVisible();
   expect(await page.locator('#hotbar-act-staple-jab').count()).toBe(0);
 });
+
+test('outfits and trinkets fill their own slots and lift derived stats', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootAndPick(page, 'office-drone');
+  const hp0 = await page.evaluate(() => window.__game.stats.maxHp);
+  await page.evaluate(() => { window.__god.player.inventory = ['okayest-mug', 'company-fleece']; });
+  await page.keyboard.press('i');
+  await expect(page.locator('#inventory-panel')).toBeVisible();
+
+  // Equip the mug (trinket, +2 maxHp), then the fleece (outfit) - each to its
+  // own slot without displacing the other.
+  await page.click('#inv-equip-0'); // the mug (index 0)
+  await expect.poll(() => page.evaluate(() => window.__game.stats.equipped.trinket)).toBe('okayest-mug');
+  await page.click('#inv-equip-0'); // the fleece is now index 0
+  await expect.poll(() => page.evaluate(() => window.__game.stats.equipped.outfit)).toBe('company-fleece');
+
+  expect(await page.evaluate(() => window.__game.stats.maxHp)).toBe(hp0 + 2); // the mug's +2
+  await expect(page.locator('#equip-slot-trinket')).toContainText('Okayest Mug');
+  await expect(page.locator('#equip-slot-outfit')).toContainText('Company Fleece');
+});

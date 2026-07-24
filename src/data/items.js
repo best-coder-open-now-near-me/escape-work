@@ -12,6 +12,8 @@
 //   stats      - equipped bonuses folded into derived numbers (stats.js
 //                equippedStats): dmg, soak, maxHp, maxAp, acc, dodge,
 //                attrBonus:{grit,hustle,savvy,composure}
+//   attack     - (weapons) the basic-swing action id this weapon grants
+//                (data/actions.js), read by stats.equippedAction
 //   examine    - flavor line (items with no use are pure office archaeology)
 //   useLog     - said when the item is consumed
 export const ITEMS = {
@@ -68,6 +70,50 @@ export const ITEMS = {
     attack: 'staple-jab',
     examine: 'THE red stapler. Someone has been looking for this since 1999. +2 damage in hand.',
   },
+  // --- equipment content (EQUIPMENT_PLAN M4) ---------------------------------
+  'letter-opener': {
+    name: 'Letter Opener',
+    icon: '🗡️',
+    slot: 'weapon',
+    stats: { dmg: 1, acc: 0.05 }, // less punch than a stapler, but precise
+    attack: 'letter-opener-stab',
+    examine: 'Technically for envelopes. Technically.',
+  },
+  'company-fleece': {
+    name: 'Company Fleece',
+    icon: '🧥',
+    slot: 'outfit',
+    stats: { soak: 1 }, // a flat point off every hit
+    examine: 'Embroidered logo. Surprisingly padded. Morale not included.',
+  },
+  'interview-blazer': {
+    name: 'Interview Blazer',
+    icon: '🕴️',
+    slot: 'outfit',
+    stats: { attrBonus: { composure: 2 } }, // poise you can wear
+    examine: 'You feel weirdly employable in it.',
+  },
+  'laminated-lanyard': {
+    name: 'Laminated Lanyard',
+    icon: '🪪',
+    slot: 'trinket',
+    stats: { attrBonus: { hustle: 1 } }, // faster on your feet, harder to pin
+    examine: 'ALL-ACCESS. Doors do not care. You feel faster anyway.',
+  },
+  'stress-ball': {
+    name: 'Stress Ball',
+    icon: '🟡',
+    slot: 'trinket',
+    stats: { attrBonus: { composure: 1 } },
+    examine: 'Squeezed to an oblate spheroid by three generations of grief.',
+  },
+  'okayest-mug': {
+    name: "World's Okayest Mug",
+    icon: '🏆',
+    slot: 'trinket',
+    stats: { maxHp: 2 }, // its mediocrity is load-bearing
+    examine: 'WORLD\'S OKAYEST EMPLOYEE. You have never felt so seen.',
+  },
   'toner-cartridge': {
     name: 'Toner Cartridge',
     icon: '🖨️',
@@ -115,6 +161,9 @@ export const LOOT_TABLES = {
     { item: 'cold-coffee', chance: 1 },
     { item: 'stapler', chance: 0.4 },
     { item: 'performance-review', chance: 0.35 },
+    { item: 'okayest-mug', chance: 0.3 },
+    { item: 'letter-opener', chance: 0.25 },
+    { item: 'stress-ball', chance: 0.2 },
     { item: 'red-stapler', chance: 0.06 },
   ],
 };

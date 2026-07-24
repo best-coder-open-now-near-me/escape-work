@@ -159,6 +159,15 @@ export const ACTIONS = {
     log: 'You jab with the stapler. Ka-chunk.',
     missLog: 'The stapler jams. Naturally.',
   },
+  'letter-opener-stab': {
+    type: 'attack',
+    ap: 2, // light and quick - less punch than a stapler, but cheap and precise
+    label: 'Letter Opener Stab',
+    min: 2,
+    max: 3,
+    log: 'You stab with the letter opener. Crisp.',
+    missLog: 'The opener slides off at a shallow angle.',
+  },
 
   // --- applicants (player-controlled summons) -----------------------------------
   // A summoned applicant you control swings with this (its AI-summon twin on

@@ -11,6 +11,8 @@ import {
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
+import { ITEMS } from '../../src/data/items.js';
+import { ACTIONS } from '../../src/data/actions.js';
 
 test('createSheet copies class stats and starts clean', () => {
   const s = createSheet('office-drone');
@@ -445,4 +447,59 @@ test('equippedAction is bare-hands punch unarmed, the weapon swing in hand', () 
   assert.equal(equippedAction(s), 'staple-jab'); // the equipped weapon's swing
   unequipItem(s, 'weapon', 10);
   assert.equal(equippedAction(s), 'punch'); // back to bare hands
+});
+
+// --- equipment content + the richer stat folds (EQUIPMENT_PLAN M4) -----------
+
+test('an outfit soak stacks on Composure deflect', () => {
+  const s = createSheet('office-drone');
+  const d0 = deflect(s);
+  s.inventory = ['company-fleece']; // soak 1
+  equipItem(s, 0);
+  assert.equal(deflect(s), d0 + 1);
+});
+
+test('a maxHp trinket lifts the cap and credits the fresh HP', () => {
+  const s = createSheet('office-drone'); // at full HP
+  const hp0 = s.maxHp;
+  s.inventory = ['okayest-mug']; // maxHp 2
+  equipItem(s, 0);
+  assert.equal(s.maxHp, hp0 + 2);
+  assert.equal(s.hp, hp0 + 2); // was full, the +2 arrives undamaged
+});
+
+test('a weapon acc stat lifts accuracy', () => {
+  const s = createSheet('office-drone');
+  const a0 = accuracy(s);
+  s.inventory = ['letter-opener']; // acc 0.05
+  equipItem(s, 0);
+  assert.ok(Math.abs(accuracy(s) - (a0 + 0.05)) < 1e-9);
+});
+
+test('gear attrBonus flows through every attribute derivation', () => {
+  // A Hustle trinket lifts dodge (drone hustle 5 -> 6 crosses a dodge step).
+  const s = createSheet('office-drone');
+  const dodge0 = dodge(s);
+  s.inventory = ['laminated-lanyard']; // +1 hustle
+  equipItem(s, 0);
+  assert.ok(dodge(s) > dodge0);
+  // A Composure outfit lifts deflect once it crosses a threshold.
+  const c = createSheet('office-drone');
+  c.attr.composure = 2 * PROGRESSION.COMP_PER_DEFLECT - 1; // deflect floor = 1
+  recomputeDerived(c);
+  const def0 = deflect(c);
+  c.inventory = ['interview-blazer']; // +2 composure -> crosses to floor 2
+  equipItem(c, 0);
+  assert.ok(deflect(c) > def0);
+});
+
+test('every equippable item declares a valid slot, stat vocabulary, and weapon swing', () => {
+  const STAT_KEYS = new Set(['dmg', 'soak', 'maxHp', 'maxAp', 'acc', 'dodge', 'attrBonus']);
+  for (const [id, def] of Object.entries(ITEMS)) {
+    if (!def.slot && !def.stats) continue; // not gear
+    assert.ok(EQUIP_SLOTS.includes(def.slot), `${id} has a valid slot`);
+    for (const k of Object.keys(def.stats || {})) assert.ok(STAT_KEYS.has(k), `${id} stat key ${k}`);
+    for (const k of Object.keys(def.stats?.attrBonus || {})) assert.ok(ATTR_KEYS.includes(k), `${id} attrBonus ${k}`);
+    if (def.slot === 'weapon') assert.ok(ACTIONS[def.attack], `${id} weapon swing ${def.attack} exists`);
+  }
 });

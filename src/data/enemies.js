@@ -24,6 +24,7 @@ export const ENEMY_TYPES = {
     loot: [
       { item: 'performance-review', chance: 1 },
       { item: 'cold-coffee', chance: 0.5 },
+      { item: 'company-fleece', chance: 0.3 },
     ],
     attacks: [
       { min: 2, max: 3, log: 'The Manager schedules a "quick sync".', missLog: 'You decline the "quick sync". It never lands.' },
@@ -50,6 +51,7 @@ export const ENEMY_TYPES = {
       { item: 'performance-review', chance: 1 },
       { item: 'red-stapler', chance: 0.35 },
       { item: 'cold-coffee', chance: 0.5 },
+      { item: 'interview-blazer', chance: 0.4 },
     ],
     attacks: [
       { min: 3, max: 5, log: 'The Executive restructures your reporting line.' },
@@ -72,6 +74,7 @@ export const ENEMY_TYPES = {
     loot: [
       { item: 'hr-pamphlet', chance: 1 },
       { item: 'half-sandwich', chance: 0.4 },
+      { item: 'laminated-lanyard', chance: 0.4 },
     ],
     attacks: [
       { min: 2, max: 3, log: 'HR invites you to a "culture-fit conversation".' },
@@ -114,6 +117,7 @@ export const ENEMY_TYPES = {
       { item: 'performance-review', chance: 1 },
       { item: 'red-stapler', chance: 0.3 },
       { item: 'cold-coffee', chance: 0.5 },
+      { item: 'company-fleece', chance: 0.4 },
     ],
     attacks: [
       { min: 3, max: 4, log: 'The Senior Manager loops in their manager.' },
@@ -139,6 +143,7 @@ export const ENEMY_TYPES = {
       { item: 'performance-review', chance: 1 },
       { item: 'red-stapler', chance: 0.5 },
       { item: 'cold-coffee', chance: 0.5 },
+      { item: 'interview-blazer', chance: 0.5 },
     ],
     attacks: [
       { min: 4, max: 6, log: 'The Regional Executive announces a "strategic realignment".', applies: 'stunned', appliesLog: 'You are booked into a mandatory strategy offsite - you lose a turn to it.' },
