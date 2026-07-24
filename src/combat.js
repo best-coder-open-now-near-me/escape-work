@@ -11,7 +11,7 @@
 import { ACTIONS } from './data/actions.js';
 import { SURFACES, GUM } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
-import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, HIT } from './stats.js';
+import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, HIT } from './stats.js';
 import { applyStatus, hasStatus, statusFx, tickTurn, clearStatuses, removeStatus, statusList } from './statuses.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
@@ -95,6 +95,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // lets the e2e suite make combat deterministic and a tester slam hit rates
   // live - the same "pin a value" affordance the god panel gives other state.
   let forceHit = null;
+  let forceProc = null; // pin for the weapon on-hit proc roll (debug/e2e)
   let lastRoll = null; // { chance, hit } of the most recent attack roll (debug/e2e)
   // One attack roll (HIT_PLAN.md): base + attacker accuracy - defender dodge +
   // mods, rolled against combat's injectable `rng` (unless pinned above). The
@@ -105,6 +106,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     lastRoll = { chance, hit };
     return hit;
   };
+  // A weapon's on-hit proc chance, honoring the debug pin.
+  const resolveProc = (chance) => (forceProc !== null ? forceProc : rollHit(chance, rng));
   const MISS_COLOR = '#b8c0d0';
   // Movement cost per unit distance, derived from the surface's `slow`
   // multiplier (0.5 => twice the AP) - one number in data drives both walk
@@ -574,6 +577,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Composure, so no resist). This is the player-action `applies` vector.
     if (a.applies && !died && applyStatus(en, a.applies)) {
       line += ` ${appliesLine(a, en.def.name)}`;
+    }
+    // The equipped weapon's on-hit proc - but only when this attack IS that
+    // weapon's own swing (swing the gum stapler, fling gum).
+    const proc = weaponProc(active.sheet);
+    if (proc && !died && id === equippedAction(active.sheet)
+      && resolveProc(proc.chance) && applyStatus(en, proc.applies)) {
+      line += ` ${appliesLine(proc, en.def.name)}`;
     }
     log(line);
     if (died) callbacks.onEnemyKilled(en);
@@ -1201,6 +1211,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // null = roll honestly. The e2e suite sets it to make combat deterministic.
     get forceHit() { return forceHit; },
     set forceHit(v) { forceHit = v == null ? null : !!v; },
+    // The weapon on-hit proc pin (EQUIPMENT_PLAN #8): true = always proc,
+    // false = never, null = roll. The e2e suite pins it deterministic.
+    get forceProc() { return forceProc; },
+    set forceProc(v) { forceProc = v == null ? null : !!v; },
     // The most recent attack roll { chance, hit }, and the to-hit chance the
     // armed-hover preview is currently showing - both for the e2e suite to
     // assert the previewed odds match the math that actually rolls.

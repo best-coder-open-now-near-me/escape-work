@@ -83,3 +83,14 @@ test('outfits and trinkets fill their own slots and lift derived stats', async (
   await expect(page.locator('#equip-slot-trinket')).toContainText('Okayest Mug');
   await expect(page.locator('#equip-slot-outfit')).toContainText('Company Fleece');
 });
+
+test('the shoes slot equips footwear', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootAndPick(page, 'office-drone');
+  await page.evaluate(() => { window.__god.player.inventory = ['warehouse-boots']; });
+  await page.keyboard.press('i');
+  await expect(page.locator('#inventory-panel')).toBeVisible();
+  await page.click('#inv-equip-0');
+  await expect.poll(() => page.evaluate(() => window.__game.stats.equipped.shoes)).toBe('warehouse-boots');
+  await expect(page.locator('#equip-slot-shoes')).toContainText('Warehouse Boots');
+});

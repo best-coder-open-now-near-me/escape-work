@@ -263,10 +263,21 @@ untouched.
    - **Deferred to playtest (the numbers pass):** the exact stat values and
      drop chances want feel-testing, same posture as HIT's whiff and STATUS's
      fire tuning. The knobs are all data; the god panel makes it a live session.
-5. **Stretch (each its own small PR, in whatever order demand dictates):**
-   on-hit procs via STATUS_PLAN (decision #8) — now unblocked, the framework
-   landed; in-combat swap for `EQUIP_AP` (decision #6); a shoes slot if
-   statuses make floor-hazard gear interesting (decision #1).
+5. **Stretch — on-hit procs + the shoes slot.** ✅ Landed. **Procs** (decision
+   #8, unblocked by STATUS): a weapon may carry `proc: { applies, chance,
+   appliesLog? }`; `stats.weaponProc` exposes it, and `combat.js performOn`
+   rolls it after the weapon's own landed swing (pinnable via
+   `__combat.forceProc`). The red stapler is the promised gum-flick stapler
+   (35% to gum on a Staple Jab). **The shoes slot** (decision #1, now that
+   statuses/gear can express floor traction): `EQUIP_SLOTS` gains `shoes`, a new
+   `slipProof` gear stat folds through `equippedStats` and into `main.js`'s
+   slip check, and Warehouse Boots (slipProof + a little dodge) drop from the
+   trash. `EQUIP_SLOTS`-driven seeding means the strip, char sheet, and save
+   migration pick the fourth slot up for free. Unit 153→155; e2e adds a proc
+   test (pinned swing gums the Manager) and a shoes-slot equip test.
+   - **Still open (lower demand):** in-combat weapon swap for an `EQUIP_AP`
+     cost (decision #6), and the cross-cutting numbers/balance pass all three
+     plans defer to playtest.
 
 ## Testing
 

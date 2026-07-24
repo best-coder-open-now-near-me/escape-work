@@ -6,7 +6,7 @@ import {
   recomputeDerived, ensureAttributes, spendAttrPoint, deflect,
   spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist,
   accuracy, dodge, hitChance, rollHit, unitCombat,
-  equipItem, unequipItem, equippedStats, equippedAction,
+  equipItem, unequipItem, equippedStats, equippedAction, weaponProc,
   PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
@@ -383,7 +383,7 @@ test('unitCombat passes innate accuracy/dodge through, defaulting to 0', () => {
 
 test('a fresh sheet has empty equipment slots', () => {
   const s = createSheet('office-drone');
-  assert.deepEqual(s.equipped, { weapon: null, outfit: null, trinket: null });
+  assert.deepEqual(s.equipped, { weapon: null, outfit: null, trinket: null, shoes: null });
   assert.deepEqual(equippedStats(s).attrBonus, {});
   assert.equal(equippedStats(s).dmg, 0);
 });
@@ -435,8 +435,8 @@ test('equipping a dmg-only weapon leaves maxHp and deflect untouched', () => {
   assert.equal(damageBonus(s) - (Math.floor((s.attr.savvy) / PROGRESSION.DMG_PER_SAVVY)), 2);
 });
 
-test('EQUIP_SLOTS is the three-slot set', () => {
-  assert.deepEqual(EQUIP_SLOTS, ['weapon', 'outfit', 'trinket']);
+test('EQUIP_SLOTS is the four-slot set', () => {
+  assert.deepEqual(EQUIP_SLOTS, ['weapon', 'outfit', 'trinket', 'shoes']);
 });
 
 test('equippedAction is bare-hands punch unarmed, the weapon swing in hand', () => {
@@ -494,7 +494,7 @@ test('gear attrBonus flows through every attribute derivation', () => {
 });
 
 test('every equippable item declares a valid slot, stat vocabulary, and weapon swing', () => {
-  const STAT_KEYS = new Set(['dmg', 'soak', 'maxHp', 'maxAp', 'acc', 'dodge', 'attrBonus']);
+  const STAT_KEYS = new Set(['dmg', 'soak', 'maxHp', 'maxAp', 'acc', 'dodge', 'slipProof', 'attrBonus']);
   for (const [id, def] of Object.entries(ITEMS)) {
     if (!def.slot && !def.stats) continue; // not gear
     assert.ok(EQUIP_SLOTS.includes(def.slot), `${id} has a valid slot`);
@@ -502,4 +502,28 @@ test('every equippable item declares a valid slot, stat vocabulary, and weapon s
     for (const k of Object.keys(def.stats?.attrBonus || {})) assert.ok(ATTR_KEYS.includes(k), `${id} attrBonus ${k}`);
     if (def.slot === 'weapon') assert.ok(ACTIONS[def.attack], `${id} weapon swing ${def.attack} exists`);
   }
+});
+
+// --- procs + the shoes slot (EQUIPMENT_PLAN M5) -----------------------------
+
+test('footwear slipProof folds into equippedStats', () => {
+  const s = createSheet('office-drone');
+  assert.equal(equippedStats(s).slipProof, false);
+  s.inventory = ['warehouse-boots'];
+  equipItem(s, 0);
+  assert.equal(s.equipped.shoes, 'warehouse-boots'); // its own slot
+  assert.equal(equippedStats(s).slipProof, true);
+  assert.ok(equippedStats(s).dodge >= 0.05); // and a touch of dodge
+});
+
+test('weaponProc reads the equipped weapon on-hit proc, null otherwise', () => {
+  const s = createSheet('office-drone');
+  assert.equal(weaponProc(s), null); // bare-handed, no proc
+  s.inventory = ['stapler'];
+  equipItem(s, 0);
+  assert.equal(weaponProc(s), null); // a plain stapler has no proc
+  s.inventory = ['red-stapler'];
+  equipItem(s, 0);
+  assert.equal(weaponProc(s).applies, 'gum'); // THE red stapler flings gum
+  assert.ok(weaponProc(s).chance > 0);
 });

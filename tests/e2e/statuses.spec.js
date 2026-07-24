@@ -117,3 +117,36 @@ test('blinded drops the attacker to-hit via accMod', async ({ page }) => {
   const blind = await readChance();
   expect(base - blind).toBeCloseTo(0.3, 5); // the whole accMod, both ends unclamped here
 });
+
+test('a weapon on-hit proc applies its status - the red stapler flings gum', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, DUEL_ARENA, 'office-drone');
+  // Equip the red stapler via the pockets before the fight (equip is out-of-combat).
+  await page.evaluate(() => { window.__god.player.inventory = ['red-stapler']; });
+  await page.keyboard.press('i');
+  await expect(page.locator('#inventory-panel')).toBeVisible();
+  await page.click('#inv-equip-0');
+  await expect.poll(() => page.evaluate(() => window.__game.stats.equipped.weapon)).toBe('red-stapler');
+  await page.keyboard.press('i'); // close the pockets
+  await enterCombat(page);
+  // Pin the hit and the proc so the swing lands and always gums.
+  await page.evaluate(() => { window.__combat.forceHit = true; window.__combat.forceProc = true; });
+  // The stapler's swing is on the combat bar (fail fast if the wiring is off).
+  await expect(page.locator('#act-staple-jab')).toBeVisible();
+
+  const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
+  const foeGummed = () => page.evaluate(([x, z]) =>
+    !!window.__combat.enemies.find((e) => e.x === x && e.z === z)?.statuses.some((s) => s.id === 'gum'),
+    [foe.x, foe.z]);
+  // Swing the stapler (its staple-jab is on the bar) until it lands; the proc gums.
+  let gummed = false;
+  for (let i = 0; i < 6 && !gummed; i++) {
+    await page.waitForTimeout(700);
+    if (await page.evaluate(() => window.__combat.armed) !== 'staple-jab') await page.click('#act-staple-jab');
+    const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
+    await page.mouse.click(fp.x, fp.y);
+    await page.waitForTimeout(400);
+    gummed = await foeGummed();
+  }
+  expect(gummed).toBe(true); // the on-hit proc stuck gum on the Manager
+});

@@ -54,10 +54,11 @@ export const HIT = {
 
 export const ATTR_KEYS = ['grit', 'hustle', 'savvy', 'composure'];
 
-// Equipment slots (EQUIPMENT_PLAN.md): one damage choice, one defense choice,
-// one wildcard. Rendered as In Hand / Dress Code / Flair. An item's `slot`
-// (data/items.js) says where it goes; `stats` fold into the derived numbers.
-export const EQUIP_SLOTS = ['weapon', 'outfit', 'trinket'];
+// Equipment slots (EQUIPMENT_PLAN.md): a damage choice, a defense choice, a
+// wildcard, and footwear (the floor is a hazard). Rendered as In Hand / Dress
+// Code / Flair / On Foot. An item's `slot` (data/items.js) says where it goes;
+// `stats` fold into the derived numbers.
+export const EQUIP_SLOTS = ['weapon', 'outfit', 'trinket', 'shoes'];
 
 // A clean {grit,hustle,savvy,composure} object from any partial source.
 export function normalizeAttr(src = {}) {
@@ -141,7 +142,7 @@ export function createSheetFrom(block, extra = {}) {
     talent: block.talent || null,
     paper: 0, // thrown-weapon ammo, picked up from paper spills
     statuses: {}, // active status effects (statuses.js) - gum, bleed, and the rest
-    equipped: { weapon: null, outfit: null, trinket: null }, // worn gear (EQUIPMENT_PLAN)
+    equipped: Object.fromEntries(EQUIP_SLOTS.map((s) => [s, null])), // worn gear (EQUIPMENT_PLAN)
     inventory: [], // looted item ids (data/items.js) - persists across floors
     ...extra,
   };
@@ -234,7 +235,7 @@ export function unitCombat(def) {
 // trinket's attribute bump all reach the numbers the same way. Empty for an
 // unequipped sheet.
 export function equippedStats(sheet) {
-  const out = { dmg: 0, soak: 0, maxHp: 0, maxAp: 0, acc: 0, dodge: 0, attrBonus: {} };
+  const out = { dmg: 0, soak: 0, maxHp: 0, maxAp: 0, acc: 0, dodge: 0, slipProof: false, attrBonus: {} };
   const eq = sheet.equipped || {};
   for (const slot of EQUIP_SLOTS) {
     const st = ITEMS[eq[slot]]?.stats;
@@ -245,9 +246,17 @@ export function equippedStats(sheet) {
     out.maxAp += st.maxAp || 0;
     out.acc += st.acc || 0;
     out.dodge += st.dodge || 0;
+    out.slipProof = out.slipProof || !!st.slipProof; // footwear traction
     for (const k in st.attrBonus || {}) out.attrBonus[k] = (out.attrBonus[k] || 0) + st.attrBonus[k];
   }
   return out;
+}
+
+// The equipped weapon's on-hit proc (EQUIPMENT_PLAN #8), or null. A proc is
+// { applies: '<status>', chance, appliesLog? } - combat rolls it when you land
+// the weapon's own swing.
+export function weaponProc(sheet) {
+  return ITEMS[sheet?.equipped?.weapon]?.proc || null;
 }
 
 // The basic weapon-attack action for a sheet (EQUIPMENT_PLAN decision #7):
@@ -448,7 +457,7 @@ export function equipItem(sheet, i) {
   const id = sheet.inventory?.[i];
   const def = ITEMS[id];
   if (!def || !EQUIP_SLOTS.includes(def.slot)) return false;
-  sheet.equipped = sheet.equipped || { weapon: null, outfit: null, trinket: null };
+  sheet.equipped = sheet.equipped || Object.fromEntries(EQUIP_SLOTS.map((s) => [s, null]));
   const maxHpBefore = sheet.maxHp;
   const prev = sheet.equipped[def.slot];
   sheet.inventory.splice(i, 1);          // out of the bag...

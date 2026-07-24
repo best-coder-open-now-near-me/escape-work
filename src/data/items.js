@@ -68,6 +68,10 @@ export const ITEMS = {
     slot: 'weapon',
     stats: { dmg: 2 },
     attack: 'staple-jab',
+    // On-hit proc (EQUIPMENT_PLAN #8): its Staple Jab has a chance to fling gum
+    // onto the target - the "gum-flick stapler" the plan promised. Resolved in
+    // combat after the swing lands (stats.weaponProc).
+    proc: { applies: 'gum', chance: 0.35, appliesLog: 'A stray staple flings gum onto their shoe.' },
     examine: 'THE red stapler. Someone has been looking for this since 1999. +2 damage in hand.',
   },
   // --- equipment content (EQUIPMENT_PLAN M4) ---------------------------------
@@ -114,6 +118,13 @@ export const ITEMS = {
     stats: { maxHp: 2 }, // its mediocrity is load-bearing
     examine: 'WORLD\'S OKAYEST EMPLOYEE. You have never felt so seen.',
   },
+  'warehouse-boots': {
+    name: 'Warehouse Boots',
+    icon: '🥾',
+    slot: 'shoes',
+    stats: { slipProof: true, dodge: 0.05 }, // the floor holds no fear (and light on your feet)
+    examine: 'Steel-toed, oil-resistant, 021 tread. Wet floors are a rumor.',
+  },
   'toner-cartridge': {
     name: 'Toner Cartridge',
     icon: '🖨️',
@@ -151,6 +162,7 @@ export const LOOT_TABLES = {
     { item: 'half-sandwich', chance: 0.5 },
     { item: 'matches', chance: 0.4 },
     { item: 'energy-drink', chance: 0.25 },
+    { item: 'warehouse-boots', chance: 0.2 },
     { item: 'usb-stick', chance: 0.15 },
   ],
   printer: [

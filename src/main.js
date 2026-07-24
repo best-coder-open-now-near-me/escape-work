@@ -17,7 +17,7 @@ import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
 import {
   createSheet, createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
-  scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction,
+  scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
@@ -1398,7 +1398,8 @@ function startGame(level) {
     // walk right there. In combat the movement AP already spent stays spent -
     // that IS the penalty. slipImmune tread never slips; neither does a
     // gummed shoe - gum is traction.
-    if (changed && !gameOver && !ms.talent?.effects?.slipImmune && !(wasSlipProof || statusFx(ms).slipProof)) {
+    if (changed && !gameOver && !ms.talent?.effects?.slipImmune
+      && !(wasSlipProof || statusFx(ms).slipProof || equippedStats(ms).slipProof)) {
       const chance = slipChanceAt(x, z);
       if (chance && Math.random() < chance) {
         actor.clearPath();

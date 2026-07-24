@@ -340,7 +340,7 @@ export function createLootLabels() {
 // item registry; `usable` items get Use, flavor items get Examine, everything
 // can be dropped (dropping creates a loose floor item the Alt overlay sees).
 // Equip-slot display names (In Hand / Dress Code / Flair).
-const SLOT_LABELS = { weapon: 'In Hand', outfit: 'Dress Code', trinket: 'Flair' };
+const SLOT_LABELS = { weapon: 'In Hand', outfit: 'Dress Code', trinket: 'Flair', shoes: 'On Foot' };
 
 export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onEquip, onUnequip }) {
   const bag = document.createElement('button');
