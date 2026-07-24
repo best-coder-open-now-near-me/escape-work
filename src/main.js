@@ -1362,6 +1362,12 @@ function startGame(level) {
         ui.say(had ? 'More gum. You are building a collection.' : sfx.message);
         ui.updateStatsHud(sheet);
       }
+      // A turn-clock status a surface applies (fire -> burning) needs combat's
+      // turns to tick, so it only takes hold in a fight; the instant surface
+      // damage below is the out-of-combat story.
+      if (sfx.applies && sfx.applies !== 'gum' && inCombat && applyStatus(ms, sfx.applies)) {
+        ui.updateStatsHud(sheet);
+      }
       const amount = effectiveSurfDamage(x, z, ms);
       if (amount > 0) {
         if (sfx.bleed) applyStatus(ms, 'bleed', { duration: sfx.bleed });

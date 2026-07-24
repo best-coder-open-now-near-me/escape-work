@@ -82,7 +82,10 @@ export const ELECTRIFIED = {
 // through `flammable` surfaces from ignited trash cans, then burns out.
 export const FIRE = {
   pathCost: 10,
-  onEnter: { amount: 4, message: 'You stride through open flame. Bold. -4 HP.' },
+  // In combat, striding through flame also sets you alight (the 'burning'
+  // status, statuses.js): a dot on each of your turns until it burns out. Out
+  // of combat there are no turns to tick, so only the instant damage lands.
+  onEnter: { amount: 4, applies: 'burning', message: 'You stride through open flame. Bold. -4 HP.' },
   examine: 'That is on fire. This is fine.',
   color: [1.0, 0.45, 0.1],
 };

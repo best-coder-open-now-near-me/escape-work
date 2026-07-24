@@ -204,6 +204,10 @@ export const ACTIONS = {
     label: 'Paper Airplane',
     min: 4,
     max: 6,
+    // A dart to the eyes: the target is blinded (accMod), aiming worse until it
+    // wears off - the player-action `applies` vector (STATUS_PLAN M4).
+    applies: 'blinded',
+    appliesLog: 'Right in the eyes - they can\'t see straight.',
     log: 'You fold a dart and send it. Right in the lanyard.',
     missLog: 'The dart banks left and augers into a monitor.',
   },

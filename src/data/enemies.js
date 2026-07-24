@@ -31,7 +31,7 @@ export const ENEMY_TYPES = {
       { min: 2, max: 3, log: 'The Manager CCs your skip-level.', missLog: 'The CC bounces - wrong distribution list.' },
       { min: 2, max: 4, log: '"Per my last email..."', missLog: 'Per your last email, you were already out of office.' },
       // applies: 'gum' - sticks gum to the target's shoe (see GUM in surfaces.js)
-      { min: 1, max: 2, log: 'The Manager parks his gum on your shoe. A power move.', applies: 'gum', missLog: 'The Manager reaches for your shoe and misses. Reprieve.' },
+      { min: 1, max: 2, log: 'The Manager parks his gum on your shoe. A power move.', applies: 'gum', appliesLog: 'Gum. On your shoe.', missLog: 'The Manager reaches for your shoe and misses. Reprieve.' },
     ],
   },
   executive: {
@@ -55,7 +55,7 @@ export const ENEMY_TYPES = {
       { min: 3, max: 5, log: 'The Executive restructures your reporting line.' },
       { min: 2, max: 4, log: 'The Executive asks what it is you even do here.' },
       { min: 2, max: 5, log: 'The Executive aligns you with the new strategy.' },
-      { min: 1, max: 2, log: 'The Executive parks his gum on your shoe. Delegation.', applies: 'gum' },
+      { min: 1, max: 2, log: 'The Executive parks his gum on your shoe. Delegation.', applies: 'gum', appliesLog: 'Gum. On your shoe.' },
     ],
   },
   hr: {
@@ -119,7 +119,7 @@ export const ENEMY_TYPES = {
       { min: 3, max: 4, log: 'The Senior Manager loops in their manager.' },
       { min: 3, max: 5, log: 'The Senior Manager moves the goalposts, then the deadline.' },
       { min: 2, max: 4, log: '"Let\'s take this offline." (It is never taken offline.)' },
-      { min: 1, max: 2, log: 'The Senior Manager parks premium gum on your shoe.', applies: 'gum' },
+      { min: 1, max: 2, log: 'The Senior Manager parks premium gum on your shoe.', applies: 'gum', appliesLog: 'Gum. On your shoe.' },
     ],
   },
   'regional-executive': {
@@ -141,7 +141,7 @@ export const ENEMY_TYPES = {
       { item: 'cold-coffee', chance: 0.5 },
     ],
     attacks: [
-      { min: 4, max: 6, log: 'The Regional Executive announces a "strategic realignment".' },
+      { min: 4, max: 6, log: 'The Regional Executive announces a "strategic realignment".', applies: 'stunned', appliesLog: 'You are booked into a mandatory strategy offsite - you lose a turn to it.' },
       { min: 3, max: 6, log: 'The Regional Executive sunsets your entire team.' },
       { min: 3, max: 5, log: 'The Regional Executive asks for a number you do not have.' },
     ],

@@ -12,7 +12,8 @@ import { ACTIONS } from './data/actions.js';
 import { SURFACES, GUM } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, HIT } from './stats.js';
-import { applyStatus, hasStatus, statusFx, tickTurn, clearStatuses, removeStatus } from './statuses.js';
+import { applyStatus, hasStatus, statusFx, tickTurn, clearStatuses, removeStatus, statusList } from './statuses.js';
+import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { buildInitiativeOrder, rollInitiative, insertionIndex } from './initiative.js';
 
@@ -21,6 +22,15 @@ const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
 const cheb = (ax, az, bx, bz) => Math.max(Math.abs(ax - bx), Math.abs(az - bz));
 const THROW_RANGE = 5;
 const SURPRISE_RADIUS = 2; // engaged from beyond this = loses the first turn
+
+// The narration when a landed hit applies a status: an explicit per-attack/
+// action line if given, else the status's own {name}-templated log, else a
+// bare fallback naming it.
+const appliesLine = (src, name) => {
+  if (src.appliesLog) return src.appliesLog;
+  const def = STATUSES[src.applies];
+  return def?.log ? def.log.replace('{name}', name) : `${def?.name || 'A status'} sets in.`;
+};
 
 export function startCombat({ app, party, engaged, world, fx, callbacks, opening = null, rng = Math.random }) {
   // Per-member turn state: every party member fights with their own AP pool,
@@ -216,8 +226,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (!a || a.type !== 'attack' || a.cone) { costTag.style.display = 'none'; return; }
     const en = enemyAtPoint(point);
     if (!en) { costTag.style.display = 'none'; return; }
-    const acc = accuracy(active.sheet) + (hasStatus(en, 'surprised') ? HIT.SURPRISE_ACC_BONUS : 0);
-    hoverHitChance = hitChance(acc, en.def.dodge || 0);
+    const acc = accuracy(active.sheet)
+      + (hasStatus(en, 'surprised') ? HIT.SURPRISE_ACC_BONUS : 0)
+      + (statusFx(active.sheet).accMod || 0);
+    hoverHitChance = hitChance(acc, (en.def.dodge || 0) + (statusFx(en).dodgeMod || 0));
     costTag.textContent = `${Math.round(hoverHitChance * 100)}% to hit`;
     costTag.style.left = `${sx + 14}px`;
     costTag.style.top = `${sy + 14}px`;
@@ -467,15 +479,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     strip.innerHTML = `<div style="font-weight:700; margin-bottom:5px;">INITIATIVE</div>` +
       order.map((s, i) => {
         const cur = i === turnPtr;
+        const carrier = s.member ? s.member.sheet : s.unit;
         const hp = s.member
           ? `${Math.max(0, s.member.sheet.hp)}/${s.member.sheet.maxHp}`
           : `${Math.max(0, s.unit.hp)}/${s.unit.maxHp}`;
         const dead = !slotAlive(s);
         const col = s.team === 'player' ? '#8adf76' : '#ffb3a0';
+        // Live status icons trail the row - the at-a-glance read of who's
+        // stunned, burning, deflecting, gummed.
+        const icons = dead ? '' : statusList(carrier).map((st) => st.icon).join('');
         return `<div style="opacity:${dead ? '.4' : '.95'}; color:${col};`
           + `font-weight:${cur ? '700' : '400'};">`
           + `${cur ? '▸ ' : '&nbsp;&nbsp;'}${slotName(s)} &middot; ${dead ? '—' : hp}`
-          + ` <span style="opacity:.6">(${s.init})</span></div>`;
+          + ` <span style="opacity:.6">(${s.init})</span>`
+          + (icons ? ` ${icons}` : '') + `</div>`;
       }).join('');
     // Reflect the ACTING member on the persistent HUD, not the leader - in a
     // multi-member fight you control whoever's turn it is (their HP, their gum/
@@ -529,9 +546,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     active.ap -= a.ap;
     // The attack roll: a miss spends the cost above and does nothing else - no
-    // damage, no purge. A surprised target is easier to hit (HIT_PLAN #6).
-    const acc = accuracy(active.sheet) + (hasStatus(en, 'surprised') ? HIT.SURPRISE_ACC_BONUS : 0);
-    if (!resolveHit(acc, en.def.dodge || 0)) {
+    // damage, no purge, no rider. A surprised target is easier to hit (HIT_PLAN
+    // #6); a blinded attacker (accMod) aims worse; the target's dodgeMod folds in.
+    const acc = accuracy(active.sheet)
+      + (hasStatus(en, 'surprised') ? HIT.SURPRISE_ACC_BONUS : 0)
+      + (statusFx(active.sheet).accMod || 0);
+    if (!resolveHit(acc, (en.def.dodge || 0) + (statusFx(en).dodgeMod || 0))) {
       fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
       log(a.missLog || `${a.log} It misses.`);
       armed = null;
@@ -548,6 +568,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const woke = hasStatus(en, 'surprised');
       clearStatuses(en);
       if (woke) line += ' Their surprise is power-cycled away.';
+    }
+    // A status the action carries lands on a live target (enemies have no
+    // Composure, so no resist). This is the player-action `applies` vector.
+    if (a.applies && !died && applyStatus(en, a.applies)) {
+      line += ` ${appliesLine(a, en.def.name)}`;
     }
     log(line);
     if (died) callbacks.onEnemyKilled(en);
@@ -575,8 +600,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // Roll per target. A dodged envelope flies but doesn't land; the wedge's
       // `leaves` surface still carpets below (HIT_PLAN #4). A surprised target
       // is easier to catch.
-      const acc = accuracy(active.sheet) + (hasStatus(en, 'surprised') ? HIT.SURPRISE_ACC_BONUS : 0);
-      if (!resolveHit(acc, en.def.dodge || 0)) {
+      const acc = accuracy(active.sheet)
+        + (hasStatus(en, 'surprised') ? HIT.SURPRISE_ACC_BONUS : 0)
+        + (statusFx(active.sheet).accMod || 0);
+      if (!resolveHit(acc, (en.def.dodge || 0) + (statusFx(en).dodgeMod || 0))) {
         fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
         continue;
       }
@@ -627,7 +654,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (!world.isWalkable(tx, tz) || !world.stepOpen(en.x, en.z, tx, tz)) {
         const died = en.takeDamage(2);
         fx.damageText(en.x, en.z, '-2', '#ffd76b');
-        log(`You shove ${en.def.name} into something solid. -2.`);
+        // A slam into a wall knocks the wind out of them - stunned (they lose
+        // their next turn). The knockdown DOS2 shoves are for.
+        let msg = `You shove ${en.def.name} into something solid. -2.`;
+        if (!died && applyStatus(en, 'stunned')) msg += ' They crumple - dazed.';
+        log(msg);
         if (died) callbacks.onEnemyKilled(en);
       } else {
         en.pushTo(tx, tz);
@@ -819,20 +850,27 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (!livingParty().length) { defeat(); return; }
     const s = order[turnPtr];
     if (!slotAlive(s)) { advanceTurn(); return; } // a corpse/downed slot - skip
-    // Turn-clock statuses tick at the top of the owner's turn: a skipTurn status
-    // (surprise now, stun in M4) costs them the turn, and every turn-clock
-    // duration decrements - so a member's Deflect expires when their next turn
-    // begins (was: s.member.defended = false), and a surprised unit's flag
-    // clears after it burns this one. (Turn-clock dot damage lands here once M4
-    // sources burning.)
     const carrier = s.member ? s.member.sheet : s.unit;
-    const skipUnit = !s.member && !!statusFx(s.unit).skipTurn;
-    tickTurn(carrier);
-    if (skipUnit) {
-      // Caught off guard: they spend the turn realizing what's happening.
+    // Read incapacitation BEFORE ticking (the tick expires a 1-turn stun/
+    // surprise): a skipTurn status costs the owner this turn.
+    const skip = !!statusFx(carrier).skipTurn;
+    const skipLine = skip ? skipTurnLine(s, carrier) : null;
+    // Turn-clock statuses tick at the top of the owner's turn: a dot (burning)
+    // bites, and every duration decrements - so a member's Deflect expires when
+    // their next turn begins, and surprise/stun clear after they burn this one.
+    const { damage } = tickTurn(carrier);
+    if (damage > 0 && applyTurnDot(s, damage)) return; // owner fell to the dot
+    if (skip) {
+      if (s.member) {
+        // A stunned member's turn is spent recovering - narrate and pass.
+        log(skipLine);
+        refresh();
+        advanceTurn();
+        return;
+      }
       phase = 'ai';
       acting = { unit: s.unit, ap: 0, wait: 0.6 };
-      log(`${s.unit.def.name} is still grabbing their lanyard.`);
+      log(skipLine);
       refresh();
       return;
     }
@@ -848,6 +886,38 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     phase = 'ai';
     acting = { unit: s.unit, ap: s.unit.def.ap, wait: 0.35 };
     refresh();
+  }
+  // The line for a turn spent incapacitated - stun reads differently from the
+  // surprise it generalized.
+  function skipTurnLine(s, carrier) {
+    const name = s.member ? s.member.sheet.name : s.unit.def.name;
+    if (hasStatus(carrier, 'stunned')) return `${name} is stuck in mandatory training. Attendance is taken.`;
+    return `${name} is still grabbing their lanyard.`;
+  }
+  // Apply a turn-start dot (burning) to the slot's owner, with popup + death
+  // handling. Returns true if the owner died (the caller then advances past the
+  // now-empty slot), false if the turn should proceed.
+  function applyTurnDot(s, damage) {
+    const actor = s.member ? s.member.actor : s.unit;
+    fx.damageText(actor.x, actor.z, `-${damage}`, '#ff7a3c');
+    if (s.member) {
+      const dead = applyDamage(s.member.sheet, damage);
+      log(`${s.member.sheet.name} is on fire. -${damage}.`);
+      if (!dead) { refresh(); return false; }
+      s.member.toppled = true;
+      s.member.actor.clearPath();
+      s.member.actor.fx = { kind: 'death', t: 0 };
+      if (!livingParty().length) { defeat(); return true; }
+      advanceTurn();
+      return true;
+    }
+    const died = s.unit.takeDamage(damage);
+    log(`${s.unit.def.name} is on fire. -${damage}.`);
+    if (!died) { refresh(); return false; }
+    callbacks.onEnemyKilled(s.unit);
+    if (!engaged.some((e) => e.alive)) { victory(); return true; }
+    advanceTurn();
+    return true;
   }
 
   // --- summons ----------------------------------------------------------------
@@ -905,7 +975,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // The attack roll (inert under M1). A miss skips damage, the deflect
       // interaction, the flinch, and any applied status; the enemy's AP was
       // already committed by the caller.
-      if (!resolveHit(unit.def.accuracy || 0, dodge(m.sheet))) {
+      // The attacker's accuracy folds in any accMod (a blinded attacker aims
+      // worse); the defender's dodge folds in any dodgeMod.
+      const acc = (unit.def.accuracy || 0) + (statusFx(unit).accMod || 0);
+      const dodgeVal = dodge(m.sheet) + (statusFx(m.sheet).dodgeMod || 0);
+      if (!resolveHit(acc, dodgeVal)) {
         fx.damageText(m.actor.x, m.actor.z, 'MISS', MISS_COLOR);
         log(atk.missLog || `${unit.def.name}'s attack goes wide.`);
         refresh();
@@ -926,9 +1000,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       m.actor.flinch();
       const dead = applyDamage(m.sheet, dmg);
       fx.damageText(m.actor.x, m.actor.z, `-${dmg}`);
-      if (atk.applies === 'gum') {
-        applyStatus(m.sheet, 'gum', {}, statusResist(m.sheet)); // Composure shrugs some off
-        line += ' Gum. On your shoe.';
+      // Any status the attack carries lands here (gum, and now stun etc.),
+      // Composure shrugging off some of a resistable one. Not onto a corpse.
+      if (atk.applies && !dead && applyStatus(m.sheet, atk.applies, {}, statusResist(m.sheet))) {
+        line += ` ${appliesLine(atk, m.sheet.name)}`;
       }
       log(line);
       refresh();
@@ -1113,7 +1188,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     get ap() { return active.ap; },
     set ap(v) { active.ap = Math.max(0, roundAp(Number(v) || 0)); refresh(); },
     get armed() { return armed; },
-    get enemies() { return engaged.map((e) => ({ name: e.def.name, x: e.x, z: e.z, hp: e.hp, alive: e.alive })); },
+    get enemies() { return engaged.map((e) => ({ name: e.def.name, x: e.x, z: e.z, hp: e.hp, alive: e.alive, statuses: statusList(e) })); },
     get maxAp() { return active.sheet.maxAp; },
     get defended() { return hasStatus(active.sheet, 'deflecting'); },
     set defended(v) {
@@ -1132,8 +1207,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     get hoverHitChance() { return hoverHitChance; },
     get usesLeft() { return active.usesLeft; }, // live { actionId: count } - edit in place, then call refresh()
     get party() {
-      return members.map((m) => ({ name: m.sheet.name, hp: m.sheet.hp, ap: m.ap, active: m === active }));
+      return members.map((m) => ({ name: m.sheet.name, hp: m.sheet.hp, ap: m.ap, active: m === active, statuses: statusList(m.sheet) }));
     },
+    // Test/debug: apply a status to the active member (STATUS_PLAN e2e). Enemy
+    // statuses arrive naturally (a shove stuns, a fire tile burns).
+    applyStatus: (id, duration) => { applyStatus(active.sheet, id, { duration }); refresh(); },
     // The initiative order, top to bottom, with whose turn it is - for the
     // tracker UI and the e2e suite.
     get order() {

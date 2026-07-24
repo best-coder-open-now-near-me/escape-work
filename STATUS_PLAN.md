@@ -254,11 +254,29 @@ map seeds `{}`.
      clears gum (it's a status, and `clearStatuses` wipes the map) — previously
      gum survived a reboot. On-theme and covered by the documented purge
      contract.
-4. **New content.** `stunned` (wall-slam shove + a `regional-executive`
-   attack `applies`), `burning` (fire tiles), `blinded` (a new printer-themed
-   source — e.g. thrown `toner-cartridge` finally earning its slot as a
-   throwable, or a printer-explosion rider); player-action `applies` support;
-   focus-banner + initiative-strip UI; god panel section.
+4. **New content.** ✅ Landed. `beginTurn` now applies a turn-clock **dot**
+   (burning) at the owner's turn with popup + death handling, and handles
+   `skipTurn` for members and units alike. Sources: **stunned** from the shove
+   wall-slam (the knockdown DOS2 shoves are for) and a `regional-executive`
+   attack; **burning** from fire tiles in combat (`FIRE.onEnter.applies`, gated
+   to combat so there are turns to tick); **blinded** from the player throwing a
+   paper airplane (the player-action `applies` vector). Application generalized:
+   `aiAttack` and `performOn`/`fireCone` resolve any `applies` (with an
+   `appliesLog`/status-log/fallback line), and `accMod`/`dodgeMod` fold into the
+   hit roll and the hover preview — so blinded actually lowers to-hit. The
+   initiative strip trails each combatant with live status icons; `__combat`
+   exposes per-combatant `statuses` snapshots and an `applyStatus` test hook.
+   Unit 140/140; e2e: a new `statuses.spec.js` proves the shove-stun lifecycle
+   (target stunned → loses a turn → stun clears), the burning dot (-2 at the
+   owner's turn), and blinded's accMod (to-hit drops 0.3); combat + surfaces
+   regression 21/21.
+   - **Deferred polish:** a dedicated god-panel status *widget* (the functional
+     `__combat.applyStatus` hook + direct-map writes cover testing) and
+     focus-banner status icons (the initiative strip already gives the
+     at-a-glance read). Both are additive UI, not framework.
+   - **Balance note (risk):** fire now double-dips (instant `onEnter` damage +
+     a burning dot). Left for the same playtest pass HIT's whiff tuning waits
+     on; the god pins make it a live-tuning session.
 5. **Mind control (deferred design, own PR).** Fear ("Performance
    Improvement" — flee toward the nearest exit-ward tile for N turns) and
    charm (`mandatory-fun` — swaps `team` for targeting purposes). Needs:
