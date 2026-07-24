@@ -78,9 +78,10 @@ export const ENEMY_TYPES = {
       { min: 1, max: 4, log: 'HR reminds you fun is mandatory at the offsite.' },
     ],
     // HR's power (SUMMON_PLAN.md): posts the role and applicants materialize to
-    // fight for it. `archetype` names a unit (the `applicant` class); `cap` is
-    // how many it may have live at once; `cooldownRounds` is the wait between
-    // reqs; `ap` is what the post costs its turn. The combat AI reads this.
+    // fight for it. `archetype` names a unit (the `applicant` class); `count` is
+    // how many arrive per post; `cap` is how many it may have live at once;
+    // `cooldownRounds` is the wait between reqs; `ap` is what the post costs its
+    // turn. The combat AI reads this (combat.js resolveSummon).
     summon: {
       archetype: 'applicant',
       count: 2,

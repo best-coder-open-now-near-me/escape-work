@@ -29,6 +29,10 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
   let asset = app.assets.find(url);
   if (!asset) {
     asset = new pc.Asset(url, 'container', { url });
+    // Attach the error handler ONCE, when the asset is first created - it's a
+    // persistent listener on a shared asset, so re-adding it per placeModel
+    // call (the editor repaints constantly) would leak handlers unbounded.
+    asset.on('error', (err) => console.warn('asset load failed:', url, err));
     app.assets.add(asset);
   }
   asset.ready(() => {
@@ -44,7 +48,6 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
     app.root.addChild(holder);
     if (onReady) onReady(holder);
   });
-  asset.on('error', (err) => console.warn('asset load failed:', url, err));
   app.assets.load(asset);
 }
 

@@ -82,6 +82,42 @@ test('approachPoint stays inside the goal tile', () => {
   assert.ok(Math.abs(px - 1) <= 0.42 + 1e-9 && Math.abs(pz - 0) <= 0.42 + 1e-9);
 });
 
+test('approachPoint stands at reach from an adjacent target', () => {
+  // Goal tile (1,0), target at (0,0): the stand point is pulled to `reach` from
+  // the target, not left at the goal centre. (The degenerate d<=0 branch would
+  // return the centre and fail this.)
+  const w = walkableFrom(['..']);
+  const [px, pz] = approachPoint(w, null, 1, 0, 0, 0, 0.85);
+  assert.ok(Math.abs(Math.hypot(px, pz) - 0.85) < 1e-6, `reach distance, got ${Math.hypot(px, pz)}`);
+  assert.ok(Math.abs(px - 1) <= 0.42 + 1e-9, 'still inside the goal tile');
+});
+
+test('clampToClearance repels a point from a solid diagonal corner', () => {
+  // (2,2) solid, all orthogonals of the standing cell (1,1) open: only the
+  // diagonal-corner repulsion can push the point clear.
+  const w = walkableFrom(['...', '...', '..#']);
+  const [x, z] = clampToClearance(w, null, 1.45, 1.45); // near the (1.5,1.5) corner
+  const corner = Math.hypot(x - 1.5, z - 1.5);
+  assert.ok(corner >= 0.3 - 1e-9, `pushed to body radius off the corner, got ${corner}`);
+});
+
+test('smoothPath leaves null and 2-point paths untouched', () => {
+  const open = () => true;
+  assert.equal(smoothPath(open, null), null);
+  assert.deepEqual(smoothPath(open, [[0, 0], [2, 2]]), [[0, 0], [2, 2]]);
+});
+
+test('smoothPath will not straighten a run across a closed edge wall', () => {
+  const w = walkableFrom(['...', '...', '...']);
+  // A partition on every x=1<->x=2 boundary: cells are open, the edge is not.
+  const edgeOpen = (x, z, nx) => !((x === 1 && nx === 2) || (x === 2 && nx === 1));
+  const raw = [[0, 0], [1, 0], [1, 2], [2, 2]];
+  const s = smoothPath(w, raw, edgeOpen);
+  // The straight (0,0)->(2,2) shortcut crosses the walled edge, so it can't
+  // collapse to two points.
+  assert.ok(s.length >= 3, 'edge wall blocks the diagonal shortcut');
+});
+
 test('truncateByBudget affords a whole cheap path exactly', () => {
   const { points, cost, done, tail } = truncateByBudget([[0, 0], [3, 0]], 5, () => 1);
   assert.equal(done, true);

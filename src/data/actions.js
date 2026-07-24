@@ -85,6 +85,10 @@ export const ACTIONS = {
     label: 'Blame the Firewall',
     log: '"That\'s a firewall issue." Incoming damage halved.',
   },
+  // NB: there is also an `energy-drink` ITEM (data/items.js) - a lootable
+  // consumable. They are distinct ids in separate registries and never share a
+  // lookup, so the namesake is harmless; do NOT rename either (both action ids
+  // in sheet.actions and item ids in sheet.inventory are persisted in saves).
   'energy-drink': {
     type: 'heal',
     ap: 2,

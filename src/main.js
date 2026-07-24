@@ -212,6 +212,9 @@ function startGame(level) {
     const t = s?.talent?.effects || {};
     if (t.shockImmune && grid.isElectrified(x, z) && !runtime.isBurning(x, z)) return 0;
     if (t.paperCutImmune && runtime.surfaceAt(x, z) === 'paper' && !runtime.isBurning(x, z)) return 0;
+    // surfaceDamageResist is a RESERVED talent effect - the handler is live but
+    // no class/companion sets it yet (a future flat surface-armor perk plugs in
+    // here with zero systems change). See ARCHITECTURE.md talents.
     return Math.max(0, fx.amount - (t.surfaceDamageResist || 0));
   };
   const isHazard = (x, z) => effectiveSurfDamage(x, z) > 0;
@@ -1202,7 +1205,9 @@ function startGame(level) {
       fx: vfx,
       callbacks: {
         say: ui.say,
-        updateHud: () => ui.updateStatsHud(sheet),
+        // Combat passes the acting member's sheet (initiative controls who you
+        // drive); default to the leader for any callless use.
+        updateHud: (s = sheet) => ui.updateStatsHud(s || sheet),
         // One combat round = one fire/smoke turn (combat.js calls this as it
         // hands the turn back to the player).
         onRound: () => runtime.advanceTurn(),

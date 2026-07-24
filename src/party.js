@@ -41,8 +41,11 @@ export function createCompanionSheet(def, id, level = 1) {
 }
 
 // --- campaign progress -------------------------------------------------------
-// v2: { version, levelId, party: [sheet, ...], active }
+// current (SAVE_VERSION): { version, levelId, party: [sheet, ...], active }
+//   - v3 added attributes + banked points; older v2 saves (same party shape,
+//     pre-attributes) backfill on load via normalizeSheet/ensureAttributes.
 // v1 (legacy): { levelId, sheet } - loads as a one-member party.
+// parseProgress reads by SHAPE, so every version above loads without a switch.
 
 export function serializeProgress(party, levelId) {
   return {

@@ -76,6 +76,20 @@ test('fire reaching an explosive prop detonates it exactly once', () => {
   assert.deepEqual(booms, [[1, 0]]);
 });
 
+test('an explosion ignites adjacent flammable surfaces', () => {
+  // (0,0) paper to start the fire, an explosive prop at (1,0), fresh paper at
+  // (2,0) beside the prop. The blast should light that paper.
+  const grid = stubGrid({
+    surfaces: { '0,0': 'paper', '2,0': 'paper' },
+    defs: { '1,0': { explosive: true } },
+  });
+  const rt = createSurfaceRuntime({ grid, hooks, onExplosion: () => {} });
+  rt.ignite(0, 0);
+  rt.advanceTurn(); // spread from (0,0) arms the fuse at (1,0)
+  rt.advanceTurn(); // fuse elapses -> boom -> ignites the (2,0) paper
+  assert.equal(rt.isBurning(2, 0), true, 'the blast lit the neighbouring paper');
+});
+
 test('non-flammable, non-ignitable cells refuse to light', () => {
   const grid = stubGrid({ surfaces: { '0,0': 'water' } });
   const rt = createSurfaceRuntime({ grid, hooks, onExplosion: () => {} });

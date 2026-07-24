@@ -37,6 +37,33 @@ test('parseLevel finds spawns and treats actor tiles as floor', () => {
   assert.equal(g.typeAt(2, 0), 'floor');
 });
 
+test('parseLevel sorts companions and enemies into their own spawn lists', () => {
+  // 'N' is the it-intern COMPANION (data/companions.js), 'M' a manager enemy.
+  const g = parseLevel({
+    name: 't', tiles: { '.': 'floor' },
+    actors: { '@': 'player', 'M': 'manager', 'N': 'it-intern' },
+    map: ['@MN'],
+  });
+  assert.deepEqual(g.enemySpawns, [{ type: 'manager', x: 1, z: 0 }]);
+  assert.deepEqual(g.companionSpawns, [{ type: 'it-intern', x: 2, z: 0 }]);
+  assert.ok(!g.enemySpawns.some((s) => s.type === 'it-intern'), 'companion is not misfiled as an enemy');
+});
+
+test('sightOpen ignores plain partitions - throws sail over cubicle walls', () => {
+  const g = parseLevel(level(['..'], { walls: ['V 1 0 1'] }));
+  assert.equal(g.edgeOpen(0, 0, 1, 0), false); // the wall blocks movement
+  assert.equal(g.sightOpen(0, 0, 1, 0), true); // but a throw clears the chest-high wall
+});
+
+test('setType can bring a conduction pool to life, not only kill it', () => {
+  // cable, a dry floor gap, then water - the water is not yet powered.
+  const g = parseLevel(level(['*.~']));
+  assert.equal(g.isElectrified(2, 0), false);
+  g.setType(1, 0, 'water'); // bridge the gap - now the whole pool touches the cable
+  assert.equal(g.isElectrified(1, 0), true);
+  assert.equal(g.isElectrified(2, 0), true);
+});
+
 test('out-of-bounds is wall, in-map void is impassable but distinct', () => {
   const g = parseLevel(level(['. .']));
   assert.equal(g.typeAt(-1, 0), 'wall');

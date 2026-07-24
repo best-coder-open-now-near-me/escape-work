@@ -230,10 +230,23 @@ export function gainXp(sheet, amount) {
 // false (and changes nothing) if the pool is empty or the attribute unknown.
 export function spendAttrPoint(sheet, attr) {
   if (!ATTR_KEYS.includes(attr) || (sheet.attrPoints || 0) <= 0) return false;
+  const maxHpBefore = sheet.maxHp;
   sheet.attr[attr] += 1;
   sheet.attrPoints -= 1;
   recomputeDerived(sheet);
+  creditNewHp(sheet, maxHpBefore);
   return true;
+}
+
+// Investing in max HP (raising Grit) credits the fresh capacity to current HP -
+// the new muscle arrives undamaged. Only the DELTA is added (a wound fraction
+// is preserved, not free-healed), and only on a spend: this deliberately lives
+// OUTSIDE recomputeDerived, which also runs on save-load and creation, where
+// healing would be wrong.
+function creditNewHp(sheet, maxHpBefore) {
+  if (sheet.maxHp > maxHpBefore) {
+    sheet.hp = Math.min(sheet.maxHp, sheet.hp + (sheet.maxHp - maxHpBefore));
+  }
 }
 
 // --- the class ability track (class points) ---------------------------------
@@ -297,10 +310,12 @@ function bakeNodeEffect(sheet, effect = {}) {
 export function spendClassPoint(sheet, nodeId) {
   const node = TRACK_NODES[nodeId];
   if (!nodeAvailable(sheet, node)) return false;
+  const maxHpBefore = sheet.maxHp;
   bakeNodeEffect(sheet, node.effect);
   (sheet.perks = sheet.perks || []).push(nodeId);
   sheet.classPoints -= (node.cost || 1);
   recomputeDerived(sheet);
+  creditNewHp(sheet, maxHpBefore); // a Grit node's extra HP arrives undamaged
   return true;
 }
 
