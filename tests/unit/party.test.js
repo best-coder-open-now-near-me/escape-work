@@ -80,6 +80,17 @@ test('parseProgress migrates a legacy single-sheet save and backfills fields', (
   assert.equal(s.maxHp, 22); // derivation preserves the saved max HP
 });
 
+test('a non-zero active leader survives the save round-trip', () => {
+  const party = createParty(createSheet('office-drone'));
+  addMember(party, createSheet('it-support'));
+  party.active = 1; // controlling the second member when we save
+  const saved = JSON.parse(JSON.stringify(serializeProgress(party, 'level2')));
+  assert.equal(saved.active, 1);
+  const parsed = parseProgress(saved);
+  assert.equal(parsed.active, 1); // not silently reset to the leader
+  assert.equal(parsed.sheets.length, 2);
+});
+
 test('parseProgress clamps a bad active index to the leader', () => {
   const party = createParty(createSheet('office-drone'));
   const saved = serializeProgress(party, 'level1');

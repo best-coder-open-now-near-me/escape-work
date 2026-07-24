@@ -5,7 +5,7 @@ import {
   createSheet, gainXp, damageBonus, applyDamage,
   recomputeDerived, ensureAttributes, spendAttrPoint, deflect,
   spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist,
-  PROGRESSION, ATTR_KEYS,
+  PROGRESSION, ATTR_KEYS, ENEMY_SCALING,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
@@ -238,4 +238,47 @@ test('effectiveLevel never drops below the native tier', () => {
   assert.equal(effectiveLevel(senior, 2), 3); // shallow floor keeps its tier
   assert.equal(effectiveLevel(senior, 5), 5); // deep floor scales up
   assert.equal(effectiveLevel(ENEMY_TYPES.manager, 4), 4);
+});
+
+test('scaleEnemy grows AP once the gap reaches AP_PER levels', () => {
+  const m = ENEMY_TYPES.manager; // level 1, ap 5
+  const s = scaleEnemy(m, m.level + ENEMY_SCALING.AP_PER); // exactly one AP step
+  assert.equal(s.ap, m.ap + 1, 'one AP step at AP_PER levels above native');
+  assert.equal(m.ap, 5); // base def untouched
+});
+
+test('scaleEnemy scales the maxHp field for a class-backed AI unit', () => {
+  // The applicant class spells max HP `maxHp` (not `hp`); scaleEnemy must scale
+  // that field and never invent a phantom `hp` (stats.js unitCombat prefers maxHp).
+  const s = scaleEnemy(CLASSES.applicant, 3);
+  assert.ok(s.maxHp > CLASSES.applicant.maxHp, 'maxHp grows');
+  assert.equal(s.hp, undefined, 'no phantom hp field appears');
+  assert.equal(s.level, 3);
+});
+
+// --- investing in max HP credits the fresh capacity (spend-only) -------------
+
+test('spending into Grit credits the new HP delta, preserving the wound', () => {
+  const s = createSheet('office-drone'); // 22/22
+  s.hp = 10;
+  s.attrPoints = 1;
+  assert.equal(spendAttrPoint(s, 'grit'), true);
+  assert.equal(s.maxHp, 22 + PROGRESSION.HP_PER_GRIT);
+  assert.equal(s.hp, 10 + PROGRESSION.HP_PER_GRIT); // delta credited, not a full heal
+});
+
+test('a Grit class-track node also credits the HP delta', () => {
+  const s = createSheet('office-drone');
+  s.hp = 10;
+  s.classPoints = 1;
+  assert.equal(spendClassPoint(s, 'drone-thick-skin'), true); // +1 Grit
+  assert.equal(s.hp, 10 + PROGRESSION.HP_PER_GRIT);
+});
+
+test('spending a non-HP attribute leaves current HP untouched', () => {
+  const s = createSheet('office-drone');
+  s.hp = 10;
+  s.attrPoints = 1;
+  assert.equal(spendAttrPoint(s, 'savvy'), true); // no maxHp change
+  assert.equal(s.hp, 10);
 });
