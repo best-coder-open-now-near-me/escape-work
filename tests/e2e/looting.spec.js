@@ -2,7 +2,7 @@
 // pockets panel, dropping to the floor, Alt-label pickup, consumables - and
 // a full fight so a body can be looted.
 import { test, expect } from '@playwright/test';
-import { bootAndPick, clickWorld, waitStill, enterCombat, endTurnUntilPlayer } from './helpers.js';
+import { bootAndPick, clickWorld, waitStill, enterCombat, endTurnUntilPlayer, stableProject } from './helpers.js';
 
 test('desk rummage, drop, Alt pickup, and consumable use', async ({ page }) => {
   test.setTimeout(300_000);
@@ -95,7 +95,12 @@ test('a fallen coworker leaves a lootable body', async ({ page }) => {
     if (st.ap >= 3) {
       if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#act-attack');
       await page.waitForTimeout(200);
-      if (!(await clickWorld(page, target.x, target.z))) { await endTurnUntilPlayer(page); continue; }
+      // Settle the camera before the attack click - a stale projection lands
+      // a tile off and walks (or lowers the attack) instead of striking,
+      // which drags the fight past its round/time budget.
+      const p = await stableProject(page, target.x, target.z).catch(() => null);
+      if (!p || !(p.x > 10 && p.x < 1270 && p.y > 10 && p.y < 790)) { await endTurnUntilPlayer(page); continue; }
+      await page.mouse.click(p.x, p.y);
       await page.waitForTimeout(700);
       await waitStill(page).catch(() => {});
     } else {
