@@ -4,10 +4,10 @@
 // the character the player controls out of combat, and whose turn state is
 // live in combat. Today the roster holds one member; recruitment
 // (data/companions.js) grows it.
-import { gainXp, createSheetFrom } from './stats.js';
+import { gainXp, createSheetFrom, ensureAttributes } from './stats.js';
 
 export const PARTY_CAP = 3; // leader + 2 companions - see PARTY_PLAN.md
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3; // v3 adds attributes + banked points (PROGRESSION_PLAN.md)
 
 export function createParty(sheet, actor = null) {
   return { members: [{ sheet, actor }], active: 0 };
@@ -60,6 +60,10 @@ function normalizeSheet(sheet) {
   sheet.bleed ??= 0;
   sheet.gum ??= 0;
   sheet.name ??= sheet.className;
+  sheet.attrPoints ??= 0; // pre-M2 saves never banked any
+  sheet.classPoints ??= 0;
+  sheet.perks ??= []; // taken track nodes; effects are already baked into the sheet
+  ensureAttributes(sheet); // pre-attribute saves get their class spread + derive
   return sheet;
 }
 

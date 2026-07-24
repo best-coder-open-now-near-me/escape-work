@@ -5,7 +5,7 @@ import {
   createParty, leader, addMember, livingMembers, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP, SAVE_VERSION,
 } from '../../src/party.js';
-import { createSheet } from '../../src/stats.js';
+import { createSheet, spendClassPoint, PROGRESSION } from '../../src/stats.js';
 import { COMPANIONS } from '../../src/data/companions.js';
 
 test('createParty starts with the leader as its only member', () => {
@@ -74,6 +74,10 @@ test('parseProgress migrates a legacy single-sheet save and backfills fields', (
   assert.equal(s.bleed, 0);
   assert.equal(s.gum, 0);
   assert.equal(s.name, 'Office Drone'); // name backfills from the class
+  for (const k of ['grit', 'hustle', 'savvy', 'composure']) {
+    assert.equal(typeof s.attr[k], 'number', `attr.${k} backfilled`);
+  }
+  assert.equal(s.maxHp, 22); // derivation preserves the saved max HP
 });
 
 test('parseProgress clamps a bad active index to the leader', () => {
@@ -85,13 +89,17 @@ test('parseProgress clamps a bad active index to the leader', () => {
   assert.equal(parseProgress(saved).active, 0);
 });
 
-test('createCompanionSheet joins at the given level, fully rested', () => {
+test('createCompanionSheet joins at the given level, fully rested, points banked', () => {
   const def = COMPANIONS['it-intern'];
   const s = createCompanionSheet(def, 'it-intern', 3);
   assert.equal(s.companionId, 'it-intern');
   assert.equal(s.name, def.name);
   assert.equal(s.level, 3);
-  assert.equal(s.bonusDmg, def.bonusDmg + 2); // one +1 per promotion
+  assert.equal(s.bonusDmg, def.bonusDmg); // no auto-damage; growth is via points
+  // Two promotions (1->2->3) bank their points; nothing auto-allocates, so the
+  // recruit arrives with a lit level-up pip for the player to spend.
+  assert.equal(s.attrPoints, 2 * PROGRESSION.ATTR_PER_LEVEL);
+  assert.equal(s.classPoints, 2 * PROGRESSION.CP_PER_LEVEL);
   assert.equal(s.hp, s.maxHp);
   assert.equal(s.classId, undefined); // a companion is not a picked class
 });
@@ -109,6 +117,19 @@ test('every companion recruit option leads to a real node', () => {
     }
     assert.ok(def.actions.length, `${id} brings combat actions`);
   }
+});
+
+test('class-track perks persist through a save without double-applying', () => {
+  const party = createParty(createSheet('office-drone'));
+  const s = leader(party).sheet;
+  s.classPoints = 1;
+  spendClassPoint(s, 'drone-thick-skin'); // +1 Grit, baked into attr
+  const grit = s.attr.grit, hp = s.maxHp;
+  const saved = JSON.parse(JSON.stringify(serializeProgress(party, 'level1')));
+  const loaded = parseProgress(saved).sheets[0];
+  assert.deepEqual(loaded.perks, ['drone-thick-skin']);
+  assert.equal(loaded.attr.grit, grit); // effect is NOT re-applied on load
+  assert.equal(loaded.maxHp, hp);
 });
 
 test('parseProgress rejects records in no known format', () => {

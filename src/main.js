@@ -14,7 +14,10 @@ import { CLASSES } from './data/classes.js';
 import { ACTIONS } from './data/actions.js';
 import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
-import { createSheet, applyDamage, PAPER_CAP } from './stats.js';
+import {
+  createSheet, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
+  scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP,
+} from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP,
@@ -103,7 +106,13 @@ function startGame(level) {
   let party = null;
   let sheet = null;
   let player = new PlayerActor(grid.playerSpawn.x, grid.playerSpawn.z);
-  const enemies = grid.enemySpawns.map((s) => new EnemyActor(s.x, s.z, s.type, ENEMY_TYPES[s.type]));
+  // Enemies scale to the floor's depth: a base coworker on a deep floor is
+  // tougher, a seniority variant keeps its tier on a shallow one (stats.js).
+  const floorDepth = level.depth || 1;
+  const enemies = grid.enemySpawns.map((s) => {
+    const base = ENEMY_TYPES[s.type];
+    return new EnemyActor(s.x, s.z, s.type, scaleEnemy(base, effectiveLevel(base, floorDepth)));
+  });
   // Player-team summons (SUMMON_PLAN.md): temporary AI allies conjured mid-fight
   // by a summon power. Not party members, not saved - they live only for the
   // combat and are despawned when it ends. They block enemies (like the party)
@@ -409,7 +418,8 @@ function startGame(level) {
     if (!party) return;
     if (dead.summoned) return; // summoned minions pay no XP (SUMMON_PLAN #6)
     for (const m of gainXpAll(party, dead.def.xp)) {
-      ui.say(`Promotion! Level ${m.sheet.level}: fully rested, +1 damage.`);
+      const pts = m.sheet.attrPoints;
+      ui.say(`Promotion! ${m.sheet.name} reaches level ${m.sheet.level} - ${pts} point${pts === 1 ? '' : 's'} to spend.`);
     }
     ui.updateStatsHud(sheet);
   }
@@ -678,7 +688,7 @@ function startGame(level) {
       if (kind === 'enemy') {
         if (ref.alive) {
           const ag = aggroColor(ref);
-          return { name: ref.def.name, sub: `HP ${ref.hp}/${ref.maxHp}`, color: ag, dotColor: ag };
+          return { name: ref.def.name, sub: `Lv ${ref.def.level || 1} · HP ${ref.hp}/${ref.maxHp}`, color: ag, dotColor: ag };
         }
         return { name: ref.def.name, sub: ref.loot?.length ? 'Body · lootable' : 'Body · picked clean', color: rgbCss(HL.loot) };
       }
@@ -959,8 +969,71 @@ function startGame(level) {
   // leader. Same bar, same click, right verb for the moment.
   const partyBar = ui.createPartyBar({
     onSelect: (i) => (inCombat && combat ? combat.setActive(i) : switchLeader(i)),
+    onLevelUp: (i) => openLevelUpFor(party.members[i]),
   });
   let partyBarKey = ''; // last rendered roster state (refresh gate)
+
+  // --- level-up allocation -----------------------------------------------------
+  // Points bank on the sheet (stats.gainXp); the player spends them here. Every
+  // member is built by hand - nothing auto-allocates (PROGRESSION_PLAN #7). The
+  // pip by the HUD covers the leader (and the solo case); the party bar carries
+  // a pip per companion.
+  const levelUpPip = ui.createLevelUpPip({ onOpen: openLevelUps });
+  const pending = (s) => (s.attrPoints || 0) + (s.classPoints || 0); // either pool
+  // A short human blurb for a track node's effect, for the screen.
+  function describeNode(effect = {}) {
+    const bits = [];
+    if (effect.attrBonus) for (const [k, v] of Object.entries(effect.attrBonus)) bits.push(`+${v} ${k[0].toUpperCase() + k.slice(1)}`);
+    if (effect.grantsAction) bits.push(`Unlock ${ACTIONS[effect.grantsAction]?.label || effect.grantsAction}`);
+    if (effect.talent) for (const [k, v] of Object.entries(effect.talent)) bits.push(typeof v === 'number' ? `+${v} ${k}` : k);
+    return bits.join(' · ') || 'A perk.';
+  }
+  // The sheet's track as screen view-models (taken / locked / affordable).
+  function trackNodesFor(sheet_) {
+    return classTrack(sheet_).map((n) => ({
+      id: n.id, name: n.name, cost: n.cost || 1, desc: describeNode(n.effect),
+      taken: (sheet_.perks || []).includes(n.id),
+      locked: !!(n.requires && !n.requires.every((r) => (sheet_.perks || []).includes(r))),
+      affordable: (sheet_.classPoints || 0) >= (n.cost || 1),
+    }));
+  }
+  // Read-only character sheet (press C). A plain view-model - main owns the
+  // derived math (damageBonus/deflect) and the perk names.
+  const charSheet = ui.createCharacterSheet({ onLevelUp: () => openLevelUps() });
+  function charSheetVm(s) {
+    return {
+      name: s.name, className: s.className, level: s.level, xp: s.xp, xpNext: s.xpNext,
+      attr: { ...s.attr }, hp: s.hp, maxHp: s.maxHp, maxAp: s.maxAp,
+      damageBonus: damageBonus(s), deflect: deflect(s),
+      talent: s.talent ? { name: s.talent.name } : null,
+      perks: (s.perks || []).map((id) => trackNode(id)?.name || id),
+      attrPoints: s.attrPoints || 0, classPoints: s.classPoints || 0,
+    };
+  }
+  function refreshProgressUi() {
+    if (sheet) { ui.updateStatsHud(sheet); buildHotbar(); } // a learned action joins the bar
+    partyBarKey = ''; // force the bar to re-render its pips next frame
+    levelUpPip.refresh(!inCombat && !gameOver && sheet ? pending(sheet) : 0);
+    if (sheet) charSheet.refresh(charSheetVm(sheet)); // keep an open sheet live
+  }
+  function openLevelUpFor(member, after) {
+    if (!member) { after?.(); return; }
+    ui.showLevelUpScreen(member.sheet, {
+      onSpend: (attr) => { spendAttrPoint(member.sheet, attr); refreshProgressUi(); },
+      onLearn: (nodeId) => { spendClassPoint(member.sheet, nodeId); refreshProgressUi(); },
+      nodesFor: () => trackNodesFor(member.sheet),
+      onDone: () => { refreshProgressUi(); after?.(); },
+    });
+  }
+  // Page through every member still holding points (of either type), one screen
+  // at a time.
+  function openLevelUps() {
+    if (!party) return;
+    const queue = party.members.filter((m) => pending(m.sheet) > 0);
+    let i = 0;
+    const next = () => (i < queue.length ? openLevelUpFor(queue[i++], next) : refreshProgressUi());
+    next();
+  }
   function switchLeader(i) {
     if (!party || inCombat || gameOver || dialogue.visible) return;
     const m = party.members[i];
@@ -974,6 +1047,7 @@ function startGame(level) {
     buildHotbar(); // their attacks, their ammo count
     ui.updateStatsHud(sheet);
     loot.refreshPanel(sheet);
+    charSheet.refresh(charSheetVm(sheet)); // an open sheet follows control
     ui.say(`You take point as ${m.sheet.name}.`);
   }
   function cycleLeader() {
@@ -1148,6 +1222,7 @@ function startGame(level) {
           }
           ui.say(`The floor is yours. You catch your breath. (+${VICTORY_HEAL} HP)`);
           ui.updateStatsHud(sheet);
+          openLevelUps(); // spend the fight's promotions now that it's safe
         },
         onLose: () => {
           inCombat = false;
@@ -1574,6 +1649,9 @@ function startGame(level) {
       e.preventDefault();
       if (inCombat) combat?.cycleActive();
       else cycleLeader();
+    } else if ((e.key === 'c' || e.key === 'C') && sheet && !gameOver && !dialogue.visible) {
+      // The read-only character sheet for whoever you're controlling.
+      charSheet.toggle(charSheetVm(sheet));
     }
   });
   window.addEventListener('keyup', (e) => {
@@ -1720,10 +1798,12 @@ function startGame(level) {
     if (party) {
       const cp = inCombat && combat ? combat.party : null;
       const key = party.members
-        .map((m, i) => `${m.sheet.name}:${m.sheet.hp}/${m.sheet.maxHp}${i === party.active ? '*' : ''}${cp ? ':' + cp[i].ap : ''}`)
+        .map((m, i) => `${m.sheet.name}:${m.sheet.hp}/${m.sheet.maxHp}${i === party.active ? '*' : ''}${cp ? ':' + cp[i].ap : ''}:${m.sheet.attrPoints || 0}/${m.sheet.classPoints || 0}p`)
         .join('|');
       if (key !== partyBarKey) { partyBarKey = key; partyBar.refresh(party, cp); }
       partyBar.setVisible(party.members.length > 1 && !gameOver);
+      // The HUD level-up pip tracks the leader's banked points, out of combat.
+      levelUpPip.refresh(!inCombat && !gameOver && !dialogue.visible && sheet ? pending(sheet) : 0);
     }
     // Fire/smoke age in TURNS. In combat, combat.js advances one per round (via
     // the onRound callback in beginCombat). Out of combat there are no rounds, so
@@ -1871,7 +1951,8 @@ function startGame(level) {
         // suite uses this to avoid wasting engage attempts on them.
         const reachable = e.alive
           && (cheb(player, e) <= 1 || !!bestApproachPath(e.x, e.z));
-        return { name: e.def.name, x: e.x, z: e.z, px: p?.x, pz: p?.z, alive: e.alive, reachable };
+        return { name: e.def.name, x: e.x, z: e.z, px: p?.x, pz: p?.z, alive: e.alive, reachable,
+          level: e.def.level || 1, hp: e.hp, maxHp: e.maxHp };
       });
     },
     get npcs() { return npcs.map((n) => ({ name: n.def.name, x: n.x, z: n.z })); },
@@ -1881,6 +1962,8 @@ function startGame(level) {
     get party() {
       return party ? party.members.map((m, i) => ({
         name: m.sheet.name, hp: m.sheet.hp, maxHp: m.sheet.maxHp,
+        level: m.sheet.level, attrPoints: m.sheet.attrPoints || 0,
+        classPoints: m.sheet.classPoints || 0, perks: [...(m.sheet.perks || [])],
         x: m.actor?.x, z: m.actor?.z, active: i === party.active,
       })) : [];
     },
@@ -1936,8 +2019,9 @@ function startGame(level) {
     // Resolves an ENEMY_TYPES id or a class archetype (e.g. 'applicant'), so a
     // tester can drop class-based units to feel out balance.
     spawnEnemy(typeId, x, z) {
-      const def = ENEMY_TYPES[typeId] || CLASSES[typeId];
-      if (!def) return null;
+      const base = ENEMY_TYPES[typeId] || CLASSES[typeId];
+      if (!base) return null;
+      const def = scaleEnemy(base, effectiveLevel(base, floorDepth)); // match the floor
       const en = new EnemyActor(x, z, typeId, def);
       enemies.push(en);
       placeModel(app, `assets/characters/${def.model}.glb`, x, z, {

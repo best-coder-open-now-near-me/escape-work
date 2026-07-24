@@ -235,10 +235,27 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   start fires that spread through flammables, burn out, and detonate
   `explosive` props (printers) - explosions damage the player, kill adjacent
   enemies for XP, and destroy the prop (grid.setType).
+- **Attributes** (`stats.js`, see PROGRESSION_PLAN.md): a sheet's four office
+  attributes — Grit, Hustle, Savvy, Composure (`sheet.attr`, seeded per class in
+  `data/classes.js`) — are the SOURCE its combat numbers derive from.
+  `maxHp`/`maxAp` are recomputed from `attr` + an innate `base` floor by
+  `recomputeDerived(sheet)`; **never assign `sheet.maxHp`/`sheet.maxAp` directly**
+  (they'd drift on the next recompute). Any code that changes an attribute calls
+  `recomputeDerived`. AI-driven units (enemies, summons) are NOT sheets — they
+  read stats through `unitCombat(def)` and scale on the enemy curve, not
+  attributes.
 - **Talents**: per-class in `data/classes.js` (shown on the resume cards).
   Effects the code understands: paperDamageBonus, paperAmmoDiscount,
   paperCutImmune, shockImmune, slipImmune, surfaceDamageResist, hasLighter,
   grantsAction.
+- **Class ability track** (`data/classes.js`/`companions.js` `track`, spent with
+  class points): a list of `{ id, name, cost, requires?, effect }` nodes. A new
+  node is a data entry — its `effect` reuses known shapes (`attrBonus`,
+  `talent`, `grantsAction`), and `spendClassPoint` (stats.js) **bakes** it into
+  the sheet's `attr`/`actions`/`talent.effects` in place, so every existing read
+  site honors it with no systems change. `sheet.perks` records what's taken (the
+  baked state persists; nothing is re-applied on load). Node ids are globally
+  unique.
 - **Thrown weapons**: actions with `ammoCost` (paper balls/airplanes) join the
   combat bar automatically; ammo (sheet.paper) is picked up from paper spills.
   Throws render as arcing projectiles with fading trails (`throwProjectile` in
