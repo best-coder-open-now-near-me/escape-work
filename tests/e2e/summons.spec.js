@@ -77,25 +77,32 @@ test('a player-summoned ally fights for you, then vanishes when the fight ends',
   await bootStash(page, MELEE_ARENA, 'office-drone');
   await enterCombat(page);
 
-  // Summon one applicant onto the player's side (the M3 action drives this in
-  // game; here the debug hook stands in). It's a summon, not an enemy.
-  await page.evaluate(() => window.__combat.summonAlly('applicant', 1));
-  expect(await page.evaluate(() => window.__game.summons.length)).toBe(1);
+  // Summon applicants onto the player's side (the M3 action drives this in
+  // game; here the debug hook stands in). They're summons, not enemies - and
+  // a couple of them so the Manager (which targets the nearest, lowest-HP
+  // hostile) can't pick off a lone ally before any of them swings.
+  await page.evaluate(() => window.__combat.summonAlly('applicant', 3));
+  expect(await page.evaluate(() => window.__game.summons.length)).toBeGreaterThanOrEqual(1);
   expect(await page.evaluate(() =>
     (window.__combat.enemies || []).some((e) => e.name === 'Applicant'))).toBe(false);
+  // Each ally takes a slot in the ONE initiative order (proof they'll act).
+  expect(await page.evaluate(() =>
+    window.__combat.order.some((o) => !o.member && o.team === 'player'))).toBe(true);
 
   const hp0 = await managerHp(page);
   expect(hp0).toBeGreaterThan(0);
 
-  // Drive the fight: end each of the player's turns and let the AI act. On
-  // the ally's own initiative turn it advances on the Manager and swings, so
-  // within a few rounds the Manager is bloodied by an attacker that is NOT
-  // the player - proof the ally fights for you.
+  // Drive the fight: end each of the player's turns and let the AI act. On an
+  // ally's own initiative turn it advances on the Manager and swings, so the
+  // Manager is bloodied by an attacker that is NOT the player - proof the
+  // allies fight for you. Keep the player standing (god top-up) so the fight
+  // lasts long enough; the point is a NON-player attacker landing a blow.
   let hurt = false;
-  for (let i = 0; i < 8 && !hurt; i++) {
+  for (let i = 0; i < 14 && !hurt; i++) {
     if (!(await page.evaluate(() => !!window.__combat))) break; // fight ended
+    await page.evaluate(() => { if (window.__god.player) window.__god.player.hp = window.__god.player.maxHp; });
     if (await page.evaluate(() => window.__combat?.phase === 'player')) await page.click('#combat-end-turn').catch(() => {});
-    await page.waitForTimeout(1500); // let the AI turns play out
+    await page.waitForTimeout(1600); // let the AI turns play out
     const hp = await managerHp(page);
     if (hp !== null && hp < hp0) hurt = true;
   }
