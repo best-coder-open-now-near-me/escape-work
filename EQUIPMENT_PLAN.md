@@ -41,6 +41,13 @@ dependency on either — only the stretch content does.
 
 ## What we're building
 
+- **A basic weapon attack, at last** (see decision #7). Today every attack is a
+  *class power* — there is no plain "swing." Equipment introduces one: a
+  weapon grants a basic attack whose numbers it defines (bare hands are a weak
+  default), built as a **computed** `sheet.actions + equippedAction(sheet)`
+  list. This is the one genuine systems addition in the plan; the rest is data
+  folding through existing seams. It's also what makes a looted weapon *feel*
+  like a weapon rather than a stat stick.
 - **Three slots** on every sheet: `weapon`, `outfit`, `trinket` — rendered in
   the UI as **In Hand / Dress Code / Flair**. Small on purpose: one damage
   choice, one defense choice, one wildcard.
@@ -70,7 +77,7 @@ dependency on either — only the stretch content does.
 | 4 | Gear attributes are computed, not baked | Equipment `attrBonus` is applied **inside** `recomputeDerived` from the live `equipped` map — unlike class-track nodes, which bake permanently at spend | Bake-and-unbake on unequip is the classic drift bug (PROGRESSION chose baking precisely because perks are permanent; equipment isn't). Computing from the worn set makes equip/unequip trivially symmetric and save-safe. The one cost: `recomputeDerived` now reads `ITEMS` — stats.js already imports it. |
 | 5 | The stapler migration | Save bumps a version; on load (and once at migration) the best carried `bonusDmg` item **auto-equips to the weapon slot**; the passive-while-carried rule is deleted | Regression-preserving: every existing character keeps exactly its current damage, now visible in a slot. Keeping both rules ("equipped counts, but carried also counts") would make the slot cosmetic. After migration a *second* stapler in the bag does nothing — which is what the old rule effectively meant anyway (only the best counted). |
 | 6 | When you can swap | **Outside combat only** in v1; the equip verb is disabled mid-fight | Dodges every mid-fight rebuild question (action bar, AP cost, uses counters) for a v1 that's about the loot loop, not swap tech. DOS2 free-swaps, BG3 charges an action — an `EQUIP_AP` cost is a clean later add; noted in open questions. |
-| 7 | Weapons don't grant actions in v1 | Weapon `stats.dmg` boosts the numbers of the attacks you already have; `grantsAction` on gear is **stretch** | The attack verbs are class identity (`sheet.actions`), and gear-granted actions need compute-at-read action lists (bake/unbake again, decision #4's logic). The stretch design: hotbar/combat build action lists as `sheet.actions + equippedAction(sheet)` — computed, never baked. Do it when a weapon concept demands it (the letter opener wants a stab…), not speculatively. |
+| 7 | Weapons grant a basic attack (revised) | Equipping a weapon grants a **basic "swing" attack** whose `min`/`max` come from the weapon; `stats.dmg` still layers onto every attack via `damageBonus` | **Revised after a gameplay note: the game has no universal basic attack today — every attack verb is a *class power* (Passive-Aggressive Email, Reboot, Bulk Mail…).** So "loot a weapon, swing it" has nothing to attach to, and the original plan (weapon dmg silently buffs class powers) makes weapons stat-sticks, not weapons. The fix is the stretch design promoted to core: combat/hotbar build the action list as `sheet.actions + equippedAction(sheet)` — a **computed, never-baked** basic attack the weapon defines (bare hands = a weak default "Flail Ineffectually"). This is the one real systems addition equipment needs; it composes with procs (#8) and keeps class powers as the identity layer on top. Alternative kept in reserve: no basic attack, weapons only buff class powers (simpler, but the note is exactly the reason to reject it). |
 | 8 | Procs are stretch, behind STATUS_PLAN | `proc: { applies: '<status>', chance }` on weapons — resolved in `performOn` after a landed hit via `applyStatus` | The full DOS2 feel (a gum-flick stapler!) with one field — but only once statuses are a framework. Shipping procs before STATUS_PLAN would mean hand-coding per-proc effects, exactly the hole that plan fills. |
 | 9 | No item levels / rarity tiers | Flat, hand-authored items; power comes from explicit stats, scarcity from loot-table chances | Rarity color economies need generated affixes to justify themselves; at this content scale hand-authored uniques ("THE red stapler") carry more character. Deeper floors get better tables, not +1 versions of the same table. |
 
@@ -163,9 +170,9 @@ loot-table lines.
 `equippedStats`; the derivation folds (decision #3). The best-in-bag scan in
 `damageBonus` dies here.
 
-**`src/party.js`** — save bumps (v4, or v5 if STATUS_PLAN landed first —
-coordinate); `normalizeSheet` seeds `equipped` and runs the stapler
-auto-equip migration (decision #5).
+**`src/party.js`** — save bumps to **v5** (STATUS_PLAN took v4);
+`normalizeSheet` seeds `equipped` and runs the stapler auto-equip migration
+(decision #5).
 
 ### PlayCanvas / DOM modules
 
@@ -180,10 +187,14 @@ labeled slots above the grid, stable ids `#equip-slot-<slot>` for e2e);
 the character sheet (C) lists equipped items beside the derived stats they
 feed; HUD untouched (it reads derived numbers, which is the point).
 
-**`src/combat.js`** — **no changes.** It reads `damageBonus`, `deflect`,
-`maxAp`, and (post HIT_PLAN) `accuracy`/`dodge` — all of which now include
-gear. This is the payoff of decision #3 and the reason this plan is the
-cheap one of the three.
+**`src/combat.js`** — **one change**, for the basic weapon attack (decision
+#7): the action bar builds from `sheet.actions + equippedAction(sheet)` (a
+computed list, never baked) so the equipped weapon's swing appears alongside
+the class powers, and `performOn` resolves its weapon-defined `min`/`max`.
+Everything *numeric* it reads — `damageBonus`, `deflect`, `maxAp`, and (post
+HIT_PLAN) `accuracy`/`dodge` — already includes gear via decision #3, so the
+stat folding stays zero-change; only the new verb needs wiring. The same
+computed-list seam is where `hotbar` picks the swing up out of combat.
 
 **`src/god.js`** — the Player card shows `equipped`; `__god.equip(memberIdx,
 itemId)` for testing; ITEMS stats join the live-editable set.
@@ -209,14 +220,19 @@ untouched.
 2. **The verbs.** Pockets Equip/Unequip + the equipped strip; out-of-combat
    gate; character-sheet display; god hooks. e2e: loot a stapler → equip it →
    `damageBonus` rises → unequip with full pockets is refused politely.
-3. **The content pass.** The item list above (± what playtesting wants),
+3. **The basic weapon attack** (promoted from stretch, decision #7). The
+   computed `sheet.actions + equippedAction(sheet)` list; a weapon defines the
+   swing's `min`/`max`; bare-hands default. The action appears on the combat
+   bar and the hotbar; unequip removes it. e2e: equip a weapon → its swing
+   appears (`#act-<weaponAction>`) and hits for the weapon's range → unequip →
+   it's gone.
+4. **The content pass.** The item list above (± what playtesting wants),
    loot-table + enemy-drop placement, `acc`/`dodge` gear if HIT_PLAN has
    landed. Numbers pass with the god panel.
-4. **Stretch (each its own small PR, in whatever order demand dictates):**
-   gear-granted actions via computed action lists (decision #7); on-hit
-   procs via STATUS_PLAN (decision #8); in-combat swap for `EQUIP_AP`
-   (decision #6); a shoes slot if statuses make floor-hazard gear
-   interesting (decision #1).
+5. **Stretch (each its own small PR, in whatever order demand dictates):**
+   on-hit procs via STATUS_PLAN (decision #8) — now unblocked, the framework
+   landed; in-combat swap for `EQUIP_AP` (decision #6); a shoes slot if
+   statuses make floor-hazard gear interesting (decision #1).
 
 ## Testing
 
