@@ -311,21 +311,27 @@ trusted from disk). Migration in `party.js`:
 
 ## Milestones (each a PR that keeps `npm test` + e2e green)
 
-1. **Attributes as the stat source — zero behavior change.** Add `attr` +
-   `recomputeDerived`; express every class's current `maxHp`/`ap` as base
-   attribute spreads + a residual so level-1 derived values **exactly match
-   today**. `gainXp` still does its current `+1 dmg`. Save v3 + migration.
-   Regression invariant: the game plays identically; every existing test proves
-   it. Deliberately boring, and most of the risk — the `PARTY_PLAN.md`
-   milestone-1 pattern.
-2. **Attribute points + the level-up screen.** `gainXp` grants `ATTR_PER_LEVEL`
-   instead of auto damage; Savvy now drives damage, Grit HP, Hustle AP,
-   Composure deflect. `showLevelUpScreen` (attribute half), banking + HUD pip,
-   deferred open at combat end / floor transition. The screen pages through the
-   whole party (leader + companions), and each member's party-bar portrait shows
-   a level-up pip while it has unspent points — a fresh recruit included (it
-   banks its pre-join points and is built by hand, nothing auto-fills).
-   Savvy→damage, Composure→deflect fold into combat.
+1. **Attributes as the stat source — zero behavior change.** ✅ Landed
+   (`b8fb3af`). Added `attr` + `recomputeDerived`; every class's current
+   `maxHp`/`ap` is an authored `attr` spread plus a sheet-stored `base` residual
+   solved so level-1 derived values **exactly match today** (unit-guarded).
+   `gainXp` unchanged this milestone. `ensureAttributes` backfills older saves.
+   Unit 75→80 green, build clean, e2e 31/31 (the 1 failure was a pre-existing
+   `recruitIntern` dialogue-click flake, proven by sibling tests passing).
+2. **Attribute points + the level-up screen.** ✅ Landed. `gainXp` banks
+   `ATTR_PER_LEVEL` points instead of the auto `+1 dmg`; `spendAttrPoint`
+   validates + `recomputeDerived`s. Savvy drives damage (`damageBonus`),
+   Composure grants flat deflect in combat's member-hit path. `showLevelUpScreen`
+   (attribute steppers), a HUD `#levelup-pip` for the leader + a per-portrait pip
+   on the party bar, auto-open on victory, and the flow pages the whole party;
+   recruits bank their pre-join points and are built by hand. Save v3. Unit
+   80/80, `progression.spec.js` green.
+   - **Scoping note:** Composure's *status-duration* resist (shorter gum/bleed)
+     is deferred — M2 ships the flat **deflect** only, to keep the gum mechanic
+     from getting over-nerfed before milestone 4's balance pass.
+   - **Scoping note:** floor-transition reloads the page, so instead of a
+     cross-reload auto-open, banked points **persist in the save** and the pip
+     re-lights on the next floor — the same "spend when you like" affordance.
 3. **Class points + the ability track.** `track` data on all four classes;
    `actionMods`/`upgradeAction` in combat; `grantsAction`/`talent`/`attrBonus`
    nodes; the class-point half of the level-up screen; perks persisted and

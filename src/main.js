@@ -14,7 +14,7 @@ import { CLASSES } from './data/classes.js';
 import { ACTIONS } from './data/actions.js';
 import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
-import { createSheet, applyDamage, PAPER_CAP } from './stats.js';
+import { createSheet, applyDamage, spendAttrPoint, PAPER_CAP } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP,
@@ -960,8 +960,36 @@ function startGame(level) {
   // leader. Same bar, same click, right verb for the moment.
   const partyBar = ui.createPartyBar({
     onSelect: (i) => (inCombat && combat ? combat.setActive(i) : switchLeader(i)),
+    onLevelUp: (i) => openLevelUpFor(party.members[i]),
   });
   let partyBarKey = ''; // last rendered roster state (refresh gate)
+
+  // --- level-up allocation -----------------------------------------------------
+  // Points bank on the sheet (stats.gainXp); the player spends them here. Every
+  // member is built by hand - nothing auto-allocates (PROGRESSION_PLAN #7). The
+  // pip by the HUD covers the leader (and the solo case); the party bar carries
+  // a pip per companion.
+  const levelUpPip = ui.createLevelUpPip({ onOpen: openLevelUps });
+  function refreshProgressUi() {
+    if (sheet) ui.updateStatsHud(sheet);
+    partyBarKey = ''; // force the bar to re-render its pips next frame
+    levelUpPip.refresh(!inCombat && !gameOver && sheet ? (sheet.attrPoints || 0) : 0);
+  }
+  function openLevelUpFor(member, after) {
+    if (!member) { after?.(); return; }
+    ui.showLevelUpScreen(member.sheet, {
+      onSpend: (attr) => { spendAttrPoint(member.sheet, attr); refreshProgressUi(); },
+      onDone: () => { refreshProgressUi(); after?.(); },
+    });
+  }
+  // Page through every member still holding points, one screen at a time.
+  function openLevelUps() {
+    if (!party) return;
+    const queue = party.members.filter((m) => (m.sheet.attrPoints || 0) > 0);
+    let i = 0;
+    const next = () => (i < queue.length ? openLevelUpFor(queue[i++], next) : refreshProgressUi());
+    next();
+  }
   function switchLeader(i) {
     if (!party || inCombat || gameOver || dialogue.visible) return;
     const m = party.members[i];
@@ -1149,6 +1177,7 @@ function startGame(level) {
           }
           ui.say(`The floor is yours. You catch your breath. (+${VICTORY_HEAL} HP)`);
           ui.updateStatsHud(sheet);
+          openLevelUps(); // spend the fight's promotions now that it's safe
         },
         onLose: () => {
           inCombat = false;
@@ -1721,10 +1750,12 @@ function startGame(level) {
     if (party) {
       const cp = inCombat && combat ? combat.party : null;
       const key = party.members
-        .map((m, i) => `${m.sheet.name}:${m.sheet.hp}/${m.sheet.maxHp}${i === party.active ? '*' : ''}${cp ? ':' + cp[i].ap : ''}`)
+        .map((m, i) => `${m.sheet.name}:${m.sheet.hp}/${m.sheet.maxHp}${i === party.active ? '*' : ''}${cp ? ':' + cp[i].ap : ''}:${m.sheet.attrPoints || 0}p`)
         .join('|');
       if (key !== partyBarKey) { partyBarKey = key; partyBar.refresh(party, cp); }
       partyBar.setVisible(party.members.length > 1 && !gameOver);
+      // The HUD level-up pip tracks the leader's banked points, out of combat.
+      levelUpPip.refresh(!inCombat && !gameOver && !dialogue.visible && sheet ? (sheet.attrPoints || 0) : 0);
     }
     // Fire/smoke age in TURNS. In combat, combat.js advances one per round (via
     // the onRound callback in beginCombat). Out of combat there are no rounds, so
@@ -1882,6 +1913,7 @@ function startGame(level) {
     get party() {
       return party ? party.members.map((m, i) => ({
         name: m.sheet.name, hp: m.sheet.hp, maxHp: m.sheet.maxHp,
+        level: m.sheet.level, attrPoints: m.sheet.attrPoints || 0,
         x: m.actor?.x, z: m.actor?.z, active: i === party.active,
       })) : [];
     },
