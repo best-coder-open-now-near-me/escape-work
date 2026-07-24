@@ -2,7 +2,7 @@
 // pockets panel, dropping to the floor, Alt-label pickup, consumables - and
 // a full fight so a body can be looted.
 import { test, expect } from '@playwright/test';
-import { bootAndPick, clickWorld, waitStill, enterCombat, endTurnUntilPlayer, stableProject, waitForPlayerTurn } from './helpers.js';
+import { bootAndPick, clickWorld, enterCombat } from './helpers.js';
 
 test('desk rummage, drop, Alt pickup, and consumable use', async ({ page }) => {
   test.setTimeout(300_000);
@@ -66,53 +66,14 @@ test('a fallen coworker leaves a lootable body', async ({ page }) => {
   await bootAndPick(page);
   await enterCombat(page);
 
-  // Grind the fight down: attack the nearest living enemy, patch up with the
-  // class heal when hurt, end turn when out of AP. Under initiative the AI
-  // takes many separate turns between yours, so wait past them with
-  // waitForPlayerTurn (rather than burning loop budget polling) - every
-  // iteration is then a real player action.
-  for (let round = 0; round < 50; round++) {
-    if (await page.evaluate(() => !window.__game.inCombat || window.__game.gameOver)) break;
-    await waitForPlayerTurn(page).catch(() => {});
-    const st = await page.evaluate(() => ({
-      inCombat: window.__game.inCombat,
-      gameOver: window.__game.gameOver,
-      phase: window.__combat?.phase,
-      ap: window.__combat?.ap,
-      hp: window.__game.stats?.hp,
-      pt: window.__game.playerTile,
-      foes: window.__combat?.enemies || [],
-    }));
-    if (!st.inCombat || st.gameOver) break;
-    if (st.phase !== 'player') { await page.waitForTimeout(500); continue; }
-    if (st.hp <= 9 && st.ap >= 2) {
-      const healed = await page.evaluate(() => {
-        const b = [...document.querySelectorAll('#combat-actions button')]
-          .find((x) => !x.disabled && /Coffee Break|Espresso|Energy Drink|Snack|Smoke/i.test(x.textContent));
-        if (b) { b.click(); return true; }
-        return false;
-      });
-      if (healed) { await page.waitForTimeout(400); continue; }
-    }
-    const cheb = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.z - b.z));
-    const target = st.foes.filter((e) => e.alive).sort((a, b) => cheb(a, st.pt) - cheb(b, st.pt))[0];
-    if (!target) { await page.waitForTimeout(500); continue; }
-    if (st.ap >= 3) {
-      if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#act-attack');
-      await page.waitForTimeout(200);
-      // Settle the camera before the attack click - a stale projection lands
-      // a tile off and walks (or lowers the attack) instead of striking,
-      // which drags the fight past its round/time budget.
-      const p = await stableProject(page, target.x, target.z).catch(() => null);
-      if (!p || !(p.x > 10 && p.x < 1270 && p.y > 10 && p.y < 790)) { await endTurnUntilPlayer(page); continue; }
-      await page.mouse.click(p.x, p.y);
-      await page.waitForTimeout(700);
-      await waitStill(page).catch(() => {});
-    } else {
-      await endTurnUntilPlayer(page);
-    }
-  }
-  expect(await page.evaluate(() => !window.__game.inCombat && !window.__game.gameOver)).toBe(true);
+  // End the fight deterministically: fell the engaged coworkers. die() rolls
+  // their loot and leaves a lootable body, and combat sees the wipe and ends.
+  // (This test's subject is looting a fallen coworker's body - that a swing
+  // lands is game.spec's job. The old projected-attack grind was fragile
+  // under a camera that keeps moving as the initiative order advances.)
+  await page.evaluate(() => window.__god.enemies.forEach((e) => e.alive && e.die()));
+  await expect.poll(() => page.evaluate(() => !window.__game.inCombat), { timeout: 30_000 }).toBe(true);
+  expect(await page.evaluate(() => window.__game.gameOver)).toBe(false);
 
   // The corpse persists; Alt labels it; clicking it loots the guaranteed drop.
   const pt = await page.evaluate(() => window.__game.playerTile);
