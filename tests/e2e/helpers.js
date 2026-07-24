@@ -127,14 +127,24 @@ const onCanvas = (page, p) => page.evaluate(
 // becomes eligible. Each click's walk plays out fully before the next attempt.
 export async function enterCombat(page) {
   let inCombat = false;
-  for (let i = 0; i < 10 && !inCombat; i++) {
+  for (let i = 0; i < 18 && !inCombat; i++) {
+    // Let the camera settle before projecting - a walk-up leaves it easing,
+    // and a stale projection lands the click a tile off (walks past the
+    // target instead of engaging). Settling on the player fixes the whole
+    // projection, enemies included.
+    const pp = await page.evaluate(() => window.__game.playerPos);
+    await stableProject(page, pp.x, pp.z).catch(() => {});
     const pt = await page.evaluate(() => window.__game.playerTile);
     const ens = await page.evaluate(() => window.__game.enemies.filter((e) => e.alive && e.reachable));
     if (!ens.length) { await page.waitForTimeout(700); continue; } // all sealed/far - let them wander
-    ens.sort((a, b) => // nearest first: shortest walk-up, most likely on-screen
+    // ALWAYS the nearest reachable coworker: the shortest walk-up gives them
+    // the least chance to wander out of reach before we arrive (a long walk
+    // across the floor can arrive where the target no longer is - no
+    // adjacency, no fight).
+    ens.sort((a, b) =>
       Math.max(Math.abs(a.x - pt.x), Math.abs(a.z - pt.z))
       - Math.max(Math.abs(b.x - pt.x), Math.abs(b.z - pt.z)));
-    const en = ens[i % ens.length];
+    const en = ens[0];
     // Aim at the BODY, not the floor under it: the pick ray lands on the
     // enemy mesh (more accurate), and a chest-height point clears the fixed
     // bottom UI band far more often. Use the CONTINUOUS body position (px/pz)
