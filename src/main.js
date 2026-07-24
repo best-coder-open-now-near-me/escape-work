@@ -968,7 +968,7 @@ function startGame(level) {
   // In combat the portraits switch the ACTIVE combatant; out of it, the
   // leader. Same bar, same click, right verb for the moment.
   const partyBar = ui.createPartyBar({
-    onSelect: (i) => (inCombat && combat ? combat.setActive(i) : switchLeader(i)),
+    onSelect: (i) => { if (!inCombat) switchLeader(i); }, // no switching mid-fight - you act on initiative
     onLevelUp: (i) => openLevelUpFor(party.members[i]),
   });
   let partyBarKey = ''; // last rendered roster state (refresh gate)
@@ -1417,42 +1417,27 @@ function startGame(level) {
       // previews, AP, target rings) is all tile/ground-keyed, and a click must
       // hit the enemy on the CLICKED tile, not whichever body the ray grazes.
       if (inCombat) {
-        // Bodies first, via the pick ray: the target rings mark BODIES, and
-        // the ground fallback behind a tall mesh is a mis-walk that burns AP.
-        // Clicking a teammate's body hands them the floor; clicking a
-        // coworker's body targets them. Ground clicks stay tile-based for
-        // movement.
-        // Your OWN tile wins first: a self-cast (purge on yourself) or a
-        // shuffle-in-place must never be stolen by an adjacent enemy's tall
-        // body mesh overlapping the click. Enemies can't stand on your tile,
-        // so this is unambiguous.
-        if (tile && tile.x === player.x && tile.z === player.z) {
+        // Initiative: you control the member whose turn it is - combat points
+        // party.active at them. Clicks target enemies or drive that member;
+        // there's no switching (each member acts only on its own turn).
+        const actingActor = party?.members[party.active]?.actor || player;
+        // The acting member's OWN tile wins first: a self-cast (purge on
+        // yourself) or a shuffle-in-place must not be stolen by an adjacent
+        // enemy's tall body mesh overlapping the click.
+        if (tile && actingActor && tile.x === actingActor.x && tile.z === actingActor.z) {
           combat?.handleTileClick(tile, point);
           return;
         }
+        // A coworker's body under the cursor is a target (rings mark bodies;
+        // the ground fallback behind a tall mesh is a mis-walk that burns AP).
         const bodyHit = picking.pick(controls.cameraEntity, sx, sy);
-        if (bodyHit?.kind === 'party') {
-          const m = memberOf(bodyHit.ref);
-          if (m && m.sheet.hp > 0 && m !== partyLeader(party)) {
-            combat?.setActive(party.members.indexOf(m));
-            return;
-          }
-          // your own body (or a downed member): fall through to the ground
-        } else if (bodyHit?.kind === 'enemy' && bodyHit.ref.alive) {
+        if (bodyHit?.kind === 'enemy' && bodyHit.ref.alive) {
           combat?.handleEnemyClick(bodyHit.ref);
           return;
         }
         if (!tile) return;
         const en = enemyAt(tile.x, tile.z);
         if (en) { combat?.handleEnemyClick(en); return; }
-        // Clicking another member's ground tile also hands them the floor
-        // (their own tile stays a ground click - purge self-casts, shuffles).
-        const pm = party?.members.find((m) =>
-          m.actor && m.sheet.hp > 0 && m.actor.x === tile.x && m.actor.z === tile.z);
-        if (pm && pm !== partyLeader(party)) {
-          combat?.setActive(party.members.indexOf(pm));
-          return;
-        }
         combat?.handleTileClick(tile, point);
         return;
       }
@@ -1643,12 +1628,12 @@ function startGame(level) {
       // Number keys arm the matching hotbar slot (out-of-combat targeting).
       const id = offensiveActionIds()[Number(e.key) - 1];
       if (id) toggleOocArm(id);
-    } else if (e.key === 'Tab' && sheet && !gameOver && !dialogue.visible) {
-      // Tab cycles who you control - the active combatant mid-fight, the
-      // leader outside one.
+    } else if (e.key === 'Tab' && sheet && !inCombat && !gameOver && !dialogue.visible) {
+      // Tab cycles which member you lead OUT of combat. In a fight there's no
+      // switching - initiative decides who acts, and you control each on their
+      // own turn.
       e.preventDefault();
-      if (inCombat) combat?.cycleActive();
-      else cycleLeader();
+      cycleLeader();
     } else if ((e.key === 'c' || e.key === 'C') && sheet && !gameOver && !dialogue.visible) {
       // The read-only character sheet for whoever you're controlling.
       charSheet.toggle(charSheetVm(sheet));
@@ -1985,8 +1970,7 @@ function startGame(level) {
     get playerActor() { return player; },
     get party() { return party; }, // live - the god panel reflects every member's sheet
     switchTo(i) {
-      if (inCombat && combat) combat.setActive(i);
-      else switchLeader(i);
+      if (!inCombat) switchLeader(i); // in combat, initiative controls the turn - no manual switch
     },
     reviveMember(i) {
       const m = party?.members[i];

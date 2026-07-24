@@ -13,6 +13,7 @@ import { SURFACES, GUM } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist } from './stats.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
+import { buildInitiativeOrder, rollInitiative, insertionIndex } from './initiative.js';
 
 const pc = window.pc;
 const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
@@ -72,6 +73,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (engaged.includes(en)) return;
     engaged.push(en);
     en.surprised = true;
+    insertSlot(unitSlot(en)); // takes an initiative slot; surprised, so loses turn one
   }
   // world: { isWalkable, findPath(sx,sz,tx,tz), hasLos(ax,az,bx,bz),
   //          stepOpen(x,z,nx,nz), surfaceIdAt(x,z), enemySurfDamage(x,z) }
@@ -99,13 +101,40 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const roundAp = (v) => Math.round(v * 10) / 10;
   const fmtAp = (v) => String(roundAp(v)).replace(/\.0$/, '');
 
-  let phase = 'player'; // 'player' | 'allies' | 'enemies' | 'done'
+  // Proper per-unit initiative (initiative.js): ONE interleaved order for the
+  // whole fight, not side-phases. `phase` now only says who's driving the
+  // CURRENT turn: 'player' (a party member you control) | 'ai' (an enemy or a
+  // player-team summon the AI drives) | 'done'.
+  let phase = 'player';
   // Nothing is pre-aimed: arm an attack/shove, THEN pick a target. While
   // armed, hover switches from the movement trail to target rings.
   let armed = null;
   let pendingMelee = null; // { en, action } to strike when the walk-up completes
-  let aiQueue = []; // the AI units taking their beats this phase (allies or enemies)
-  let acting = null; // { en, ap, wait }
+  let acting = null; // the AI unit's working turn state: { unit, ap, wait }
+
+  // --- initiative order --------------------------------------------------------
+  // A slot wraps one combatant: `{ member }` (player-controlled) or `{ unit }`
+  // (an AI actor - enemy or player-team summon). buildInitiativeOrder rolls
+  // d20 + `initMod` and sorts; `turnPtr` is whose turn it is.
+  const initRng = () => Math.random();
+  const memberSlot = (m) => ({ member: m, team: 'player', initMod: m.sheet.attr?.hustle ?? 0 });
+  const unitSlot = (u) => ({ unit: u, team: u.team === 'player' ? 'player' : 'enemy', initMod: u.def.ap || 0 });
+  const slotActor = (s) => (s.member ? s.member.actor : s.unit);
+  const slotAlive = (s) => (s.member ? s.member.sheet.hp > 0 && !!s.member.actor : !!s.unit.alive);
+  const slotName = (s) => (s.member ? s.member.sheet.name : s.unit.def.name);
+  let order = buildInitiativeOrder(
+    [...members.map(memberSlot), ...engaged.filter((e) => e.alive).map(unitSlot)],
+    initRng,
+  );
+  let turnPtr = 0;
+  // Splice a fresh combatant (pulled-in bystander, summon) into the order by
+  // its roll, keeping the current unit current.
+  function insertSlot(slot) {
+    slot.init = rollInitiative(slot.initMod, initRng);
+    const idx = insertionIndex(order, slot.init);
+    order.splice(idx, 0, slot);
+    if (idx <= turnPtr) turnPtr += 1;
+  }
 
   // --- UI ---------------------------------------------------------------------
   const panel = document.createElement('div');
@@ -319,38 +348,22 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   }
   buildActionBar();
 
-  // The raw handoff: point everything at another member. party.active moves
-  // with it so the portrait bar highlights - and so the out-of-combat leader
-  // bindings follow whoever had the floor when the fight ends (main.js
-  // syncLeaderBindings).
-  function applyActive(i) {
-    party.active = i;
-    active = members[i];
+  // Point everything at the member whose initiative turn it now is:
+  // party.active moves with it so the portrait bar highlights and the
+  // out-of-combat leader bindings follow whoever last held the floor (main.js
+  // syncLeaderBindings). No free switching - proper initiative means you
+  // control each member only when its own turn comes up.
+  function makeActive(m) {
+    active = m;
+    party.active = members.indexOf(m);
     armed = null;
     pendingMelee = null;
     hidePreview();
     buildActionBar();
-    refresh();
   }
-  // Hand control to another member mid-fight (portrait click, Tab, or a click
-  // on their body). Their AP pool is wherever they left it - switching is
-  // free and reversible, the Divinity courtesy.
-  function setActive(i) {
-    const m = members[i];
-    if (phase !== 'player' || !m || m === active || m.sheet.hp <= 0 || !m.actor) return;
-    if (active.actor.moving) { log('Let the current move land first.'); return; }
-    applyActive(i);
-    log(`${m.sheet.name} has the floor. ${fmtAp(m.ap)} AP.`);
-  }
-  function cycleActive() {
-    for (let step = 1; step < members.length; step++) {
-      const i = (members.indexOf(active) + step) % members.length;
-      if (members[i].sheet.hp > 0 && members[i].actor) { setActive(i); return; }
-    }
-  }
-  // A member dropped to 0 HP outside the enemy phase (fire under a combat
-  // walk) - main.js reports it here. Topple them, hand off if it was the
-  // active member, defeat only on a wipe.
+  // A member dropped to 0 HP outside its own turn (fire under a combat walk) -
+  // main.js reports it here. Topple them; if it was the acting member, end
+  // their turn; defeat only on a party wipe.
   function notifyMemberDown() {
     for (const m of members) {
       if (m.sheet.hp > 0 || m.toppled) continue;
@@ -359,10 +372,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (m.actor) m.actor.fx = { kind: 'death', t: 0 };
     }
     if (!livingMembers().length) { defeat(); return; }
-    if (active.sheet.hp <= 0) {
-      const i = members.findIndex((m) => m.sheet.hp > 0 && m.actor);
-      log(`${active.sheet.name} goes down! ${members[i].sheet.name} steps up.`);
-      applyActive(i);
+    if (phase === 'player' && active.sheet.hp <= 0) {
+      log(`${active.sheet.name} goes down!`);
+      advanceTurn();
     } else {
       refresh();
     }
@@ -374,8 +386,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     callbacks.say(text);
   }
   function refresh() {
-    el('combat-turn').textContent = phase === 'player' ? 'YOUR TURN'
-      : phase === 'allies' ? 'SUMMONS MOVE' : phase === 'enemies' ? 'THEIR TURN' : '';
+    // Name whose turn it is (initiative interleaves your members with the
+    // enemies). "YOUR TURN — Name" on a member you control; "Name's turn" on
+    // an AI unit.
+    const solo = members.length === 1 && !liveAllies().length;
+    el('combat-turn').textContent = phase === 'player'
+      ? (solo ? 'YOUR TURN' : `YOUR TURN — ${active.sheet.name}`)
+      : phase === 'ai' && acting ? `${acting.unit.def.name}'s turn` : '';
     // Distance-priced movement leaves fractional AP - show it as a half pip.
     const full = Math.floor(active.ap + 1e-6);
     const half = active.ap - full >= 0.05 ? 1 : 0;
@@ -397,23 +414,23 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       b.style.borderColor = ((a.type === 'attack' || a.type === 'shove') && id === armed) ? '#8adf76' : '#3a3a52';
     }
     endBtn.disabled = phase !== 'player';
-    // The label says what the click will actually do: pass to a teammate who
-    // hasn't ended their turn, or hand the round to the other side.
-    endBtn.textContent = members.some((m) => m !== active && !m.done && m.sheet.hp > 0 && m.actor)
-      ? 'Next Member' : 'End Turn';
-    // One member reads as "You"; a real party lists everyone by name, the
-    // downed marked as such.
-    strip.innerHTML = `<div style="font-weight:700; margin-bottom:5px;">COMBAT</div>` +
-      members.map((m) => {
-        const label = members.length === 1 ? 'You' : m.sheet.name;
-        const state = m.sheet.hp <= 0 ? 'DOWN' : `${m.sheet.hp}/${m.sheet.maxHp}`;
-        return `<div>${label} &middot; ${state}</div>`;
-      }).join('') +
-      // Your summons fight on your side of the ledger, tinted friendly.
-      liveAllies().map((s) =>
-        `<div style="opacity:.85; color:#8adf76">${s.def.name} &middot; ${s.hp}/${s.maxHp}</div>`).join('') +
-      engaged.filter((e) => e.alive).map((e) =>
-        `<div style="opacity:.9">${e.def.name} &middot; ${e.hp}/${e.maxHp}</div>`).join('');
+    endBtn.textContent = 'End Turn'; // your turn ends, initiative moves on
+    // The initiative tracker: the turn order top-to-bottom, the current unit
+    // marked, your side tinted friendly and the enemies warm. HP rides along;
+    // the downed/dead show a dash.
+    strip.innerHTML = `<div style="font-weight:700; margin-bottom:5px;">INITIATIVE</div>` +
+      order.map((s, i) => {
+        const cur = i === turnPtr;
+        const hp = s.member
+          ? `${Math.max(0, s.member.sheet.hp)}/${s.member.sheet.maxHp}`
+          : `${Math.max(0, s.unit.hp)}/${s.unit.maxHp}`;
+        const dead = !slotAlive(s);
+        const col = s.team === 'player' ? '#8adf76' : '#ffb3a0';
+        return `<div style="opacity:${dead ? '.4' : '.95'}; color:${col};`
+          + `font-weight:${cur ? '700' : '400'};">`
+          + `${cur ? '▸ ' : '&nbsp;&nbsp;'}${slotName(s)} &middot; ${dead ? '—' : hp}`
+          + ` <span style="opacity:.6">(${s.init})</span></div>`;
+      }).join('');
     callbacks.updateHud();
   }
 
@@ -697,55 +714,57 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // button exactly.
   endBtn.onclick = () => {
     if (phase !== 'player') return;
-    active.done = true;
-    const next = members.find((m) => m !== active && !m.done && m.sheet.hp > 0 && m.actor);
-    if (next) {
-      setActive(members.indexOf(next));
-      return;
-    }
-    startAlliesPhase();
+    advanceTurn();
   };
 
-  // --- AI phases (allies, then enemies) --------------------------------------------
-  // Player-team summons act between your turn and the enemies' - the ally step
-  // of player -> allies -> enemies. With no summons it's invisible: hand
-  // straight to the enemies so an ordinary fight is byte-for-byte as before.
-  function startAlliesPhase() {
-    const allies = liveAllies();
-    if (!allies.length) { startEnemyPhase(); return; }
-    phase = 'allies';
-    pendingMelee = null;
+  // --- the turn order driver ---------------------------------------------------
+  // One combatant acts at a time, in initiative order. advanceTurn moves to the
+  // next slot (wrapping to a fresh round); beginTurn sets up whoever's up -
+  // handing control to you for a member, or arming the AI's working state for a
+  // unit. Dead/downed slots are skipped; a surprised unit burns its turn.
+  function advanceTurn() {
     armed = null;
+    pendingMelee = null;
     hidePreview();
-    aiQueue = allies.slice();
-    acting = null;
-    log('Your summons move...');
-    refresh();
+    turnPtr += 1;
+    if (turnPtr >= order.length) { newRound(); return; }
+    beginTurn();
   }
-
-  function startEnemyPhase() {
-    phase = 'enemies';
-    pendingMelee = null;
-    armed = null;
-    hidePreview();
-    // One enemy phase is one round: age every summoner's cooldown a tick, so a
-    // capped/cooling HR fights instead of re-posting the same req every turn.
+  function newRound() {
+    turnPtr = 0;
+    // A full pass through the order is one round: age summoner cooldowns and
+    // the fire/smoke lifecycle a tick.
     for (const e of engaged) if (e.summonCd > 0) e.summonCd -= 1;
-    aiQueue = engaged.filter((e) => e.alive);
-    acting = null;
-    log('Their turn...');
-    refresh();
+    callbacks.onRound?.();
+    beginTurn();
   }
-
-  function startPlayerTurn() {
-    phase = 'player';
-    for (const m of members) {
-      m.ap = m.sheet.maxAp;
-      m.defended = false;
-      m.done = false;
+  function beginTurn() {
+    // The fight can end on the boundary (a kill emptied one side).
+    if (!engaged.some((e) => e.alive)) { victory(); return; }
+    if (!livingMembers().length) { defeat(); return; }
+    const s = order[turnPtr];
+    if (!slotAlive(s)) { advanceTurn(); return; } // a corpse/downed slot - skip
+    if (!s.member && s.unit.surprised) {
+      // Caught off guard: they spend the turn realizing what's happening.
+      s.unit.surprised = false;
+      phase = 'ai';
+      acting = { unit: s.unit, ap: 0, wait: 0.6 };
+      log(`${s.unit.def.name} is still grabbing their lanyard.`);
+      refresh();
+      return;
     }
-    callbacks.onRound?.(); // a full round elapsed - age fire/smoke one turn
-    log('Your turn.');
+    if (s.member) {
+      makeActive(s.member);
+      s.member.ap = s.member.sheet.maxAp; // full AP at the top of your turn
+      s.member.defended = false;
+      phase = 'player';
+      const solo = members.length === 1 && !liveAllies().length;
+      log(solo ? 'Your turn.' : `${s.member.sheet.name}'s turn.`);
+      refresh();
+      return;
+    }
+    phase = 'ai';
+    acting = { unit: s.unit, ap: s.unit.def.ap, wait: 0.35 };
     refresh();
   }
 
@@ -767,6 +786,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const spawned = world.spawnSummon(d.archetype, team, summoner, n) || [];
     for (const a of spawned) {
       if (team === 'enemy' && !engaged.includes(a)) engaged.push(a);
+      a.surprised = true; // fresh arrivals don't act the turn they're posted
+      insertSlot(unitSlot(a)); // ...but they take an initiative slot for next round
     }
     return spawned.length;
   }
@@ -807,14 +828,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         m.actor.clearPath();
         m.actor.fx = { kind: 'death', t: 0 };
         if (!livingMembers().length) { defeat(); return; } // party wipe - the only true loss
+        log(`${m.sheet.name} is out cold. They'll sit the rest of this one out.`);
+        // Keep `active` (the sheet the HUD reflects, and the post-combat
+        // leader) on someone still standing. Their initiative slot is simply
+        // skipped when it comes around.
         if (m === active) {
-          // The member you were controlling fell - a survivor steps up so the
-          // fight goes on.
-          const i = members.findIndex((mm) => mm.sheet.hp > 0 && mm.actor);
-          log(`${m.sheet.name} goes down! ${members[i].sheet.name} steps up.`);
-          applyActive(i);
-        } else {
-          log(`${m.sheet.name} is out cold.`);
+          const alive = livingMembers()[0];
+          active = alive;
+          party.active = members.indexOf(alive);
         }
       }
       return;
@@ -912,42 +933,29 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
       return;
     }
-    // One shared driver runs both AI phases - allies, then enemies - just
-    // pointed at a different queue and a different hostile team.
-    if (phase !== 'allies' && phase !== 'enemies') return;
-    if (acting && acting.wait > 0) {
+    // The AI drives the ONE unit whose initiative turn it is (acting, set by
+    // beginTurn). It takes beats until out of AP, then advanceTurn hands the
+    // order on.
+    if (phase !== 'ai' || !acting) return;
+    if (acting.wait > 0) {
       acting.wait -= dt;
       return;
     }
-    if (!acting) {
-      const unit = aiQueue.shift();
-      if (!unit) { phase === 'allies' ? startEnemyPhase() : startPlayerTurn(); return; }
-      if (!unit.alive) return;
-      if (unit.surprised) {
-        unit.surprised = false;
-        log(`${unit.def.name} is still grabbing their lanyard.`);
-        acting = { unit, ap: 0, wait: 0.6 };
-        return;
-      }
-      acting = { unit, ap: unit.def.ap, wait: 0.35 };
-      return;
-    }
     const { unit } = acting;
-    if (!unit.alive) { acting = null; return; }
+    if (!unit.alive) { advanceTurn(); return; }
     if (unit.moving) return; // let the current walk play out
     if (unit.slipped) {
-      unit.slipped = false;
-      acting.ap = 0; // the rest of the turn goes to getting up with dignity
-      acting.wait = 0.6;
+      unit.slipped = false; // a spill ends their whole turn
+      advanceTurn();
       return;
     }
     const target = pickTarget(unit);
     if (!target) {
-      // Enemies with no living player-side target means a party wipe. An ally
-      // with no enemies left just idles out the queue (victory already fired
-      // from the kill that emptied them).
-      if (phase === 'enemies') { defeat(); return; }
-      acting = null;
+      // An enemy with no living player-side target means a party wipe; a
+      // player summon with no enemies just yields its turn (victory already
+      // fired from the kill that emptied them).
+      if (unit.team !== 'player') { defeat(); return; }
+      advanceTurn();
       return;
     }
     // A summoner reinforces before it wades in: off cooldown, able to afford
@@ -975,21 +983,28 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       else acting.ap = Math.max(0, roundAp(acting.ap - spent));
       acting.wait = 0.15;
     } else {
-      acting = null; // out of AP - next
+      advanceTurn(); // out of AP / nothing to do - next in initiative
     }
   }
 
   app.on('update', update);
-  log('Combat! Your move.');
-  refresh();
-
-  // Started from the persistent hotbar: the fight opens with the armed action
-  // aimed at the coworker you clicked. handleEnemyClick sorts out the rest -
-  // melee walks up and strikes on arrival, a throw fires if in range and line.
+  log('Combat!');
+  // Kick off the initiative order. Started from the persistent hotbar, the
+  // initiator AMBUSHES: the throwing member leads off regardless of their roll
+  // (they caught the coworker cold - the same reason distant enemies start
+  // surprised), then fires the armed opener as part of that turn. Otherwise
+  // the highest roll simply goes first - which can be an enemy.
   if (opening && ACTIONS[opening.actionId] && opening.target?.alive) {
-    armed = opening.actionId;
-    refresh();
-    handleEnemyClick(opening.target);
+    const oi = order.findIndex((s) => s.member === members[party.active]);
+    if (oi >= 0) turnPtr = oi;
+    beginTurn();
+    if (phase === 'player') {
+      armed = opening.actionId;
+      refresh();
+      handleEnemyClick(opening.target);
+    }
+  } else {
+    beginTurn();
   }
 
   // Read-only handle for tests, plus a few live setters god mode (god.js) uses
@@ -1009,6 +1024,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     get party() {
       return members.map((m) => ({ name: m.sheet.name, hp: m.sheet.hp, ap: m.ap, active: m === active }));
     },
+    // The initiative order, top to bottom, with whose turn it is - for the
+    // tracker UI and the e2e suite.
+    get order() {
+      return order.map((s, i) => ({
+        name: slotName(s), team: s.team, init: s.init,
+        member: !!s.member, current: i === turnPtr, alive: slotAlive(s),
+      }));
+    },
+    get turn() { return order[turnPtr] ? slotName(order[turnPtr]) : null; },
     get summons() {
       return liveAllies().map((s) => ({ name: s.def.name, x: s.x, z: s.z, hp: s.hp }));
     },
@@ -1022,8 +1046,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     handleTileClick,
     handleEnemyClick,
     handleHover,
-    setActive,
-    cycleActive,
     notifyMemberDown,
     // Per-member turn snapshot, for the party bar's in-combat AP readout.
     get party() {
