@@ -4,7 +4,7 @@
 // tile behind a tall mesh - the same fix that makes a click on the raised door
 // panel actually open the door.
 import { test, expect } from '@playwright/test';
-import { bootAndPick, bootStash, onScreen, waitStill, combatOrWalkDone } from './helpers.js';
+import { bootAndPick, bootStash, onScreen, waitStill, combatOrWalkDone, stableProject } from './helpers.js';
 
 // Hover the on-screen position of a world point (a tall mesh, y > 0). Returns
 // false if it projects off-screen so the caller can bail.
@@ -58,14 +58,23 @@ test('the persistent hotbar shows attacks and arming targets a coworker', async 
   expect(await page.evaluate(() => window.__game.armed)).toBe('attack');
 
   // Arming, then clicking a coworker, opens combat with that attack as the
-  // opener (melee walks up first). Enemies wander/hide behind doors, so try a
-  // few round-robin like the confront helper does.
+  // opener (melee walks up first). Mirror the hardened enterCombat: target
+  // only REACHABLE coworkers (some spawn sealed behind doors), nearest first,
+  // aim at the settled body, and re-arm if a stray click lowered the attack.
   let inCombat = false;
-  for (let i = 0; i < 8 && !inCombat; i++) {
-    const ens = await page.evaluate(() => window.__game.enemies.filter((e) => e.alive));
-    const en = ens[i % ens.length];
-    const p = await page.evaluate(([x, z]) => window.__game.project(x, z), [en.x, en.z]);
+  for (let i = 0; i < 14 && !inCombat; i++) {
+    const pt = await page.evaluate(() => window.__game.playerTile);
+    const ens = await page.evaluate(() => window.__game.enemies.filter((e) => e.alive && e.reachable));
+    if (!ens.length) { await page.waitForTimeout(700); continue; }
+    ens.sort((a, b) => Math.max(Math.abs(a.x - pt.x), Math.abs(a.z - pt.z))
+      - Math.max(Math.abs(b.x - pt.x), Math.abs(b.z - pt.z)));
+    const en = ens[0];
+    const pp = await page.evaluate(() => window.__game.playerPos);
+    await stableProject(page, pp.x, pp.z).catch(() => {}); // settle the camera
+    let p = await page.evaluate(([x, z]) => window.__game.project3(x, 0.9, z), [en.px ?? en.x, en.pz ?? en.z]);
+    if (!onScreen(p)) p = await page.evaluate(([x, z]) => window.__game.project(x, z), [en.x, en.z]);
     if (!onScreen(p)) continue;
+    if (await page.evaluate(() => window.__game.armed) !== 'attack') await page.click('#hotbar-act-attack');
     await page.mouse.click(p.x, p.y);
     inCombat = await combatOrWalkDone(page, 25_000);
   }
