@@ -162,6 +162,9 @@ export async function enterCombat(page) {
     inCombat = await combatOrWalkDone(page, 25_000);
   }
   expect(inCombat).toBe(true);
+  // Initiative may hand the enemy the first turn(s); settle on the player's
+  // turn so callers can act. (If the fight somehow ends first, don't hang.)
+  if (await page.evaluate(() => window.__game.inCombat)) await waitForPlayerTurn(page).catch(() => {});
 }
 
 // Wait until it's a party member's turn (phase 'player'). Under initiative an

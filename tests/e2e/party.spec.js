@@ -2,7 +2,7 @@
 // the lead from the party bar, fight as either member - and prove old
 // single-sheet saves still load.
 import { test, expect } from '@playwright/test';
-import { bootStash, clickWorld, waitStill, enterCombat } from './helpers.js';
+import { bootStash, clickWorld, waitStill, enterCombat, waitForPlayerTurn } from './helpers.js';
 
 // A small arena: the intern one tile from spawn, open floor to walk.
 const LEVEL = {
@@ -89,7 +89,7 @@ test('recruit the intern, he follows, and the party bar hands him the lead', asy
   expect(Math.max(Math.abs(after[0].x - after[1].x), Math.abs(after[0].z - after[1].z))).toBeLessThanOrEqual(3);
 });
 
-test('party combat: switch the active member, and the fight survives the leader going down', async ({ page }) => {
+test('party combat: initiative interleaves the party and enemies; both members act; a downed member is skipped, not a loss', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, COMBAT_LEVEL);
   await recruitIntern(page);
@@ -98,19 +98,16 @@ test('party combat: switch the active member, and the fight survives the leader 
   await enterCombat(page);
   expect(await page.evaluate(() => window.__combat.party.length)).toBe(2);
 
-  // In combat the portraits carry each member's remaining AP.
-  await expect(page.locator('#party-slot-0')).toContainText('AP');
+  // ONE initiative order lists every combatant - both members and the Manager -
+  // each with a rolled init and exactly one marked current.
+  const order = await page.evaluate(() => window.__combat.order);
+  expect(order.length).toBeGreaterThanOrEqual(3);
+  expect(order.filter((o) => o.member).length).toBe(2); // both party members
+  expect(order.some((o) => !o.member)).toBe(true); // the Manager
+  expect(order.every((o) => Number.isFinite(o.init))).toBe(true);
+  expect(order.filter((o) => o.current).length).toBe(1);
 
-  // Portrait click hands the intern the floor: his action bar, his AP.
-  await page.click('#party-slot-1');
-  await expect.poll(() => page.evaluate(() => window.__combat.party[1].active)).toBe(true);
-  await expect(page.locator('#act-reboot')).toBeVisible(); // the intern's kit
-  // ...and back.
-  await page.click('#party-slot-0');
-  await expect.poll(() => page.evaluate(() => window.__combat.party[0].active)).toBe(true);
-
-  // Hold Ctrl: rings under everyone, and hovering a body mid-fight glows it
-  // and names it in the banner.
+  // Hold Ctrl: rings under everyone, and hovering a body mid-fight glows it.
   await page.keyboard.down('Control');
   expect(await page.evaluate(() => window.__game.ctrlHeld)).toBe(true);
   const mp = await page.evaluate(() => {
@@ -120,24 +117,29 @@ test('party combat: switch the active member, and the fight survives the leader 
   await page.mouse.move(mp.x, mp.y);
   await expect.poll(() => page.evaluate(() => window.__game.hoverKind), { timeout: 10_000 }).toBe('enemy');
   await page.keyboard.up('Control');
-  expect(await page.evaluate(() => window.__game.ctrlHeld)).toBe(false);
 
-  // Wound the controlled leader to 1 HP (live god handle), then end their
-  // turn. End Turn QUEUES through the party: the first click passes the
-  // floor to the intern, only the second hands the round to the enemies.
-  await page.evaluate(() => { window.__god.player.hp = 1; window.__combat.refresh(); });
-  await page.click('#combat-end-turn');
-  await expect.poll(() => page.evaluate(() => window.__combat.party[1].active)).toBe(true);
-  expect(await page.evaluate(() => window.__combat.phase)).toBe('player');
-  await page.click('#combat-end-turn');
-  // The Manager targets the bloodied nearest member, the leader drops, and
-  // the fight carries on with the intern in control instead of ending.
-  await expect.poll(
-    () => page.evaluate(() => window.__combat.party[0].hp === 0 && window.__combat.party[1].active),
-    { timeout: 90_000 },
-  ).toBe(true);
-  expect(await page.evaluate(() => window.__game.inCombat)).toBe(true); // no defeat
-  expect(await page.evaluate(() => window.__combat.phase)).not.toBe('done');
+  // Both members take their OWN turn (no switching - each acts on its slot).
+  // Cycle turns and collect who holds the floor.
+  const acted = new Set();
+  for (let i = 0; i < 14 && acted.size < 2; i++) {
+    if (await page.evaluate(() => window.__game.gameOver || !window.__game.inCombat)) break;
+    await waitForPlayerTurn(page).catch(() => {});
+    const who = await page.evaluate(() => window.__combat.party.find((m) => m.active && m.hp > 0)?.name);
+    if (who) acted.add(who);
+    await page.click('#combat-end-turn').catch(() => {});
+  }
+  expect(acted.size).toBe(2); // the Drone and the Intern each got a turn
+
+  // Party-wipe-only defeat: wound one member to 1 HP; when the Manager drops
+  // them, the fight continues because the other still stands (their slot is
+  // simply skipped when it comes around).
+  await page.evaluate(() => { window.__god.party.members[0].sheet.hp = 1; window.__combat.refresh(); });
+  await expect.poll(async () => {
+    if (await page.evaluate(() => window.__combat?.phase) === 'player') await page.click('#combat-end-turn').catch(() => {});
+    return page.evaluate(() => window.__combat?.party[0].hp === 0 || window.__game.gameOver);
+  }, { timeout: 120_000 }).toBe(true);
+  expect(await page.evaluate(() => window.__game.gameOver)).toBe(false); // one down is not a wipe
+  expect(await page.evaluate(() => window.__game.inCombat)).toBe(true);
 });
 
 // Both recruitables in one room - the roster fills to its cap of three.

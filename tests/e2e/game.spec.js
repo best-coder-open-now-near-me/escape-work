@@ -8,7 +8,7 @@
 // stays slower than local. Every wait here is therefore generous, and boot
 // helpers gate on frames actually ticking before any projection is trusted.
 import { test, expect } from '@playwright/test';
-import { waitForSmoothFrames, onScreen, bootAndPick, combatOrWalkDone, enterCombat, endTurnUntilPlayer } from './helpers.js';
+import { waitForSmoothFrames, onScreen, bootAndPick, combatOrWalkDone, enterCombat, endTurnUntilPlayer, waitForPlayerTurn } from './helpers.js';
 
 test('the class carousel browses every resume and hires one', async ({ page }) => {
   await page.goto('/');
@@ -69,6 +69,9 @@ test('confronting a coworker starts combat and an attack lands', async ({ page }
   await bootAndPick(page);
   await enterCombat(page);
   await expect(page.locator('#combat-panel')).toBeVisible();
+  // Under initiative the coworker can win the roll and act first - wait for
+  // control to come around before doing anything.
+  await waitForPlayerTurn(page);
   // A click can race the combat trigger and get spent as an in-combat walk;
   // if this turn's AP is too low to attack, cycle a turn for a fresh budget.
   if (await page.evaluate(() => window.__combat.ap) < 3) {

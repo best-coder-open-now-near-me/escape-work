@@ -33,22 +33,18 @@ test('HR summons applicants that join the fight as enemies, capped', async ({ pa
   await bootStash(page, SUMMON_ARENA, 'office-drone');
   await enterCombat(page);
 
-  // Combat opened against HR alone - no applicants yet.
-  expect(await applicants(page)).toBe(0);
-
-  // Hand the round to the enemies: HR's first act is to post the role.
-  await page.click('#combat-end-turn');
-
-  // Two applicants materialize and join the engaged enemies (cap: 2).
-  await expect.poll(() => applicants(page), { timeout: 30_000 }).toBe(2);
+  // HR posts the role on its own initiative turn. Drive the fight - ending
+  // each of the player's turns lets the AI act - until two applicants have
+  // materialized and joined the engaged enemies (cap: 2). Order-agnostic:
+  // HR may even win initiative and post before the player's first turn.
+  await expect.poll(async () => {
+    if (await page.evaluate(() => window.__combat?.phase === 'player')) await page.click('#combat-end-turn').catch(() => {});
+    return applicants(page);
+  }, { timeout: 45_000 }).toBe(2);
 
   // A further round doesn't stack a fresh batch on top - the live cap holds.
-  // (Guarded: if the player has already fallen, combat is over and there's
-  // nothing left to check.)
   if (await page.evaluate(() => !!window.__combat)) {
-    await expect.poll(() => page.evaluate(() => window.__combat?.phase),
-      { timeout: 20_000 }).toBe('player');
-    await page.click('#combat-end-turn').catch(() => {});
+    if (await page.evaluate(() => window.__combat?.phase === 'player')) await page.click('#combat-end-turn').catch(() => {});
     await page.waitForTimeout(1500);
     expect(await applicants(page)).toBeLessThanOrEqual(2);
   }
@@ -91,18 +87,15 @@ test('a player-summoned ally fights for you, then vanishes when the fight ends',
   const hp0 = await managerHp(page);
   expect(hp0).toBeGreaterThan(0);
 
-  // Hand off the round repeatedly: on the allies phase the summon advances on
-  // the Manager and swings. Within a couple of rounds the Manager is bloodied
-  // by an attacker that is NOT the player - proof the ally fights for you.
+  // Drive the fight: end each of the player's turns and let the AI act. On
+  // the ally's own initiative turn it advances on the Manager and swings, so
+  // within a few rounds the Manager is bloodied by an attacker that is NOT
+  // the player - proof the ally fights for you.
   let hurt = false;
-  for (let i = 0; i < 5 && !hurt; i++) {
-    if (!(await page.evaluate(() => window.__combat?.phase === 'player'))) {
-      await expect.poll(() => page.evaluate(() => window.__combat?.phase || 'gone'),
-        { timeout: 20_000 }).not.toBe('enemies');
-    }
+  for (let i = 0; i < 8 && !hurt; i++) {
     if (!(await page.evaluate(() => !!window.__combat))) break; // fight ended
-    await page.click('#combat-end-turn').catch(() => {});
-    await page.waitForTimeout(1800); // let allies + enemies phases play out
+    if (await page.evaluate(() => window.__combat?.phase === 'player')) await page.click('#combat-end-turn').catch(() => {});
+    await page.waitForTimeout(1500); // let the AI turns play out
     const hp = await managerHp(page);
     if (hp !== null && hp < hp0) hurt = true;
   }
