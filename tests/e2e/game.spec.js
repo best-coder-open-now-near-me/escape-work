@@ -15,7 +15,7 @@ test('the class carousel browses every resume and hires one', async ({ page }) =
   // One resume at a time, straight from the class registry; arrows browse.
   await expect(page.locator('#resume-card')).toBeVisible();
   await expect(page.locator('#resume-card')).toContainText('Office Drone');
-  const classNames = ['Middle Manager', 'Mail Room', 'IT Support', 'Office Drone'];
+  const classNames = ['Middle Manager', 'Mail Room', 'IT Support', 'Human Resources', 'Office Drone'];
   for (const name of classNames) {
     await page.click('#carousel-next');
     await expect(page.locator('#resume-card')).toContainText(name);

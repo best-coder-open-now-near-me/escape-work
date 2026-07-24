@@ -344,7 +344,7 @@ function buildPanel(api, requestToggle) {
       title: `${en.def.name} @ (${en.x}, ${en.z})${en.alive ? '' : ' †'}`,
       hide: RIG_INTERNALS, readOnly: new Set(['x', 'z', 'typeId']),
       actions: [
-        { label: 'Full heal', run: () => { en.hp = en.def.hp; api.combat && api.combat.refresh(); render(); } },
+        { label: 'Full heal', run: () => { en.hp = en.maxHp; api.combat && api.combat.refresh(); render(); } },
         { label: 'Kill', run: () => { if (en.alive) en.die(); render(); } },
       ],
     }));

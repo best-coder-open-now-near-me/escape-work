@@ -34,14 +34,30 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   });
   let active = members[party.active];
   const livingMembers = () => members.filter((m) => m.sheet.hp > 0 && m.actor);
-  // Enemies pick on the nearest living member; ties go to the bloodied one.
-  function pickTarget(en) {
+  const liveAllies = () => (world.liveAllies ? world.liveAllies() : []); // player-team summons
+  // Everything an AI unit could swing at on the far side. An enemy hunts the
+  // party AND any player-team summons; a player-team summon hunts the enemies.
+  // A target wraps { actor, member }: `member` is set only for a party member
+  // (its sheet takes the hit, with the downed/handoff rules); a bare actor - an
+  // enemy, or a summon on either side - takes damage through takeDamage.
+  const targetHp = (t) => (t.member ? t.member.sheet.hp : t.actor.hp);
+  function hostilesFor(unit) {
+    if (unit.team === 'player') return world.liveEnemies().map((a) => ({ actor: a, member: null }));
+    return [
+      ...livingMembers().map((m) => ({ actor: m.actor, member: m })),
+      ...liveAllies().map((a) => ({ actor: a, member: null })),
+    ];
+  }
+  // Nearest hostile (Chebyshev), ties broken by lowest HP - the rule the
+  // party's enemies always used, now team-agnostic so summons on either side
+  // pick targets the same way.
+  function pickTarget(unit) {
     let best = null;
-    for (const m of livingMembers()) {
-      const d = cheb(en.x, en.z, m.actor.x, m.actor.z);
-      if (!best || d < best.d || (d === best.d && m.sheet.hp < best.m.sheet.hp)) best = { m, d };
+    for (const t of hostilesFor(unit)) {
+      const d = cheb(unit.x, unit.z, t.actor.x, t.actor.z);
+      if (!best || d < best.d || (d === best.d && targetHp(t) < targetHp(best.t))) best = { t, d };
     }
-    return best?.m || null;
+    return best?.t || null;
   }
   // Enemies pulled in from a distance are surprised - they spend their first
   // turn realizing what's happening, so group openings don't alpha-strike you.
@@ -72,8 +88,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Movement cost per unit distance, derived from the surface's `slow`
   // multiplier (0.5 => twice the AP) - one number in data drives both walk
   // speed and AP pricing, for everyone. Gum on a shoe surcharges every step;
-  // a member's gum lives on their sheet, an enemy's on the actor (see
-  // enemyAdvance).
+  // a member's gum lives on their sheet, an AI unit's on the actor (see
+  // aiAdvance).
   const surfaceStepCost = (x, z) => {
     const slow = SURFACES[world.surfaceIdAt(x, z)]?.slow;
     return slow ? 1 / slow : 1;
@@ -83,12 +99,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const roundAp = (v) => Math.round(v * 10) / 10;
   const fmtAp = (v) => String(roundAp(v)).replace(/\.0$/, '');
 
-  let phase = 'player'; // 'player' | 'enemies' | 'done'
+  let phase = 'player'; // 'player' | 'allies' | 'enemies' | 'done'
   // Nothing is pre-aimed: arm an attack/shove, THEN pick a target. While
   // armed, hover switches from the movement trail to target rings.
   let armed = null;
   let pendingMelee = null; // { en, action } to strike when the walk-up completes
-  let enemyQueue = [];
+  let aiQueue = []; // the AI units taking their beats this phase (allies or enemies)
   let acting = null; // { en, ap, wait }
 
   // --- UI ---------------------------------------------------------------------
@@ -358,7 +374,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     callbacks.say(text);
   }
   function refresh() {
-    el('combat-turn').textContent = phase === 'player' ? 'YOUR TURN' : phase === 'enemies' ? 'THEIR TURN' : '';
+    el('combat-turn').textContent = phase === 'player' ? 'YOUR TURN'
+      : phase === 'allies' ? 'SUMMONS MOVE' : phase === 'enemies' ? 'THEIR TURN' : '';
     // Distance-priced movement leaves fractional AP - show it as a half pip.
     const full = Math.floor(active.ap + 1e-6);
     const half = active.ap - full >= 0.05 ? 1 : 0;
@@ -392,8 +409,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         const state = m.sheet.hp <= 0 ? 'DOWN' : `${m.sheet.hp}/${m.sheet.maxHp}`;
         return `<div>${label} &middot; ${state}</div>`;
       }).join('') +
+      // Your summons fight on your side of the ledger, tinted friendly.
+      liveAllies().map((s) =>
+        `<div style="opacity:.85; color:#8adf76">${s.def.name} &middot; ${s.hp}/${s.maxHp}</div>`).join('') +
       engaged.filter((e) => e.alive).map((e) =>
-        `<div style="opacity:.9">${e.def.name} &middot; ${e.hp}/${e.def.hp}</div>`).join('');
+        `<div style="opacity:.9">${e.def.name} &middot; ${e.hp}/${e.maxHp}</div>`).join('');
     callbacks.updateHud();
   }
 
@@ -658,6 +678,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       fx.damageText(active.actor.x, active.actor.z, `+${a.amount}`, '#8adf76');
       log(a.log);
       refresh();
+    } else if (a.type === 'summon') {
+      // Post the role: applicants report for duty on your side, up to the
+      // action's live cap. Instant, like heal/defend - no target to pick.
+      if (a.uses && active.usesLeft[id] <= 0) return;
+      const n = resolveSummon(active.actor, 'player', a);
+      if (n <= 0) { log('No room - the applicants can\'t find a free desk.'); return; }
+      if (a.uses) active.usesLeft[id] -= 1;
+      active.ap -= a.ap;
+      active.actor.lunge();
+      log(`${a.log} ${n} report${n === 1 ? 's' : ''} for duty.`);
+      refresh();
     }
   }
   // End Turn queues through the party: it ends the ACTIVE member's turn and
@@ -672,16 +703,35 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       setActive(members.indexOf(next));
       return;
     }
-    startEnemyPhase();
+    startAlliesPhase();
   };
 
-  // --- enemy phase ----------------------------------------------------------------
+  // --- AI phases (allies, then enemies) --------------------------------------------
+  // Player-team summons act between your turn and the enemies' - the ally step
+  // of player -> allies -> enemies. With no summons it's invisible: hand
+  // straight to the enemies so an ordinary fight is byte-for-byte as before.
+  function startAlliesPhase() {
+    const allies = liveAllies();
+    if (!allies.length) { startEnemyPhase(); return; }
+    phase = 'allies';
+    pendingMelee = null;
+    armed = null;
+    hidePreview();
+    aiQueue = allies.slice();
+    acting = null;
+    log('Your summons move...');
+    refresh();
+  }
+
   function startEnemyPhase() {
     phase = 'enemies';
     pendingMelee = null;
     armed = null;
     hidePreview();
-    enemyQueue = engaged.filter((e) => e.alive);
+    // One enemy phase is one round: age every summoner's cooldown a tick, so a
+    // capped/cooling HR fights instead of re-posting the same req every turn.
+    for (const e of engaged) if (e.summonCd > 0) e.summonCd -= 1;
+    aiQueue = engaged.filter((e) => e.alive);
     acting = null;
     log('Their turn...');
     refresh();
@@ -699,54 +749,94 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     refresh();
   }
 
-  function enemyAttack(en, target) {
-    const atk = en.def.attacks[rand(0, en.def.attacks.length - 1)];
+  // --- summons ----------------------------------------------------------------
+  // Live minions a summoner still has on the board - the cap counts these.
+  // Enemy-team summons live in the shared enemy list (world.liveEnemies);
+  // player-team summons arrive with the ally phase (M2).
+  function liveSummonsOf(summoner) {
+    return [...world.liveEnemies(), ...liveAllies()].filter((e) => e.summonedBy === summoner).length;
+  }
+  // Post the req: spawn up to the descriptor's `count` for `team` beside the
+  // summoner, never past its live `cap`. Enemy-team arrivals join `engaged` so
+  // they count toward victory and queue next round - they don't act the turn
+  // they're summoned. Returns how many actually showed up.
+  function resolveSummon(summoner, team, d) {
+    const room = (d.cap ?? d.count) - liveSummonsOf(summoner);
+    const n = Math.min(d.count, Math.max(0, room));
+    if (n <= 0) return 0;
+    const spawned = world.spawnSummon(d.archetype, team, summoner, n) || [];
+    for (const a of spawned) {
+      if (team === 'enemy' && !engaged.includes(a)) engaged.push(a);
+    }
+    return spawned.length;
+  }
+
+  // One AI unit's swing at its target. A party member takes it on their sheet
+  // (deflect, gum, and the downed/handoff/party-wipe rules); a bare actor - an
+  // enemy struck by a player summon, or a player summon struck by an enemy -
+  // takes it through takeDamage, with no downed courtesy (a spent minion just
+  // falls, never a game-over).
+  function aiAttack(unit, target) {
+    const atk = unit.def.attacks[rand(0, unit.def.attacks.length - 1)];
     let dmg = rand(atk.min, atk.max);
-    let line = atk.log;
-    if (target.defended) {
-      dmg = Math.ceil(dmg / 2);
-      line += ` You deflect - only ${dmg} damage.`;
-    } else {
-      line += ` ${dmg} damage.`;
-    }
-    en.lunge(target.actor.x, target.actor.z);
-    target.actor.flinch();
-    const dead = applyDamage(target.sheet, dmg);
-    fx.damageText(target.actor.x, target.actor.z, `-${dmg}`);
-    if (atk.applies === 'gum') {
-      target.sheet.gum = GUM.steps;
-      line += ' Gum. On your shoe.';
-    }
-    log(line);
-    refresh();
-    if (dead) {
-      target.toppled = true;
-      target.actor.clearPath();
-      target.actor.fx = { kind: 'death', t: 0 };
-      if (!livingMembers().length) { defeat(); return; } // party wipe - the only true loss
-      if (target === active) {
-        // The member you were controlling fell - a survivor steps up so the
-        // fight goes on.
-        const i = members.findIndex((m) => m.sheet.hp > 0 && m.actor);
-        log(`${target.sheet.name} goes down! ${members[i].sheet.name} steps up.`);
-        applyActive(i);
+    unit.lunge(target.actor.x, target.actor.z);
+    if (target.member) {
+      const m = target.member;
+      let line = atk.log;
+      if (m.defended) {
+        dmg = Math.ceil(dmg / 2);
+        line += ` You deflect - only ${dmg} damage.`;
       } else {
-        log(`${target.sheet.name} is out cold.`);
+        line += ` ${dmg} damage.`;
       }
+      m.actor.flinch();
+      const dead = applyDamage(m.sheet, dmg);
+      fx.damageText(m.actor.x, m.actor.z, `-${dmg}`);
+      if (atk.applies === 'gum') {
+        m.sheet.gum = GUM.steps;
+        line += ' Gum. On your shoe.';
+      }
+      log(line);
+      refresh();
+      if (dead) {
+        m.toppled = true;
+        m.actor.clearPath();
+        m.actor.fx = { kind: 'death', t: 0 };
+        if (!livingMembers().length) { defeat(); return; } // party wipe - the only true loss
+        if (m === active) {
+          // The member you were controlling fell - a survivor steps up so the
+          // fight goes on.
+          const i = members.findIndex((mm) => mm.sheet.hp > 0 && mm.actor);
+          log(`${m.sheet.name} goes down! ${members[i].sheet.name} steps up.`);
+          applyActive(i);
+        } else {
+          log(`${m.sheet.name} is out cold.`);
+        }
+      }
+      return;
     }
+    // Bare actor: an enemy (a player summon's swing) or a player summon (an
+    // enemy's swing). takeDamage flinches on a hit and topples on a kill.
+    const a = target.actor;
+    const died = a.takeDamage(dmg);
+    fx.damageText(a.x, a.z, `-${dmg}`, '#ffd76b');
+    log(`${atk.log} ${dmg} damage.`);
+    if (died && unit.team === 'player') callbacks.onEnemyKilled(a);
+    refresh();
+    if (unit.team === 'player' && !engaged.some((e) => e.alive)) victory();
   }
 
   // Route toward the cheapest target-adjacent tile and walk it in ONE smooth
   // run, as far as `budget` allows (1 AP per tile-length) - no more
   // hop-pause-hop. Surface damage lands per tile entered via the actor's
   // onTile hook. Returns the AP actually spent (0 = couldn't move).
-  function enemyAdvance(en, budget, target) {
+  function aiAdvance(unit, budget, target) {
     let best = null;
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
       const tx = target.actor.x + dx;
       const tz = target.actor.z + dz;
-      if (!world.isWalkable(tx, tz) && !(en.x === tx && en.z === tz)) continue;
-      const p = world.findEnemyPath(en.x, en.z, tx, tz);
+      if (!world.isWalkable(tx, tz) && !(unit.x === tx && unit.z === tz)) continue;
+      const p = world.findEnemyPath(unit.x, unit.z, tx, tz);
       if (p && p.length > 1 && (!best || p.length < best.length)) best = p;
     }
     if (!best) return 0;
@@ -755,43 +845,43 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const [gx, gz] = best[best.length - 1];
     const pp = target.actor.entity ? target.actor.entity.getPosition() : { x: target.actor.x, z: target.actor.z };
     best[best.length - 1] = world.approach(gx, gz, pp.x, pp.z);
-    const s = world.smoothEnemy(en, best);
-    // Enemies pay the same surface movement tax the player does, plus their
+    const s = world.smoothEnemy(unit, best);
+    // AI units pay the same surface movement tax the player does, plus their
     // own gum surcharge if they've stepped in a wad.
     const { points, cost } = truncateByBudget(s, budget,
-      (x, z) => surfaceStepCost(x, z) * (en.gummed ? GUM.moveCost : 1));
+      (x, z) => surfaceStepCost(x, z) * (unit.gummed ? GUM.moveCost : 1));
     if (points.length < 2 || cost < 0.05) return 0;
-    en.onTile = (x, z, done, changed) => {
+    unit.onTile = (x, z, done, changed) => {
       if (changed) {
-        // enemies feel the floor too
+        // AI units feel the floor too
         const surf = world.enemySurfDamage(x, z);
         if (surf > 0) {
-          const died = en.takeDamage(surf);
+          const died = unit.takeDamage(surf);
           fx.damageText(x, z, `-${surf}`, '#ffd76b');
-          log(`${en.def.name} stumbles through the hazard. -${surf}.`);
+          log(`${unit.def.name} stumbles through the hazard. -${surf}.`);
           if (died) {
-            callbacks.onEnemyKilled(en);
+            if (unit.team !== 'player') callbacks.onEnemyKilled(unit);
             refresh();
           }
         }
-        // gum wads stick to enemies too: slowed for good, but sure-footed
-        if (en.alive && !en.gummed && world.stickGum(x, z)) {
-          en.gummed = true;
-          en.speed *= GUM.slow;
-          log(`${en.def.name} steps in gum. It's theirs now.`);
+        // gum wads stick to AI units too: slowed for good, but sure-footed
+        if (unit.alive && !unit.gummed && world.stickGum(x, z)) {
+          unit.gummed = true;
+          unit.speed *= GUM.slow;
+          log(`${unit.def.name} steps in gum. It's theirs now.`);
         }
         // wet floor: a slip ends their whole turn (they spend it getting up)
-        if (en.alive && !en.gummed && Math.random() < (world.slipChanceAt(x, z) || 0)) {
-          en.clearPath();
-          en.flinch();
-          en.slipped = true;
+        if (unit.alive && !unit.gummed && Math.random() < (world.slipChanceAt(x, z) || 0)) {
+          unit.clearPath();
+          unit.flinch();
+          unit.slipped = true;
           fx.damageText(x, z, 'slip!', '#8ad4df');
-          log(`${en.def.name} slips in the water and goes down.`);
+          log(`${unit.def.name} slips in the water and goes down.`);
         }
       }
-      if (done || !en.alive) en.onTile = null;
+      if (done || !unit.alive) unit.onTile = null;
     };
-    en.setPath(points);
+    unit.setPath(points);
     return cost;
   }
 
@@ -818,41 +908,65 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
       return;
     }
-    if (phase !== 'enemies') return;
+    // One shared driver runs both AI phases - allies, then enemies - just
+    // pointed at a different queue and a different hostile team.
+    if (phase !== 'allies' && phase !== 'enemies') return;
     if (acting && acting.wait > 0) {
       acting.wait -= dt;
       return;
     }
     if (!acting) {
-      const en = enemyQueue.shift();
-      if (!en) { startPlayerTurn(); return; }
-      if (!en.alive) return;
-      if (en.surprised) {
-        en.surprised = false;
-        log(`${en.def.name} is still grabbing their lanyard.`);
-        acting = { en, ap: 0, wait: 0.6 };
+      const unit = aiQueue.shift();
+      if (!unit) { phase === 'allies' ? startEnemyPhase() : startPlayerTurn(); return; }
+      if (!unit.alive) return;
+      if (unit.surprised) {
+        unit.surprised = false;
+        log(`${unit.def.name} is still grabbing their lanyard.`);
+        acting = { unit, ap: 0, wait: 0.6 };
         return;
       }
-      acting = { en, ap: en.def.ap, wait: 0.35 };
+      acting = { unit, ap: unit.def.ap, wait: 0.35 };
       return;
     }
-    const { en } = acting;
-    if (!en.alive) { acting = null; return; }
-    if (en.moving) return; // let the current walk play out
-    if (en.slipped) {
-      en.slipped = false;
+    const { unit } = acting;
+    if (!unit.alive) { acting = null; return; }
+    if (unit.moving) return; // let the current walk play out
+    if (unit.slipped) {
+      unit.slipped = false;
       acting.ap = 0; // the rest of the turn goes to getting up with dignity
       acting.wait = 0.6;
       return;
     }
-    const target = pickTarget(en);
-    if (!target) { defeat(); return; }
-    if (cheb(en.x, en.z, target.actor.x, target.actor.z) <= 1 && acting.ap >= en.def.attackAp) {
-      enemyAttack(en, target);
-      acting.ap -= en.def.attackAp;
+    const target = pickTarget(unit);
+    if (!target) {
+      // Enemies with no living player-side target means a party wipe. An ally
+      // with no enemies left just idles out the queue (victory already fired
+      // from the kill that emptied them).
+      if (phase === 'enemies') { defeat(); return; }
+      acting = null;
+      return;
+    }
+    // A summoner reinforces before it wades in: off cooldown, able to afford
+    // the post, and under its live cap (resolveSummon returns 0 when full, so a
+    // maxed HR just fights). Posting the req is the whole beat. Enemy-side only
+    // today - the player summons from the action bar, not on autopilot.
+    const sm = unit.def.summon;
+    if (sm && (unit.summonCd || 0) <= 0 && acting.ap >= sm.ap
+      && resolveSummon(unit, 'enemy', sm) > 0) {
+      unit.summonCd = sm.cooldownRounds || 0;
+      acting.ap = roundAp(acting.ap - sm.ap);
+      unit.lunge(target.actor.x, target.actor.z);
+      log(sm.log || `${unit.def.name} calls in reinforcements.`);
+      acting.wait = 0.6;
+      refresh();
+      return;
+    }
+    if (cheb(unit.x, unit.z, target.actor.x, target.actor.z) <= 1 && acting.ap >= unit.def.attackAp) {
+      aiAttack(unit, target);
+      acting.ap -= unit.def.attackAp;
       acting.wait = 0.55;
-    } else if (acting.ap >= 1 && cheb(en.x, en.z, target.actor.x, target.actor.z) > 1) {
-      const spent = enemyAdvance(en, acting.ap, target);
+    } else if (acting.ap >= 1 && cheb(unit.x, unit.z, target.actor.x, target.actor.z) > 1) {
+      const spent = aiAdvance(unit, acting.ap, target);
       if (spent <= 0) acting.ap = 0;
       else acting.ap = Math.max(0, roundAp(acting.ap - spent));
       acting.wait = 0.15;
@@ -891,6 +1005,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     get party() {
       return members.map((m) => ({ name: m.sheet.name, hp: m.sheet.hp, ap: m.ap, active: m === active }));
     },
+    get summons() {
+      return liveAllies().map((s) => ({ name: s.def.name, x: s.x, z: s.z, hp: s.hp }));
+    },
+    // Test/debug: drop a player-team summon beside the active member, as the
+    // HR class's Post the Role will (M3). Bypasses caps - callers set the count.
+    summonAlly: (id, n = 1) => resolveSummon(active.actor, 'player', { archetype: id, count: n, cap: n }),
     refresh,
   };
 
