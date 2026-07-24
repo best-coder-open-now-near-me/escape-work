@@ -57,6 +57,7 @@ export const ITEMS = {
     icon: '🖇️',
     slot: 'weapon',
     stats: { dmg: 1 },
+    attack: 'staple-jab', // the basic swing this weapon grants (data/actions.js)
     examine: 'A desk weapon of legitimate business. +1 damage in hand.',
   },
   'red-stapler': {
@@ -64,6 +65,7 @@ export const ITEMS = {
     icon: '🧷',
     slot: 'weapon',
     stats: { dmg: 2 },
+    attack: 'staple-jab',
     examine: 'THE red stapler. Someone has been looking for this since 1999. +2 damage in hand.',
   },
   'toner-cartridge': {

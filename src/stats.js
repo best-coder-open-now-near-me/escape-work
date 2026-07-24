@@ -250,6 +250,14 @@ export function equippedStats(sheet) {
   return out;
 }
 
+// The basic weapon-attack action for a sheet (EQUIPMENT_PLAN decision #7):
+// the equipped weapon names its own swing; bare hands fall back to 'punch'.
+// Always returns an action id, so everyone has a basic attack - the combat bar
+// and the hotbar splice it in beside the class powers.
+export function equippedAction(sheet) {
+  return ITEMS[sheet?.equipped?.weapon]?.attack || 'punch';
+}
+
 // A sheet's attributes with equipped `attrBonus` folded in - the "effective"
 // spread every attribute-derived number reads, so a +1 Savvy mug lifts damage
 // AND accuracy for free. Falls through to the raw attr when no gear bends it.

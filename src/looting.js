@@ -16,7 +16,7 @@ export const INV_CAP = 10;
 
 // `extraEntries` (optional) lets the host add non-loot entries to the Alt
 // overlay (doors) without this module knowing what they are.
-export function createLooting({ app, grid, runtime, enemies, getActor, getSheet, isInCombat, isGameOver, approachAndDo, extraEntries = null }) {
+export function createLooting({ app, grid, runtime, enemies, getActor, getSheet, isInCombat, isGameOver, approachAndDo, extraEntries = null, onGearChange = null }) {
   const containerLoot = new Map(); // "x,z" -> remaining item ids (rolled on first rummage)
   const looseItems = []; // { x, z, id, entity } - dropped/overflowed floor items
   const harvestedPaper = new Set(); // "x,z" of paper drifts already gathered for ammo
@@ -155,8 +155,8 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     const id = sheet.inventory[i];
     if (equipItem(sheet, i)) {
       ui.say(`You equip the ${itemName(id)}.`);
-      ui.updateStatsHud(sheet);
       invPanel.refresh(sheet);
+      onGearChange?.(); // derived stats + the basic weapon swing changed
     } else {
       ui.say('That is not something you can equip.');
     }
@@ -172,8 +172,8 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     if (!id) return;
     if (unequipItem(sheet, slot, INV_CAP)) {
       ui.say(`You stow the ${itemName(id)}.`);
-      ui.updateStatsHud(sheet);
       invPanel.refresh(sheet);
+      onGearChange?.(); // derived stats + the basic weapon swing changed
     } else {
       ui.say('Pockets are full - nowhere to stow it.');
     }

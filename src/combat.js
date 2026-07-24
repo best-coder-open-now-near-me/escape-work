@@ -11,7 +11,7 @@
 import { ACTIONS } from './data/actions.js';
 import { SURFACES, GUM } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
-import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, HIT } from './stats.js';
+import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, HIT } from './stats.js';
 import { applyStatus, hasStatus, statusFx, tickTurn, clearStatuses, removeStatus, statusList } from './statuses.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
@@ -83,8 +83,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // callbacks: { say, updateHud, onRound, onEnemyKilled(en), onWin, onLose }
   const talentFxOf = (m) => m.sheet.talent?.effects || {};
   const throwableIds = Object.keys(ACTIONS).filter((id) => ACTIONS[id].ammoCost);
-  // Everyone can shove - it's an office, not a fencing academy.
-  const actionIdsOf = (m) => [...m.sheet.actions, 'shove', ...throwableIds];
+  // Everyone can shove - it's an office, not a fencing academy - and everyone
+  // has a basic weapon swing (the equipped weapon's, or bare-handed 'punch').
+  const actionIdsOf = (m) => [...m.sheet.actions, equippedAction(m.sheet), 'shove', ...throwableIds];
   const ammoCostOf = (id) => {
     const base = ACTIONS[id].ammoCost || 0;
     return base > 1 ? Math.max(1, base - (talentFxOf(active).paperAmmoDiscount || 0)) : base;

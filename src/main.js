@@ -17,7 +17,7 @@ import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
 import {
   createSheet, createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
-  scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS,
+  scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction,
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
@@ -161,6 +161,9 @@ function startGame(level) {
     isGameOver: () => gameOver,
     approachAndDo: (x, z, run) => approachAndDo(x, z, run),
     extraEntries: () => doorEntries(), // doors share the Alt overlay
+    // Equipping changes derived stats AND the basic weapon swing on the bars -
+    // refresh the HUD, hotbar, and char sheet.
+    onGearChange: () => refreshProgressUi(),
   });
 
   function abortCombat() {
@@ -948,7 +951,7 @@ function startGame(level) {
   function offensiveActionIds() {
     const throwables = Object.keys(ACTIONS).filter((id) => ACTIONS[id].ammoCost);
     const seen = new Set();
-    return [...sheet.actions, 'shove', ...throwables].filter((id) => {
+    return [...sheet.actions, equippedAction(sheet), 'shove', ...throwables].filter((id) => {
       if (seen.has(id) || !ACTIONS[id]) return false;
       seen.add(id);
       const t = ACTIONS[id].type;

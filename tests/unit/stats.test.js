@@ -6,7 +6,7 @@ import {
   recomputeDerived, ensureAttributes, spendAttrPoint, deflect,
   spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist,
   accuracy, dodge, hitChance, rollHit, unitCombat,
-  equipItem, unequipItem, equippedStats,
+  equipItem, unequipItem, equippedStats, equippedAction,
   PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
@@ -435,4 +435,14 @@ test('equipping a dmg-only weapon leaves maxHp and deflect untouched', () => {
 
 test('EQUIP_SLOTS is the three-slot set', () => {
   assert.deepEqual(EQUIP_SLOTS, ['weapon', 'outfit', 'trinket']);
+});
+
+test('equippedAction is bare-hands punch unarmed, the weapon swing in hand', () => {
+  const s = createSheet('office-drone');
+  assert.equal(equippedAction(s), 'punch'); // everyone always has a basic attack
+  s.inventory = ['red-stapler'];
+  equipItem(s, 0);
+  assert.equal(equippedAction(s), 'staple-jab'); // the equipped weapon's swing
+  unequipItem(s, 'weapon', 10);
+  assert.equal(equippedAction(s), 'punch'); // back to bare hands
 });

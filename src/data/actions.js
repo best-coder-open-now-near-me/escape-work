@@ -135,6 +135,31 @@ export const ACTIONS = {
     log: 'You shove them.',
   },
 
+  // --- basic weapon attack (EQUIPMENT_PLAN) -------------------------------------
+  // Everyone always has a basic swing, resolved from the equipped weapon
+  // (stats.equippedAction): a weapon names its own attack action; bare hands
+  // fall back to 'punch'. It sits on the bar alongside the class powers, and
+  // scales with the weapon's `stats.dmg` (folded through damageBonus). This is
+  // also the only attack a non-attacking class (HR) gets.
+  punch: {
+    type: 'attack',
+    ap: 3,
+    label: 'Throw a Punch',
+    min: 1,
+    max: 2,
+    log: 'You throw a punch. Unarmed, unafraid, underwhelming.',
+    missLog: 'Your fist finds only stale air.',
+  },
+  'staple-jab': {
+    type: 'attack',
+    ap: 3,
+    label: 'Staple Jab',
+    min: 2,
+    max: 4,
+    log: 'You jab with the stapler. Ka-chunk.',
+    missLog: 'The stapler jams. Naturally.',
+  },
+
   // --- applicants (player-controlled summons) -----------------------------------
   // A summoned applicant you control swings with this (its AI-summon twin on
   // the enemy side rolls from the class's `attacks` instead). Cheap and weak -

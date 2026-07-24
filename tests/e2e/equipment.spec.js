@@ -42,3 +42,24 @@ test('unequip is refused politely when the pockets are full', async ({ page }) =
   await expect(page.locator('#subtitle')).toContainText('full');
   expect(await page.evaluate(() => window.__game.stats.equipped.weapon)).toBe('red-stapler');
 });
+
+test('a basic weapon attack is always on the bar; the weapon defines it', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootAndPick(page, 'office-drone');
+  // Bare hands: everyone has a basic punch (the gap this closes).
+  await expect(page.locator('#hotbar-act-punch')).toBeVisible();
+  expect(await page.locator('#hotbar-act-staple-jab').count()).toBe(0);
+
+  // Equip a red stapler: the basic swing becomes the stapler's; punch retires.
+  await page.evaluate(() => { window.__god.player.inventory = ['red-stapler']; });
+  await page.keyboard.press('i');
+  await expect(page.locator('#inventory-panel')).toBeVisible();
+  await page.click('#inv-equip-0');
+  await expect(page.locator('#hotbar-act-staple-jab')).toBeVisible();
+  expect(await page.locator('#hotbar-act-punch').count()).toBe(0);
+
+  // Stow it: back to bare hands.
+  await page.click('#equip-unequip-weapon');
+  await expect(page.locator('#hotbar-act-punch')).toBeVisible();
+  expect(await page.locator('#hotbar-act-staple-jab').count()).toBe(0);
+});

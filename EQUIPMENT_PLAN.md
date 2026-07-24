@@ -235,12 +235,18 @@ untouched.
    slot and leaves the bag → stow it back; and a full-bag unstow is refused
    politely (the weapon stays, nothing vanishes). Unit 147/147; e2e 6/6
    (equipment + looting + char-sheet regressions).
-3. **The basic weapon attack** (promoted from stretch, decision #7). The
-   computed `sheet.actions + equippedAction(sheet)` list; a weapon defines the
-   swing's `min`/`max`; bare-hands default. The action appears on the combat
-   bar and the hotbar; unequip removes it. e2e: equip a weapon → its swing
-   appears (`#act-<weaponAction>`) and hits for the weapon's range → unequip →
-   it's gone.
+3. **The basic weapon attack** ✅ Landed (promoted from stretch, decision #7,
+   at a gameplay note). `equippedAction(sheet)` names the equipped weapon's
+   swing action, or bare-hands `punch` when unarmed — always an id, so
+   **everyone always has a basic attack** (including HR, which had no attack
+   action at all). Both the combat bar (`combat.js actionIdsOf`) and the hotbar
+   (`main.js offensiveActionIds`) splice it in beside the class powers; a real
+   `ACTIONS` entry, so `performOn` resolves it with zero special-casing. The
+   staplers grant `staple-jab`; the weapon's `stats.dmg` still folds through
+   `damageBonus`, so a better stapler swings harder. Equipping rebuilds the
+   bars via a new `onGearChange` host hook. Unit 148/148; e2e: the basic punch
+   is always on the bar, equipping a stapler swaps it for `staple-jab`, stowing
+   it reverts to punch.
 4. **The content pass.** The item list above (± what playtesting wants),
    loot-table + enemy-drop placement, `acc`/`dodge` gear if HIT_PLAN has
    landed. Numbers pass with the god panel.
