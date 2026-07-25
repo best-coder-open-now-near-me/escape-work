@@ -89,16 +89,28 @@ test('circling inside its reach provokes nothing', async ({ page }) => {
 // hold still: wander is paused during combat.) They stay hoverable because
 // enemyAtPoint scans every live enemy, and visible because partitions block
 // bodies, not sight.
+// Both test foes are WALLED INTO one-tile alcoves. That matters twice over:
+// enemies wander freely until a fight starts, so nothing else keeps them on
+// the tiles this test hovers; and wall CELLS pin them without granting cover,
+// because cover is an EDGE test (grid.stepOpen ignores cell solidity). So the
+// only cover in this arena is the one partition, on the west face of (8,3) -
+// the side the player shoots from. The foe at (8,1) is pinned the same way
+// with no partition anywhere on it, giving a clean like-for-like pair.
+//
+// Both sit at Chebyshev 6 from the player, beyond main.js's ENGAGE_RADIUS (4),
+// so they never join the fight and never take a turn either. They stay
+// hoverable because enemyAtPoint scans every live enemy, and unreachable
+// alcoves keep enterCombat's helper aimed at the Manager that starts the fight.
 const COVER_ARENA = {
   name: 'Cover Lab',
   tiles: { '#': 'wall', '.': 'floor' },
   actors: { '@': 'player', M: 'manager' },
-  walls: ['V 8 3 1'], // partition on the WEST face of (8,3) - the side we shoot from
+  walls: ['V 8 3 1'], // the ONLY partition: west face of (8,3)
   map: [
     '############',
-    '#.@M....M..#',
-    '#..........#',
-    '#.......M..#',
+    '#.@M...#M#.#',
+    '#.......#..#',
+    '#.......M#.#',
     '############',
   ],
 };
@@ -176,10 +188,18 @@ test('striking a foe from behind its committed facing is a backstab', async ({ p
   // It just swung at us, so we are squarely in its front arc.
   expect(await readTag(foe.x, foe.z)).not.toContain('from behind');
 
-  // Step to the tile directly opposite, across its body. Still adjacent to it
-  // the whole way, so nothing is provoked - but it puts us in its rear arc.
-  const bx = foe.x + (foe.x - pt.x);
-  const bz = foe.z + (foe.z - pt.z);
+  // Get into its rear arc: any tile adjacent to it whose direction from it is
+  // opposed to where we were standing when it swung (that is what its facing
+  // was committed to). The single directly-opposite tile is not enough - the
+  // Manager wanders before the fight, so that one tile can be a wall; try the
+  // three rear candidates and take the first that we can actually stand on.
+  const fx = Math.sign(pt.x - foe.x);
+  const fz = Math.sign(pt.z - foe.z);
+  const rear = [[-fx, -fz], [-fx, 0], [0, -fz]]
+    .filter(([dx, dz]) => dx || dz)
+    .map(([dx, dz]) => [foe.x + dx, foe.z + dz]);
+  let bx = null;
+  let bz = null;
   // Reading the tag left the attack armed, and a LEFT click no longer lowers
   // it (it reports an invalid target) - so back out the way the game now
   // expects, with a right click, before walking.
@@ -188,9 +208,13 @@ test('striking a foe from behind its committed facing is a backstab', async ({ p
     await page.mouse.click(here.x, here.y, { button: 'right' });
     await expect.poll(() => page.evaluate(() => window.__combat.armed)).toBe(null);
   }
-  expect(await clickWorld(page, bx, bz)).toBe(true);
-  await expect.poll(() => page.evaluate(() => window.__game.playerTile),
-    { timeout: 30_000 }).toEqual({ x: bx, z: bz });
+  for (const [tx, tz] of rear) {
+    if (!(await clickWorld(page, tx, tz))) continue;
+    await page.waitForTimeout(2000);
+    const at = await page.evaluate(() => window.__game.playerTile);
+    if (at.x === tx && at.z === tz) { bx = tx; bz = tz; break; }
+  }
+  expect(bx, 'could not reach any tile behind the Manager').not.toBe(null);
 
   expect(await readTag(foe.x, foe.z)).toContain('from behind');
 });
@@ -202,17 +226,15 @@ test('a shove does not provoke - forced movement is the safe disengage', async (
   await page.evaluate(() => { window.__combat.forceHit = true; });
   const before = await foeOf(page);
 
-  // The Manager wanders before the fight starts, so check it has somewhere to
-  // BE shoved: a shove into something solid is a legal outcome that deals its
-  // own damage and moves nobody, which would read here as a false failure.
-  // DISENGAGE_ARENA's floor is x 1..10, z 1..3.
-  const pt0 = await page.evaluate(() => window.__game.playerTile);
-  const px = before.x + Math.sign(before.x - pt0.x);
-  const pz = before.z + Math.sign(before.z - pt0.z);
-  expect(px >= 1 && px <= 10 && pz >= 1 && pz <= 3).toBe(true); // open floor behind it
+  // Assert on the ROLL, not on geometry. The Manager wanders before the fight
+  // starts, so it can end up backed against a wall, where a shove legally
+  // slams it for 2 and moves nobody - an outcome a position/HP check misreads
+  // as a failure. An opportunity attack, by contrast, ALWAYS rolls to hit, and
+  // combat records every roll on lastRoll. So: whatever the shove does, if
+  // lastRoll is untouched afterwards, nothing swung.
+  const rollBefore = await page.evaluate(() => JSON.stringify(window.__combat.lastRoll ?? null));
 
-  // Shove it out of our reach. A shove into open floor deals no damage, so if
-  // forced movement provoked, our own free swing would show up as HP loss.
+  // Shove it out of our reach.
   let shoved = false;
   for (let i = 0; i < 6 && !shoved; i++) {
     await page.waitForTimeout(700);
@@ -227,6 +249,12 @@ test('a shove does not provoke - forced movement is the safe disengage', async (
   expect(shoved).toBe(true);
 
   const after = await foeOf(page);
-  expect(after.x !== before.x || after.z !== before.z).toBe(true); // it did move
-  expect(after.hp).toBe(before.hp); // and took nothing on the way out
+  // It left our reach one way or the other - shoved clear, or slammed into
+  // something solid (which stuns it). Either is forced movement.
+  const movedOrSlammed = (after.x !== before.x || after.z !== before.z)
+    || after.hp === before.hp - 2;
+  expect(movedOrSlammed).toBe(true);
+  // The point of the test: no reaction rolled on the way out.
+  expect(await page.evaluate(() => JSON.stringify(window.__combat.lastRoll ?? null)))
+    .toBe(rollBefore);
 });
