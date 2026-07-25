@@ -201,6 +201,9 @@ export function updateStatsHud(sheet, portrait = null) {
   const xpFrac = Math.max(0, Math.min(1, sheet.xpNext ? sheet.xp / sheet.xpNext : 0));
   // Green while healthy, amber under half, red when it is nearly over.
   const hpColor = hpFrac > 0.5 ? '#8adf76' : hpFrac > 0.25 ? '#ffd76b' : '#ff6b5e';
+  // Banked points are easy to forget you have - the character sheet (C) is
+  // where they're spent, so say so where you'll actually see it.
+  const points = (sheet.attrPoints || 0) + (sheet.classPoints || 0);
   el.innerHTML = `
     <span style="display:flex; align-items:center; gap:9px;">
       <span id="stats-portrait-slot" style="display:${portrait ? 'block' : 'none'};
@@ -222,6 +225,8 @@ export function updateStatsHud(sheet, portrait = null) {
         <span style="display:block; height:3px; background:#241f28; border-radius:2px; overflow:hidden;">
           <span style="display:block; height:100%; width:${xpFrac * 100}%; background:#6fa8ff;"></span>
         </span>
+        ${points ? `<span style="display:block; margin-top:4px; font-size:11px; font-weight:700;
+          color:#8adf76;">⬆ ${points} unspent point${points === 1 ? '' : 's'} — press C</span>` : ''}
       </span>
     </span>`;
   if (portrait) {
