@@ -130,7 +130,13 @@ test('the HR class posts the role, staffing your side of the fight', async ({ pa
   await expect(page.locator('#act-summon-applicants')).toBeVisible();
   expect(await page.evaluate(() => window.__game.summons.length)).toBe(0);
 
-  // Click it: two applicants report for duty on YOUR side (summons, not enemies).
+  // Instant self-casts arm first and commit on a second click, so a stray
+  // click can't spend a turn's AP. The first press must NOT summon anyone.
+  await page.click('#act-summon-applicants');
+  await page.waitForTimeout(400);
+  expect(await page.evaluate(() => window.__game.summons.length)).toBe(0);
+
+  // Confirm it: two applicants report for duty on YOUR side (summons, not enemies).
   await page.click('#act-summon-applicants');
   await expect.poll(() => page.evaluate(() => window.__game.summons.length),
     { timeout: 15_000 }).toBe(2);
