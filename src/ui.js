@@ -489,7 +489,7 @@ export function createLootLabels() {
 // Equip-slot display names (In Hand / Dress Code / Flair).
 const SLOT_LABELS = { weapon: 'In Hand', outfit: 'Dress Code', trinket: 'Flair', shoes: 'On Foot' };
 
-export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onEquip, onUnequip, onSend, canSend }) {
+export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onEquip, onUnequip, onSend, canSend, getCash }) {
   // The bag sits immediately right of the bottom-left profile card, where your
   // eye already is for HP - not up in the top-left corner it used to share with
   // nothing. Its exact left edge is measured from the card each layout pass,
@@ -600,6 +600,17 @@ export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onE
     pName.textContent = `📄 Paper × ${sheet?.paper ?? 0}`;
     pName.title = 'Ammunition for thrown attacks. Gathered from spills; no carry limit.';
     paperRow.appendChild(pName);
+    // Petty Cash sits in the same strip, for the same reason: it is a resource
+    // the sheet spends, not an item in the bag. It is PARTY state though, so it
+    // comes from an accessor rather than off the sheet (ECONOMY_PLAN #2).
+    if (getCash) {
+      const cName = document.createElement('div');
+      cName.id = 'inv-cash';
+      cName.style.flex = '1';
+      cName.textContent = `💵 ${getCash()}`;
+      cName.title = 'Petty Cash. Shared by the whole party; spent at machines and merchants.';
+      paperRow.appendChild(cName);
+    }
     panel.appendChild(paperRow);
     if (!inv.length) {
       const empty = document.createElement('div');
@@ -1060,6 +1071,149 @@ export function createDialoguePanel() {
     panel.appendChild(opts);
     panel.style.display = 'block';
   }
+  function hide() { panel.style.display = 'none'; panel.innerHTML = ''; }
+  return { show, hide, get visible() { return panel.style.display !== 'none'; } };
+}
+
+// --- the shop panel (ECONOMY_PLAN.md) ----------------------------------------
+// One panel for both merchant shapes: a machine and a person differ only in
+// what they hand this function. Two short columns - what they have, what you
+// have - because this is the first screen in the game that asks the player to
+// COMPARE rather than click a thing and have the thing happen. The price lives
+// in the button, so nothing has to be read twice.
+//
+// `show()` takes a fully-resolved view (shopping.js owns the arithmetic):
+//   { name, greeting, cash, buys,
+//     stock: [{ item, name, icon, qty, price, affordable }],
+//     sellable: [{ index, name, icon, paid }] }
+export function createShopPanel({ onBuy, onSell, onClose }) {
+  const panel = document.createElement('div');
+  panel.id = 'shop-panel';
+  Object.assign(panel.style, PANEL_CHROME, {
+    position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
+    zIndex: '29', width: 'min(620px, 94vw)', display: 'none', borderRadius: '12px',
+    padding: '16px 18px', userSelect: 'none', maxHeight: '80vh', overflowY: 'auto',
+  });
+  panel.onmousedown = (e) => e.stopPropagation(); // clicks stay off the canvas
+  document.body.appendChild(panel);
+
+  const btn = (label, title, enabled) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.title = title;
+    Object.assign(b.style, {
+      padding: '4px 9px', borderRadius: '5px', border: '1px solid #3a3a52',
+      background: enabled ? '#2e2e46' : '#26262e', color: enabled ? '#f0f0f5' : '#7a7a8c',
+      font: '11px system-ui, sans-serif', cursor: enabled ? 'pointer' : 'default',
+      whiteSpace: 'nowrap',
+    });
+    b.disabled = !enabled;
+    return b;
+  };
+
+  // One goods row: icon + name (+ how many are left), then its verb button.
+  function row(icon, name, note, button) {
+    const r = document.createElement('div');
+    Object.assign(r.style, {
+      display: 'flex', alignItems: 'center', gap: '7px', padding: '5px 2px',
+      borderTop: '1px solid #2c2c42',
+    });
+    const n = document.createElement('div');
+    n.style.flex = '1';
+    n.textContent = `${icon || '📦'} ${name}`;
+    r.appendChild(n);
+    if (note) {
+      const q = document.createElement('div');
+      Object.assign(q.style, { opacity: '.55', fontSize: '11px' });
+      q.textContent = note;
+      r.appendChild(q);
+    }
+    r.appendChild(button);
+    return r;
+  }
+
+  function column(title, emptyText) {
+    const col = document.createElement('div');
+    Object.assign(col.style, { flex: '1', minWidth: '0' });
+    const h = document.createElement('div');
+    Object.assign(h.style, {
+      fontWeight: '700', letterSpacing: '1px', fontSize: '11px', opacity: '.7',
+      marginBottom: '2px',
+    });
+    h.textContent = title;
+    col.appendChild(h);
+    col.__empty = emptyText;
+    return col;
+  }
+
+  function finish(col) {
+    if (col.children.length > 1) return col;
+    const e = document.createElement('div');
+    Object.assign(e.style, { opacity: '.5', padding: '6px 2px' });
+    e.textContent = col.__empty;
+    col.appendChild(e);
+    return col;
+  }
+
+  function show(view) {
+    panel.innerHTML = '';
+    const head = document.createElement('div');
+    Object.assign(head.style, { display: 'flex', alignItems: 'baseline', gap: '10px' });
+    const nm = document.createElement('div');
+    Object.assign(nm.style, { fontWeight: '700', letterSpacing: '1px', color: '#8adf76', flex: '1' });
+    nm.textContent = view.name;
+    head.appendChild(nm);
+    const cash = document.createElement('div');
+    cash.id = 'shop-cash';
+    Object.assign(cash.style, { fontWeight: '700' });
+    cash.textContent = `💵 ${view.cash}`;
+    head.appendChild(cash);
+    panel.appendChild(head);
+
+    const greet = document.createElement('div');
+    Object.assign(greet.style, { opacity: '.75', margin: '4px 0 12px', lineHeight: '1.45' });
+    greet.textContent = view.greeting;
+    panel.appendChild(greet);
+
+    const cols = document.createElement('div');
+    Object.assign(cols.style, { display: 'flex', gap: '18px', alignItems: 'flex-start' });
+
+    const forSale = column('FOR SALE', 'SOLD OUT. Try another floor.');
+    view.stock.forEach((s, i) => {
+      const b = btn(`Buy — ${s.price}💵`, s.affordable ? '' : 'Not enough Petty Cash', s.affordable);
+      b.id = `shop-buy-${i}`;
+      b.onclick = () => onBuy(i);
+      forSale.appendChild(row(s.icon, s.name, s.qty > 1 ? `×${s.qty}` : '', b));
+    });
+    cols.appendChild(finish(forSale));
+
+    // A merchant that doesn't buy gets no second column at all, rather than an
+    // empty one - a machine refusing your stapler is a fact about machines, not
+    // a thing you should have to discover by clicking.
+    if (view.buys) {
+      const yours = column('THEY WILL TAKE', 'Nothing here they want.');
+      view.sellable.forEach((s) => {
+        const b = btn(`Sell +${s.paid}💵`, '', true);
+        b.id = `shop-sell-${s.index}`;
+        b.onclick = () => onSell(s.index);
+        yours.appendChild(row(s.icon, s.name, '', b));
+      });
+      cols.appendChild(finish(yours));
+    }
+    panel.appendChild(cols);
+
+    const close = document.createElement('button');
+    close.id = 'shop-close';
+    Object.assign(close.style, BUTTON_CHROME, {
+      marginTop: '14px', padding: '8px 10px', borderRadius: '7px', width: '100%',
+    });
+    close.textContent = view.buys ? 'That\'s everything.' : 'Step away from the machine.';
+    close.onclick = () => onClose();
+    panel.appendChild(close);
+
+    panel.style.display = 'block';
+  }
+
   function hide() { panel.style.display = 'none'; panel.innerHTML = ''; }
   return { show, hide, get visible() { return panel.style.display !== 'none'; } };
 }

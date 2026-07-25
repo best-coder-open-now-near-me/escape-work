@@ -21,7 +21,7 @@ export const INV_CAP = Infinity;
 
 // `extraEntries` (optional) lets the host add non-loot entries to the Alt
 // overlay (doors) without this module knowing what they are.
-export function createLooting({ app, grid, runtime, enemies, getActor, getSheet, isInCombat, isGameOver, approachAndDo, extraEntries = null, onGearChange = null, recipients = null }) {
+export function createLooting({ app, grid, runtime, enemies, getActor, getSheet, isInCombat, isGameOver, approachAndDo, extraEntries = null, onGearChange = null, recipients = null, addCash = null, getCash = null, openShop = null, shopSoldOut = null }) {
   const containerLoot = new Map(); // "x,z" -> remaining item ids (rolled on first rummage)
   const looseItems = []; // { x, z, id, entity } - dropped/overflowed floor items
   const harvestedPaper = new Set(); // "x,z" of paper drifts already gathered for ammo
@@ -47,6 +47,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     onUnequip: (slot) => unequip(slot),
     onSend: (i, btn) => sendItem(i, btn),
     canSend: () => (recipients?.() || []).length > 0,
+    getCash,
   });
 
   // Hand an item to another party member. Pockets are unlimited, so this can
@@ -79,11 +80,25 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
 
   // Loot lands in the pockets; overflow hits the floor, where the Alt overlay
   // (and a click) can pick it back up.
+  //
+  // Money is the exception and it is deliberately the ONLY one: an item with a
+  // `cash` field is banked here and never reaches the bag (ECONOMY_PLAN #3).
+  // Cash is an item right up until the moment it is received, which is what
+  // lets it ride the loot tables, corpse drops, the Alt overlay and loose floor
+  // items with no second roll shape anywhere.
   function receiveItems(ids, from) {
     const sheet = getSheet();
     const taken = [];
     let overflowed = false;
+    let banked = 0;
     for (const id of ids) {
+      const money = ITEMS[id]?.cash;
+      if (money) {
+        banked += money;
+        addCash?.(money);
+        taken.push(`${itemName(id)} (${money}\u{1F4B5})`);
+        continue;
+      }
       if (sheet.inventory.length < INV_CAP) {
         sheet.inventory.push(id);
         taken.push(itemName(id));
@@ -94,6 +109,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     }
     let msg = `${from}: ${taken.length ? taken.join(', ') : 'nothing'}.`;
     if (overflowed) msg += ' Pockets full - the rest hits the floor.';
+    if (banked) msg += ` Banked ${banked}\u{1F4B5}.`;
     ui.toast(msg);
     invPanel.refresh(sheet);
   }
@@ -268,6 +284,27 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
           world: { x, y: def.height + 0.8, z },
           onClick: () => approachAndDo(cx, cz, () => lootContainer(cx, cz)),
         });
+      }
+    }
+    // Merchant props (ECONOMY_PLAN M2) label alongside the containers - a
+    // machine you can't see from the corridor is a machine you never find. A
+    // sold-out one still labels, saying so, rather than silently vanishing and
+    // leaving you to walk over and discover it.
+    if (openShop) {
+      for (let z = 0; z < grid.height; z++) {
+        for (let x = 0; x < grid.width; x++) {
+          const def = grid.defAt(x, z);
+          if (!def.shop || !near(x, z)) continue;
+          const empty = shopSoldOut?.(x + ',' + z);
+          const cx = x;
+          const cz = z;
+          out.push({
+            icon: '🥤',
+            text: empty ? `${def.label} (sold out)` : def.label,
+            world: { x, y: def.height + 0.8, z },
+            onClick: () => approachAndDo(cx, cz, () => openShop(cx, cz)),
+          });
+        }
       }
     }
     for (const en of enemies) {

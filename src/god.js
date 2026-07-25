@@ -305,6 +305,18 @@ function buildPanel(api, requestToggle) {
       out.push({ id: 'sheet', title: 'Character Sheet', note: 'Pick a class first.' });
       return out;
     }
+    // The purse, above the sheets. It is PARTY state, not sheet state
+    // (ECONOMY_PLAN #2), so it gets a card of its own rather than hiding on
+    // whoever happens to be active. `members` is an array and `active` is
+    // hidden, so this card renders exactly one editable field - the money -
+    // which is the whole point of having it during a balance session.
+    out.push({
+      id: 'purse', scope: 'purse',
+      title: 'Petty Cash',
+      obj: party,
+      getObj: () => api.party,
+      hide: new Set(['active']),
+    });
     // One live sheet card per party member; the active one carries the
     // inventory editor (Give lands in the controlled member's pockets).
     party.members.forEach((m, i) => {

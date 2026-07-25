@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createParty, leader, addMember, livingMembers, gainXpAll, createCompanionSheet,
-  serializeProgress, parseProgress, PARTY_CAP, SAVE_VERSION,
+  serializeProgress, parseProgress, PARTY_CAP, SAVE_VERSION, addCash,
 } from '../../src/party.js';
 import { createSheet, spendClassPoint, damageBonus, PROGRESSION, EQUIP_SLOTS } from '../../src/stats.js';
 import { COMPANIONS } from '../../src/data/companions.js';
@@ -60,6 +60,73 @@ test('serializeProgress writes the v2 shape and parseProgress round-trips it', (
   assert.equal(parsed.sheets.length, 2);
   assert.equal(parsed.active, 0);
   assert.equal(parsed.sheets[0].className, 'Office Drone');
+});
+
+// --- the purse (ECONOMY_PLAN.md) ---------------------------------------------
+
+test('a new party starts broke, and addCash banks and spends', () => {
+  const party = createParty(createSheet('office-drone'));
+  assert.equal(party.cash, 0);
+  assert.equal(addCash(party, 12), 12);
+  assert.equal(addCash(party, -5), 7);
+  assert.equal(party.cash, 7);
+});
+
+test('the purse can never go negative, however hard a caller tries', () => {
+  const party = createParty(createSheet('office-drone'));
+  addCash(party, 3);
+  assert.equal(addCash(party, -99), 0);
+  assert.equal(party.cash, 0);
+});
+
+test('the purse is party state, not sheet state - it survives a leader switch', () => {
+  // The whole reason for decision #2: buying a sandwich must never depend on
+  // who is currently being controlled.
+  const party = createParty(createSheet('office-drone'));
+  addMember(party, createSheet('it-support'));
+  addCash(party, 25);
+  party.active = 1;
+  assert.equal(party.cash, 25);
+  for (const m of party.members) assert.equal(m.sheet.cash, undefined);
+});
+
+test('v6 round-trips the purse', () => {
+  const party = createParty(createSheet('office-drone'));
+  addCash(party, 34);
+  const saved = JSON.parse(JSON.stringify(serializeProgress(party, 'level2')));
+  assert.equal(saved.version, 6);
+  assert.equal(saved.cash, 34);
+  assert.equal(parseProgress(saved).cash, 34);
+});
+
+test('a pre-v6 save loads with an empty purse and is otherwise untouched', () => {
+  // The purse is NEW state, not migrated state, so there is nothing to invent -
+  // an older save simply reads 0 (contrast the v5 auto-equip, which had to be
+  // version-gated precisely because it invented state).
+  const party = createParty(createSheet('office-drone'));
+  const v5 = JSON.parse(JSON.stringify(serializeProgress(party, 'level2')));
+  v5.version = 5;
+  delete v5.cash;
+  const parsed = parseProgress(v5);
+  assert.equal(parsed.cash, 0);
+  assert.equal(parsed.sheets[0].className, 'Office Drone');
+  assert.equal(parsed.levelId, 'level2');
+});
+
+test('a corrupted purse reads as zero rather than poisoning the arithmetic', () => {
+  const party = createParty(createSheet('office-drone'));
+  const base = JSON.parse(JSON.stringify(serializeProgress(party, 'level1')));
+  for (const bad of [null, 'lots', NaN, -20, undefined, {}]) {
+    const parsed = parseProgress({ ...base, cash: bad });
+    assert.equal(parsed.cash, 0, `cash ${JSON.stringify(bad)} reads as 0`);
+  }
+  // ...and a fractional one is floored, because cash is counted, not measured.
+  assert.equal(parseProgress({ ...base, cash: 12.7 }).cash, 12);
+});
+
+test('a legacy single-sheet save also loads with an empty purse', () => {
+  const legacy = { levelId: 'level2', sheet: { classId: 'office-drone', className: 'Office Drone', hp: 9, maxHp: 22, level: 2 } };
+  assert.equal(parseProgress(legacy).cash, 0);
 });
 
 test('parseProgress migrates a legacy single-sheet save and backfills fields', () => {

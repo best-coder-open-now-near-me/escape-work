@@ -24,6 +24,13 @@
 // printable ASCII set minus the actor/enemy chars. Adding a kit model that
 // isn't registered below is a one-entry job; finding it a free char is the
 // only constraint.
+//
+// AND THAT CEILING IS ESSENTIALLY REACHED. As of the snack machine, 91 of the
+// 95 printable characters are spoken for; what remains is "'\ and the player's
+// own @. Two of those are awkward inside a JSON string. The next content pass
+// that wants props cannot simply take a character - it has to decouple the map
+// from single characters first (multi-char cells, or an object layer beside the
+// ASCII grid). Treat a free char as a scarce resource, not a formality.
 export const TILE_TYPES = {
   wall: {
     char: '#',
@@ -156,6 +163,28 @@ export const TILE_TYPES = {
     color: [0.55, 0.38, 0.24],
     model: 'furniture/cabinet',
     scale: 0.5,
+  },
+  // The merchant you can paint (ECONOMY_PLAN M2). `shop` points at a SHOPS
+  // entry (data/shops.js) exactly the way `loot` points at a loot table, and
+  // everything downstream - picking, the walk-up, the Alt label, the
+  // right-click verb - follows from that one field.
+  //
+  // The kit ships no vending machine, so this is the tall door-fronted fridge
+  // tinted machine-red; at this camera angle it reads correctly, and a bespoke
+  // model is a swap of one line whenever one exists.
+  'snack-machine': {
+    char: '$', category: 'furniture',
+    solid: true,
+    // A machine is TALL - that is how you spot one across a break room. The
+    // kit's models are authored for scale 1 (the 0.5s elsewhere belong to the
+    // older non-kit props), and `height` is what occlusion and the Alt label
+    // measure against, so both have to describe the same object.
+    height: 1.2,
+    scale: 1.0,
+    color: [0.72, 0.18, 0.22],
+    model: 'furniture/kit/kitchenFridgeLarge',
+    label: 'Snack Machine',
+    shop: 'vending',
   },
   plant: {
     char: 'P',
@@ -397,7 +426,10 @@ export const TILE_TYPES = {
     model: 'furniture/kit/rugRectangle', label: 'Rug',
   },
   'rug-round': {
-    char: '$', category: 'decor',
+    // Was '$' until the snack machine wanted the one character in the printable
+    // set that means money. No shipped level had painted a round rug, so the
+    // swap cost nothing - and it could never be made later.
+    char: '"', category: 'decor',
     height: 0.12, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/rugRound', label: 'Rug Round',
   },

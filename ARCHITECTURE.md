@@ -24,7 +24,8 @@ src/
     enemies.js         enemy types: stats, model, attack sets, loot, flavor
     classes.js         player classes: base stats + action ids
     actions.js         combat actions: attack/defend/heal definitions
-    items.js           items + container loot tables (heal/ammo/bonusDmg/flavor)
+    items.js           items + container loot tables (heal/ammo/cash/value/flavor)
+    shops.js           merchant registry: greeting, markup, buys, stock list
     npcs.js            non-hostile actors you TALK to: name, model, dialogue tree
     companions.js      recruitable coworkers: an NPC-shaped presence plus a
                        class-shaped stat block; dialogue options can carry
@@ -64,7 +65,11 @@ src/
                      from data
   initiative.js      Combat turn order: d20 + speed roll, sort, joiner
                      insertion                                (pure logic)
+  shop.js            Merchant arithmetic: price, sell yield, the stock roll,
+                     and the atomic buy/sell                  (pure logic)
   looting.js         Containers, bodies, loose items, pockets, Alt overlay
+  shopping.js        The merchant runtime: per-instance stock, the shop panel,
+                     the buy/sell verbs (ECONOMY_PLAN.md)
   ui.js              All DOM: HUD, context menu, overlays, shared chrome
   god.js             God-mode tweak panel (` / F8): live-reflects the sheet,
                      enemies, combat + world; edit/pin values, pause, spawn
@@ -82,7 +87,7 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - `data/*` imports nothing (`data/levels.js` is the one exception - it imports
   the level JSON files, which are themselves data).
 - `grid`, `pathfinding`, `stats`, `party`, `surfaces-runtime`, `initiative`,
-  `statuses`, `tactics`, `occlusion` are pure JS (no PlayCanvas, no DOM) - unit
+  `statuses`, `tactics`, `occlusion`, `shop` are pure JS (no PlayCanvas, no DOM) - unit
   tested in isolation (tests/unit).
 - `scene`, `shading`, `tile-renderer`, `models`, `controls`, `picking`,
   `actors` touch PlayCanvas; `ui` touches the DOM; `fx`, `combat` and
@@ -257,7 +262,7 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   `__game` is read-only state (beyond `npcs`, `party`, `summons`, `armed`,
   `hoverKind`, `cursor`, `dialogueOpen`, it exposes the world queries the
   specs need: `doors`, `looseItems`, `burning`, `smoking`, `surfaceAt`,
-  `losClear`, …). `__combat` is mostly read-only (`phase`, `order`, `turn`,
+  `losClear`, `cash`, `shopOpen`, `shopStockAt`, …). `__combat` is mostly read-only (`phase`, `order`, `turn`,
   `party`, `summons`, `enemies`, `lastRoll`, `hoverHitChance`) but also
   carries deliberate LIVE setters god mode and the specs drive: `ap`,
   `defended`, `usesLeft` (edit in place, then `refresh()`), `applyStatus`,
@@ -432,6 +437,29 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   understands: `heal`, `ammo`, `bonusDmg` (passive while carried, best item
   counts - see `damageBonus` in stats.js). `sheet.inventory` persists across
   floors with the campaign save.
+- **Money & merchants** (ECONOMY_PLAN.md): **Petty Cash** (💵) is a single
+  integer on the PARTY, not a sheet (`party.cash`, `party.addCash`) - one purse
+  the whole roster spends from, so buying never depends on who you're
+  controlling. It persists at the top level of the campaign save (**v6**); an
+  older save simply reads 0, because the purse is new state rather than
+  migrated state. Cash ARRIVES as ordinary loot: an item with a `cash` field is
+  auto-banked by `looting.receiveItems` and never reaches the bag, which is why
+  a fiver rides the loot tables, corpse drops, loose floor items and the Alt
+  overlay with no second roll shape anywhere. Every item states what it is
+  worth (`value`); greed lives on the MERCHANT (`markup` selling to you,
+  `sellRate` buying from you), so a machine and a person can disagree about a
+  candy bar. **A merchant is data in two shapes on one system**: a tile type
+  with `shop: '<id>'` is a machine (the snack machine, map char `$`) and an
+  NPC/companion with the same field is a person, reached by a dialogue option
+  carrying `effect: { shop: true }` - the same seam `effect: { recruit: true }`
+  uses. Machines carry `buys: false` (a sink); people buy your junk (a sink and
+  a source), which is what finally makes the flavor items worth carrying.
+  Stock is rolled ONCE per instance and decrements, exactly like container
+  loot, so a machine can sell out. `shop.js` owns the arithmetic and the
+  atomicity rule - cash, stock and bag move together or not at all, every
+  refusal before the first mutation. Shopping is gated out of combat like every
+  other pockets verb (`modalOpen()` in main.js covers the dialogue and shop
+  panels together).
 - **Weapons/items**: extend `data/actions.js`; equipping = swapping ids in
   `sheet.actions` (see `stats.js`).
 - **New class**: entry in `data/classes.js` (stats, model, action ids) - the

@@ -91,14 +91,14 @@ needs. It has no dependency on `STATUS_PLAN` except in the stretch content
 | 2 | Who owns the money | **A shared party purse** — `party.cash`, not `sheet.cash` | Per-member wallets would mean switching leaders to afford a sandwich, and shuffling money between members with a `Give` verb. That is exactly the friction `INV_CAP = Infinity` was deleted to remove ("friction without a decision attached"). The party already shares XP and hands items around freely; money is the same social contract. Cost: the purse lives at the party level in the save, not on a sheet — see decision #11. |
 | 3 | How cash arrives | **As loot-table entries** — an item with a `cash: n` field, **auto-banked** in `receiveItems` instead of entering the bag | One branch in the single funnel every acquisition already passes through. Loose floor items, the Alt overlay, corpse loot, container rolls and god-mode drops all work with no changes, because a fiver *is* an item right up until the moment it's received. Rejected: a `cash: [min,max]` field on loot-table rows (a second, parallel roll shape in every table, plus new handling in `rollLoot`, `receiveItems`, the overlay, and loose items — more code for the same result). |
 | 4 | One number per item | **`value: n`** on the item; markup/markdown live on the **merchant** | Two fields (`price` for buying, `value` for selling) drift apart the moment content is authored in a hurry, and encode the merchant's greed in the item — so a vending machine and a clerk can't disagree about a candy bar. One value plus a per-shop `markup` / `sellRate` means "vending machines are a rip-off" is a *shop* property, which is where the joke belongs. |
-| 5 | Merchants are data, in two shapes, on one system | A `SHOPS` registry (`data/shops.js`). A **tile type** with `shop: '<id>'` is a machine; an **NPC/companion** with `shop: '<id>'` is a person. Both open the same panel | The two shapes already have separate approach verbs in `main.js` (`dispatchHit` kind `prop` vs. kind `npc` → dialogue), and both already walk you into reach. The shop itself doesn't care which one opened it. This is what makes "a snack machine" and "a guy in the supply closet" the same feature. |
+| 5 | Merchants are data, in two shapes, on one system | A `SHOPS` registry (`data/shops.js`). A **tile type** with `shop: '<id>'` is a machine; an **NPC/companion** with `shop: '<id>'` is a person. Both open the same panel | The two shapes already have separate approach verbs in `main.js` (`dispatchHit` kind `prop` vs. kind `npc` → dialogue), and both already walk you into reach. The shop itself doesn't care which one opened it. This is what makes "a snack machine" and "a guy in the supply closet" the same feature. | **Revised in implementation:** the person merchant is the **Mail Room Veteran**, not a new Supply Closet Clerk. The map legend had three usable characters left (#12), and a merchant who already stands on the map costs none of them - spending a third of the game's entire remaining content budget on one shopkeeper was not a trade worth making. It is also the better story: he has pushed a cart down every corridor in this building for eleven years, he already carries a `snack-cart` combat action, and when he signs on he takes the cart with him - so the party's fence becomes a member of the party. The coffee machine (a second machine selling one item) was cut for the same reason.
 | 6 | Stock is finite, rolled once per instance | Per-instance stock, keyed like container loot (`"x,z"` for a machine, the npc id for a person), rolled on first visit and decremented by purchases. No restock within a run | Mirrors `containerLoot` exactly — same memory shape, same "rolled once, remembers" contract, and the player already understands it from rummaging. A machine that sells out is a reason to go looking for another one, which is the only thing that makes a *placed* merchant more interesting than a menu. Rejected: infinite stock (removes any reason to explore for a second machine, and makes healing a pure cash check). |
 | 7 | Machines don't buy | `buys: false` on a machine shop; person merchants buy at `sellRate` | In-fiction and mechanically useful: it means the two merchant shapes have genuinely different roles rather than one being a worse version of the other. A snack machine is a *sink*; a clerk is a *sink and a source*. It also keeps the absurd case ("you sold your red stapler to a vending machine") out of the game. |
 | 8 | Selling is at a markdown | `SELL_RATE = 0.4` (a shop-level override), floored at 1 | The universal answer to "why not just buy everything back". 40% is the genre-standard "junk is worth carrying, round-tripping is not". Exact number is a playtest knob, same posture as HIT's whiff rate. |
 | 9 | No haggling in v1 | Prices are flat; **no** Savvy/Composure discount | Tempting — the attribute economy and the money economy *should* touch eventually — but a stat that shifts every price turns the balance milestone into a moving target on the same PR that first introduces prices. Deferred to the stretch milestone, where it's a one-line multiplier in `shop.priceOf` and nothing else. |
 | 10 | Out of combat only | The shop verb is gated exactly like use / drop / equip | Consistency with every other pockets verb, and it dodges the "I bought a sandwich with the Manager mid-swing" question entirely. The gate already exists as a host callback (`isInCombat`); this is a reuse, not a rule. |
 | 11 | Where the purse persists | **Save v6**: `cash` at the top level of the progress record, beside `levelId` / `party` / `active` | The purse is party state, and `serializeProgress(party, levelId)` is already the party-level seam. `parseProgress` returns it alongside `sheets`; older saves seed `0`. Rejected: stashing it on `party.members[0].sheet` (invents an owner, breaks the moment the leader changes or member 0 goes down). |
-| 12 | The machine's map character | **`$`**, reassigning `rug-round` (its current owner) to one of the six remaining free characters | The printable-ASCII legend namespace is **86/95 used** — `ARCHITECTURE.md` already names this as the real ceiling on prop count. `$` is the one character in the set that means "money" to every human alive, and it is currently spent on a *round rug*. No shipped level uses `$` (verified against `levels/*.json`), so the swap is free today and impossible later. Do it in the same milestone as the machine. |
+| 12 | The machine's map character | **`$`**, reassigning `rug-round` to `"` | The printable-ASCII legend namespace is the binding constraint on all content, and it got tighter during implementation: 86/95 used when this plan was written, 90/95 by the time it was built, leaving `"`, `'`, `\` and the player's own `@`. `$` is the one character in the set that means "money" to every human alive, and it was spent on a *round rug* that no shipped level had ever painted - so the swap was free the day it was made and would have been impossible the day after the first level painted one. |
 | 13 | Shaking the machine | **Stretch.** A right-click verb: free snack / nothing / it tips on you | Pure upside as flavor, and it composes with plumbing that already exists (`applyDamage`, the right-click menu, the `explosive`/`ignitable` prop precedent). Deliberately not core: it's a risk verb on a system that has to be *legible* first. |
 | 14 | No rarity tiers, no generated prices | Hand-authored `value` per item, same as `EQUIPMENT_PLAN` #9 | Consistent with the equipment plan's reasoning, and at this content scale a hand-priced red stapler ("someone has been looking for this since 1999" — 40💵) carries more character than a formula. |
 
@@ -342,103 +342,128 @@ warns about for the v5 auto-equip. Purchased items persist because they are
 ordinary inventory; **stock does not persist across floors**, which is correct:
 a new floor has new machines.
 
-## Milestones (each a PR that keeps `npm test` + e2e green)
+## Milestones
 
-1. **The purse.** Currency exists and does nothing yet. `party.cash`, save v6,
-   the `cash` item field + the `receiveItems` auto-bank branch, the three
-   currency items in the trash/desk/enemy tables, the `#inv-cash` row, and
-   `__game.cash`. Playable outcome: you find money and watch a number go up.
-   Deliberately shipping the resource before the sink, so the sink milestone
-   is a pure UI/verb change against a proven, saved, tested number.
-2. **The machine.** `data/shops.js`, `src/shop.js` (+ its unit tests), the
-   `$` snack machine tile (and the `rug-round` character swap), the shop panel,
-   buy-only, finite per-instance stock, the `dispatchHit`/`scene.js`/Alt-overlay
-   wiring. Place one in Floor 1's break room (`k` tiles, already painted) and
-   one on Floor 2. **This is the milestone the whole plan is for.**
-3. **Selling & the person merchant.** `value` on every existing item,
-   `SELL_RATE`, the `buys` flag, the sell column in the panel, the
-   `effect: { shop: true }` dialogue branch, and the Supply Closet Clerk in
-   `data/npcs.js` + a level legend. Outcome: the four flavor items become
-   the reason to keep rummaging.
-4. **The content pass.** Machine-exclusive consumables, cash entries across
-   every loot table and enemy drop list, a machine per floor, gear in the
-   clerk's stock deep enough that saving up beats spending immediately, and
-   the registry lint (every `shop` id resolves, every stocked item exists and
-   has a `value`, every `value` is a positive integer) alongside the existing
-   levels lint.
-5. **The numbers.** Prices, markups, drop rates and the sell rate, tuned in a
-   live god-panel session. Same posture the equipment, hit and status plans all
-   took: the knobs are data, the feel is playtest.
-6. **Stretch.** *Shake It* (decision #13) as a right-click verb on a machine;
-   a Savvy discount in `shop.priceOf` (decision #9); a `caffeinated` consumable
-   once `STATUS_PLAN`'s registry can carry it; a companion who runs a cart
-   (`shop` on a `COMPANIONS` entry — the Mail Room Veteran already has a
-   `snack-cart` combat action and eleven years of corridor knowledge).
+**All six landed in one pass.** The notes record what shipped and where it
+departed from the plan.
+
+1. **The purse.** ✅ Landed. `party.cash` + `party.addCash` (clamped at zero,
+   the backstop under `shop.js`'s own refusals), save **v6**, and the `cash`
+   item field with its auto-bank branch in `looting.receiveItems`. Three
+   currency items (`crumpled-fiver`, `petty-cash-envelope`, `coin-return`)
+   ride the existing loot tables - money in the trash and the desk drawer, an
+   envelope filed under M for Morale in the cabinets. The pockets grew an
+   `#inv-cash` readout beside the paper ammo, and `__game.cash` exposes it.
+   Playable outcome on its own: you find money and watch a number go up.
+2. **The machine.** ✅ Landed. `data/shops.js`, the pure `src/shop.js`, the
+   `snack-machine` tile on `$` (with `rug-round` moved to `"`), the shop panel
+   (`ui.createShopPanel`), the merchant runtime (`src/shopping.js`) with
+   per-instance stock, and the wiring: `dispatchHit` on a `shop` prop,
+   `scene.js`'s `interactive` test, an Alt-overlay label, a right-click verb,
+   and a focus-banner line that says `Sold out` when it is. One machine in
+   Floor 1's left break room, one in Floor 2's.
+   - **Fixed in review:** the machine first shipped at `scale: 0.5`, copied
+     from the older non-kit props - the kit's models are authored for scale 1,
+     so it rendered as a mini-fridge and its pick box topped out below half a
+     tile. A vending machine has to read as TALL from across a break room;
+     `scale: 1.0` / `height: 1.2` is what a machine looks like, and the e2e
+     click that caught it now aims at the body it actually has.
+3. **Selling & the person merchant.** ✅ Landed. `value` on all 20 pre-existing
+   items, `SELL_RATE`, the `buys` flag, the sell column, and the
+   `effect: { shop: true }` dialogue branch - which **replaces** the
+   conversation rather than stacking a second modal over it. The merchant is
+   the Mail Room Veteran (decision #5 as revised), reachable before recruiting
+   him and after. The four flavor items - toner cartridge, mystery USB,
+   performance review, HR pamphlet - stop being archaeology and become the
+   reason to keep rummaging.
+4. **The content pass.** ✅ Landed. Four machine consumables (`candy-bar`,
+   `vending-crisps`, `stale-danish`, and the machine-exclusive
+   `mystery-flavor`), cash across the trash/desk/filing-cabinet tables, and the
+   registry lint: every `shop` id resolves, every stocked item exists and
+   carries a `value`, every `value`/`cash` is a positive integer, and a cash
+   item is *only* money (no value, no slot, no heal - it never reaches the bag,
+   so anything else on it would be dead data).
+5. **The numbers.** ✅ First pass set, playtest pending - the same posture the
+   equipment, hit and status plans took. Values are hand-authored (junk 1-12,
+   gear 8-40), the machine charges `markup: 1.6`, the cart charges list and
+   pays `0.45`. A unit test pins the shape rather than the values: **a round
+   trip through any merchant that buys must always lose money**, asserted over
+   every shipped shop and every item it stocks, so a future markup edit that
+   opened an infinite-money loop fails the suite instead of the balance.
+   `__god.setCash` and a Petty Cash card in the god panel make the tuning a
+   live session.
+6. **Stretch.** Not taken, deliberately. *Shake It* (#13), the Savvy discount
+   (#9) and a `caffeinated` consumable are all still one-function adds on the
+   seams this milestone built; none of them should land before the core has
+   been felt in a real run, because each one bends the price curve the numbers
+   pass has not yet validated.
 
 ## Testing
 
-- **Unit** (`tests/unit/shop.test.js`, new): `priceOf`/`sellYield` rounding and
-  the floor-at-1 rule; `canAfford`; `rollStock` respects `chance`/`qty`;
-  a purchase is atomic (cash, stock and bag move together or not at all); a
-  buy with insufficient cash changes nothing; selling to a `buys: false`
-  merchant is refused; an item with no `value` cannot be sold; cash never goes
-  negative or fractional.
-- **Unit** (`tests/unit/party.test.js` grows): v6 round-trips `cash`; a v5 save
-  loads with `cash: 0` and everything else byte-identical; a legacy v1 save
-  still loads (the existing invariant).
-- **Unit** (`tests/unit/levels.test.js` grows): the registry lint of milestone 4
-  — every `shop` id in `TILE_TYPES`/`NPCS`/`COMPANIONS` resolves in `SHOPS`;
-  every stocked item id exists in `ITEMS` and carries a `value`; every map
-  character is still globally unique after the `$` swap.
-- **e2e** (`tests/e2e/economy.spec.js`, new): the loop, through real clicks —
-  loot a fiver and watch `__game.cash` rise; click a snack machine, get walked
-  up, buy a candy bar (cash falls by the marked-up price, the item is in the
-  pockets, the stock row decrements); buy the last one and the row is gone;
-  the panel is refused mid-combat; talk to the clerk, sell the toner cartridge,
-  cash rises by the marked-down value.
-- **Regression invariant:** after milestone 1, every existing spec passes
-  unchanged. Cash is additive state that nothing else reads — a character who
-  never finds a dollar plays exactly the game they played yesterday.
+Shipped: **unit 212 -> 236** (`npm test`), **e2e +4** (all green), plus the
+full existing e2e suite re-run for regressions.
+
+- **Unit** (`tests/unit/shop.test.js`, 17 tests): price rounding and the
+  floor-at-1 rule in both directions; `rollStock` respecting `chance`/`qty`;
+  and above all **atomicity** - an unaffordable buy and a refused sale each
+  assert that cash, stock and bag are all *exactly* as they were. Plus two
+  content invariants that outlive the current numbers: no merchant round trip
+  can profit, and cash stays a non-negative integer across a 30-step
+  buy/sell loop.
+- **Unit** (`tests/unit/party.test.js`, +7): the purse is party state and
+  survives a leader switch; v6 round-trips it; a pre-v6 save loads with 0 and
+  is otherwise byte-identical; a corrupted `cash` (`null`, `'lots'`, `NaN`,
+  negative, fractional) reads as 0 or floors rather than poisoning the
+  arithmetic.
+- **Unit** (`tests/unit/levels.test.js`, extended): the merchant registry lint
+  described in milestone 4, alongside the existing char-uniqueness check that
+  now also covers `$`.
+- **e2e** (`tests/e2e/economy.spec.js`, 4 tests): a dropped fiver picked up
+  through a real ground click banks itself and leaves the bag empty; a real
+  click on the machine's body opens it, and buying moves cash, stock and
+  pockets together; the machine can be bought dry, says SOLD OUT, and still
+  labels itself as spent in the Alt overlay; and on Floor 2 the Veteran's
+  dialogue opens the cart, closes the conversation, and buys a toner cartridge
+  at exactly the marked-down price.
+- **Regression:** the full e2e suite re-run unchanged. Cash is additive state
+  nothing else reads - a character who never finds a dollar plays exactly the
+  game they played yesterday.
+- **Caught by an existing lint, worth recording:** the first cut of the
+  Veteran's trade options had no `next`, and `party.test.js`'s "every option
+  leads somewhere" check failed them. It was right to: a shop option *does*
+  end the conversation, and `next: null` is how this codebase says so.
 
 ## Risks and open questions
 
-- **The legend namespace is nearly full — this is the binding constraint, not
-  a footnote.** 86 of the 95 printable characters are taken; the free set is
-  `"`, `'`, `` ` ``, `{`, `|`, `}`. This plan spends up to three of them (the
-  coffee machine, the clerk, and whatever `rug-round` moves to). After that the
-  next content plan has three characters left in the entire game. The real fix
-  is decoupling the map from single characters (multi-char cells, or a separate
-  object layer beside the ASCII grid) — out of scope here, but this plan is the
-  one that makes it urgent, and it should be said out loud in the milestone-4 PR.
+- **The legend namespace is now effectively full, and this is the binding
+  constraint on all future content.** 91 of 95 printable characters are taken;
+  what remains is `"`, `'`, `\` and the player's own `@`, two of which are
+  awkward inside a JSON string. This plan spent one (`$`) and moved one, and
+  deliberately declined to spend two more (decision #5). **The next content
+  pass that wants props cannot simply take a character** - it has to decouple
+  the map from single characters first: multi-char cells, or an object layer
+  beside the ASCII grid. The note at the top of `data/tiles.js` now says so at
+  the point someone would reach for one.
 - **Healing you can buy vs. healing you find.** A purchasable snack is a
-  regeneration valve the difficulty curve has never had to account for. The
-  finite per-machine stock (decision #6) is the intended brake, but if cash
-  income outpaces it the fight economy softens invisibly. Watch total cash
-  earned per floor against total heal value stocked per floor in the numbers
-  milestone; if it drifts, cut income, not stock (a sold-out machine is a good
-  story, an unaffordable one is just a locked door).
-- **A shop is a wall of numbers in a game that has been about verbs.** Every
-  other interaction in this game is "click the thing, the thing happens." The
-  panel is the first screen that asks the player to *compare*. Keep it to two
-  short columns, name the price in the button (`Buy — 8💵`), and let the Alt
-  overlay label the machine so it never has to be hunted for. If it needs a
-  scrollbar, the stock list is too long.
-- **Gear in a shop competes with gear as a reward.** If the clerk stocks a
-  letter opener, finding one in a desk is worth less. Mitigation: merchants
-  stock *consumables and utility*, and only ever the low end of the gear curve.
-  The identity pieces (the red stapler, the interview blazer) stay drops —
-  a merchant should never sell the thing someone has been looking for since 1999.
-- **`value` and item ids are now load-bearing together.** Same discipline the
+  regeneration valve the difficulty curve has never had to account for. Finite
+  per-machine stock is the intended brake. Watch cash earned per floor against
+  heal value stocked per floor in the numbers pass; if it drifts, **cut income,
+  not stock** - a sold-out machine is a good story, an unaffordable one is just
+  a locked door.
+- **Gear in a shop competes with gear as a reward.** The cart stocks the low
+  end (fleece, runners, letter opener) and never the identity pieces. A
+  merchant should never sell the thing someone has been looking for since 1999.
+- **`value` and item ids are load-bearing together.** Same discipline the
   equipment plan established: item ids are as immutable as action ids, since
-  shop stock lists persist nothing but ids and the lint only catches what the
-  registries can see. Renaming an item silently empties a shop.
-- **Editor round-trip.** Machines are ordinary tile entries, so the editor
-  palette picks them up automatically (registries drive the palette) — but the
-  editor still normalises unknown *actor* characters to floor, so a level with
-  the Supply Closet Clerk re-exported from the editor loses him, exactly as it
-  loses NPCs today. Pre-existing, worth naming in the milestone-3 PR.
-- **Open: does the party keep its money on a wipe?** The run ends on a party
-  wipe and the campaign save is what carries forward. Cash is party state, so
-  today's answer falls out as "the save holds it." Whether a *fresh run* should
-  start with a small stipend (a plausible 10💵 "last paycheck") is a design
-  call the numbers milestone should make deliberately rather than inherit.
+  shop stock lists persist nothing but ids. Renaming an item silently empties a
+  shop; the lint catches only what the registries can see.
+- **Stock does not persist across floors, by design** - a new floor has new
+  machines. But it also does not persist across a *reload* on the same floor,
+  which is a mild exploit: quitting and resuming re-rolls a machine you had
+  emptied. Fixing it means putting instance stock in the save, which is real
+  state for a small gain; noted rather than done.
+- **Open: should a fresh run start with a stipend?** Cash is party state and
+  the save carries it, so a continued run keeps its money. Whether a *new* run
+  should open with a plausible 10💵 last paycheck is a design call the numbers
+  pass should make deliberately rather than inherit from "the field defaults to
+  zero".
