@@ -2,6 +2,14 @@
 // (assets/characters/<model>.glb), and the combat actions it brings (ids into
 // data/actions.js). Weapons/perks later modify or extend the same action list.
 //
+// `model` names a RIG FILE, not a role. The rigs get passed around as the cast
+// changes - hr.glb is the Mail Room clerk's, midmanager.glb is HR's, veteran.glb
+// is the Middle Manager's and the Mail Room Veteran companion's - so read the
+// entry, never the filename, to know who wears what. (Renaming them to chase
+// the current owner just moves the confusion into git history.) Where two
+// entries share a rig, each carries a `look.build` that makes them read as
+// different people; keep that up when you hand a rig to someone new.
+//
 // A class is becoming the shared unit archetype - not just what you pick, but
 // what companions and (increasingly) enemies are (see SUMMON_PLAN.md). Two
 // optional fields carry that:
@@ -48,7 +56,12 @@ export const CLASSES = {
   },
   'middle-manager': {
     name: 'Middle Manager',
-    model: 'midmanager',
+    // Shares the veteran rig with the Mail Room Veteran companion, and reads
+    // apart from them by height: the companion is tall and stocky from eleven
+    // years on his feet, the manager is short and settled from six years in
+    // the chair. Same jacket, opposite silhouette.
+    model: 'veteran',
+    look: { build: { legs: 1.68 } },
     tagline: 'Absorbs blame like a sponge. Tough, but hits like a memo.',
     experience: 'VP of Alignment (self-described), 6 yrs. Survived 4 reorgs.',
     maxHp: 28,
@@ -76,13 +89,10 @@ export const CLASSES = {
   },
   'mail-room': {
     name: 'Mail Room',
-    // The clerk shares the veteran rig with the Mail Room Veteran companion -
-    // same corridors, same uniform - and reads apart from them by build: rangy
-    // and unstooped where the veteran is stocky from eleven years of it. The
-    // rig this class used to wear is the Security Guard's now (`security.glb`)
-    // (data/enemies.js) - it always read as a uniform more than a mail cart.
-    model: 'veteran',
-    look: { build: { legs: 2.0, torso: 1.16 } },
+    // Rangy from eleven years of corridors. Sole wearer of this rig, so the
+    // build is character rather than a way to tell two people apart.
+    model: 'hr',
+    look: { build: { legs: 2.0 } },
     tagline: 'Knows every corridor. Slips on nothing. Delivers regardless.',
     experience: 'Mail Room Clerk, 11 yrs. Knows where every body is filed.',
     maxHp: 24,
@@ -134,7 +144,7 @@ export const CLASSES = {
 
   'human-resources': {
     name: 'Human Resources',
-    model: 'hr', // the HR rig already ships (assets/characters/hr.glb)
+    model: 'midmanager',
     tagline: 'Doesn\'t fight so much as staff. Brings friends to your review.',
     experience: 'People Ops "Business Partner". Owns the offsite. Tenure: undisclosed.',
     maxHp: 20,
