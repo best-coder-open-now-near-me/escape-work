@@ -117,9 +117,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     const before = sheet.paper;
     sheet.paper = Math.min(PAPER_CAP, sheet.paper + sheets);
     const pocketed = sheet.paper - before;
-    ui.say(pocketed > 0
-      ? `You gather the loose sheets. (+${pocketed} 📄${pocketed < sheets ? ' — pockets full' : ''})`
-      : 'Your pockets already bulge with paper.');
+    ui.say(`You gather the loose sheets. (+${pocketed} 📄)`);
     ui.updateStatsHud(sheet);
     if (lootLabels.visible) showLabels(); // that patch is spent now
   }
@@ -135,7 +133,6 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
       if (sheet.hp >= sheet.maxHp) { ui.say('You are already at full health. Ration the snacks.'); return; }
       sheet.hp = Math.min(sheet.maxHp, sheet.hp + def.heal);
     } else if (def.ammo) {
-      if (sheet.paper >= PAPER_CAP) { ui.say('Your pockets hold no more paper.'); return; }
       sheet.paper = Math.min(PAPER_CAP, sheet.paper + def.ammo);
     } else { ui.say(def.examine || 'It is what it is.'); return; } // flavor: not consumed
     sheet.inventory.splice(i, 1);

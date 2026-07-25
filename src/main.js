@@ -1832,7 +1832,10 @@ function startGame(level) {
     // The bottom narrator box gets general narration only when nothing else
     // owns the bottom of the screen: not mid-fight (combat has its own log),
     // not mid-conversation (the dialogue panel is up), not pre-class-pick.
-    ui.setNarrationGate(!!sheet && !inCombat && !gameOver && !dialogue.visible);
+    // The narration box stays up in combat and in conversation now: examine
+    // text and incidental narration used to vanish entirely during both, which
+    // is what made every examine description look broken.
+    ui.setNarrationGate(!!sheet && !gameOver);
     // Persistent hotbar: visible only when it can act; ammo counts refresh
     // when they change (the gate keeps DOM writes off the hot path). Armed
     // out-of-combat target rings redraw each frame, like combat's own.

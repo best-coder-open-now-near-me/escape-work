@@ -23,54 +23,67 @@ export function say(text) {
 
 // --- narrator box (Divinity / BG3 style general narration) --------------------
 // General narration surfaces in a dialogue-style box near the bottom, like the
-// narrator in Divinity/BG3 - not just the (now hidden) top subtitle. It is
-// purely cosmetic: pointer-events pass through so play never stalls, and it
-// auto-fades. Combat owns its own bottom panel + log and a live conversation
-// owns the dialogue panel, so main.js gates the narrator off during both (see
-// setNarrationGate) to avoid stacking boxes at the bottom of the screen.
+// narrator in Divinity/BG3 - the top #subtitle is display:none, so this box is
+// the ONLY place say() is visible. It is purely cosmetic: pointer-events pass
+// through so play never stalls.
+//
+// It used to auto-fade after ~5s, replace its text on every line, and be
+// gated off entirely during combat - which meant every examine description
+// during a fight went nowhere at all, and out of combat you had five seconds
+// to read one. Now it is always on screen once a class is in play and it
+// ACCUMULATES: new lines append, the oldest scroll off, and the box holds the
+// last NARRATION_KEEP lines so you can read back what just happened.
+const NARRATION_KEEP = 8;
 let narratorEl = null;
-let narratorTimer = null;
 let narrationOk = false;
+const narrationLines = [];
 
 function ensureNarrator() {
   if (narratorEl) return narratorEl;
   narratorEl = document.createElement('div');
   narratorEl.id = 'narration-box';
   Object.assign(narratorEl.style, {
-    position: 'fixed', right: '14px', bottom: '20px', transform: 'translateY(6px)',
-    zIndex: '27', maxWidth: 'min(360px, 46vw)', boxSizing: 'border-box',
-    pointerEvents: 'none', textAlign: 'left',
+    position: 'fixed', right: '14px', bottom: '20px',
+    zIndex: '27', width: 'min(360px, 46vw)', maxHeight: '30vh', boxSizing: 'border-box',
+    pointerEvents: 'none', textAlign: 'left', overflow: 'hidden',
+    display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: '4px',
     background: 'rgba(18,18,30,.9)', border: '1px solid #3a3a52', borderRadius: '12px',
     padding: '11px 16px', color: '#e9e7f2',
-    font: 'italic 14px Georgia, "Times New Roman", serif', lineHeight: '1.5',
+    font: 'italic 14px Georgia, "Times New Roman", serif', lineHeight: '1.45',
     boxShadow: '0 8px 24px rgba(0,0,0,.5)',
-    opacity: '0', transition: 'opacity .2s ease, transform .2s ease',
+    opacity: '0', transition: 'opacity .2s ease',
   });
   document.body.appendChild(narratorEl);
   return narratorEl;
 }
 
-function hideNarrator() {
-  if (!narratorEl) return;
-  narratorEl.style.opacity = '0';
-  narratorEl.style.transform = 'translateY(6px)';
-}
-
-// main.js flips this each frame: narration is welcome only when a class is in
-// play and neither combat nor a conversation owns the bottom of the screen.
+// main.js flips this each frame: the box lives whenever a class is in play.
+// It deliberately STAYS UP during combat and conversations now - combat has
+// its own log, but examine text and incidental narration were going nowhere
+// while a fight or a dialogue was open.
 export function setNarrationGate(ok) {
   narrationOk = ok;
-  if (!ok) hideNarrator();
+  if (!narratorEl) return;
+  narratorEl.style.opacity = ok && narrationLines.length ? '1' : '0';
 }
 
+// Append a line and re-render. The newest sits at the bottom, like a chat log.
 function narrate(text) {
-  if (!narrationOk || !text) return;
+  if (!text) return;
+  const line = String(text);
+  if (narrationLines[narrationLines.length - 1] === line) return; // no stutter
+  narrationLines.push(line);
+  while (narrationLines.length > NARRATION_KEEP) narrationLines.shift();
   const el = ensureNarrator();
-  el.textContent = text;
-  el.style.opacity = '1';
-  el.style.transform = 'translateY(0)';
-  if (narratorTimer) clearTimeout(narratorTimer);
-  narratorTimer = setTimeout(hideNarrator, 5200);
+  el.innerHTML = '';
+  narrationLines.forEach((t, i) => {
+    const p = document.createElement('div');
+    p.textContent = t;
+    // Older lines recede so the newest reads first.
+    p.style.opacity = String(0.35 + (0.65 * (i + 1)) / narrationLines.length);
+    el.appendChild(p);
+  });
+  el.style.opacity = narrationOk ? '1' : '0';
 }
 
 // --- focused-object banner (Divinity/BG3 examine-on-hover) --------------------
@@ -417,8 +430,24 @@ export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onE
   function refresh(sheet) {
     const inv = sheet?.inventory || [];
     panel.innerHTML = `<div style="font-weight:700; letter-spacing:1px; margin-bottom:7px;">
-      POCKETS <span style="opacity:.6; font-weight:400;">${inv.length}/${cap} · 📄 ${sheet?.paper ?? 0}</span></div>`;
+      POCKETS <span style="opacity:.6; font-weight:400;">${inv.length}/${cap}</span></div>`;
     if (sheet?.equipped) renderEquipStrip(sheet);
+    // Paper is ammo, not an inventory item - it lives on the sheet, not in the
+    // bag - but it was only ever a number in the header, so it read as missing.
+    // Give it a real row of its own, above the loose items.
+    const paperRow = document.createElement('div');
+    paperRow.id = 'inv-paper';
+    Object.assign(paperRow.style, {
+      display: 'flex', alignItems: 'center', gap: '7px',
+      padding: '5px 2px', marginBottom: '4px',
+      borderTop: '1px solid #2c2c42', borderBottom: '1px solid #2c2c42',
+    });
+    const pName = document.createElement('div');
+    pName.style.flex = '1';
+    pName.textContent = `📄 Paper × ${sheet?.paper ?? 0}`;
+    pName.title = 'Ammunition for thrown attacks. Gathered from spills; no carry limit.';
+    paperRow.appendChild(pName);
+    panel.appendChild(paperRow);
     if (!inv.length) {
       const empty = document.createElement('div');
       empty.style.opacity = '.6';

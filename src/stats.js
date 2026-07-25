@@ -3,9 +3,12 @@ import { CLASSES } from './data/classes.js';
 import { COMPANIONS } from './data/companions.js';
 import { ITEMS } from './data/items.js';
 
-// Thrown-weapon ammo cap: paper picked up from spills, spent on throws.
-// Every pickup/use site clamps against this one value.
-export const PAPER_CAP = 8;
+// Thrown-weapon ammo: paper picked up from spills, spent on throws. There is
+// no longer a carry limit - hoarding sheets is the whole fantasy, and the cap
+// only ever produced "your pockets are full" refusals at a paper spill.
+// Kept as a named export (Infinity) so every clamp site stays honest without
+// each one growing a special case.
+export const PAPER_CAP = Infinity;
 
 // --- attributes & derived stats ---------------------------------------------
 // The four office attributes are a character's single source of truth for its
