@@ -11,6 +11,11 @@ import { test, expect } from '@playwright/test';
 import { waitForSmoothFrames, onScreen, bootAndPick, combatOrWalkDone, enterCombat, endTurnUntilPlayer, waitForPlayerTurn } from './helpers.js';
 
 test('the class carousel browses every resume and hires one', async ({ page }) => {
+  // This test renders EVERY class's .glb, one per slide, and under CI's
+  // software GL each of those costs tens of seconds. Adding the Security class
+  // pushed the walk past the default 120s, so it gets the same budget as the
+  // other model-heavy specs - the work is inherently linear in class count.
+  test.setTimeout(300_000);
   await page.goto('/');
   // One resume at a time, straight from the class registry; arrows browse.
   await expect(page.locator('#resume-card')).toBeVisible();

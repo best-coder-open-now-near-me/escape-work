@@ -192,6 +192,19 @@ export const LOOT_TABLES = {
     { item: 'stress-ball', chance: 0.2 },
     { item: 'red-stapler', chance: 0.06 },
   ],
+  // Paperwork, not desk clutter. A filing cabinet reusing the `desk` table
+  // would hand out cold coffee and a novelty mug, which belong on a desk's
+  // surface rather than filed in a drawer - so this is the same expected haul
+  // (~2.4 items) drawn from what an office actually files. The Mystery USB is
+  // the interesting one: `trash` is currently the only other place it drops.
+  'filing-cabinet': [
+    { item: 'performance-review', chance: 1 },
+    { item: 'hr-pamphlet', chance: 0.5 },
+    { item: 'paper-ream', chance: 0.4 },
+    { item: 'laminated-lanyard', chance: 0.2 },
+    { item: 'usb-stick', chance: 0.2 },
+    { item: 'letter-opener', chance: 0.15 },
+  ],
 };
 
 // Roll a table into a list of item ids.
