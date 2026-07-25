@@ -1,6 +1,15 @@
 name: CI
 
-# Two tiers, because Actions minutes are a budget:
+# Three tiers, because the right amount of checking depends on the change.
+#
+# Put `[quick]` in the commit message for a change you will SEE - a colour, a
+# material, a model swap, copy. The browser tests never checked pixels anyway
+# (they assert state and clicks), so for anything visual, playing it for five
+# seconds is the better instrument and this pipeline is just latency. `[quick]`
+# leaves the unit suite running - it costs seconds, and it catches the class of
+# bug you CANNOT see: a save migration that corrupts on the next floor, an
+# off-by-one in a hit roll, an `applies` typo whose status silently never fires.
+# Deploy still runs, so a visual tweak is live in about a minute.
 #
 #   fast (always)  - unit suite + build + the smoke spec. A few minutes, and
 #                    it answers "is this fundamentally working?" while you are
@@ -56,7 +65,9 @@ jobs:
 
       # The critical path through a REAL browser, on every push. One boot
       # shared across its steps, so it costs about one ordinary e2e test.
+      # `[quick]` in the commit message skips it - see the header.
       - name: Cache Playwright browser
+        if: ${{ !contains(github.event.head_commit.message, '[quick]') }}
         id: pw-cache
         uses: actions/cache@v4
         with:
@@ -64,14 +75,15 @@ jobs:
           key: pw-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright Chromium
-        if: steps.pw-cache.outputs.cache-hit != 'true'
+        if: ${{ !contains(github.event.head_commit.message, '[quick]') && steps.pw-cache.outputs.cache-hit != 'true' }}
         run: npx playwright install --with-deps chromium
 
       - name: Install browser system deps
-        if: steps.pw-cache.outputs.cache-hit == 'true'
+        if: ${{ !contains(github.event.head_commit.message, '[quick]') && steps.pw-cache.outputs.cache-hit == 'true' }}
         run: npx playwright install-deps chromium
 
       - name: Smoke tests
+        if: ${{ !contains(github.event.head_commit.message, '[quick]') }}
         run: npm run test:e2e:smoke
 
   e2e:
