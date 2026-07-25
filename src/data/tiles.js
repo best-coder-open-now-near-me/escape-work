@@ -502,6 +502,7 @@ export const TILE_TYPES = {
     char: "'", category: 'storage', solid: true,
     height: 0.62, scale: 0.5, color: [0.2, 0.42, 0.58],
     model: 'office/cabinets', label: 'Filing Cabinet',
+    loot: 'filing-cabinet',
   },
   'water-cooler': {
     char: '`', category: 'breakroom', solid: true,
