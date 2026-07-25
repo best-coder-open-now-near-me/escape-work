@@ -2,10 +2,12 @@ name: CI
 
 # Two tiers, because Actions minutes are a budget:
 #
-#   fast (always)  - unit suite + build. ~1-2 min. This is the merge gate for
-#                    branches and PRs: 200 unit tests over the pure modules
-#                    plus the level/registry lints catch most regressions.
-#   e2e  (main)    - the full headless Playwright suite. ~35 min, because every
+#   fast (always)  - unit suite + build + the smoke spec. A few minutes, and
+#                    it answers "is this fundamentally working?" while you are
+#                    still looking at the screen: 200 unit tests over the pure
+#                    modules, the level/registry lints, and the critical path
+#                    driven through a real browser.
+#   e2e  (main)    - the full headless Playwright suite. Long, because every
 #                    test boots the whole engine under software GL. It runs on
 #                    pushes to main (the thing deploy.yml gates on) and on
 #                    demand, NOT on every branch push - iterating on a branch
@@ -51,6 +53,26 @@ jobs:
 
       - name: Fail early if the build produced nothing
         run: test -s build/web/index.html || { echo "Build produced no index.html"; exit 1; }
+
+      # The critical path through a REAL browser, on every push. One boot
+      # shared across its steps, so it costs about one ordinary e2e test.
+      - name: Cache Playwright browser
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright Chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install browser system deps
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Smoke tests
+        run: npm run test:e2e:smoke
 
   e2e:
     name: E2E smoke tests
