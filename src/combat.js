@@ -11,7 +11,7 @@
 import { ACTIONS } from './data/actions.js';
 import { SURFACES, GUM } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
-import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc } from './stats.js';
+import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, MOVE } from './stats.js';
 import { applyStatus, hasStatus, statusFx, tickTurn, clearStatuses, removeStatus, statusList } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, TACTICS } from './tactics.js';
 import { STATUSES } from './data/statuses.js';
@@ -175,9 +175,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // speed and AP pricing, for everyone. Gum on a shoe surcharges every step;
   // a member's gum lives on their sheet, an AI unit's on the actor (see
   // aiAdvance).
+  // AP per tile: the base rate, then the surface's own drag. A `slow` surface
+  // multiplies the cost (coffee at slow 0.5 costs double), so terrain bites
+  // proportionally harder now that the base is cheaper - which is the point,
+  // per MOVEMENT_PLAN #7.
   const surfaceStepCost = (x, z) => {
     const slow = SURFACES[world.surfaceIdAt(x, z)]?.slow;
-    return slow ? 1 / slow : 1;
+    return MOVE.COST_PER_TILE * (slow ? 1 / slow : 1);
   };
   const stepCost = (x, z) => surfaceStepCost(x, z) * (statusFx(active.sheet).moveCostMult ?? 1);
   // AP is spent in tenths now that movement charges by distance.
@@ -1521,7 +1525,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       aiAttack(unit, target);
       acting.ap -= unit.def.attackAp;
       acting.wait = 0.85; // outlast the swing animation so hits read one at a time
-    } else if (acting.ap >= 1 && cheb(unit.x, unit.z, target.actor.x, target.actor.z) > 1) {
+    } else if (acting.ap >= MOVE.COST_PER_TILE && cheb(unit.x, unit.z, target.actor.x, target.actor.z) > 1) {
       const spent = aiAdvance(unit, acting.ap, target);
       if (spent <= 0) acting.ap = 0;
       else acting.ap = Math.max(0, roundAp(acting.ap - spent));

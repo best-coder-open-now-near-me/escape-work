@@ -62,6 +62,20 @@ export const HIT = {
   POSITION_CAP: 0.35,    // ceiling on the summed POSITIVE positional terms
 };
 
+// --- the movement economy (MOVEMENT_PLAN.md) --------------------------------
+// Movement and actions share ONE pool (the DOS2 branch of the genre), so the
+// price of a step is the price of part of a swing. At 1 AP per tile against
+// 3 AP attacks in a 5-7 AP pool, walking around a body to reach someone's back
+// cost a whole attack - which made the positional layer (TACTICS_PLAN: cover,
+// flanking, backstab) a bad trade you would never take.
+//
+// Halving the rate is the baseline relief every character gets: that same walk
+// now costs half an attack instead of a whole one. It deliberately does NOT
+// try to make repositioning free - that is what the Pawn talent is for.
+export const MOVE = {
+  COST_PER_TILE: 0.5, // AP per tile of clean floor (was an implicit 1.0)
+};
+
 export const ATTR_KEYS = ['grit', 'hustle', 'savvy', 'composure'];
 
 // Equipment slots (EQUIPMENT_PLAN.md): a damage choice, a defense choice, a
