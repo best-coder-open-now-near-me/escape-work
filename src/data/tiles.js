@@ -25,12 +25,20 @@
 // isn't registered below is a one-entry job; finding it a free char is the
 // only constraint.
 //
-// AND THAT CEILING IS ESSENTIALLY REACHED. As of the snack machine, 91 of the
-// 95 printable characters are spoken for; what remains is "'\ and the player's
-// own @. Two of those are awkward inside a JSON string. The next content pass
-// that wants props cannot simply take a character - it has to decouple the map
-// from single characters first (multi-char cells, or an object layer beside the
-// ASCII grid). Treat a free char as a scarce resource, not a formality.
+// AND THAT CEILING IS NOW REACHED. As of the snack machine, 92 of the 94
+// printable non-space characters are spoken for. What is left is the player's
+// own '@' and a single backslash - which has to be escaped inside a level's
+// JSON map rows, so it is the least usable character in the set. THERE IS NO
+// NEXT ONE. A content pass that wants a new prop has to either retire a tile
+// type or decouple the map from single characters first (multi-char cells, or
+// an object layer beside the ASCII grid). Treat a free char as a spent
+// resource, not a formality.
+//
+// A corollary, for whoever allocates the next one: give the JSON-awkward
+// characters to props nothing paints. The snack machine took '$' from
+// 'rug-round' for exactly this reason - the machine is painted on two floors
+// and needs a clean character, the round rug is painted nowhere and can live
+// with the escaped one.
 export const TILE_TYPES = {
   wall: {
     char: '#',
@@ -525,11 +533,13 @@ export const TILE_TYPES = {
   // new prop from this pack needs no eyeballing: read its metres out of the
   // converter's --report and halve them.
   //
-  // These five take the last of the comfortable legend characters. Only `"`
-  // and `\` are left after them, and both need escaping inside a level's JSON
-  // map rows - so registering a sixth prop from this pack now means either
-  // living with that or retiring a tile type. The other 57 .glb files are in
-  // assets/office/ ready to register the moment a character frees up.
+  // These five take the last of the comfortable legend characters. `"` has
+  // since gone to 'rug-round' (displaced by the snack machine's '$'), which
+  // leaves `\` alone - and it needs escaping inside a level's JSON map rows.
+  // Registering a sixth prop from this pack now means retiring a tile type.
+  // The other 57 .glb files are in assets/office/ ready to register the moment
+  // a character frees up, which is to say: not until the map stops being one
+  // character per cell. See the ceiling note at the top of this file.
   'filing-cabinet': {
     char: "'", category: 'storage', solid: true,
     height: 0.62, scale: 0.5, color: [0.2, 0.42, 0.58],

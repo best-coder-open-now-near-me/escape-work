@@ -383,6 +383,12 @@ departed from the plan.
    carries a `value`, every `value`/`cash` is a positive integer, and a cash
    item is *only* money (no value, no slot, no heal - it never reaches the bag,
    so anything else on it would be dead data).
+   - **Caught while placing content:** the `petty-cash-envelope` was authored
+     into the `filing-cabinet` loot table, and no shipped level paints a filing
+     cabinet - the biggest find in the game was unreachable. Money now also
+     drops from BODIES, scaled by seniority: a fiver off Managers, HR and
+     Security, an envelope off Executives, Senior Managers and Regional
+     Executives. The one who signs for petty cash is the one carrying it.
 5. **The numbers.** ✅ First pass set, playtest pending - the same posture the
    equipment, hit and status plans took. Values are hand-authored (junk 1-12,
    gear 8-40), the machine charges `markup: 1.6`, the cart charges list and
@@ -435,15 +441,17 @@ full existing e2e suite re-run for regressions.
 
 ## Risks and open questions
 
-- **The legend namespace is now effectively full, and this is the binding
-  constraint on all future content.** 91 of 95 printable characters are taken;
-  what remains is `"`, `'`, `\` and the player's own `@`, two of which are
-  awkward inside a JSON string. This plan spent one (`$`) and moved one, and
-  deliberately declined to spend two more (decision #5). **The next content
-  pass that wants props cannot simply take a character** - it has to decouple
+- **The legend namespace is now FULL, and this is the binding constraint on
+  all future content.** 92 of the 94 printable non-space characters are taken.
+  What remains is the player's own `@` and a single backslash, which has to be
+  escaped inside a level's JSON map rows - so in practice, nothing. This plan
+  spent one character (`$`), displaced one (`rug-round` to `"`), and
+  deliberately declined to spend two more (decision #5). **There is no next
+  one.** A content pass that wants a prop must retire a tile type or decouple
   the map from single characters first: multi-char cells, or an object layer
-  beside the ASCII grid. The note at the top of `data/tiles.js` now says so at
-  the point someone would reach for one.
+  beside the ASCII grid. Both notes in `data/tiles.js` now say so at the point
+  someone would reach for a character, along with the allocation rule this plan
+  followed - give the JSON-awkward characters to props nothing paints.
 - **Healing you can buy vs. healing you find.** A purchasable snack is a
   regeneration valve the difficulty curve has never had to account for. Finite
   per-machine stock is the intended brake. Watch cash earned per floor against
