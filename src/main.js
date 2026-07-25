@@ -18,12 +18,14 @@ import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DI
 import {
   createSheet, createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
   scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
+  reachOf, REACH,
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP,
 } from './party.js';
 import { applyStatus, statusFx, hasStatus, tickStep, statusLeft } from './statuses.js';
+import { inReach } from './tactics.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel } from './scene.js';
@@ -759,6 +761,20 @@ function startGame(level) {
   // --- targeting, hover highlight, cursor --------------------------------------
   const THROW_RANGE = 5; // must match combat.js
   const cheb = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.z - b.z));
+  // Melee reach out of combat, measured the same way combat measures it: real
+  // distance between continuous positions against the leader's weapon reach
+  // (TACTICS_PLAN revision). These pre-flight an opener before a fight starts,
+  // so they must agree with combat's own predicate or a click could open a
+  // fight the attacker can't actually swing in.
+  const posOf = (a) => {
+    if (a?.entity) { const p = a.entity.getPosition(); return { x: p.x, z: p.z }; }
+    return { x: a?.x ?? 0, z: a?.z ?? 0 };
+  };
+  const playerReaches = (en, r = null) => {
+    const a = posOf(player);
+    const b = posOf(en);
+    return inReach(a.x, a.z, b.x, b.z, r ?? (sheet ? reachOf(sheet) : REACH.DEFAULT));
+  };
   // A sight line for throws: open terrain that ISN'T hazed by smoke. Smoke
   // hangs floor-to-ceiling for a couple of turns and breaks line of sight;
   // movement ignores it, so this is separate from terrainOpen.
@@ -1446,8 +1462,8 @@ function startGame(level) {
     if (a.ammoCost) {
       if (!oocTargetOk(actionId, en)) { ui.say('No line for that throw from here.'); return; }
     } else if (a.type === 'shove') {
-      if (cheb(player, en) > 1) { ui.say('Too far to shove. Walk your feelings over first.'); return; }
-    } else if (cheb(player, en) > 1 && !bestApproachPath(en.x, en.z)) {
+      if (!playerReaches(en, REACH.SHOVE)) { ui.say('Too far to shove. Walk your feelings over first.'); return; }
+    } else if (!playerReaches(en) && !bestApproachPath(en.x, en.z)) {
       ui.say('No way to reach them from here.');
       return;
     }
@@ -2253,7 +2269,7 @@ function startGame(level) {
         // door) are unreachable, so a click on them does nothing - the e2e
         // suite uses this to avoid wasting engage attempts on them.
         const reachable = e.alive
-          && (cheb(player, e) <= 1 || !!bestApproachPath(e.x, e.z));
+          && (playerReaches(e) || !!bestApproachPath(e.x, e.z));
         return { name: e.def.name, x: e.x, z: e.z, px: p?.x, pz: p?.z, alive: e.alive, reachable,
           level: e.def.level || 1, hp: e.hp, maxHp: e.maxHp };
       });

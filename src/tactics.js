@@ -211,9 +211,16 @@ export function isBackstab(ax, az, dx, dz, facing) {
 // is MELEE-only (a pincer means bodies, not angles). Surprise is not capped
 // here - it rides the accuracy term in toHitTerms - but hitChance's CLAMP_HI
 // still bounds everything, so nothing becomes a guaranteed hit.
+//
+// `ax/az/dx/dz` are TILE coordinates: a cover face and an exactly-opposite
+// pincer are genuinely grid-shaped, and octant signs are the honest way to ask
+// them. Only `melee` moved to real distance - the caller decides it, because
+// only the caller knows the attacker's reach (TACTICS_PLAN revision). It
+// defaults to the old tile rule so a caller that hasn't been updated behaves
+// exactly as before.
 export function positionMods(ax, az, dx, dz, opts = {}) {
   const { edgeOpen = null, allies = [], facing = null } = opts;
-  const melee = cheb(ax, az, dx, dz) <= 1;
+  const melee = opts.melee ?? (cheb(ax, az, dx, dz) <= 1);
   const covered = !melee && hasCover(ax, az, dx, dz, edgeOpen);
   const flanked = melee && isFlanked(ax, az, dx, dz, allies);
   // Backstab is range-agnostic: shooting someone in the back counts, which is
