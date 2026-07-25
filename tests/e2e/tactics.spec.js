@@ -159,8 +159,26 @@ test('striking a foe from behind its committed facing is a backstab', async ({ p
   test.setTimeout(300_000);
   await bootStash(page, DISENGAGE_ARENA, 'office-drone');
   await enterCombat(page);
+
+  // Choose which side to stand on BEFORE it commits a facing. The Manager
+  // wanders before the fight, and DISENGAGE_ARENA has only three floor rows -
+  // so a Manager on the top or bottom row has its whole rear arc inside a
+  // wall, and there is nowhere to stand behind it. Approaching along the X
+  // axis (and flipping if it is against the west wall) guarantees the tile
+  // behind it is open floor.
+  const foe0 = await foeOf(page);
+  const side = foe0.x <= 3 ? 1 : -1;
+  const standAt = [foe0.x + side, foe0.z];
+  if (await page.evaluate(() => window.__combat.armed)) {
+    const p0 = await page.evaluate(() => window.__game.project(window.__game.playerTile.x, window.__game.playerTile.z));
+    await page.mouse.click(p0.x, p0.y, { button: 'right' });
+  }
+  await clickWorld(page, standAt[0], standAt[1]);
+  await expect.poll(() => page.evaluate(() => window.__game.playerTile), { timeout: 30_000 })
+    .toEqual({ x: standAt[0], z: standAt[1] });
+
   // Let the Manager take a turn: attacking commits its LOGICAL facing toward
-  // where we were standing. Before that it has no facing and cannot be
+  // where we are standing. Before that it has no facing and cannot be
   // backstabbed at all - which is the rule we rely on below.
   await endTurnUntilPlayer(page);
 
@@ -184,22 +202,14 @@ test('striking a foe from behind its committed facing is a backstab', async ({ p
   };
 
   const foe = await foeOf(page);
-  const pt = await page.evaluate(() => window.__game.playerTile);
   // It just swung at us, so we are squarely in its front arc.
   expect(await readTag(foe.x, foe.z)).not.toContain('from behind');
 
-  // Get into its rear arc: any tile adjacent to it whose direction from it is
-  // opposed to where we were standing when it swung (that is what its facing
-  // was committed to). The single directly-opposite tile is not enough - the
-  // Manager wanders before the fight, so that one tile can be a wall; try the
-  // three rear candidates and take the first that we can actually stand on.
-  const fx = Math.sign(pt.x - foe.x);
-  const fz = Math.sign(pt.z - foe.z);
-  const rear = [[-fx, -fz], [-fx, 0], [0, -fz]]
-    .filter(([dx, dz]) => dx || dz)
-    .map(([dx, dz]) => [foe.x + dx, foe.z + dz]);
-  let bx = null;
-  let bz = null;
+  // Straight through to the far side along the axis we approached on - open
+  // floor by construction, and adjacent to the Manager the whole way, so
+  // nothing is provoked.
+  const bx = foe.x - side;
+  const bz = foe.z;
   // Reading the tag left the attack armed, and a LEFT click no longer lowers
   // it (it reports an invalid target) - so back out the way the game now
   // expects, with a right click, before walking.
@@ -208,13 +218,9 @@ test('striking a foe from behind its committed facing is a backstab', async ({ p
     await page.mouse.click(here.x, here.y, { button: 'right' });
     await expect.poll(() => page.evaluate(() => window.__combat.armed)).toBe(null);
   }
-  for (const [tx, tz] of rear) {
-    if (!(await clickWorld(page, tx, tz))) continue;
-    await page.waitForTimeout(2000);
-    const at = await page.evaluate(() => window.__game.playerTile);
-    if (at.x === tx && at.z === tz) { bx = tx; bz = tz; break; }
-  }
-  expect(bx, 'could not reach any tile behind the Manager').not.toBe(null);
+  expect(await clickWorld(page, bx, bz)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__game.playerTile), { timeout: 30_000 })
+    .toEqual({ x: bx, z: bz });
   // Walking around a body costs AP, and an unaffordable attack button cannot
   // be armed to read a to-hit from. Top it back up: what is under test here is
   // the positional modifier, not the AP economy. Crucially this does NOT end
