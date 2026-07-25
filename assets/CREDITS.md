@@ -10,6 +10,14 @@ All third-party assets here are CC0 (public domain), free for commercial use.
   `furniture/couch.glb` (couch_pillows), `furniture/bookshelf.glb`
   (shelf_B_large_decorated), `furniture/lamp.glb` (lamp_standing).
 
+- **Furniture Kit (1.0)** by **Kenney** — https://www.kenney.nl. License: CC0.
+  The full 140-model kit lives in `furniture/kit/` (its own folder because the
+  kit ships its own `desk.glb`/`chair.glb`, which would otherwise collide with
+  the KayKit pieces above). Shipped as GLB, used as-is. Around sixty are
+  registered as paintable tile types in `src/data/tiles.js`; the rest are in
+  the repo ready to register, the only limit being that a level's map is one
+  character per cell so each type needs a free char.
+
 ## Characters
 - **Mini Characters (1.0)** by **Kenney** — https://www.kenney.nl. License: CC0.
   Shipped as GLB, used as-is (+ shared `characters/Textures/`). All twelve

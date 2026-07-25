@@ -371,15 +371,18 @@ export function startEditor(app, levelData, stashKey) {
     zIndex: '30', display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'center',
     maxWidth: '96vw', borderRadius: '10px', padding: '9px',
     font: '12px system-ui, sans-serif', alignItems: 'center',
+    // The furniture kit pushed this past seventy brushes: cap the height and
+    // scroll, or the palette eats the screen it is meant to sit under.
+    maxHeight: '42vh', overflowY: 'auto',
   });
-  const btn = (id, label) => {
+  const btn = (id, label, host = bar) => {
     const b = document.createElement('button');
     b.id = id;
     b.textContent = label;
     Object.assign(b.style, BUTTON_CHROME, {
       padding: '7px 10px', borderRadius: '7px',
     });
-    bar.appendChild(b);
+    host.appendChild(b);
     return b;
   };
   const divider = () => {
@@ -405,11 +408,40 @@ export function startEditor(app, levelData, stashKey) {
     b.onclick = () => selectBrush('door', b);
     brushButtons.push(b);
   }
-  for (const [id] of Object.entries(TILE_TYPES)) {
-    const b = btn('brush-' + id, id.replace('-', ' '));
-    b.onclick = () => selectBrush(id, b);
-    brushButtons.push(b);
-    if (id === brush) b.style.borderColor = '#8adf76';
+  // Tile brushes, grouped. Uncategorised entries (floor, walls, hazards - the
+  // originals) stay in a leading "basics" row so the old muscle memory holds.
+  const CATEGORY_ORDER = ['basics', 'work', 'seating', 'tables', 'storage',
+    'breakroom', 'decor', 'structure', 'facilities'];
+  const byCategory = new Map();
+  for (const [id, def] of Object.entries(TILE_TYPES)) {
+    const cat = def.category || 'basics';
+    if (!byCategory.has(cat)) byCategory.set(cat, []);
+    byCategory.get(cat).push(id);
+  }
+  const cats = [...byCategory.keys()]
+    .sort((a, b) => (CATEGORY_ORDER.indexOf(a) + 1 || 99) - (CATEGORY_ORDER.indexOf(b) + 1 || 99));
+  for (const cat of cats) {
+    const row = document.createElement('div');
+    Object.assign(row.style, {
+      display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center',
+      width: '100%', justifyContent: 'center',
+    });
+    const tag = document.createElement('span');
+    tag.textContent = cat;
+    Object.assign(tag.style, {
+      opacity: '.5', letterSpacing: '1px', textTransform: 'uppercase',
+      fontSize: '10px', minWidth: '68px', textAlign: 'right',
+    });
+    row.appendChild(tag);
+    for (const id of byCategory.get(cat)) {
+      const def = TILE_TYPES[id];
+      const b = btn('brush-' + id, def.label || id.replace(/-/g, ' '), row);
+      b.title = `${def.label || id}  (map char "${def.char}")`;
+      b.onclick = () => selectBrush(id, b);
+      brushButtons.push(b);
+      if (id === brush) b.style.borderColor = '#8adf76';
+    }
+    bar.appendChild(row);
   }
   {
     const b = btn('brush-player', 'player start');
