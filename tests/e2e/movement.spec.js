@@ -72,7 +72,7 @@ test('repositioning behind a foe still leaves AP to attack with', async ({ page 
   // Still enough to swing, and the button says so. Read the cost from the
   // registry rather than hardcoding it, so re-pricing actions cannot make this
   // test quietly assert the wrong thing.
-  const attackAp = await page.evaluate(() => window.__game.actionAp?.('attack') ?? 2);
+  const attackAp = await page.evaluate(() => window.__god.actionAp('attack'));
   expect(await page.evaluate(() => window.__combat.ap)).toBeGreaterThanOrEqual(attackAp);
   await expect(page.locator('#act-attack')).toBeEnabled();
 });
@@ -82,11 +82,12 @@ test('the Pawn allowance pays for movement before AP does', async ({ page }) => 
   await bootStash(page, ROOM, 'mail-room');
   await enterCombat(page);
   // Take Always Moving (the Pawn node) through the real progression path.
+  expect(await page.evaluate(() => typeof window.__god.spendClassPoint)).toBe('function');
   await page.evaluate(() => {
     const s = window.__god.player;
     s.classPoints = 2;
-    window.__game.spendClassPoint?.(s, 'mail-cart-legs');
-    window.__game.spendClassPoint?.(s, 'mail-always-moving');
+    window.__god.spendClassPoint(s, 'mail-cart-legs');
+    window.__god.spendClassPoint(s, 'mail-always-moving');
   });
   const granted = await page.evaluate(() => window.__god.player.talent?.effects?.freeMoveAp || 0);
   expect(granted).toBeGreaterThan(0);
@@ -115,7 +116,7 @@ test('Frequent Flier walks out of melee without being hit', async ({ page }) => 
     const s = window.__god.player;
     s.hp = s.maxHp;
     s.classPoints = 1;
-    window.__game.spendClassPoint?.(s, 'mgr-frequent-flier');
+    window.__god.spendClassPoint(s, 'mgr-frequent-flier');
   });
   expect(await page.evaluate(() =>
     !!window.__god.player.talent?.effects?.noProvoke)).toBe(true);
