@@ -74,7 +74,15 @@ test('the persistent hotbar shows attacks and arming targets a coworker', async 
     let p = await page.evaluate(([x, z]) => window.__game.project3(x, 0.9, z), [en.px ?? en.x, en.pz ?? en.z]);
     if (!onScreen(p)) p = await page.evaluate(([x, z]) => window.__game.project(x, z), [en.x, en.z]);
     if (!onScreen(p)) continue;
-    if (await page.evaluate(() => window.__game.armed) !== 'attack') await page.click('#hotbar-act-attack');
+    // combatOrWalkDone can report "walk finished" on the same poll that combat
+    // is starting, so re-check before doing anything else - and never click the
+    // hotbar once a fight owns the screen. Combat hides the out-of-combat
+    // hotbar, and Playwright waits on a hidden button until the test times out.
+    if (await page.evaluate(() => window.__game.inCombat)) { inCombat = true; break; }
+    if (await page.evaluate(() => window.__game.armed) !== 'attack') {
+      if (!(await page.locator('#hotbar-act-attack').isVisible())) break;
+      await page.click('#hotbar-act-attack');
+    }
     await page.mouse.click(p.x, p.y);
     inCombat = await combatOrWalkDone(page, 25_000);
   }
