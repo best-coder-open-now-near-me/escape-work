@@ -6,7 +6,7 @@ import {
   recomputeDerived, ensureAttributes, spendAttrPoint, deflect,
   spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist,
   accuracy, dodge, hitChance, rollHit, unitCombat,
-  equipItem, unequipItem, equippedStats, equippedAction, weaponProc,
+  equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf,
   PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
@@ -496,7 +496,7 @@ test('gear attrBonus flows through every attribute derivation', () => {
 });
 
 test('every equippable item declares a valid slot, stat vocabulary, and weapon swing', () => {
-  const STAT_KEYS = new Set(['dmg', 'soak', 'maxHp', 'maxAp', 'acc', 'dodge', 'slipProof', 'attrBonus']);
+  const STAT_KEYS = new Set(['dmg', 'soak', 'maxHp', 'maxAp', 'acc', 'dodge', 'slipProof', 'moveCost', 'attrBonus']);
   for (const [id, def] of Object.entries(ITEMS)) {
     if (!def.slot && !def.stats) continue; // not gear
     assert.ok(EQUIP_SLOTS.includes(def.slot), `${id} has a valid slot`);
@@ -546,4 +546,30 @@ test('weaponProc reads the equipped weapon on-hit proc, null otherwise', () => {
   equipItem(s, 0);
   assert.equal(weaponProc(s).applies, 'gum'); // THE red stapler flings gum
   assert.ok(weaponProc(s).chance > 0);
+});
+
+// --- footwear movement efficiency (MOVEMENT_PLAN M4) ------------------------
+
+test('footwear moveCost multiplies, and bare feet are neutral', () => {
+  const s = createSheet('office-drone');
+  s.equipped.shoes = null;
+  assert.equal(moveCostOf(s), 1); // no shoes = no modifier, not zero cost
+  s.inventory = ['running-shoes'];
+  equipItem(s, 0);
+  assert.equal(s.equipped.shoes, 'running-shoes');
+  assert.ok(moveCostOf(s) < 1, 'runners are faster than bare feet');
+});
+
+test('the boots trade speed for traction', () => {
+  // The choice the slot exists to pose: sure-footed but heavier, or quick but
+  // at the mercy of a wet floor.
+  const boots = createSheet('office-drone');
+  boots.inventory = ['warehouse-boots'];
+  equipItem(boots, 0);
+  const runners = createSheet('office-drone');
+  runners.inventory = ['running-shoes'];
+  equipItem(runners, 0);
+  assert.ok(moveCostOf(boots) > moveCostOf(runners), 'boots cost more per tile');
+  assert.equal(equippedStats(boots).slipProof, true);
+  assert.equal(equippedStats(runners).slipProof, false); // speed buys no grip
 });

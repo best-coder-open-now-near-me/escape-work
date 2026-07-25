@@ -263,7 +263,7 @@ export function unitCombat(def) {
 // trinket's attribute bump all reach the numbers the same way. Empty for an
 // unequipped sheet.
 export function equippedStats(sheet) {
-  const out = { dmg: 0, soak: 0, maxHp: 0, maxAp: 0, acc: 0, dodge: 0, slipProof: false, attrBonus: {} };
+  const out = { dmg: 0, soak: 0, maxHp: 0, maxAp: 0, acc: 0, dodge: 0, slipProof: false, moveCost: 1, attrBonus: {} };
   const eq = sheet.equipped || {};
   for (const slot of EQUIP_SLOTS) {
     const st = ITEMS[eq[slot]]?.stats;
@@ -275,6 +275,10 @@ export function equippedStats(sheet) {
     out.acc += st.acc || 0;
     out.dodge += st.dodge || 0;
     out.slipProof = out.slipProof || !!st.slipProof; // footwear traction
+    // Footwear movement efficiency MULTIPLIES, so it composes with surfaces and
+    // statuses instead of fighting them - good boots partly offset a spill
+    // rather than ignoring it (MOVEMENT_PLAN #6).
+    if (st.moveCost) out.moveCost *= st.moveCost;
     for (const k in st.attrBonus || {}) out.attrBonus[k] = (out.attrBonus[k] || 0) + st.attrBonus[k];
   }
   return out;
@@ -283,6 +287,12 @@ export function equippedStats(sheet) {
 // The equipped weapon's on-hit proc (EQUIPMENT_PLAN #8), or null. A proc is
 // { applies: '<status>', chance, appliesLog? } - combat rolls it when you land
 // the weapon's own swing.
+// A sheet's footwear movement multiplier (1 = ordinary shoes). Multiplied into
+// the per-tile cost, so <1 is faster and >1 is slower.
+export function moveCostOf(sheet) {
+  return equippedStats(sheet).moveCost;
+}
+
 export function weaponProc(sheet) {
   return ITEMS[sheet?.equipped?.weapon]?.proc || null;
 }

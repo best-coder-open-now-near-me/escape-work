@@ -11,7 +11,8 @@
 //                moves the item out of the bag into sheet.equipped[slot].
 //   stats      - equipped bonuses folded into derived numbers (stats.js
 //                equippedStats): dmg, soak, maxHp, maxAp, acc, dodge,
-//                attrBonus:{grit,hustle,savvy,composure}
+//                slipProof, moveCost, attrBonus:{grit,hustle,savvy,composure}
+//                moveCost multiplies the AP a tile costs - under 1 is faster
 //   attack     - (weapons) the basic-swing action id this weapon grants
 //                (data/actions.js), read by stats.equippedAction
 //   examine    - flavor line (items with no use are pure office archaeology)
@@ -122,8 +123,20 @@ export const ITEMS = {
     name: 'Warehouse Boots',
     icon: '🥾',
     slot: 'shoes',
-    stats: { slipProof: true, dodge: 0.05 }, // the floor holds no fear (and light on your feet)
+    // The floor holds no fear - but steel toes are not light. Sure-footed and
+    // evasive, at a small movement premium: the trade that makes the slot a
+    // decision rather than a default.
+    stats: { slipProof: true, dodge: 0.05, moveCost: 1.1 },
     examine: 'Steel-toed, oil-resistant, 021 tread. Wet floors are a rumor.',
+  },
+  'running-shoes': {
+    name: 'Lunchtime Runners',
+    icon: '👟',
+    slot: 'shoes',
+    // Nothing but speed: every tile costs a fifth less. No traction, so a wet
+    // floor is still exactly as dangerous as it looks.
+    stats: { moveCost: 0.8 },
+    examine: 'Somebody actually uses the lunch hour. Suspicious.',
   },
   'toner-cartridge': {
     name: 'Toner Cartridge',
@@ -163,6 +176,7 @@ export const LOOT_TABLES = {
     { item: 'matches', chance: 0.4 },
     { item: 'energy-drink', chance: 0.25 },
     { item: 'warehouse-boots', chance: 0.2 },
+    { item: 'running-shoes', chance: 0.18 },
     { item: 'usb-stick', chance: 0.15 },
   ],
   printer: [

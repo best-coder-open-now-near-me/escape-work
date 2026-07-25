@@ -69,7 +69,71 @@ test('repositioning behind a foe still leaves AP to attack with', async ({ page 
   expect(await clickWorld(page, foe.x + 1, foe.z)).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__game.playerTile),
     { timeout: 30_000 }).toEqual({ x: foe.x + 1, z: foe.z });
-  // Still enough for the 3 AP swing, and the button says so.
-  expect(await page.evaluate(() => window.__combat.ap)).toBeGreaterThanOrEqual(3);
+  // Still enough to swing, and the button says so. Read the cost from the
+  // registry rather than hardcoding it, so re-pricing actions cannot make this
+  // test quietly assert the wrong thing.
+  const attackAp = await page.evaluate(() => window.__game.actionAp?.('attack') ?? 2);
+  expect(await page.evaluate(() => window.__combat.ap)).toBeGreaterThanOrEqual(attackAp);
   await expect(page.locator('#act-attack')).toBeEnabled();
+});
+
+test('the Pawn allowance pays for movement before AP does', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, ROOM, 'mail-room');
+  await enterCombat(page);
+  // Take Always Moving (the Pawn node) through the real progression path.
+  await page.evaluate(() => {
+    const s = window.__god.player;
+    s.classPoints = 2;
+    window.__game.spendClassPoint?.(s, 'mail-cart-legs');
+    window.__game.spendClassPoint?.(s, 'mail-always-moving');
+  });
+  const granted = await page.evaluate(() => window.__god.player.talent?.effects?.freeMoveAp || 0);
+  expect(granted).toBeGreaterThan(0);
+
+  // The allowance only refreshes at the top of a turn, so cycle to one.
+  await page.click('#combat-end-turn').catch(() => {});
+  await expect.poll(() => page.evaluate(() => window.__combat?.phase), { timeout: 60_000 }).toBe('player');
+  const ap0 = await page.evaluate(() => window.__combat.ap);
+  const tile = await page.evaluate(() => window.__game.playerTile);
+  const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
+  const away = Math.sign(tile.x - foe.x) || -1;
+
+  // One tile costs 0.5 - inside the allowance, so real AP must not move.
+  expect(await clickWorld(page, tile.x + away, tile.z)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__game.playerTile),
+    { timeout: 30_000 }).toEqual({ x: tile.x + away, z: tile.z });
+  expect(await page.evaluate(() => window.__combat.ap)).toBe(ap0); // allowance paid
+});
+
+test('Frequent Flier walks out of melee without being hit', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, ROOM, 'middle-manager');
+  await enterCombat(page);
+  await page.evaluate(() => {
+    window.__combat.forceHit = true;          // any reaction WOULD land
+    const s = window.__god.player;
+    s.hp = s.maxHp;
+    s.classPoints = 1;
+    window.__game.spendClassPoint?.(s, 'mgr-frequent-flier');
+  });
+  expect(await page.evaluate(() =>
+    !!window.__god.player.talent?.effects?.noProvoke)).toBe(true);
+
+  const hp0 = await page.evaluate(() => window.__god.player.hp);
+  const roll0 = await page.evaluate(() => JSON.stringify(window.__combat.lastRoll ?? null));
+  // Break contact. Without the talent this is exactly the walk that provokes.
+  const tile = await page.evaluate(() => window.__game.playerTile);
+  const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
+  const away = Math.sign(tile.x - foe.x) || -1;
+  expect(await clickWorld(page, tile.x + 4 * away, tile.z)).toBe(true);
+  await expect.poll(() => page.evaluate(() => {
+    const p = window.__game.playerTile;
+    const m = window.__combat.enemies.find((e) => e.alive);
+    return Math.max(Math.abs(p.x - m.x), Math.abs(p.z - m.z));
+  }), { timeout: 30_000 }).toBeGreaterThan(1);
+
+  expect(await page.evaluate(() => window.__god.player.hp)).toBe(hp0); // untouched
+  // And nothing even ROLLED - the reaction never happened, it didn't just miss.
+  expect(await page.evaluate(() => JSON.stringify(window.__combat.lastRoll ?? null))).toBe(roll0);
 });

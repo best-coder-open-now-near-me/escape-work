@@ -4,6 +4,11 @@
 //
 // Types the combat runner understands:
 //   attack - rolls min..max (+ the character sheet's bonusDmg)
+//
+// AP NOTE (MOVEMENT_PLAN M5): attacks cost 2, not 3. Against a 5-7 AP pool
+// that gives a turn THREE beats instead of two, which is what lets movement
+// sit between actions instead of replacing one. Costs are deliberately coarse
+// - 2 for most things - so the arithmetic stays readable mid-fight.
 //   defend - halves the next incoming hit
 //   heal   - restores `amount` HP, limited to `uses` per fight
 //   summon - conjures `count` AI allies of `archetype` (a class id) on your
@@ -20,7 +25,7 @@ export const ACTIONS = {
   // --- Office Drone -----------------------------------------------------------
   attack: {
     type: 'attack',
-    ap: 3,
+    ap: 2,
     label: 'Passive-Aggressive Email',
     desc: 'Your basic swing. No frills, no cost beyond the AP.',
     min: 3,
@@ -48,7 +53,7 @@ export const ACTIONS = {
   // --- Middle Manager ---------------------------------------------------------
   delegate: {
     type: 'attack',
-    ap: 3,
+    ap: 2,
     label: 'Delegate Ruthlessly',
     desc: 'Make it someone else\'s problem. Hits hard for a manager.',
     min: 2,
@@ -76,7 +81,7 @@ export const ACTIONS = {
   // --- IT Support ---------------------------------------------------------------
   reboot: {
     type: 'attack',
-    ap: 3,
+    ap: 2,
     label: 'Turn It Off And On Again',
     desc: 'Turn yourself off and on again. Clears EVERY status - your buffs too.',
     min: 4,
@@ -113,7 +118,7 @@ export const ACTIONS = {
   // --- Mail Room ----------------------------------------------------------------
   'mail-cone': {
     type: 'attack',
-    ap: 3,
+    ap: 2,
     cone: { range: 4, halfAngle: 35 },
     leaves: 'paper',
     // The drifts are litter, not terrain - they clear this many rounds later
@@ -160,7 +165,7 @@ export const ACTIONS = {
   // also the only attack a non-attacking class (HR) gets.
   punch: {
     type: 'attack',
-    ap: 3,
+    ap: 2,
     label: 'Throw a Punch',
     desc: 'Bare hands. Everyone always has this.',
     min: 1,
@@ -170,7 +175,7 @@ export const ACTIONS = {
   },
   'staple-jab': {
     type: 'attack',
-    ap: 3,
+    ap: 2,
     label: 'Staple Jab',
     desc: 'The stapler, used as intended by nobody.',
     min: 2,
@@ -180,7 +185,7 @@ export const ACTIONS = {
   },
   'letter-opener-stab': {
     type: 'attack',
-    ap: 2, // light and quick - less punch than a stapler, but cheap and precise
+    ap: 2, // no longer the cheap one now every attack is 2 - its edge is accuracy
     label: 'Letter Opener Stab',
     desc: 'Technically for envelopes. Precise, if not heavy.',
     min: 2,
@@ -195,7 +200,7 @@ export const ACTIONS = {
   // a disposable body, not a bruiser.
   'resume-slap': {
     type: 'attack',
-    ap: 3,
+    ap: 2,
     label: 'Résumé Slap',
     desc: 'A resume, delivered at speed.',
     min: 1,
