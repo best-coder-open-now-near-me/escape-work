@@ -9,6 +9,15 @@ export default defineConfig({
   // of shader compilation. Locally everything exits early.
   timeout: 120_000,
   retries: process.env.CI ? 1 : 0,
+  // A red run should cost minutes, not half an hour. Every test boots the whole
+  // engine under software GL (~40s each), so letting a broken build grind
+  // through all 50-odd of them burns the Actions budget to tell you something
+  // the first failure already said. Locally, run everything.
+  maxFailures: process.env.CI ? 3 : 0,
+  // NB: billing is runner WALL-CLOCK, so in-runner parallelism is free money -
+  // but these tests are CPU-bound on software GL, and over-subscribing the
+  // runner's 4 vCPUs trades flakes (and re-runs) for the time it saves. Left at
+  // Playwright's default; raise deliberately, with a flake check.
   // A retry turns a flake green, so make the flakes visible: 'list' prints
   // every retried test, and the HTML report lands in the CI artifact next to
   // the traces below. Without these, a failure on CI left nothing to debug -

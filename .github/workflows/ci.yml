@@ -1,15 +1,34 @@
 name: CI
 
-# The merge gate: every PR (and main) must pass unit tests, build, and the
-# headless Playwright smoke suite before deploy.yml ships anything.
+# Two tiers, because Actions minutes are a budget:
+#
+#   fast (always)  - unit suite + build. ~1-2 min. This is the merge gate for
+#                    branches and PRs: 200 unit tests over the pure modules
+#                    plus the level/registry lints catch most regressions.
+#   e2e  (main)    - the full headless Playwright suite. ~35 min, because every
+#                    test boots the whole engine under software GL. It runs on
+#                    pushes to main (the thing deploy.yml gates on) and on
+#                    demand, NOT on every branch push - iterating on a branch
+#                    used to cost a full suite per push, then a second one when
+#                    the same code landed on main.
+#
+# Run it on a branch when a change warrants it: the Actions tab ->
+# CI -> "Run workflow", or put [e2e] in the commit message.
 on:
   pull_request:
   push:
     branches: [ main ]
   workflow_dispatch:
 
+# Pushing over yourself cancels the superseded run instead of paying for both.
+# Never cancel on main: deploy.yml chains off that run's completion.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
-  test:
+  fast:
+    name: Unit tests + build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -30,8 +49,48 @@ jobs:
       - name: Build web bundle
         run: npm run build
 
+      - name: Fail early if the build produced nothing
+        run: test -s build/web/index.html || { echo "Build produced no index.html"; exit 1; }
+
+  e2e:
+    name: E2E smoke tests
+    runs-on: ubuntu-latest
+    needs: fast          # never pay 35 min for a tree that fails in 1
+    # On main (what deploy gates on), on demand, or when a commit opts in.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.ref == 'refs/heads/main' ||
+      contains(github.event.head_commit.message, '[e2e]')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The browser is ~130MB and unchanged between runs; restoring it beats
+      # re-downloading it (and re-running the apt step) every single time.
+      - name: Cache Playwright browser
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       - name: Install Playwright Chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
+
+      # Cached browser still needs its system libraries on a fresh runner.
+      - name: Install browser system deps
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
 
       - name: E2E smoke tests
         run: npm run test:e2e
@@ -47,3 +106,4 @@ jobs:
             playwright-report/
             test-results/
           if-no-files-found: ignore
+          retention-days: 7   # the default 90 costs storage quota too
