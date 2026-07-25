@@ -1553,7 +1553,12 @@ function startGame(level) {
       worldHover(point, sx, sy);
     },
     onRightClickTile: (tile, sx, sy, point) => {
-      if (!sheet || inCombat || gameOver || dialogue.visible) return;
+      if (!sheet || gameOver) return;
+      // In combat, right-click is the universal "back out": it lowers an armed
+      // action or a pending confirm. Left-click never cancels (it reports an
+      // invalid target), so aiming survives a near-miss.
+      if (inCombat) { combat?.cancelArmed(); return; }
+      if (dialogue.visible) return;
       const hit = picking.pick(controls.cameraEntity, sx, sy);
       if (hit && hit.kind === 'npc') {
         ui.showMenu(sx, sy, [

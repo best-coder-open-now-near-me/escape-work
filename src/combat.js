@@ -21,6 +21,9 @@ import { buildInitiativeOrder, rollInitiative, insertionIndex } from './initiati
 const pc = window.pc;
 const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
 const cheb = (ax, az, bx, bz) => Math.max(Math.abs(ax - bx), Math.abs(az - bz));
+// Radius of a target's ring marker. Cone tests use it so a body counts when
+// the wedge CLIPS it, matching what the ring shows.
+const TARGET_R = 0.5;
 const THROW_RANGE = 5;
 const SURPRISE_RADIUS = 2; // engaged from beyond this = loses the first turn
 
@@ -84,9 +87,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // callbacks: { say, updateHud, onRound, onEnemyKilled(en), onWin, onLose }
   const talentFxOf = (m) => m.sheet.talent?.effects || {};
   const throwableIds = Object.keys(ACTIONS).filter((id) => ACTIONS[id].ammoCost);
+  // A throwable can be gated behind a talent effect (`needsTalent`): folding a
+  // dart that lands in someone's eye is a craft, so paper airplanes belong to
+  // the Origami Specialist. Anyone can crumple a wad.
+  const throwablesFor = (m) => throwableIds.filter((id) => {
+    const need = ACTIONS[id].needsTalent;
+    return !need || !!(m.sheet.talent?.effects || {})[need];
+  });
   // Everyone can shove - it's an office, not a fencing academy - and everyone
   // has a basic weapon swing (the equipped weapon's, or bare-handed 'punch').
-  const actionIdsOf = (m) => [...m.sheet.actions, equippedAction(m.sheet), 'shove', ...throwableIds];
+  const actionIdsOf = (m) => [...m.sheet.actions, equippedAction(m.sheet), 'shove', ...throwablesFor(m)];
   const ammoCostOf = (id) => {
     const base = ACTIONS[id].ammoCost || 0;
     return base > 1 ? Math.max(1, base - (talentFxOf(active).paperAmmoDiscount || 0)) : base;
@@ -184,8 +194,23 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Nothing is pre-aimed: arm an attack/shove, THEN pick a target. While
   // armed, hover switches from the movement trail to target rings.
   let armed = null;
+  let pendingConfirm = null; // an instant self-action awaiting its second click
   let pendingMelee = null; // { en, action } to strike when the walk-up completes
   let acting = null; // the AI unit's working turn state: { unit, ap, wait }
+  // Self-cast actions that used to fire on the first button press. They now
+  // take a confirm click, so a stray click can't spend a turn's AP.
+  const INSTANT_CONFIRM = new Set(['defend', 'heal', 'summon']);
+  // Back out of whatever is armed or awaiting confirmation. RIGHT-CLICK does
+  // this from anywhere; a left click never cancels (it reports an invalid
+  // target instead), so aiming can't be lost by a near-miss.
+  function cancelArmed(quiet = false) {
+    const was = armed || pendingConfirm;
+    armed = null;
+    pendingConfirm = null;
+    aimPoint = null;
+    if (was && !quiet) log(`You lower the ${ACTIONS[was].label.toLowerCase()}.`);
+    return !!was;
+  }
 
   // --- initiative order --------------------------------------------------------
   // A slot wraps one combatant: `{ member }` (player-controlled) or `{ unit }`
@@ -363,13 +388,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (len < 0.2) return null;
     dx /= len;
     dz /= len;
-    const cosLimit = Math.cos((a.cone.halfAngle * Math.PI) / 180);
-    const test = (wx, wz) => {
+    const half = (a.cone.halfAngle * Math.PI) / 180;
+    // `r` is the target's radius. A point test (r = 0) is right for carpeting
+    // floor tiles, but WRONG for bodies: it demanded the wedge swallow a
+    // target's centre, so the ring only went green once the cone visibly
+    // covered the whole marker. Passing the ring's radius widens the wedge by
+    // the angle the body subtends, so the cone catches anything it clips.
+    const test = (wx, wz, r = 0) => {
       const vx = wx - pp.x;
       const vz = wz - pp.z;
       const d = Math.hypot(vx, vz);
-      if (d < 0.3 || d > a.cone.range) return false;
-      return (vx * dx + vz * dz) / d >= cosLimit;
+      if (d < 0.3 || d - r > a.cone.range) return false;
+      const slack = r > 0 ? Math.asin(Math.min(1, r / Math.max(d, 1e-6))) : 0;
+      return (vx * dx + vz * dz) / d >= Math.cos(Math.min(Math.PI, half + slack));
     };
     test.origin = pp;
     test.angle = Math.atan2(dz, dx);
@@ -404,8 +435,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       for (const en of world.liveEnemies()) {
         if (!en.entity) continue;
         const pos = en.entity.getPosition();
-        const hit = test && test(en.x, en.z) && world.hasLos(active.actor.x, active.actor.z, en.x, en.z);
-        drawRing(pos.x, pos.z, 0.5, hit && active.ap >= a.ap ? PREVIEW_OK : PREVIEW_FAR);
+        // Test the BODY (where the ring is drawn), not the tile centre, so the
+        // ring and the rule agree about what the cone catches.
+        const hit = test && test(pos.x, pos.z, TARGET_R)
+          && world.hasLos(active.actor.x, active.actor.z, en.x, en.z);
+        drawRing(pos.x, pos.z, TARGET_R, hit && active.ap >= a.ap ? PREVIEW_OK : PREVIEW_FAR);
       }
       return;
     }
@@ -422,7 +456,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         ok = active.ap >= a.ap; // melee: clicking a distant target walks you in
       }
       const pos = en.entity.getPosition();
-      drawRing(pos.x, pos.z, 0.5, ok ? PREVIEW_OK : PREVIEW_FAR);
+      drawRing(pos.x, pos.z, TARGET_R, ok ? PREVIEW_OK : PREVIEW_FAR);
     }
     // A purge can also target yourself - ring the caster too.
     if (a.purge && active.actor.entity) {
@@ -475,6 +509,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // leader). The initiative tracker shows whose turn it actually is.
     if (!m.isSummon) party.active = members.indexOf(m);
     armed = null;
+    pendingConfirm = null;
     pendingMelee = null;
     hidePreview();
     buildActionBar();
@@ -527,9 +562,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         && (!a.uses || active.usesLeft[id] > 0)
         && (!a.ammoCost || active.sheet.paper >= ammoCostOf(id))
         && !(a.footwork && statusFx(active.sheet).noFootwork); // no kicking with gum on the shoe
-      b.disabled = !affordable;
-      b.style.opacity = affordable ? '1' : '.4';
-      b.style.borderColor = ((a.type === 'attack' || a.type === 'shove') && id === armed) ? '#8adf76' : '#3a3a52';
+      // An armed action stays clickable even when unaffordable - that button is
+      // the way to lower it (see onActionButton).
+      b.disabled = !affordable && id !== armed && id !== pendingConfirm;
+      b.style.opacity = affordable || id === armed || id === pendingConfirm ? '1' : '.4';
+      // The live one pulses: armed (aiming) or awaiting its confirm click. A
+      // static border was too easy to miss mid-fight.
+      const live = id === armed || id === pendingConfirm;
+      b.style.borderColor = live ? (id === pendingConfirm ? '#ffd76b' : '#8adf76') : '#3a3a52';
+      b.style.animation = live ? 'act-pulse 1.1s ease-in-out infinite' : '';
+      b.title = actionTip(id, a);
     }
     endBtn.disabled = phase !== 'player';
     endBtn.textContent = 'End Turn'; // your turn ends, initiative moves on
@@ -659,7 +701,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     faceTarget(active, tx, tz); // the cone points where you aimed it
     let hits = 0;
     for (const en of world.liveEnemies()) {
-      if (!test(en.x, en.z)) continue;
+      // Same body-radius test the ring previewed - what you saw is what lands.
+      const bp = en.entity ? en.entity.getPosition() : { x: en.x, z: en.z };
+      if (!test(bp.x, bp.z, TARGET_R)) continue;
       if (!world.hasLos(active.actor.x, active.actor.z, en.x, en.z)) continue;
       joinCombat(en); // a bystander caught in the mail joins the fight
       fx.projectile({ x: active.actor.x, z: active.actor.z }, { x: en.x, z: en.z }, 'plane');
@@ -819,10 +863,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         refresh();
         return;
       }
-      // aiming: a ground click lowers the action instead of walking
-      log(`You lower the ${a.label.toLowerCase()}.`);
-      armed = null;
-      refresh();
+      // Aiming: a left click NEVER cancels. Missing the target used to lower
+      // the action (and, with a cone out of AP, could strand you unable to do
+      // either) - so say what went wrong and stay armed. Right-click cancels.
+      log('Invalid target.');
       return;
     }
     if (!world.isWalkable(tile.x, tile.z)) return;
@@ -838,20 +882,65 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     walkActive(p, active.ap, point ? world.clampPoint(point.x, point.z) : null);
   }
 
+  // Hover text for a power. Assembled from the action's own data so a new
+  // action documents itself; `desc` in data/actions.js adds the hand-written
+  // line on top. Live numbers (your damage bonus, paper on hand, uses left)
+  // come from the acting member, so the tip answers "what happens if I press
+  // this, now" rather than quoting the registry.
+  function actionTip(id, a) {
+    const out = [`${a.label} - ${a.ap} AP`];
+    if (a.desc) out.push(a.desc);
+    if (a.min != null && a.max != null) {
+      const bonus = damageBonus(active.sheet);
+      out.push(`Damage ${a.min}-${a.max}${bonus ? ` +${bonus}` : ''}`);
+    }
+    if (a.amount) out.push(`Restores ${a.amount} HP`);
+    if (a.cone) out.push(`Cone - ${a.cone.range} tiles, ${a.cone.halfAngle * 2} degrees wide`);
+    if (a.ammoCost) out.push(`Costs ${ammoCostOf(id)} paper (you have ${active.sheet.paper})`);
+    if (a.uses) out.push(`${active.usesLeft[id]} of ${a.uses} uses left this fight`);
+    if (a.applies) out.push(`Applies ${STATUSES[a.applies]?.name || a.applies}`);
+    if (a.purge) out.push('Clears every status - the good ones too');
+    if (a.footwork) out.push('Footwork - gum on your shoe prevents it');
+    return out.join('\n');
+  }
+
   function onActionButton(id, b) {
-    if (phase !== 'player' || b.disabled) return;
+    if (phase !== 'player') return;
     const a = ACTIONS[id];
-    if (a.type === 'attack' || a.type === 'shove') {
-      if (armed === id) {
-        armed = null; // clicking again lowers it
-        log(`You lower the ${a.label.toLowerCase()}.`);
-      } else {
-        armed = id; // arm it; clicking a ringed target fires it
-        hidePreview(); // aiming now - the movement trail yields to targets
-        log(`${a.label} armed. Click a target.`);
-      }
+    // Lowering an armed action must ALWAYS work, even once its button has gone
+    // unaffordable: spending your AP while a cone was armed used to disable the
+    // only control that could unarm it, stranding you (the button is disabled,
+    // and a ground click just re-tried the cone).
+    if (armed === id) {
+      cancelArmed();
       refresh();
-    } else if (a.type === 'defend') {
+      return;
+    }
+    if (b.disabled) return;
+    if (a.type === 'attack' || a.type === 'shove') {
+      armed = id; // arm it; clicking a ringed target fires it
+      hidePreview(); // aiming now - the movement trail yields to targets
+      log(`${a.label} armed. Click a target.`);
+      refresh();
+    } else if (INSTANT_CONFIRM.has(a.type)) {
+      // Instant self-actions (Deflect, a heal, Post the Role) used to fire the
+      // moment you touched the button - easy to spend a turn's AP by accident.
+      // First press ARMS it, second press commits (right-click, or the button
+      // again, backs out). Targeted actions already worked this way.
+      if (pendingConfirm !== id) {
+        pendingConfirm = id;
+        log(`${a.label} - click again to confirm.`);
+        refresh();
+        return;
+      }
+      pendingConfirm = null;
+      commitInstant(id, a);
+    }
+  }
+
+  // The self-cast actions, once confirmed.
+  function commitInstant(id, a) {
+    if (a.type === 'defend') {
       if (hasStatus(active.sheet, 'deflecting')) { log('You are already deflecting. Save the AP.'); return; }
       active.ap -= a.ap;
       applyStatus(active.sheet, 'deflecting');
@@ -895,6 +984,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // unit. Dead/downed slots are skipped; a surprised unit burns its turn.
   function advanceTurn() {
     armed = null;
+    pendingConfirm = null;
     pendingMelee = null;
     hidePreview();
     turnPtr += 1;
@@ -1429,6 +1519,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // per-tile hooks for members and summons, so it reports the step here and
     // combat resolves any opportunity attack it provoked (TACTICS_PLAN M2).
     notifyStep,
+    // Right-click backs out of an armed action / a pending confirm. Returns
+    // true if it consumed the click, so main.js can suppress the context menu.
+    cancelArmed: () => {
+      const consumed = cancelArmed();
+      if (consumed) refresh();
+      return consumed;
+    },
     abort: cleanup, // for deaths resolved outside combat (surfaces, explosions)
     get active() { return phase !== 'done'; },
   };

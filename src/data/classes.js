@@ -41,7 +41,9 @@ export const CLASSES = {
     talent: {
       name: 'Origami Specialist',
       blurb: 'Immune to paper cuts. Projectiles +2 damage; airplanes fold for 1 sheet.',
-      effects: { paperDamageBonus: 2, paperAmmoDiscount: 1, paperCutImmune: true },
+      // foldsAirplanes is what unlocks the Paper Airplane throwable at all
+      // (data/actions.js `needsTalent`) - the blurb above already promised it.
+      effects: { paperDamageBonus: 2, paperAmmoDiscount: 1, paperCutImmune: true, foldsAirplanes: true },
     },
   },
   'middle-manager': {

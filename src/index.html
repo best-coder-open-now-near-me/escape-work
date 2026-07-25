@@ -23,6 +23,12 @@
     /* Kept in the DOM as the current-narration source (tests + accessibility);
        narration surfaces visibly in the bottom narrator box now. */
     #subtitle { display: none; }
+    /* The armed / awaiting-confirm power button breathes, so the live one is
+       obvious mid-fight instead of a static border you have to hunt for. */
+    @keyframes act-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(138,223,118,.55); }
+      50%      { box-shadow: 0 0 0 5px rgba(138,223,118,0); }
+    }
   </style>
 </head>
 <body>
