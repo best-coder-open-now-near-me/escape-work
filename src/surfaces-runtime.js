@@ -68,6 +68,8 @@ export function createSurfaceRuntime({ grid, hooks, onExplosion }) {
     // Snapshot smoke too, so a cell that STARTS smoking this turn (step 2) isn't
     // also aged this turn (step 3) - that would rob it of its first turn.
     const activeSmoke = [...smoking.values()];
+    // Snapshot the fuses for the same reason - step 1 below arms new ones.
+    const activeFuses = [...fuses];
     // 1) Spread once per cell: ignite flammable neighbours, fuse explosives.
     for (const b of active) {
       if (b.spread) continue;
@@ -102,8 +104,12 @@ export function createSurfaceRuntime({ grid, hooks, onExplosion }) {
         hooks.removeSmoke?.(s.x, s.z);
       }
     }
-    // 4) Tick explosive fuses.
-    for (const [k, f] of [...fuses]) {
+    // 4) Tick the fuses that were already burning at the START of this turn.
+    //    A fuse ARMED by step 1's spread must not also age here, or it would
+    //    detonate on the very turn the fire reached it - PRINTER_FUSE_TURNS = 1
+    //    behaved as a zero-turn fuse and nobody ever got the telegraphed turn
+    //    to step clear. Same snapshot rule as the fires and the smoke above.
+    for (const [k, f] of activeFuses) {
       f.turnsLeft -= 1;
       if (f.turnsLeft <= 0) {
         fuses.delete(k);

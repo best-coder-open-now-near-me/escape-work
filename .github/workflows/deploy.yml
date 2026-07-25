@@ -1,9 +1,21 @@
 name: Build and Deploy to itch.io
 
+# Deploys only what CI has actually verified. This used to run on `push` in
+# PARALLEL with ci.yml, so a push whose e2e suite failed still shipped to
+# itch.io - the "merge gate" only ever gated pull requests. Chaining off CI's
+# completion makes the gate real for direct pushes too.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [ main ]
   workflow_dispatch:
+
+# One deploy at a time, newest wins: two quick pushes could otherwise race
+# butler and land out of order.
+concurrency:
+  group: deploy-itch
+  cancel-in-progress: false
 
 env:
   # NB: the itch username ("nr") differs from the GitHub org ("near").
@@ -17,9 +29,17 @@ jobs:
   # cloud anymore.
   build:
     runs-on: ubuntu-latest
+    # workflow_run fires on success AND failure - only ship a green CI run.
+    # (A manual workflow_dispatch has no triggering run and passes through.)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     steps:
       - name: Checkout
+        # Build the exact commit CI verified, not whatever main points at now.
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Set up Node
         uses: actions/setup-node@v4

@@ -204,7 +204,11 @@ export const ACTIONS = {
   // The HR class's power (SUMMON_PLAN.md): post the role and applicants report
   // for duty on your side. `archetype` is the unit (the applicant class),
   // `count` how many per post, `cap` how many may be live at once, `uses` how
-  // many posts per fight. Instant - no target to pick.
+  // many posts per fight. TARGETED: arm it, then click where they should
+  // report - `range` is how far from the summoner that spot may be (needs line
+  // of sight, like a throw). They land on the clicked tile and the free tiles
+  // ringing outward from it. An enemy `summon` descriptor carries no `range`
+  // and drops its reinforcements beside the summoner instead.
   'summon-applicants': {
     type: 'summon',
     ap: 4,
@@ -212,8 +216,9 @@ export const ACTIONS = {
     count: 2,
     cap: 3,
     uses: 2,
+    range: 5,
     label: 'Post the Role',
-    desc: 'Post the req. Applicants report for duty and fight on your side.',
+    desc: 'Post the req. Click where they should report - applicants fight on your side.',
     log: 'You open a req. Applicants flood in -',
   },
 

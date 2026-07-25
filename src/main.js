@@ -265,16 +265,25 @@ function startGame(level) {
   // enemies), off any party member, and clear of the hazards a fresh arrival
   // shouldn't materialize into. Rings outward so reinforcements appear beside
   // their summoner, not across the room; returns up to `n` [x,z] pairs (fewer
-  // when the summoner is boxed in). Used by world.spawnSummon.
-  function freeTilesNear(cx, cz, n) {
+  // when the area is boxed in). Used by world.spawnSummon.
+  //   `minR` is the first ring to consider: 1 for "beside the summoner" (enemy
+  //   reinforcements), 0 for a player-CHOSEN drop point, where the clicked tile
+  //   itself is the first place they should try to stand.
+  function freeTilesNear(cx, cz, n, minR = 1) {
+    const spotOk = (x, z) =>
+      isWalkable(x, z) && !partyAt(x, z) && !summonAt(x, z) && !enemyIsHazard(x, z);
     const out = [];
-    for (let r = 1; r <= 4 && out.length < n; r++) {
+    for (let r = minR; r <= 4 && out.length < n; r++) {
+      if (r === 0) {
+        if (spotOk(cx, cz)) out.push([cx, cz]);
+        continue;
+      }
       for (let dz = -r; dz <= r && out.length < n; dz++) {
         for (let dx = -r; dx <= r && out.length < n; dx++) {
           if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue; // this ring shell only
           const x = cx + dx;
           const z = cz + dz;
-          if (!isWalkable(x, z) || partyAt(x, z) || summonAt(x, z) || enemyIsHazard(x, z)) continue;
+          if (!spotOk(x, z)) continue;
           out.push([x, z]);
         }
       }
@@ -470,6 +479,12 @@ function startGame(level) {
     let msg = 'The printer detonates in a cloud of toner.';
     if (slain.length) msg += ` ${slain.length} coworker${slain.length === 1 ? '' : 's'} caught in the blast (+XP).`;
     // Shrapnel hits every party member beside the printer, not just the leader.
+    // Deaths funnel through downOrLose like every other way to die: a member
+    // going down is not the end of the run, even when it's the one you were
+    // controlling (a survivor takes over). Only a party WIPE loses. Collect the
+    // casualties and resolve them AFTER the loop, so one death can't cut short
+    // the shrapnel for everyone else or the XP for the coworkers it killed.
+    const downed = [];
     for (const m of party ? party.members : []) {
       if (!m.actor?.entity || m.sheet.hp <= 0) continue;
       if (Math.abs(m.actor.x - x) > 1 || Math.abs(m.actor.z - z) > 1) continue;
@@ -479,18 +494,15 @@ function startGame(level) {
       msg += m === partyLeader(party)
         ? ` You catch shrapnel. -${EXPLOSION_DAMAGE} HP.`
         : ` ${m.sheet.name} catches shrapnel. -${EXPLOSION_DAMAGE} HP.`;
-      if (dead) {
-        if (m === partyLeader(party)) {
-          ui.say(msg);
-          loseGame('PC LOAD LETTER. Fatal.');
-          return;
-        }
-        downCompanion(m);
-      }
+      if (dead) downed.push(m);
     }
     ui.say(msg);
     for (const en of slain) awardKill(en);
     if (sheet) ui.updateStatsHud(sheet);
+    for (const m of downed) {
+      downOrLose(m, 'PC LOAD LETTER. Fatal.');
+      if (gameOver) return; // that was the wipe
+    }
   }
 
   // Who can start a fire: the Middle Manager's Smoker lighter (unlimited), or
@@ -1140,20 +1152,27 @@ function startGame(level) {
     ui.say(live > 1
       ? `${primary.def.name} has noticed you. So have ${live - 1} other${live > 2 ? 's' : ''}.`
       : `${primary.def.name} has noticed you.`);
-    combat = startCombat({
+    const controller = startCombat({
       app,
       party,
       engaged,
       opening,
       world: {
         isWalkable,
-        // The acting member's own route: allies BLOCK in combat (no ending a
+        // The acting body's own route: allies BLOCK in combat (no ending a
         // move stacked on a teammate; sequenced moves can afford the detour)
         // and the costs are the walker's own talents, not the leader's.
+        // "The walker" includes a summon you're driving - it has its own sheet
+        // and its own talents, so looking only at party.members made a shock-
+        // immune leader route an applicant straight through live water.
+        // Summons block too: a member's move must not end stacked on one.
         findPath: (sx, sz, tx, tz, self = player) => {
-          const ms = party.members.find((m) => m.actor === self)?.sheet || sheet;
-          const open = (x, z) => isWalkable(x, z) && !party.members.some((m) =>
+          const walker = party.members.find((m) => m.actor === self)
+            || summons.find((s) => s.actor === self);
+          const ms = walker?.sheet || sheet;
+          const blocked = (x, z) => [...party.members, ...summons].some((m) =>
             m.actor && m.actor !== self && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z);
+          const open = (x, z) => isWalkable(x, z) && !blocked(x, z);
           return findPath(open, sx, sz, tx, tz, hazardCostFor(ms), grid.stepOpen);
         },
         // AI routing (enemies and player-team summons): never through a party
@@ -1209,12 +1228,21 @@ function startGame(level) {
         //     it's CONTROLLED like a party member on its initiative turn. The
         //     actor registers as a 'summon' pick kind (contextual clicks in
         //     combat select it, like a teammate).
-        spawnSummon: (archetypeId, team, summoner, n) => {
+        // The tiles a summon aimed at (tx,tz) would actually land on - the
+        // placement preview draws these rings, and spawnSummon fills them, so
+        // what you see is where they stand.
+        summonSpots: (tx, tz, n) => freeTilesNear(tx, tz, n, 0),
+        spawnSummon: (archetypeId, team, summoner, n, at = null) => {
           const def = CLASSES[archetypeId] || ENEMY_TYPES[archetypeId];
           if (!def) return [];
           const ally = team === 'player';
           const out = [];
-          for (const [x, z] of freeTilesNear(summoner.x, summoner.z, n)) {
+          // A player-chosen drop point starts at the clicked tile itself;
+          // without one (enemy AI) they file in beside their summoner.
+          const spots = at
+            ? freeTilesNear(at.x, at.z, n, 0)
+            : freeTilesNear(summoner.x, summoner.z, n, 1);
+          for (const [x, z] of spots) {
             const actor = ally
               ? new CompanionActor(x, z, archetypeId, def)
               : new EnemyActor(x, z, archetypeId, def, { team, summoned: true, summonedBy: summoner });
@@ -1270,6 +1298,11 @@ function startGame(level) {
         },
       },
     });
+    // A hotbar opener can kill the last coworker before startCombat even
+    // returns - onWin/onLose already tore the fight down and nulled `combat`,
+    // so binding the returned controller here would resurrect a dead one (and
+    // a later abort would run its cleanup a second time).
+    if (inCombat) combat = controller;
   }
 
   // Proximity trigger: a coworker adjacent to any party member starts the
@@ -1315,6 +1348,14 @@ function startGame(level) {
   // LEADER's deliberate destination, so pathing past it (or a follower
   // trailing over it) doesn't end the level by accident. Walk-up interactions
   // are the leader's too - they're what the player clicked.
+  // The sheet the HUD card is showing RIGHT NOW: in combat that's whoever has
+  // initiative (combat repaints it from its own refresh), out of combat it's
+  // the leader. A stepping member repaints the card only when it's their own -
+  // otherwise a member taking surface damage on their combat turn redrew the
+  // pre-combat LEADER's card, so the damage appeared to hit nobody.
+  const hudSheetNow = () => (inCombat && combat?.actingSheet) || sheet;
+  const syncHudFor = (s) => { if (s && s === hudSheetNow()) ui.updateStatsHud(s); };
+
   function onMemberStep(member, x, z, pathDone, changed = true) {
     // Stepping out of an enemy's reach mid-fight provokes it (TACTICS_PLAN M2).
     // Combat owns the rule and the bookkeeping; this just reports the step.
@@ -1350,7 +1391,7 @@ function startGame(level) {
         actor.flinch();
         vfx.damageText(x, z, `-${fx.amount}`);
         ui.say(fx.message);
-        ui.updateStatsHud(sheet);
+        syncHudFor(ms);
         if (dead) {
           downOrLose(member, 'Done in by the office itself. The floor was, in fact, wet.');
           return;
@@ -1367,7 +1408,7 @@ function startGame(level) {
         const bled = applyDamage(ms, damage);
         vfx.damageText(x, z, `-${damage}`);
         ui.say('You drip on the carpet. -1 HP.');
-        ui.updateStatsHud(sheet);
+        syncHudFor(ms);
         if (bled) {
           downOrLose(member, 'Death by a thousand paper cuts. Well - several.');
           return;
@@ -1375,7 +1416,7 @@ function startGame(level) {
       }
       if (expired.includes('gum')) {
         ui.say('The gum finally lets go of your sole. Freedom.');
-        ui.updateStatsHud(sheet);
+        syncHudFor(ms);
       }
     }
     // Surface effects (data/surfaces.js): fire and electrified pools hurt,
@@ -1392,13 +1433,13 @@ function startGame(level) {
         const had = hasStatus(ms, 'gum');
         applyStatus(ms, 'gum');
         ui.say(had ? 'More gum. You are building a collection.' : sfx.message);
-        ui.updateStatsHud(sheet);
+        syncHudFor(ms);
       }
       // A turn-clock status a surface applies (fire -> burning) needs combat's
       // turns to tick, so it only takes hold in a fight; the instant surface
       // damage below is the out-of-combat story.
       if (sfx.applies && sfx.applies !== 'gum' && inCombat && applyStatus(ms, sfx.applies)) {
-        ui.updateStatsHud(sheet);
+        syncHudFor(ms);
       }
       const amount = effectiveSurfDamage(x, z, ms);
       if (amount > 0) {
@@ -1407,7 +1448,7 @@ function startGame(level) {
         actor.flinch();
         vfx.damageText(x, z, `-${amount}`);
         ui.say(sfx.message);
-        ui.updateStatsHud(sheet);
+        syncHudFor(ms);
         if (dead) {
           downOrLose(member, 'Done in by the office itself. Facilities sends their regards.');
           return;
@@ -1416,7 +1457,7 @@ function startGame(level) {
         ui.say(ms.talent?.effects?.shockImmune && grid.isElectrified(x, z)
           ? 'The water crackles. Your ESD soles rate this a non-event. 0 damage.'
           : 'You glide across the drift; the edges respect a master. Not a scratch.');
-        ui.updateStatsHud(sheet);
+        syncHudFor(ms);
       } else if (sfx.message && !sfx.applies) {
         ui.say(sfx.message);
       }
@@ -1467,6 +1508,7 @@ function startGame(level) {
         const dead = applyDamage(ms, amount);
         actor.flinch();
         vfx.damageText(x, z, `-${amount}`);
+        syncHudFor(ms); // it's the summon's own card while it has the floor
         if (dead) { if (inCombat && combat) combat.notifyMemberDown(); return; }
       }
     }
@@ -1475,6 +1517,7 @@ function startGame(level) {
     if (damage > 0) {
       const bled = applyDamage(ms, damage);
       vfx.damageText(x, z, `-${damage}`);
+      syncHudFor(ms);
       if (bled && inCombat && combat) combat.notifyMemberDown();
     }
   }
@@ -1575,6 +1618,16 @@ function startGame(level) {
       }
       if (!sheet || gameOver || dialogue.visible) { clearHoverHighlight(); setCursor(null); ui.setFocusBanner(null); return; }
       worldHover(point, sx, sy);
+    },
+    // The cursor left the world for the DOM UI: drop the world hover rather
+    // than leaving the last-hovered body glowing and named behind the panel
+    // the player is now using.
+    onHoverLeave: () => {
+      hoverKind = null;
+      clearHoverHighlight();
+      setCursor(null);
+      ui.setFocusBanner(null);
+      if (inCombat && combat) combat.handleHover(null, 0, 0);
     },
     onRightClickTile: (tile, sx, sy, point) => {
       if (!sheet || gameOver) return;
@@ -1777,8 +1830,10 @@ function startGame(level) {
       m.followT = 0.25;
       const dist = Math.max(Math.abs(m.actor.x - lead.actor.x), Math.abs(m.actor.z - lead.actor.z));
       if (dist <= FOLLOW_NEAR) continue; // near enough - let any walk finish
-      // Through the party, around everything else.
-      const open = (x, z) => grid.terrainOpen(x, z) && !enemyAt(x, z) && !npcAt(x, z);
+      // Through the party, around everything else - which is exactly
+      // isWalkable. Spelling it out again here meant a change to what blocks
+      // movement would silently miss the followers (never re-implement it).
+      const open = isWalkable;
       let spot = null;
       for (const [dx, dz] of DIRS8) {
         const sx = lead.actor.x + dx;
@@ -1952,11 +2007,16 @@ function startGame(level) {
         // A non-active class character (saved mid-switch) rides the same
         // follower plumbing with a minimal def - model from their own sheet.
         || { name: m.sheet.name, model: m.sheet.model, examine: 'One of yours. Holding up, mostly.' };
+      // Beside the leader, on a tile nobody has taken yet. isWalkable alone
+      // ignores the party, and DIRS8 is a fixed order, so two restored
+      // companions both picked the SAME first open neighbour and spawned
+      // stacked - only separating once the leader walked far enough to make
+      // the followers repath.
       let spot = grid.playerSpawn;
       for (const [dx, dz] of DIRS8) {
         const x = grid.playerSpawn.x + dx;
         const z = grid.playerSpawn.z + dz;
-        if (isWalkable(x, z)) { spot = { x, z }; break; }
+        if (isWalkable(x, z) && !partyAt(x, z)) { spot = { x, z }; break; }
       }
       const comp = new CompanionActor(spot.x, spot.z, m.sheet.companionId || m.sheet.classId, def);
       comp.recruited = true;

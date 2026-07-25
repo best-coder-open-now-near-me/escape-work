@@ -41,5 +41,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: test-results/
+          # Both: the HTML report (rendered run, with the traces linked) and
+          # the raw per-test artifacts (trace.zip, screenshots, video).
+          path: |
+            playwright-report/
+            test-results/
           if-no-files-found: ignore

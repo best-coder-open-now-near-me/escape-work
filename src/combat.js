@@ -46,7 +46,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     for (const id of m.sheet.actions) if (ACTIONS[id].uses) usesLeft[id] = ACTIONS[id].uses;
     // `done` marks a member End Turn has passed - it gates the auto-advance,
     // never the member (switch back manually and they can still act).
-    return { sheet: m.sheet, actor: m.actor, ap: m.sheet.maxAp, done: false, usesLeft };
+    return { sheet: m.sheet, actor: m.actor, ap: m.sheet.maxAp, usesLeft };
   });
   let active = members[party.active];
   // Everyone you control: party members plus any summons you've conjured
@@ -198,12 +198,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   let pendingMelee = null; // { en, action } to strike when the walk-up completes
   let acting = null; // the AI unit's working turn state: { unit, ap, wait }
   // EVERY instant self-cast takes a confirm click - the stances (Deflect,
-  // Return to Sender), every heal (Coffee, Espresso, Energy Drink, Snack Cart,
-  // the smoke break) and the summons (Post the Role). They all used to commit
-  // the moment you touched the button, so a stray click could spend a turn's
-  // AP with nothing to undo it. Targeted actions already worked this way:
-  // arm, then commit. Right-click backs out of either.
-  const INSTANT_CONFIRM = new Set(['defend', 'heal', 'summon']);
+  // Return to Sender) and every heal (Coffee, Espresso, Energy Drink, Snack
+  // Cart, the smoke break). They all used to commit the moment you touched the
+  // button, so a stray click could spend a turn's AP with nothing to undo it.
+  // Targeted actions already worked this way: arm, then commit. Right-click
+  // backs out of either. (Summons are targeted now - you pick the spot - so
+  // they arm like an attack instead of confirming in place.)
+  const INSTANT_CONFIRM = new Set(['defend', 'heal']);
   // Back out of whatever is armed or awaiting confirmation. RIGHT-CLICK does
   // this from anywhere; a left click never cancels (it reports an invalid
   // target instead), so aiming can't be lost by a near-miss.
@@ -325,13 +326,33 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     costTag.style.display = 'block';
   }
 
+  // While a summon is armed, the cursor previews the DROP: how many applicants
+  // that spot fits, or why it doesn't work. Same rule the click runs.
+  function showSummonPreview(point, sx, sy) {
+    const a = ACTIONS[armed];
+    const tx = Math.round(point.x);
+    const tz = Math.round(point.z);
+    const problem = summonSpotProblem(a, tx, tz);
+    const room = problem ? 0 : world.summonSpots(tx, tz, a.count).length;
+    costTag.textContent = problem
+      || `Post ${room} applicant${room === 1 ? '' : 's'} here · ${a.ap} AP`;
+    costTag.style.left = `${sx + 14}px`;
+    costTag.style.top = `${sy + 14}px`;
+    costTag.style.display = 'block';
+  }
+
   function handleHover(point, sx, sy) {
-    // While aiming, target rings replace the movement trail entirely.
-    // Cone attacks additionally track the cursor - the wedge follows it.
-    if (armed && ACTIONS[armed].cone) aimPoint = point;
+    // While aiming, target rings replace the movement trail entirely. Cone
+    // attacks and summon placement additionally track the cursor - the wedge
+    // (or the drop zone) follows it.
+    if (armed && (ACTIONS[armed].cone || ACTIONS[armed].type === 'summon')) aimPoint = point;
     if (phase !== 'player' || active.actor.moving || !point) { hidePreview(); return; }
     // Armed: the movement trail yields to the to-hit readout over a target.
-    if (armed) { showHitPreview(point, sx, sy); return; }
+    if (armed) {
+      if (ACTIONS[armed].type === 'summon') { showSummonPreview(point, sx, sy); return; }
+      showHitPreview(point, sx, sy);
+      return;
+    }
     const tx = Math.round(point.x);
     const tz = Math.round(point.z);
     if (!world.isWalkable(tx, tz)) { hidePreview(); return; } // enemies/walls: no route preview
@@ -419,6 +440,18 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function drawTargets() {
     if (phase !== 'player' || !armed) return;
     const a = ACTIONS[armed];
+    // A summon rings the tiles its applicants would actually land on (green),
+    // or the aimed tile alone in red when the spot is unusable - so "where do
+    // they go?" is answered before the AP is spent.
+    if (a.type === 'summon') {
+      if (!aimPoint) return;
+      const tx = Math.round(aimPoint.x);
+      const tz = Math.round(aimPoint.z);
+      const spots = summonSpotProblem(a, tx, tz) ? [] : world.summonSpots(tx, tz, a.count);
+      if (!spots.length) { drawRing(tx, tz, 0.42, PREVIEW_FAR); return; }
+      for (const [sx, sz] of spots) drawRing(sx, sz, 0.42, PREVIEW_OK);
+      return;
+    }
     if (a.type !== 'attack' && a.type !== 'shove') return;
     if (a.cone) {
       const test = aimPoint && coneTest(a, aimPoint.x, aimPoint.z);
@@ -751,6 +784,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (!armed) { log('Choose an action first, then a target.'); return; }
     const a = ACTIONS[armed];
     if (a.cone) { fireCone(en.x, en.z); return; }
+    // Placing a summon on top of a coworker: the tile is taken, so they report
+    // to the free ground ringing outward from it. Aiming at the enemy you want
+    // them to swarm is a reasonable thing to click.
+    if (a.type === 'summon') { placeSummon(en.x, en.z); return; }
     if (a.type === 'shove') {
       if (cheb(active.actor.x, active.actor.z, en.x, en.z) > 1) { log('Too far to shove.'); return; }
       if (active.ap < a.ap) { log('Not enough AP.'); return; }
@@ -762,8 +799,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       active.ap -= a.ap;
       active.actor.lunge(en.x, en.z);
       faceTarget(active, en.x, en.z);
-      // A partition between the tiles counts as "something solid" too.
-      if (!world.isWalkable(tx, tz) || !world.stepOpen(en.x, en.z, tx, tz)) {
+      // A partition between the tiles counts as "something solid" too - and so
+      // does a body. isWalkable only excludes enemies and NPCs, so without the
+      // occupancy check a shove could glide a coworker onto a teammate's (or a
+      // summon's) tile and leave two combatants permanently stacked.
+      const occupied = members.some((m) =>
+        m.sheet.hp > 0 && m.actor && m.actor.x === tx && m.actor.z === tz);
+      if (occupied || !world.isWalkable(tx, tz) || !world.stepOpen(en.x, en.z, tx, tz)) {
         const died = en.takeDamage(2);
         fx.damageText(en.x, en.z, '-2', '#ffd76b');
         // A slam into a wall knocks the wind out of them - stunned (they lose
@@ -840,6 +882,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const { points, cost, done } = truncateByBudget(s, Math.max(0, budget), stepCost);
     if (points.length < 2 || cost < 0.05) return null;
     hidePreview();
+    // Walking spends the AP a pending confirm was priced against, so the
+    // confirm lapses here rather than committing later at a price this member
+    // can no longer pay (which drove AP negative and broke refresh()).
+    pendingConfirm = null;
     beginMove(active); // a deliberate move - leaving reach can provoke
     active.actor.setPath(points);
     active.ap = Math.max(0, roundAp(active.ap - cost));
@@ -853,6 +899,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const a = ACTIONS[armed];
       // Cones fire at wherever you click - ground included.
       if (a.cone && point) { fireCone(point.x, point.z); return; }
+      // A summon is placed at the clicked tile (the whole point of arming it).
+      if (a.type === 'summon') { placeSummon(tile.x, tile.z); return; }
       // A purge (reboot) can target YOURSELF: wipes your statuses too -
       // paper-cut bleeding stops, but so does your Deflect.
       if (a.purge && tile.x === active.actor.x && tile.z === active.actor.z) {
@@ -921,32 +969,43 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return;
     }
     if (b.disabled) return;
-    if (a.type === 'attack' || a.type === 'shove') {
-      armed = id; // arm it; clicking a ringed target fires it
+    // Reaching for ANY other action drops whatever was awaiting confirmation -
+    // a pending confirm shouldn't survive in the background while you arm
+    // something else and spend the AP it was priced against.
+    const wasPending = pendingConfirm;
+    pendingConfirm = null;
+    if (a.type === 'attack' || a.type === 'shove' || a.type === 'summon') {
+      armed = id; // arm it; clicking a ringed target (or a spot) fires it
       hidePreview(); // aiming now - the movement trail yields to targets
-      log(`${a.label} armed. Click a target.`);
+      log(a.type === 'summon'
+        ? `${a.label} armed. Click where they should report.`
+        : `${a.label} armed. Click a target.`);
       refresh();
     } else if (INSTANT_CONFIRM.has(a.type)) {
-      // Instant self-actions (Deflect, a heal, Post the Role) used to fire the
-      // moment you touched the button - easy to spend a turn's AP by accident.
-      // First press ARMS it, second press commits (right-click, or the button
+      // Instant self-actions (Deflect, a heal) used to fire the moment you
+      // touched the button - easy to spend a turn's AP by accident. First
+      // press ARMS it, second press commits (right-click, or the button
       // again, backs out). Targeted actions already worked this way.
-      if (pendingConfirm !== id) {
+      if (wasPending !== id) {
         pendingConfirm = id;
         log(`${a.label} - click again to confirm.`);
         refresh();
         return;
       }
-      pendingConfirm = null;
       commitInstant(id, a);
     }
   }
 
-  // The self-cast actions, once confirmed.
+  // The self-cast actions, once confirmed. Every branch re-checks AP: a
+  // pending confirm survives the movement that happens between the two
+  // clicks (arm Coffee, walk, confirm), so the button being enabled when it
+  // was armed proves nothing about affordability NOW. Committing anyway drove
+  // AP negative, and a negative AP wrecked refresh()'s pip repeat().
   function commitInstant(id, a) {
+    if (active.ap < a.ap) { log('Not enough AP any more.'); refresh(); return; }
     if (a.type === 'defend') {
       if (hasStatus(active.sheet, 'deflecting')) { log('You are already deflecting. Save the AP.'); return; }
-      active.ap -= a.ap;
+      active.ap = roundAp(active.ap - a.ap);
       applyStatus(active.sheet, 'deflecting');
       log(a.log);
       refresh();
@@ -954,23 +1013,45 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (a.uses && active.usesLeft[id] <= 0) return;
       if (active.sheet.hp >= active.sheet.maxHp) { log('Already at full health. Savor it.'); return; }
       if (a.uses) active.usesLeft[id] -= 1;
-      active.ap -= a.ap;
+      active.ap = roundAp(active.ap - a.ap);
       active.sheet.hp = Math.min(active.sheet.maxHp, active.sheet.hp + a.amount);
       fx.damageText(active.actor.x, active.actor.z, `+${a.amount}`, '#8adf76');
       log(a.log);
       refresh();
-    } else if (a.type === 'summon') {
-      // Post the role: applicants report for duty on your side, up to the
-      // action's live cap. Instant, like heal/defend - no target to pick.
-      if (a.uses && active.usesLeft[id] <= 0) return;
-      const n = resolveSummon(active.actor, 'player', a);
-      if (n <= 0) { log('No room - the applicants can\'t find a free desk.'); return; }
-      if (a.uses) active.usesLeft[id] -= 1;
-      active.ap -= a.ap;
-      active.actor.lunge();
-      log(`${a.log} ${n} report${n === 1 ? 's' : ''} for duty.`);
-      refresh();
     }
+  }
+
+  // --- targeted summoning -------------------------------------------------------
+  // Post the role AT a spot you pick (Divinity-style placement) rather than
+  // wherever the summoner happens to stand: arm the action, then click a tile
+  // within `range` with a clear line to it. The applicants take that tile and
+  // the free tiles ringing outward from it, so a click into open floor puts
+  // them exactly where you wanted them - flanking, or screening a corridor.
+  const summonRange = (a) => a.range ?? 5;
+  // Why a spot is unusable, or null when it's good. Shared by the click and the
+  // hover preview so the ring you see is the rule that runs.
+  function summonSpotProblem(a, tx, tz) {
+    if (active.ap < a.ap) return 'Not enough AP.';
+    if (a.uses && active.usesLeft[armed] <= 0) return 'No postings left this fight.';
+    if (cheb(active.actor.x, active.actor.z, tx, tz) > summonRange(a)) return 'Too far - post it closer.';
+    if (!world.hasLos(active.actor.x, active.actor.z, tx, tz)) return 'No clear line to that spot.';
+    if (!world.summonSpots(tx, tz, 1).length) return 'No room for anyone to stand there.';
+    return null;
+  }
+  function placeSummon(tx, tz) {
+    const a = ACTIONS[armed];
+    const problem = summonSpotProblem(a, tx, tz);
+    if (problem) { log(problem); return; }
+    const n = resolveSummon(active.actor, 'player', a, { x: tx, z: tz });
+    if (n <= 0) { log('No room - the applicants can\'t find a free desk there.'); return; }
+    if (a.uses) active.usesLeft[armed] -= 1;
+    active.ap = roundAp(active.ap - a.ap);
+    active.actor.lunge(tx, tz);
+    faceTarget(active, tx, tz); // you gesture at where you posted them
+    log(`${a.log} ${n} report${n === 1 ? 's' : ''} for duty.`);
+    armed = null;
+    aimPoint = null;
+    refresh();
   }
   // End Turn queues through the party: it ends the ACTIVE member's turn and
   // hands the floor to the next member who hasn't ended theirs - only the
@@ -1068,6 +1149,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       s.member.actor.clearPath();
       s.member.actor.fx = { kind: 'death', t: 0 };
       if (!livingParty().length) { defeat(); return true; }
+      // Burning to death at the top of your own turn: move the bindings off the
+      // corpse before passing the turn on, or the HUD, the party bar and the
+      // post-combat leader all keep pointing at a downed member through the
+      // enemies' turns (and past a victory landing in that window).
+      if (s.member === active) makeActive(livingParty()[0]);
       advanceTurn();
       return true;
     }
@@ -1098,11 +1184,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   //   player team -> temporary MEMBERS you control: a real sheet + body, its own
   //     action bar and AP, a `{member}` initiative slot. Not in party.members
   //     (outside the cap, unsaved); combat owns them, despawned at fight's end.
-  function resolveSummon(summoner, team, d) {
+  //   `at` is the player's chosen drop point ({x,z}); without one (enemy AI,
+  //   the debug hook) they report beside the summoner as before.
+  function resolveSummon(summoner, team, d, at = null) {
     const room = (d.cap ?? d.count) - liveSummonsOf(summoner);
     const n = Math.min(d.count, Math.max(0, room));
     if (n <= 0) return 0;
-    const spawned = world.spawnSummon(d.archetype, team, summoner, n) || [];
+    const spawned = world.spawnSummon(d.archetype, team, summoner, n, at) || [];
     for (const rec of spawned) {
       if (team === 'enemy') {
         if (!engaged.includes(rec)) engaged.push(rec);
@@ -1113,7 +1201,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         for (const id of rec.sheet.actions) if (ACTIONS[id].uses) usesLeft[id] = ACTIONS[id].uses;
         const m = {
           sheet: rec.sheet, actor: rec.actor, ap: rec.sheet.maxAp,
-          done: false, usesLeft, isSummon: true, summonedBy: summoner,
+          usesLeft, isSummon: true, summonedBy: summoner,
         };
         members.push(m);
         insertSlot(memberSlot(m)); // slots in by its own roll; acts when its turn comes
@@ -1182,10 +1270,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         : `${m.sheet.name} is out cold. They'll sit the rest of this one out.`);
       // Keep `active` (the sheet the HUD reflects, and the post-combat leader)
       // on a real member still standing - never a summon, which despawns.
-      // Their initiative slot is simply skipped when it comes around.
+      // This can fire mid-PLAYER-turn (an opportunity attack cut the acting
+      // member down as they walked), so hand off properly: makeActive rebuilds
+      // the survivor's action bar and clears the dead member's armed/pending
+      // state. If it WAS their turn, end it too - otherwise the survivor
+      // inherits the corpse's initiative slot and its leftover AP, then gets a
+      // second full turn when their own slot comes up. During an AI turn the
+      // acting enemy is mid-swing, so only the binding moves.
       if (m === active) {
-        active = livingParty()[0];
-        party.active = members.indexOf(active);
+        makeActive(livingParty()[0]);
+        if (phase === 'player') advanceTurn();
+        else refresh();
       }
     }
   }
@@ -1431,23 +1526,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
 
   app.on('update', update);
   log('Combat!');
-  // Kick off the initiative order. Started from the persistent hotbar, the
-  // initiator AMBUSHES: the throwing member leads off regardless of their roll
-  // (they caught the coworker cold - the same reason distant enemies start
-  // surprised), then fires the armed opener as part of that turn. Otherwise
-  // the highest roll simply goes first - which can be an enemy.
-  if (opening && ACTIONS[opening.actionId] && opening.target?.alive) {
-    const oi = order.findIndex((s) => s.member === members[party.active]);
-    if (oi >= 0) turnPtr = oi;
-    beginTurn();
-    if (phase === 'player') {
-      armed = opening.actionId;
-      refresh();
-      handleEnemyClick(opening.target);
-    }
-  } else {
-    beginTurn();
-  }
 
   // Read-only handle for tests, plus a few live setters god mode (god.js) uses
   // to edit turn state in place. Tests only ever read phase/ap/armed/enemies;
@@ -1505,6 +1583,28 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     refresh,
   };
 
+  // Kick off the initiative order. Started from the persistent hotbar, the
+  // initiator AMBUSHES: the throwing member leads off regardless of their roll
+  // (they caught the coworker cold - the same reason distant enemies start
+  // surprised), then fires the armed opener as part of that turn. Otherwise
+  // the highest roll simply goes first - which can be an enemy.
+  // This runs AFTER window.__combat is published: an opening strike can kill
+  // the last enemy outright, and that victory's cleanup() deletes the handle -
+  // which a later assignment would have resurrected, leaving a dead controller
+  // on window while __game.inCombat said the fight was over.
+  if (opening && ACTIONS[opening.actionId] && opening.target?.alive) {
+    const oi = order.findIndex((s) => s.member === members[party.active]);
+    if (oi >= 0) turnPtr = oi;
+    beginTurn();
+    if (phase === 'player') {
+      armed = opening.actionId;
+      refresh();
+      handleEnemyClick(opening.target);
+    }
+  } else {
+    beginTurn();
+  }
+
   return {
     handleTileClick,
     handleEnemyClick,
@@ -1513,6 +1613,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // The body whose turn it is - a party member OR a summon you're driving.
     // main.js needs this because party.active can't point at a summon.
     get actingActor() { return active.actor; },
+    // ...and the sheet the HUD card is reflecting for that turn, so main.js's
+    // per-tile hooks repaint the RIGHT character when a step hurts them.
+    get actingSheet() { return active.sheet; },
     // Per-member turn snapshot, for the party bar's in-combat AP readout.
     get party() {
       return members.map((m) => ({ name: m.sheet.name, hp: m.sheet.hp, ap: m.ap, active: m === active }));

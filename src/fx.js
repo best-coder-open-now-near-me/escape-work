@@ -4,10 +4,18 @@ import { makeMaterial } from './shading.js';
 
 const pc = window.pc;
 
-// World point -> CSS-pixel screen point. worldToScreen works in device
-// pixels while the DOM works in CSS pixels, so every DOM element tracking a
-// world position (damage popups, loot labels, test helpers) must project
-// through this - a raw worldToScreen drifts on HiDPI displays.
+// World point -> CSS-pixel screen point. Every DOM element tracking a world
+// position (damage popups, loot labels, test helpers) projects through this.
+//
+// PlayCanvas's worldToScreen divides by the device's `clientRect` - which is
+// the canvas's getBoundingClientRect(), i.e. CSS pixels - so its output is
+// ALREADY CSS-space, whatever the backing store's resolution. This function
+// therefore just passes the coordinates through.
+// (It used to multiply by clientWidth/canvas.width "to convert device->CSS".
+// That was backwards, and only harmless because the engine defaults
+// maxPixelRatio to min(1, devicePixelRatio), leaving the factor exactly 1.
+// The moment anyone raised maxPixelRatio for a sharper canvas, every overlay
+// would have jumped toward the top-left by the DPR.)
 // Input and output vectors MUST be distinct: worldToScreen re-reads the
 // world point after writing the result (for the perspective divide), so
 // passing one vector as both corrupts the projection.
@@ -15,13 +23,7 @@ const _projIn = new pc.Vec3();
 const _projOut = new pc.Vec3();
 export function worldToScreenCss(app, cameraEntity, wx, wy, wz) {
   cameraEntity.camera.worldToScreen(_projIn.set(wx, wy, wz), _projOut);
-  const canvas = app.graphicsDevice.canvas;
-  // Device->CSS scale per axis. Under RESOLUTION_AUTO both factors equal the
-  // DPR, but scaling each axis by its own dimension keeps overlays correct if
-  // the canvas ever letterboxes (non-uniform device/CSS ratio).
-  const sx = canvas.clientWidth ? canvas.clientWidth / canvas.width : 1;
-  const sy = canvas.clientHeight ? canvas.clientHeight / canvas.height : 1;
-  return { x: _projOut.x * sx, y: _projOut.y * sy, behind: _projOut.z < 0 };
+  return { x: _projOut.x, y: _projOut.y, behind: _projOut.z < 0 };
 }
 
 let fxMats = null;

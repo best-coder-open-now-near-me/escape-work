@@ -58,7 +58,10 @@ export function serializeProgress(party, levelId) {
 }
 
 // Backfill fields older saves may predate, so no math ever meets undefined.
-function normalizeSheet(sheet) {
+// `version` is the save's own version (0 when it predates the field): a
+// migration that INVENTS state rather than defaulting it must run only for
+// saves old enough to need it, or it re-applies itself on every single load.
+function normalizeSheet(sheet, version = 0) {
   sheet.inventory ||= []; // saves from before pockets existed
   sheet.paper ??= 0;
   // v4: gum/bleed moved from numeric sheet fields into the status map. Carry any
@@ -75,9 +78,12 @@ function normalizeSheet(sheet) {
   // v5: equipment slots. The old "best carried stapler counts" rule became a
   // real weapon slot - auto-equip the best weapon still loose in the bag so no
   // migrated character loses the damage it used to get for free.
-  sheet.equipped ??= { weapon: null, outfit: null, trinket: null };
+  sheet.equipped ??= {};
   for (const slot of EQUIP_SLOTS) sheet.equipped[slot] ??= null;
-  if (!sheet.equipped.weapon) {
+  // ...and only for a save that predates the slots. On a current save an empty
+  // weapon slot is a CHOICE (you unequipped the stapler), and re-equipping the
+  // best bag weapon every load quietly overrode it.
+  if (version < 5 && !sheet.equipped.weapon) {
     let best = null;
     let bestDmg = 0;
     for (const id of sheet.inventory) {
@@ -97,13 +103,16 @@ function normalizeSheet(sheet) {
 // progress record in any known format. Level validity is the caller's check.
 export function parseProgress(raw) {
   if (!raw || typeof raw !== 'object') return null;
+  // Shape still decides HOW to read the save; `version` decides which one-time
+  // migrations still need to run over it (0 for the pre-version legacy shape).
+  const version = Number.isInteger(raw.version) ? raw.version : 0;
   if (Array.isArray(raw.party) && raw.party.length) {
     const active = Number.isInteger(raw.active) && raw.active >= 0 && raw.active < raw.party.length
       ? raw.active : 0;
-    return { levelId: raw.levelId, sheets: raw.party.map(normalizeSheet), active };
+    return { levelId: raw.levelId, sheets: raw.party.map((s) => normalizeSheet(s, version)), active };
   }
   if (raw.sheet && typeof raw.sheet === 'object') {
-    return { levelId: raw.levelId, sheets: [normalizeSheet(raw.sheet)], active: 0 };
+    return { levelId: raw.levelId, sheets: [normalizeSheet(raw.sheet, version)], active: 0 };
   }
   return null;
 }
