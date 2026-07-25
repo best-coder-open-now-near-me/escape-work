@@ -481,4 +481,50 @@ export const TILE_TYPES = {
     height: 1.77, scale: 0.71, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/shower', label: 'Shower',
   },
+
+  // --- Low Poly Office props (assets/office) --------------------------------
+  // Converted from the pack's Unity .fbx by tools/fbx-to-glb.py, which bakes
+  // in each model's Unity import scale - so these .glb files are in REAL
+  // METRES, unlike the two kits above (each of which has its own arbitrary
+  // authoring size). One factor converts the whole pack: `scale: 0.5`, which
+  // is not a fudge but a measurement - this pack's desk is 1.87m x 0.99m, and
+  // at 0.5 that lands at 0.94 x 0.50, matching the `desk` entry above to the
+  // centimetre. So `height` here is always the model's real height / 2, and a
+  // new prop from this pack needs no eyeballing: read its metres out of the
+  // converter's --report and halve them.
+  //
+  // These five take the last of the comfortable legend characters. Only `"`
+  // and `\` are left after them, and both need escaping inside a level's JSON
+  // map rows - so registering a sixth prop from this pack now means either
+  // living with that or retiring a tile type. The other 57 .glb files are in
+  // assets/office/ ready to register the moment a character frees up.
+  'filing-cabinet': {
+    char: "'", category: 'storage', solid: true,
+    height: 0.62, scale: 0.5, color: [0.2, 0.42, 0.58],
+    model: 'office/cabinets', label: 'Filing Cabinet',
+  },
+  'water-cooler': {
+    char: '`', category: 'breakroom', solid: true,
+    height: 1.18, scale: 0.5, color: [0.55, 0.6, 0.68],
+    model: 'office/waterCooler', label: 'Water Cooler',
+  },
+  'whiteboard': {
+    char: '{', category: 'work', solid: true,
+    height: 1.17, scale: 0.5, color: [0.85, 0.85, 0.87],
+    model: 'office/whiteBoard', label: 'Whiteboard',
+  },
+  'wet-floor-sign': {
+    char: '}', category: 'facilities', solid: true,
+    height: 0.48, scale: 0.5, color: [0.95, 0.78, 0.2],
+    model: 'office/caution_wetfloor', label: 'Wet Floor Sign',
+  },
+  // The one prop in the pack whose Unity scale factor is 1 rather than 4, so
+  // it converts to a 17cm model - desk clutter, not a floor unit. 2.0 restores
+  // the pack's own metres-based footing (0.5 x 4) and it reads as a real
+  // floor-standing shredder next to the cabinet.
+  'shredder': {
+    char: '|', category: 'work', solid: true,
+    height: 0.34, scale: 2.0, color: [0.3, 0.3, 0.34],
+    model: 'office/shredder', label: 'Shredder',
+  },
 };

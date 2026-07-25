@@ -1,10 +1,13 @@
 # Asset credits
 
-All third-party assets here are CC0 (public domain), free for commercial use.
+Most third-party assets here are CC0 (public domain), free for commercial use.
+The exception is `office/` - see **Office props** below, which is a PAID Unity
+Asset Store pack under a different licence. Check that section before assuming
+anything under `assets/` can be freely redistributed.
 
 The repo's own code is MIT (see `LICENSE` at the root). That covers the code
-only - everything under `assets/` is third-party CC0, credited below, and
-carries its own terms rather than the MIT grant.
+only - everything under `assets/` is third-party, credited below, and carries
+its own terms rather than the MIT grant.
 
 ## Furniture (environment)
 - **KayKit : Furniture Bits (1.0)** by **Kay Lousberg** — https://www.kaylousberg.com
@@ -41,3 +44,27 @@ carries its own terms rather than the MIT grant.
   | `characters/midmanager.glb` | `character-female-d` |
   | `characters/hrrep.glb` | `character-female-e` |
   | `characters/seniormanager.glb` | `character-female-f` |
+
+## Office props
+- **Low Poly Office Pack: Characters & Props (1.0)** by **Polygonal Mind** —
+  https://polygonalmind.com. Unity Asset Store product `119386`.
+
+  **Licence: not CC0** - a free Unity Asset Store download, so it comes under
+  the Asset Store EULA rather than the public-domain grant the rest of this
+  file describes. Free-to-download is not the same as public-domain: the EULA
+  covers shipping these models inside the game, which is what this repo does.
+  Worth knowing before anyone treats `office/` like the CC0 kits above and
+  reuses it elsewhere. `tools/` regenerates every file from the original
+  `.unitypackage` if the binaries ever need to come out of git.
+
+  The 62 props live in `office/`, converted from the pack's `.fbx` by
+  `tools/fbx-to-glb.py` (see `tools/README.md`). Filenames are the pack's own,
+  minus the redundant `mesh_` prefix. Unlike the kits above these are in real
+  metres, so `src/data/tiles.js` scales the whole pack by a single 0.5.
+  Five are registered as paintable tile types; the other 57 are in the repo
+  ready to register, the only limit being a free legend character each.
+
+  The pack's 29 characters and 5 Mixamo clips are NOT converted - the game's
+  character pipeline (`src/models.js`) expects the Kenney mini rig's 7-bone
+  skeleton and `idle`/`walk`/`attack-melee-right` clips, and this pack ships a
+  23-bone humanoid whose only clips are sitting and typing.
