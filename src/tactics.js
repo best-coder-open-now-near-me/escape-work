@@ -46,9 +46,67 @@ export const TACTICS = {
   REACTIONS_PER_ROUND: 1, // free swings a unit may take between its own turns
 };
 
-// Chebyshev distance: a diagonal costs the same as an orthogonal, which is how
-// the grid treats adjacency everywhere else (movement, shove range, melee).
+// Chebyshev distance: a diagonal costs the same as an orthogonal. Still the
+// right model for AREAS - which cells a blast or a summon placement covers -
+// but no longer how reach is measured (see inReach below).
 export const cheb = (ax, az, bx, bz) => Math.max(Math.abs(ax - bx), Math.abs(az - bz));
+
+// --- reach (TACTICS_PLAN "Revision - reach is a DISTANCE") -------------------
+
+// True distance between two continuous positions. Reach measures in this, not
+// in tiles: bodies live at continuous positions and the logical tile is only
+// Math.round of one, so a tile test can be off by up to 2.83 units.
+export const dist = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
+
+const SWEEP = 0.1; // segment sampling step for reachOpen, in tile-units
+
+// Is the straight line from (ax, az) to (bx, bz) free of solid edges? An arm
+// travels in a straight line, so this walks the segment and demands an open
+// edge at every tile boundary it crosses.
+//
+// Deliberately NOT `stepOpen`. That test's diagonal rule requires all four
+// edges around the crossed corner so a BODY cannot slip past a partition's end
+// - correct for movement, wrong for arms: reaching diagonally around the end of
+// a cubicle wall is a legitimate swing. Here a diagonal crossing (both axes
+// changing in one sample) passes if EITHER L-path around the corner is open,
+// which is the same permissiveness hasCover uses.
+//
+// Inert without an edge test (returns true), so a caller that hasn't wired one
+// gets pure distance rather than an exception - the shape hasCover uses.
+export function reachOpen(ax, az, bx, bz, edgeOpen) {
+  if (typeof edgeOpen !== 'function') return true;
+  const d = dist(ax, az, bx, bz);
+  if (d < 1e-9) return true;
+  const steps = Math.ceil(d / SWEEP);
+  let cx = Math.round(ax);
+  let cz = Math.round(az);
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const nx = Math.round(ax + (bx - ax) * t);
+    const nz = Math.round(az + (bz - az) * t);
+    if (nx === cx && nz === cz) continue;
+    if (nx !== cx && nz !== cz) {
+      // Corner crossing: either way around is a legal swing.
+      const viaX = edgeOpen(cx, cz, nx, cz) && edgeOpen(nx, cz, nx, nz);
+      const viaZ = edgeOpen(cx, cz, cx, nz) && edgeOpen(cx, nz, nx, nz);
+      if (!viaX && !viaZ) return false;
+    } else if (!edgeOpen(cx, cz, nx, nz)) {
+      return false;
+    }
+    cx = nx;
+    cz = nz;
+  }
+  return true;
+}
+
+// Can something at (ax, az) with reach `r` touch (bx, bz)? Distance within
+// reach AND nothing solid in the way. The one predicate every melee site reads
+// - swings, shoves, opportunity attacks, and the melee/ranged split in
+// positionMods - so reach means one thing everywhere.
+export function inReach(ax, az, bx, bz, r, edgeOpen = null) {
+  if (dist(ax, az, bx, bz) > r) return false;
+  return reachOpen(ax, az, bx, bz, edgeOpen);
+}
 
 // A unit threatens the eight tiles around it. Everyone can threaten: since
 // EQUIPMENT_PLAN M3 every combatant has a basic melee swing (its weapon's, or

@@ -6,8 +6,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   toHitTerms, cheb, threatens, provokedBy, hasCover, isFlanked, isBackstab, positionMods,
+  dist, reachOpen, inReach,
 } from '../../src/tactics.js';
-import { HIT, hitChance } from '../../src/stats.js';
+import { HIT, REACH, hitChance } from '../../src/stats.js';
 
 test('an empty pair is all zeroes - no accidental baseline', () => {
   assert.deepEqual(toHitTerms(), { acc: 0, dodge: 0, mods: 0 });
@@ -75,6 +76,70 @@ test('cheb treats a diagonal as one step, like the rest of the grid', () => {
   assert.equal(cheb(0, 0, 1, 1), 1);  // diagonal is adjacent
   assert.equal(cheb(0, 0, 2, 0), 2);
   assert.equal(cheb(3, 3, 1, 2), 2);  // max of the two axes, not the sum
+});
+
+// --- reach as a distance (TACTICS_PLAN revision, M1) ------------------------
+
+// A symmetric solid edge between two tiles - what grid.edgeOpen reports for a
+// partition, which blocks whichever way you cross it.
+const wallBetween = (ax, az, bx, bz) => (x, z, nx, nz) =>
+  !((x === ax && z === az && nx === bx && nz === bz)
+    || (x === bx && z === bz && nx === ax && nz === az));
+
+test('dist is true Euclidean distance, not a grid step', () => {
+  assert.equal(dist(0, 0, 3, 4), 5);
+  assert.ok(Math.abs(dist(0, 0, 1, 1) - Math.SQRT2) < 1e-9); // a diagonal is 1.41, not 1
+  assert.equal(dist(2, 2, 2, 2), 0);
+});
+
+test('REACH.DEFAULT keeps every attack that LOOKS adjacent and drops the rest', () => {
+  const r = REACH.DEFAULT;
+  assert.equal(inReach(0, 0, 1, 0, r), true);        // orthogonal centres: 1.0
+  assert.equal(inReach(0, 0, 1, 1, r), true);        // diagonal centres: 1.41
+  assert.equal(inReach(0, 0, 2, 0, r), false);       // two tiles out: 2.0
+  // The defect this revision exists to fix: both units are cheb-adjacent
+  // (tiles (0,0) and (1,1)) but sit at opposite far corners, 2.83 apart.
+  assert.equal(cheb(0, 0, 1, 1), 1);                 // ...the old rule said yes
+  assert.equal(inReach(-0.5, -0.5, 1.5, 1.5, r), false); // ...distance says no
+});
+
+test('reach is inclusive at the boundary', () => {
+  assert.equal(inReach(0, 0, 1.5, 0, 1.5), true);
+  assert.equal(inReach(0, 0, 1.51, 0, 1.5), false);
+});
+
+test('a longer reach buys exactly the distance it says', () => {
+  assert.equal(inReach(0, 0, 2, 0, REACH.DEFAULT), false);
+  assert.equal(inReach(0, 0, 2, 0, REACH.DEFAULT + 0.7), true); // a long handle
+});
+
+test('reachOpen is inert without an edge test rather than throwing', () => {
+  assert.equal(reachOpen(0, 0, 1, 0, null), true);
+  assert.equal(inReach(0, 0, 1, 0, REACH.DEFAULT, undefined), true);
+});
+
+test('a solid edge between two bodies blocks the swing', () => {
+  const wall = wallBetween(0, 0, 1, 0);
+  assert.equal(reachOpen(0, 0, 1, 0, wall), false);
+  assert.equal(inReach(0, 0, 1, 0, REACH.DEFAULT, wall), false); // in range, no line
+  assert.equal(reachOpen(0, 0, 0, 1, wall), true);               // a different face is open
+});
+
+test('reaching diagonally around a partition end works - either L-path is enough', () => {
+  // The rule stepOpen deliberately forbids for BODIES and reach allows for
+  // ARMS: one of the two ways around the corner is walled, the other is not.
+  const oneSide = wallBetween(0, 0, 1, 0);
+  assert.equal(reachOpen(0, 0, 1, 1, oneSide), true);
+  // Wall BOTH ways around the corner and the diagonal really is blocked.
+  const bothSides = (x, z, nx, nz) =>
+    wallBetween(0, 0, 1, 0)(x, z, nx, nz) && wallBetween(0, 0, 0, 1)(x, z, nx, nz);
+  assert.equal(reachOpen(0, 0, 1, 1, bothSides), false);
+});
+
+test('a body standing on the same tile always has a line to itself', () => {
+  const wall = wallBetween(0, 0, 1, 0);
+  assert.equal(reachOpen(0, 0, 0, 0, wall), true);
+  assert.equal(reachOpen(0.2, 0.1, 0.3, -0.1, wall), true); // sub-tile jitter, same cell
 });
 
 test('a unit threatens its eight neighbours and nothing further', () => {

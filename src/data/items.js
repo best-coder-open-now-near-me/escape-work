@@ -10,9 +10,13 @@
 //   slot       - equippable slot: 'weapon' | 'outfit' | 'trinket'. Equipping
 //                moves the item out of the bag into sheet.equipped[slot].
 //   stats      - equipped bonuses folded into derived numbers (stats.js
-//                equippedStats): dmg, soak, maxHp, maxAp, acc, dodge,
+//                equippedStats): dmg, soak, maxHp, maxAp, acc, dodge, reach,
 //                slipProof, moveCost, attrBonus:{grit,hustle,savvy,composure}
 //                moveCost multiplies the AP a tile costs - under 1 is faster
+//                reach ADDS tile-units to REACH.DEFAULT (a long handle). Keep
+//                it positive: below 1.41 a weapon can't hit a diagonally
+//                adjacent target and reads as broken, so shortness is
+//                expressed through dmg/acc instead (TACTICS_PLAN revision).
 //   attack     - (weapons) the basic-swing action id this weapon grants
 //                (data/actions.js), read by stats.equippedAction
 //   examine    - flavor line (items with no use are pure office archaeology)

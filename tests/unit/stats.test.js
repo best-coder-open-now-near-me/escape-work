@@ -7,7 +7,8 @@ import {
   spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist,
   accuracy, dodge, hitChance, rollHit, unitCombat,
   equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf,
-  PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS,
+  reachOf,
+  PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
@@ -572,4 +573,38 @@ test('the boots trade speed for traction', () => {
   assert.ok(moveCostOf(boots) > moveCostOf(runners), 'boots cost more per tile');
   assert.equal(equippedStats(boots).slipProof, true);
   assert.equal(equippedStats(runners).slipProof, false); // speed buys no grip
+});
+
+// --- reach (TACTICS_PLAN revision, M1) --------------------------------------
+
+test('a character with no weapon still has REACH.DEFAULT', () => {
+  // The floor, not a midpoint: bare hands can reach a diagonally adjacent
+  // target, because anything under 1.41 could not and would read as broken.
+  const bare = createSheet('office-drone');
+  bare.equipped = Object.fromEntries(EQUIP_SLOTS.map((s) => [s, null]));
+  assert.equal(reachOf(bare), REACH.DEFAULT);
+  assert.equal(equippedStats(bare).reach, 0);
+  assert.ok(REACH.DEFAULT > Math.SQRT2, 'the floor must clear a diagonal');
+});
+
+test('every current weapon leaves reach at the floor', () => {
+  // Reach is an upgrade axis, so the existing kit is deliberately unchanged -
+  // M2 must not silently shorten anybody's swing.
+  for (const [id, def] of Object.entries(ITEMS)) {
+    if (def.slot !== 'weapon') continue;
+    assert.equal(def.stats?.reach ?? 0, 0, `${id} carries no reach yet`);
+  }
+});
+
+test('an AI unit reads reach off its def, defaulting to the floor', () => {
+  assert.equal(unitCombat({ name: 'Coworker', hp: 5 }).reach, REACH.DEFAULT);
+  assert.equal(unitCombat({ name: 'Custodian', hp: 5, reach: 2.2 }).reach, 2.2);
+  // Zero is a real answer, not a missing one - `??` not `||`.
+  assert.equal(unitCombat({ name: 'Ghost', hp: 1, reach: 0 }).reach, 0);
+});
+
+test('the whole current bestiary inherits the default reach', () => {
+  for (const [id, def] of Object.entries(ENEMY_TYPES)) {
+    assert.equal(unitCombat(def).reach, REACH.DEFAULT, `${id} is at the floor`);
+  }
 });

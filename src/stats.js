@@ -76,6 +76,31 @@ export const MOVE = {
   COST_PER_TILE: 0.5, // AP per tile of clean floor (was an implicit 1.0)
 };
 
+// --- reach (TACTICS_PLAN "Revision - reach is a DISTANCE") -------------------
+// Melee reach is a DISTANCE between continuous positions, not tile adjacency.
+// The engine has always placed bodies continuously - `GridActor.x` is the
+// logical tile *derived* from the position via Math.round - and it already
+// charges movement per unit of real distance, so a diagonal step costs
+// 1.41x. Reach was the one system still measuring in grid cells, which let two
+// units at opposite far corners of diagonally adjacent tiles (hypot(2,2) =
+// 2.83 apart) trade swings while a deliberate walk-up stops at 0.85.
+//
+// DEFAULT is derived, not tasted: orthogonal tile centres are 1.0 apart and
+// diagonal ones 1.41, so 1.5 keeps every attack that LOOKS adjacent legal while
+// the 2.0-2.83 far-corner cases stop working. 1.0 would forbid diagonal attacks
+// (reads as a bug); 2.0 would readmit most of the pathology.
+//
+// A weapon's `stats.reach` ADDS to DEFAULT and is positive-only: below 1.41 a
+// weapon cannot hit a diagonal neighbour, which reads as broken however well
+// the flavour justifies it. So reach is an upgrade axis and DEFAULT is the
+// floor - a short weapon expresses itself through dmg/acc instead.
+export const REACH = {
+  DEFAULT: 1.5,
+  // A shove is arms-length whatever you are holding: a broom must not become a
+  // telekinesis upgrade. Its own constant, deliberately not weapon reach.
+  SHOVE: 1.5,
+};
+
 export const ATTR_KEYS = ['grit', 'hustle', 'savvy', 'composure'];
 
 // Equipment slots (EQUIPMENT_PLAN.md): a damage choice, a defense choice, a
@@ -262,6 +287,10 @@ export function unitCombat(def) {
     // the same passthrough every other unit stat uses (HIT_PLAN.md).
     accuracy: def.accuracy || 0,
     dodge: def.dodge || 0,
+    // Melee reach. An AI unit wears no weapon, so its reach is stated on the
+    // def outright rather than derived from equipment - a coworker with a long
+    // handled thing sets `reach` and everyone else inherits the floor.
+    reach: def.reach ?? REACH.DEFAULT,
   };
 }
 
@@ -270,11 +299,12 @@ export function unitCombat(def) {
 // trinket's attribute bump all reach the numbers the same way. Empty for an
 // unequipped sheet.
 export function equippedStats(sheet) {
-  const out = { dmg: 0, soak: 0, maxHp: 0, maxAp: 0, acc: 0, dodge: 0, slipProof: false, moveCost: 1, attrBonus: {} };
+  const out = { dmg: 0, soak: 0, maxHp: 0, maxAp: 0, acc: 0, dodge: 0, reach: 0, slipProof: false, moveCost: 1, attrBonus: {} };
   const eq = sheet.equipped || {};
   for (const slot of EQUIP_SLOTS) {
     const st = ITEMS[eq[slot]]?.stats;
     if (!st) continue;
+    out.reach += st.reach || 0; // a long weapon extends REACH.DEFAULT (positive-only)
     out.dmg += st.dmg || 0;
     out.soak += st.soak || 0;
     out.maxHp += st.maxHp || 0;
@@ -331,6 +361,13 @@ export function effectiveAttr(sheet) {
 export function damageBonus(sheet) {
   const savvy = Math.floor((effectiveAttr(sheet).savvy || 0) / PROGRESSION.DMG_PER_SAVVY);
   return (sheet.bonusDmg || 0) + savvy + equippedStats(sheet).dmg;
+}
+
+// A sheet's melee reach in tile-units: the floor every character has, plus
+// whatever the equipped weapon extends it by. The one number the reach test
+// consumes for a party member; AI units read `def.reach` (see unitCombat).
+export function reachOf(sheet) {
+  return REACH.DEFAULT + (equippedStats(sheet).reach || 0);
 }
 
 // Composure buys flat damage mitigation - a small amount shaved off every
