@@ -194,9 +194,16 @@ export function toast(text, ms = 2600) {
 // pressure - it is a real bar now, with XP as a thin rule beneath it, and it
 // changes colour as you get hurt. `portrait` is an optional <canvas> the
 // caller keeps updated (a live headshot); it is slotted in on the left.
-export function updateStatsHud(sheet, portrait = null) {
+// The portrait is STICKY: pass it when it changes (a new leader, or a portrait
+// that just finished rendering) and omit it everywhere else. Without this,
+// every incidental refresh - using an item, taking a hit - would have to know
+// about portraits just to avoid blanking one.
+let lastPortrait = null;
+export function updateStatsHud(sheet, portraitUrl = undefined) {
+  if (portraitUrl !== undefined) lastPortrait = portraitUrl || null;
   const el = document.getElementById('stats');
   if (!el || !sheet) return;
+  const portrait = lastPortrait;
   const hpFrac = Math.max(0, Math.min(1, sheet.maxHp ? sheet.hp / sheet.maxHp : 0));
   const xpFrac = Math.max(0, Math.min(1, sheet.xpNext ? sheet.xp / sheet.xpNext : 0));
   // Green while healthy, amber under half, red when it is nearly over.
@@ -208,7 +215,9 @@ export function updateStatsHud(sheet, portrait = null) {
     <span style="display:flex; align-items:center; gap:9px;">
       <span id="stats-portrait-slot" style="display:${portrait ? 'block' : 'none'};
         width:46px; height:46px; border-radius:8px; overflow:hidden;
-        border:1px solid #3a3a52; background:#15151f; flex:none;"></span>
+        border:1px solid #3a3a52; background:#15151f; flex:none;">
+        ${portrait ? `<img src="${portrait}" alt="" style="width:100%; height:100%; display:block;">` : ''}
+      </span>
       <span style="display:block; min-width:172px;">
         <span style="display:flex; justify-content:space-between; font-size:12px; opacity:.85;">
           <b style="letter-spacing:.5px;">${sheet.name || ''}</b><span>Lv ${sheet.level}</span>
@@ -229,14 +238,6 @@ export function updateStatsHud(sheet, portrait = null) {
           color:#8adf76;">⬆ ${points} unspent point${points === 1 ? '' : 's'} — press C</span>` : ''}
       </span>
     </span>`;
-  if (portrait) {
-    const slot = el.querySelector('#stats-portrait-slot');
-    if (slot && portrait.parentElement !== slot) {
-      slot.innerHTML = '';
-      Object.assign(portrait.style, { width: '100%', height: '100%', display: 'block' });
-      slot.appendChild(portrait);
-    }
-  }
   renderStatusEffects(sheet);
 }
 
