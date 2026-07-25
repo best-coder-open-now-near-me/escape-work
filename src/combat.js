@@ -741,7 +741,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           // No carpeting a tile a party member is standing on.
           if (members.some((m) => m.sheet.hp > 0 && m.actor?.x === x && m.actor?.z === z)) continue;
           if (!world.hasLos(active.actor.x, active.actor.z, x, z)) continue;
-          world.leaveSurface(x, z, a.leaves);
+          world.leaveSurface(x, z, a.leaves, a.leavesTurns || 0);
         }
       }
     }

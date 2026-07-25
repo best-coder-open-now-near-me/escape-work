@@ -1,6 +1,5 @@
 // Equipment verbs (EQUIPMENT_PLAN M2): equip a weapon from the pockets into
-// its slot, stow it back, and the full-pockets refusal that keeps gear from
-// vanishing. Driven through the real inventory-panel DOM.
+// its slot and stow it back, driven through the real inventory-panel DOM.
 import { test, expect } from '@playwright/test';
 import { bootAndPick } from './helpers.js';
 
@@ -26,21 +25,21 @@ test('equip a weapon from the pockets, then stow it back', async ({ page }) => {
   expect(await page.evaluate(() => window.__game.stats.inventory.includes('red-stapler'))).toBe(true);
 });
 
-test('unequip is refused politely when the pockets are full', async ({ page }) => {
+test('unequip always succeeds - there is no carry limit to refuse for', async ({ page }) => {
   test.setTimeout(300_000);
   await bootAndPick(page, 'office-drone');
-  // A weapon in hand, and a bag stuffed to its cap.
+  // A weapon in hand and a deliberately enormous bag. This used to be refused
+  // at ten items; pockets are unlimited now, so gear always has somewhere to go.
   await page.evaluate(() => {
     const s = window.__god.player;
     s.equipped.weapon = 'red-stapler';
-    s.inventory = new Array(10).fill('paper-wad'); // INV_CAP
+    s.inventory = new Array(40).fill('paper-wad');
   });
   await page.keyboard.press('i');
   await expect(page.locator('#inventory-panel')).toBeVisible();
   await page.click('#equip-unequip-weapon');
-  // Refused - the weapon stays equipped, nothing was lost.
-  await expect(page.locator('#subtitle')).toContainText('full');
-  expect(await page.evaluate(() => window.__game.stats.equipped.weapon)).toBe('red-stapler');
+  await expect.poll(() => page.evaluate(() => window.__game.stats.equipped.weapon)).toBe(null);
+  expect(await page.evaluate(() => window.__game.stats.inventory.length)).toBe(41);
 });
 
 test('a basic weapon attack is always on the bar; the weapon defines it', async ({ page }) => {
@@ -93,4 +92,15 @@ test('the shoes slot equips footwear', async ({ page }) => {
   await page.click('#inv-equip-0');
   await expect.poll(() => page.evaluate(() => window.__game.stats.equipped.shoes)).toBe('warehouse-boots');
   await expect(page.locator('#equip-slot-shoes')).toContainText('Warehouse Boots');
+});
+
+test('the Send button hands an item to another party member', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootAndPick(page, 'office-drone');
+  // Alone, there is nobody to hand anything to - so no button at all.
+  await page.evaluate(() => { window.__god.player.inventory = ['cold-coffee']; });
+  await page.keyboard.press('i');
+  await expect(page.locator('#inventory-panel')).toBeVisible();
+  await expect(page.locator('#inv-row-0')).toBeVisible();
+  expect(await page.locator('#inv-send-0').count()).toBe(0);
 });

@@ -165,6 +165,12 @@ function startGame(level) {
     // Equipping changes derived stats AND the basic weapon swing on the bars -
     // refresh the HUD, hotbar, and char sheet.
     onGearChange: () => refreshProgressUi(),
+    // Everyone else still standing can be handed an item. The recipient's
+    // sheet takes it directly - pockets are unlimited, so there is nothing to
+    // refuse for.
+    recipients: () => (party?.members || [])
+      .filter((m) => m !== partyLeader(party) && m.sheet.hp > 0)
+      .map((m) => ({ name: m.sheet.name, take: (id) => m.sheet.inventory.push(id) })),
   });
 
   function abortCombat() {
@@ -291,6 +297,25 @@ function startGame(level) {
   // sheet's look resolves back through its class/companion entry.
   const sheetLook = (sh) => (sh?.classId && CLASSES[sh.classId]?.look)
     || (sh?.companionId && COMPANIONS[sh.companionId]?.look) || null;
+  // Surfaces a power DROPS during a fight are litter, not terrain: Bulk Mail's
+  // paper drifts clear a few rounds later, so a cone can't permanently repaint
+  // the floor (nor leave a renewable ammo pile behind it). Tracked here rather
+  // than in surfaces-runtime because reverting needs the grid AND the visual,
+  // both of which live on this side.
+  const tempSurfaces = new Map(); // "x,z" -> { left, type }
+  function ageTempSurfaces() {
+    for (const [key, t] of [...tempSurfaces]) {
+      const [x, z] = key.split(',').map(Number);
+      // Fire ate it, or something repainted the tile - either way it is no
+      // longer ours to clean up.
+      if (grid.typeAt(x, z) !== t.type) { tempSurfaces.delete(key); continue; }
+      if (t.left > 1) { t.left -= 1; continue; }
+      tempSurfaces.delete(key);
+      grid.setType(x, z, 'floor');
+      scene.hideSurfaceVisual(x, z);
+      loot.forgetPaper?.(x, z); // a fresh drift here later is gatherable again
+    }
+  }
   const portraits = createPortraits(app);
   // A portrait finishing is the only reason to repaint for it: refresh the
   // corner readout (if it belongs to whoever we are controlling) and the
@@ -1203,10 +1228,13 @@ function startGame(level) {
         stickGum,
         // Cone attacks carpet plain floor with a surface tile (Bulk Mail ->
         // paper). Only bare floor converts - carpets, surfaces, props stay.
-        leaveSurface: (x, z, tileType) => {
+        // `turns` > 0 marks the surface as LITTER rather than terrain: it
+        // clears itself after that many rounds (see ageTempSurfaces).
+        leaveSurface: (x, z, tileType, turns = 0) => {
           if (grid.typeAt(x, z) !== 'floor') return false;
           grid.setType(x, z, tileType);
           scene.addSurfaceVisual(x, z, tileType);
+          if (turns > 0) tempSurfaces.set(x + ',' + z, { left: turns, type: tileType });
           return true;
         },
         // Anyone alive is a legal target - bystanders outside the initial
@@ -1254,7 +1282,7 @@ function startGame(level) {
         updateHud: (s = sheet) => ui.updateStatsHud(s || sheet),
         // One combat round = one fire/smoke turn (combat.js calls this as it
         // hands the turn back to the player).
-        onRound: () => runtime.advanceTurn(),
+        onRound: () => { runtime.advanceTurn(); ageTempSurfaces(); },
         onEnemyKilled: awardKill,
         onWin: () => {
           inCombat = false;

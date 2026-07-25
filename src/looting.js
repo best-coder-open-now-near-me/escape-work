@@ -12,16 +12,24 @@ import { PAPER_CAP, equipItem, unequipItem } from './stats.js';
 import { placeDroppedItem } from './tile-renderer.js';
 import * as ui from './ui.js';
 
-export const INV_CAP = 10;
+// No carry limit. The cap only ever produced overflow-onto-the-floor and
+// "pockets are full" refusals, which is friction without a decision attached -
+// you never chose WHAT to leave behind, the tenth item just fell out. Kept as
+// a named export (Infinity) so every guard site stays honest without each one
+// growing a special case.
+export const INV_CAP = Infinity;
 
 // `extraEntries` (optional) lets the host add non-loot entries to the Alt
 // overlay (doors) without this module knowing what they are.
-export function createLooting({ app, grid, runtime, enemies, getActor, getSheet, isInCombat, isGameOver, approachAndDo, extraEntries = null, onGearChange = null }) {
+export function createLooting({ app, grid, runtime, enemies, getActor, getSheet, isInCombat, isGameOver, approachAndDo, extraEntries = null, onGearChange = null, recipients = null }) {
   const containerLoot = new Map(); // "x,z" -> remaining item ids (rolled on first rummage)
   const looseItems = []; // { x, z, id, entity } - dropped/overflowed floor items
   const harvestedPaper = new Set(); // "x,z" of paper drifts already gathered for ammo
 
   const itemName = (id) => ITEMS[id]?.name || id;
+  // A temporary drift that expires takes its harvested-here mark with it, so a
+  // later drift on the same tile is gatherable again (main.js ageTempSurfaces).
+  const forgetPaper = (x, z) => harvestedPaper.delete(x + ',' + z);
   const looseAt = (x, z) => looseItems.filter((li) => li.x === x && li.z === z);
   // Live, still-gatherable paper: a paper drift (not burning/burnt - runtime
   // reports 'fire'/null for those) that hasn't been picked clean yet. The
@@ -37,7 +45,32 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     onExamine: (i) => ui.say(ITEMS[getSheet().inventory[i]]?.examine || 'It is what it is.'),
     onEquip: (i) => equip(i),
     onUnequip: (slot) => unequip(slot),
+    onSend: (i, btn) => sendItem(i, btn),
+    canSend: () => (recipients?.() || []).length > 0,
   });
+
+  // Hand an item to another party member. Pockets are unlimited, so this can
+  // never fail for space - the only reason it is unavailable is having nobody
+  // to hand it TO, which is why the button hides itself when travelling alone.
+  function sendItem(i, btn) {
+    const sheet = getSheet();
+    if (!sheet || i >= sheet.inventory.length) return;
+    const to = recipients?.() || [];
+    if (!to.length) { ui.say('There is nobody else to hand it to.'); return; }
+    const id = sheet.inventory[i];
+    const r = btn?.getBoundingClientRect?.();
+    ui.showMenu(r ? r.right + 4 : 200, r ? r.top : 200, to.map((m) => ({
+      label: `Give to ${m.name}`,
+      action: () => {
+        const at = sheet.inventory.indexOf(id);
+        if (at < 0) return; // it moved while the menu was open
+        sheet.inventory.splice(at, 1);
+        m.take(id);
+        ui.say(`You hand the ${itemName(id)} to ${m.name}.`);
+        invPanel.refresh(sheet);
+      },
+    })));
+  }
   const lootLabels = ui.createLootLabels();
 
   function dropLoose(x, z, id) {
@@ -288,6 +321,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     get labelsVisible() { return lootLabels.visible; },
     // Spawn a loose floor item at a tile (god mode's "drop on ground").
     dropAt: (x, z, id) => dropLoose(x, z, id),
+    forgetPaper,
     // Read-only views for the window.__game debug/test surface.
     debug: {
       looseItems: () => looseItems.map((li) => ({ x: li.x, z: li.z, id: li.id })),

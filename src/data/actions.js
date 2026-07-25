@@ -116,6 +116,10 @@ export const ACTIONS = {
     ap: 3,
     cone: { range: 4, halfAngle: 35 },
     leaves: 'paper',
+    // The drifts are litter, not terrain - they clear this many rounds later
+    // (main.js ageTempSurfaces), so a cone cannot permanently repaint a room
+    // or leave a renewable ammo pile behind it.
+    leavesTurns: 4,
     label: 'Bulk Mail',
     desc: 'Bulk mail in a wide wedge. Carpets the floor with paper behind it.',
     min: 2,

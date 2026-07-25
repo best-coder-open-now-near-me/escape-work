@@ -401,7 +401,7 @@ export function createLootLabels() {
 // Equip-slot display names (In Hand / Dress Code / Flair).
 const SLOT_LABELS = { weapon: 'In Hand', outfit: 'Dress Code', trinket: 'Flair', shoes: 'On Foot' };
 
-export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onEquip, onUnequip }) {
+export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onEquip, onUnequip, onSend, canSend }) {
   const bag = document.createElement('button');
   bag.id = 'inventory-btn';
   bag.textContent = '🎒';
@@ -476,7 +476,7 @@ export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onE
   function refresh(sheet) {
     const inv = sheet?.inventory || [];
     panel.innerHTML = `<div style="font-weight:700; letter-spacing:1px; margin-bottom:7px;">
-      POCKETS <span style="opacity:.6; font-weight:400;">${inv.length}/${cap}</span></div>`;
+      POCKETS <span style="opacity:.6; font-weight:400;">${Number.isFinite(cap) ? `${inv.length}/${cap}` : inv.length}</span></div>`;
     if (sheet?.equipped) renderEquipStrip(sheet);
     // Paper is ammo, not an inventory item - it lives on the sheet, not in the
     // bag - but it was only ever a number in the header, so it read as missing.
@@ -531,6 +531,14 @@ export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onE
         ex.id = `inv-examine-${i}`;
         ex.onclick = () => onExamine(i);
         row.appendChild(ex);
+      }
+      // Hand it to another member. Hidden when travelling alone - a button
+      // that can only ever say "there is nobody" is not worth the width.
+      if (onSend && canSend?.()) {
+        const send = smallBtn('Send', 'Hand it to another party member');
+        send.id = `inv-send-${i}`;
+        send.onclick = () => onSend(i, send);
+        row.appendChild(send);
       }
       const drop = smallBtn('Drop', 'Leave it on the floor');
       drop.id = `inv-drop-${i}`;
