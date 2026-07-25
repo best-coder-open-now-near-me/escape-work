@@ -44,8 +44,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const members = party.members.map((m) => {
     const usesLeft = {};
     for (const id of m.sheet.actions) if (ACTIONS[id].uses) usesLeft[id] = ACTIONS[id].uses;
-    // `done` marks a member End Turn has passed - it gates the auto-advance,
-    // never the member (switch back manually and they can still act).
     return { sheet: m.sheet, actor: m.actor, ap: m.sheet.maxAp, usesLeft };
   });
   let active = members[party.active];
@@ -1053,10 +1051,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     aimPoint = null;
     refresh();
   }
-  // End Turn queues through the party: it ends the ACTIVE member's turn and
-  // hands the floor to the next member who hasn't ended theirs - only the
-  // last hand-off gives the round to the enemies. One member = the old
-  // button exactly.
+  // End Turn ends the ACTING unit's turn and initiative moves on - the next
+  // slot may be a teammate, a summon you're driving, or an enemy. (It used to
+  // queue through the party side before per-unit initiative replaced the
+  // two-phase spine.)
   endBtn.onclick = () => {
     if (phase !== 'player') return;
     advanceTurn();
