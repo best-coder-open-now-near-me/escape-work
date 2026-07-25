@@ -2,6 +2,12 @@ name: CI
 
 # Three tiers, because the right amount of checking depends on the change.
 #
+# NB the tiers are about LATENCY, not cost: this repo is public, so standard
+# runners are free and unlimited. The full suite is kept off branch pushes
+# because waiting ~35 minutes for an answer is the problem, not the bill. If
+# that ever stops mattering, widen the `if:` on the e2e job - there is no
+# longer a budget reason not to.
+#
 # Put `[quick]` in the commit message for a change you will SEE - a colour, a
 # material, a model swap, copy. The browser tests never checked pixels anyway
 # (they assert state and clicks), so for anything visual, playing it for five
@@ -140,4 +146,4 @@ jobs:
             playwright-report/
             test-results/
           if-no-files-found: ignore
-          retention-days: 7   # the default 90 costs storage quota too
+          retention-days: 7   # a failed run's trace is worth days, not months

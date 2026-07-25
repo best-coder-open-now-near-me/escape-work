@@ -31,9 +31,19 @@ jobs:
     runs-on: ubuntu-latest
     # workflow_run fires on success AND failure - only ship a green CI run.
     # (A manual workflow_dispatch has no triggering run and passes through.)
+    #
+    # The event and head_repository checks are what make this safe on a PUBLIC
+    # repo. `branches: [main]` above filters the triggering run's HEAD branch,
+    # and a fork's branch can be called "main" too - so a stranger could open a
+    # PR from fork:main, CI would run it, this workflow would fire, check out
+    # THEIR commit, and push it to our itch.io page using BUTLER_API_KEY.
+    # Requiring a `push` event from this repository closes that: fork PRs
+    # trigger `pull_request` runs owned by the fork, never a push to ours.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     steps:
       - name: Checkout
         # Build the exact commit CI verified, not whatever main points at now.
