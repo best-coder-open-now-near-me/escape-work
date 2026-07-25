@@ -27,6 +27,10 @@ export function startEditor(app, levelData, stashKey) {
   let height = 0;
   let levelName = '';
   let levelNext; // preserved through export so campaigns survive editing
+  // ...and so is `depth`: main.js scales every enemy on the floor by it
+  // (effectiveLevel), so dropping it on the load -> export round trip silently
+  // demoted a deep floor's coworkers back to level 1.
+  let levelDepth;
   // Edge walls (partitions between tiles) - same Sets grid.js parses.
   let hWalls = new Set();
   let vWalls = new Set();
@@ -235,7 +239,12 @@ export function startEditor(app, levelData, stashKey) {
   function renderAll() {
     for (const list of cellEntities.values()) for (const e of list) e.destroy();
     cellEntities.clear();
-    cellVersion.clear();
+    // Deliberately NOT cellVersion.clear(): the versions are what tell a model
+    // load still in flight that its cell has moved on. Resetting them restarted
+    // the counter at 1, so a .glb requested before a load/resize compared equal
+    // on arrival, passed the staleness guard, and pushed itself into the
+    // orphaned entity list - an undeletable prop floating over the new map.
+    for (const [k, v] of cellVersion) cellVersion.set(k, v + 1);
     electrified = computeElectrifiedSet();
     carpet = computeCarpet();
     for (let z = 0; z < height; z++) for (let x = 0; x < width; x++) renderCell(x, z);
@@ -266,8 +275,16 @@ export function startEditor(app, levelData, stashKey) {
     });
     ({ h: hWalls, v: vWalls } = parseWallRuns(data.walls));
     ({ h: hDoors, v: vDoors } = parseWallRuns(data.doors));
+    // A door REPLACES any wall on its edge (grid.js applies the same rule when
+    // the game parses a level). A hand-authored file may legitimately run a
+    // wall straight through a doorway; without this the editor rendered both
+    // on one edge, lost the wall entity's handle so it could never be erased,
+    // and exported the edge into `walls` AND `doors`.
+    for (const k of hDoors) hWalls.delete(k);
+    for (const k of vDoors) vWalls.delete(k);
     levelName = data.name || 'Untitled Floor';
     levelNext = data.next;
+    levelDepth = data.depth;
     renderAll();
   }
 
@@ -354,7 +371,11 @@ export function startEditor(app, levelData, stashKey) {
     for (const [id, def] of Object.entries(TILE_TYPES)) tiles[def.char] = id;
     const actors = { [PLAYER_CHAR]: 'player' };
     for (const [id, def] of Object.entries(ENEMY_TYPES)) actors[def.char] = id;
-    const out = { name: levelName, tiles, actors, map: rows.map((r) => r.join('')) };
+    // Key order mirrors the hand-authored files in levels/, so a re-export
+    // diffs cleanly against the original.
+    const out = { name: levelName };
+    if (levelDepth != null) out.depth = levelDepth;
+    Object.assign(out, { tiles, actors, map: rows.map((r) => r.join('')) });
     const walls = compressWallRuns(hWalls, vWalls);
     if (walls.length) out.walls = walls;
     const doors = compressWallRuns(hDoors, vDoors);
@@ -501,6 +522,10 @@ export function startEditor(app, levelData, stashKey) {
   document.body.appendChild(bar);
 
   function showExport() {
+    // One modal at a time - a second Export click used to stack another
+    // full-screen overlay with duplicate #export-modal / #export-json ids,
+    // and Close only dismissed the top one.
+    document.getElementById('export-modal')?.remove();
     const div = document.createElement('div');
     div.id = 'export-modal';
     Object.assign(div.style, {
@@ -542,7 +567,7 @@ export function startEditor(app, levelData, stashKey) {
     // World point -> CSS-pixel screen point, so tests can click precise
     // ground points (mouse events arrive in CSS pixels).
     project(x, z) {
-      const s = worldToScreenCss(app, controls.cameraEntity, x, 0, z);
+      const s = worldToScreenCss(controls.cameraEntity, x, 0, z);
       return { x: s.x, y: s.y };
     },
     charAt: (x, z) => rows[z]?.[x],

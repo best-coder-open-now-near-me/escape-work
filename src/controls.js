@@ -5,7 +5,7 @@ import { applyCameraPostFx } from './shading.js';
 
 const pc = window.pc;
 
-export function createControls({ app, canvas, focus, onLeftClickTile, onRightClickTile, onAnyLeftPress, onLeftDragTile, onHover }) {
+export function createControls({ app, canvas, focus, onLeftClickTile, onRightClickTile, onAnyLeftPress, onLeftDragTile, onHover, onHoverLeave }) {
   // Rig: camYaw (spins around the focus) -> camPitch (tilts) -> camera (sits
   // back at a fixed distance, looking at the focus).
   const camYaw = new pc.Entity('camYaw');
@@ -55,6 +55,7 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
 
   let orbiting = false;
   let leftHeld = false; // for drag-painting in the editor
+  let hoveringCanvas = false; // was the last hover over the world, not the UI?
   app.mouse.on(pc.EVENT_MOUSEDOWN, (e) => {
     if (!onCanvas(e)) return;
     if (e.button === pc.MOUSEBUTTON_MIDDLE) {
@@ -80,8 +81,17 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
       apply();
     } else if (leftHeld && onLeftDragTile && onCanvas(e)) {
       onLeftDragTile(screenToTile(e.x, e.y), screenToGround(e.x, e.y));
-    } else if (onHover && onCanvas(e)) {
-      onHover(screenToGround(e.x, e.y), e.x, e.y);
+    } else if (onCanvas(e)) {
+      hoveringCanvas = true;
+      onHover && onHover(screenToGround(e.x, e.y), e.x, e.y);
+    } else if (hoveringCanvas) {
+      // The cursor slid off the world and onto DOM UI. Say so ONCE: hover
+      // events over UI used to be dropped entirely, so nothing ever told the
+      // game the world hover had ended - the enemy you slid off kept its
+      // highlight and the focus banner kept naming them the whole time the
+      // pointer sat on the hotbar.
+      hoveringCanvas = false;
+      onHoverLeave && onHoverLeave();
     }
   });
   app.mouse.on(pc.EVENT_MOUSEWHEEL, (e) => {

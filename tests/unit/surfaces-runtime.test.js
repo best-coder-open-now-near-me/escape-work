@@ -76,6 +76,25 @@ test('fire reaching an explosive prop detonates it exactly once', () => {
   assert.deepEqual(booms, [[1, 0]]);
 });
 
+// The fuse is a TELEGRAPH: the turn between "the fire reached the printer" and
+// "the printer goes off" is the turn you get to walk away. A fuse armed by this
+// turn's spread must not also be ticked by this turn's fuse step, or
+// PRINTER_FUSE_TURNS = 1 silently behaves as a zero-turn fuse and the blast
+// lands on whoever was standing there with no warning at all.
+test('an armed fuse does not detonate on the same turn the fire reached it', () => {
+  const booms = [];
+  const grid = stubGrid({
+    surfaces: { '0,0': 'paper' },
+    defs: { '1,0': { explosive: true } },
+  });
+  const rt = createSurfaceRuntime({ grid, hooks, onExplosion: (x, z) => booms.push([x, z]) });
+  rt.ignite(0, 0);
+  rt.advanceTurn(); // the fire spreads to the prop and ARMS the fuse
+  assert.deepEqual(booms, [], 'the turn the fuse is lit is a warning, not the boom');
+  rt.advanceTurn(); // now it elapses
+  assert.deepEqual(booms, [[1, 0]], 'and detonates on the very next turn');
+});
+
 test('an explosion ignites adjacent flammable surfaces', () => {
   // (0,0) paper to start the fire, an explosive prop at (1,0), fresh paper at
   // (2,0) beside the prop. The blast should light that paper.

@@ -29,9 +29,18 @@ src/
     companions.js      recruitable coworkers: an NPC-shaped presence plus a
                        class-shaped stat block; dialogue options can carry
                        effect: { recruit } to sign them onto the party
+    levels.js          the floor registry: id -> level JSON + display name
+    statuses.js        status registry: name/icon, clock (turn vs step),
+                       duration, and the effects they carry
   grid.js            Level parsing, terrain + edge-wall queries (pure logic)
   pathfinding.js     8-dir Dijkstra, string-pulling smoother, free-point
                      clamping, distance-budget truncation      (pure logic)
+  statuses.js        The status runtime: apply/tick/clear over a carrier's
+                     status map, both clocks                   (pure logic)
+  tactics.js         Positional to-hit modifiers: facing, flanking, cover
+                     (TACTICS_PLAN.md)                         (pure logic)
+  surfaces-runtime.js Fire/smoke/fuse state machine, advanced one turn at a
+                     time over a grid interface                (pure logic)
   stats.js           Character sheet, XP/levels, damage       (pure logic)
   party.js           The roster: members (sheet + actor), the active
                      leader, XP fan-out, campaign-save format + the
@@ -69,12 +78,15 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 
 ## Layering
 
-- `data/*` imports nothing.
-- `grid`, `pathfinding`, `stats`, `party`, `surfaces-runtime` are pure JS (no
-  PlayCanvas, no DOM) - unit tested in isolation (tests/unit).
+- `data/*` imports nothing (`data/levels.js` is the one exception - it imports
+  the level JSON files, which are themselves data).
+- `grid`, `pathfinding`, `stats`, `party`, `surfaces-runtime`, `initiative`,
+  `statuses`, `tactics` are pure JS (no PlayCanvas, no DOM) - unit tested in
+  isolation (tests/unit).
 - `scene`, `shading`, `tile-renderer`, `models`, `controls`, `picking`,
-  `actors` touch PlayCanvas; `ui`, `combat`, `looting` touch the DOM; `fx`
-  touches both (world-tracking popups).
+  `actors` touch PlayCanvas; `ui` touches the DOM; `fx`, `combat` and
+  `looting` touch both (combat draws its own previews/rings and builds its own
+  panel; looting spawns dropped-item entities).
 - Only `main.js` sees everything. It owns game state (`inCombat`, `gameOver`)
   and game flow (what a click means, when combat starts, tile effects).
 - Enemy AI decisions (pathing costs, wander avoidance) use a talent-free
@@ -85,9 +97,9 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 
 - **Tile effects**: `TILE_TYPES[x].onEnter` — `{ effect: 'exit' }` fires only on
   deliberate arrival (end of a path); `{ effect: 'damage', ... }` fires on every
-  step. New effect kinds are added in `main.js`'s `onPlayerStep`.
+  step. New effect kinds are added in `main.js`'s `onMemberStep`.
 - **Walkability** is layered: `grid.terrainOpen` (static terrain) + living
-  enemies (dynamic) = `isWalkable` in `main.js`. Pass `isWalkable` into
+  enemies + NPCs (dynamic) = `isWalkable` in `main.js`. Pass `isWalkable` into
   `findPath`; never re-implement it.
 - **Walls live between tiles.** Rooms and cubicles are edge walls ("walls" in
   the level JSON; `grid.hWalls`/`vWalls`), so a wall costs no floor space.
@@ -146,31 +158,33 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   exit and walk-up interactions stay leader-only. Combat fields every member
   with per-member AP/deflect/uses (`combat.js` `members`, `active`); enemies
   target the nearest living member, ties to the bloodied one. Campaign saves
-  are v2 (`{ version, levelId, party: [sheets], active }`); old single-sheet
+  are at `party.SAVE_VERSION` (`{ version, levelId, party: [sheets], active }`
+  - v3 added attributes, v4 statuses, v5 equipment); old single-sheet
   saves migrate on load (`party.parseProgress`), and recruited companions
-  respawn beside the leader on the next floor. **Recruitment**: companions
+  respawn beside the leader on the next floor. `parseProgress` reads the save
+  by SHAPE but consults its `version` for one-time migrations: anything that
+  INVENTS state (the v5 best-weapon auto-equip) must be version-gated, or it
+  re-fires on every load and overrides deliberate player choices. **Recruitment**: companions
   (data/companions.js) stand among the NPCs until a dialogue option carrying
   `effect: { recruit: true }` signs them on - the same actor converts in
   place (picking kind `party`, sheet minted at the leader's level).
   **Following**: out of combat, followers path to a free tile beside the
   leader on a small repath cadence - costed by their OWN talents, pass-through
   for the rest of the party, never parking on a tile that hurts them.
-  **Switching**: clicking a party-bar portrait (`ui.createPartyBar`,
-  `#party-slot-<i>`), pressing Tab, or clicking a member's body switches who
-  you control - out of combat that re-keys the `sheet`/`player` bindings
-  (camera, hotbar, HUD, pockets, menu verbs, follower set); in combat it
-  moves combat's `active` pointer (their action bar, their AP - switching is
-  free and reversible, DOS-style), and when the fight ends the out-of-combat
-  bindings follow whoever had the floor (`syncLeaderBindings`). **End Turn
-  queues**: it ends the ACTIVE member's turn and auto-advances to the next
-  member who hasn't ended (the button reads "Next Member" until the last
-  hand-off gives the round to the enemies); manual switching back to a
-  passed member still works - `done` gates only the auto-advance. In-combat
-  clicks check the pick ray for BODIES first (a teammate's body switches, a
-  coworker's body targets - the rings mark bodies, and the ground tile
-  behind a tall mesh is a mis-walk); ground clicks stay tile-based for
-  movement, and a member's combat route treats allies as blockers so a move
-  never ends stacked on a teammate. **Hold Ctrl** to draw a ground ring at
+  **Switching**: OUT of combat, clicking a party-bar portrait
+  (`ui.createPartyBar`, `#party-slot-<i>`), pressing Tab, or clicking a
+  member's body switches who you control - re-keying the `sheet`/`player`
+  bindings (camera, hotbar, HUD, pockets, menu verbs, follower set). IN
+  combat there is no switching: proper per-unit initiative means you control
+  each member only when their own turn comes up (`beginTurn` -> `makeActive`),
+  and when the fight ends the out-of-combat bindings follow whoever had the
+  floor (`syncLeaderBindings`). **End Turn** ends the acting member's turn and
+  initiative moves on - the next slot may be a teammate, a summon you're
+  driving, or an enemy. In-combat clicks check the pick ray for a coworker's
+  BODY first (the rings mark bodies, and the ground tile behind a tall mesh is
+  a mis-walk); ground clicks stay tile-based for movement, and a member's
+  combat route treats allies AND summons as blockers so a move never ends
+  stacked on one. **Hold Ctrl** to draw a ground ring at
   every character's TRUE position (party teal, hostiles red, NPCs green, the
   downed gold) - tall meshes read a tile off at this camera angle - and to
   get the hover body-highlight + focus banner inside combat too. **Downed**:
@@ -180,7 +194,9 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   it via `forceLeader`. The downed are back at 1 HP after a victory, a
   stairwell, or a walk-up hand up (the leader's actor registers in picking
   as kind `party` so a downed ex-leader is clickable; clicks on your own
-  healthy body fall through to the ground).
+  healthy body fall through to the ground). EVERY death funnels through
+  `downOrLose` - tile damage, bleed, surfaces, and printer blasts alike - so
+  no single way to die can end a run the party could have survived.
 - **Actors**: extend `GridActor` for anything that lives on the grid and owns
   a model (it provides smoothed waypoint-path movement, shove glides via
   `pushTo`, and facing). The holder entity
@@ -197,14 +213,21 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   (.github/workflows/ci.yml) gates every PR on both. Set CHROMIUM_PATH to a
   local Chromium to skip Playwright's browser download.
 - **Debug/test surface**: `window.__game` / `window.__combat` /
-  `window.__editor` expose read-only state; the e2e tests assert against
+  `window.__editor` are the test surface; the e2e tests assert against
   them and click through their `project()` / `project3()` helpers (CSS
   pixels - `project3` aims at a world point at any height, for tall meshes).
-  `__game` also exposes `npcs`, `party`, `summons`, `armed` (hotbar),
-  `hoverKind`, `cursor`, and `dialogueOpen`; `__combat` exposes `summons`, a
-  `summonAlly(archetypeId, n)` test hook, and `forceHit` (the hit-roll pin:
-  `true` always hits, `false` always misses, `null` rolls honestly - the e2e
-  suite sets it to make combat deterministic). Keep them in sync when adding state. `window.__god` is the
+  `__game` is read-only state (beyond `npcs`, `party`, `summons`, `armed`,
+  `hoverKind`, `cursor`, `dialogueOpen`, it exposes the world queries the
+  specs need: `doors`, `looseItems`, `burning`, `smoking`, `surfaceAt`,
+  `losClear`, …). `__combat` is mostly read-only (`phase`, `order`, `turn`,
+  `party`, `summons`, `enemies`, `lastRoll`, `hoverHitChance`) but also
+  carries deliberate LIVE setters god mode and the specs drive: `ap`,
+  `defended`, `usesLeft` (edit in place, then `refresh()`), `applyStatus`,
+  `summonAlly(archetypeId, n)`, and the determinism pins `forceHit` /
+  `forceProc` (`true` always, `false` never, `null` rolls honestly). NOTE
+  those pins cover the hit and proc rolls only - damage and initiative still
+  roll on `Math.random`, so a fight is never fully deterministic. Keep all of
+  it in sync when adding state. `window.__god` is the
   exception: it hands out LIVE references and mutators for the god-mode panel
   (god.js) to edit runtime state in place - including the party
   (`__god.party`, `switchTo`, `reviveMember`, `recruit`; the panel's Player
@@ -310,8 +333,15 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
     defeat - a party WIPE of real members only).
   Caps + cooldowns are data: the HR enemy's `summon` (data/enemies.js) and the
   HR class's Post the Role (`summon-applicants`, data/actions.js).
-  `world.spawnSummon` + `freeTilesNear` (main.js) place them; `resolveSummon`
-  (combat.js) enforces the live cap and files each onto the right side.
+  **A player summon is TARGETED**: it arms like an attack, and you click the
+  spot where they should report - within the action's `range` (data), with a
+  clear line to it. They fill the clicked tile first, then the free ground
+  ringing outward from it (`world.summonSpots`/`freeTilesNear(…, minR: 0)`);
+  the armed hover rings exactly those tiles, so the preview is the rule. An
+  enemy `summon` descriptor carries no `range` and drops its reinforcements
+  beside the summoner as before. `world.spawnSummon` (main.js) places them;
+  `resolveSummon` (combat.js) enforces the live cap and files each onto the
+  right side.
 - **New furniture/prop**: a tile entry with `model` (a .glb under `assets/`) and
   `solid: true` - it blocks movement and renders as the model in both game and
   editor. Props are level data, never hardcoded set dressing.

@@ -14,6 +14,9 @@ import { COMPANIONS } from '../../src/data/companions.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ACTIONS } from '../../src/data/actions.js';
 import { ITEMS, LOOT_TABLES } from '../../src/data/items.js';
+import { LEVELS, FIRST_LEVEL } from '../../src/data/levels.js';
+import { STATUSES } from '../../src/data/statuses.js';
+import { SURFACES, ELECTRIFIED, FIRE } from '../../src/data/surfaces.js';
 
 const files = readdirSync('levels').filter((f) => f.endsWith('.json'));
 const load = (f) => JSON.parse(readFileSync(`levels/${f}`, 'utf8'));
@@ -33,6 +36,38 @@ test('every registry cross-reference resolves', () => {
       }
     }
   }
+  // Every `applies` names a real status. applyStatus() returns false for an
+  // unknown id without a peep, so a typo here ships an attack, surface or
+  // weapon proc whose rider silently never fires - the exact bug class a lint
+  // is for. Walks every registry that can carry one.
+  const statusSites = [];
+  for (const [id, a] of Object.entries(ACTIONS)) {
+    if (a.applies) statusSites.push([`ACTIONS.${id}.applies`, a.applies]);
+  }
+  for (const [id, def] of Object.entries(ENEMY_TYPES)) {
+    for (const [i, atk] of (def.attacks || []).entries()) {
+      if (atk.applies) statusSites.push([`ENEMY_TYPES.${id}.attacks[${i}].applies`, atk.applies]);
+    }
+  }
+  for (const [id, def] of Object.entries(CLASSES)) {
+    for (const [i, atk] of (def.attacks || []).entries()) {
+      if (atk.applies) statusSites.push([`CLASSES.${id}.attacks[${i}].applies`, atk.applies]);
+    }
+  }
+  for (const [id, it] of Object.entries(ITEMS)) {
+    if (it.proc?.applies) statusSites.push([`ITEMS.${id}.proc.applies`, it.proc.applies]);
+  }
+  for (const [id, s] of Object.entries(SURFACES)) {
+    if (s.onEnter?.applies) statusSites.push([`SURFACES.${id}.onEnter.applies`, s.onEnter.applies]);
+  }
+  for (const [name, s] of [['ELECTRIFIED', ELECTRIFIED], ['FIRE', FIRE]]) {
+    if (s.onEnter?.applies) statusSites.push([`${name}.onEnter.applies`, s.onEnter.applies]);
+  }
+  for (const [where, statusId] of statusSites) {
+    assert.ok(STATUSES[statusId], `${where} = "${statusId}" is a real status`);
+  }
+  assert.ok(statusSites.length > 0, 'the lint actually found status references to check');
+
   // Summon archetypes resolve to a class or an enemy type (class-side + enemy-side).
   for (const [id, a] of Object.entries(ACTIONS)) {
     if (a.type === 'summon') assert.ok(CLASSES[a.archetype] || ENEMY_TYPES[a.archetype], `action "${id}" summons a real archetype`);
@@ -153,6 +188,22 @@ for (const f of files) {
     const data = load(f);
     if (data.next) {
       assert.ok(files.includes(`${data.next}.json`), `next="${data.next}" ships`);
+    }
+  });
+
+  // A file on disk is not enough: the exit reads LEVELS (data/levels.js), so a
+  // level that ships but was never registered there ends the campaign with the
+  // WIN screen instead of loading the next floor.
+  test(`${f} is registered in data/levels.js`, () => {
+    const id = f.replace(/\.json$/, '');
+    assert.ok(LEVELS[id], `levels/${f} is registered as LEVELS["${id}"]`);
+  });
+
+  test(`${f} "next" is registered in data/levels.js`, () => {
+    const data = load(f);
+    if (data.next) {
+      assert.ok(LEVELS[data.next],
+        `next="${data.next}" is in LEVELS, or the exit silently ends the run`);
     }
   });
 

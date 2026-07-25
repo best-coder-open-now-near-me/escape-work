@@ -5,7 +5,7 @@ import {
   createParty, leader, addMember, livingMembers, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP, SAVE_VERSION,
 } from '../../src/party.js';
-import { createSheet, spendClassPoint, damageBonus, PROGRESSION } from '../../src/stats.js';
+import { createSheet, spendClassPoint, damageBonus, PROGRESSION, EQUIP_SLOTS } from '../../src/stats.js';
 import { COMPANIONS } from '../../src/data/companions.js';
 
 test('createParty starts with the leader as its only member', () => {
@@ -109,6 +109,35 @@ test('v4->v5 migration auto-equips the best carried weapon, preserving its damag
   // damage preserved: office-drone's Savvy 5 gives +1, the equipped red stapler
   // +2 - exactly what the old best-in-bag rule (Savvy +1, best bonusDmg +2) gave.
   assert.equal(damageBonus(s), 3);
+});
+
+// The v5 auto-equip INVENTS state (it moves an item out of the bag into a
+// slot), so it must be a one-time migration. Run unconditionally it re-fires on
+// every load, and an empty weapon slot on a CURRENT save is a deliberate choice
+// - bare hands, or a proc weapon you took off - not a gap to be filled in.
+test('the v5 auto-equip does not re-run on a current save', () => {
+  const v5 = {
+    version: 5, levelId: 'level2', active: 0,
+    party: [{
+      classId: 'office-drone', className: 'Office Drone', hp: 22, maxHp: 22, level: 1,
+      inventory: ['stapler', 'red-stapler'],
+      equipped: { weapon: null, outfit: null, trinket: null, shoes: null },
+    }],
+  };
+  const s = parseProgress(v5).sheets[0];
+  assert.equal(s.equipped.weapon, null, 'the emptied slot stays empty');
+  assert.ok(s.inventory.includes('red-stapler'), 'and the weapon stays in the bag');
+});
+
+test('every equipment slot is backfilled, not just the three v5 shipped with', () => {
+  const v4 = {
+    version: 4, levelId: 'level1', active: 0,
+    party: [{ classId: 'office-drone', className: 'Office Drone', hp: 22, maxHp: 22, level: 1 }],
+  };
+  const s = parseProgress(v4).sheets[0];
+  for (const slot of EQUIP_SLOTS) {
+    assert.ok(slot in s.equipped, `${slot} is present after the migration`);
+  }
 });
 
 test('a non-zero active leader survives the save round-trip', () => {

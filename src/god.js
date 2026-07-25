@@ -319,10 +319,22 @@ function buildPanel(api, requestToggle) {
       out.push({
         // The ACTIVE member keeps the plain 'sheet' scope - stable field ids
         // (#god-f-sheet-hp) and pins that always mean "whoever I control".
+        // So the 'sheet' pin must RESOLVE that way too: bound to the index that
+        // happened to be active when it was pinned, switching control left the
+        // pin holding the old member while displaying as the new one's.
         id: active ? 'sheet' : `sheet-${i}`, scope: active ? 'sheet' : `sheet-${i}`,
         title: `${m.sheet.name}${active ? ' (active)' : ''}${m.sheet.hp <= 0 ? ' †' : ''}`,
-        obj: m.sheet, getObj: () => api.party?.members[i]?.sheet,
-        readOnly: new Set(['classId', 'companionId', 'className', 'model', 'xpNext', 'name']),
+        obj: m.sheet,
+        getObj: active
+          ? () => api.party?.members[api.party.active]?.sheet
+          : () => api.party?.members[i]?.sheet,
+        // maxHp/maxAp are DERIVED from attr + the class base (stats.js
+        // recomputeDerived) - assigning them directly is the one thing
+        // ARCHITECTURE.md forbids, because the next recompute (equipping gear,
+        // raising an attribute, loading a save) silently discards the edit, and
+        // pinning one makes the pin fight the recompute every frame.
+        readOnly: new Set(['classId', 'companionId', 'className', 'model', 'xpNext', 'name',
+          'maxHp', 'maxAp']),
         special: active ? 'inventory' : null,
         actions,
       });

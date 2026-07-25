@@ -1,15 +1,51 @@
 name: CI
 
-# The merge gate: every PR (and main) must pass unit tests, build, and the
-# headless Playwright smoke suite before deploy.yml ships anything.
+# Three tiers, because the right amount of checking depends on the change.
+#
+# NB the tiers are about LATENCY, not cost: this repo is public, so standard
+# runners are free and unlimited. The full suite is kept off branch pushes
+# because waiting ~35 minutes for an answer is the problem, not the bill. If
+# that ever stops mattering, widen the `if:` on the e2e job - there is no
+# longer a budget reason not to.
+#
+# Put `[quick]` in the commit message for a change you will SEE - a colour, a
+# material, a model swap, copy. The browser tests never checked pixels anyway
+# (they assert state and clicks), so for anything visual, playing it for five
+# seconds is the better instrument and this pipeline is just latency. `[quick]`
+# leaves the unit suite running - it costs seconds, and it catches the class of
+# bug you CANNOT see: a save migration that corrupts on the next floor, an
+# off-by-one in a hit roll, an `applies` typo whose status silently never fires.
+# Deploy still runs, so a visual tweak is live in about a minute.
+#
+#   fast (always)  - unit suite + build + the smoke spec. A few minutes, and
+#                    it answers "is this fundamentally working?" while you are
+#                    still looking at the screen: 200 unit tests over the pure
+#                    modules, the level/registry lints, and the critical path
+#                    driven through a real browser.
+#   e2e  (main)    - the full headless Playwright suite. Long, because every
+#                    test boots the whole engine under software GL. It runs on
+#                    pushes to main (the thing deploy.yml gates on) and on
+#                    demand, NOT on every branch push - iterating on a branch
+#                    used to cost a full suite per push, then a second one when
+#                    the same code landed on main.
+#
+# Run it on a branch when a change warrants it: the Actions tab ->
+# CI -> "Run workflow", or put [e2e] in the commit message.
 on:
   pull_request:
   push:
     branches: [ main ]
   workflow_dispatch:
 
+# Pushing over yourself cancels the superseded run instead of paying for both.
+# Never cancel on main: deploy.yml chains off that run's completion.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
-  test:
+  fast:
+    name: Unit tests + build + smoke
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -30,10 +66,73 @@ jobs:
       - name: Build web bundle
         run: npm run build
 
+      - name: Fail early if the build produced nothing
+        run: test -s build/web/index.html || { echo "Build produced no index.html"; exit 1; }
+
+      # The critical path through a REAL browser, on every push. One boot
+      # shared across its steps, so it costs about one ordinary e2e test.
+      # `[quick]` in the commit message skips it - see the header.
+      - name: Cache Playwright browser
+        if: ${{ !contains(github.event.head_commit.message, '[quick]') }}
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       - name: Install Playwright Chromium
+        if: ${{ !contains(github.event.head_commit.message, '[quick]') && steps.pw-cache.outputs.cache-hit != 'true' }}
         run: npx playwright install --with-deps chromium
 
-      - name: E2E smoke tests
+      - name: Install browser system deps
+        if: ${{ !contains(github.event.head_commit.message, '[quick]') && steps.pw-cache.outputs.cache-hit == 'true' }}
+        run: npx playwright install-deps chromium
+
+      - name: Smoke tests
+        if: ${{ !contains(github.event.head_commit.message, '[quick]') }}
+        run: npm run test:e2e:smoke
+
+  e2e:
+    name: Full E2E suite
+    runs-on: ubuntu-latest
+    needs: fast          # never pay 35 min for a tree that fails in 1
+    # On main (what deploy gates on), on demand, or when a commit opts in.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.ref == 'refs/heads/main' ||
+      contains(github.event.head_commit.message, '[e2e]')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The browser is ~130MB and unchanged between runs; restoring it beats
+      # re-downloading it (and re-running the apt step) every single time.
+      - name: Cache Playwright browser
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright Chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      # Cached browser still needs its system libraries on a fresh runner.
+      - name: Install browser system deps
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Full E2E suite
         run: npm run test:e2e
 
       - name: Upload Playwright report on failure
@@ -41,5 +140,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: test-results/
+          # Both: the HTML report (rendered run, with the traces linked) and
+          # the raw per-test artifacts (trace.zip, screenshots, video).
+          path: |
+            playwright-report/
+            test-results/
           if-no-files-found: ignore
+          retention-days: 7   # a failed run's trace is worth days, not months

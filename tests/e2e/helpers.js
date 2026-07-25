@@ -18,6 +18,12 @@ export const onScreen = (p) => p && p.x > 10 && p.x < 1270 && p.y > 10 && p.y < 
 
 // The class picker is a carousel: only the active slide's hire button exists
 // (#pick-<classId>). Step through slides until the wanted one is up.
+//
+// This is the SLOW path, and the boot helpers below deliberately avoid it:
+// every slide renders that candidate's .glb, which under CI's software GL
+// costs tens of seconds EACH, so walking to the fifth class burned minutes
+// before the test under it had started. Kept for the one spec whose subject
+// is the carousel itself.
 export async function pickClass(page, classId) {
   await expect(page.locator('#resume-card')).toBeVisible();
   for (let i = 0; i < 8; i++) {
@@ -27,35 +33,42 @@ export async function pickClass(page, classId) {
   await page.click(`#pick-${classId}`);
 }
 
-// Boot the game into a playable state: class picked, model spawned, renderer
-// warmed up, camera settled - then zoom all the way out so the whole floor
-// projects inside the viewport (far enemies would otherwise fall off-screen
-// and clicks aimed at them would be silent no-ops).
-export async function bootAndPick(page, classId = 'office-drone') {
-  await page.goto('/');
-  await pickClass(page, classId);
-  await page.waitForFunction(() => window.__game && window.__game.stats);
+// Zoom out so the whole floor projects inside the viewport - far enemies would
+// otherwise fall off-screen and clicks aimed at them are silent no-ops.
+//
+// This used to drive the rig with 4-8 real mouse-wheel events. Each one forces
+// a camera apply and a re-render, which under CI's software GL costs SECONDS -
+// measured at ~45s of the ~85s it took a test to reach its first click. The
+// __game.zoomOut() hook reaches the identical end state (setView clamps to the
+// rig's maxDist) in a single apply.
+async function settleCamera(page) {
   await waitForSmoothFrames(page);
-  await page.mouse.move(640, 400); // wheel events need the pointer on canvas
-  for (let i = 0; i < 8; i++) await page.mouse.wheel(0, 120);
+  await page.evaluate(() => window.__game.zoomOut());
+  await page.mouse.move(640, 400); // park the pointer on the canvas
   await page.waitForTimeout(600); // camera ease-in
 }
 
+// Boot the game into a playable state: class hired straight off the URL
+// (`#class=<id>`, see main.js preselectedClass), model spawned, renderer warmed
+// up, camera settled.
+export async function bootAndPick(page, classId = 'office-drone') {
+  await page.goto(`/#class=${classId}`);
+  await page.waitForFunction(() => window.__game && window.__game.stats);
+  await settleCamera(page);
+}
+
 // Boot into a stashed playtest level (the editor's localStorage hand-off) -
-// small bespoke arenas keep surface tests fast and deterministic.
+// small bespoke arenas keep surface tests fast and deterministic. The stash is
+// seeded by an init script so it is already in place on the FIRST load: the
+// old goto -> write -> reload dance booted the whole engine twice per test.
 export async function bootStash(page, level, classId = 'office-drone') {
-  await page.goto('/');
-  await page.evaluate((lvl) => {
-    localStorage.clear();
+  await page.addInitScript((lvl) => {
+    localStorage.clear(); // no campaign progress bleeding into a bespoke arena
     localStorage.setItem('escape-work.playtest', JSON.stringify(lvl));
   }, level);
-  await page.reload();
-  await pickClass(page, classId);
+  await page.goto(`/#class=${classId}`);
   await page.waitForFunction(() => window.__game && window.__game.stats);
-  await waitForSmoothFrames(page);
-  await page.mouse.move(640, 400);
-  for (let i = 0; i < 4; i++) await page.mouse.wheel(0, 120);
-  await page.waitForTimeout(600);
+  await settleCamera(page);
 }
 
 // Click the ground at world (x, z). Returns false when the point projects
