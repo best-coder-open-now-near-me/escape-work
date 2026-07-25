@@ -40,14 +40,15 @@ test('hovering a coworker shows the attack cursor and enemy highlight', async ({
   await bootAndPick(page);
   // Hover the body (~0.8 up). Enemies WANDER, so re-read the live position on
   // every attempt rather than aiming at where one stood when the test started -
-  // and read it off the entity, so a coworker caught mid-step between tiles is
-  // still under the cursor.
+  // and use px/pz (the entity's CONTINUOUS position) rather than the x/z tile,
+  // so a coworker caught mid-step between tiles is still under the cursor.
+  // NB `__game.enemies` is a projection, not the live actors: it exposes
+  // px/pz for exactly this, and has no `entity` to read a position off.
   await expect.poll(async () => {
     const p = await page.evaluate(() => {
-      const en = window.__game.enemies.find((e) => e.alive && e.entity);
+      const en = window.__game.enemies.find((e) => e.alive && e.px !== undefined);
       if (!en) return null;
-      const w = en.entity.getPosition();
-      return window.__game.project3(w.x, 0.8, w.z);
+      return window.__game.project3(en.px, 0.8, en.pz);
     });
     if (!onScreen(p)) return null;
     await page.mouse.move(p.x, p.y);
@@ -57,6 +58,11 @@ test('hovering a coworker shows the attack cursor and enemy highlight', async ({
 });
 
 test('the persistent hotbar shows attacks and arming targets a coworker', async ({ page }) => {
+  // The engage loop below is allowed 14 attempts, and a single attempt can
+  // spend 20s settling the camera plus 25s waiting on the walk - so the
+  // default 120s is less than three attempts' worth. Same budget the other
+  // walk-up-and-fight specs take.
+  test.setTimeout(300_000);
   await bootAndPick(page);
   await expect(page.locator('#hotbar')).toBeVisible();
   // Office Drone: attack + shove + two thrown weapons are offensive.

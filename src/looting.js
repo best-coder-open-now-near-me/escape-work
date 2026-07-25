@@ -261,7 +261,9 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
         const cx = x;
         const cz = z;
         out.push({
-          icon: { trash: '🗑️', printer: '🖨️', desk: '🗄️' }[def.loot],
+          // Keyed by loot table, so a new table needs an entry here or its
+          // Alt label renders with no icon at all.
+          icon: { trash: '🗑️', printer: '🖨️', desk: '🗄️', 'filing-cabinet': '📁' }[def.loot],
           text: def.label,
           world: { x, y: def.height + 0.8, z },
           onClick: () => approachAndDo(cx, cz, () => lootContainer(cx, cz)),

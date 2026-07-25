@@ -127,8 +127,18 @@ test('a player summon is a controllable member, outlives the fight, then times o
 
   // What DOES end them is the assignment running out. Out of combat the world
   // clock spends it a turn at a time, so they see themselves out on their own.
+  //
+  // That clock is FRAME-bound, not wall-clock-bound: PlayCanvas clamps dt to
+  // maxDeltaTime (0.1s), so a 1.6s out-of-combat turn takes at least 16
+  // frames however long they take to arrive. Under CI's software GL that is
+  // seconds per turn, and a 12-turn assignment outran the wait here - this
+  // test's whole point is that the assignment expires, not how many frames
+  // the runner managed. timeScale multiplies the CLAMPED dt, so the same
+  // turns pass in the same frames' worth of scaled time.
+  await page.evaluate(() => { window.__god.timeScale = 8; });
   await expect.poll(() => page.evaluate(() => window.__game.summons.length),
     { timeout: 90_000 }).toBe(0);
+  await page.evaluate(() => { window.__god.timeScale = 1; });
 });
 
 test('the HR class posts the role AT a spot you pick', async ({ page }) => {
