@@ -9,7 +9,16 @@
 //   'green'  - no intention of initiating; only fights if provoked
 //   'yellow' - will talk first, then maybe escalate
 //   'red'    - straight to battle
-export const ENEMY_TYPES = {
+import { fromClass } from './classes.js';
+
+// id -> either a standalone stat block, or `{ classId, ...overrides }` for a
+// coworker who IS one of the playable classes. The Security Guard is the first
+// of those: he and the Security class are the same job, so he names it and
+// inherits the rig, the build and the kit rather than keeping a copy that
+// drifts the moment the class changes. Everyone else here has no class twin -
+// The Manager, the Executive and the rest are their own archetypes - so they
+// stay written out. Don't invent a class just to inherit from it.
+const KITS = {
   manager: {
     char: 'M',
     name: 'The Manager',
@@ -102,19 +111,21 @@ export const ENEMY_TYPES = {
   },
 
   'security-guard': {
+    // The same job as the playable Security class, so he IS one: the rig, the
+    // attributes and the kit all come from it and follow it wherever it goes.
+    // What's left below is only what makes him the one you FIGHT - a map char,
+    // AI damage rolls, what he's worth and what he drops.
+    classId: 'security',
     // Lowercase because every free uppercase char is already spoken for by a
     // tile type or another actor; actor chars are looked up before tiles
     // (grid.js), so 's' is unambiguous in a level map.
     char: 's',
     name: 'Security Guard',
-    // The rig the Mail Room class used to wear - it always read as a uniform
-    // more than a mail cart, so it went to the person whose job IS the uniform.
-    model: 'security',
-    // Squared off by the vest and the belt.
+    // Squared off by the vest and the belt - where he departs from the player's
+    // guard, who stands taller and less padded on the same rig.
     look: { build: { torso: 1.34 } },
     level: 2,
     hp: 20,
-    ap: 5,
     attackAp: 3,
     xp: 11,
     dodge: 0.05, // trained to stay on his feet (HIT_PLAN)
@@ -196,3 +207,16 @@ export const ENEMY_TYPES = {
     ],
   },
 };
+
+// What every consumer reads: fully-formed defs, so nothing downstream knows or
+// cares which entries were assembled from a class. ENEMY_KITS stays exported so
+// the lint can check an override never just repeats what its class already says.
+export const ENEMY_TYPES = Object.fromEntries(
+  Object.entries(KITS).map(([id, kit]) => [
+    id,
+    // `maxHp`: enemies spell it `hp`, and unitCombat prefers `maxHp` - leaving
+    // the class's would silently outrank this enemy's own HP.
+    kit.classId ? fromClass(kit, { drop: ['maxHp'] }) : kit,
+  ]),
+);
+export { KITS as ENEMY_KITS };

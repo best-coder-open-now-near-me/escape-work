@@ -2,7 +2,7 @@
 // reboot, the Mail Room's cone attack with its paper aftermath, and Security's
 // stun-riding Detain.
 import { test, expect } from '@playwright/test';
-import { bootAndPick, clickWorld, enterCombat, waitStill, stableProject, onScreen } from './helpers.js';
+import { bootAndPick, bootStash, clickWorld, enterCombat, waitStill, stableProject, onScreen } from './helpers.js';
 
 test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ page }) => {
   test.setTimeout(300_000);
@@ -88,10 +88,26 @@ test('Mail Room: Bulk Mail cones damage and leave paper drifts', async ({ page }
   expect(await paperNear()).toBeGreaterThan(paperBefore);
 });
 
+// Just you and one Manager, two tiles apart in an open room - the same shape
+// the other precision specs use. Level 1's floor is too loose for a projected
+// click on a wandering coworker to be reliable.
+const GUARD_ARENA = {
+  name: 'Guard Post',
+  tiles: { '#': 'wall', '.': 'floor', '>': 'exit' },
+  actors: { '@': 'player', 'M': 'manager' },
+  map: [
+    '#########',
+    '#.......#',
+    '#.@.M..>#',
+    '#.......#',
+    '#########',
+  ],
+};
+
 test('Security: Detain lands a stun, and the guard wears the cop rig', async ({ page }) => {
   test.setTimeout(300_000);
-  await bootAndPick(page, 'security');
-  // The class actually boots: its own sheet, its own rig.
+  await bootStash(page, GUARD_ARENA, 'security');
+  // The class actually boots: its own sheet, its own rig, its own bar.
   expect(await page.evaluate(() => window.__game.stats.className)).toBe('Security');
   expect(await page.evaluate(() => window.__game.stats.maxHp)).toBe(26);
 
@@ -100,17 +116,21 @@ test('Security: Detain lands a stun, and the guard wears the cop rig', async ({ 
   await expect(page.locator('#act-stand-post')).toBeVisible();
   await expect(page.locator('#act-night-thermos')).toBeVisible();
 
-  // Detain is the class's hammer: damage plus the stun rider, twice a fight.
   await page.evaluate(() => { window.__combat.forceHit = true; });
   const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
   expect(foe).toBeTruthy();
   const foeNow = () => page.evaluate(([x, z]) =>
     window.__combat.enemies.find((e) => e.x === x && e.z === z), [foe.x, foe.z]);
 
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 6; i++) {
     const cur = await foeNow();
-    if (cur && (cur.hp < foe.hp || cur.statuses?.some((s) => s.id === 'stunned'))) break;
+    if (cur && cur.hp < foe.hp) break;
     await page.waitForTimeout(900); // camera settle before projecting
+    if (!(await page.evaluate(() => window.__combat?.phase === 'player'))) continue;
+    // Closing the distance spends AP, which can leave the 3 AP Detain
+    // unaffordable and its button disabled. This spec is about the stun rider,
+    // not the AP economy - top the pool up the way forceHit pins the roll.
+    await page.evaluate(() => { window.__combat.ap = window.__combat.maxAp; });
     if (await page.evaluate(() => window.__combat?.armed) !== 'detain') {
       if (!(await page.locator('#act-detain').isVisible())) break;
       await page.click('#act-detain');
@@ -121,6 +141,6 @@ test('Security: Detain lands a stun, and the guard wears the cop rig', async ({ 
     await page.waitForTimeout(700);
   }
   const after = await foeNow();
-  expect(after.hp).toBeLessThan(foe.hp);
-  expect(after.statuses.some((s) => s.id === 'stunned')).toBe(true);
+  expect(after.hp).toBeLessThan(foe.hp);          // it hits...
+  expect(after.statuses.some((s) => s.id === 'stunned')).toBe(true); // ...and the rider fires
 });

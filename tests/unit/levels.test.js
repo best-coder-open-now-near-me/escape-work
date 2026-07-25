@@ -8,9 +8,9 @@ import { parseLevel } from '../../src/grid.js';
 import { findPath } from '../../src/pathfinding.js';
 import { existsSync } from 'node:fs';
 import { TILE_TYPES } from '../../src/data/tiles.js';
-import { ENEMY_TYPES } from '../../src/data/enemies.js';
+import { ENEMY_TYPES, ENEMY_KITS } from '../../src/data/enemies.js';
 import { NPCS } from '../../src/data/npcs.js';
-import { COMPANIONS } from '../../src/data/companions.js';
+import { COMPANIONS, COMPANION_KITS } from '../../src/data/companions.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ACTIONS } from '../../src/data/actions.js';
 import { ITEMS, LOOT_TABLES } from '../../src/data/items.js';
@@ -36,6 +36,40 @@ test('every registry cross-reference resolves', () => {
       }
     }
   }
+  // A companion or an enemy that IS one of the classes names it and inherits
+  // it. The class must resolve...
+  const ARCHETYPE_KITS = [
+    ['COMPANIONS', COMPANION_KITS],
+    ['ENEMY_TYPES', ENEMY_KITS],
+  ];
+  for (const [regName, kits] of ARCHETYPE_KITS) {
+    for (const [id, kit] of Object.entries(kits)) {
+      if (!kit.classId) continue; // a standalone archetype with no class twin
+      assert.ok(CLASSES[kit.classId], `${regName}.${id} classId "${kit.classId}" is a real class`);
+    }
+  }
+  // ...and must never re-state something the class already says. That
+  // restatement is what let the Mail Room Veteran keep the old rig and the old
+  // kit after the Mail Room class moved on - a silent copy that drifts. An
+  // override is for DEPARTING from the class; matching it means delete the line.
+  // `maxHp` is exempt: enemies spell it `hp` and fromClass drops the inherited
+  // one, so an enemy's own value can legitimately equal the class's.
+  const IDENTITY = new Set([
+    'classId', 'char', 'name', 'examine', 'dialogue', 'recruitedDialogue',
+    'level', 'hp', 'xp', 'loot', 'attacks', 'attackAp', 'aggression', 'summon',
+  ]);
+  for (const [regName, kits] of ARCHETYPE_KITS) {
+    for (const [id, kit] of Object.entries(kits)) {
+      if (!kit.classId) continue;
+      const base = CLASSES[kit.classId];
+      for (const [key, val] of Object.entries(kit)) {
+        if (IDENTITY.has(key) || !(key in base)) continue;
+        assert.notDeepEqual(val, base[key],
+          `${regName}.${id}.${key} just repeats ${kit.classId}.${key} - delete it and inherit`);
+      }
+    }
+  }
+
   // Every `applies` names a real status. applyStatus() returns false for an
   // unknown id without a peep, so a typo here ships an attack, surface or
   // weapon proc whose rider silently never fires - the exact bug class a lint

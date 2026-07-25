@@ -24,6 +24,32 @@
 // only - migrations and companions omit it). Kept curve-neutral: none of these
 // touch maxHp/maxAp (Grit/Hustle), so each class's headline HP/AP stay exact -
 // the signature piece flavours a slot, it doesn't inflate the sheet.
+// Fields that belong to the class PICKER, not to a character built from one: a
+// companion is met and an enemy is fought, neither is hired off a résumé card.
+// `name` goes too - they have their own, and inheriting "Mail Room" as a
+// person's name is the exact confusion this shape exists to remove.
+const PICKER_ONLY = ['name', 'tagline', 'experience', 'startGear', 'playable'];
+
+/**
+ * Build a character FROM a class: `{ classId, ...overrides }` in, a full def
+ * out. This is the one mechanism behind "a class is the shared unit archetype"
+ * (ARCHITECTURE) - companions and enemies that ARE a class name it and inherit
+ * it, instead of keeping a private copy that drifts the moment the class moves.
+ * An override is for DEPARTING from the class; anything that merely matches it
+ * should be deleted (there's a lint).
+ *
+ * `drop` removes further inherited fields. Enemies pass `maxHp`: the two
+ * registries spell max HP differently and `unitCombat` prefers `maxHp` over
+ * `hp`, so an inherited `maxHp` would silently outrank the enemy's own `hp`.
+ */
+export function fromClass({ classId, ...over }, { drop = [] } = {}) {
+  const base = CLASSES[classId];
+  if (!base) throw new Error(`archetype references unknown class "${classId}"`);
+  const kit = { ...base };
+  for (const key of [...PICKER_ONLY, ...drop]) delete kit[key];
+  return { classId, ...kit, ...over };
+}
+
 export const CLASSES = {
   'office-drone': {
     name: 'Office Drone',

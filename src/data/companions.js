@@ -1,31 +1,52 @@
 // Recruitable companions: coworkers who can JOIN the party. A companion is an
 // NPC-shaped actor (stands on the map, blocks movement, talks on left-click)
-// plus a class-shaped stat block that becomes their character sheet the moment
-// they sign on (party.js createCompanionSheet levels it to match the leader).
+// who IS one of the classes, plus the handful of things that make them a
+// person. Their stat block becomes their character sheet the moment they sign
+// on (party.js createCompanionSheet levels it to match the leader).
+//
+// `classId` is the whole point. A companion USED to restate a class - the Mail
+// Room Veteran carried his own copy of the mail room's actions, talent and
+// attributes, all identical to `mail-room`'s - which is a parallel
+// implementation of a thing we already have, and it drifted the moment the
+// class changed: reassigning the Mail Room's rig left the veteran wearing the
+// old one, still calling himself mail room. Now he names the class and
+// inherits it, so there is one definition of what a mail room person IS and he
+// cannot fall out of step with it.
+//
+// An entry therefore carries ONLY what a class cannot say about a person:
+// their char and name, how they look, what they know (dialogue), and any
+// deliberate departure from the class - companions run softer stat lines than
+// the player's, because they're interns and clerks, not protagonists. Anything
+// you'd otherwise copy from the class, delete: inheriting it is the point.
 //
 // Dialogue is the recruitment surface: `dialogue` runs while they're still a
 // bystander, and an option carrying `effect: { recruit: true }` is what hands
 // them a party badge (main.js filters the option out once they've joined or
 // the roster is full). `recruitedDialogue` is the small talk afterwards.
-// Deliberately softer stat lines than the player classes - they're interns
-// and clerks, not protagonists.
-export const COMPANIONS = {
+// The merge lives in classes.js - enemies build from a class the same way
+// (data/enemies.js), and one mechanism means one place for the rules.
+import { fromClass } from './classes.js';
+
+// id -> the class they are, plus only what makes them them.
+const KITS = {
   'it-intern': {
+    classId: 'it-support',
     char: 'N',
     name: 'Nervous IT Intern',
+    // His own rig, and smaller than IT Support proper - visibly the junior.
     model: 'intern',
-    // Smaller than IT Support proper - visibly the junior.
     look: { build: { legs: 1.7, head: 0.68 } },
     examine: 'An intern, hunched behind a monitor. Badge still shrink-wrapped.',
+    // Where the intern departs from the class, and why: softer, a step slower,
+    // and nowhere near IT Support's savvy yet. The kit itself (reboot,
+    // firewall, energy drink) is inherited - he does the same job, badly.
     maxHp: 14,
     ap: 6,
-    bonusDmg: 0,
     attr: { grit: 3, hustle: 6, savvy: 3, composure: 3 }, // quick but green
     track: [
       { id: 'intern-fast-learner', name: 'Fast Learner', cost: 1, effect: { attrBonus: { savvy: 1 } } },
       { id: 'intern-nerves', name: 'Steady Nerves', cost: 1, effect: { attrBonus: { composure: 1 } } },
     ],
-    actions: ['reboot', 'firewall', 'energy-drink'],
     talent: null, // too new for a talent - fresh eyes, no habits
     dialogue: {
       start: 'hi',
@@ -88,26 +109,19 @@ export const COMPANIONS = {
     },
   },
   'mail-veteran': {
+    // He is a mail room person. That is the entire stat block: the rig, the
+    // kit (Bulk Mail, Return to Sender, the snack cart), Warehouse Soles and
+    // the mail room's own progression all come from the class, and follow it
+    // wherever it goes next.
+    classId: 'mail-room',
     char: 'V',
     name: 'Mail Room Veteran',
-    model: 'veteran',
-    // Stockier than the rest of the mail room - eleven years of it.
+    // Stockier than the rest of the mail room - eleven years of it. The only
+    // reason to restate `look`: it is what tells him apart from the clerk
+    // wearing the same rig.
     look: { build: { torso: 1.38 } },
     examine: 'Eleven years in the mail room. Knows every corridor. Fears no wet floor.',
-    maxHp: 18,
-    ap: 6,
-    bonusDmg: 0,
-    attr: { grit: 6, hustle: 8, savvy: 4, composure: 5 }, // seasoned, sure-footed
-    track: [
-      { id: 'vet-hustle', name: 'Decade of Miles', cost: 1, effect: { attrBonus: { hustle: 1 } } },
-      { id: 'vet-boots', name: 'Steel-Toe Boots', cost: 1, effect: { grantsAction: 'kick' } },
-    ],
-    actions: ['mail-cone', 'return-to-sender', 'snack-cart'],
-    talent: {
-      name: 'Warehouse Soles',
-      blurb: 'Eleven years of ignored wet-floor signs. Cannot slip. Ever.',
-      effects: { slipImmune: true },
-    },
+    maxHp: 18, // a companion line, not a protagonist's
     dialogue: {
       start: 'hi',
       nodes: {
@@ -161,3 +175,12 @@ export const COMPANIONS = {
     },
   },
 };
+
+// The registry every consumer reads: fully-formed defs, so nothing downstream
+// (grid, party, stats, main, god) needs to know a companion is assembled
+// rather than written out. The raw kits stay exported so the lint can check a
+// companion never re-states something its class already says.
+export const COMPANIONS = Object.fromEntries(
+  Object.entries(KITS).map(([id, kit]) => [id, fromClass(kit)]),
+);
+export { KITS as COMPANION_KITS };

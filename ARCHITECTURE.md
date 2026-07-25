@@ -260,16 +260,32 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 
 ## Growth paths (where things plug in)
 
+- **A character that IS a class inherits it - never copies it.** A companion or
+  an enemy who does one of the playable jobs writes `classId: '<class>'` plus
+  ONLY what makes them them, and `fromClass` (data/classes.js) merges the rest:
+  rig, build, attributes, kit, talent, track. The Mail Room Veteran and the
+  Security Guard both work this way. This is the "class as shared unit
+  archetype" direction made real, and it exists because the copies drifted -
+  reassigning the Mail Room's rig left the veteran wearing the old one while
+  still calling himself mail room. An override means DEPARTING from the class;
+  a lint fails the build if one merely repeats what the class already says.
+  Registries export their raw kit tables (`COMPANION_KITS`, `ENEMY_KITS`) for
+  it. Enemies drop the inherited `maxHp` - they spell it `hp`, and `unitCombat`
+  prefers `maxHp`, so keeping it would silently outrank their own. Characters
+  with no class twin (The Manager, the Executive) stay written out; don't invent
+  a class just to inherit from one.
 - **New enemy**: entry in `data/enemies.js` + character in a level's `actors`
-  legend + a .glb in `assets/characters/`.
+  legend + a .glb in `assets/characters/`. If it's a playable job, give it a
+  `classId` instead of restating the class.
 - **New NPC (talkable)**: entry in `data/npcs.js` (name, model, dialogue tree)
   + character in a level's `actors` legend. It stands, blocks movement, and
   talks on left-click; it never fights. Reuses a character `.glb`.
-- **New companion (recruitable)**: entry in `data/companions.js` - the NPC
-  fields plus a class-shaped stat block (maxHp, ap, actions, talent) and a
-  dialogue option with `effect: { recruit: true }`. Give it a character in a
-  level's `actors` legend; everything else (recruit conversion, following,
-  the party bar slot, per-member stepping, the save) is systems.
+- **New companion (recruitable)**: entry in `data/companions.js` - a `classId`
+  naming the class they are, the NPC fields (char, name, examine), a dialogue
+  option with `effect: { recruit: true }`, and only the stats where they depart
+  from the class (companions run softer lines than the player's). Give them a
+  character in a level's `actors` legend; everything else (recruit conversion,
+  following, the party bar slot, per-member stepping, the save) is systems.
 - **New hazard/tile**: entry in `data/tiles.js` + character in `tiles` legend.
 - **New surface** (the Divinity layer): entry in `data/surfaces.js` + a tile
   type carrying it. Surfaces slow, damage, bleed, arm you, trip you
