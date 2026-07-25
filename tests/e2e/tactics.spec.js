@@ -215,6 +215,12 @@ test('striking a foe from behind its committed facing is a backstab', async ({ p
     if (at.x === tx && at.z === tz) { bx = tx; bz = tz; break; }
   }
   expect(bx, 'could not reach any tile behind the Manager').not.toBe(null);
+  // Walking around a body costs AP, and an unaffordable attack button cannot
+  // be armed to read a to-hit from. Top it back up: what is under test here is
+  // the positional modifier, not the AP economy. Crucially this does NOT end
+  // the turn - the Manager must not act again, or it would re-face us and we
+  // would no longer be behind it.
+  await page.evaluate(() => { window.__combat.ap = window.__god.player.maxAp; });
 
   expect(await readTag(foe.x, foe.z)).toContain('from behind');
 });
