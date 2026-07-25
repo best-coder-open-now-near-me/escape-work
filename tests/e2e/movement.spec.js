@@ -5,22 +5,29 @@
 import { test, expect } from '@playwright/test';
 import { bootStash, enterCombat, clickWorld } from './helpers.js';
 
-// A long clean corridor: no surfaces, no hazards, so distance is the only
-// thing being charged for.
-const CORRIDOR = {
+// A wide clean room: no surfaces and no hazards, so distance is the only thing
+// being charged for. The pair start ADJACENT and central, which matters twice:
+// enterCombat engages without walking the player somewhere unpredictable, and
+// there is open floor on every side to walk into. (A corridor does not work -
+// the Manager stands in the only lane, and a body blocks movement.)
+const ROOM = {
   name: 'Move Lab',
   tiles: { '#': 'wall', '.': 'floor' },
   actors: { '@': 'player', M: 'manager' },
   map: [
-    '##############',
-    '#.@M.........#',
-    '##############',
+    '##################',
+    '#................#',
+    '#................#',
+    '#........@M......#',
+    '#................#',
+    '#................#',
+    '##################',
   ],
 };
 
 test('a tile of clean floor costs half an AP', async ({ page }) => {
   test.setTimeout(300_000);
-  await bootStash(page, CORRIDOR, 'office-drone');
+  await bootStash(page, ROOM, 'office-drone');
   await enterCombat(page);
   // Nothing armed, so a ground click walks.
   if (await page.evaluate(() => window.__combat.armed)) {
@@ -30,8 +37,11 @@ test('a tile of clean floor costs half an AP', async ({ page }) => {
   const before = await page.evaluate(() => ({
     ap: window.__combat.ap, tile: window.__game.playerTile,
   }));
-  // Walk a known distance down the open corridor, away from the Manager.
-  const target = { x: before.tile.x + 4, z: before.tile.z };
+  // Four tiles directly away from the Manager - open floor, and a straight
+  // line, so the distance charged is the distance intended.
+  const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
+  const away = Math.sign(before.tile.x - foe.x) || -1;
+  const target = { x: before.tile.x + 4 * away, z: before.tile.z };
   expect(await clickWorld(page, target.x, target.z)).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__game.playerTile),
     { timeout: 30_000 }).toEqual(target);
@@ -46,7 +56,7 @@ test('a tile of clean floor costs half an AP', async ({ page }) => {
 
 test('repositioning behind a foe still leaves AP to attack with', async ({ page }) => {
   test.setTimeout(300_000);
-  await bootStash(page, CORRIDOR, 'office-drone');
+  await bootStash(page, ROOM, 'office-drone');
   await enterCombat(page);
   // The trade this milestone exists to create: at the old rate a walk around a
   // body cost a whole attack, so backstab was never worth taking. Walk past
