@@ -96,7 +96,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
       if (money) {
         banked += money;
         addCash?.(money);
-        taken.push(`${itemName(id)} (${money}\u{1F4B5})`);
+        taken.push(`${itemName(id)} (${money}💵)`);
         continue;
       }
       if (sheet.inventory.length < INV_CAP) {
@@ -109,7 +109,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     }
     let msg = `${from}: ${taken.length ? taken.join(', ') : 'nothing'}.`;
     if (overflowed) msg += ' Pockets full - the rest hits the floor.';
-    if (banked) msg += ` Banked ${banked}\u{1F4B5}.`;
+    if (banked) msg += ` Banked ${banked}💵.`;
     ui.toast(msg);
     invPanel.refresh(sheet);
   }

@@ -57,11 +57,11 @@ export function createShopping({ getSheet, getParty, isInCombat, isGameOver, onB
           affordable: cash >= price,
         };
       }),
-      // Only what they'd actually take, but indexed against the REAL pocket
-      // positions - the sell verb has to address the bag, not this filtered
-      // view, or selling one thing would sell another.
-      sellable: (sheet?.inventory || []).map((id, index) => ({ id, index }))
-        .map(({ id, index }) => ({ index, id, paid: sellYield(openShop, id) }))
+      // Only what they'd actually take, but carrying the REAL pocket index -
+      // the sell verb has to address the bag, not this filtered view, or
+      // selling one thing would sell another.
+      sellable: (sheet?.inventory || [])
+        .map((id, index) => ({ id, index, paid: sellYield(openShop, id) }))
         .filter((s) => s.paid > 0)
         .map((s) => ({ ...s, name: itemName(s.id), icon: ITEMS[s.id]?.icon })),
     };
