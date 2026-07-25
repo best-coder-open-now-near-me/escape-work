@@ -625,11 +625,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         // Live status icons trail the row - the at-a-glance read of who's
         // stunned, burning, deflecting, gummed.
         const icons = dead ? '' : statusList(carrier).map((st) => st.icon).join('');
+        // Each row leads with the combatant's own rendered face (portraits.js).
+        // It rides the ACTOR, so it is there for members, summons and enemies
+        // alike, and simply absent until the render lands.
+        const face = (s.member ? s.member.actor : s.unit)?.portraitUrl;
+        const pic = face
+          ? `<img src="${face}" alt="" style="width:22px; height:22px; border-radius:4px;`
+            + `border:1px solid ${col}; vertical-align:middle; margin-right:5px; flex:none;">`
+          : '';
         return `<div style="opacity:${dead ? '.4' : '.95'}; color:${col};`
-          + `font-weight:${cur ? '700' : '400'};">`
-          + `${cur ? '▸ ' : '&nbsp;&nbsp;'}${slotName(s)} &middot; ${dead ? '—' : hp}`
+          + `font-weight:${cur ? '700' : '400'}; display:flex; align-items:center; gap:2px; margin:1px 0;">`
+          + `<span style="width:11px; flex:none;">${cur ? '▸' : ''}</span>${pic}`
+          + `<span>${slotName(s)} &middot; ${dead ? '—' : hp}`
           + ` <span style="opacity:.6">(${s.init})</span>`
-          + (icons ? ` ${icons}` : '') + `</div>`;
+          + (icons ? ` ${icons}` : '') + `</span></div>`;
       }).join('');
     // Reflect the ACTING member on the persistent HUD, not the leader - in a
     // multi-member fight you control whoever's turn it is (their HP, their gum/
@@ -763,7 +772,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           // No carpeting a tile a party member is standing on.
           if (members.some((m) => m.sheet.hp > 0 && m.actor?.x === x && m.actor?.z === z)) continue;
           if (!world.hasLos(active.actor.x, active.actor.z, x, z)) continue;
-          world.leaveSurface(x, z, a.leaves);
+          world.leaveSurface(x, z, a.leaves, a.leavesTurns || 0);
         }
       }
     }
@@ -1624,6 +1633,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // per-tile hooks for members and summons, so it reports the step here and
     // combat resolves any opportunity attack it provoked (TACTICS_PLAN M2).
     notifyStep,
+    // Repaint the panel and initiative strip - main.js calls this when a
+    // character's portrait finishes rendering mid-fight.
+    refresh,
     // Right-click backs out of an armed action / a pending confirm. Returns
     // true if it consumed the click, so main.js can suppress the context menu.
     cancelArmed: () => {

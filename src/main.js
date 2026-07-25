@@ -28,6 +28,7 @@ import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel } from './scene.js';
 import { placeModel, applyCharacterProportions } from './models.js';
+import { createPortraits } from './portraits.js';
 import { addHighlight, setHighlight } from './shading.js';
 import { throwProjectile, spawnDamageText, worldToScreenCss } from './fx.js';
 import { createControls } from './controls.js';
@@ -164,6 +165,12 @@ function startGame(level) {
     // Equipping changes derived stats AND the basic weapon swing on the bars -
     // refresh the HUD, hotbar, and char sheet.
     onGearChange: () => refreshProgressUi(),
+    // Everyone else still standing can be handed an item. The recipient's
+    // sheet takes it directly - pockets are unlimited, so there is nothing to
+    // refuse for.
+    recipients: () => (party?.members || [])
+      .filter((m) => m !== partyLeader(party) && m.sheet.hp > 0)
+      .map((m) => ({ name: m.sheet.name, take: (id) => m.sheet.inventory.push(id) })),
   });
 
   function abortCombat() {
@@ -299,24 +306,56 @@ function startGame(level) {
   // sheet's look resolves back through its class/companion entry.
   const sheetLook = (sh) => (sh?.classId && CLASSES[sh.classId]?.look)
     || (sh?.companionId && COMPANIONS[sh.companionId]?.look) || null;
+  // Surfaces a power DROPS during a fight are litter, not terrain: Bulk Mail's
+  // paper drifts clear a few rounds later, so a cone can't permanently repaint
+  // the floor (nor leave a renewable ammo pile behind it). Tracked here rather
+  // than in surfaces-runtime because reverting needs the grid AND the visual,
+  // both of which live on this side.
+  const tempSurfaces = new Map(); // "x,z" -> { left, type }
+  function ageTempSurfaces() {
+    for (const [key, t] of [...tempSurfaces]) {
+      const [x, z] = key.split(',').map(Number);
+      // Fire ate it, or something repainted the tile - either way it is no
+      // longer ours to clean up.
+      if (grid.typeAt(x, z) !== t.type) { tempSurfaces.delete(key); continue; }
+      if (t.left > 1) { t.left -= 1; continue; }
+      tempSurfaces.delete(key);
+      grid.setType(x, z, 'floor');
+      scene.hideSurfaceVisual(x, z);
+      loot.forgetPaper?.(x, z); // a fresh drift here later is gatherable again
+    }
+  }
+  const portraits = createPortraits(app);
+  // A portrait finishing is the only reason to repaint for it: refresh the
+  // corner readout (if it belongs to whoever we are controlling) and the
+  // in-fight initiative strip.
+  const onPortraitReady = () => {
+    const lead = party ? partyLeader(party) : null;
+    if (sheet) ui.updateStatsHud(sheet, lead?.actor?.portraitUrl || player?.portraitUrl || null);
+    if (inCombat) combat?.refresh?.();
+  };
   // Proportions BEFORE attach (it captures the rig lift); tint AFTER, because
   // attach is what clones the shared materials per instance.
-  const dressUp = (e, actor, look) => {
+  const dressUp = (e, actor, look, model = null) => {
     applyCharacterProportions(e, look?.build);
     actor.attach(e);
     actor.applyTint(look?.tint);
+    // Kick off this character's portrait from the SAME model + look, so the
+    // little picture and the body on the floor can never disagree. It lands
+    // asynchronously and refreshes whatever is showing when it does.
+    if (model) portraits.forActor(actor, model, look, onPortraitReady);
   };
   for (const en of enemies) {
     placeModel(app, `assets/characters/${en.def.model}.glb`, en.x, en.z, {
       lift, rotY: -90, animate: true,
-      onReady: (e) => { dressUp(e, en, en.def.look); picking.register(e, 'enemy', en); },
+      onReady: (e) => { dressUp(e, en, en.def.look, en.def.model); picking.register(e, 'enemy', en); },
     });
   }
   for (const npc of npcs) {
     placeModel(app, `assets/characters/${npc.def.model}.glb`, npc.x, npc.z, {
       lift, rotY: 90, animate: true,
       onReady: (e) => {
-        dressUp(e, npc, npc.def.look);
+        dressUp(e, npc, npc.def.look, npc.def.model);
         npc.faceToward(player.x, player.z);
         picking.register(e, 'npc', npc);
       },
@@ -333,7 +372,7 @@ function startGame(level) {
     // a target.
     placeModel(app, `assets/characters/${sheet.model}.glb`, player.x, player.z, {
       lift, rotY: 90, animate: true,
-      onReady: (e) => { dressUp(e, player, sheetLook(sheet)); picking.register(e, 'party', player); },
+      onReady: (e) => { dressUp(e, player, sheetLook(sheet), sheet.model); picking.register(e, 'party', player); },
     });
     ui.updateStatsHud(sheet);
   }
@@ -1208,10 +1247,13 @@ function startGame(level) {
         stickGum,
         // Cone attacks carpet plain floor with a surface tile (Bulk Mail ->
         // paper). Only bare floor converts - carpets, surfaces, props stay.
-        leaveSurface: (x, z, tileType) => {
+        // `turns` > 0 marks the surface as LITTER rather than terrain: it
+        // clears itself after that many rounds (see ageTempSurfaces).
+        leaveSurface: (x, z, tileType, turns = 0) => {
           if (grid.typeAt(x, z) !== 'floor') return false;
           grid.setType(x, z, tileType);
           scene.addSurfaceVisual(x, z, tileType);
+          if (turns > 0) tempSurfaces.set(x + ',' + z, { left: turns, type: tileType });
           return true;
         },
         // Anyone alive is a legal target - bystanders outside the initial
@@ -1251,7 +1293,7 @@ function startGame(level) {
             placeModel(app, `assets/characters/${def.model}.glb`, x, z, {
               lift, rotY: ally ? 90 : -90, animate: true,
               onReady: (e) => {
-                dressUp(e, actor, ally ? sheetLook(rec.sheet) : actor.def?.look);
+                dressUp(e, actor, ally ? sheetLook(rec.sheet) : actor.def?.look, ally ? rec.sheet.model : actor.def?.model);
                 picking.register(e, ally ? 'summon' : 'enemy', actor);
               },
             });
@@ -1268,7 +1310,7 @@ function startGame(level) {
         updateHud: (s = sheet) => ui.updateStatsHud(s || sheet),
         // One combat round = one fire/smoke turn (combat.js calls this as it
         // hands the turn back to the player).
-        onRound: () => runtime.advanceTurn(),
+        onRound: () => { runtime.advanceTurn(); ageTempSurfaces(); },
         onEnemyKilled: awardKill,
         onWin: () => {
           inCombat = false;
@@ -2023,7 +2065,7 @@ function startGame(level) {
       m.actor = comp;
       placeModel(app, `assets/characters/${m.sheet.model}.glb`, spot.x, spot.z, {
         lift, rotY: 90, animate: true,
-        onReady: (e) => { dressUp(e, comp, sheetLook(m.sheet)); picking.register(e, 'party', comp); },
+        onReady: (e) => { dressUp(e, comp, sheetLook(m.sheet), m.sheet.model); picking.register(e, 'party', comp); },
       });
     }
     loot.refreshPanel(sheet);
@@ -2170,7 +2212,7 @@ function startGame(level) {
       enemies.push(en);
       placeModel(app, `assets/characters/${def.model}.glb`, x, z, {
         lift, rotY: -90, animate: true,
-        onReady: (e) => { dressUp(e, en, def.look); picking.register(e, 'enemy', en); },
+        onReady: (e) => { dressUp(e, en, def.look, def.model); picking.register(e, 'enemy', en); },
       });
       return en;
     },

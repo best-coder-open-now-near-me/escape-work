@@ -6,6 +6,8 @@
 // (data/companions.js) grows it.
 import { gainXp, createSheetFrom, ensureAttributes, EQUIP_SLOTS } from './stats.js';
 import { ITEMS } from './data/items.js';
+import { CLASSES } from './data/classes.js';
+import { COMPANIONS } from './data/companions.js';
 
 export const PARTY_CAP = 3; // leader + 2 companions - see PARTY_PLAN.md
 export const SAVE_VERSION = 5; // v5 adds equipment slots (EQUIPMENT_PLAN.md)
@@ -72,6 +74,15 @@ function normalizeSheet(sheet, version = 0) {
   delete sheet.gum;
   delete sheet.bleed;
   sheet.name ??= sheet.className;
+  // A character's MODEL is presentation derived from identity, not player
+  // state, so re-derive it from the class/companion entry on every load rather
+  // than trusting whatever was saved. That way art changes (new rigs landing,
+  // a character reassigned to its own model) reach existing saves instead of
+  // leaving old characters wearing the rig they were created with - and a save
+  // can never point at a .glb that no longer exists.
+  const block = (sheet.classId && CLASSES[sheet.classId])
+    || (sheet.companionId && COMPANIONS[sheet.companionId]) || null;
+  if (block?.model) sheet.model = block.model;
   sheet.attrPoints ??= 0; // pre-M2 saves never banked any
   sheet.classPoints ??= 0;
   sheet.perks ??= []; // taken track nodes; effects are already baked into the sheet

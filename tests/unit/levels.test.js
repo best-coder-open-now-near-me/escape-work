@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { parseLevel } from '../../src/grid.js';
 import { findPath } from '../../src/pathfinding.js';
+import { existsSync } from 'node:fs';
 import { TILE_TYPES } from '../../src/data/tiles.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
 import { NPCS } from '../../src/data/npcs.js';
@@ -77,6 +78,27 @@ test('every registry cross-reference resolves', () => {
   // Tile loot tables exist, and every table entry names a real item.
   for (const [id, def] of Object.entries(TILE_TYPES)) {
     if (def.loot) assert.ok(LOOT_TABLES[def.loot], `tile "${id}" loot table "${def.loot}" exists`);
+  }
+  // A level's map is one CHARACTER per cell and the editor exports canonical
+  // registry chars, so a duplicate `char` silently makes one prop unpaintable
+  // and corrupts the load -> export round trip. With a large furniture kit
+  // this is the easiest mistake to make, so pin it.
+  const byChar = new Map();
+  for (const [id, def] of Object.entries(TILE_TYPES)) {
+    assert.ok(typeof def.char === 'string' && def.char.length === 1, `tile "${id}" has a single-char code`);
+    assert.ok(!byChar.has(def.char),
+      `tile char "${def.char}" is unique (${id} collides with ${byChar.get(def.char)})`);
+    byChar.set(def.char, id);
+  }
+  // Every referenced model actually ships - a typo here renders an invisible
+  // prop that still blocks movement, which is near-impossible to spot in play.
+  for (const [id, def] of Object.entries(TILE_TYPES)) {
+    if (!def.model) continue;
+    assert.ok(existsSync(new URL(`../../assets/${def.model}.glb`, import.meta.url)),
+      `tile "${id}" model assets/${def.model}.glb exists`);
+    if (def.scale !== undefined) {
+      assert.ok(def.scale > 0 && def.scale <= 3, `tile "${id}" scale ${def.scale} is sane`);
+    }
   }
   for (const [table, entries] of Object.entries(LOOT_TABLES)) {
     for (const e of entries) assert.ok(ITEMS[e.item], `loot table "${table}" item "${e.item}" exists`);
