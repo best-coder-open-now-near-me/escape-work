@@ -4,7 +4,7 @@
 // tile behind a tall mesh - the same fix that makes a click on the raised door
 // panel actually open the door.
 import { test, expect } from '@playwright/test';
-import { bootAndPick, bootStash, onScreen, waitStill, combatOrWalkDone, stableProject } from './helpers.js';
+import { bootAndPick, bootStash, onScreen, waitStill, combatOrWalkDone, stableProject, enterCombat } from './helpers.js';
 
 // Hover the on-screen position of a world point (a tall mesh, y > 0). Returns
 // false if it projects off-screen so the caller can bail.
@@ -139,4 +139,47 @@ test('clicking an NPC walks up and opens a dialogue you can advance and close', 
     await page.waitForTimeout(150);
   }
   expect(await page.evaluate(() => window.__game.dialogueOpen)).toBe(false);
+});
+
+// A single coworker two tiles off, in an open room - close enough that the
+// walk-up is one step, so a click resolves inside a turn.
+const DUEL_ARENA = {
+  name: 'Duel',
+  tiles: { '#': 'wall', '.': 'floor', '>': 'exit' },
+  actors: { '@': 'player', 'M': 'manager' },
+  map: [
+    '#########',
+    '#.......#',
+    '#.@.M..>#',
+    '#.......#',
+    '#########',
+  ],
+};
+
+test('clicking a coworker in combat attacks with the basic swing - no action armed first', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, DUEL_ARENA, 'office-drone');
+  await enterCombat(page);
+
+  // Nothing is armed: this is the whole point of the test. The click below is
+  // the only input, and it has to mean "hit them".
+  expect(await page.evaluate(() => window.__combat.armed)).toBe(null);
+  await page.evaluate(() => { window.__combat.forceHit = true; });
+
+  const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
+  expect(foe).toBeTruthy();
+  const foeHp = () => page.evaluate(() => window.__combat.enemies.find((e) => e.alive)?.hp);
+
+  // Click the body. The camera keeps easing after the walk-up, so settle and
+  // retry a couple of times rather than trusting one projection.
+  for (let i = 0; i < 4 && (await foeHp()) >= foe.hp; i++) {
+    await page.waitForTimeout(1000);
+    const p = await page.evaluate(([x, z]) => window.__game.project3(x, 0.9, z), [foe.x, foe.z]);
+    if (!onScreen(p)) continue;
+    await page.mouse.click(p.x, p.y);
+    await page.waitForTimeout(600);
+  }
+  expect(await foeHp()).toBeLessThan(foe.hp);
+  // It swung the equipped weapon's action (bare-handed here), not a class power.
+  expect(await page.evaluate(() => window.__combat.lastRoll)).not.toBe(null);
 });

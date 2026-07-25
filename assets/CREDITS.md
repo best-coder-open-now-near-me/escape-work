@@ -31,7 +31,7 @@ carries its own terms rather than the MIT grant.
   | --- | --- |
   | `characters/worker.glb` | `character-male-a` |
   | `characters/itsupport.glb` | `character-male-b` |
-  | `characters/mailroom.glb` | `character-male-c` |
+  | `characters/security.glb` | `character-male-c` |
   | `characters/veteran.glb` | `character-male-d` |
   | `characters/hr.glb` | `character-male-e` |
   | `characters/regional.glb` | `character-male-f` |

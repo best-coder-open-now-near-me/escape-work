@@ -36,16 +36,24 @@ const appliesLine = (src, name) => {
   return def?.log ? def.log.replace('{name}', name) : `${def?.name || 'A status'} sets in.`;
 };
 
-export function startCombat({ app, party, engaged, world, fx, callbacks, opening = null, rng = Math.random }) {
+export function startCombat({ app, party, engaged, world, fx, callbacks, opening = null, allies = [], rng = Math.random }) {
   // Per-member turn state: every party member fights with their own AP pool,
   // deflect stance and limited-use counters. `active` is whose action bar,
   // previews and clicks are live - with one member that is simply "you";
   // switching mid-fight arrives with the party bar.
-  const members = party.members.map((m) => {
+  const asMember = (rec, extra) => {
     const usesLeft = {};
-    for (const id of m.sheet.actions) if (ACTIONS[id].uses) usesLeft[id] = ACTIONS[id].uses;
-    return { sheet: m.sheet, actor: m.actor, ap: m.sheet.maxAp, usesLeft };
-  });
+    for (const id of rec.sheet.actions) if (ACTIONS[id].uses) usesLeft[id] = ACTIONS[id].uses;
+    return { sheet: rec.sheet, actor: rec.actor, ap: rec.sheet.maxAp, usesLeft, ...extra };
+  };
+  const members = party.members.map((m) => asMember(m));
+  // Summons still standing from an EARLIER fight (they outlive it now - main.js
+  // keeps them until their assignment runs out) walk back in as the temporary
+  // members they already were: same sheet, same body, whatever turns they have
+  // left. They enter after the real roster, so party.active still indexes right.
+  for (const s of allies) {
+    if (s.sheet.hp > 0 && s.actor) members.push(asMember(s, { isSummon: true, summonedBy: null }));
+  }
   let active = members[party.active];
   // Everyone you control: party members plus any summons you've conjured
   // (temporary members, appended by resolveSummon). `livingParty` is the real
@@ -691,6 +699,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // combatant as the fight ends. Step-clock statuses (gum/bleed) persist.
     for (const m of members) clearStatuses(m.sheet, { clock: 'turn' });
     for (const e of engaged) clearStatuses(e, { clock: 'turn' });
+    // Summons OUTLIVE the fight now (main.js keeps them until their assignment
+    // runs out), with one exception: one that fell is gone for good. There is no
+    // body to loot and no revive courtesy, so sweep it here rather than leaving
+    // a toppled temp lying on the carpet forever.
+    for (const m of members) if (m.isSummon && m.actor && m.sheet.hp <= 0) dismissSummon(m);
     phase = 'done';
     app.off('update', update);
     panel.remove();
@@ -824,10 +837,24 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (!engaged.some((e) => e.alive)) victory();
   }
 
+  // Clicking a coworker with nothing armed is an attack - the basic swing from
+  // whatever is in your hand (stats.equippedAction; bare hands fall back to
+  // 'punch'). The old behavior was a nag ("choose an action first"), which made
+  // the most obvious verb in the game the one thing a click could NOT do. Arming
+  // a power still overrides it; that's what arming is for.
+  const defaultAttack = () => equippedAction(active.sheet);
+
   function handleEnemyClick(en) {
     if (phase !== 'player' || active.actor.moving || !en.alive) return;
     hidePreview();
-    if (!armed) { log('Choose an action first, then a target.'); return; }
+    if (!armed) {
+      // Not enough AP for even the basic swing: say so once, rather than
+      // silently walking them into the enemy's face.
+      const id = defaultAttack();
+      if (active.ap < ACTIONS[id].ap) { log('Not enough AP to attack.'); return; }
+      armed = id;
+      refresh(); // the bar lights the swing that is about to happen
+    }
     const a = ACTIONS[armed];
     if (a.cone) { fireCone(en.x, en.z); return; }
     // Placing a summon on top of a coworker: the tile is taken, so they report
@@ -1137,6 +1164,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (!livingParty().length) { defeat(); return; }
     const s = order[turnPtr];
     if (!slotAlive(s)) { advanceTurn(); return; } // a corpse/downed slot - skip
+    // A summon serves a fixed number of turns and then the contract lapses.
+    // Spending it here - at the top of its own turn - is what makes the budget
+    // legible: "six turns" means six turns it actually got to act, however long
+    // the fight or the walk between fights took.
+    const body = s.member ? s.member.actor : s.unit;
+    if (body?.summonTurns != null) {
+      if (body.summonTurns <= 0) { expireSummon(s); return; }
+      body.summonTurns -= 1;
+    }
     const carrier = s.member ? s.member.sheet : s.unit;
     // Read incapacitation BEFORE ticking (the tick expires a 1-turn stun/
     // surprise): a skipTurn status costs the owner this turn.
@@ -1175,6 +1211,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     acting = { unit: s.unit, ap: s.unit.def.ap, freeAp: freeMoveOf(s.unit), wait: 0.5 };
     refresh();
   }
+  // A summon's turns ran out with the fight still on: it leaves mid-battle,
+  // which is the cost of fielding temps. Dismissing an enemy-side one can empty
+  // the enemy list, so hand off through advanceTurn - beginTurn re-checks both
+  // win conditions at the top.
+  function expireSummon(s) {
+    log(`${slotName(s)}'s assignment ends. They gather their things and go.`);
+    dismissSummon(s.member || s.unit);
+    refresh();
+    advanceTurn();
+  }
+
   // The line for a turn spent incapacitated - stun reads differently from the
   // surprise it generalized.
   function skipTurnLine(s, carrier) {
@@ -1220,8 +1267,29 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function liveSummonsOf(summoner) {
     const enemySummons = world.liveEnemies().filter((e) => e.summonedBy === summoner).length;
     const playerSummons = members.filter((m) =>
-      m.isSummon && m.sheet.hp > 0 && m.summonedBy === summoner).length;
+      m.isSummon && m.sheet.hp > 0 && m.actor && m.summonedBy === summoner).length;
     return enemySummons + playerSummons;
+  }
+  // A summon's assignment ran out (or the fight it was called for is over and
+  // main.js is sweeping): take it off the board WITHOUT killing it. This is not
+  // a death - no topple, no corpse, no loot, no XP - the temp just leaves.
+  //   a member  -> drop its body; a null `actor` is exactly what slotAlive,
+  //                livingMembers and the initiative strip already read as "not
+  //                in this fight", so nothing else needs to know.
+  //   an AI unit -> mark it not-alive so victory can be reached, and hand the
+  //                body back to main.js to destroy.
+  function dismissSummon(target) {
+    if (target.sheet) {
+      const body = target.actor;
+      target.actor = null;
+      world.dismissSummon(body);
+      // The floor can't be held by someone who just walked out.
+      if (active === target) makeActive(livingParty()[0] || members[0]);
+      return;
+    }
+    target.alive = false;
+    target.loot = [];
+    world.dismissSummon(target);
   }
   // Post the req: spawn up to the descriptor's `count` for `team` beside the
   // summoner, never past its live `cap`. Returns how many actually showed up.
@@ -1239,17 +1307,18 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (n <= 0) return 0;
     const spawned = world.spawnSummon(d.archetype, team, summoner, n, at) || [];
     for (const rec of spawned) {
+      // The contract. `lifetimeTurns` is how many of its OWN turns the unit
+      // serves before it files out (beginTurn spends them; main.js's world
+      // clock spends them out of combat). Omit it and the summon is permanent,
+      // which is the old behavior and still what a descriptor gets by default.
+      const body = team === 'enemy' ? rec : rec.actor;
+      body.summonTurns = d.lifetimeTurns ?? null;
       if (team === 'enemy') {
         if (!engaged.includes(rec)) engaged.push(rec);
         applyStatus(rec, 'surprised');
         insertSlot(unitSlot(rec));
       } else {
-        const usesLeft = {};
-        for (const id of rec.sheet.actions) if (ACTIONS[id].uses) usesLeft[id] = ACTIONS[id].uses;
-        const m = {
-          sheet: rec.sheet, actor: rec.actor, ap: rec.sheet.maxAp,
-          usesLeft, isSummon: true, summonedBy: summoner,
-        };
+        const m = asMember(rec, { isSummon: true, summonedBy: summoner });
         members.push(m);
         insertSlot(memberSlot(m)); // slots in by its own roll; acts when its turn comes
       }
@@ -1355,7 +1424,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     setFacing(u, tx - b.x, tz - b.z);
   };
   const bodyOf = (u) => u.actor || u; // a member wraps an actor; a unit IS one
-  const standing = (u) => (u.sheet ? u.sheet.hp > 0 && !u.toppled : !!u.alive);
+  // On its feet AND on the board. The `actor` check is not paranoia: a summon
+  // whose assignment lapsed has its body dropped (dismissSummon) while its
+  // member record lives on at full HP, and a bodiless member has no tile to
+  // flank from, take cover behind, or throw an opportunity attack out of.
+  const standing = (u) => (u.sheet ? u.sheet.hp > 0 && !u.toppled && !!u.actor : !!u.alive);
   const canReact = (u) => standing(u)
     && (TACTICS.REACTIONS_PER_ROUND - (reactions.get(u) || 0)) > 0
     && !hasStatus(statusesOf(u), 'surprised')
@@ -1644,12 +1717,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     },
     get turn() { return order[turnPtr] ? slotName(order[turnPtr]) : null; },
     get summons() {
-      return members.filter((m) => m.isSummon && m.sheet.hp > 0)
-        .map((m) => ({ name: m.sheet.name, x: m.actor.x, z: m.actor.z, hp: m.sheet.hp }));
+      return members.filter((m) => m.isSummon && m.sheet.hp > 0 && m.actor)
+        .map((m) => ({
+          name: m.sheet.name, x: m.actor.x, z: m.actor.z, hp: m.sheet.hp,
+          turnsLeft: m.actor.summonTurns,
+        }));
     },
     // Test/debug: drop a player-team summon beside the active member, as the
-    // HR class's Post the Role will (M3). Bypasses caps - callers set the count.
-    summonAlly: (id, n = 1) => resolveSummon(active.actor, 'player', { archetype: id, count: n, cap: n }),
+    // HR class's Post the Role does. Bypasses caps - callers set the count -
+    // and takes an optional lifetime so a test can watch one time out.
+    summonAlly: (id, n = 1, lifetimeTurns = null) =>
+      resolveSummon(active.actor, 'player', { archetype: id, count: n, cap: n, lifetimeTurns }),
     refresh,
   };
 

@@ -239,7 +239,17 @@ export function updateStatsHud(sheet, portraitUrl = undefined) {
       </span>
     </span>`;
   renderStatusEffects(sheet);
+  relayoutBag(); // the bag button rides the card's right edge, whose width just changed
 }
+
+// The bag button and the pockets panel are anchored to the bottom-left stats
+// card, whose width changes with the name and the unspent-points line. The
+// inventory panel registers its layout pass here so every stats repaint (and
+// every resize) re-seats them instead of leaving the button floating over the
+// card or a gap beside it.
+let bagLayout = null;
+function relayoutBag() { bagLayout?.(); }
+window.addEventListener('resize', relayoutBag);
 
 // --- player status effects ----------------------------------------------------
 // Transient effects stacked just above the bottom-left stats - gum, bleeding,
@@ -355,15 +365,39 @@ export function createLootLabels() {
     for (const en of entries) {
       const chip = document.createElement('div');
       chip.className = 'loot-label';
+      // A label can name several things on one tile (looting.js groups a pile
+      // into one entry), so it is a LIST: the first line is the headline, the
+      // rest are the other items under it.
       chip.textContent = `${en.icon || '📦'} ${en.text}`;
+      for (const extra of en.also || []) {
+        const line = document.createElement('div');
+        line.textContent = extra;
+        Object.assign(line.style, { opacity: '.75', fontSize: '11px' });
+        chip.appendChild(line);
+      }
       Object.assign(chip.style, {
-        position: 'absolute', transform: 'translate(-50%, -100%)', whiteSpace: 'nowrap',
-        background: 'rgba(22,22,36,.92)', border: '1px solid #3a3a52', borderRadius: '6px',
+        // Floated well clear of the thing it names (-170% instead of sitting on
+        // it) so the item, body or container underneath stays visible, and
+        // translucent for the same reason - a solid chip on a floor tile hid
+        // exactly the loot it was advertising. Hovering makes it solid again.
+        position: 'absolute', transform: 'translate(-50%, -170%)', whiteSpace: 'nowrap',
+        background: 'rgba(22,22,36,.58)', border: '1px solid rgba(120,120,160,.55)',
+        borderRadius: '6px', opacity: '.85',
         padding: '3px 9px', color: '#f0f0f5', font: '12px system-ui, sans-serif',
+        textShadow: '0 1px 2px rgba(0,0,0,.9)', // legible over any carpet
         cursor: 'pointer', pointerEvents: 'auto', userSelect: 'none', display: 'none',
+        transition: 'opacity .1s linear, background .1s linear',
       });
-      chip.onmouseenter = () => { chip.style.borderColor = '#8adf76'; };
-      chip.onmouseleave = () => { chip.style.borderColor = '#3a3a52'; };
+      chip.onmouseenter = () => {
+        chip.style.borderColor = '#8adf76';
+        chip.style.background = 'rgba(22,22,36,.95)';
+        chip.style.opacity = '1';
+      };
+      chip.onmouseleave = () => {
+        chip.style.borderColor = 'rgba(120,120,160,.55)';
+        chip.style.background = 'rgba(22,22,36,.58)';
+        chip.style.opacity = '.85';
+      };
       chip.onmousedown = (e) => e.stopPropagation(); // don't let the canvas see it
       chip.onclick = () => { hide(); en.onClick && en.onClick(); };
       en.el = chip;
@@ -402,26 +436,57 @@ export function createLootLabels() {
 const SLOT_LABELS = { weapon: 'In Hand', outfit: 'Dress Code', trinket: 'Flair', shoes: 'On Foot' };
 
 export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onEquip, onUnequip, onSend, canSend }) {
+  // The bag sits immediately right of the bottom-left profile card, where your
+  // eye already is for HP - not up in the top-left corner it used to share with
+  // nothing. Its exact left edge is measured from the card each layout pass,
+  // because the card's width moves with the character's name.
   const bag = document.createElement('button');
   bag.id = 'inventory-btn';
   bag.textContent = '🎒';
   Object.assign(bag.style, {
-    position: 'fixed', top: '12px', left: '58px', zIndex: '25',
+    position: 'fixed', left: '12px', bottom: '14px', zIndex: '25',
     background: '#232334', color: '#f0f0f5', border: '1px solid #3a3a52',
     borderRadius: '7px', padding: '6px 10px', font: '14px system-ui, sans-serif',
     cursor: 'pointer',
   });
   document.body.appendChild(bag);
 
+  // ...and the pockets rise out of the bottom over the button, rather than
+  // dropping from the top-left. Long bags scroll inside the panel instead of
+  // growing off the top of the screen.
   const panel = document.createElement('div');
   panel.id = 'inventory-panel';
   Object.assign(panel.style, {
-    position: 'fixed', top: '54px', left: '12px', zIndex: '25', width: '250px',
+    position: 'fixed', bottom: '80px', left: '12px', zIndex: '25', width: '250px',
     display: 'none', background: '#232334', color: '#f0f0f5',
     border: '1px solid #3a3a52', borderRadius: '9px', padding: '10px 12px',
     font: '12px system-ui, sans-serif', boxShadow: '0 8px 24px rgba(0,0,0,.45)',
+    maxHeight: 'min(58vh, 520px)', overflowY: 'auto',
+    // The pop: it slides up into place from behind the button. `display` stays
+    // the source of truth for "is it open" (tests and the hotkey read it), so
+    // the transform only ever decorates a state that has already flipped.
+    transformOrigin: 'bottom left', transform: 'translateY(12px)', opacity: '0',
+    transition: 'transform .16s ease-out, opacity .16s ease-out',
   });
   document.body.appendChild(panel);
+
+  // Seat both against the live stats card. Called on every stats repaint and on
+  // resize (relayoutBag), so they track the card instead of guessing at it.
+  function layout() {
+    const stats = document.getElementById('stats');
+    const r = stats?.getBoundingClientRect();
+    // No card yet (pre-class-pick) - fall back to the same left margin the card
+    // itself uses, so the button never lands in the middle of nowhere.
+    const left = r && r.width ? r.right + 8 : 12;
+    const bottom = r && r.height ? Math.round(window.innerHeight - r.bottom) : 14;
+    bag.style.left = `${Math.round(left)}px`;
+    bag.style.bottom = `${bottom}px`;
+    // Clear the card AND the button - both live at the bottom-left corner.
+    const cardTop = r && r.height ? window.innerHeight - r.top : 60;
+    panel.style.bottom = `${Math.round(Math.max(cardTop, bottom + bag.offsetHeight) + 8)}px`;
+  }
+  bagLayout = layout;
+  layout();
 
   const smallBtn = (label, title) => {
     const b = document.createElement('button');
@@ -548,19 +613,37 @@ export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onE
     });
   }
 
+  // Open/close flips `display` immediately (the honest "is it open" answer) and
+  // then plays the slide on the next frame - a transform applied in the same
+  // frame as display:block never animates.
+  function setOpen(open) {
+    if (open) {
+      panel.style.display = 'block';
+      layout();
+      requestAnimationFrame(() => {
+        panel.style.transform = 'translateY(0)';
+        panel.style.opacity = '1';
+      });
+    } else {
+      panel.style.display = 'none';
+      panel.style.transform = 'translateY(12px)';
+      panel.style.opacity = '0';
+    }
+  }
+
   let lastSheet = null;
   function toggle(sheet) {
     lastSheet = sheet;
     const showing = panel.style.display !== 'none';
-    panel.style.display = showing ? 'none' : 'block';
-    if (!showing) refresh(sheet);
+    if (!showing) refresh(sheet); // fill it before it slides into view
+    setOpen(!showing);
   }
   bag.onclick = () => { if (lastSheet) toggle(lastSheet); };
 
   return {
     toggle,
     refresh: (sheet) => { lastSheet = sheet; if (panel.style.display !== 'none') refresh(sheet); },
-    hide: () => { panel.style.display = 'none'; },
+    hide: () => setOpen(false),
     get visible() { return panel.style.display !== 'none'; },
   };
 }

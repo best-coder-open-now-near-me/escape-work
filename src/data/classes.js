@@ -76,10 +76,13 @@ export const CLASSES = {
   },
   'mail-room': {
     name: 'Mail Room',
-    model: 'mailroom',
-    // Rangy from eleven years of corridors - its own rig now, so the build
-    // nudge is character rather than compensation for shared art.
-    look: { build: { legs: 2.0 } },
+    // The clerk shares the veteran rig with the Mail Room Veteran companion -
+    // same corridors, same uniform - and reads apart from them by build: rangy
+    // and unstooped where the veteran is stocky from eleven years of it. The
+    // rig this class used to wear is the Security Guard's now (`security.glb`)
+    // (data/enemies.js) - it always read as a uniform more than a mail cart.
+    model: 'veteran',
+    look: { build: { legs: 2.0, torso: 1.16 } },
     tagline: 'Knows every corridor. Slips on nothing. Delivers regardless.',
     experience: 'Mail Room Clerk, 11 yrs. Knows where every body is filed.',
     maxHp: 24,

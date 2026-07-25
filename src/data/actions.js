@@ -11,8 +11,9 @@
 // - 2 for most things - so the arithmetic stays readable mid-fight.
 //   defend - halves the next incoming hit
 //   heal   - restores `amount` HP, limited to `uses` per fight
-//   summon - conjures `count` AI allies of `archetype` (a class id) on your
-//            side, up to a live `cap`; instant, `uses` per fight (SUMMON_PLAN)
+//   summon - conjures `count` allies of `archetype` (a class id) on your side,
+//            up to a live `cap`; instant, `uses` per fight. Each one serves
+//            `lifetimeTurns` of its own turns and then files out (SUMMON_PLAN)
 // Modifiers:
 //   purge (on an attack) - hitting a target also wipes their status effects,
 //   harmful and helpful alike; click your own tile while armed to self-cast
@@ -213,7 +214,9 @@ export const ACTIONS = {
   // The HR class's power (SUMMON_PLAN.md): post the role and applicants report
   // for duty on your side. `archetype` is the unit (the applicant class),
   // `count` how many per post, `cap` how many may be live at once, `uses` how
-  // many posts per fight. TARGETED: arm it, then click where they should
+  // many posts per fight, `lifetimeTurns` how many turns each one gets before
+  // the contract runs out and it walks (in combat that is its own initiative
+  // turns; out of combat the world clock spends them). TARGETED: arm it, then click where they should
   // report - `range` is how far from the summoner that spot may be (needs line
   // of sight, like a throw). They land on the clicked tile and the free tiles
   // ringing outward from it. An enemy `summon` descriptor carries no `range`
@@ -226,6 +229,7 @@ export const ACTIONS = {
     cap: 3,
     uses: 2,
     range: 5,
+    lifetimeTurns: 6,
     label: 'Post the Role',
     desc: 'Post the req. Click where they should report - applicants fight on your side.',
     log: 'You open a req. Applicants flood in -',

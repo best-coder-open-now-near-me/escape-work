@@ -107,6 +107,34 @@ test('every registry cross-reference resolves', () => {
   for (const [id, def] of Object.entries(ENEMY_TYPES)) {
     for (const e of def.loot || []) assert.ok(ITEMS[e.item], `enemy "${id}" loot item "${e.item}" exists`);
   }
+  // Every CHARACTER rig a registry names actually ships. Character models are
+  // reassigned as roles change hands (the Mail Room clerk and the Security
+  // Guard swapped rigs), and a typo there loads nothing at all - an invisible
+  // enemy that still blocks, fights and kills you.
+  for (const [regName, reg] of [['ENEMY_TYPES', ENEMY_TYPES], ['CLASSES', CLASSES],
+    ['NPCS', NPCS], ['COMPANIONS', COMPANIONS]]) {
+    for (const [id, def] of Object.entries(reg)) {
+      if (!def.model) continue;
+      assert.ok(existsSync(new URL(`../../assets/characters/${def.model}.glb`, import.meta.url)),
+        `${regName}.${id} model assets/characters/${def.model}.glb exists`);
+    }
+  }
+  // Actor characters live in the same one-char-per-cell map as tile chars, and
+  // actors win the lookup (grid.js), so a shared char makes a tile unpaintable
+  // wherever that actor is legal. Keep the actor namespace clean of both.
+  const actorChars = new Map();
+  const tileChars = new Set(Object.values(TILE_TYPES).map((d) => d.char));
+  for (const [regName, reg] of [['ENEMY_TYPES', ENEMY_TYPES], ['NPCS', NPCS], ['COMPANIONS', COMPANIONS]]) {
+    for (const [id, def] of Object.entries(reg)) {
+      assert.ok(typeof def.char === 'string' && def.char.length === 1, `${regName}.${id} has a single-char code`);
+      assert.ok(def.char !== '@', `${regName}.${id} does not claim the player's char`);
+      assert.ok(!actorChars.has(def.char),
+        `actor char "${def.char}" is unique (${id} collides with ${actorChars.get(def.char)})`);
+      assert.ok(!tileChars.has(def.char),
+        `actor char "${def.char}" (${id}) does not shadow a tile char`);
+      actorChars.set(def.char, id);
+    }
+  }
 });
 
 for (const f of files) {

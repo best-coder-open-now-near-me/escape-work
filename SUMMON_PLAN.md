@@ -22,12 +22,44 @@ So a player-side summon is now a **temporary combat MEMBER**: a real
 `createSheetFrom(applicant)` sheet on a `CompanionActor` body, appended to
 combat's `members` with a `{member}` initiative slot, so you drive it on its
 own turn (its own action bar — *Résumé Slap* — and AP). It's still outside
-`party.members` (not counted against the cap, not saved, despawned at fight's
+`party.members` (not counted against the cap, not saved; since the lifespan
+revision below, removed when its assignment runs out rather than at fight's
 end), and a summon falling is still never a game-over (`livingParty` gates
 defeat). Enemy-side summons are unchanged — they stay AI. This **reverses
 decision #1 for the player side** and retires the `allies` phase; the faction
 tag, caps/cooldowns, anti-farm, and placement all still hold. Details live in
 `ARCHITECTURE.md` (**Summons**).
+
+## Revision — summons are TIMED, and they outlive the fight
+
+Decision #8 shipped summons as combat-scoped: removed on victory or defeat, and
+otherwise permanent for the length of the fight. Both halves of that were wrong
+in play.
+
+- **They vanished the instant the fight ended.** An applicant you posted two
+  turns earlier evaporated on the killing blow, which read less like a rule than
+  like the game forgetting about them.
+- **Nothing bounded them the other way.** Inside a long fight a summon was
+  permanent, so the only ceiling on a summoner was the live `cap`.
+
+So a summon descriptor now carries **`lifetimeTurns`**, and that — not the end of
+combat — is what ends a summon:
+
+- `beginTurn` (combat.js) spends one at the top of each of the unit's OWN turns.
+  "Six turns" therefore means six turns it actually got to act, however long the
+  fight or the walk between fights took.
+- Out of combat, main.js's world clock spends them instead (`ageSummons`, one per
+  fire/smoke turn), so temps don't loiter on the floor forever.
+- Victory leaves survivors standing. They walk out of the fight with you and are
+  handed back into the next one via `startCombat({ allies })`, keeping their
+  sheet, their body and whatever assignment is left.
+- Expiry is **not death**: `dismissSummon` lifts the unit off the board — no
+  topple, no corpse, no loot, no XP. (One that was actually killed is swept at
+  `cleanup()`; either way there is no body to rummage, per decision #6.)
+- Defeat, `abortCombat` and a floor change still clear the whole roster.
+
+Shipped defaults, both data: the HR enemy posts applicants for **5** turns; the
+player's Post the Role for **6**.
 
 ## Direction: the class as the shared unit archetype
 
@@ -88,7 +120,7 @@ working untouched.
 | 5 | Class shape change | Add AI-combat fields (`attacks`, `attackAp`, `xp`, `loot`) and `playable` to the class shape, **additively**; the picker filters `playable !== false`; the combat AI reads these fields only for AI-driven class units | Non-breaking: every existing player class omits them and behaves exactly as today. The applicant is the first (and for now only) class that sets them, so the surface is tiny and testable before any enemy migrates. |
 | 6 | Anti-farm: XP & loot | Applicants drop **no loot** and grant **0 XP** (or a token 1) when killed | An enemy HR that summons on a cooldown is an infinite spawner; paying XP/loot per kill turns every HR fight into a grind. Killing the *summoner* is the win condition, not the minions. |
 | 7 | Summon caps | Per-summoner **live cap** (e.g. 2) + **cooldown** in rounds (e.g. 2), both data on the summon descriptor | Without a cap an enemy HR out-summons your DPS and the fight never ends; without a cooldown a player HR trivializes everything turn one. Both are tunable content, not code. |
-| 8 | Lifespan | **Combat-scoped**: summons live until killed or the fight ends. Player-team summons are removed on victory/defeat; enemy-team summons simply must all die for victory | Simplest coherent rule. A timed N-round expiry (BG-style) was considered — nice flavor, more bookkeeping and UI; deferred to polish. Summons are never serialized, so they can't leak across floors. |
+| 8 | Lifespan | ~~**Combat-scoped**: summons live until killed or the fight ends.~~ **Superseded — see the lifespan revision below.** A summon serves `lifetimeTurns` of its OWN turns and files out when they run out, wherever that lands | The combat-scoped rule was the simplest thing that worked, and it played as a bug: an applicant posted two turns ago blinked out the instant the last coworker fell. The timed expiry this row deferred ("nice flavor, more bookkeeping") is what shipped. Summons are still never serialized, so they can't leak across floors. |
 | 9 | Summon death | Summons **die outright** (topple + prune) — no downed/revive. A player-team summon falling is **never** a game-over | The downed courtesy exists to protect characters you've invested in (PARTY_PLAN #7). A summon is spent on purpose; defeat stays "party wipe only." |
 | 10 | Spawn placement | BFS the nearest free, walkable, unoccupied tiles around the summoner; face them outward. Too few free tiles → summon fewer, with a flavor line | Reuses `isWalkable` + the occupancy checks already in `main.js`. Never spawn onto a wall, hazard-locked pocket, or another body. |
 | 11 | Occupancy & pathing | Player-team summons **block enemies** (join the `partyAt`/`blockedByParty` set) and are **pass-through for the party** — exactly the companion rule. Enemy-team summons live in `enemies[]`, so they block and are targetable for free | Keeps followers/summons from jamming doorways (PARTY_PLAN follower rule) while still forming a real front line against enemies. |

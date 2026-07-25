@@ -87,15 +87,53 @@ export const ENEMY_TYPES = {
     // fight for it. `archetype` names a unit (the `applicant` class); `count` is
     // how many arrive per post; `cap` is how many it may have live at once;
     // `cooldownRounds` is the wait between reqs; `ap` is what the post costs its
-    // turn. The combat AI reads this (combat.js resolveSummon).
+    // turn; `lifetimeTurns` is how many of its own turns an applicant serves
+    // before the contract lapses and it walks off the board. The combat AI
+    // reads this (combat.js resolveSummon).
     summon: {
       archetype: 'applicant',
       count: 2,
       cap: 2,
       cooldownRounds: 2,
       ap: 3,
+      lifetimeTurns: 5,
       log: 'HR posts the role internally. Applicants materialize, résumés in hand.',
     },
+  },
+
+  'security-guard': {
+    // Lowercase because every free uppercase char is already spoken for by a
+    // tile type or another actor; actor chars are looked up before tiles
+    // (grid.js), so 's' is unambiguous in a level map.
+    char: 's',
+    name: 'Security Guard',
+    // The rig the Mail Room class used to wear - it always read as a uniform
+    // more than a mail cart, so it went to the person whose job IS the uniform.
+    model: 'security',
+    // Squared off by the vest and the belt.
+    look: { build: { torso: 1.34 } },
+    level: 2,
+    hp: 20,
+    ap: 5,
+    attackAp: 3,
+    xp: 11,
+    dodge: 0.05, // trained to stay on his feet (HIT_PLAN)
+    // Badge first, force second: he wants to see your lanyard before anything
+    // escalates, which is exactly what 'yellow' means.
+    aggression: 'yellow',
+    examine: 'Security. Knows the badge policy by heart. Has never once been asked about it.',
+    loot: [
+      { item: 'laminated-lanyard', chance: 1 },
+      { item: 'warehouse-boots', chance: 0.35 },
+      { item: 'cold-coffee', chance: 0.5 },
+      { item: 'usb-stick', chance: 0.2 },
+    ],
+    attacks: [
+      { min: 3, max: 4, log: 'The Security Guard asks to see your badge. Firmly.', missLog: 'You pat your pockets convincingly. He waits.' },
+      { min: 2, max: 5, log: 'The Security Guard escorts you toward the door. You are not going that way.', missLog: 'You sidestep the escort. He recovers his footing.' },
+      { min: 2, max: 4, log: 'The Security Guard shines a flashlight directly into your morning.', missLog: 'The beam sweeps past you into an empty cubicle.' },
+      { min: 1, max: 3, log: 'The Security Guard writes you up in the incident log.', applies: 'stunned', appliesLog: 'You are detained for a statement - you lose a turn to it.', missLog: 'His pen is out of ink. Reprieve.' },
+    ],
   },
 
   // --- seniority variants (higher native tier) --------------------------------

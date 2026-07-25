@@ -183,12 +183,44 @@ function startGame(level) {
     syncLeaderBindings();
   }
 
-  // Summons are a combat effect, not a roster: when the fight ends (win, loss,
-  // or abort) they vanish. Destroying the entity auto-unregisters it from
-  // picking (see ARCHITECTURE.md).
+  // Take one summon off the board. NOT a death - a summon's assignment simply
+  // ends (combat.js dismissSummon, or the world clock below), so there is no
+  // topple, no body, no loot. Destroying the entity auto-unregisters it from
+  // picking (see ARCHITECTURE.md); nulling the node stops the actor's update
+  // from animating a body that no longer exists.
+  function dismissSummon(body) {
+    if (!body) return;
+    body.entity?.destroy();
+    body.entity = null;
+    body.visual = null;
+    const i = summons.findIndex((s) => s.actor === body);
+    if (i >= 0) summons.splice(i, 1);
+    const e = enemies.indexOf(body);
+    if (e >= 0) enemies.splice(e, 1);
+  }
+
+  // Clear the whole summon roster at once. Losing and aborting still do this -
+  // a game over or a torn-down fight leaves nothing standing. VICTORY no longer
+  // does: a summon with turns left on its assignment walks out of the fight
+  // with you and joins the next one (see the world clock in the update loop).
   function despawnSummons() {
-    for (const s of summons) s.actor.entity?.destroy();
+    // Over a COPY - dismissSummon splices the list it is walking.
+    for (const s of [...summons]) dismissSummon(s.actor);
     summons.length = 0;
+  }
+
+  // Out-of-combat, a summon's assignment is spent by the world clock instead of
+  // by initiative turns - one per fire/smoke turn - so temps don't loiter
+  // forever just because you stopped fighting. Returns nothing; expired
+  // applicants show themselves out.
+  function ageSummons() {
+    for (const s of [...summons]) {
+      if (s.actor.summonTurns == null) continue;
+      s.actor.summonTurns -= 1;
+      if (s.actor.summonTurns > 0) continue;
+      ui.toast(`${s.sheet.name}'s assignment ends. They head for the elevators.`);
+      dismissSummon(s.actor);
+    }
   }
 
   const enemyAt = (x, z) => enemies.find((e) => e.alive && e.x === x && e.z === z) || null;
@@ -1204,6 +1236,9 @@ function startGame(level) {
       party,
       engaged,
       opening,
+      // Summons that outlived the last fight walk into this one - they're still
+      // on the floor with turns left on the clock, so they fight.
+      allies: summons.filter((s) => s.sheet.hp > 0),
       world: {
         isWalkable,
         // The acting body's own route: allies BLOCK in combat (no ending a
@@ -1282,6 +1317,9 @@ function startGame(level) {
         // placement preview draws these rings, and spawnSummon fills them, so
         // what you see is where they stand.
         summonSpots: (tx, tz, n) => freeTilesNear(tx, tz, n, 0),
+        // A summon whose assignment lapsed (or one that fell) leaves the board
+        // here - combat.js decides when, main.js owns the lists and the body.
+        dismissSummon: (body) => dismissSummon(body),
         spawnSummon: (archetypeId, team, summoner, n, at = null) => {
           const def = CLASSES[archetypeId] || ENEMY_TYPES[archetypeId];
           if (!def) return [];
@@ -1323,7 +1361,11 @@ function startGame(level) {
         onWin: () => {
           inCombat = false;
           combat = null;
-          despawnSummons(); // the applicants file out with the fight over
+          // Summons stay. They used to blink out the instant the last coworker
+          // fell, which made a two-turn-old applicant feel like a prop; now the
+          // assignment (`lifetimeTurns`) is what ends them, whether that runs
+          // out mid-fight, between fights, or in the next one. combat.js has
+          // already swept any that were killed.
           syncLeaderBindings(); // control stays with whoever had the floor
           // A breather after every victory, so back-to-back fights aren't a
           // death spiral - wounds still carry over, just less brutally. The
@@ -1998,6 +2040,7 @@ function startGame(level) {
       while (oocTurnClock >= OOC_TURN_SECONDS) {
         oocTurnClock -= OOC_TURN_SECONDS;
         runtime.advanceTurn();
+        ageSummons(); // temps you brought out of the last fight are on the clock
       }
     }
     animateSurfaces(dt);
@@ -2166,7 +2209,10 @@ function startGame(level) {
     get npcs() { return npcs.map((n) => ({ name: n.def.name, x: n.x, z: n.z })); },
     get summons() {
       return summons.filter((s) => s.sheet.hp > 0)
-        .map((s) => ({ name: s.actor.def.name, x: s.actor.x, z: s.actor.z, hp: s.sheet.hp }));
+        .map((s) => ({
+          name: s.actor.def.name, x: s.actor.x, z: s.actor.z, hp: s.sheet.hp,
+          turnsLeft: s.actor.summonTurns,
+        }));
     },
     get party() {
       return party ? party.members.map((m, i) => ({
@@ -2247,8 +2293,10 @@ function startGame(level) {
     },
     // Drop a player-team summon beside the active member (combat only) - the
     // console-side twin of the HR class's Post the Role, for tuning.
-    summonAlly(archetypeId = 'applicant', n = 1) {
-      return window.__combat ? window.__combat.summonAlly(archetypeId, n) : 0;
+    // `lifetimeTurns` null = permanent, a number = turns of assignment before
+    // the applicant files out (the tuning knob milestone 4 left open).
+    summonAlly(archetypeId = 'applicant', n = 1, lifetimeTurns = null) {
+      return window.__combat ? window.__combat.summonAlly(archetypeId, n, lifetimeTurns) : 0;
     },
     giveItem(id) {
       if (!sheet) return;

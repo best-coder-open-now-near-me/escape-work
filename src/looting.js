@@ -229,13 +229,27 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     const out = [];
     const me = getActor();
     const near = (x, z) => Math.max(Math.abs(x - me.x), Math.abs(z - me.z)) <= 10;
+    // One label per TILE, not per item: picking up takes the whole tile anyway
+    // (pickUpAt), and a stack of dropped items used to render a stack of chips
+    // at the identical screen position, each hiding the one behind it. The
+    // label lists what is actually down there.
+    const byTile = new Map();
     for (const li of looseItems) {
       if (!near(li.x, li.z)) continue;
+      const key = li.x + ',' + li.z;
+      if (!byTile.has(key)) byTile.set(key, []);
+      byTile.get(key).push(li);
+    }
+    for (const pile of byTile.values()) {
+      const [first, ...rest] = pile;
       out.push({
-        icon: ITEMS[li.id]?.icon,
-        text: itemName(li.id),
-        world: { x: li.x, y: 0.35, z: li.z },
-        onClick: () => approachAndDo(li.x, li.z, () => pickUpAt(li.x, li.z)),
+        icon: ITEMS[first.id]?.icon,
+        text: itemName(first.id),
+        also: rest.map((li) => `${ITEMS[li.id]?.icon || '📦'} ${itemName(li.id)}`),
+        // Floated above the item rather than through it - the chip is a tag on
+        // the loot, not a lid over it.
+        world: { x: first.x, y: 0.9, z: first.z },
+        onClick: () => approachAndDo(first.x, first.z, () => pickUpAt(first.x, first.z)),
       });
     }
     for (let z = 0; z < grid.height; z++) {
@@ -249,7 +263,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
         out.push({
           icon: { trash: '🗑️', printer: '🖨️', desk: '🗄️' }[def.loot],
           text: def.label,
-          world: { x, y: def.height + 0.4, z },
+          world: { x, y: def.height + 0.8, z },
           onClick: () => approachAndDo(cx, cz, () => lootContainer(cx, cz)),
         });
       }
@@ -259,7 +273,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
       out.push({
         icon: '💀',
         text: `${en.def.name} (body)`,
-        world: { x: en.x, y: 0.4, z: en.z },
+        world: { x: en.x, y: 0.9, z: en.z },
         onClick: () => approachAndDo(en.x, en.z, () => lootBody(en)),
       });
     }
@@ -300,7 +314,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
         out.push({
           icon: '📄',
           text: n > 1 ? `Loose paper ×${n}` : 'Loose paper',
-          world: { x: sx / n, y: 0.3, z: sz / n },
+          world: { x: sx / n, y: 0.85, z: sz / n },
           onClick: () => approachAndDo(target[0], target[1], () => harvestPaperPatch(patch)),
         });
       }

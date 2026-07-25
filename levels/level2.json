@@ -57,7 +57,8 @@
     "H": "hr",
     "V": "mail-veteran",
     "E": "executive",
-    "G": "senior-manager"
+    "G": "senior-manager",
+    "s": "security-guard"
   },
   "map": [
     "....................h.......",
@@ -69,7 +70,7 @@
     ".......!.iiiiii.....mmgm&m..",
     "..................!!mmmmmm..",
     "!hkkkLCkk...................",
-    "!.kkkkkkkV.............9..h.",
+    "!.kkkkkkkV.............9s.h.",
     "..kT%%kgk....9............P.",
     "..kk%kgkk...................",
     "..Bkkkkkk...8..H.!...8......",

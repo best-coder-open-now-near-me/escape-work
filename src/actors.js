@@ -133,8 +133,23 @@ export class GridActor {
         }
       }
     }
-    if (this.fx?.kind === 'death' || this.fx?.kind === 'corpse') this.setClip('idle', 0.2);
-    else if (this.fx?.kind === 'lunge') this.setClip('attack-melee-right', 0.05, 1.3);
+    // Death ends the skeleton, not just the clip. A corpse used to be switched
+    // to 'idle', so a body lying on its back went on breathing and shifting its
+    // weight forever. Disabling the anim component stops it writing bones at
+    // all, freezing the pose it fell in - the procedural topple below still
+    // plays, because that rides the visual node above the bones. Re-enabled the
+    // moment `fx` is cleared, which is how a downed member comes back up
+    // (main.js's post-victory revive).
+    const gone = this.fx?.kind === 'death' || this.fx?.kind === 'corpse';
+    if (this.animC && this.animC.enabled === gone) {
+      this.animC.enabled = !gone;
+      this.clip = null; // whatever it was mid-blend, re-enter the state cleanly
+    }
+    if (gone) {
+      // No clip, and no leg settle either - both write bones, and the dead
+      // hold whatever pose they landed in.
+      this.legSettle = null;
+    } else if (this.fx?.kind === 'lunge') this.setClip('attack-melee-right', 0.05, 1.3);
     // 0.25 paces the 0.667s walk clip for the STRETCHED legs (models.js):
     // the de-chibi'd stride covers roughly twice the ground, so the cycle
     // runs at half the cadence the stubby rig wanted. Higher rates read as
@@ -353,6 +368,10 @@ export class EnemyActor extends GridActor {
     this.team = opts.team || 'enemy';
     this.summonedBy = opts.summonedBy || null;
     this.summoned = !!opts.summoned;
+    // Turns of assignment left before a summon files out on its own (set by
+    // combat.js from the summon descriptor's `lifetimeTurns`). null = forever,
+    // which is every hand-placed coworker.
+    this.summonTurns = opts.summonTurns ?? null;
     // Stagger decisions so enemies don't all step in lockstep.
     this.wanderTimer = 1 + Math.random() * 1.5;
   }

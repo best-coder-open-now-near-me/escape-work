@@ -79,6 +79,25 @@ test('enemy summon descriptors reference a valid, combat-ready archetype', () =>
     assert.ok((s.cap ?? s.count) >= s.count, `${id}.summon.cap >= count`);
     assert.ok((s.cooldownRounds ?? 0) >= 0, `${id}.summon.cooldownRounds >= 0`);
     assert.ok(s.ap > 0, `${id}.summon.ap costs something`);
+    assert.ok(s.lifetimeTurns > 0, `${id}.summon.lifetimeTurns is a real budget`);
+  }
+});
+
+// Every summon carries a turn budget. Without one a summoner on a cooldown is
+// an infinite spawner - and now that summons outlive the fight that made them,
+// an unbounded one would follow you across the floor forever.
+test('every summon descriptor spends a bounded number of turns', () => {
+  const descriptors = [
+    ...Object.entries(ENEMY_TYPES).filter(([, d]) => d.summon).map(([id, d]) => [`ENEMY_TYPES.${id}`, d.summon]),
+    ...Object.entries(ACTIONS).filter(([, a]) => a.type === 'summon').map(([id, a]) => [`ACTIONS.${id}`, a]),
+  ];
+  assert.ok(descriptors.length >= 2, 'both sides of the ledger are covered');
+  for (const [where, d] of descriptors) {
+    assert.ok(Number.isInteger(d.lifetimeTurns) && d.lifetimeTurns > 0,
+      `${where}.lifetimeTurns is a positive whole number of turns`);
+    // A budget long enough to outlast any plausible fight is the same as no
+    // budget at all - the point is that temps leave.
+    assert.ok(d.lifetimeTurns <= 20, `${where}.lifetimeTurns is a real limit, not a formality`);
   }
 });
 
@@ -100,6 +119,7 @@ test('summon actions reference a valid, combat-ready archetype', () => {
     assert.ok(a.count >= 1, `${id}.count >= 1`);
     assert.ok((a.cap ?? a.count) >= a.count, `${id}.cap >= count`);
     assert.ok(a.ap > 0, `${id}.ap costs something`);
+    assert.ok(a.lifetimeTurns > 0, `${id}.lifetimeTurns is a real budget`);
   }
 });
 

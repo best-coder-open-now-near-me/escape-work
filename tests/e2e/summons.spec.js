@@ -76,7 +76,7 @@ const currentSlot = (page) => page.evaluate(() => {
   return o ? { name: o.name, member: o.member, team: o.team, phase: c.phase } : null;
 });
 
-test('a player summon is a controllable member, then vanishes when the fight ends', async ({ page }) => {
+test('a player summon is a controllable member, outlives the fight, then times out', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, MELEE_ARENA, 'office-drone');
   await enterCombat(page);
@@ -84,7 +84,9 @@ test('a player summon is a controllable member, then vanishes when the fight end
   // Summon applicants onto the player's side (the HR action drives this in
   // game; the debug hook stands in). Three of them, so the Manager can't pick
   // off a lone one before its turn comes up. They're summons, not enemies.
-  await page.evaluate(() => window.__combat.summonAlly('applicant', 3));
+  // The third argument is the assignment: 12 turns, spent by their own combat
+  // turns and - once the fight is over - by the world clock.
+  await page.evaluate(() => window.__combat.summonAlly('applicant', 3, 12));
   expect(await page.evaluate(() => window.__game.summons.length)).toBeGreaterThanOrEqual(1);
   expect(await page.evaluate(() =>
     (window.__combat.enemies || []).some((e) => e.name === 'Applicant'))).toBe(false);
@@ -114,11 +116,19 @@ test('a player summon is a controllable member, then vanishes when the fight end
   }
   expect(controlled).toBe(true);
 
-  // End the fight (force-kill the remaining coworkers): summons are a combat
-  // effect, so victory despawns them - no lingering applicants on the floor.
+  // End the fight (force-kill the remaining coworkers). Victory no longer
+  // evaporates your summons: an applicant with assignment left walks out of the
+  // fight with you and is still standing on the floor afterwards.
   await page.evaluate(() => window.__god.enemies.forEach((e) => e.alive && e.die()));
+  await expect.poll(() => page.evaluate(() => window.__game.inCombat),
+    { timeout: 20_000 }).toBe(false);
+  await page.waitForTimeout(1000);
+  expect(await page.evaluate(() => window.__game.summons.length)).toBeGreaterThan(0);
+
+  // What DOES end them is the assignment running out. Out of combat the world
+  // clock spends it a turn at a time, so they see themselves out on their own.
   await expect.poll(() => page.evaluate(() => window.__game.summons.length),
-    { timeout: 20_000 }).toBe(0);
+    { timeout: 90_000 }).toBe(0);
 });
 
 test('the HR class posts the role AT a spot you pick', async ({ page }) => {

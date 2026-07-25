@@ -128,6 +128,12 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   BG3-style coloured outline (`shading.addHighlight`/`setHighlight`, one shell
   per interactable, coloured by kind). Register a holder as it's created;
   destroyed holders auto-unregister.
+  **In combat, clicking a coworker with nothing armed is an attack** - it arms
+  the basic swing from whatever is in your hand (`stats.equippedAction`, bare
+  hands fall back to `punch`) and resolves it, walk-up included. Arming a power
+  first still wins; the default only fills the empty case, which used to be a
+  refusal ("choose an action first") on the most obvious verb in the game. It is
+  refused only when even the basic swing is unaffordable.
 - **Attacks are available outside combat via the persistent hotbar.** The
   offensive slice of the sheet's actions (attacks, shove, throws) lives on an
   always-on bar (`ui.createHotbar`, ids `#hotbar-act-<id>` so they never
@@ -328,11 +334,22 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
     unsaved, so `party.active` never points at it - combat exposes
     `actingActor`); it lives in main.js's `summons` list as `{ sheet, actor }`,
     stepped like a member (`onSummonStep` for surfaces), blocks enemies but is
-    pass-through for the party, rings friendly on Ctrl, and is despawned when the
-    fight ends. A summon falling is never a game-over (`livingParty` gates
-    defeat - a party WIPE of real members only).
-  Caps + cooldowns are data: the HR enemy's `summon` (data/enemies.js) and the
-  HR class's Post the Role (`summon-applicants`, data/actions.js).
+    pass-through for the party, and rings friendly on Ctrl. A summon falling is
+    never a game-over (`livingParty` gates defeat - a party WIPE of real members
+    only).
+  **Summons are timed, not combat-scoped.** Each descriptor carries
+  `lifetimeTurns`: how many of the unit's OWN turns it serves before the
+  assignment lapses and it walks off the board. `beginTurn` spends one at the top
+  of each of its turns; out of combat main.js's world clock (`ageSummons`, one
+  per fire/smoke turn) spends them instead. Winning a fight no longer evaporates
+  them - a summon with turns left stays on the floor, follows the fight it was
+  called for out the door, and is handed back into the NEXT one through
+  `startCombat({ allies })`. Expiry is not death: `dismissSummon` takes the body
+  off the board with no topple, no corpse, no loot and no XP (a summon that was
+  actually KILLED is swept at `cleanup()` - there is nothing to loot either way).
+  Losing, aborting and a floor change still clear them outright.
+  Caps + cooldowns are data too: the HR enemy's `summon` (data/enemies.js) and
+  the HR class's Post the Role (`summon-applicants`, data/actions.js).
   **A player summon is TARGETED**: it arms like an attack, and you click the
   spot where they should report - within the action's `range` (data), with a
   clear line to it. They fill the clicked tile first, then the free ground
