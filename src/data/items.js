@@ -209,12 +209,6 @@ export const ITEMS = {
     cash: 15,
     examine: 'Marked FOR TEAM MORALE. Unopened since the reorg. Morale pending.',
   },
-  'coin-return': {
-    name: 'Coin Return',
-    icon: '🪙',
-    cash: 2,
-    examine: 'The machine owed you this and you both know it.',
-  },
 
   // --- vending stock (ECONOMY_PLAN M2) ---------------------------------------
   // The heal economy you can BUY. Deliberately shallow numbers: a machine

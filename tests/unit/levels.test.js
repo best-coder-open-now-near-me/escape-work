@@ -151,6 +151,24 @@ test('every registry cross-reference resolves', () => {
     }
     assert.ok((shop.markup ?? 1) > 0, `shop "${id}" markup is positive`);
   }
+  // Every item can actually be OBTAINED. An entry nothing drops, stocks or
+  // starts you with is dead data that no other lint can see - it type-checks,
+  // it prices, it just never reaches a player. (This caught a `coin-return`
+  // authored for a machine-shaking verb that was then deliberately not built.)
+  const obtainable = new Set();
+  for (const entries of Object.values(LOOT_TABLES)) for (const e of entries) obtainable.add(e.item);
+  for (const def of Object.values(ENEMY_TYPES)) for (const e of def.loot || []) obtainable.add(e.item);
+  for (const shop of Object.values(SHOPS)) for (const r of shop.stock || []) obtainable.add(r.item);
+  for (const reg of [CLASSES, COMPANIONS]) {
+    for (const def of Object.values(reg)) {
+      for (const id of Object.values(def.startGear || {})) obtainable.add(id);
+    }
+  }
+  for (const id of Object.keys(ITEMS)) {
+    assert.ok(obtainable.has(id),
+      `item "${id}" is unobtainable - no loot table, enemy, shop or startGear produces it`);
+  }
+
   // Money and worth are integers. A fractional `value` would put a price like
   // "7.2" in a button and a fraction in the purse, and cash is counted, not
   // measured.
