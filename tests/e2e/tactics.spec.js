@@ -83,17 +83,23 @@ test('circling inside its reach provokes nothing', async ({ page }) => {
 // Two Managers at the SAME distance from the player, one with a partition on
 // the face pointing back at the player. Equal range and equal enemy type mean
 // cover is the only variable between the two hover readings.
+// The two test foes sit at Chebyshev 6 from the player - beyond main.js's
+// ENGAGE_RADIUS (4), so they never join the fight, never take a turn, and
+// never advance off the tiles this test hovers. (Non-engaged enemies also
+// hold still: wander is paused during combat.) They stay hoverable because
+// enemyAtPoint scans every live enemy, and visible because partitions block
+// bodies, not sight.
 const COVER_ARENA = {
   name: 'Cover Lab',
   tiles: { '#': 'wall', '.': 'floor' },
   actors: { '@': 'player', M: 'manager' },
-  walls: ['V 6 3 1'], // partition on the WEST face of (6,3) - the side we shoot from
+  walls: ['V 8 3 1'], // partition on the WEST face of (8,3) - the side we shoot from
   map: [
-    '#########',
-    '#.@M..M.#',
-    '#.......#',
-    '#.....M.#',
-    '#########',
+    '############',
+    '#.@M....M..#',
+    '#..........#',
+    '#.......M..#',
+    '############',
   ],
 };
 
@@ -119,12 +125,16 @@ test('a partition gives the defender cover against a ranged attacker', async ({ 
 
   // Both foes must still be at range for cover to be in play at all.
   const pt = await page.evaluate(() => window.__game.playerTile);
-  expect(pt.x).toBeLessThan(6);
-  expect(Math.max(Math.abs(6 - pt.x), Math.abs(1 - pt.z))).toBeGreaterThan(1);
-  expect(Math.max(Math.abs(6 - pt.x), Math.abs(3 - pt.z))).toBeGreaterThan(1);
+  expect(pt.x).toBeLessThan(8);
+  expect(Math.max(Math.abs(8 - pt.x), Math.abs(1 - pt.z))).toBeGreaterThan(1);
+  expect(Math.max(Math.abs(8 - pt.x), Math.abs(3 - pt.z))).toBeGreaterThan(1);
+  // Both test foes must still be standing where they were placed - if either
+  // joined the fight and advanced, this run cannot compare like with like.
+  expect(await page.evaluate(() => window.__game.enemies
+    .filter((e) => e.alive && e.x === 8 && (e.z === 1 || e.z === 3)).length)).toBe(2);
 
-  const open = await readAt(6, 1);   // no partition between us
-  const behind = await readAt(6, 3); // partition on its near face
+  const open = await readAt(8, 1);   // no partition between us
+  const behind = await readAt(8, 3); // partition on its near face
   expect(typeof open.chance).toBe('number');
   expect(typeof behind.chance).toBe('number');
   // Same range, same enemy - the whole gap is the cover term (HIT.COVER_DODGE).
@@ -145,7 +155,14 @@ test('striking a foe from behind its committed facing is a backstab', async ({ p
   const readTag = async (x, z) => {
     for (let i = 0; i < 8; i++) {
       await page.waitForTimeout(400);
-      if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#act-attack');
+      if (await page.evaluate(() => window.__combat.armed) !== 'attack') {
+        // NEVER click a disabled button: Playwright waits for it to become
+        // enabled, so walking here on low AP would hang to the test timeout
+        // instead of reporting the real problem.
+        expect(await page.locator('#act-attack').isEnabled(),
+          'attack must be affordable to read a to-hit').toBe(true);
+        await page.click('#act-attack');
+      }
       const fp = await page.evaluate(([wx, wz]) => window.__game.project(wx, wz), [x, z]);
       await page.mouse.move(fp.x, fp.y);
       await page.waitForTimeout(150);
