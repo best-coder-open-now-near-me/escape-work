@@ -37,12 +37,13 @@ const KITS = {
     model: 'intern',
     look: { build: { legs: 1.7, head: 0.68 } },
     examine: 'An intern, hunched behind a monitor. Badge still shrink-wrapped.',
-    // Where the intern departs from the class, and why: softer, a step slower,
-    // and nowhere near IT Support's savvy yet. The kit itself (reboot,
-    // firewall, energy drink) is inherited - he does the same job, badly.
+    // Where the intern departs from IT Support, and nowhere else: softer, a
+    // step slower, and nothing like their savvy yet. Grit, hustle and composure
+    // are the class's - he is the same person earlier on. The kit (reboot,
+    // firewall, energy drink) is inherited too: he does the same job, badly.
     maxHp: 14,
     ap: 6,
-    attr: { grit: 3, hustle: 6, savvy: 3, composure: 3 }, // quick but green
+    attr: { savvy: 3 }, // the one dial that makes him the intern
     track: [
       { id: 'intern-fast-learner', name: 'Fast Learner', cost: 1, effect: { attrBonus: { savvy: 1 } } },
       { id: 'intern-nerves', name: 'Steady Nerves', cost: 1, effect: { attrBonus: { composure: 1 } } },

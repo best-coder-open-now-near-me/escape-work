@@ -47,8 +47,25 @@ export function fromClass({ classId, ...over }, { drop = [] } = {}) {
   if (!base) throw new Error(`archetype references unknown class "${classId}"`);
   const kit = { ...base };
   for (const key of [...PICKER_ONLY, ...drop]) delete kit[key];
-  return { classId, ...kit, ...over };
+  const out = { classId, ...kit, ...over };
+  for (const key of MERGED_PER_KEY) {
+    if (over[key] && kit[key]) out[key] = { ...kit[key], ...over[key] };
+  }
+  return out;
 }
+
+// Fields merged one KEY at a time rather than replaced wholesale. `attr` is
+// four independent dials, so "an intern is IT Support who isn't savvy yet" is
+// honestly written `attr: { savvy: 3 }` - restating the other three just to
+// change one is the copy-that-drifts problem in miniature.
+//
+// `look` is deliberately NOT in here: a build is one silhouette, adopted or
+// replaced, not a bag of dials. Half-inheriting a stretch and a stockiness
+// meant for different bodies produces a shape nobody chose.
+//
+// The lint's granularity follows this list - a per-key merge is checked per
+// key, a whole-value replace is checked whole.
+export const MERGED_PER_KEY = ['attr'];
 
 export const CLASSES = {
   'office-drone': {

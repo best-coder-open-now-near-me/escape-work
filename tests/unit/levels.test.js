@@ -11,7 +11,7 @@ import { TILE_TYPES } from '../../src/data/tiles.js';
 import { ENEMY_TYPES, ENEMY_KITS } from '../../src/data/enemies.js';
 import { NPCS } from '../../src/data/npcs.js';
 import { COMPANIONS, COMPANION_KITS } from '../../src/data/companions.js';
-import { CLASSES } from '../../src/data/classes.js';
+import { CLASSES, MERGED_PER_KEY } from '../../src/data/classes.js';
 import { ACTIONS } from '../../src/data/actions.js';
 import { ITEMS, LOOT_TABLES } from '../../src/data/items.js';
 import { LEVELS, FIRST_LEVEL } from '../../src/data/levels.js';
@@ -58,12 +58,23 @@ test('every registry cross-reference resolves', () => {
     'classId', 'char', 'name', 'examine', 'dialogue', 'recruitedDialogue',
     'level', 'hp', 'xp', 'loot', 'attacks', 'attackAp', 'aggression', 'summon',
   ]);
+  // The check's granularity follows the MERGE's: a field merged per key (attr)
+  // is checked per key, or three verbatim attributes hide behind one that
+  // differs - which is exactly how the intern kept copying IT Support's grit,
+  // hustle and composure while only savvy made him an intern.
   for (const [regName, kits] of ARCHETYPE_KITS) {
     for (const [id, kit] of Object.entries(kits)) {
       if (!kit.classId) continue;
       const base = CLASSES[kit.classId];
       for (const [key, val] of Object.entries(kit)) {
         if (IDENTITY.has(key) || !(key in base)) continue;
+        if (MERGED_PER_KEY.includes(key)) {
+          for (const [sub, v] of Object.entries(val)) {
+            assert.notDeepEqual(v, base[key]?.[sub],
+              `${regName}.${id}.${key}.${sub} just repeats ${kit.classId}.${key}.${sub} - delete it and inherit`);
+          }
+          continue;
+        }
         assert.notDeepEqual(val, base[key],
           `${regName}.${id}.${key} just repeats ${kit.classId}.${key} - delete it and inherit`);
       }
