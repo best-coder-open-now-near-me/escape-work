@@ -416,6 +416,14 @@ function startGame(level) {
     controls.setView({ dist: 26, pitch: 55, focusY: 0.3 }); // tactical camera
   }
 
+  // A playable class named by the URL (`#class=it-support`), or null. Only
+  // real, playable ids resolve - a typo shows the picker rather than booting
+  // into a broken sheet.
+  function preselectedClass() {
+    const id = /(?:^|[#&])class=([\w-]+)/.exec(location.hash)?.[1];
+    return id && CLASSES[id] && CLASSES[id].playable !== false ? id : null;
+  }
+
   function onClassPicked(classId) {
     endClassPreview();
     sheet = createSheet(classId);
@@ -2071,6 +2079,14 @@ function startGame(level) {
     loot.refreshPanel(sheet);
     buildHotbar();
     ui.say(`${grid.name}. Keep going.`);
+  } else if (preselectedClass()) {
+    // `#class=<id>` hires straight off the URL, skipping the carousel - the
+    // same kind of boot-time affordance as `#editor` and `#god`. The e2e suite
+    // lives on this: browsing the carousel renders each candidate's .glb as it
+    // slides, which under CI's software GL costs ~30s PER SLIDE, so a test
+    // that wanted the fifth class paid minutes before it began. An unknown or
+    // unplayable id falls through to the normal picker.
+    onClassPicked(preselectedClass());
   } else {
     // The carousel: frame the spawn tile close and head-on (eye-ish level,
     // aimed at the chest) where previewClass parades the browsed candidate;
