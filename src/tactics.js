@@ -69,3 +69,43 @@ export function provokedBy(threats, fx, fz, tx, tz) {
   return (threats || []).filter((t) =>
     threatens(t.x, t.z, fx, fz) && !threatens(t.x, t.z, tx, tz));
 }
+
+// --- cover (TACTICS_PLAN M3) ------------------------------------------------
+
+// Is the defender at (dx, dz) shielded from an attacker at (ax, az)?
+//
+// Partitions in this game are EDGES between tiles, not cells (grid.js), and
+// they deliberately don't block sight - throws sail right over a chest-high
+// cubicle wall (grid.sightOpen tests doors only). So a partition was pure
+// movement obstacle with no tactical upside. Cover is the upside: it doesn't
+// stop the shot, it spoils it.
+//
+// The test is which SIDE of the defender's own tile the attacker is on: take
+// the direction from defender toward attacker and ask whether a solid edge
+// sits on the one or two faces pointing that way. `edgeOpen(x, z, nx, nz)`
+// is passed in (combat threads world.stepOpen, already on its façade and
+// already meaning "something solid" - the shove's wall-slam reads it the same
+// way), which is why walls and closed doors grant cover too. Peeking around a
+// doorframe should work.
+//
+// Deliberately boolean: cover applies at most once per attack, so tucking
+// into a partition corner can't stack two edges into double cover.
+export function hasCover(ax, az, dx, dz, edgeOpen) {
+  if (typeof edgeOpen !== 'function') return false;
+  const sx = Math.sign(ax - dx);
+  const sz = Math.sign(az - dz);
+  // Each axis is checked as its own orthogonal face. A diagonal attacker is
+  // blocked by either face - going around one corner is enough.
+  if (sx !== 0 && !edgeOpen(dx, dz, dx + sx, dz)) return true;
+  if (sz !== 0 && !edgeOpen(dx, dz, dx, dz + sz)) return true;
+  return false;
+}
+
+// The signed positional term for one attack. Cover is DEFENDER-favouring, so
+// it is negative. Melee ignores it: a cubicle wall is no help once someone is
+// already swinging at you from the next tile (TACTICS_PLAN #3).
+export function positionMods(ax, az, dx, dz, edgeOpen) {
+  const ranged = cheb(ax, az, dx, dz) > 1;
+  const covered = ranged && hasCover(ax, az, dx, dz, edgeOpen);
+  return { positional: covered ? -HIT.COVER_DODGE : 0, covered };
+}

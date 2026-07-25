@@ -13,7 +13,7 @@ import { SURFACES, GUM } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc } from './stats.js';
 import { applyStatus, hasStatus, statusFx, tickTurn, clearStatuses, removeStatus, statusList } from './statuses.js';
-import { toHitTerms, provokedBy, TACTICS } from './tactics.js';
+import { toHitTerms, provokedBy, positionMods, TACTICS } from './tactics.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { buildInitiativeOrder, rollInitiative, insertionIndex } from './initiative.js';
@@ -120,13 +120,24 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // preview read it, so the percentage the player sees is always the
   // arithmetic the roll actually uses. `positional` (cover/flank/backstab)
   // plugs in here in later milestones and reaches all four sites at once.
-  const attackMods = (attacker, defender) => toHitTerms({
-    accuracy: accuracyOf(attacker),
-    dodge: dodgeOf(defender),
-    surprised: hasStatus(statusesOf(defender), 'surprised'),
-    accMod: statusFx(statusesOf(attacker)).accMod || 0,
-    dodgeMod: statusFx(statusesOf(defender)).dodgeMod || 0,
-  });
+  const attackMods = (attacker, defender) => {
+    // Position is a per-PAIR term - it depends on where the other one stands,
+    // so it is computed at roll time and never cached on a unit.
+    const A = bodyOf(attacker);
+    const D = bodyOf(defender);
+    const pos = positionMods(A.x, A.z, D.x, D.z, world.stepOpen);
+    return {
+      ...toHitTerms({
+        accuracy: accuracyOf(attacker),
+        dodge: dodgeOf(defender),
+        surprised: hasStatus(statusesOf(defender), 'surprised'),
+        accMod: statusFx(statusesOf(attacker)).accMod || 0,
+        dodgeMod: statusFx(statusesOf(defender)).dodgeMod || 0,
+        positional: pos.positional,
+      }),
+      covered: pos.covered, // for the hover tag's reason string
+    };
+  };
   // The chance `attacker` lands on `defender` right now - what the hover tag
   // reads. Never rolls, never pins; purely the number.
   const chanceFor = (attacker, defender) => {
@@ -262,9 +273,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (!a || a.type !== 'attack' || a.cone) { costTag.style.display = 'none'; return; }
     const en = enemyAtPoint(point);
     if (!en) { costTag.style.display = 'none'; return; }
-    // The same terms the swing will roll - not a second copy of the math.
-    hoverHitChance = chanceFor(active, en);
-    costTag.textContent = `${Math.round(hoverHitChance * 100)}% to hit`;
+    // The same terms the swing will roll - not a second copy of the math. The
+    // reason string matters: a positional modifier the player can't see reads
+    // as randomness (TACTICS_PLAN, ui.js note).
+    const t = attackMods(active, en);
+    hoverHitChance = hitChance(t.acc, t.dodge, t.mods);
+    costTag.textContent = `${Math.round(hoverHitChance * 100)}% to hit${t.covered ? ' - in cover' : ''}`;
     costTag.style.left = `${sx + 14}px`;
     costTag.style.top = `${sy + 14}px`;
     costTag.style.display = 'block';

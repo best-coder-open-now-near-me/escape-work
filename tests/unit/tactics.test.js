@@ -4,7 +4,7 @@
 // copies in combat.js used to each own.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { toHitTerms, cheb, threatens, provokedBy } from '../../src/tactics.js';
+import { toHitTerms, cheb, threatens, provokedBy, hasCover, positionMods } from '../../src/tactics.js';
 import { HIT, hitChance } from '../../src/stats.js';
 
 test('an empty pair is all zeroes - no accidental baseline', () => {
@@ -118,4 +118,67 @@ test('escaping several threats at once provokes each of them', () => {
 test('provokedBy tolerates an empty or missing threat list', () => {
   assert.deepEqual(provokedBy([], 1, 1, 5, 5), []);
   assert.deepEqual(provokedBy(undefined, 1, 1, 5, 5), []);
+});
+
+// --- cover (TACTICS_PLAN M3) ------------------------------------------------
+
+// A solid edge on ONE face of the defender's tile. `edgeOpen(x,z,nx,nz)` is
+// the shape combat passes (world.stepOpen): false means something solid.
+const wallOn = (fx, fz, tx, tz) => (x, z, nx, nz) =>
+  !(x === fx && z === fz && nx === tx && nz === tz);
+
+test('a solid edge on the attacker side is cover; the far side is not', () => {
+  // Defender at (5,5) with a partition on its EAST face.
+  const east = wallOn(5, 5, 6, 5);
+  assert.equal(hasCover(9, 5, 5, 5, east), true);  // attacker east - shielded
+  assert.equal(hasCover(1, 5, 5, 5, east), false); // attacker west - wide open
+  assert.equal(hasCover(5, 1, 5, 5, east), false); // attacker north - wrong axis
+});
+
+test('a diagonal attacker is blocked by either facing edge', () => {
+  const east = wallOn(5, 5, 6, 5);
+  const north = wallOn(5, 5, 5, 4);
+  // Attacker up-and-right: the east face alone is enough to break the angle,
+  // and so is the north face - going around one corner suffices.
+  assert.equal(hasCover(9, 1, 5, 5, east), true);
+  assert.equal(hasCover(9, 1, 5, 5, north), true);
+  // ...but an edge on neither facing side does nothing.
+  assert.equal(hasCover(9, 1, 5, 5, wallOn(5, 5, 4, 5)), false); // west face
+});
+
+test('no edges anywhere means no cover', () => {
+  const open = () => true;
+  assert.equal(hasCover(9, 5, 5, 5, open), false);
+  assert.equal(hasCover(5, 9, 5, 5, open), false);
+});
+
+test('hasCover is inert without an edge test rather than throwing', () => {
+  assert.equal(hasCover(9, 5, 5, 5, undefined), false);
+  assert.equal(hasCover(9, 5, 5, 5, null), false);
+});
+
+test('cover is ranged-only - melee ignores the partition', () => {
+  const east = wallOn(5, 5, 6, 5);
+  // Adjacent through that very edge: no help once they are on top of you.
+  const melee = positionMods(6, 5, 5, 5, east);
+  assert.equal(melee.covered, false);
+  assert.equal(melee.positional, 0);
+  // The same wall, from across the room, does apply.
+  const ranged = positionMods(9, 5, 5, 5, east);
+  assert.equal(ranged.covered, true);
+  assert.equal(ranged.positional, -HIT.COVER_DODGE); // defender-favouring, so negative
+});
+
+test('cover lowers the resulting hit chance by exactly COVER_DODGE', () => {
+  const east = wallOn(5, 5, 6, 5);
+  const open = hitChance(0.1, 0.05, positionMods(9, 5, 5, 5, () => true).positional);
+  const behind = hitChance(0.1, 0.05, positionMods(9, 5, 5, 5, east).positional);
+  assert.ok(Math.abs((open - behind) - HIT.COVER_DODGE) < 1e-9);
+});
+
+test('cover applies at most once - a corner cannot double up', () => {
+  // Both facing edges solid (a corner nook). Still one application.
+  const corner = (x, z, nx, nz) => !(x === 5 && z === 5 && ((nx === 6 && nz === 5) || (nx === 5 && nz === 4)));
+  const m = positionMods(9, 1, 5, 5, corner);
+  assert.equal(m.positional, -HIT.COVER_DODGE);
 });

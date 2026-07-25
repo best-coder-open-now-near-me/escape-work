@@ -233,18 +233,39 @@ None. See decision #6.
 
 ## Milestones (each a PR that keeps `npm test` + e2e green)
 
-1. **The mods seam, behavior-preserved.** Extract `attackMods()`; route all
-   four roll sites (hover, melee, cone, AI) through it; it returns `mods: 0`.
-   **Zero gameplay change** — the whole suite passes untouched, and the hover
-   preview is now provably the same arithmetic as the roll. Unit tests cover
-   the assembler directly. This is the `HIT` M1 / `EQUIPMENT` M1 discipline:
-   land the seam inert, prove nothing moved.
-2. **Opportunity attacks.** `tactics.threatens`/`provokes`, the reaction
-   budget, `notifyStep`, forced-movement exemption, unaware-unit exemption.
-   The largest gameplay delta in the plan and independent of milestone 1 —
-   *sequenced first among the features because kiting is dominant today.*
-3. **Cover.** `tactics.hasCover` + the ranged-only rule + the hover reason
-   string. Nearly free given `stepOpen`.
+1. **The mods seam, behavior-preserved.** ✅ Landed. `src/tactics.js` owns
+   `toHitTerms()`, the one place the terms are summed; combat grew
+   `attackMods` / `chanceFor` / `rollAgainst`, and all four sites collapsed
+   into them. Three accessors (`statusesOf`/`accuracyOf`/`dodgeOf`) absorb the
+   member-vs-unit shape difference, so the AI's swing runs the *same*
+   assembler with the roles reversed — which is what makes the later terms
+   symmetric for free. **Zero gameplay change**, verified by the full 14-spec
+   e2e suite (48 passed) plus 8 new unit tests. The AI path picked up a
+   surprise term it lacked, which is inert: `surprised` is only ever applied
+   to enemies and *enemy-team* summons, never to a member sheet.
+2. **Opportunity attacks.** ✅ Landed. `combat.notifyStep(ref, x, z)` is the
+   seam; main.js reports member/summon steps from the per-tile hooks it
+   already owned, and combat calls it for enemies from the `onTile` hook
+   `aiAdvance` already installed — no new movement engine. One reaction per
+   unit per round (cleared in `newRound`), unaware units don't react, and the
+   walk is never interrupted. **Forced movement is exempt by construction, not
+   by a special case:** `pushTo` sets the logical tile and glides the body,
+   and `GridActor.update` early-returns on `slideTo`, so a shove never fires
+   the hook at all — shove is the safe disengage, as designed (#9). Also split
+   `unitStrikesMember` out of `aiAttack` so a reaction lands by identical
+   rules (soak, Deflect, applied status, downed/handoff/party-wipe) rather
+   than reimplementing them; rng call order unchanged.
+   - **Gotcha worth remembering:** combat wraps `party.members` into *new*
+     objects, so main.js's member is not combat's member. Step reports resolve
+     through the shared `actor` (`combatantFor`) — keying the bookkeeping on
+     the member object would have silently no-op'd for the player.
+3. **Cover.** ✅ Landed. `tactics.hasCover` + `positionMods`, wired into
+   `attackMods` — one edit, and because M1 consolidated the seam it reached
+   the hover preview, the melee swing, the cone and the AI's swing at once.
+   Ranged-only (`cheb > 1`), boolean so a corner nook can't stack, and it
+   reuses `world.stepOpen` exactly as the shove's wall-slam does, so walls and
+   closed doors grant cover too. The hover tag now says "— in cover", because
+   a modifier the player can't see reads as randomness.
 4. **Flanking.** `tactics.isFlanked`, symmetric for both sides.
 5. **Backstab.** Logical `facing` + `tactics.isBackstab`. Last because it is
    the only feature introducing new per-unit state.

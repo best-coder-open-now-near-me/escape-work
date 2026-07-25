@@ -50,6 +50,10 @@ export const HIT = {
   CLAMP_LO: 0.35,        // a stacked dodge build is never unhittable
   CLAMP_HI: 0.95,        // a universal 1-in-20 whiff, even fully buffed
   SURPRISE_ACC_BONUS: 0.15, // attacking a surprised target (applied by combat, M3)
+  // Positional terms (TACTICS_PLAN). They ride the `mods` argument of
+  // hitChance, assembled per attacker/defender pair in tactics.js - never
+  // stored on a unit, because each depends on where the OTHER one is standing.
+  COVER_DODGE: 0.20,     // a solid edge shielding the defender from a RANGED attacker
 };
 
 export const ATTR_KEYS = ['grit', 'hustle', 'savvy', 'composure'];

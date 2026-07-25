@@ -80,6 +80,59 @@ test('circling inside its reach provokes nothing', async ({ page }) => {
   expect(await page.evaluate(() => window.__god.player.hp)).toBe(hp0); // untouched
 });
 
+// Two Managers at the SAME distance from the player, one with a partition on
+// the face pointing back at the player. Equal range and equal enemy type mean
+// cover is the only variable between the two hover readings.
+const COVER_ARENA = {
+  name: 'Cover Lab',
+  tiles: { '#': 'wall', '.': 'floor' },
+  actors: { '@': 'player', M: 'manager' },
+  walls: ['V 6 3 1'], // partition on the WEST face of (6,3) - the side we shoot from
+  map: [
+    '#########',
+    '#.@M..M.#',
+    '#.......#',
+    '#.....M.#',
+    '#########',
+  ],
+};
+
+test('a partition gives the defender cover against a ranged attacker', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, COVER_ARENA, 'office-drone');
+  await enterCombat(page); // the adjacent Manager starts the fight; we barely move
+
+  // Arm the attack and hover a specific tile, returning the honest to-hit the
+  // roll would use plus the tag the player actually reads.
+  const readAt = async (x, z) => {
+    let c = null;
+    for (let i = 0; i < 8 && c == null; i++) {
+      await page.waitForTimeout(400);
+      if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#act-attack');
+      const fp = await page.evaluate(([wx, wz]) => window.__game.project(wx, wz), [x, z]);
+      await page.mouse.move(fp.x, fp.y);
+      await page.waitForTimeout(150);
+      c = await page.evaluate(() => window.__combat.hoverHitChance);
+    }
+    return { chance: c, tag: (await page.locator('#combat-move-cost').textContent()) || '' };
+  };
+
+  // Both foes must still be at range for cover to be in play at all.
+  const pt = await page.evaluate(() => window.__game.playerTile);
+  expect(pt.x).toBeLessThan(6);
+  expect(Math.max(Math.abs(6 - pt.x), Math.abs(1 - pt.z))).toBeGreaterThan(1);
+  expect(Math.max(Math.abs(6 - pt.x), Math.abs(3 - pt.z))).toBeGreaterThan(1);
+
+  const open = await readAt(6, 1);   // no partition between us
+  const behind = await readAt(6, 3); // partition on its near face
+  expect(typeof open.chance).toBe('number');
+  expect(typeof behind.chance).toBe('number');
+  // Same range, same enemy - the whole gap is the cover term (HIT.COVER_DODGE).
+  expect(open.chance - behind.chance).toBeCloseTo(0.20, 5);
+  expect(behind.tag).toContain('in cover'); // and the player can SEE why
+  expect(open.tag).not.toContain('in cover');
+});
+
 test('a shove does not provoke - forced movement is the safe disengage', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, DISENGAGE_ARENA, 'office-drone');
