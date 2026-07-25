@@ -117,6 +117,11 @@ export function throwProjectile(app, from, to, kind = 'ball') {
 
 // Floating damage/heal number above a tile. DOM-based so it stays crisp;
 // tracks the world position each frame as the camera moves.
+// How long a damage number stays up. Deliberately unhurried: a fight resolves
+// several of these at once, and at 0.9s they were gone before you had read
+// them - especially the ones behind the combat panel.
+const DMG_POP_SECONDS = 1.8;
+
 export function spawnDamageText(app, cameraEntity, wx, wy, wz, text, color = '#ff8a76') {
   const div = document.createElement('div');
   div.className = 'dmg-pop';
@@ -130,20 +135,20 @@ export function spawnDamageText(app, cameraEntity, wx, wy, wz, text, color = '#f
   let t = 0;
   const tick = (dt) => {
     t += dt;
-    const k = t / 0.9;
+    const k = t / DMG_POP_SECONDS;
     if (k >= 1) {
       app.off('update', tick);
       div.remove();
       return;
     }
-    const s = worldToScreenCss(app, cameraEntity, wx, wy + 0.6 + k * 0.85, wz);
+    const s = worldToScreenCss(app, cameraEntity, wx, wy + 0.6 + k * 0.55, wz);
     // A point behind the camera projects to a mirrored/garbage screen position -
     // hide the popup that frame rather than flash it somewhere wrong (matches
     // the loot-label projection guard).
     if (s.behind) { div.style.opacity = '0'; return; }
     div.style.left = s.x + 'px';
     div.style.top = s.y + 'px';
-    div.style.opacity = String(1 - k * k);
+    div.style.opacity = String(k < 0.6 ? 1 : 1 - ((k - 0.6) / 0.4) ** 2);
   };
   app.on('update', tick);
 }

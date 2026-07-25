@@ -1040,7 +1040,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return;
     }
     phase = 'ai';
-    acting = { unit: s.unit, ap: s.unit.def.ap, wait: 0.35 };
+    acting = { unit: s.unit, ap: s.unit.def.ap, wait: 0.5 };
     refresh();
   }
   // The line for a turn spent incapacitated - stun reads differently from the
@@ -1414,7 +1414,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (cheb(unit.x, unit.z, target.actor.x, target.actor.z) <= 1 && acting.ap >= unit.def.attackAp) {
       aiAttack(unit, target);
       acting.ap -= unit.def.attackAp;
-      acting.wait = 0.55;
+      acting.wait = 0.85; // outlast the swing animation so hits read one at a time
     } else if (acting.ap >= 1 && cheb(unit.x, unit.z, target.actor.x, target.actor.z) > 1) {
       const spent = aiAdvance(unit, acting.ap, target);
       if (spent <= 0) acting.ap = 0;

@@ -63,13 +63,18 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
 // in-game and still swings fine - go carefully beyond that.
 const PROPORTIONS = { legs: 1.9, torso: 1.3, head: 0.62, arms: 0.7 };
 
-export function applyCharacterProportions(holder) {
+// `build` (from a character's data `look.build`) nudges those proportions per
+// character TYPE, so the several entries that share one .glb still read as
+// different people - a stockier veteran, a smaller intern. Only the keys given
+// are overridden; the caution above about `legs` and `torso` still applies, so
+// keep overrides modest.
+export function applyCharacterProportions(holder, build = null) {
   const root = holder.findByName('root');
   const legL = holder.findByName('leg-left');
   const legR = holder.findByName('leg-right');
   const torso = holder.findByName('torso');
   if (!root || !legL || !torso) return; // not a rigged mini character
-  const { legs, torso: torsoS, head: headS, arms: armsS } = PROPORTIONS;
+  const { legs, torso: torsoS, head: headS, arms: armsS } = { ...PROPORTIONS, ...(build || {}) };
   legL.setLocalScale(1, legs, 1);
   if (legR) legR.setLocalScale(1, legs, 1);
   // Legs stretch downward from the hip joint, so lift the rig by the extra

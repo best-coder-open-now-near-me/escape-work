@@ -284,18 +284,30 @@ function startGame(level) {
 
   // --- populate the scene -----------------------------------------------------
   const lift = floorHeight / 2;
+  // A character's `look` (data/classes.js, data/enemies.js, data/companions.js)
+  // is what keeps the several entries sharing one .glb from being the same
+  // person: a build nudge plus a colour tint. Sheets carry only `model`, so a
+  // sheet's look resolves back through its class/companion entry.
+  const sheetLook = (sh) => (sh?.classId && CLASSES[sh.classId]?.look)
+    || (sh?.companionId && COMPANIONS[sh.companionId]?.look) || null;
+  // Proportions BEFORE attach (it captures the rig lift); tint AFTER, because
+  // attach is what clones the shared materials per instance.
+  const dressUp = (e, actor, look) => {
+    applyCharacterProportions(e, look?.build);
+    actor.attach(e);
+    actor.applyTint(look?.tint);
+  };
   for (const en of enemies) {
     placeModel(app, `assets/characters/${en.def.model}.glb`, en.x, en.z, {
       lift, rotY: -90, animate: true,
-      onReady: (e) => { applyCharacterProportions(e); en.attach(e); picking.register(e, 'enemy', en); },
+      onReady: (e) => { dressUp(e, en, en.def.look); picking.register(e, 'enemy', en); },
     });
   }
   for (const npc of npcs) {
     placeModel(app, `assets/characters/${npc.def.model}.glb`, npc.x, npc.z, {
       lift, rotY: 90, animate: true,
       onReady: (e) => {
-        applyCharacterProportions(e);
-        npc.attach(e);
+        dressUp(e, npc, npc.def.look);
         npc.faceToward(player.x, player.z);
         picking.register(e, 'npc', npc);
       },
@@ -312,7 +324,7 @@ function startGame(level) {
     // a target.
     placeModel(app, `assets/characters/${sheet.model}.glb`, player.x, player.z, {
       lift, rotY: 90, animate: true,
-      onReady: (e) => { applyCharacterProportions(e); player.attach(e); picking.register(e, 'party', player); },
+      onReady: (e) => { dressUp(e, player, sheetLook(sheet)); picking.register(e, 'party', player); },
     });
     ui.updateStatsHud(sheet);
   }
@@ -330,7 +342,20 @@ function startGame(level) {
     placeModel(app, `assets/characters/${CLASSES[classId].model}.glb`, player.x, player.z, {
       lift, rotY: 45, animate: true, // start facing the head-on camera
       onReady: (e) => {
-        applyCharacterProportions(e);
+        // The picker must show the character you will actually get, tint and
+        // build included - no actor here, so clone the materials by hand.
+        const look = CLASSES[classId].look;
+        applyCharacterProportions(e, look?.build);
+        if (look?.tint) {
+          for (const rc of e.findComponents('render')) {
+            for (const mi of rc.meshInstances) {
+              const c = mi.material.clone();
+              c.diffuse.set(c.diffuse.r * look.tint[0], c.diffuse.g * look.tint[1], c.diffuse.b * look.tint[2]);
+              c.update();
+              mi.material = c;
+            }
+          }
+        }
         if (token !== previewToken) { e.destroy(); return; }
         previewEntity = e;
       },
@@ -1198,8 +1223,7 @@ function startGame(level) {
             placeModel(app, `assets/characters/${def.model}.glb`, x, z, {
               lift, rotY: ally ? 90 : -90, animate: true,
               onReady: (e) => {
-                applyCharacterProportions(e);
-                actor.attach(e);
+                dressUp(e, actor, ally ? sheetLook(rec.sheet) : actor.def?.look);
                 picking.register(e, ally ? 'summon' : 'enemy', actor);
               },
             });
@@ -1939,7 +1963,7 @@ function startGame(level) {
       m.actor = comp;
       placeModel(app, `assets/characters/${m.sheet.model}.glb`, spot.x, spot.z, {
         lift, rotY: 90, animate: true,
-        onReady: (e) => { applyCharacterProportions(e); comp.attach(e); picking.register(e, 'party', comp); },
+        onReady: (e) => { dressUp(e, comp, sheetLook(m.sheet)); picking.register(e, 'party', comp); },
       });
     }
     loot.refreshPanel(sheet);
@@ -2086,7 +2110,7 @@ function startGame(level) {
       enemies.push(en);
       placeModel(app, `assets/characters/${def.model}.glb`, x, z, {
         lift, rotY: -90, animate: true,
-        onReady: (e) => { applyCharacterProportions(e); en.attach(e); picking.register(e, 'enemy', en); },
+        onReady: (e) => { dressUp(e, en, def.look); picking.register(e, 'enemy', en); },
       });
       return en;
     },

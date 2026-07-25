@@ -39,6 +39,9 @@ export const ENEMY_TYPES = {
     char: 'E',
     name: 'The Executive',
     model: 'midmanager',
+    // Shares the midmanager rig with the Middle Manager class: cooler, taller,
+    // better tailored the further up the org chart you go.
+    look: { tint: [0.86, 0.88, 1.0], build: { legs: 2.0 } },
     level: 2, // descended from the floors above - a tier over the base Manager
     hp: 18,
     ap: 5,
@@ -64,6 +67,9 @@ export const ENEMY_TYPES = {
     char: 'H',
     name: 'HR Representative',
     model: 'hr',
+    // Shares the hr rig with the Human Resources class - warmer and softer
+    // looking, which is the joke.
+    look: { tint: [1.08, 0.86, 0.92] },
     level: 1,
     hp: 12,
     ap: 6,
@@ -105,6 +111,8 @@ export const ENEMY_TYPES = {
     char: 'G',
     name: 'Senior Manager',
     model: 'manager', // reuses the Manager rig until a dedicated .glb lands
+    // A darker, heavier cut of the same suit - seniority reads as menace.
+    look: { tint: [0.82, 0.7, 0.72], build: { legs: 1.95, torso: 1.35 } },
     level: 3,
     hp: 22,
     ap: 5,
@@ -130,6 +138,8 @@ export const ENEMY_TYPES = {
     char: 'X',
     name: 'Regional Executive',
     model: 'midmanager',
+    // The top of that same rig: darkest suit, tallest cut.
+    look: { tint: [0.66, 0.66, 0.8], build: { legs: 2.05, torso: 1.34 } },
     level: 4,
     hp: 30,
     ap: 5,

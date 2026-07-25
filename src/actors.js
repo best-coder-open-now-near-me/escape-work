@@ -68,6 +68,18 @@ export class GridActor {
     }
   }
 
+  // Tint this character's own materials. Must run AFTER attach(), which clones
+  // the .glb's shared materials per instance - tinting before the clone would
+  // recolour every character built from the same rig. Multiplies the diffuse,
+  // leaving emissive alone so the damage flash still works.
+  applyTint(rgb) {
+    if (!rgb) return;
+    for (const { mat } of this.mats) {
+      mat.diffuse.set(mat.diffuse.r * rgb[0], mat.diffuse.g * rgb[1], mat.diffuse.b * rgb[2]);
+      mat.update();
+    }
+  }
+
   faceToward(tx, tz) {
     this.targetYaw = Math.atan2(tx - this.x, tz - this.z) * pc.math.RAD_TO_DEG;
   }
@@ -164,11 +176,13 @@ export class GridActor {
       this.fx.t += dt;
       const { kind, t } = this.fx;
       if (kind === 'lunge') {
-        const T = 0.28;
+        // Unhurried on purpose: the swing used to be over in 0.28s, which read
+        // as a twitch rather than a hit landing.
+        const T = 0.5;
         if (t >= T) this.fx = null;
         else forward = Math.sin((Math.PI * t) / T) * 0.42;
       } else if (kind === 'flinch') {
-        const T = 0.24;
+        const T = 0.42;
         if (t >= T) this.fx = null;
         else {
           const k = Math.sin((Math.PI * t) / T);
@@ -177,7 +191,7 @@ export class GridActor {
           forward = -0.1 * k; // recoil
         }
       } else if (kind === 'death') {
-        const T = 0.7;
+        const T = 1.0;
         const k = Math.min(1, t / T);
         pitch = -88 * k * (2 - k); // ease-out topple onto their back
         bobY = -Math.max(0, k - 0.7) * 0.5; // then sink into the carpet

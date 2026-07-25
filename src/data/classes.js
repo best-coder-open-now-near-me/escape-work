@@ -71,6 +71,9 @@ export const CLASSES = {
   'mail-room': {
     name: 'Mail Room',
     model: 'worker', // TODO: dedicated mailroom .glb when one lands in assets
+    // Shares the worker rig with the Office Drone, so a warmer khaki tint and
+    // a taller, rangier build keep them distinct until a mailroom .glb lands.
+    look: { tint: [1.05, 0.92, 0.72], build: { legs: 2.0 } },
     tagline: 'Knows every corridor. Slips on nothing. Delivers regardless.',
     experience: 'Mail Room Clerk, 11 yrs. Knows where every body is filed.',
     maxHp: 24,
@@ -152,6 +155,8 @@ export const CLASSES = {
   applicant: {
     name: 'Applicant',
     model: 'worker', // reuse the office-worker rig; a temp .glb can land later
+    // Washed-out and slight - a temp who barely registers.
+    look: { tint: [0.82, 0.86, 0.95], build: { legs: 1.7, torso: 1.2 } },
     playable: false,
     maxHp: 5,
     ap: 4,
