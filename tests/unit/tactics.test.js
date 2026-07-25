@@ -372,3 +372,26 @@ test('cover applies at most once - a corner cannot double up', () => {
   const m = positionMods(9, 1, 5, 5, { edgeOpen: corner });
   assert.equal(m.positional, -HIT.COVER_DODGE);
 });
+
+// --- walls block swings (TACTICS_PLAN revision, M3) --------------------------
+
+test('a partition beats reach: in range, no line, no swing', () => {
+  // The defect M3 closes. Before it, cover was ranged-only AND melee ignored
+  // edges, so a cubicle wall cost a melee attacker nothing at all.
+  const wall = wallBetween(4, 4, 5, 4);
+  assert.equal(dist(4, 4, 5, 4) <= REACH.DEFAULT, true); // distance says yes
+  assert.equal(inReach(4, 4, 5, 4, REACH.DEFAULT, wall), false); // the wall says no
+});
+
+test('reach around a partition end still works with the line test on', () => {
+  // The whole reason reach does not reuse stepOpen: a body cannot slip past the
+  // end of a partition, but an arm can swing around it.
+  const wall = wallBetween(4, 4, 5, 4);
+  assert.equal(inReach(4, 4, 5, 5, REACH.DEFAULT, wall), true);
+});
+
+test('a longer reach does not buy a swing through a wall', () => {
+  // Reach and line are independent gates: more reach never becomes x-ray.
+  const wall = wallBetween(0, 0, 1, 0);
+  assert.equal(inReach(0, 0, 1, 0, 5, wall), false);
+});

@@ -74,11 +74,38 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // The AI enemies hunt the whole player side - members and summons alike, all
   // members now. A target wraps { actor, member }; combat reads `member` to take
   // the hit on its sheet (deflect, gum, the downed rules).
+  // The route to a tile the unit could stand on and swing from: the shortest
+  // path to any of the target's eight neighbours, or null if none is reachable.
+  // Shared by pickTarget and aiAdvance so the two can never disagree about who
+  // is engageable - if the target picker says yes, the mover must find a route.
+  function standTilePath(unit, target) {
+    let best = null;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const tx = target.actor.x + dx;
+      const tz = target.actor.z + dz;
+      if (!world.isWalkable(tx, tz) && !(unit.x === tx && unit.z === tz)) continue;
+      const p = world.findEnemyPath(unit.x, unit.z, tx, tz);
+      if (p && p.length > 1 && (!best || p.length < best.length)) best = p;
+    }
+    return best;
+  }
+
+  // Nearest living member - but ENGAGEABLE first. Once a partition blocks a
+  // swing (M3), the closest member by distance can be one the unit can neither
+  // reach nor walk to: on the far side of a cubicle wall with the way round
+  // sealed. Targeting them means walking to the wall and swinging at nothing,
+  // every turn, forever. So a member the unit can actually fight outranks a
+  // nearer one it cannot, and distance only breaks ties within each group.
   function pickTarget(unit) {
     let best = null;
     for (const m of livingMembers()) {
       const d = cheb(unit.x, unit.z, m.actor.x, m.actor.z);
-      if (!best || d < best.d || (d === best.d && m.sheet.hp < best.m.sheet.hp)) best = { m, d };
+      const engageable = canReach(unit, m) || !!standTilePath(unit, m);
+      const better = !best
+        || (engageable && !best.engageable)
+        || (engageable === best.engageable
+          && (d < best.d || (d === best.d && m.sheet.hp < best.m.sheet.hp)));
+      if (better) best = { m, d, engageable };
     }
     return best ? { actor: best.m.actor, member: best.m } : null;
   }
@@ -161,40 +188,58 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const statusesOf = (u) => u.sheet || u;
   const accuracyOf = (u) => (u.sheet ? accuracy(u.sheet) : (u.def?.accuracy || 0));
   const dodgeOf = (u) => (u.sheet ? dodge(u.sheet) : (u.def?.dodge || 0));
-  // Reach joins them: a member's comes from their weapon, an AI unit states it
-  // on its def (like attackAp). REACH.DEFAULT is the floor for both.
-  const reachOfUnit = (u) => (u.sheet ? reachOf(u.sheet) : (u.def?.reach ?? REACH.DEFAULT));
+  // Reach joins them - but as hoisted FUNCTION declarations, not the const
+  // arrows the three above use. pickTarget is called eagerly during
+  // startCombat (the surprise sweep, well before this point in the body), and
+  // it now needs canReach: a const here would sit in its temporal dead zone
+  // and throw ReferenceError mid-setup, starting a fight whose panel never
+  // gets built. Functions hoist, so call order stops mattering.
+
+  // A member's reach comes from their weapon, an AI unit's from its def (like
+  // attackAp). REACH.DEFAULT is the floor for both.
+  function reachOfUnit(u) {
+    return u.sheet ? reachOf(u.sheet) : (u.def?.reach ?? REACH.DEFAULT);
+  }
 
   // The CONTINUOUS position reach measures against. `actor.x/.z` are only
   // Math.round of this, which is why the old tile test let two units at
   // opposite far corners of diagonally adjacent tiles (2.83 apart) trade
   // swings while a deliberate walk-up stops at 0.85 (TACTICS_PLAN revision).
   // Falls back to the logical tile for a unit with no body in the scene yet.
-  const posOf = (u) => {
+  function posOf(u) {
     const a = u.actor || u;
     if (a.entity) {
       const p = a.entity.getPosition();
       return { x: p.x, z: p.z };
     }
     return { x: a.x, z: a.z };
-  };
+  }
 
   // Is the defender within the attacker's reach DISTANCE? Ignores anything
   // solid in between on purpose: this is the melee/ranged split positionMods
   // needs, and whether a cubicle wall spoils a shot is a question about
   // proximity, not about whether the swing is legal.
-  const withinReach = (attacker, defender, r = null) => {
+  function withinReach(attacker, defender, r = null) {
     const a = posOf(attacker);
     const d = posOf(defender);
     return inReach(a.x, a.z, d.x, d.z, r ?? reachOfUnit(attacker));
-  };
+  }
 
-  // Can the attacker actually TOUCH the defender - reach distance, and (from
-  // milestone 3) nothing solid in the way? THE melee predicate: swings, shoves
-  // and opportunity attacks all read it, so reach means one thing everywhere.
-  // `r` overrides the attacker's own reach, which the shove needs - a shove is
-  // arms-length whatever you happen to be holding.
-  const canReach = (attacker, defender, r = null) => withinReach(attacker, defender, r);
+  // Can the attacker actually TOUCH the defender - reach distance, and nothing
+  // solid in the way? THE melee predicate: swings, shoves and opportunity
+  // attacks all read it, so reach means one thing everywhere. `r` overrides the
+  // attacker's own reach, which the shove needs - a shove is arms-length
+  // whatever you happen to be holding.
+  //
+  // The line test is what makes a partition terrain rather than decoration:
+  // before it, cover was ranged-only AND melee ignored edges, so a cubicle wall
+  // cost a melee attacker nothing - not even a step around it.
+  function canReach(attacker, defender, r = null) {
+    const a = posOf(attacker);
+    const d = posOf(defender);
+    return inReach(a.x, a.z, d.x, d.z, r ?? reachOfUnit(attacker), world.stepOpen);
+  }
+
   // The to-hit terms for one attacker/defender pair (TACTICS_PLAN #1). THE
   // single place the terms are assembled: every roll site and the hover
   // preview read it, so the percentage the player sees is always the
@@ -1616,14 +1661,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // hop-pause-hop. Surface damage lands per tile entered via the actor's
   // onTile hook. Returns the AP actually spent (0 = couldn't move).
   function aiAdvance(unit, budget, target) {
-    let best = null;
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-      const tx = target.actor.x + dx;
-      const tz = target.actor.z + dz;
-      if (!world.isWalkable(tx, tz) && !(unit.x === tx && unit.z === tz)) continue;
-      const p = world.findEnemyPath(unit.x, unit.z, tx, tz);
-      if (p && p.length > 1 && (!best || p.length < best.length)) best = p;
-    }
+    let best = standTilePath(unit, target);
     const pp = posOf(target);
     // Nowhere better to stand, but the tile is already the right one and only
     // the sub-tile position is wrong. Now that reach is a DISTANCE, one tile
@@ -1636,6 +1674,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const here = posOf(unit);
       const step = world.approach(unit.x, unit.z, pp.x, pp.z);
       if (dist(here.x, here.z, step[0], step[1]) < 0.05) return 0; // as close as this tile allows
+      // And only if shuffling would actually earn a swing. A partition between
+      // the two bodies isn't a distance problem, so closing the gap can't solve
+      // it - spending AP to end up equally unable to swing is the same stall
+      // wearing a different hat.
+      if (!inReach(step[0], step[1], pp.x, pp.z, reachOfUnit(unit), world.stepOpen)) return 0;
       best = [[here.x, here.z], step];
     } else {
       // Stand at reach of the target's BODY, not the middle of the adjacent

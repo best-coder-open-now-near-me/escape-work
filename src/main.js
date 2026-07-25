@@ -773,7 +773,7 @@ function startGame(level) {
   const playerReaches = (en, r = null) => {
     const a = posOf(player);
     const b = posOf(en);
-    return inReach(a.x, a.z, b.x, b.z, r ?? (sheet ? reachOf(sheet) : REACH.DEFAULT));
+    return inReach(a.x, a.z, b.x, b.z, r ?? (sheet ? reachOf(sheet) : REACH.DEFAULT), grid.stepOpen);
   };
   // A sight line for throws: open terrain that ISN'T hazed by smoke. Smoke
   // hangs floor-to-ceiling for a couple of turns and breaks line of sight;
