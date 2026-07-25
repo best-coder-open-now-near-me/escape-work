@@ -92,10 +92,18 @@ test('the Pawn allowance pays for movement before AP does', async ({ page }) => 
   const granted = await page.evaluate(() => window.__god.player.talent?.effects?.freeMoveAp || 0);
   expect(granted).toBeGreaterThan(0);
 
+  // Take the boots off first. The Mail Room starts in Warehouse Boots, which
+  // cost 1.1 per tile (M4) - that is a real interaction, but it is not what
+  // this test is about, and it leaves too little headroom in a 1.0 allowance
+  // for the walk to stay inside it.
+  await page.evaluate(() => { window.__god.player.equipped.shoes = null; });
+
   // The allowance only refreshes at the top of a turn, so cycle to one.
   await page.click('#combat-end-turn').catch(() => {});
   await expect.poll(() => page.evaluate(() => window.__combat?.phase), { timeout: 60_000 }).toBe('player');
   const ap0 = await page.evaluate(() => window.__combat.ap);
+  const free0 = await page.evaluate(() => window.__combat.freeAp);
+  expect(free0).toBeGreaterThan(0); // refreshed at the top of the turn
   const tile = await page.evaluate(() => window.__game.playerTile);
   const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
   const away = Math.sign(tile.x - foe.x) || -1;
@@ -104,7 +112,9 @@ test('the Pawn allowance pays for movement before AP does', async ({ page }) => 
   expect(await clickWorld(page, tile.x + away, tile.z)).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__game.playerTile),
     { timeout: 30_000 }).toEqual({ x: tile.x + away, z: tile.z });
-  expect(await page.evaluate(() => window.__combat.ap)).toBe(ap0); // allowance paid
+  // The allowance paid for it: it went down, and real AP did not move at all.
+  expect(await page.evaluate(() => window.__combat.freeAp)).toBeLessThan(free0);
+  expect(await page.evaluate(() => window.__combat.ap)).toBe(ap0);
 });
 
 test('Frequent Flier walks out of melee without being hit', async ({ page }) => {

@@ -1601,6 +1601,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   window.__combat = {
     get phase() { return phase; },
     get ap() { return active.ap; },
+    // The movement allowance left this turn (MOVEMENT_PLAN M2). 0 for a
+    // character without the talent.
+    get freeAp() { return active.freeAp || 0; },
     set ap(v) { active.ap = Math.max(0, roundAp(Number(v) || 0)); refresh(); },
     get armed() { return armed; },
     get enemies() { return engaged.map((e) => ({ name: e.def.name, x: e.x, z: e.z, hp: e.hp, alive: e.alive, statuses: statusList(e) })); },
