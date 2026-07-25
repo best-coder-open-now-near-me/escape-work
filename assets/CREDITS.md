@@ -2,6 +2,10 @@
 
 All third-party assets here are CC0 (public domain), free for commercial use.
 
+The repo's own code is MIT (see `LICENSE` at the root). That covers the code
+only - everything under `assets/` is third-party CC0, credited below, and
+carries its own terms rather than the MIT grant.
+
 ## Furniture (environment)
 - **KayKit : Furniture Bits (1.0)** by **Kay Lousberg** — https://www.kaylousberg.com
   (https://kaylousberg.itch.io). License: CC0. Source `.gltf` files were converted
