@@ -4,7 +4,7 @@
 // copies in combat.js used to each own.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { toHitTerms } from '../../src/tactics.js';
+import { toHitTerms, cheb, threatens, provokedBy } from '../../src/tactics.js';
 import { HIT, hitChance } from '../../src/stats.js';
 
 test('an empty pair is all zeroes - no accidental baseline', () => {
@@ -64,4 +64,58 @@ test('a defender-favouring positional term can only lower the chance', () => {
   const covered = toHitTerms({ accuracy: 0.1, dodge: 0.05, positional: -0.2 });
   assert.ok(hitChance(covered.acc, covered.dodge, covered.mods)
     <= hitChance(open.acc, open.dodge, open.mods));
+});
+
+// --- threat & opportunity attacks (TACTICS_PLAN M2) -------------------------
+
+test('cheb treats a diagonal as one step, like the rest of the grid', () => {
+  assert.equal(cheb(0, 0, 0, 0), 0);
+  assert.equal(cheb(0, 0, 1, 1), 1);  // diagonal is adjacent
+  assert.equal(cheb(0, 0, 2, 0), 2);
+  assert.equal(cheb(3, 3, 1, 2), 2);  // max of the two axes, not the sum
+});
+
+test('a unit threatens its eight neighbours and nothing further', () => {
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      assert.equal(threatens(5, 5, 5 + dx, 5 + dz), true, `${dx},${dz} is threatened`);
+    }
+  }
+  assert.equal(threatens(5, 5, 7, 5), false); // two tiles out is free
+  assert.equal(threatens(5, 5, 5, 7), false);
+  assert.equal(threatens(5, 5, 7, 7), false);
+});
+
+test('stepping out of reach provokes; approaching does not', () => {
+  const foe = [{ x: 5, z: 5 }];
+  assert.equal(provokedBy(foe, 5, 6, 5, 8).length, 1); // adjacent -> away: provokes
+  assert.equal(provokedBy(foe, 5, 8, 5, 6).length, 0); // away -> adjacent: closing is free
+});
+
+test('circling a foe provokes nothing - the threat set never lapses', () => {
+  // Both tiles are adjacent to the foe, so it never stops threatening. This is
+  // the case raw adjacency-diffing gets wrong.
+  const foe = [{ x: 5, z: 5 }];
+  assert.deepEqual(provokedBy(foe, 4, 5, 4, 4), []); // orthogonal -> diagonal, still in reach
+  assert.deepEqual(provokedBy(foe, 4, 4, 5, 4), []); // diagonal -> orthogonal
+  assert.deepEqual(provokedBy(foe, 5, 5, 5, 5), []); // standing still is not leaving
+});
+
+test('only the threats actually escaped fire, not every nearby foe', () => {
+  const a = { x: 5, z: 5, tag: 'left-behind' };
+  const b = { x: 8, z: 5, tag: 'still-adjacent' };
+  // Move from between them to a tile that only b still reaches.
+  const provoked = provokedBy([a, b], 6, 5, 7, 5);
+  assert.equal(provoked.length, 1);
+  assert.equal(provoked[0].tag, 'left-behind'); // b never lost reach, so it gets nothing
+});
+
+test('escaping several threats at once provokes each of them', () => {
+  const swarm = [{ x: 4, z: 5 }, { x: 5, z: 4 }, { x: 6, z: 5 }];
+  assert.equal(provokedBy(swarm, 5, 5, 5, 9).length, 3); // walking out of a surround
+});
+
+test('provokedBy tolerates an empty or missing threat list', () => {
+  assert.deepEqual(provokedBy([], 1, 1, 5, 5), []);
+  assert.deepEqual(provokedBy(undefined, 1, 1, 5, 5), []);
 });

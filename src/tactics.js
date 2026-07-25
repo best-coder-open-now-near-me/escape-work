@@ -36,3 +36,29 @@ export function toHitTerms({
     mods: positional,
   };
 }
+
+// --- threat & opportunity attacks (TACTICS_PLAN M2) -------------------------
+
+// Chebyshev distance: a diagonal costs the same as an orthogonal, which is how
+// the grid treats adjacency everywhere else (movement, shove range, melee).
+export const cheb = (ax, az, bx, bz) => Math.max(Math.abs(ax - bx), Math.abs(az - bz));
+
+// A unit threatens the eight tiles around it. Everyone can threaten: since
+// EQUIPMENT_PLAN M3 every combatant has a basic melee swing (its weapon's, or
+// a punch), so this needs no per-unit capability check.
+export const threatens = (tx, tz, x, z) => cheb(tx, tz, x, z) <= 1;
+
+// Which of `threats` a step from (fx, fz) to (tx, tz) provokes: those that
+// threatened the tile being LEFT and no longer threaten the tile being
+// ENTERED. Comparing threat SETS rather than raw adjacency is what keeps a
+// unit circling a foe - sliding from one threatened tile to another - from
+// provoking, and stops a diagonal shuffle past someone from double-firing
+// (TACTICS_PLAN, "continuous movement and tile-granular reactions").
+//
+// Pure: `threats` is any list of things carrying x/z, and eligibility (alive,
+// aware, still holding a reaction) is the caller's filter, not this rule's.
+export function provokedBy(threats, fx, fz, tx, tz) {
+  if (fx === tx && fz === tz) return []; // standing still is not leaving
+  return (threats || []).filter((t) =>
+    threatens(t.x, t.z, fx, fz) && !threatens(t.x, t.z, tx, tz));
+}
