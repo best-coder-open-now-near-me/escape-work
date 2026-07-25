@@ -112,9 +112,14 @@ test('the Pawn allowance pays for movement before AP does', async ({ page }) => 
   expect(await clickWorld(page, tile.x + away, tile.z)).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__game.playerTile),
     { timeout: 30_000 }).toEqual({ x: tile.x + away, z: tile.z });
-  // The allowance paid for it: it went down, and real AP did not move at all.
-  expect(await page.evaluate(() => window.__combat.freeAp)).toBeLessThan(free0);
-  expect(await page.evaluate(() => window.__combat.ap)).toBe(ap0);
+  // Assert the RULE, not one arithmetic outcome: real AP is only ever touched
+  // once the allowance is empty. Pinning "ap is unchanged" instead would make
+  // this test depend on the walk being short, and the walk length depends on
+  // where the Manager wandered on its turn - which is not what is under test.
+  const freeAfter = await page.evaluate(() => window.__combat.freeAp);
+  const apAfter = await page.evaluate(() => window.__combat.ap);
+  expect(freeAfter).toBeLessThan(free0);          // the allowance paid first...
+  if (ap0 - apAfter > 0) expect(freeAfter).toBe(0); // ...and AP only after it ran dry
 });
 
 test('Frequent Flier walks out of melee without being hit', async ({ page }) => {
