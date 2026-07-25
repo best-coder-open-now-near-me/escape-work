@@ -163,7 +163,14 @@ test('striking a foe from behind its committed facing is a backstab', async ({ p
   // the whole way, so nothing is provoked - but it puts us in its rear arc.
   const bx = foe.x + (foe.x - pt.x);
   const bz = foe.z + (foe.z - pt.z);
-  if (await page.evaluate(() => window.__combat.armed)) await clickWorld(page, bx, bz); // lower it first
+  // Reading the tag left the attack armed, and a LEFT click no longer lowers
+  // it (it reports an invalid target) - so back out the way the game now
+  // expects, with a right click, before walking.
+  if (await page.evaluate(() => window.__combat.armed)) {
+    const here = await page.evaluate(() => window.__game.project(window.__game.playerTile.x, window.__game.playerTile.z));
+    await page.mouse.click(here.x, here.y, { button: 'right' });
+    await expect.poll(() => page.evaluate(() => window.__combat.armed)).toBe(null);
+  }
   expect(await clickWorld(page, bx, bz)).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__game.playerTile),
     { timeout: 30_000 }).toEqual({ x: bx, z: bz });
@@ -177,6 +184,15 @@ test('a shove does not provoke - forced movement is the safe disengage', async (
   await enterCombat(page);
   await page.evaluate(() => { window.__combat.forceHit = true; });
   const before = await foeOf(page);
+
+  // The Manager wanders before the fight starts, so check it has somewhere to
+  // BE shoved: a shove into something solid is a legal outcome that deals its
+  // own damage and moves nobody, which would read here as a false failure.
+  // DISENGAGE_ARENA's floor is x 1..10, z 1..3.
+  const pt0 = await page.evaluate(() => window.__game.playerTile);
+  const px = before.x + Math.sign(before.x - pt0.x);
+  const pz = before.z + Math.sign(before.z - pt0.z);
+  expect(px >= 1 && px <= 10 && pz >= 1 && pz <= 3).toBe(true); // open floor behind it
 
   // Shove it out of our reach. A shove into open floor deals no damage, so if
   // forced movement provoked, our own free swing would show up as HP loss.

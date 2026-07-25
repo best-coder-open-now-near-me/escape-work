@@ -220,7 +220,7 @@ export function updateStatsHud(sheet, portrait = null) {
           <span style="position:absolute; inset:0; display:flex; align-items:center;
             justify-content:center; font-size:10px; font-weight:700; letter-spacing:.4px;
             color:#12121c; text-shadow:0 1px 0 rgba(255,255,255,.25);">
-            ${sheet.hp} / ${sheet.maxHp}</span>
+            HP ${sheet.hp}/${sheet.maxHp}</span>
         </span>
         <span style="display:block; height:3px; background:#241f28; border-radius:2px; overflow:hidden;">
           <span style="display:block; height:100%; width:${xpFrac * 100}%; background:#6fa8ff;"></span>

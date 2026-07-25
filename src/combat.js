@@ -198,8 +198,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   let pendingMelee = null; // { en, action } to strike when the walk-up completes
   let acting = null; // the AI unit's working turn state: { unit, ap, wait }
   // Self-cast actions that used to fire on the first button press. They now
-  // take a confirm click, so a stray click can't spend a turn's AP.
-  const INSTANT_CONFIRM = new Set(['defend', 'heal', 'summon']);
+  // take a confirm click, so a stray click can't spend a turn's AP. Summons
+  // are deliberately NOT here: Post the Role is a build-around you press on
+  // purpose, and gating it was scope I added rather than scope that was asked
+  // for.
+  const INSTANT_CONFIRM = new Set(['defend', 'heal']);
   // Back out of whatever is armed or awaiting confirmation. RIGHT-CLICK does
   // this from anywhere; a left click never cancels (it reports an invalid
   // target instead), so aiming can't be lost by a near-miss.
