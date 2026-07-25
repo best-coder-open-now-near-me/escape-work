@@ -478,6 +478,9 @@ export function createTileRenderer(app) {
     renderFloor, renderMarker, renderEdgeWall, renderDoor, addFlame, explosionFlash, animate,
     addSmoke, removeSmoke,
     tileMats, wallGhost, doorMat, doorGhost, floorHeight: floorDef.height,
+    // World Y of the top face of an edge wall / a door panel. The occlusion
+    // fade needs these to tell whether the sightline clears the thing.
+    edgeWallTop: EDGE_HEIGHT, doorTop: DOOR_HEIGHT,
   };
 }
 

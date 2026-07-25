@@ -32,6 +32,14 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     yaw: 45, pitch: 55, dist: 26,
     minDist: 9, maxDist: 42, minPitch: 18, maxPitch: 80,
   };
+  // The TACTICAL view: straight down the Y axis, the way a battle map is drawn.
+  // Deliberately past maxPitch - the orbit clamp exists to stop you tumbling
+  // into a useless near-horizon view by accident, not to forbid the one
+  // overhead angle where tile boundaries stop foreshortening and a click
+  // lands exactly where it looks like it will. Non-null while it is up, and it
+  // remembers the view to put back.
+  let tactical = null;
+  const TACTICAL_PITCH = 90;
   function apply() {
     camYaw.setLocalEulerAngles(0, CAM.yaw, 0);
     camPitch.setLocalEulerAngles(-CAM.pitch, 0, 0);
@@ -77,6 +85,10 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     if (orbiting) {
       // an orbit in progress keeps tracking even across UI
       CAM.yaw -= e.dx * 0.3;
+      // Tilting by hand is how you leave the tactical view - it sits past the
+      // orbit's own pitch clamp, so the first drag would otherwise snap the
+      // camera down to maxPitch while the button still claimed it was on.
+      if (e.dy) tactical = null;
       CAM.pitch = pc.math.clamp(CAM.pitch + e.dy * 0.3, CAM.minPitch, CAM.maxPitch);
       apply();
     } else if (leftHeld && onLeftDragTile && onCanvas(e)) {
@@ -139,11 +151,43 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   // raw - callers restore the defaults when done.
   function setView({ dist, pitch, yaw, focusY } = {}) {
     if (dist !== undefined) CAM.dist = pc.math.clamp(dist, 1, CAM.maxDist);
-    if (pitch !== undefined) CAM.pitch = pitch;
+    // A raw pitch override (the class carousel) supersedes the tactical view -
+    // drop the banked framing rather than restoring it over the caller later.
+    if (pitch !== undefined) { CAM.pitch = pitch; tactical = null; }
     if (yaw !== undefined) CAM.yaw = yaw;
     if (focusY !== undefined) focusHeight = focusY;
     apply();
   }
 
-  return { cameraEntity, screenToTile, screenToGround, follow, setView };
+  // Drop into (or out of) the overhead tactical view. Going in banks the
+  // current pitch/dist; coming out restores exactly what you were looking at,
+  // so toggling it for one careful move doesn't cost you your framing.
+  // Returns the state it settled on.
+  function setTactical(on) {
+    if (!!on === !!tactical) return !!tactical;
+    if (on) {
+      tactical = { pitch: CAM.pitch, dist: CAM.dist };
+      CAM.pitch = TACTICAL_PITCH;
+      // Pull back a little if you were in close: straight down from a tight
+      // boom shows a handful of tiles and defeats the point of the view.
+      CAM.dist = Math.max(CAM.dist, 22);
+    } else {
+      CAM.pitch = tactical.pitch;
+      CAM.dist = tactical.dist;
+      tactical = null;
+    }
+    apply();
+    return !!tactical;
+  }
+
+  return {
+    cameraEntity,
+    screenToTile,
+    screenToGround,
+    follow,
+    setView,
+    setTactical,
+    toggleTactical: () => setTactical(!tactical),
+    get tactical() { return !!tactical; },
+  };
 }

@@ -149,6 +149,37 @@ export const ACTIONS = {
     log: 'You liberate a pastry from the cart. +5 HP.',
   },
 
+  // --- Security -------------------------------------------------------------------
+  detain: {
+    type: 'attack',
+    ap: 3,
+    label: 'Detain',
+    desc: 'Write them up on the spot. Solid damage, and they lose their next turn to the paperwork.',
+    min: 3,
+    max: 5,
+    uses: 2, // an incident report is a big enough hammer to ration it
+    applies: 'stunned',
+    appliesLog: 'They are detained for a statement - they lose a turn to it.',
+    log: 'You open an incident report. Name, badge number, time of entry.',
+    missLog: 'They produce a lanyard from somewhere. It even scans.',
+  },
+  'stand-post': {
+    type: 'defend',
+    ap: 2,
+    label: 'Stand Post',
+    desc: 'Plant yourself in the doorway. Incoming damage is halved until your next turn.',
+    log: 'You plant yourself in the doorway. Nobody is getting past. Damage halved.',
+  },
+  'night-thermos': {
+    type: 'heal',
+    ap: 2,
+    label: 'Night Thermos',
+    desc: 'The thermos that has seen every 3am on this floor. Steady heal.',
+    amount: 5,
+    uses: 3,
+    log: 'You pour from the thermos. It is still, somehow, hot. +5 HP.',
+  },
+
   // --- universal ----------------------------------------------------------------
   shove: {
     type: 'shove',

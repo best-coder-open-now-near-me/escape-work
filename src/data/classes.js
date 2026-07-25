@@ -167,6 +167,38 @@ export const CLASSES = {
     },
   },
 
+  security: {
+    name: 'Security',
+    // The cop rig - the one the Mail Room clerk used to wear before it went to
+    // the person whose job actually IS the uniform. Shared with the Security
+    // Guard ENEMY (data/enemies.js), who is squarer through the vest; the
+    // player's guard stands taller and less padded, so the two read apart when
+    // you meet yourself coming the other way.
+    model: 'security',
+    look: { build: { legs: 1.98, torso: 1.18 } },
+    tagline: 'Has the keys, the clipboard, and the authority. Slow to swing, hard to move.',
+    experience: 'Night Security, 8 yrs. Has walked this floor more times than anyone alive.',
+    maxHp: 26,
+    ap: 5,
+    bonusDmg: 0,
+    startGear: { shoes: 'warehouse-boots' }, // the duty boot: sure-footed, not light
+    attr: { grit: 7, hustle: 4, savvy: 5, composure: 6 }, // steady, unhurried, hard to rattle
+    track: [
+      { id: 'sec-post', name: 'Standing Post', cost: 1, effect: { attrBonus: { grit: 1 } } },
+      { id: 'sec-rounds', name: 'Night Rounds', cost: 1, effect: { attrBonus: { hustle: 1 } } },
+      { id: 'sec-deescalate', name: 'De-escalation Training', cost: 1, effect: { attrBonus: { composure: 1 } } },
+      { id: 'sec-boots', name: 'Duty Boots', cost: 1, requires: ['sec-post'], effect: { grantsAction: 'kick' } },
+    ],
+    actions: ['detain', 'stand-post', 'night-thermos'],
+    talent: {
+      name: 'Incident Report',
+      blurb: 'Eight years of walking through whatever the day shift spilled. Hazards on the floor hurt you less.',
+      // surfaceDamageResist is a live handler (main.js) that had no owner until
+      // now - flat reduction on the damage a surface deals you per step.
+      effects: { surfaceDamageResist: 1 },
+    },
+  },
+
   // --- summoned, never chosen -------------------------------------------------
   // The applicant is a class with no résumé worth reading: spawned by an HR
   // summon (data/enemies.js hr.summon, and later the HR class's Post the Role),
