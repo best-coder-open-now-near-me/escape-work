@@ -92,10 +92,28 @@ test('a machine can be cleaned out, and the overlay says so afterwards', async (
 
   // Buy the top row until nothing is left. Finite stock is what makes a placed
   // merchant worth finding rather than a menu you carry around.
-  for (let i = 0; i < 40; i++) {
-    if (!(await page.locator('#shop-buy-0').count())) break;
-    await page.click('#shop-buy-0');
-    await page.waitForTimeout(60);
+  //
+  // Every step here is BOUNDED, because the first cut of this loop was an
+  // unbounded `page.click` per item and it hung for the full 300s test budget
+  // once on CI with no stack to show for it. A per-click timeout plus a
+  // stock-didn't-move check turns any future stall into a legible failure
+  // naming the row that stuck, instead of a bare timeout.
+  const stockLeft = () => page.evaluate(
+    ([x, z]) => window.__game.shopStockAt(x, z).reduce((n, r) => n + r.qty, 0), [MACHINE.x, MACHINE.z]);
+  let left = await stockLeft();
+  expect(left).toBeGreaterThan(0);
+  for (let guard = left + 5; guard > 0 && left > 0; guard--) {
+    const buy = page.locator('#shop-buy-0');
+    if (!(await buy.count())) break;
+    // A disabled button would otherwise be waited on until the test budget is
+    // gone; with 500💵 in the purse it never should be, so say so plainly.
+    expect(await buy.isDisabled(), 'the top row is affordable at 500 cash').toBe(false);
+    await buy.click({ timeout: 20_000 });
+    // Wait on the STOCK moving rather than a fixed sleep - the panel repaints
+    // at whatever rate software GL allows.
+    const before = left;
+    await expect.poll(stockLeft, { timeout: 20_000 }).toBeLessThan(before);
+    left = await stockLeft();
   }
   expect(await page.evaluate(([x, z]) => window.__game.shopStockAt(x, z), [MACHINE.x, MACHINE.z])).toEqual([]);
   await expect(page.locator('#shop-panel')).toContainText('SOLD OUT');
