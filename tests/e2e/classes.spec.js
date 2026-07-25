@@ -1,7 +1,8 @@
 // Class-specific kit: IT Support's granted kick and self-targeted purging
-// reboot, and the Mail Room's cone attack with its paper aftermath.
+// reboot, the Mail Room's cone attack with its paper aftermath, and Security's
+// stun-riding Detain.
 import { test, expect } from '@playwright/test';
-import { bootAndPick, clickWorld, enterCombat, waitStill, stableProject } from './helpers.js';
+import { bootAndPick, clickWorld, enterCombat, waitStill, stableProject, onScreen } from './helpers.js';
 
 test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ page }) => {
   test.setTimeout(300_000);
@@ -85,4 +86,41 @@ test('Mail Room: Bulk Mail cones damage and leave paper drifts', async ({ page }
 
   // The wedge's bare floor is carpeted with fresh paper.
   expect(await paperNear()).toBeGreaterThan(paperBefore);
+});
+
+test('Security: Detain lands a stun, and the guard wears the cop rig', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootAndPick(page, 'security');
+  // The class actually boots: its own sheet, its own rig.
+  expect(await page.evaluate(() => window.__game.stats.className)).toBe('Security');
+  expect(await page.evaluate(() => window.__game.stats.maxHp)).toBe(26);
+
+  await enterCombat(page);
+  await expect(page.locator('#act-detain')).toBeVisible();
+  await expect(page.locator('#act-stand-post')).toBeVisible();
+  await expect(page.locator('#act-night-thermos')).toBeVisible();
+
+  // Detain is the class's hammer: damage plus the stun rider, twice a fight.
+  await page.evaluate(() => { window.__combat.forceHit = true; });
+  const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
+  expect(foe).toBeTruthy();
+  const foeNow = () => page.evaluate(([x, z]) =>
+    window.__combat.enemies.find((e) => e.x === x && e.z === z), [foe.x, foe.z]);
+
+  for (let i = 0; i < 4; i++) {
+    const cur = await foeNow();
+    if (cur && (cur.hp < foe.hp || cur.statuses?.some((s) => s.id === 'stunned'))) break;
+    await page.waitForTimeout(900); // camera settle before projecting
+    if (await page.evaluate(() => window.__combat?.armed) !== 'detain') {
+      if (!(await page.locator('#act-detain').isVisible())) break;
+      await page.click('#act-detain');
+    }
+    const p = await page.evaluate(([x, z]) => window.__game.project3(x, 0.9, z), [foe.x, foe.z]);
+    if (!onScreen(p)) continue;
+    await page.mouse.click(p.x, p.y);
+    await page.waitForTimeout(700);
+  }
+  const after = await foeNow();
+  expect(after.hp).toBeLessThan(foe.hp);
+  expect(after.statuses.some((s) => s.id === 'stunned')).toBe(true);
 });
