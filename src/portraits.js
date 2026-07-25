@@ -28,6 +28,12 @@ const DIST = 1.15;          // camera distance - head and shoulders at fov 30
 export function createPortraits(app) {
   const cache = new Map();   // key -> data URL (or null if it couldn't render)
   const inflight = new Map(); // key -> Promise
+  // ONE camera and ONE render target serve every portrait, and every staged rig
+  // stands on the same spot - so two renders in flight at once would read each
+  // other's pixels (the whole party and every enemy are dressed in the same
+  // frame at level load, so that is the normal case, not a corner). Renders are
+  // therefore queued: one stages, reads, and tears down before the next begins.
+  let queue = Promise.resolve();
   let rt = null;
   let cam = null;
 
@@ -112,7 +118,7 @@ export function createPortraits(app) {
     if (inflight.has(key)) return inflight.get(key);
     if (!ensureRig()) return Promise.resolve(null);
 
-    const p = new Promise((resolve) => {
+    const render = () => new Promise((resolve) => {
       const finish = (url, entity) => {
         cam.enabled = false;
         if (entity) entity.destroy();
@@ -160,9 +166,13 @@ export function createPortraits(app) {
           app.on('postrender', tick);
         },
       });
-      // A .glb that never loads must not leave a caller waiting forever.
+      // A .glb that never loads must not leave a caller waiting forever - and
+      // must not wedge the queue behind it either.
       setTimeout(() => { if (!settled) { settled = true; finish(null, null); } }, 8000);
     });
+
+    const p = queue.then(render);
+    queue = p.catch(() => {}); // one bad render must not poison the rest
     inflight.set(key, p);
     return p;
   }
