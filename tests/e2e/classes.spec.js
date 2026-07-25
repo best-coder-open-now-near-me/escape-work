@@ -16,6 +16,11 @@ test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ pa
   }
   expect(await page.evaluate(() => window.__combat.armed)).toBe('reboot');
   const ap0 = await page.evaluate(() => window.__combat.ap);
+  // Read the cost from the registry rather than pinning a number here: action
+  // costs get re-priced (MOVEMENT_PLAN M5 moved every attack 3 -> 2), and this
+  // test is about the self-cast spending EXACTLY its cost, not about what that
+  // cost happens to be this month.
+  const cost = await page.evaluate(() => window.__god.actionAp('reboot'));
   // Click your own tile: the reboot turns YOU off and on again. The purge's
   // self-cast is tile-based (tile === your tile), so settle first - a click
   // taken while the camera still eases can project a tile off and lower the
@@ -37,7 +42,7 @@ test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ pa
     await page.mouse.click(p.x, p.y);
     // Compare in NODE - `ap0` doesn't exist in the browser page context.
     const ap = await page.evaluate(() => window.__combat.ap).catch(() => null);
-    spent = ap === ap0 - 3;
+    spent = ap != null && Math.abs(ap - (ap0 - cost)) < 0.01;
   }
   expect(spent).toBe(true); // reboot self-cast consumed exactly its AP
   expect(await page.evaluate(() => window.__combat.armed)).toBe(null);

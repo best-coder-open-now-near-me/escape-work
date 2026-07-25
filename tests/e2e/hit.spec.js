@@ -34,18 +34,35 @@ test('a forced miss deals no damage but still spends the attack AP', async ({ pa
   await page.evaluate(() => { window.__combat.forceHit = false; });
 
   // Arm the basic attack and swing until the attack's AP is actually spent - a
-  // real swing (exactly the 3-AP cost), not a mis-projected lower or a walk-up.
-  // Under the pin that swing is a guaranteed miss.
+  // real swing (exactly the attack's cost, read from the registry so a
+  // re-pricing doesn't quietly turn this into a test of nothing), not a
+  // mis-projected lower or a walk-up. Under the pin that swing is a
+  // guaranteed miss.
+  const cost = await page.evaluate(() => window.__god.actionAp('attack'));
   let swung = false;
   for (let i = 0; i < 6 && !swung; i++) {
     await page.waitForTimeout(800); // camera settle before projecting
+    // NEVER click a disabled button: Playwright waits for it to become enabled
+    // and burns the whole test timeout. A mis-projected click walks instead of
+    // swinging, which can drain the turn below the cost - so pass the turn and
+    // pick it back up with a full pool. Every roll is pinned to a miss, so
+    // handing the Manager its turns costs nothing.
+    await expect.poll(async () => {
+      const s = await page.evaluate((c) => window.__combat
+        && { player: window.__combat.phase === 'player', can: window.__combat.ap >= c }, cost);
+      if (!s) return false;
+      if (s.player && !s.can) await page.click('#combat-end-turn').catch(() => {});
+      return s.player && s.can;
+    }, { timeout: 60_000 }).toBe(true);
     const apBefore = await page.evaluate(() => window.__combat.ap);
-    if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#act-attack');
+    if (await page.evaluate(() => window.__combat.armed) !== 'attack') {
+      await page.click('#act-attack');
+    }
     const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
     await page.mouse.click(fp.x, fp.y);
     await page.waitForTimeout(300);
     const apAfter = await page.evaluate(() => window.__combat.ap);
-    if (Math.abs(apAfter - (apBefore - 3)) < 0.01) swung = true; // the 3-AP attack fired
+    if (Math.abs(apAfter - (apBefore - cost)) < 0.01) swung = true; // the attack fired
   }
   expect(swung).toBe(true);           // the swing happened and cost its AP
   expect(await foeHp()).toBe(foe.hp); // ...but the forced miss dealt no damage

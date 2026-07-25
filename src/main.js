@@ -2217,6 +2217,13 @@ function startGame(level) {
     get inCombat() { return inCombat; },
     get gameOver() { return gameOver; },
     get burningCount() { return runtime.burningCount; },
+    // Read an action's AP cost from the registry - so a test can assert
+    // "affordable" without hardcoding a number that re-pricing would stale.
+    actionAp: (id) => ACTIONS[id]?.ap ?? null,
+    // Take a class-track node on a sheet, through the same function the
+    // level-up screen calls - so a test exercises the real path rather than
+    // hand-writing talent effects the game would never produce.
+    spendClassPoint: (sheet, nodeId) => spendClassPoint(sheet, nodeId),
     get doors() { return [...grid.doors].map(([key, d]) => ({ key, open: d.open })); },
     setDoorOpen(key, open) {
       if (!grid.doors.has(key)) return;

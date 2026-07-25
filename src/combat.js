@@ -11,7 +11,7 @@
 import { ACTIONS } from './data/actions.js';
 import { SURFACES, GUM } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
-import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc } from './stats.js';
+import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, MOVE } from './stats.js';
 import { applyStatus, hasStatus, statusFx, tickTurn, clearStatuses, removeStatus, statusList } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, TACTICS } from './tactics.js';
 import { STATUSES } from './data/statuses.js';
@@ -84,6 +84,26 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // fx:    { projectile(from,to,kind), damageText(x,z,text,color) } - cosmetic
   // callbacks: { say, updateHud, onRound, onEnemyKilled(en), onWin, onLose }
   const talentFxOf = (m) => m.sheet.talent?.effects || {};
+  // --- the movement allowance (MOVEMENT_PLAN M2, "the Pawn") -----------------
+  // A talent may grant AP that ONLY movement can spend. It is drawn from first,
+  // so a reposition stops competing with a swing; once it is dry a long walk
+  // falls through to real AP and costs what it always did. Works for a member
+  // (talent on the sheet) or an AI unit (talent on its def), so an enemy
+  // archetype can carry it too.
+  const freeMoveOf = (u) => (u.sheet
+    ? (u.sheet.talent?.effects?.freeMoveAp || 0)
+    : (u.def?.talent?.effects?.freeMoveAp || 0));
+  // Bill `cost` against a { freeAp, ap } pair, allowance first. Returns what
+  // came out of real AP. truncateByBudget only ever needs a TOTAL, so the split
+  // happens here rather than inside the sampler.
+  const billMove = (holder, cost) => {
+    const fromFree = Math.min(holder.freeAp || 0, cost);
+    holder.freeAp = roundAp((holder.freeAp || 0) - fromFree);
+    const fromAp = roundAp(cost - fromFree);
+    holder.ap = Math.max(0, roundAp(holder.ap - fromAp));
+    return fromAp;
+  };
+  const moveBudget = (holder) => Math.max(0, (holder.freeAp || 0) + holder.ap);
   const throwableIds = Object.keys(ACTIONS).filter((id) => ACTIONS[id].ammoCost);
   // A throwable can be gated behind a talent effect (`needsTalent`): folding a
   // dart that lands in someone's eye is a craft, so paper airplanes belong to
@@ -175,11 +195,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // speed and AP pricing, for everyone. Gum on a shoe surcharges every step;
   // a member's gum lives on their sheet, an AI unit's on the actor (see
   // aiAdvance).
+  // AP per tile: the base rate, then the surface's own drag. A `slow` surface
+  // multiplies the cost (coffee at slow 0.5 costs double), so terrain bites
+  // proportionally harder now that the base is cheaper - which is the point,
+  // per MOVEMENT_PLAN #7.
   const surfaceStepCost = (x, z) => {
     const slow = SURFACES[world.surfaceIdAt(x, z)]?.slow;
-    return slow ? 1 / slow : 1;
+    return MOVE.COST_PER_TILE * (slow ? 1 / slow : 1);
   };
-  const stepCost = (x, z) => surfaceStepCost(x, z) * (statusFx(active.sheet).moveCostMult ?? 1);
+  const stepCost = (x, z) => surfaceStepCost(x, z)
+    * (statusFx(active.sheet).moveCostMult ?? 1)
+    * moveCostOf(active.sheet); // footwear (MOVEMENT_PLAN M4)
   // AP is spent in tenths now that movement charges by distance.
   const roundAp = (v) => Math.round(v * 10) / 10;
   const fmtAp = (v) => String(roundAp(v)).replace(/\.0$/, '');
@@ -365,9 +391,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       raw = [...p.slice(0, -1), world.clampPoint(point.x, point.z)];
     }
     const s = world.smooth(raw, active.actor);
-    const { points, cost, done, tail } = truncateByBudget(s, active.ap, stepCost);
+    const { points, cost, done, tail } = truncateByBudget(s, moveBudget(active), stepCost);
     preview = { reach: points, tail };
-    costTag.textContent = done ? `${fmtAp(cost)} AP` : `${fmtAp(cost)} AP - out of reach`;
+    // Show what it actually costs YOU: the allowance is spent first, so a short
+    // reposition can read as free even though the route has a distance cost.
+    const free = Math.min(active.freeAp || 0, cost);
+    const apPart = roundAp(cost - free);
+    const label = free > 0
+      ? (apPart > 0 ? `${fmtAp(apPart)} AP + ${fmtAp(free)} move` : `${fmtAp(free)} move (free)`)
+      : `${fmtAp(cost)} AP`;
+    costTag.textContent = done ? label : `${label} - out of reach`;
     costTag.style.left = `${sx + 14}px`;
     costTag.style.top = `${sy + 14}px`;
     costTag.style.display = 'block';
@@ -584,8 +617,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Distance-priced movement leaves fractional AP - show it as a half pip.
     const full = Math.floor(active.ap + 1e-6);
     const half = active.ap - full >= 0.05 ? 1 : 0;
+    // The movement allowance rides beside the AP pips as its own boot glyph,
+    // and only for characters that have one - never advertise a resource a
+    // character does not own.
+    const freeLeft = active.freeAp || 0;
+    const freeTag = freeMoveOf(active) > 0 ? `  🥾 ${fmtAp(freeLeft)} move` : '';
     el('combat-ap').textContent = 'AP ' + '●'.repeat(full) + (half ? '◐' : '')
-      + '○'.repeat(Math.max(0, active.sheet.maxAp - full - half)) + ` ${fmtAp(active.ap)}`;
+      + '○'.repeat(Math.max(0, active.sheet.maxAp - full - half)) + ` ${fmtAp(active.ap)}`
+      + freeTag;
     for (const b of buttons) {
       const id = b.dataset.action;
       const a = ACTIONS[id];
@@ -895,7 +934,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     pendingConfirm = null;
     beginMove(active); // a deliberate move - leaving reach can provoke
     active.actor.setPath(points);
-    active.ap = Math.max(0, roundAp(active.ap - cost));
+    billMove(active, cost); // the movement allowance first, then real AP
     refresh();
     return { done, end: points[points.length - 1] };
   }
@@ -933,12 +972,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (point && tile.x === active.actor.x && tile.z === active.actor.z && active.actor.entity) {
       // shuffling within the current tile is a move too
       const pos = active.actor.entity.getPosition();
-      walkActive([[pos.x, pos.z], world.clampPoint(point.x, point.z)], active.ap);
+      walkActive([[pos.x, pos.z], world.clampPoint(point.x, point.z)], moveBudget(active));
       return;
     }
     const p = world.findPath(active.actor.x, active.actor.z, tile.x, tile.z, active.actor);
     if (!p || p.length < 2) return;
-    walkActive(p, active.ap, point ? world.clampPoint(point.x, point.z) : null);
+    walkActive(p, moveBudget(active), point ? world.clampPoint(point.x, point.z) : null);
   }
 
   // Hover text for a power. Assembled from the action's own data so a new
@@ -1117,7 +1156,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         return;
       }
       phase = 'ai';
-      acting = { unit: s.unit, ap: 0, wait: 0.6 };
+      acting = { unit: s.unit, ap: 0, freeAp: 0, wait: 0.6 };
       log(skipLine);
       refresh();
       return;
@@ -1125,6 +1164,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (s.member) {
       makeActive(s.member);
       s.member.ap = s.member.sheet.maxAp; // full AP at the top of your turn
+      s.member.freeAp = freeMoveOf(s.member); // and the movement allowance, if any
       phase = 'player';
       const solo = members.length === 1;
       log(solo ? 'Your turn.' : `${s.member.sheet.name}'s turn.`);
@@ -1132,7 +1172,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return;
     }
     phase = 'ai';
-    acting = { unit: s.unit, ap: s.unit.def.ap, wait: 0.5 };
+    acting = { unit: s.unit, ap: s.unit.def.ap, freeAp: freeMoveOf(s.unit), wait: 0.5 };
     refresh();
   }
   // The line for a turn spent incapacitated - stun reads differently from the
@@ -1344,12 +1384,27 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (phase === 'done') return;
     const mover = combatantFor(ref);
     if (!mover) return;
+    // Frequent Flier (MOVEMENT_PLAN M3): this character never provokes, from
+    // anyone, ever. Deliberately the ONLY exception to the rule that leaving
+    // a threatened tile costs you - which is what makes it worth a class
+    // point. Read the same way every other talent effect is, so an enemy
+    // archetype can carry it too.
+    const flier = mover.sheet
+      ? mover.sheet.talent?.effects?.noProvoke
+      : mover.def?.talent?.effects?.noProvoke;
     const from = moveStart.get(mover);
     if (!from) return; // not a tracked deliberate move (a shove glide, a spawn)
     if (from.x === x && from.z === z) return;
     setFacing(mover, x - from.x, z - from.z); // you face where you're going
     moveStart.set(mover, { x, z }); // the next leg starts here
     if (!standing(mover)) return;
+    if (flier) {
+      // Say so once per escape, or "nothing happened" reads as a missing rule.
+      if (provokedBy(threatsAgainst(mover), from.x, from.z, x, z).length) {
+        log(`${mover.sheet ? mover.sheet.name : mover.def.name} walks off untouched. Frequent flier.`);
+      }
+      return;
+    }
     for (const t of provokedBy(threatsAgainst(mover), from.x, from.z, x, z)) {
       if (!canReact(t.ref)) continue; // an earlier swing this step spent it
       reactions.set(t.ref, (reactions.get(t.ref) || 0) + 1);
@@ -1416,6 +1471,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // AI units pay the same surface movement tax the player does, plus their
     // own gum surcharge if they've stepped in a wad.
     const { points, cost } = truncateByBudget(s, budget,
+      // AI units aren't sheets and wear nothing, so there is no footwear term
+      // here - just the floor and whatever is stuck to them.
       (x, z) => surfaceStepCost(x, z) * (statusFx(unit).moveCostMult ?? 1));
     if (points.length < 2 || cost < 0.05) return 0;
     beginMove(unit); // a deliberate move - leaving reach can provoke
@@ -1521,10 +1578,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       aiAttack(unit, target);
       acting.ap -= unit.def.attackAp;
       acting.wait = 0.85; // outlast the swing animation so hits read one at a time
-    } else if (acting.ap >= 1 && cheb(unit.x, unit.z, target.actor.x, target.actor.z) > 1) {
-      const spent = aiAdvance(unit, acting.ap, target);
+    } else if (moveBudget(acting) >= MOVE.COST_PER_TILE
+      && cheb(unit.x, unit.z, target.actor.x, target.actor.z) > 1) {
+      const spent = aiAdvance(unit, moveBudget(acting), target);
+      // Nothing walkable: burn the real AP so the turn can end, but never the
+      // allowance - it cannot buy anything else, so leaving it is harmless.
       if (spent <= 0) acting.ap = 0;
-      else acting.ap = Math.max(0, roundAp(acting.ap - spent));
+      else billMove(acting, spent);
       acting.wait = 0.15;
     } else {
       advanceTurn(); // out of AP / nothing to do - next in initiative
@@ -1541,6 +1601,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   window.__combat = {
     get phase() { return phase; },
     get ap() { return active.ap; },
+    // The movement allowance left this turn (MOVEMENT_PLAN M2). 0 for a
+    // character without the talent.
+    get freeAp() { return active.freeAp || 0; },
     set ap(v) { active.ap = Math.max(0, roundAp(Number(v) || 0)); refresh(); },
     get armed() { return armed; },
     get enemies() { return engaged.map((e) => ({ name: e.def.name, x: e.x, z: e.z, hp: e.hp, alive: e.alive, statuses: statusList(e) })); },

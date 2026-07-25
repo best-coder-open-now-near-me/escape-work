@@ -60,6 +60,12 @@ export const CLASSES = {
       { id: 'mgr-stonewall', name: 'Stonewall', cost: 1, effect: { attrBonus: { composure: 1 } } },
       { id: 'mgr-reorg', name: 'Reorg Survivor', cost: 1, effect: { attrBonus: { grit: 1 } } },
       { id: 'mgr-traction', name: 'Corner-Office Traction', cost: 1, requires: ['mgr-stonewall'], effect: { talent: { slipImmune: true } } },
+      // Frequent Flier (MOVEMENT_PLAN M3): never triggers an opportunity
+      // attack. The manager is always at a conference and never in the
+      // building to be hit - and it hands the slowest class an escape hatch,
+      // which is a better spread than piling every movement talent on the
+      // clerk.
+      { id: 'mgr-frequent-flier', name: 'Frequent Flier', cost: 1, effect: { talent: { noProvoke: true } } },
     ],
     actions: ['delegate', 'own-calendar', 'espresso'],
     talent: {
@@ -85,6 +91,10 @@ export const CLASSES = {
       { id: 'mail-cart-legs', name: 'Cart Legs', cost: 1, effect: { attrBonus: { hustle: 1 } } },
       { id: 'mail-routes', name: 'Route Knowledge', cost: 1, effect: { attrBonus: { savvy: 1 } } },
       { id: 'mail-dock-boots', name: 'Dock Boots', cost: 1, requires: ['mail-cart-legs'], effect: { grantsAction: 'kick' } },
+      // The Pawn (MOVEMENT_PLAN M2): AP that ONLY movement may spend, drawn
+      // before real AP. Turns repositioning from a cost into a habit - the
+      // clerk flanks and gets behind people without giving up a swing.
+      { id: 'mail-always-moving', name: 'Always Moving', cost: 1, requires: ['mail-cart-legs'], effect: { talent: { freeMoveAp: 1 } } },
     ],
     actions: ['mail-cone', 'return-to-sender', 'snack-cart'],
     talent: {

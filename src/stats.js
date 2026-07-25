@@ -62,6 +62,20 @@ export const HIT = {
   POSITION_CAP: 0.35,    // ceiling on the summed POSITIVE positional terms
 };
 
+// --- the movement economy (MOVEMENT_PLAN.md) --------------------------------
+// Movement and actions share ONE pool (the DOS2 branch of the genre), so the
+// price of a step is the price of part of a swing. At 1 AP per tile against
+// 3 AP attacks in a 5-7 AP pool, walking around a body to reach someone's back
+// cost a whole attack - which made the positional layer (TACTICS_PLAN: cover,
+// flanking, backstab) a bad trade you would never take.
+//
+// Halving the rate is the baseline relief every character gets: that same walk
+// now costs half an attack instead of a whole one. It deliberately does NOT
+// try to make repositioning free - that is what the Pawn talent is for.
+export const MOVE = {
+  COST_PER_TILE: 0.5, // AP per tile of clean floor (was an implicit 1.0)
+};
+
 export const ATTR_KEYS = ['grit', 'hustle', 'savvy', 'composure'];
 
 // Equipment slots (EQUIPMENT_PLAN.md): a damage choice, a defense choice, a
@@ -249,7 +263,7 @@ export function unitCombat(def) {
 // trinket's attribute bump all reach the numbers the same way. Empty for an
 // unequipped sheet.
 export function equippedStats(sheet) {
-  const out = { dmg: 0, soak: 0, maxHp: 0, maxAp: 0, acc: 0, dodge: 0, slipProof: false, attrBonus: {} };
+  const out = { dmg: 0, soak: 0, maxHp: 0, maxAp: 0, acc: 0, dodge: 0, slipProof: false, moveCost: 1, attrBonus: {} };
   const eq = sheet.equipped || {};
   for (const slot of EQUIP_SLOTS) {
     const st = ITEMS[eq[slot]]?.stats;
@@ -261,6 +275,10 @@ export function equippedStats(sheet) {
     out.acc += st.acc || 0;
     out.dodge += st.dodge || 0;
     out.slipProof = out.slipProof || !!st.slipProof; // footwear traction
+    // Footwear movement efficiency MULTIPLIES, so it composes with surfaces and
+    // statuses instead of fighting them - good boots partly offset a spill
+    // rather than ignoring it (MOVEMENT_PLAN #6).
+    if (st.moveCost) out.moveCost *= st.moveCost;
     for (const k in st.attrBonus || {}) out.attrBonus[k] = (out.attrBonus[k] || 0) + st.attrBonus[k];
   }
   return out;
@@ -269,6 +287,12 @@ export function equippedStats(sheet) {
 // The equipped weapon's on-hit proc (EQUIPMENT_PLAN #8), or null. A proc is
 // { applies: '<status>', chance, appliesLog? } - combat rolls it when you land
 // the weapon's own swing.
+// A sheet's footwear movement multiplier (1 = ordinary shoes). Multiplied into
+// the per-tile cost, so <1 is faster and >1 is slower.
+export function moveCostOf(sheet) {
+  return equippedStats(sheet).moveCost;
+}
+
 export function weaponProc(sheet) {
   return ITEMS[sheet?.equipped?.weapon]?.proc || null;
 }

@@ -38,10 +38,19 @@ test('clicking the raised door mesh opens it (parallax fix)', async ({ page }) =
 
 test('hovering a coworker shows the attack cursor and enemy highlight', async ({ page }) => {
   await bootAndPick(page);
-  const en = await page.evaluate(() => window.__game.enemies.find((e) => e.alive));
-  // Hover the body (~0.8 up). Enemies wander, so poll a couple of times.
+  // Hover the body (~0.8 up). Enemies WANDER, so re-read the live position on
+  // every attempt rather than aiming at where one stood when the test started -
+  // and read it off the entity, so a coworker caught mid-step between tiles is
+  // still under the cursor.
   await expect.poll(async () => {
-    await hover3(page, en.x, 0.8, en.z);
+    const p = await page.evaluate(() => {
+      const en = window.__game.enemies.find((e) => e.alive && e.entity);
+      if (!en) return null;
+      const w = en.entity.getPosition();
+      return window.__game.project3(w.x, 0.8, w.z);
+    });
+    if (!onScreen(p)) return null;
+    await page.mouse.move(p.x, p.y);
     return page.evaluate(() => window.__game.hoverKind);
   }, { timeout: 20_000 }).toBe('enemy');
   expect(await page.evaluate(() => window.__game.cursor)).toBe('crosshair');
