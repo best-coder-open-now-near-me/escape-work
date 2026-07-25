@@ -11,8 +11,9 @@
 import { ACTIONS } from './data/actions.js';
 import { SURFACES, GUM } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
-import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, HIT } from './stats.js';
+import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc } from './stats.js';
 import { applyStatus, hasStatus, statusFx, tickTurn, clearStatuses, removeStatus, statusList } from './statuses.js';
+import { toHitTerms } from './tactics.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { buildInitiativeOrder, rollInitiative, insertionIndex } from './initiative.js';
@@ -105,6 +106,37 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const hit = forceHit !== null ? forceHit : rollHit(chance, rng);
     lastRoll = { chance, hit };
     return hit;
+  };
+  // A combatant here is either a party-side MEMBER ({ sheet, actor, ap }) or
+  // an AI UNIT (an actor carrying `def`). These three accessors are the only
+  // place that difference matters, which lets the roll math below stay
+  // uniform - and lets an enemy and a member be attacker or defender
+  // interchangeably. Statuses live on a member's sheet, but on a unit itself.
+  const statusesOf = (u) => u.sheet || u;
+  const accuracyOf = (u) => (u.sheet ? accuracy(u.sheet) : (u.def?.accuracy || 0));
+  const dodgeOf = (u) => (u.sheet ? dodge(u.sheet) : (u.def?.dodge || 0));
+  // The to-hit terms for one attacker/defender pair (TACTICS_PLAN #1). THE
+  // single place the terms are assembled: every roll site and the hover
+  // preview read it, so the percentage the player sees is always the
+  // arithmetic the roll actually uses. `positional` (cover/flank/backstab)
+  // plugs in here in later milestones and reaches all four sites at once.
+  const attackMods = (attacker, defender) => toHitTerms({
+    accuracy: accuracyOf(attacker),
+    dodge: dodgeOf(defender),
+    surprised: hasStatus(statusesOf(defender), 'surprised'),
+    accMod: statusFx(statusesOf(attacker)).accMod || 0,
+    dodgeMod: statusFx(statusesOf(defender)).dodgeMod || 0,
+  });
+  // The chance `attacker` lands on `defender` right now - what the hover tag
+  // reads. Never rolls, never pins; purely the number.
+  const chanceFor = (attacker, defender) => {
+    const t = attackMods(attacker, defender);
+    return hitChance(t.acc, t.dodge, t.mods);
+  };
+  // Roll that attack (honors the forceHit pin, records lastRoll).
+  const rollAgainst = (attacker, defender) => {
+    const t = attackMods(attacker, defender);
+    return resolveHit(t.acc, t.dodge, t.mods);
   };
   // A weapon's on-hit proc chance, honoring the debug pin.
   const resolveProc = (chance) => (forceProc !== null ? forceProc : rollHit(chance, rng));
@@ -230,10 +262,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (!a || a.type !== 'attack' || a.cone) { costTag.style.display = 'none'; return; }
     const en = enemyAtPoint(point);
     if (!en) { costTag.style.display = 'none'; return; }
-    const acc = accuracy(active.sheet)
-      + (hasStatus(en, 'surprised') ? HIT.SURPRISE_ACC_BONUS : 0)
-      + (statusFx(active.sheet).accMod || 0);
-    hoverHitChance = hitChance(acc, (en.def.dodge || 0) + (statusFx(en).dodgeMod || 0));
+    // The same terms the swing will roll - not a second copy of the math.
+    hoverHitChance = chanceFor(active, en);
     costTag.textContent = `${Math.round(hoverHitChance * 100)}% to hit`;
     costTag.style.left = `${sx + 14}px`;
     costTag.style.top = `${sy + 14}px`;
@@ -550,12 +580,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     active.ap -= a.ap;
     // The attack roll: a miss spends the cost above and does nothing else - no
-    // damage, no purge, no rider. A surprised target is easier to hit (HIT_PLAN
-    // #6); a blinded attacker (accMod) aims worse; the target's dodgeMod folds in.
-    const acc = accuracy(active.sheet)
-      + (hasStatus(en, 'surprised') ? HIT.SURPRISE_ACC_BONUS : 0)
-      + (statusFx(active.sheet).accMod || 0);
-    if (!resolveHit(acc, (en.def.dodge || 0) + (statusFx(en).dodgeMod || 0))) {
+    // damage, no purge, no rider. Surprise, the attacker's accMod, the
+    // target's dodgeMod (and later, position) are assembled by attackMods.
+    if (!rollAgainst(active, en)) {
       fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
       log(a.missLog || `${a.log} It misses.`);
       armed = null;
@@ -611,10 +638,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // Roll per target. A dodged envelope flies but doesn't land; the wedge's
       // `leaves` surface still carpets below (HIT_PLAN #4). A surprised target
       // is easier to catch.
-      const acc = accuracy(active.sheet)
-        + (hasStatus(en, 'surprised') ? HIT.SURPRISE_ACC_BONUS : 0)
-        + (statusFx(active.sheet).accMod || 0);
-      if (!resolveHit(acc, (en.def.dodge || 0) + (statusFx(en).dodgeMod || 0))) {
+      if (!rollAgainst(active, en)) {
         fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
         continue;
       }
@@ -983,14 +1007,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     unit.lunge(target.actor.x, target.actor.z);
     if (target.member) {
       const m = target.member;
-      // The attack roll (inert under M1). A miss skips damage, the deflect
-      // interaction, the flinch, and any applied status; the enemy's AP was
-      // already committed by the caller.
-      // The attacker's accuracy folds in any accMod (a blinded attacker aims
-      // worse); the defender's dodge folds in any dodgeMod.
-      const acc = (unit.def.accuracy || 0) + (statusFx(unit).accMod || 0);
-      const dodgeVal = dodge(m.sheet) + (statusFx(m.sheet).dodgeMod || 0);
-      if (!resolveHit(acc, dodgeVal)) {
+      // The attack roll. A miss skips damage, the deflect interaction, the
+      // flinch, and any applied status; the enemy's AP was already committed
+      // by the caller.
+      // Same assembler as the player's swings, with the roles reversed - the
+      // unit attacks, the member defends (attackMods reads either shape).
+      if (!rollAgainst(unit, m)) {
         fx.damageText(m.actor.x, m.actor.z, 'MISS', MISS_COLOR);
         log(atk.missLog || `${unit.def.name}'s attack goes wide.`);
         refresh();
