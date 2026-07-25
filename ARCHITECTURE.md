@@ -33,6 +33,7 @@ src/
     statuses.js        status registry: name/icon, clock (turn vs step),
                        duration, and the effects they carry
   grid.js            Level parsing, terrain + edge-wall queries (pure logic)
+  occlusion.js       Which walls stand between camera and character (pure logic)
   pathfinding.js     8-dir Dijkstra, string-pulling smoother, free-point
                      clamping, distance-budget truncation      (pure logic)
   statuses.js        The status runtime: apply/tick/clear over a carrier's
@@ -81,8 +82,8 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - `data/*` imports nothing (`data/levels.js` is the one exception - it imports
   the level JSON files, which are themselves data).
 - `grid`, `pathfinding`, `stats`, `party`, `surfaces-runtime`, `initiative`,
-  `statuses`, `tactics` are pure JS (no PlayCanvas, no DOM) - unit tested in
-  isolation (tests/unit).
+  `statuses`, `tactics`, `occlusion` are pure JS (no PlayCanvas, no DOM) - unit
+  tested in isolation (tests/unit).
 - `scene`, `shading`, `tile-renderer`, `models`, `controls`, `picking`,
   `actors` touch PlayCanvas; `ui` touches the DOM; `fx`, `combat` and
   `looting` touch both (combat draws its own previews/rings and builds its own
@@ -128,6 +129,22 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   BG3-style coloured outline (`shading.addHighlight`/`setHighlight`, one shell
   per interactable, coloured by kind). Register a holder as it's created;
   destroyed holders auto-unregister.
+- **The camera** (`controls.js`): an orbit rig - yaw/pitch drag, wheel zoom -
+  clamped to pitch 18-80 so you can't tumble into a useless near-horizon view.
+  The **tactical view** (the HUD-rail button, or `T`) deliberately steps past
+  that clamp to a dead-overhead 90: tile boundaries stop foreshortening, so a
+  click lands exactly where it looks like it will. It banks the pitch/dist it
+  replaced and restores them on the way out, and any manual pitch drag (or a
+  raw `setView`) drops it, so the button's lit state never outlives the view.
+- **Walls between you and the camera are ghosted**, and the test for "between"
+  is 3D (`occlusion.js`, unit tested). It walks the sightline from the camera to
+  the character's FEET and ghosts a wall only where that segment is still below
+  the wall's top - so it respects both ends (nothing past the camera, nothing
+  behind the character) and the fact that these walls are SHORT (0.6-0.72). At a
+  steep pitch the sightline clears a partition within half a tile and almost
+  nothing ghosts; at a shallow one the same partition covers several tiles. The
+  flat "is it that way?" test this replaced had neither bound and ghosted most
+  of the room. Each wall entry carries a `top` for it (`scene.js`).
   **In combat, clicking a coworker with nothing armed is an attack** - it arms
   the basic swing from whatever is in your hand (`stats.equippedAction`, bare
   hands fall back to `punch`) and resolves it, walk-up included. Arming a power
@@ -370,9 +387,17 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   with `loot: '<table>'` (+ `label`) is rummageable - trash cans, printers,
   desks; enemies with a `loot` list leave lootable bodies (corpses persist).
   Hold **Alt** for BG3-style clickable labels over everything lootable
-  nearby; clicking a label or the object walks you into reach and loots.
+  nearby; clicking a label or the object walks you into reach and loots. A
+  label names a TILE, not an item - a pile lists its contents in one chip
+  rather than stacking chips at one screen point - and it floats clear of and
+  translucent over what it names, going solid on hover.
   **I** (or the bag button) opens the pockets: use (heal/ammo), examine, or
-  drop - drops become loose floor items the overlay sees. Effects the code
+  drop - drops become loose floor items the overlay sees. The bag lives on the
+  **HUD rail** (`ui.js`), the row of buttons queued off the bottom-left profile
+  card's live right edge - bag, then the tactical camera. The card's width moves
+  with the character's name, so `layoutHudRail` re-seats the whole row on every
+  stats repaint and resize; `registerHudButton` adds a slot, `railHooks` lets a
+  panel (the pockets) ride the same pass. Effects the code
   understands: `heal`, `ammo`, `bonusDmg` (passive while carried, best item
   counts - see `damageBonus` in stats.js). `sheet.inventory` persists across
   floors with the campaign save.

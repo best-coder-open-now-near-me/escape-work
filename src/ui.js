@@ -239,17 +239,71 @@ export function updateStatsHud(sheet, portraitUrl = undefined) {
       </span>
     </span>`;
   renderStatusEffects(sheet);
-  relayoutBag(); // the bag button rides the card's right edge, whose width just changed
+  layoutHudRail(); // the rail rides the card's right edge, whose width just changed
 }
 
-// The bag button and the pockets panel are anchored to the bottom-left stats
-// card, whose width changes with the name and the unspent-points line. The
-// inventory panel registers its layout pass here so every stats repaint (and
-// every resize) re-seats them instead of leaving the button floating over the
-// card or a gap beside it.
-let bagLayout = null;
-function relayoutBag() { bagLayout?.(); }
-window.addEventListener('resize', relayoutBag);
+// --- the HUD rail -------------------------------------------------------------
+// The row of square buttons that sits immediately right of the bottom-left
+// profile card: the pockets bag, the tactical camera, whatever comes next. They
+// queue left to right off the CARD's live right edge, because that edge moves
+// with the character's name and the unspent-points line - so every stats
+// repaint (and every resize) re-seats the whole rail rather than leaving a
+// button overlapping the card or stranded in a gap beside it.
+const HUD_RAIL_GAP = 8;
+const hudRail = []; // buttons, in the order they were registered
+const railHooks = []; // extra layout passes (the pockets panel rides the rail)
+
+export const HUD_BUTTON_CHROME = {
+  position: 'fixed', left: '12px', bottom: '14px', zIndex: '25',
+  background: '#232334', color: '#f0f0f5', border: '1px solid #3a3a52',
+  borderRadius: '7px', padding: '6px 10px', font: '14px system-ui, sans-serif',
+  cursor: 'pointer', lineHeight: '1',
+};
+
+function registerHudButton(btn) {
+  hudRail.push(btn);
+  layoutHudRail();
+}
+function layoutHudRail() {
+  const r = document.getElementById('stats')?.getBoundingClientRect();
+  // No card yet (pre-class-pick) - fall back to the margin the card itself
+  // uses, so a button never lands in the middle of nowhere.
+  let x = r && r.width ? r.right + HUD_RAIL_GAP : 12;
+  const bottom = r && r.height ? Math.round(window.innerHeight - r.bottom) : 14;
+  for (const b of hudRail) {
+    if (b.style.display === 'none') continue;
+    b.style.left = `${Math.round(x)}px`;
+    b.style.bottom = `${bottom}px`;
+    x += b.offsetWidth + HUD_RAIL_GAP;
+  }
+  for (const hook of railHooks) hook(r, bottom);
+}
+window.addEventListener('resize', layoutHudRail);
+
+// The overhead tactical camera toggle - second slot on the rail, beside the
+// bag. `isOn` is read back after every click so the lit state follows the
+// camera even when something else drops out of the view (an orbit drag, the
+// class carousel), rather than tracking a flag of its own that can drift.
+export function createTacticalButton({ onToggle, isOn }) {
+  const btn = document.createElement('button');
+  btn.id = 'tactical-btn';
+  btn.textContent = '⊹';
+  Object.assign(btn.style, HUD_BUTTON_CHROME, { fontSize: '16px' });
+  const paint = () => {
+    const on = !!isOn();
+    btn.style.borderColor = on ? '#8adf76' : '#3a3a52';
+    btn.style.background = on ? '#2c3b2c' : '#232334';
+    btn.title = on
+      ? 'Tactical view: straight down, no foreshortening. Click to return (T)'
+      : 'Tactical view: look straight down for precise moves (T)';
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  };
+  btn.onclick = () => { onToggle(); paint(); };
+  document.body.appendChild(btn);
+  registerHudButton(btn);
+  paint();
+  return { refresh: paint, setVisible: (v) => { btn.style.display = v ? '' : 'none'; layoutHudRail(); } };
+}
 
 // --- player status effects ----------------------------------------------------
 // Transient effects stacked just above the bottom-left stats - gum, bleeding,
@@ -443,13 +497,9 @@ export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onE
   const bag = document.createElement('button');
   bag.id = 'inventory-btn';
   bag.textContent = '🎒';
-  Object.assign(bag.style, {
-    position: 'fixed', left: '12px', bottom: '14px', zIndex: '25',
-    background: '#232334', color: '#f0f0f5', border: '1px solid #3a3a52',
-    borderRadius: '7px', padding: '6px 10px', font: '14px system-ui, sans-serif',
-    cursor: 'pointer',
-  });
+  Object.assign(bag.style, HUD_BUTTON_CHROME);
   document.body.appendChild(bag);
+  registerHudButton(bag); // first slot on the rail
 
   // ...and the pockets rise out of the bottom over the button, rather than
   // dropping from the top-left. Long bags scroll inside the panel instead of
@@ -470,23 +520,15 @@ export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onE
   });
   document.body.appendChild(panel);
 
-  // Seat both against the live stats card. Called on every stats repaint and on
-  // resize (relayoutBag), so they track the card instead of guessing at it.
-  function layout() {
-    const stats = document.getElementById('stats');
-    const r = stats?.getBoundingClientRect();
-    // No card yet (pre-class-pick) - fall back to the same left margin the card
-    // itself uses, so the button never lands in the middle of nowhere.
-    const left = r && r.width ? r.right + 8 : 12;
-    const bottom = r && r.height ? Math.round(window.innerHeight - r.bottom) : 14;
-    bag.style.left = `${Math.round(left)}px`;
-    bag.style.bottom = `${bottom}px`;
-    // Clear the card AND the button - both live at the bottom-left corner.
+  // The panel rides the rail: it must clear the profile card AND the button row,
+  // both of which live in the bottom-left corner. Registered as a rail hook so
+  // it re-seats on the same passes the buttons do.
+  function layout(r, bottom) {
     const cardTop = r && r.height ? window.innerHeight - r.top : 60;
-    panel.style.bottom = `${Math.round(Math.max(cardTop, bottom + bag.offsetHeight) + 8)}px`;
+    panel.style.bottom = `${Math.round(Math.max(cardTop, (bottom ?? 14) + bag.offsetHeight) + 8)}px`;
   }
-  bagLayout = layout;
-  layout();
+  railHooks.push(layout);
+  layoutHudRail();
 
   const smallBtn = (label, title) => {
     const b = document.createElement('button');
@@ -619,7 +661,7 @@ export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onE
   function setOpen(open) {
     if (open) {
       panel.style.display = 'block';
-      layout();
+      layoutHudRail(); // seat it against the card + rail before it slides in
       requestAnimationFrame(() => {
         panel.style.transform = 'translateY(0)';
         panel.style.opacity = '1';

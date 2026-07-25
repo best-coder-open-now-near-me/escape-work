@@ -4,6 +4,7 @@
 // combat FX in fx.js.
 import { TILE_TYPES } from './data/tiles.js';
 import { createTileRenderer, computeCarpetZones } from './tile-renderer.js';
+import { occludes } from './occlusion.js';
 
 const pc = window.pc;
 
@@ -71,7 +72,10 @@ export function buildLevel(app, grid, { picking = null } = {}) {
         surfaceAt: (sx, sz) => TILE_TYPES[grid.typeAt(sx, sz)]?.surface || null,
         onAsync: interactive && picking ? (holder) => picking.register(holder, 'prop', { x, z }) : null,
       });
-      if (res.kind === 'wall') walls.push({ entity: res.entities[0], x, z, faded: false });
+      // `top` is the world Y of the wall's top face - the fade test needs it to
+      // know whether the sightline clears this wall (see occlusion.js). A solid
+      // tile's box is centred at def.height / 2 and def.height tall.
+      if (res.kind === 'wall') walls.push({ entity: res.entities[0], x, z, top: def.height, faded: false });
       else if (res.kind === 'surface') surfaceVisuals.set(x + ',' + z, res.entities[0]);
       else if (res.kind === 'prop') {
         propVisuals.set(x + ',' + z, res.entities[0]);
@@ -83,11 +87,11 @@ export function buildLevel(app, grid, { picking = null } = {}) {
   // their world-space centre.
   for (const k of grid.hWalls) {
     const [x, z] = k.split(',').map(Number);
-    walls.push({ entity: r.renderEdgeWall(x, z, 'h'), x, z: z - 0.5, faded: false });
+    walls.push({ entity: r.renderEdgeWall(x, z, 'h'), x, z: z - 0.5, top: r.edgeWallTop, faded: false });
   }
   for (const k of grid.vWalls) {
     const [x, z] = k.split(',').map(Number);
-    walls.push({ entity: r.renderEdgeWall(x, z, 'v'), x: x - 0.5, z, faded: false });
+    walls.push({ entity: r.renderEdgeWall(x, z, 'v'), x: x - 0.5, z, top: r.edgeWallTop, faded: false });
   }
 
   // Doors: rendered from grid state and re-rendered whenever one toggles.
@@ -108,6 +112,7 @@ export function buildLevel(app, grid, { picking = null } = {}) {
       entity: panel,
       x: orient === 'v' ? x - 0.5 : x,
       z: orient === 'h' ? z - 0.5 : z,
+      top: r.doorTop,
       faded: false,
       solidMat: r.doorMat,
       ghostMat: r.doorGhost,
@@ -117,23 +122,18 @@ export function buildLevel(app, grid, { picking = null } = {}) {
   }
   for (const key of grid.doors.keys()) renderDoorAt(key);
 
-  // Fade walls sitting between the camera and the player - the "toward the
-  // camera" direction is the actual player->camera ray.
+  // Ghost the walls that genuinely stand between the camera and the character.
+  // The test is 3D and lives in occlusion.js - a flat "is it that way?" check
+  // ghosted walls the sightline had long since risen above, which at the
+  // default steep pitch meant most of the room.
   function updateWallFade(cameraEntity, playerPos) {
     if (!playerPos) return;
     const cam = cameraEntity.getPosition();
-    let dx = cam.x - playerPos.x;
-    let dz = cam.z - playerPos.z;
-    const len = Math.hypot(dx, dz) || 1;
-    dx /= len;
-    dz /= len;
+    // The character's feet sit on the floor's top face; the sightline is
+    // anchored there, so a wall counts when it covers any part of the body.
+    const feet = { x: playerPos.x, y: r.floorHeight / 2, z: playerPos.z };
     for (const w of walls) {
-      const vx = w.x - playerPos.x;
-      const vz = w.z - playerPos.z;
-      const t = vx * dx + vz * dz;
-      const px = vx - t * dx;
-      const pz = vz - t * dz;
-      const shouldFade = t > 0.3 && Math.hypot(px, pz) < 1.15;
+      const shouldFade = occludes(w, cam, feet);
       if (shouldFade !== w.faded) {
         w.faded = shouldFade;
         w.entity.render.meshInstances[0].material = shouldFade

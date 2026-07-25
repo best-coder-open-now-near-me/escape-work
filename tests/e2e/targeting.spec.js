@@ -183,3 +183,43 @@ test('clicking a coworker in combat attacks with the basic swing - no action arm
   // It swung the equipped weapon's action (bare-handed here), not a class power.
   expect(await page.evaluate(() => window.__combat.lastRoll)).not.toBe(null);
 });
+
+test('the tactical camera button sits on the HUD rail and looks straight down', async ({ page }) => {
+  await bootAndPick(page);
+
+  // The bottom-left cluster reads left to right: profile card, bag, tactical.
+  const box = async (sel) => page.locator(sel).boundingBox();
+  const [stats, bag, tac] = await Promise.all(
+    ['#stats', '#inventory-btn', '#tactical-btn'].map(box));
+  expect(stats).not.toBeNull();
+  expect(bag.x).toBeGreaterThan(stats.x + stats.width - 1); // clear of the card
+  expect(tac.x).toBeGreaterThan(bag.x + bag.width - 1);     // and right of the bag
+  // All three share the bottom edge - it's one row, not a stack.
+  expect(Math.abs((bag.y + bag.height) - (tac.y + tac.height))).toBeLessThan(2);
+
+  // Off by default; the button turns it on and looks straight down.
+  expect(await page.evaluate(() => window.__game.tactical)).toBe(false);
+  await page.click('#tactical-btn');
+  await expect.poll(() => page.evaluate(() => window.__game.tactical),
+    { timeout: 10_000 }).toBe(true);
+
+  // Straight down means the camera sits (almost) directly over what it follows,
+  // so the ground point under screen centre is the point it is focused on.
+  const overhead = await page.evaluate(() => {
+    const c = window.__game.cameraPos;
+    const p = window.__game.playerPos;
+    return Math.hypot(c.x - p.x, c.z - p.z);
+  });
+  expect(overhead).toBeLessThan(1.5); // horizontal offset collapses when looking down
+
+  // Toggling back restores the angled view rather than leaving you overhead.
+  await page.click('#tactical-btn');
+  await expect.poll(() => page.evaluate(() => window.__game.tactical),
+    { timeout: 10_000 }).toBe(false);
+  const angled = await page.evaluate(() => {
+    const c = window.__game.cameraPos;
+    const p = window.__game.playerPos;
+    return Math.hypot(c.x - p.x, c.z - p.z);
+  });
+  expect(angled).toBeGreaterThan(5);
+});

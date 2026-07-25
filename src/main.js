@@ -141,6 +141,7 @@ function startGame(level) {
   let pendingAction = null; // walk-up interaction, runs on arrival
   let armedOoc = null; // hotbar action armed OUT of combat (targets an enemy)
   let hotbar = null; // persistent attack bar (built once a class is picked)
+  let tacticalBtn = null; // overhead-camera toggle on the HUD rail (built with the HUD)
   let hotbarPaper = -1; // last paper count the hotbar rendered (refresh gate)
   let pendingGodPick = null; // god-mode click-to-place callback (see window.__god)
   let oocTurnClock = 0; // out-of-combat real-time accrued toward the next fire/smoke turn
@@ -1849,6 +1850,16 @@ function startGame(level) {
     },
   });
 
+  // The overhead tactical camera toggle - third in the bottom-left cluster,
+  // after the profile card and the bag. Built here rather than with the rest of
+  // the HUD because it reads the camera rig, which only exists from this point
+  // on. `isOn` asks the rig rather than tracking a flag of its own, so the lit
+  // state stays honest when an orbit drag tilts back out of the view.
+  tacticalBtn = ui.createTacticalButton({
+    onToggle: () => controls.toggleTactical(),
+    isOn: () => controls.tactical,
+  });
+
   // --- keyboard: hold Alt for the loot overlay, I for the pockets ---------------
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Alt') {
@@ -1871,6 +1882,10 @@ function startGame(level) {
     } else if ((e.key === 'c' || e.key === 'C') && sheet && !gameOver && !dialogue.visible) {
       // The read-only character sheet for whoever you're controlling.
       charSheet.toggle(charSheetVm(sheet));
+    } else if ((e.key === 't' || e.key === 'T') && sheet && !gameOver && !dialogue.visible) {
+      // Overhead tactical view - the same toggle as the rail button.
+      controls.toggleTactical();
+      tacticalBtn?.refresh();
     }
   });
   window.addEventListener('keyup', (e) => {
@@ -2161,6 +2176,12 @@ function startGame(level) {
       const p = player.entity?.getPosition();
       return p ? { x: p.x, z: p.z } : { x: player.x, z: player.z };
     },
+    // Where the camera actually sits, for tests that assert on the framing
+    // (the tactical view collapses the horizontal offset to ~nothing).
+    get cameraPos() {
+      const c = controls.cameraEntity.getPosition();
+      return { x: c.x, y: c.y, z: c.z };
+    },
     // World point -> CSS-pixel screen point, so tests can click precise
     // ground points (mouse events arrive in CSS pixels).
     project(x, z) {
@@ -2222,6 +2243,8 @@ function startGame(level) {
         x: m.actor?.x, z: m.actor?.z, active: i === party.active,
       })) : [];
     },
+    // Is the overhead tactical view up? (rail button / T key, for the e2e suite)
+    get tactical() { return controls.tactical; },
     // Out-of-combat targeting + hover state, for the e2e suite.
     get armed() { return armedOoc; },
     get hoverKind() { return hoverKind; },

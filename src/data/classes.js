@@ -2,6 +2,14 @@
 // (assets/characters/<model>.glb), and the combat actions it brings (ids into
 // data/actions.js). Weapons/perks later modify or extend the same action list.
 //
+// `model` names a RIG FILE, not a role. The rigs get passed around as the cast
+// changes - hr.glb is the Mail Room clerk's, midmanager.glb is HR's, veteran.glb
+// is the Middle Manager's and the Mail Room Veteran companion's - so read the
+// entry, never the filename, to know who wears what. (Renaming them to chase
+// the current owner just moves the confusion into git history.) Where two
+// entries share a rig, each carries a `look.build` that makes them read as
+// different people; keep that up when you hand a rig to someone new.
+//
 // A class is becoming the shared unit archetype - not just what you pick, but
 // what companions and (increasingly) enemies are (see SUMMON_PLAN.md). Two
 // optional fields carry that:
@@ -48,7 +56,12 @@ export const CLASSES = {
   },
   'middle-manager': {
     name: 'Middle Manager',
-    model: 'midmanager',
+    // Shares the veteran rig with the Mail Room Veteran companion, and reads
+    // apart from them by height: the companion is tall and stocky from eleven
+    // years on his feet, the manager is short and settled from six years in
+    // the chair. Same jacket, opposite silhouette.
+    model: 'veteran',
+    look: { build: { legs: 1.68 } },
     tagline: 'Absorbs blame like a sponge. Tough, but hits like a memo.',
     experience: 'VP of Alignment (self-described), 6 yrs. Survived 4 reorgs.',
     maxHp: 28,
@@ -76,13 +89,10 @@ export const CLASSES = {
   },
   'mail-room': {
     name: 'Mail Room',
-    // The clerk shares the veteran rig with the Mail Room Veteran companion -
-    // same corridors, same uniform - and reads apart from them by build: rangy
-    // and unstooped where the veteran is stocky from eleven years of it. The
-    // rig this class used to wear is the Security Guard's now (`security.glb`)
-    // (data/enemies.js) - it always read as a uniform more than a mail cart.
-    model: 'veteran',
-    look: { build: { legs: 2.0, torso: 1.16 } },
+    // Rangy from eleven years of corridors. Sole wearer of this rig, so the
+    // build is character rather than a way to tell two people apart.
+    model: 'hr',
+    look: { build: { legs: 2.0 } },
     tagline: 'Knows every corridor. Slips on nothing. Delivers regardless.',
     experience: 'Mail Room Clerk, 11 yrs. Knows where every body is filed.',
     maxHp: 24,
@@ -134,7 +144,7 @@ export const CLASSES = {
 
   'human-resources': {
     name: 'Human Resources',
-    model: 'hr', // the HR rig already ships (assets/characters/hr.glb)
+    model: 'midmanager',
     tagline: 'Doesn\'t fight so much as staff. Brings friends to your review.',
     experience: 'People Ops "Business Partner". Owns the offsite. Tenure: undisclosed.',
     maxHp: 20,
@@ -154,6 +164,38 @@ export const CLASSES = {
       name: 'Open Door Policy',
       blurb: 'The door is always open. So is the req. There is always another applicant.',
       effects: {}, // flavor for now; a summon-scaling effect can land later
+    },
+  },
+
+  security: {
+    name: 'Security',
+    // The cop rig - the one the Mail Room clerk used to wear before it went to
+    // the person whose job actually IS the uniform. Shared with the Security
+    // Guard ENEMY (data/enemies.js), who is squarer through the vest; the
+    // player's guard stands taller and less padded, so the two read apart when
+    // you meet yourself coming the other way.
+    model: 'security',
+    look: { build: { legs: 1.98, torso: 1.18 } },
+    tagline: 'Has the keys, the clipboard, and the authority. Slow to swing, hard to move.',
+    experience: 'Night Security, 8 yrs. Has walked this floor more times than anyone alive.',
+    maxHp: 26,
+    ap: 5,
+    bonusDmg: 0,
+    startGear: { shoes: 'warehouse-boots' }, // the duty boot: sure-footed, not light
+    attr: { grit: 7, hustle: 4, savvy: 5, composure: 6 }, // steady, unhurried, hard to rattle
+    track: [
+      { id: 'sec-post', name: 'Standing Post', cost: 1, effect: { attrBonus: { grit: 1 } } },
+      { id: 'sec-rounds', name: 'Night Rounds', cost: 1, effect: { attrBonus: { hustle: 1 } } },
+      { id: 'sec-deescalate', name: 'De-escalation Training', cost: 1, effect: { attrBonus: { composure: 1 } } },
+      { id: 'sec-boots', name: 'Duty Boots', cost: 1, requires: ['sec-post'], effect: { grantsAction: 'kick' } },
+    ],
+    actions: ['detain', 'stand-post', 'night-thermos'],
+    talent: {
+      name: 'Incident Report',
+      blurb: 'Eight years of walking through whatever the day shift spilled. Hazards on the floor hurt you less.',
+      // surfaceDamageResist is a live handler (main.js) that had no owner until
+      // now - flat reduction on the damage a surface deals you per step.
+      effects: { surfaceDamageResist: 1 },
     },
   },
 
