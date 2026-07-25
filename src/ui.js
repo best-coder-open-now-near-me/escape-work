@@ -189,9 +189,49 @@ export function toast(text, ms = 2600) {
   }, ms);
 }
 
-export function updateStatsHud(sheet) {
+// The bottom-left readout for whoever you're controlling. HP was a run of text
+// among other text, which is no good as a thing you have to track under
+// pressure - it is a real bar now, with XP as a thin rule beneath it, and it
+// changes colour as you get hurt. `portrait` is an optional <canvas> the
+// caller keeps updated (a live headshot); it is slotted in on the left.
+export function updateStatsHud(sheet, portrait = null) {
   const el = document.getElementById('stats');
-  if (el) el.textContent = `Lv ${sheet.level} · HP ${sheet.hp}/${sheet.maxHp} · XP ${sheet.xp}/${sheet.xpNext}`;
+  if (!el || !sheet) return;
+  const hpFrac = Math.max(0, Math.min(1, sheet.maxHp ? sheet.hp / sheet.maxHp : 0));
+  const xpFrac = Math.max(0, Math.min(1, sheet.xpNext ? sheet.xp / sheet.xpNext : 0));
+  // Green while healthy, amber under half, red when it is nearly over.
+  const hpColor = hpFrac > 0.5 ? '#8adf76' : hpFrac > 0.25 ? '#ffd76b' : '#ff6b5e';
+  el.innerHTML = `
+    <span style="display:flex; align-items:center; gap:9px;">
+      <span id="stats-portrait-slot" style="display:${portrait ? 'block' : 'none'};
+        width:46px; height:46px; border-radius:8px; overflow:hidden;
+        border:1px solid #3a3a52; background:#15151f; flex:none;"></span>
+      <span style="display:block; min-width:172px;">
+        <span style="display:flex; justify-content:space-between; font-size:12px; opacity:.85;">
+          <b style="letter-spacing:.5px;">${sheet.name || ''}</b><span>Lv ${sheet.level}</span>
+        </span>
+        <span style="display:block; position:relative; height:13px; margin:3px 0 2px;
+          background:#241f28; border:1px solid #3a3a52; border-radius:7px; overflow:hidden;">
+          <span style="display:block; height:100%; width:${hpFrac * 100}%; background:${hpColor};
+            transition:width .18s ease, background .18s ease;"></span>
+          <span style="position:absolute; inset:0; display:flex; align-items:center;
+            justify-content:center; font-size:10px; font-weight:700; letter-spacing:.4px;
+            color:#12121c; text-shadow:0 1px 0 rgba(255,255,255,.25);">
+            ${sheet.hp} / ${sheet.maxHp}</span>
+        </span>
+        <span style="display:block; height:3px; background:#241f28; border-radius:2px; overflow:hidden;">
+          <span style="display:block; height:100%; width:${xpFrac * 100}%; background:#6fa8ff;"></span>
+        </span>
+      </span>
+    </span>`;
+  if (portrait) {
+    const slot = el.querySelector('#stats-portrait-slot');
+    if (slot && portrait.parentElement !== slot) {
+      slot.innerHTML = '';
+      Object.assign(portrait.style, { width: '100%', height: '100%', display: 'block' });
+      slot.appendChild(portrait);
+    }
+  }
   renderStatusEffects(sheet);
 }
 
