@@ -877,6 +877,28 @@ function startGame(level) {
   const clearHoverHighlight = () => setHoverHighlight(null, null);
   const setCursor = (c) => { if (canvasEl) canvasEl.style.cursor = c || ''; };
 
+  // The body glow is an INSPECT verb, not an ambient one: held behind Ctrl or
+  // Alt, the two keys that already mean "show me what's there" (rings under
+  // every character, labels over every lootable). Lit on plain hover it fired
+  // on everything the cursor crossed - doors, desks, bystanders - and a light
+  // that is always on stops meaning anything.
+  //
+  // What the cursor is over is tracked ALWAYS (`hoverTarget`), and the modifier
+  // only decides whether it's lit. That's what lets pressing the key light up
+  // what you're already pointing at, instead of nothing happening until you
+  // jiggle the mouse to provoke a fresh hover event.
+  let hoverTarget = null; // { entity, rgb } under the cursor, lit or not
+  const glowHeld = () => ctrlHeld || altHeld;
+  function applyHoverGlow() {
+    if (glowHeld() && hoverTarget) setHoverHighlight(hoverTarget.entity, hoverTarget.rgb);
+    else clearHoverHighlight();
+  }
+  // Remember what's under the cursor and light it if a modifier is down.
+  function trackHoverGlow(hit) {
+    hoverTarget = hit?.entity ? { entity: hit.entity, rgb: colorForHit(hit) } : null;
+    applyHoverGlow();
+  }
+
   const colorForHit = (hit) =>
     hit.kind === 'enemy' ? (hit.ref.alive ? HL.enemy : HL.loot)
       : hit.kind === 'npc' ? HL.npc
@@ -910,8 +932,7 @@ function startGame(level) {
   function worldHover(point, sx, sy) {
     const hit = picking.pick(controls.cameraEntity, sx, sy);
     hoverKind = hit ? hit.kind : null;
-    if (hit) setHoverHighlight(hit.entity, colorForHit(hit));
-    else clearHoverHighlight();
+    trackHoverGlow(hit); // lit only while Ctrl/Alt is held
     setCursor(cursorFor(hit, point));
     ui.setFocusBanner(focusInfoFor(hit, point));
   }
@@ -947,6 +968,7 @@ function startGame(level) {
   const RING_HOSTILE = new pc.Color(1.0, 0.28, 0.2);
   const RING_FRIENDLY = new pc.Color(0.42, 0.85, 0.42);
   let ctrlHeld = false;
+  let altHeld = false; // Ctrl and Alt both gate the hover glow (see applyHoverGlow)
   function drawCharacterRings() {
     for (const m of party?.members || []) {
       if (!m.actor?.entity) continue;
@@ -1705,13 +1727,8 @@ function startGame(level) {
         const character = hit && (hit.kind === 'party' || hit.kind === 'npc'
           || (hit.kind === 'enemy' && hit.ref.alive));
         hoverKind = character ? hit.kind : null;
-        if (character) {
-          setHoverHighlight(hit.entity, colorForHit(hit));
-          ui.setFocusBanner(focusInfoFor(hit, point));
-        } else {
-          clearHoverHighlight();
-          ui.setFocusBanner(null);
-        }
+        trackHoverGlow(character ? hit : null);
+        ui.setFocusBanner(character ? focusInfoFor(hit, point) : null);
         return;
       }
       if (!sheet || gameOver || dialogue.visible) { clearHoverHighlight(); setCursor(null); ui.setFocusBanner(null); return; }
@@ -1869,9 +1886,12 @@ function startGame(level) {
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Alt') {
       e.preventDefault(); // keep focus off the browser's menu bar
+      altHeld = true;
+      applyHoverGlow(); // light what the cursor is already on, without a re-hover
       if (!e.repeat && sheet && !inCombat && !gameOver) loot.showLabels();
     } else if (e.key === 'Control') {
       ctrlHeld = true; // rings under everyone while held (see drawCharacterRings)
+      applyHoverGlow();
     } else if ((e.key === 'i' || e.key === 'I') && sheet && !gameOver) {
       loot.togglePanel(sheet);
     } else if (/^[1-9]$/.test(e.key) && sheet && !inCombat && !gameOver && !dialogue.visible) {
@@ -1894,10 +1914,16 @@ function startGame(level) {
     }
   });
   window.addEventListener('keyup', (e) => {
-    if (e.key === 'Alt') loot.hideLabels();
+    if (e.key === 'Alt') { altHeld = false; loot.hideLabels(); }
     if (e.key === 'Control') ctrlHeld = false;
+    applyHoverGlow();
   });
-  window.addEventListener('blur', () => { loot.hideLabels(); ctrlHeld = false; });
+  window.addEventListener('blur', () => {
+    loot.hideLabels();
+    ctrlHeld = false;
+    altHeld = false;
+    applyHoverGlow(); // a key can't be 'still held' across a focus loss
+  });
 
   // Cosmetic combat feedback (projectiles, floating numbers). Defined after
   // controls exist because the damage text projects through the camera.
@@ -2254,6 +2280,9 @@ function startGame(level) {
     get armed() { return armedOoc; },
     get hoverKind() { return hoverKind; },
     get ctrlHeld() { return ctrlHeld; },
+    // Is the hover body-glow actually LIT right now? (tracked target + a held
+    // modifier - the two halves the gate is made of)
+    get hoverGlow() { return !!(glowHeld() && hoverTarget); },
     get cursor() { return canvasEl ? canvasEl.style.cursor : ''; },
     get dialogueOpen() { return dialogue.visible; },
   };

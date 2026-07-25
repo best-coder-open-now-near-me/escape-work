@@ -184,23 +184,38 @@ test('clicking a coworker in combat attacks with the basic swing - no action arm
   // moves, so his opening tile stops covering his body - and nudge the pointer
   // by a pixel, because a mouse.move to the position it is already at
   // dispatches no event and the hover never re-runs.
+  // Sweep a few heights up the body rather than guessing one. Looking down at
+  // this pitch, a point 0.9 above the tile projects well ABOVE the mesh, so the
+  // pick ray sails over the coworker's head - only low points land on him.
+  // (The click later doesn't care: a body miss falls back to the enemy's TILE.
+  // Hover has no such fallback, which is why it alone needs the sweep.)
   let jiggle = 0;
   await expect.poll(async () => {
-    const p = await page.evaluate(() => {
-      const en = window.__combat?.enemies.find((e) => e.alive);
-      return en ? window.__game.project3(en.x, 0.9, en.z) : null;
-    });
-    if (!onScreen(p)) return null;
-    jiggle = 1 - jiggle;
-    await page.mouse.move(p.x + jiggle, p.y);
-    return page.evaluate(() => window.__game.cursor);
+    for (const y of [0.2, 0.45, 0.7]) {
+      const p = await page.evaluate((yy) => {
+        const en = window.__combat?.enemies.find((e) => e.alive);
+        return en ? window.__game.project3(en.x, yy, en.z) : null;
+      }, y);
+      if (!onScreen(p)) continue;
+      // A move to the pixel the pointer already occupies dispatches no event,
+      // so the hover would never re-run - nudge it.
+      jiggle = 1 - jiggle;
+      await page.mouse.move(p.x + jiggle, p.y);
+      if (await page.evaluate(() => window.__game.cursor) === 'crosshair') return 'crosshair';
+    }
+    return null;
   }, { timeout: 20_000 }).toBe('crosshair');
   const chance = await page.evaluate(() => window.__combat.hoverHitChance);
   expect(chance).toBeGreaterThan(0); // the odds of the swing a click would make
-  // The DOS2 body glow rides the same hover, with no Ctrl held - `hoverKind`
-  // is set on exactly the condition that lights the highlight shell, and in
-  // combat it used to stay null unless you held Ctrl.
+  // The cursor is on a coworker, so the glow has a target...
   expect(await page.evaluate(() => window.__game.hoverKind)).toBe('enemy');
+  // ...but the body glow is an INSPECT verb: dark until Ctrl (or Alt) is held,
+  // and lit the moment it is, without needing a fresh mouse move.
+  expect(await page.evaluate(() => window.__game.hoverGlow)).toBe(false);
+  await page.keyboard.down('Control');
+  expect(await page.evaluate(() => window.__game.hoverGlow)).toBe(true);
+  await page.keyboard.up('Control');
+  expect(await page.evaluate(() => window.__game.hoverGlow)).toBe(false);
   // ...and hovering it did NOT quietly arm anything - the default stays implicit.
   expect(await page.evaluate(() => window.__combat.armed)).toBe(null);
 

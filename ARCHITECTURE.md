@@ -156,12 +156,16 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   describe the swing a click would actually make, so the default attack is
   visible before it is used - shipping it without them made a working feature
   look absent, because nothing on screen said a click would land.
-  **Hovering a character glows their body** (`shading.addHighlight`) in and out
-  of combat alike - a Divinity-style aura of stacked back-face shells at growing
-  push and falling opacity, drawn additively so it reads as light rather than
-  paint. Ctrl still adds ground rings under EVERY character, which answers a
-  different question ("where is everyone") than the hover does ("what is under
-  my cursor").
+  **Hold Ctrl or Alt to glow what you're hovering** (`shading.addHighlight`) -
+  a Divinity-style aura of stacked back-face shells at growing push and falling
+  opacity, drawn additively so it reads as light rather than paint. The glow is
+  an INSPECT verb, gated behind the two keys that already mean "show me what's
+  there" (Ctrl's ground rings, Alt's loot labels); lit on plain hover it fired
+  on every door and desk the cursor crossed, and a light that is always on says
+  nothing. What the cursor is over is tracked ALWAYS (`hoverTarget`) and the
+  modifier only decides whether it's lit, so pressing the key lights what you
+  are already pointing at instead of waiting for a fresh hover event. The
+  cursor and the focus banner stay ungated - they cost no attention.
 - **Attacks are available outside combat via the persistent hotbar.** The
   offensive slice of the sheet's actions (attacks, shove, throws) lives on an
   always-on bar (`ui.createHotbar`, ids `#hotbar-act-<id>` so they never
