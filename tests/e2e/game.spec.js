@@ -44,7 +44,9 @@ test('the pockets toggle with I and start empty', async ({ page }) => {
   await bootAndPick(page);
   await page.keyboard.press('i');
   await expect(page.locator('#inventory-panel')).toBeVisible();
-  await expect(page.locator('#inventory-panel')).toContainText('0/10');
+  // Pockets are unlimited now, so the header is a bare count, not "0/10".
+  await expect(page.locator('#inventory-panel')).toContainText('POCKETS');
+  await expect(page.locator('#inventory-panel')).toContainText('Empty');
   await page.keyboard.press('i');
   await expect(page.locator('#inventory-panel')).toBeHidden();
 });
