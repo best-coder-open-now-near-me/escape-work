@@ -176,6 +176,34 @@ test('clicking a coworker in combat attacks with the basic swing - no action arm
   expect(foe).toBeTruthy();
   const foeHp = () => page.evaluate(() => window.__combat.enemies.find((e) => e.alive)?.hp);
 
+  // The swing has to be VISIBLE before it's clickable. With nothing armed,
+  // hovering a coworker must show the aiming cursor and the to-hit readout -
+  // shipping the attack without these made it look like the feature was
+  // missing, because nothing on screen said a click would land.
+  // Re-read the coworker's LIVE position each attempt - he takes turns and
+  // moves, so his opening tile stops covering his body - and nudge the pointer
+  // by a pixel, because a mouse.move to the position it is already at
+  // dispatches no event and the hover never re-runs.
+  let jiggle = 0;
+  await expect.poll(async () => {
+    const p = await page.evaluate(() => {
+      const en = window.__combat?.enemies.find((e) => e.alive);
+      return en ? window.__game.project3(en.x, 0.9, en.z) : null;
+    });
+    if (!onScreen(p)) return null;
+    jiggle = 1 - jiggle;
+    await page.mouse.move(p.x + jiggle, p.y);
+    return page.evaluate(() => window.__game.cursor);
+  }, { timeout: 20_000 }).toBe('crosshair');
+  const chance = await page.evaluate(() => window.__combat.hoverHitChance);
+  expect(chance).toBeGreaterThan(0); // the odds of the swing a click would make
+  // The DOS2 body glow rides the same hover, with no Ctrl held - `hoverKind`
+  // is set on exactly the condition that lights the highlight shell, and in
+  // combat it used to stay null unless you held Ctrl.
+  expect(await page.evaluate(() => window.__game.hoverKind)).toBe('enemy');
+  // ...and hovering it did NOT quietly arm anything - the default stays implicit.
+  expect(await page.evaluate(() => window.__combat.armed)).toBe(null);
+
   // Click the body. The camera keeps easing after the walk-up, so settle and
   // retry a couple of times rather than trusting one projection.
   for (let i = 0; i < 4 && (await foeHp()) >= foe.hp; i++) {

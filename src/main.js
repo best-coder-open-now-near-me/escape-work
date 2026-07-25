@@ -1688,22 +1688,27 @@ function startGame(level) {
     onHover: (point, sx, sy) => {
       if (inCombat && combat) {
         combat.handleHover(point, sx, sy);
-        // Hold Ctrl mid-fight and hovering a character glows their BODY (and
-        // names them in the banner) - the same read you get out of combat.
-        if (ctrlHeld) {
-          const hit = picking.pick(controls.cameraEntity, sx, sy);
-          const character = hit && (hit.kind === 'party' || hit.kind === 'npc'
-            || (hit.kind === 'enemy' && hit.ref.alive));
-          hoverKind = character ? hit.kind : null;
-          if (character) {
-            setHoverHighlight(hit.entity, colorForHit(hit));
-            ui.setFocusBanner(focusInfoFor(hit, point));
-          } else {
-            clearHoverHighlight();
-            ui.setFocusBanner(null);
-          }
+        const hit = picking.pick(controls.cameraEntity, sx, sy);
+        // A coworker under the cursor is a TARGET, armed or not - a bare click
+        // swings the basic attack (combat.js), so the cursor has to say so.
+        // Combat used to leave the cursor alone entirely, which meant the one
+        // place you spend every click aiming was the one place it never
+        // showed you were aiming.
+        setCursor(hit?.kind === 'enemy' && hit.ref.alive ? 'crosshair' : null);
+        // Hovering a character glows their BODY and names them in the banner -
+        // the DOS2 read, and the same one you already get out of combat. This
+        // used to be held behind Ctrl, which meant the half of the game where
+        // you aim at people was the half that wouldn't show you who you were
+        // aiming at. Ctrl still adds the ground rings under EVERY character
+        // (drawCharacterRings) - that's the at-a-glance read of the whole
+        // board, which is a different question from "what is under my cursor".
+        const character = hit && (hit.kind === 'party' || hit.kind === 'npc'
+          || (hit.kind === 'enemy' && hit.ref.alive));
+        hoverKind = character ? hit.kind : null;
+        if (character) {
+          setHoverHighlight(hit.entity, colorForHit(hit));
+          ui.setFocusBanner(focusInfoFor(hit, point));
         } else {
-          hoverKind = null;
           clearHoverHighlight();
           ui.setFocusBanner(null);
         }

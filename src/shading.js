@@ -105,13 +105,20 @@ export function addOutlines(holder) {
 }
 
 // --- hover highlight ----------------------------------------------------------
-// A BG3/Divinity-style target glow: the SAME inverted-hull trick as the ink
-// outline, but pushed out further and drawn full-bright in a colour, so a
-// coloured rim reads around whatever the cursor is over. Built once per
-// interactable (disabled), then toggled/recoloured on hover by setHighlight -
-// per-entity, so it never touches the shared model materials. The bigger push
-// (0.04 vs the ink line's 0.012) makes the rim sit OUTSIDE the black outline.
-const HIGHLIGHT_TRANSFORM_CHUNK = `
+// A Divinity-style target GLOW: the same inverted-hull trick as the ink
+// outline, but pushed further out, coloured, and drawn additively so the
+// cursor's target is haloed in light. Built once per interactable (disabled),
+// then toggled/recoloured on hover by setHighlight - per-entity, so it never
+// touches the shared model materials. Every push clears the ink line's 0.012,
+// so the glow sits OUTSIDE the black outline rather than fighting it.
+//
+// The glow is a set of back-face shells, each pushed out along the
+// vertex normal by `push` world units. One thin shell is a hard-edged selection
+// OUTLINE; several at growing distance and falling opacity read as a GLOW
+// around the body, because the steps approximate a falloff the silhouette alone
+// can't express. The push is baked per layer - shader chunks are source, so
+// there's nothing to uniform here.
+const highlightTransformChunk = (push) => `
 #ifdef NORMALS
 vec3 getLocalNormal(vec3 vertexNormal);
 mat3 getNormalMatrix(mat4 modelMatrix);
@@ -120,7 +127,7 @@ vec4 evalWorldPosition(vec3 vertexPosition, mat4 modelMatrix) {
     vec4 posW = modelMatrix * vec4(getLocalPosition(vertexPosition), 1.0);
 #ifdef NORMALS
     vec3 worldN = normalize(getNormalMatrix(modelMatrix) * getLocalNormal(vec3(0.0)));
-    posW.xyz += worldN * 0.04;
+    posW.xyz += worldN * ${push.toFixed(4)};
 #endif
     return posW;
 }
@@ -135,43 +142,66 @@ vec3 getWorldPosition() {
 }
 `;
 
-// One material per highlight shell, so each target can be recoloured
-// independently (an alive enemy glows red, its corpse glows loot-gold). Colour
-// lives in emissive (unlit-looking rim, and a whisper of bloom picks it up);
-// diffuse/specular stay black like the ink outline so lighting never tints it.
-function makeHighlightMat() {
+// Materials are per shell, so each target recolours independently (an alive
+// enemy glows red, its corpse loot-gold). Colour lives in emissive; diffuse and
+// specular stay black like the ink outline, so scene lighting never tints it.
+//
+// The layers of the glow, innermost first: how far each shell is pushed off the
+// body, and how strongly it burns. The tight bright one draws the silhouette;
+// the wide faint ones are the aura bleeding off it. Additive, so it reads as
+// LIGHT around the character rather than paint on them - and the camera's bloom
+// pass then smears the brightest of it a little further, which is the rest of
+// the effect for free.
+const GLOW_LAYERS = [
+  { push: 0.045, alpha: 0.85, intensity: 1.7 },
+  { push: 0.110, alpha: 0.34, intensity: 1.3 },
+  { push: 0.200, alpha: 0.14, intensity: 1.0 },
+];
+
+function makeHighlightMat({ push, alpha, intensity }) {
   const m = new pc.StandardMaterial();
   m.diffuse = new pc.Color(0, 0, 0);
   m.specular = new pc.Color(0, 0, 0);
   m.gloss = 0;
   m.emissive = new pc.Color(1, 1, 1);
-  m.emissiveIntensity = 1.6;
+  m.emissiveIntensity = intensity;
+  // Back faces only, so the character's own body occludes the inner half of
+  // every shell and what survives is a rim hugging the silhouette.
   m.cull = pc.CULLFACE_FRONT;
   m.depthWrite = false;
-  m.shaderChunks.glsl.set('transformVS', HIGHLIGHT_TRANSFORM_CHUNK);
+  // ADDITIVEALPHA (not ADDITIVE) so `opacity` still scales the layer - that is
+  // the whole falloff. Straight additive would burn every layer at full
+  // strength and give back the hard edge.
+  m.blendType = pc.BLEND_ADDITIVEALPHA;
+  m.opacity = alpha;
+  m.shaderChunks.glsl.set('transformVS', highlightTransformChunk(push));
   m.update();
   return m;
 }
 
-// Build a coloured highlight shell on `holder` (disabled). Returns the shell
-// entity, or null if the holder has no pickable geometry. Skips the ink
-// outline and any prior highlight so the rim wraps the model, not a shell.
+// Build a coloured glow on `holder` (disabled). Returns the shell entity, or
+// null if the holder has no pickable geometry. Skips the ink outline and any
+// prior highlight so the glow wraps the model, not another shell.
 export function addHighlight(holder) {
-  const mat = makeHighlightMat();
+  const mats = GLOW_LAYERS.map(makeHighlightMat);
   const copies = [];
   for (const rc of holder.findComponents('render')) {
     if (rc.entity.name === 'outlines' || rc.entity.name === 'highlight') continue;
     for (const mi of rc.meshInstances) {
-      const omi = new pc.MeshInstance(mi.mesh, mat, mi.node);
-      if (mi.skinInstance) omi.skinInstance = mi.skinInstance;
-      copies.push(omi);
+      // One copy of the mesh per layer. They share the source mesh and the
+      // skinning instance, so an animated body's glow follows its bones.
+      for (const mat of mats) {
+        const omi = new pc.MeshInstance(mi.mesh, mat, mi.node);
+        if (mi.skinInstance) omi.skinInstance = mi.skinInstance;
+        copies.push(omi);
+      }
     }
   }
   if (!copies.length) return null;
   const shell = new pc.Entity('highlight');
   shell.addComponent('render', { meshInstances: copies, castShadows: false });
   shell.enabled = false;
-  shell._hlMat = mat; // recoloured by setHighlight
+  shell._hlMats = mats; // recoloured together by setHighlight
   holder.addChild(shell);
   return shell;
 }
@@ -180,9 +210,13 @@ export function addHighlight(holder) {
 // [r, g, b] 0..1 array.
 export function setHighlight(shell, on, rgb) {
   if (!shell) return;
-  if (on && rgb && shell._hlMat) {
-    shell._hlMat.emissive.set(rgb[0], rgb[1], rgb[2]);
-    shell._hlMat.update();
+  if (on && rgb && shell._hlMats) {
+    // Every layer takes the same colour - the falloff is opacity, not hue, or
+    // the aura would drift away from the rim it belongs to.
+    for (const m of shell._hlMats) {
+      m.emissive.set(rgb[0], rgb[1], rgb[2]);
+      m.update();
+    }
   }
   shell.enabled = !!on;
 }

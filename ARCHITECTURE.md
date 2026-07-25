@@ -151,6 +151,17 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   first still wins; the default only fills the empty case, which used to be a
   refusal ("choose an action first") on the most obvious verb in the game. It is
   refused only when even the basic swing is unaffordable.
+  **Every aiming affordance reads that same fallback** (`combat.previewAction`):
+  the target rings, the hover to-hit readout, and the crosshair cursor all
+  describe the swing a click would actually make, so the default attack is
+  visible before it is used - shipping it without them made a working feature
+  look absent, because nothing on screen said a click would land.
+  **Hovering a character glows their body** (`shading.addHighlight`) in and out
+  of combat alike - a Divinity-style aura of stacked back-face shells at growing
+  push and falling opacity, drawn additively so it reads as light rather than
+  paint. Ctrl still adds ground rings under EVERY character, which answers a
+  different question ("where is everyone") than the hover does ("what is under
+  my cursor").
 - **Attacks are available outside combat via the persistent hotbar.** The
   offensive slice of the sheet's actions (attacks, shove, throws) lives on an
   always-on bar (`ui.createHotbar`, ids `#hotbar-act-<id>` so they never

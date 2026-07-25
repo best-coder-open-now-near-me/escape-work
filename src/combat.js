@@ -341,7 +341,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // feedback and a shove auto-hits, so neither shows a percentage.
   function showHitPreview(point, sx, sy) {
     hoverHitChance = null;
-    const a = ACTIONS[armed];
+    const a = ACTIONS[previewAction()];
     if (!a || a.type !== 'attack' || a.cone) { costTag.style.display = 'none'; return; }
     const en = enemyAtPoint(point);
     if (!en) { costTag.style.display = 'none'; return; }
@@ -385,6 +385,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       showHitPreview(point, sx, sy);
       return;
     }
+    // Nothing armed, but a coworker under the cursor is still a target - the
+    // click swings by default, so preview the odds rather than falling through
+    // to a movement route (their tile isn't walkable, so that showed nothing at
+    // all, which read as "a click here does nothing").
+    if (enemyAtPoint(point)) { showHitPreview(point, sx, sy); return; }
     const tx = Math.round(point.x);
     const tz = Math.round(point.z);
     if (!world.isWalkable(tx, tz)) { hidePreview(); return; } // enemies/walls: no route preview
@@ -477,13 +482,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // clickable bystander deserves the same feedback. A cone draws its aimed
   // wedge instead, ringing whoever it would catch.
   function drawTargets() {
-    if (phase !== 'player' || !armed) return;
-    const a = ACTIONS[armed];
+    if (phase !== 'player') return;
+    // Not gated on `armed`: with nothing armed a click still swings (the basic
+    // attack), and a swing you can't see coming is worse than no swing at all -
+    // the rings are how you know which coworker a click would hit and whether
+    // you can afford it. previewAction() is that same fallback, so what's drawn
+    // is always what would happen.
+    const id = previewAction();
+    if (!id) return;
+    const a = ACTIONS[id];
     // A summon rings the tiles its applicants would actually land on (green),
     // or the aimed tile alone in red when the spot is unusable - so "where do
     // they go?" is answered before the AP is spent.
     if (a.type === 'summon') {
-      if (!aimPoint) return;
+      if (!armed || !aimPoint) return;
       const tx = Math.round(aimPoint.x);
       const tz = Math.round(aimPoint.z);
       const spots = summonSpotProblem(a, tx, tz) ? [] : world.summonSpots(tx, tz, a.count);
@@ -527,7 +539,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       } else if (a.ammoCost) {
         ok = cheb(active.actor.x, active.actor.z, en.x, en.z) <= THROW_RANGE
           && world.hasLos(active.actor.x, active.actor.z, en.x, en.z)
-          && active.sheet.paper >= ammoCostOf(armed) && active.ap >= a.ap;
+          && active.sheet.paper >= ammoCostOf(id) && active.ap >= a.ap;
       } else {
         ok = active.ap >= a.ap; // melee: clicking a distant target walks you in
       }
@@ -843,6 +855,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // the most obvious verb in the game the one thing a click could NOT do. Arming
   // a power still overrides it; that's what arming is for.
   const defaultAttack = () => equippedAction(active.sheet);
+  // What a click on a coworker would use RIGHT NOW: whatever you armed, else
+  // that basic swing. Every preview reads this - the target rings, the to-hit
+  // tag, and (through main.js) the cursor - so the affordances always describe
+  // the swing that would actually land rather than only the armed case.
+  const previewAction = () => (phase === 'player' && active?.sheet ? (armed || defaultAttack()) : null);
 
   function handleEnemyClick(en) {
     if (phase !== 'player' || active.actor.moving || !en.alive) return;
