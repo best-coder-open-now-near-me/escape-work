@@ -1292,6 +1292,9 @@ function startGame(level) {
   // trailing over it) doesn't end the level by accident. Walk-up interactions
   // are the leader's too - they're what the player clicked.
   function onMemberStep(member, x, z, pathDone, changed = true) {
+    // Stepping out of an enemy's reach mid-fight provokes it (TACTICS_PLAN M2).
+    // Combat owns the rule and the bookkeeping; this just reports the step.
+    if (changed && inCombat && combat) combat.notifyStep(member, x, z);
     const ms = member.sheet;
     const actor = member.actor;
     const isLeader = member === partyLeader(party);
@@ -1426,6 +1429,8 @@ function startGame(level) {
   // and hands you a survivor if it was the one you were driving.
   function onSummonStep(s, x, z, done, changed) {
     if (!changed) return;
+    // A summon breaking away from an enemy provokes just like a member does.
+    if (inCombat && combat) combat.notifyStep(s, x, z);
     const ms = s.sheet;
     const actor = s.actor;
     const sfx = surfEffect(x, z);

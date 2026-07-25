@@ -13,7 +13,7 @@ import { SURFACES, GUM } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc } from './stats.js';
 import { applyStatus, hasStatus, statusFx, tickTurn, clearStatuses, removeStatus, statusList } from './statuses.js';
-import { toHitTerms } from './tactics.js';
+import { toHitTerms, provokedBy, TACTICS } from './tactics.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { buildInitiativeOrder, rollInitiative, insertionIndex } from './initiative.js';
@@ -763,6 +763,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const { points, cost, done } = truncateByBudget(s, Math.max(0, budget), stepCost);
     if (points.length < 2 || cost < 0.05) return null;
     hidePreview();
+    beginMove(active); // a deliberate move - leaving reach can provoke
     active.actor.setPath(points);
     active.ap = Math.max(0, roundAp(active.ap - cost));
     refresh();
@@ -876,6 +877,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // A full pass through the order is one round: age summoner cooldowns and
     // the fire/smoke lifecycle a tick.
     for (const e of engaged) if (e.summonCd > 0) e.summonCd -= 1;
+    reactions.clear(); // everyone gets their reaction back (TACTICS_PLAN M2)
     callbacks.onRound?.();
     beginTurn();
   }
@@ -1003,60 +1005,154 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // sheet (deflect, gum, and the downed/handoff/party-wipe rules).
   function aiAttack(unit, target) {
     const atk = unit.def.attacks[rand(0, unit.def.attacks.length - 1)];
-    let dmg = rand(atk.min, atk.max);
     unit.lunge(target.actor.x, target.actor.z);
-    if (target.member) {
-      const m = target.member;
-      // The attack roll. A miss skips damage, the deflect interaction, the
-      // flinch, and any applied status; the enemy's AP was already committed
-      // by the caller.
-      // Same assembler as the player's swings, with the roles reversed - the
-      // unit attacks, the member defends (attackMods reads either shape).
-      if (!rollAgainst(unit, m)) {
-        fx.damageText(m.actor.x, m.actor.z, 'MISS', MISS_COLOR);
-        log(atk.missLog || `${unit.def.name}'s attack goes wide.`);
+    if (target.member) unitStrikesMember(unit, target.member, atk);
+  }
+
+  // One AI unit's swing at a member: the roll, the Composure soak, the Deflect
+  // stance, any applied status, and the downed/handoff/party-wipe rules. Split
+  // out of aiAttack so an opportunity attack lands by exactly the same rules
+  // as a turn attack rather than reimplementing them (TACTICS_PLAN M2).
+  function unitStrikesMember(unit, m, atk) {
+    let dmg = rand(atk.min, atk.max);
+    // The attack roll. A miss skips damage, the deflect interaction, the
+    // flinch, and any applied status; the enemy's AP was already committed
+    // by the caller.
+    // Same assembler as the player's swings, with the roles reversed - the
+    // unit attacks, the member defends (attackMods reads either shape).
+    if (!rollAgainst(unit, m)) {
+      fx.damageText(m.actor.x, m.actor.z, 'MISS', MISS_COLOR);
+      log(atk.missLog || `${unit.def.name}'s attack goes wide.`);
+      refresh();
+      return;
+    }
+    let line = atk.log;
+    // Composure soaks a flat slice off the hit (one point always lands),
+    // before the Deflect Blame stance (incomingMult) halves whatever is left.
+    const soak = deflect(m.sheet);
+    if (soak > 0) dmg = Math.max(1, dmg - soak);
+    const inMult = statusFx(m.sheet).incomingMult ?? 1;
+    if (inMult < 1) {
+      dmg = Math.max(1, Math.ceil(dmg * inMult));
+      line += ` You deflect - only ${dmg} damage.`;
+    } else {
+      line += ` ${dmg} damage.`;
+    }
+    m.actor.flinch();
+    const dead = applyDamage(m.sheet, dmg);
+    fx.damageText(m.actor.x, m.actor.z, `-${dmg}`);
+    // Any status the attack carries lands here (gum, and now stun etc.),
+    // Composure shrugging off some of a resistable one. Not onto a corpse.
+    if (atk.applies && !dead && applyStatus(m.sheet, atk.applies, {}, statusResist(m.sheet))) {
+      line += ` ${appliesLine(atk, m.sheet.name)}`;
+    }
+    log(line);
+    refresh();
+    if (dead) {
+      m.toppled = true;
+      m.actor.clearPath();
+      m.actor.fx = { kind: 'death', t: 0 };
+      if (!livingParty().length) { defeat(); return; } // party wipe - the only true loss
+      log(m.isSummon
+        ? `${m.sheet.name} is dismissed - back to the applicant pool.`
+        : `${m.sheet.name} is out cold. They'll sit the rest of this one out.`);
+      // Keep `active` (the sheet the HUD reflects, and the post-combat leader)
+      // on a real member still standing - never a summon, which despawns.
+      // Their initiative slot is simply skipped when it comes around.
+      if (m === active) {
+        active = livingParty()[0];
+        party.active = members.indexOf(active);
+      }
+    }
+  }
+
+  // --- opportunity attacks (TACTICS_PLAN M2) ---------------------------------
+  // Leaving a threatened tile hands the threatener a free swing, so walking
+  // out of melee stops being free and kiting stops being strictly dominant.
+  // Three rules keep it from becoming a blender:
+  //   - one reaction per unit per ROUND (refilled by newRound)
+  //   - unaware units don't react (surprised/stunned haven't registered it)
+  //   - FORCED movement never provokes. A shove sets the logical tile through
+  //     pushTo and glides the body, which skips the per-tile hook entirely
+  //     (actors.js update), and only deliberate moves seed `moveStart` - so
+  //     shove is the safe way to break contact (TACTICS_PLAN #9).
+  const reactions = new Map(); // combatant -> reactions spent this round
+  const moveStart = new Map(); // combatant -> tile its current move began on
+  const bodyOf = (u) => u.actor || u; // a member wraps an actor; a unit IS one
+  const standing = (u) => (u.sheet ? u.sheet.hp > 0 && !u.toppled : !!u.alive);
+  const canReact = (u) => standing(u)
+    && (TACTICS.REACTIONS_PER_ROUND - (reactions.get(u) || 0)) > 0
+    && !hasStatus(statusesOf(u), 'surprised')
+    && !hasStatus(statusesOf(u), 'stunned');
+  // main.js owns the per-tile hooks for members and summons, and its records
+  // are NOT the objects combat wraps them in - so resolve through the shared
+  // actor, which both sides hold a reference to.
+  const combatantFor = (ref) => {
+    if (!ref) return null;
+    const body = bodyOf(ref);
+    return members.find((m) => m.actor === body) || engaged.find((e) => e === body) || null;
+  };
+  // Mark the tile a deliberate move begins on. Only moves that come through
+  // here can provoke - which is exactly how forced movement stays exempt.
+  const beginMove = (u) => { if (u) moveStart.set(u, { x: bodyOf(u).x, z: bodyOf(u).z }); };
+  // Everyone on the far side of `mover` able to punish it right now.
+  const threatsAgainst = (mover) => (mover.sheet ? engaged : members)
+    .filter((u) => canReact(u))
+    .map((u) => ({ x: bodyOf(u).x, z: bodyOf(u).z, ref: u }));
+
+  // `ref` entered (x, z) under its own power. Anyone whose reach it just left
+  // gets one free swing. The walk is NOT interrupted - its AP was charged up
+  // front (TACTICS_PLAN #8) - so the mover takes the hit and keeps going,
+  // unless it goes down.
+  function notifyStep(ref, x, z) {
+    if (phase === 'done') return;
+    const mover = combatantFor(ref);
+    if (!mover) return;
+    const from = moveStart.get(mover);
+    if (!from) return; // not a tracked deliberate move (a shove glide, a spawn)
+    if (from.x === x && from.z === z) return;
+    moveStart.set(mover, { x, z }); // the next leg starts here
+    if (!standing(mover)) return;
+    for (const t of provokedBy(threatsAgainst(mover), from.x, from.z, x, z)) {
+      if (!canReact(t.ref)) continue; // an earlier swing this step spent it
+      reactions.set(t.ref, (reactions.get(t.ref) || 0) + 1);
+      opportunityStrike(t.ref, mover);
+      if (!standing(mover)) break; // dropped mid-flight - no further swings
+    }
+  }
+
+  // The reaction swing: the attacker's own basic attack, at no AP cost, rolled
+  // through the same assembler as every other attack. It deliberately carries
+  // no weapon on-hit proc - a reflex, not a committed swing.
+  function opportunityStrike(attacker, defender) {
+    if (attacker.sheet) {
+      // A party-side body catches a fleeing enemy.
+      const a = ACTIONS[equippedAction(attacker.sheet)];
+      if (!a) return; // no basic swing to make (shouldn't happen - punch is the floor)
+      attacker.actor.lunge(defender.x, defender.z);
+      if (!rollAgainst(attacker, defender)) {
+        fx.damageText(defender.x, defender.z, 'MISS', MISS_COLOR);
+        log(`${attacker.sheet.name} swings at ${defender.def.name} breaking away - and misses.`);
         refresh();
         return;
       }
-      let line = atk.log;
-      // Composure soaks a flat slice off the hit (one point always lands),
-      // before the Deflect Blame stance (incomingMult) halves whatever is left.
-      const soak = deflect(m.sheet);
-      if (soak > 0) dmg = Math.max(1, dmg - soak);
-      const inMult = statusFx(m.sheet).incomingMult ?? 1;
-      if (inMult < 1) {
-        dmg = Math.max(1, Math.ceil(dmg * inMult));
-        line += ` You deflect - only ${dmg} damage.`;
-      } else {
-        line += ` ${dmg} damage.`;
-      }
-      m.actor.flinch();
-      const dead = applyDamage(m.sheet, dmg);
-      fx.damageText(m.actor.x, m.actor.z, `-${dmg}`);
-      // Any status the attack carries lands here (gum, and now stun etc.),
-      // Composure shrugging off some of a resistable one. Not onto a corpse.
-      if (atk.applies && !dead && applyStatus(m.sheet, atk.applies, {}, statusResist(m.sheet))) {
-        line += ` ${appliesLine(atk, m.sheet.name)}`;
-      }
-      log(line);
+      const dmg = rand(a.min, a.max) + damageBonus(attacker.sheet);
+      const died = defender.takeDamage(dmg);
+      fx.damageText(defender.x, defender.z, `-${dmg}`, '#ffd76b');
+      log(`${attacker.sheet.name} catches ${defender.def.name} breaking away. ${dmg} damage!`);
+      if (died) callbacks.onEnemyKilled(defender);
       refresh();
-      if (dead) {
-        m.toppled = true;
-        m.actor.clearPath();
-        m.actor.fx = { kind: 'death', t: 0 };
-        if (!livingParty().length) { defeat(); return; } // party wipe - the only true loss
-        log(m.isSummon
-          ? `${m.sheet.name} is dismissed - back to the applicant pool.`
-          : `${m.sheet.name} is out cold. They'll sit the rest of this one out.`);
-        // Keep `active` (the sheet the HUD reflects, and the post-combat leader)
-        // on a real member still standing - never a summon, which despawns.
-        // Their initiative slot is simply skipped when it comes around.
-        if (m === active) {
-          active = livingParty()[0];
-          party.active = members.indexOf(active);
-        }
-      }
+      return;
     }
+    // An enemy catches a fleeing member (or summon) - same rules as its turn
+    // attack, just reworded so the log reads as a punish, not a swing in turn.
+    const base = attacker.def.attacks[rand(0, attacker.def.attacks.length - 1)];
+    attacker.lunge(defender.actor.x, defender.actor.z);
+    unitStrikesMember(attacker, defender, {
+      ...base,
+      log: `${attacker.def.name} catches ${defender.sheet.name} pulling away.`,
+      missLog: `${attacker.def.name} grabs at ${defender.sheet.name} and comes up empty.`,
+    });
   }
 
   // Route toward the cheapest target-adjacent tile and walk it in ONE smooth
@@ -1084,8 +1180,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const { points, cost } = truncateByBudget(s, budget,
       (x, z) => surfaceStepCost(x, z) * (statusFx(unit).moveCostMult ?? 1));
     if (points.length < 2 || cost < 0.05) return 0;
+    beginMove(unit); // a deliberate move - leaving reach can provoke
     unit.onTile = (x, z, done, changed) => {
       if (changed) {
+        // Breaking away from a party-side body hands it a free swing first -
+        // an enemy that repositions out of your reach pays for it too.
+        notifyStep(unit, x, z);
+        if (!unit.alive) { unit.onTile = null; return; }
         // AI units feel the floor too
         const surf = world.enemySurfDamage(x, z);
         if (surf > 0) {
@@ -1282,6 +1383,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     },
     // main.js detected a slip mid-walk (tile effects live there) - narrate it
     notifySlip: () => log('You slip in the water. The rest of that movement is a donation.'),
+    // A party-side body entered a tile under its own power - main.js owns the
+    // per-tile hooks for members and summons, so it reports the step here and
+    // combat resolves any opportunity attack it provoked (TACTICS_PLAN M2).
+    notifyStep,
     abort: cleanup, // for deaths resolved outside combat (surfaces, explosions)
     get active() { return phase !== 'done'; },
   };

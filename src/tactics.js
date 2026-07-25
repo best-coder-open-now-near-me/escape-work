@@ -39,6 +39,13 @@ export function toHitTerms({
 
 // --- threat & opportunity attacks (TACTICS_PLAN M2) -------------------------
 
+// Tunables the positional rules own. Hit-chance magnitudes live in stats.HIT
+// with the rest of the roll; this is the reaction economy, which isn't a
+// to-hit number.
+export const TACTICS = {
+  REACTIONS_PER_ROUND: 1, // free swings a unit may take between its own turns
+};
+
 // Chebyshev distance: a diagonal costs the same as an orthogonal, which is how
 // the grid treats adjacency everywhere else (movement, shove range, melee).
 export const cheb = (ax, az, bx, bz) => Math.max(Math.abs(ax - bx), Math.abs(az - bz));
