@@ -934,7 +934,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     pendingConfirm = null;
     beginMove(active); // a deliberate move - leaving reach can provoke
     active.actor.setPath(points);
-    active.ap = Math.max(0, roundAp(active.ap - cost));
+    billMove(active, cost); // the movement allowance first, then real AP
     refresh();
     return { done, end: points[points.length - 1] };
   }
