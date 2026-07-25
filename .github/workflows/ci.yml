@@ -45,7 +45,7 @@ concurrency:
 
 jobs:
   fast:
-    name: Unit tests + build
+    name: Unit tests + build + smoke
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -93,7 +93,7 @@ jobs:
         run: npm run test:e2e:smoke
 
   e2e:
-    name: E2E smoke tests
+    name: Full E2E suite
     runs-on: ubuntu-latest
     needs: fast          # never pay 35 min for a tree that fails in 1
     # On main (what deploy gates on), on demand, or when a commit opts in.
@@ -132,7 +132,7 @@ jobs:
         if: steps.pw-cache.outputs.cache-hit == 'true'
         run: npx playwright install-deps chromium
 
-      - name: E2E smoke tests
+      - name: Full E2E suite
         run: npm run test:e2e
 
       - name: Upload Playwright report on failure
