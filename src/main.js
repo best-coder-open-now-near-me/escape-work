@@ -2107,6 +2107,12 @@ function startGame(level) {
 
   // Small read-only handle for tests and console poking.
   window.__game = {
+    // Test hook: jump straight to the fully zoomed-out tactical view (setView
+    // clamps to the rig's maxDist). The e2e suite used to do this with eight
+    // mouse-wheel events per test, and every one forced a camera apply plus a
+    // re-render - ~45 SECONDS per test under CI's software GL, in every single
+    // test. One apply does the same job.
+    zoomOut: () => controls.setView({ dist: 1e4 }),
     get playerTile() { return { x: player.x, z: player.z }; },
     get playerPos() {
       const p = player.entity?.getPosition();

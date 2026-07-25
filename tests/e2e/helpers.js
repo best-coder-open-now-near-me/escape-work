@@ -35,10 +35,16 @@ export async function pickClass(page, classId) {
 
 // Zoom out so the whole floor projects inside the viewport - far enemies would
 // otherwise fall off-screen and clicks aimed at them are silent no-ops.
-async function settleCamera(page, clicks) {
+//
+// This used to drive the rig with 4-8 real mouse-wheel events. Each one forces
+// a camera apply and a re-render, which under CI's software GL costs SECONDS -
+// measured at ~45s of the ~85s it took a test to reach its first click. The
+// __game.zoomOut() hook reaches the identical end state (setView clamps to the
+// rig's maxDist) in a single apply.
+async function settleCamera(page) {
   await waitForSmoothFrames(page);
-  await page.mouse.move(640, 400); // wheel events need the pointer on canvas
-  for (let i = 0; i < clicks; i++) await page.mouse.wheel(0, 120);
+  await page.evaluate(() => window.__game.zoomOut());
+  await page.mouse.move(640, 400); // park the pointer on the canvas
   await page.waitForTimeout(600); // camera ease-in
 }
 
@@ -48,7 +54,7 @@ async function settleCamera(page, clicks) {
 export async function bootAndPick(page, classId = 'office-drone') {
   await page.goto(`/#class=${classId}`);
   await page.waitForFunction(() => window.__game && window.__game.stats);
-  await settleCamera(page, 8);
+  await settleCamera(page);
 }
 
 // Boot into a stashed playtest level (the editor's localStorage hand-off) -
@@ -62,7 +68,7 @@ export async function bootStash(page, level, classId = 'office-drone') {
   }, level);
   await page.goto(`/#class=${classId}`);
   await page.waitForFunction(() => window.__game && window.__game.stats);
-  await settleCamera(page, 4);
+  await settleCamera(page);
 }
 
 // Click the ground at world (x, z). Returns false when the point projects
