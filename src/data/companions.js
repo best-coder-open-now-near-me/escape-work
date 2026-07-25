@@ -13,9 +13,9 @@ export const COMPANIONS = {
   'it-intern': {
     char: 'N',
     name: 'Nervous IT Intern',
-    model: 'itsupport', // reuse the IT Support rig until an intern .glb lands
-    // Brighter and smaller than IT Support proper - visibly the junior.
-    look: { tint: [0.85, 1.1, 0.9], build: { legs: 1.7, head: 0.68 } },
+    model: 'intern',
+    // Smaller than IT Support proper - visibly the junior.
+    look: { build: { legs: 1.7, head: 0.68 } },
     examine: 'An intern, hunched behind a monitor. Badge still shrink-wrapped.',
     maxHp: 14,
     ap: 6,
@@ -90,9 +90,9 @@ export const COMPANIONS = {
   'mail-veteran': {
     char: 'V',
     name: 'Mail Room Veteran',
-    model: 'worker', // shares the mail-room rig; a dedicated .glb can land later
-    // Weathered and stockier than the other worker rigs - eleven years of it.
-    look: { tint: [0.78, 0.76, 0.72], build: { legs: 1.8, torso: 1.38 } },
+    model: 'veteran',
+    // Stockier than the rest of the mail room - eleven years of it.
+    look: { build: { torso: 1.38 } },
     examine: 'Eleven years in the mail room. Knows every corridor. Fears no wet floor.',
     maxHp: 18,
     ap: 6,
