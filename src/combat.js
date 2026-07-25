@@ -12,7 +12,7 @@ import { ACTIONS } from './data/actions.js';
 import { SURFACES, GUM } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, MOVE } from './stats.js';
-import { applyStatus, hasStatus, statusFx, tickTurn, clearStatuses, removeStatus, statusList } from './statuses.js';
+import { applyStatus, hasStatus, statusFx, tickTurn, clearStatuses, removeStatus, statusList, blockedBy } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, TACTICS } from './tactics.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
@@ -34,6 +34,16 @@ const appliesLine = (src, name) => {
   if (src.appliesLog) return src.appliesLog;
   const def = STATUSES[src.applies];
   return def?.log ? def.log.replace('{name}', name) : `${def?.name || 'A status'} sets in.`;
+};
+
+// The counterpart for a status TURNED AWAY by a live anti-chain window
+// (statuses.js). The bound is only fair if the player can watch it work - on
+// their target and on themselves alike - so a stun that doesn't land says why
+// instead of silently doing nothing. `id` is the blocking window's id, from
+// blockedBy.
+const immunityLine = (id, name) => {
+  const def = STATUSES[id];
+  return def?.log ? def.log.replace('{name}', name) : `${def?.name || 'An immunity'} holds.`;
 };
 
 export function startCombat({ app, party, engaged, world, fx, callbacks, opening = null, allies = [], rng = Math.random }) {
@@ -779,8 +789,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     // A status the action carries lands on a live target (enemies have no
     // Composure, so no resist). This is the player-action `applies` vector.
-    if (a.applies && !died && applyStatus(en, a.applies)) {
-      line += ` ${appliesLine(a, en.def.name)}`;
+    // A window read BEFORE the apply, so a stun Detain can't land is narrated
+    // rather than swallowed - checking after would see the window this very
+    // application just granted.
+    if (a.applies && !died) {
+      const blocked = blockedBy(en, a.applies);
+      if (applyStatus(en, a.applies)) line += ` ${appliesLine(a, en.def.name)}`;
+      else if (blocked) line += ` ${immunityLine(blocked, en.def.name)}`;
     }
     // The equipped weapon's on-hit proc - but only when this attack IS that
     // weapon's own swing (swing the gum stapler, fling gum).
@@ -901,7 +916,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         // A slam into a wall knocks the wind out of them - stunned (they lose
         // their next turn). The knockdown DOS2 shoves are for.
         let msg = `You shove ${en.def.name} into something solid. -2.`;
-        if (!died && applyStatus(en, 'stunned')) msg += ' They crumple - dazed.';
+        // The shove is the one UNRATIONED stun in the game (2 AP, no use
+        // limit), so it is the chain the anti-chain window exists to break -
+        // and the site where the player most needs to be told why the second
+        // slam didn't daze.
+        if (!died) {
+          const blocked = blockedBy(en, 'stunned');
+          if (applyStatus(en, 'stunned')) msg += ' They crumple - dazed.';
+          else if (blocked) msg += ` ${immunityLine(blocked, en.def.name)}`;
+        }
         log(msg);
         if (died) callbacks.onEnemyKilled(en);
       } else {
@@ -1387,9 +1410,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const dead = applyDamage(m.sheet, dmg);
     fx.damageText(m.actor.x, m.actor.z, `-${dmg}`);
     // Any status the attack carries lands here (gum, and now stun etc.),
-    // Composure shrugging off some of a resistable one. Not onto a corpse.
-    if (atk.applies && !dead && applyStatus(m.sheet, atk.applies, {}, statusResist(m.sheet))) {
-      line += ` ${appliesLine(atk, m.sheet.name)}`;
+    // Composure shrugging off some of a resistable one. Not onto a corpse. This
+    // is the side of the anti-chain window that matters most: the Security Guard
+    // and the Regional Executive both stun on an ordinary attack, with nothing
+    // rationing it, so without a window a party member could lose every turn of
+    // a fight in a row.
+    if (atk.applies && !dead) {
+      const blocked = blockedBy(m.sheet, atk.applies);
+      if (applyStatus(m.sheet, atk.applies, {}, statusResist(m.sheet))) {
+        line += ` ${appliesLine(atk, m.sheet.name)}`;
+      } else if (blocked) line += ` ${immunityLine(blocked, m.sheet.name)}`;
     }
     log(line);
     refresh();

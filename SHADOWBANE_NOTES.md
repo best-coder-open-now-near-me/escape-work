@@ -78,37 +78,40 @@ stating before proposing changes:
   multiplying `moveCost` seam in `equippedStats` is the machinery Shadowbane's
   armor-weight rule would need.
 
-## The finding: our attributes are not on equal footing
+## On our attributes
 
-Shadowbane deliberately spread offense across separate axes: damage came from
-Strength / Intelligence / Spirit, *hit chance* came from skill trains, and
-defense came from Dexterity. Attack and damage were different investments.
+Shadowbane spread offense across separate axes: damage from Strength /
+Intelligence / Spirit, *hit chance* from skill trains, defense from Dexterity.
+Attack and damage were different investments. Ours aren't — Savvy buys both.
 
-Ours are not. Tallying what each attribute currently buys:
+**How many things a stat feeds is the wrong measure, though.** What matters is
+per-point amplitude, and by that measure ours are closer than a tally suggests.
+For a level-1 Drone (all 5s, 22 HP, 6 AP), one point is worth roughly:
 
-| Attribute | Buys | Rate |
-| --- | --- | --- |
-| Grit | max HP | 2 HP/pt |
-| Hustle | max AP, dodge, initiative | 1 AP/4, 5%/3, 1:1 |
-| Savvy | damage, accuracy | 1 dmg/3, 5%/3 |
-| Composure | deflect, status resist | 1/4, 1/4 |
+| Attribute | Per point, in the output it feeds |
+| --- | --- |
+| Grit | +2 HP on 22 → **~9% effective HP** |
+| Hustle | ~+0.25 AP (~4% of the pool) and ~+1.7% dodge (~2% effective HP) |
+| Savvy | ~+0.33 damage (~11%) and ~+1.7% accuracy (~2% more swings land) |
+| Composure | ~+0.25 deflect (~8% off a 3-point hit), plus status resist |
 
-Savvy buys *both halves of offense* at the same 3-point rate — more damage on
-a swing that also lands more often. Hustle triple-dips (economy, defense, turn
-order) with two of the three at rate 3 or better. Grit buys one thing.
-Composure buys two, both at the slower rate 4.
+All in the 6–10% band. Grit, feeding one output, is not obviously behind.
 
-A player optimizing this pours points into Savvy, then Hustle, and treats Grit
-and Composure as what's left over. That is the balance hole, and it's
-structural — no amount of retuning `HP_PER_GRIT` fixes a stat that buys one
-thing competing against a stat that buys two.
+Two things do survive the amplitude lens, and they're the ones worth acting on:
 
-Shadowbane suggests two independent fixes, and they compose:
+- **Offense compounds, defense mostly adds.** Savvy's two effects multiply into
+  a single output — more damage on a swing that also lands more often — where
+  Hustle's AP and dodge feed unrelated outputs. That's an argument for moving
+  accuracy off Savvy (Composure is the thematic fit: poise as steadiness of
+  hand), but it's a modest effect, worth measuring before acting on.
+- **`floor()` granularity is the bigger practical problem.** At
+  `COMP_PER_DEFLECT = 4`, three of every four points into Composure buy
+  *nothing observable* — no number on the sheet moves. Same for Grit's
+  neighbours at rate 3. A level-up that visibly does nothing is worse for the
+  feel of progression than any of the amplitude gaps above, and it's the thing
+  a player will actually notice.
 
-- **Split the double-dip.** Accuracy stops deriving from Savvy and derives from
-  something else — Composure is the thematic fit (poise as steadiness of hand),
-  and it hands the weakest attribute a headline job. Savvy keeps damage.
-- **Escalate the cost.** Below.
+Escalating cost (below) is independent of both and still worth having.
 
 ## Candidate borrowings, best fit first
 
@@ -170,6 +173,13 @@ nothing prevents chain-application. In a turn-based game a stun-lock is
 is a lost fight with no counterplay, and the player watches it happen. The 3×
 rule is a small addition to the status registry (an immunity flag with a
 duration, checked at apply time) with an outsized fairness payoff.
+
+**Landed** — `STATUS_PLAN.md` milestone 5. A status declares
+`immunity: '<id>'`; landing grants that companion status for
+`IMMUNITY_WINDOW_MULT` (3) × the duration actually applied, and it blocks
+re-application while live. `stunned` → `training-credit`. Only turn-denying
+effects get a window; the blocked application is narrated so the player sees the
+bound work.
 
 The root/snare distinction is also already half-built: a snare is exactly the
 `moveCost` multiplier, and "breaks on damage" is a clean, readable rule that
@@ -276,9 +286,10 @@ Three, in order, on the grounds that each is a *bound* rather than a tuning
 pass, and each lands in a seam that already exists:
 
 1. **CC immunity windows (§3)** — smallest change, biggest fairness gain, and
-   turn-based combat needs it more than an MMO does.
-2. **The Savvy/Hustle double-dip split plus escalating attribute cost (§2 and
-   the finding above it)** — this is the live balance hole, not a hypothetical.
+   turn-based combat needs it more than an MMO does. ✅ Landed.
+2. **Attribute granularity, then escalating cost (§2 and the attribute section
+   above)** — the `floor()` rates mean most single points buy nothing
+   observable, which players feel long before they feel an amplitude gap.
 3. **Slot caps on the class track (§1)** — turns progression from accumulation
    into choice, and makes two characters of one class differ.
 

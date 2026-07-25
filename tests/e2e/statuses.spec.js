@@ -21,6 +21,26 @@ const manager = (page) => page.evaluate(() =>
   window.__combat.enemies.find((e) => e.name === 'The Manager'));
 const managerStunned = (page) => page.evaluate(() =>
   !!window.__combat.enemies.find((e) => e.name === 'The Manager')?.statuses.some((s) => s.id === 'stunned'));
+const managerCredit = (page) => page.evaluate(() =>
+  window.__combat.enemies.find((e) => e.name === 'The Manager')
+    ?.statuses.find((s) => s.id === 'training-credit')?.left ?? 0);
+
+// Arm Shove and drive it into the Manager until the shove actually fires (its
+// 2 AP is spent), slamming the wall-backed Manager into something solid.
+// Returns whether it went off inside the attempt budget.
+async function shoveManager(page, foe) {
+  for (let i = 0; i < 6; i++) {
+    await page.waitForTimeout(700);
+    const ap0 = await page.evaluate(() => window.__combat.ap);
+    if (await page.evaluate(() => window.__combat.armed) !== 'shove') await page.click('#act-shove');
+    const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
+    await page.mouse.click(fp.x, fp.y);
+    await page.waitForTimeout(300);
+    const ap1 = await page.evaluate(() => window.__combat.ap);
+    if (Math.abs(ap1 - (ap0 - 2)) < 0.01) return true;
+  }
+  return false;
+}
 
 test('a shove into a wall stuns the target, and the stun costs it a turn', async ({ page }) => {
   test.setTimeout(300_000);
@@ -31,20 +51,7 @@ test('a shove into a wall stuns the target, and the stun costs it a turn', async
   await page.evaluate(() => { window.__combat.forceHit = false; });
 
   const foe = await manager(page);
-  // Arm Shove and drive it into the Manager until the shove actually fires
-  // (its 2 AP is spent) - it slams the wall-backed Manager into something solid.
-  let shoved = false;
-  for (let i = 0; i < 6 && !shoved; i++) {
-    await page.waitForTimeout(700);
-    const ap0 = await page.evaluate(() => window.__combat.ap);
-    if (await page.evaluate(() => window.__combat.armed) !== 'shove') await page.click('#act-shove');
-    const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
-    await page.mouse.click(fp.x, fp.y);
-    await page.waitForTimeout(300);
-    const ap1 = await page.evaluate(() => window.__combat.ap);
-    if (Math.abs(ap1 - (ap0 - 2)) < 0.01) shoved = true;
-  }
-  expect(shoved).toBe(true);
+  expect(await shoveManager(page, foe)).toBe(true);
   expect(await managerStunned(page)).toBe(true); // the slam stunned it
 
   // Cycle a full round: the Manager's turn comes and goes without an attack
@@ -53,6 +60,34 @@ test('a shove into a wall stuns the target, and the stun costs it a turn', async
   await endTurnUntilPlayer(page);
   expect(await managerStunned(page)).toBe(false);        // the skip consumed the stun
   expect(await page.evaluate(() => window.__god.player.hp)).toBe(hp0); // it never got to swing
+});
+
+// The anti-chain window in a real fight (SHADOWBANE_NOTES.md §3): the shove is
+// the game's one unrationed stun, so shoving the same wall twice is the exact
+// stun-lock the window exists to break.
+test('a second shove cannot re-stun through the anti-chain window', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, STUN_CORNER, 'office-drone');
+  await enterCombat(page);
+  await page.evaluate(() => { window.__combat.forceHit = false; });
+
+  const foe = await manager(page);
+  expect(await shoveManager(page, foe)).toBe(true);
+  expect(await managerStunned(page)).toBe(true);
+  expect(await managerCredit(page)).toBe(3); // a 1-turn stun bought a 3-turn window
+
+  // Shove again the same turn, while both the stun and its window are live. The
+  // slam still lands (damage is never gated) - the stun is what gets turned away.
+  expect(await shoveManager(page, foe)).toBe(true);
+  expect(await managerCredit(page)).toBe(3);  // not refreshed, not extended
+  // ...and the player is TOLD why, rather than left watching nothing happen.
+  await expect(page.locator('#combat-log')).toContainText('training this quarter');
+
+  // And it is still a single stun on the far side of the round - one skipped
+  // turn, not two.
+  await endTurnUntilPlayer(page);
+  expect(await managerStunned(page)).toBe(false);
+  expect(await managerCredit(page)).toBe(2); // window ticking down, stuns still barred
 });
 
 // A plain duel arena for the burning dot.
