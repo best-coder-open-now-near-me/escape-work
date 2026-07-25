@@ -11,7 +11,7 @@
 //
 // `positional` is the seam the later milestones fill in (cover, flanking,
 // backstab). It is 0 everywhere today, so this milestone changes no number.
-import { HIT } from './stats.js';
+import { HIT, REACH } from './stats.js';
 
 // The to-hit terms for one attacker/defender pair, in the shape
 // stats.hitChance consumes: { acc, dodge, mods }.
@@ -108,24 +108,41 @@ export function inReach(ax, az, bx, bz, r, edgeOpen = null) {
   return reachOpen(ax, az, bx, bz, edgeOpen);
 }
 
-// A unit threatens the eight tiles around it. Everyone can threaten: since
-// EQUIPMENT_PLAN M3 every combatant has a basic melee swing (its weapon's, or
-// a punch), so this needs no per-unit capability check.
-export const threatens = (tx, tz, x, z) => cheb(tx, tz, x, z) <= 1;
-
-// Which of `threats` a step from (fx, fz) to (tx, tz) provokes: those that
-// threatened the tile being LEFT and no longer threaten the tile being
-// ENTERED. Comparing threat SETS rather than raw adjacency is what keeps a
-// unit circling a foe - sliding from one threatened tile to another - from
-// provoking, and stops a diagonal shuffle past someone from double-firing
-// (TACTICS_PLAN, "continuous movement and tile-granular reactions").
+// A unit threatens wherever it could swing: the same reach test an actual
+// attack uses. Everyone can threaten - since EQUIPMENT_PLAN M3 every combatant
+// has a basic melee swing (its weapon's, or a punch) - so this needs no
+// per-unit capability check, only a reach.
 //
-// Pure: `threats` is any list of things carrying x/z, and eligibility (alive,
-// aware, still holding a reaction) is the caller's filter, not this rule's.
-export function provokedBy(threats, fx, fz, tx, tz) {
-  if (fx === tx && fz === tz) return []; // standing still is not leaving
-  return (threats || []).filter((t) =>
-    threatens(t.x, t.z, fx, fz) && !threatens(t.x, t.z, tx, tz));
+// Threat used to be the eight surrounding TILES. Reading it off `inReach`
+// instead is what makes an opportunity attack agree with the swing it becomes:
+// a unit can no longer threaten a spot it would be unable to hit, and a long
+// weapon zones the ground its own reach covers rather than a fixed ring.
+export const threatens = (tx, tz, x, z, reach, edgeOpen = null) =>
+  inReach(tx, tz, x, z, reach, edgeOpen);
+
+// Which of `threats` a move from (fx, fz) to (tx, tz) provokes: those whose
+// reach covered the point being LEFT and no longer covers the point being
+// ENTERED. Comparing threat SETS rather than raw proximity is what keeps a unit
+// circling a foe - sliding around inside its reach - from provoking, and stops
+// a shuffle past someone from double-firing.
+//
+// The set-diff was an APPROXIMATION of "are you still in reach" while reach was
+// a tile ring; now that reach is a radius it is that question exactly, so the
+// circling case holds for a reason rather than by construction.
+//
+// Pure: `threats` is any list of things carrying x/z plus their own `reach`
+// (they differ - a long weapon zones further), and eligibility (alive, aware,
+// still holding a reaction) is the caller's filter, not this rule's.
+export function provokedBy(threats, fx, fz, tx, tz, edgeOpen = null) {
+  if (dist(fx, fz, tx, tz) < 1e-9) return []; // standing still is not leaving
+  return (threats || []).filter((t) => {
+    // A threat that forgot to state its reach would otherwise compare against
+    // `undefined`, and every NaN comparison is false - so it would threaten
+    // EVERYWHERE and therefore provoke nowhere. Silent, and exactly backwards.
+    const r = t.reach ?? REACH.DEFAULT;
+    return threatens(t.x, t.z, fx, fz, r, edgeOpen)
+      && !threatens(t.x, t.z, tx, tz, r, edgeOpen);
+  });
 }
 
 // --- cover (TACTICS_PLAN M3) ------------------------------------------------
@@ -173,7 +190,7 @@ export function isFlanked(ax, az, dx, dz, allies) {
   const sz = Math.sign(az - dz);
   if (sx === 0 && sz === 0) return false; // attacker standing on the defender
   return (allies || []).some((a) =>
-    threatens(a.x, a.z, dx, dz)            // must be in its face, not lobbing from afar
+    cheb(a.x, a.z, dx, dz) <= 1            // must be in its face, not lobbing from afar
     && Math.sign(a.x - dx) === -sx
     && Math.sign(a.z - dz) === -sz);
 }

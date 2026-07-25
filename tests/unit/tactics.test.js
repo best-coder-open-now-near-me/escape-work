@@ -142,35 +142,68 @@ test('a body standing on the same tile always has a line to itself', () => {
   assert.equal(reachOpen(0.2, 0.1, 0.3, -0.1, wall), true); // sub-tile jitter, same cell
 });
 
-test('a unit threatens its eight neighbours and nothing further', () => {
+test('a unit threatens the ground its reach covers, not a ring of tiles', () => {
+  const r = REACH.DEFAULT;
+  // At tile centres the outcome is the same eight neighbours as the old rule -
+  // by geometry now (1.0 and 1.41 both clear 1.5) rather than by definition.
   for (let dz = -1; dz <= 1; dz++) {
     for (let dx = -1; dx <= 1; dx++) {
-      assert.equal(threatens(5, 5, 5 + dx, 5 + dz), true, `${dx},${dz} is threatened`);
+      assert.equal(threatens(5, 5, 5 + dx, 5 + dz, r), true, `${dx},${dz} is threatened`);
     }
   }
-  assert.equal(threatens(5, 5, 7, 5), false); // two tiles out is free
-  assert.equal(threatens(5, 5, 5, 7), false);
-  assert.equal(threatens(5, 5, 7, 7), false);
+  assert.equal(threatens(5, 5, 7, 5, r), false); // two tiles out is free
+  assert.equal(threatens(5, 5, 7, 7, r), false);
+  // What actually changed: a spot inside a NEIGHBOURING tile can be out of
+  // reach, so standing in the far corner of it is no longer being zoned.
+  assert.equal(threatens(5, 5, 6.4, 6.4, r), false);
+  // ...and a longer weapon zones ground a pair of fists cannot.
+  assert.equal(threatens(5, 5, 7, 5, r + 0.7), true);
+});
+
+test('threat stops at a wall - you cannot zone through a partition', () => {
+  // Threat has to agree with the swing it becomes, or an opportunity attack
+  // fires for a hit that could never have landed.
+  const wall = wallBetween(5, 5, 6, 5);
+  assert.equal(threatens(5, 5, 6, 5, REACH.DEFAULT), true);              // no wall passed
+  assert.equal(threatens(5, 5, 6, 5, REACH.DEFAULT, wall), false);       // walled off
 });
 
 test('stepping out of reach provokes; approaching does not', () => {
-  const foe = [{ x: 5, z: 5 }];
-  assert.equal(provokedBy(foe, 5, 6, 5, 8).length, 1); // adjacent -> away: provokes
-  assert.equal(provokedBy(foe, 5, 8, 5, 6).length, 0); // away -> adjacent: closing is free
+  const foe = [{ x: 5, z: 5, reach: REACH.DEFAULT }];
+  assert.equal(provokedBy(foe, 5, 6, 5, 8).length, 1); // in reach -> away: provokes
+  assert.equal(provokedBy(foe, 5, 8, 5, 6).length, 0); // away -> in reach: closing is free
+});
+
+test('a threat missing its reach falls back to the floor, not to omniscience', () => {
+  // Guards the NaN trap: comparing against `undefined` is false either way, so
+  // an unstated reach would threaten everywhere and therefore provoke nowhere.
+  const sloppy = [{ x: 5, z: 5 }];
+  assert.equal(provokedBy(sloppy, 5, 6, 5, 8).length, 1);
+});
+
+test('a longer reach zones a wider ring - you must get further away to escape', () => {
+  const pike = [{ x: 5, z: 5, reach: REACH.DEFAULT + 0.7 }];
+  const fists = [{ x: 5, z: 5, reach: REACH.DEFAULT }];
+  // A step from 1.0 to 2.0 away escapes fists but is still inside the pike.
+  assert.equal(provokedBy(fists, 5, 6, 5, 7).length, 1);
+  assert.equal(provokedBy(pike, 5, 6, 5, 7).length, 0);
+  // Keep going and even the pike loses you.
+  assert.equal(provokedBy(pike, 5, 6, 5, 9).length, 1);
 });
 
 test('circling a foe provokes nothing - the threat set never lapses', () => {
-  // Both tiles are adjacent to the foe, so it never stops threatening. This is
-  // the case raw adjacency-diffing gets wrong.
-  const foe = [{ x: 5, z: 5 }];
+  // Both spots are inside the foe's reach, so it never stops threatening. Under
+  // the old tile rule the set-diff APPROXIMATED this; against a radius it is
+  // the question exactly.
+  const foe = [{ x: 5, z: 5, reach: REACH.DEFAULT }];
   assert.deepEqual(provokedBy(foe, 4, 5, 4, 4), []); // orthogonal -> diagonal, still in reach
   assert.deepEqual(provokedBy(foe, 4, 4, 5, 4), []); // diagonal -> orthogonal
   assert.deepEqual(provokedBy(foe, 5, 5, 5, 5), []); // standing still is not leaving
 });
 
 test('only the threats actually escaped fire, not every nearby foe', () => {
-  const a = { x: 5, z: 5, tag: 'left-behind' };
-  const b = { x: 8, z: 5, tag: 'still-adjacent' };
+  const a = { x: 5, z: 5, tag: 'left-behind', reach: REACH.DEFAULT };
+  const b = { x: 8, z: 5, tag: 'still-adjacent', reach: REACH.DEFAULT };
   // Move from between them to a tile that only b still reaches.
   const provoked = provokedBy([a, b], 6, 5, 7, 5);
   assert.equal(provoked.length, 1);
@@ -178,7 +211,8 @@ test('only the threats actually escaped fire, not every nearby foe', () => {
 });
 
 test('escaping several threats at once provokes each of them', () => {
-  const swarm = [{ x: 4, z: 5 }, { x: 5, z: 4 }, { x: 6, z: 5 }];
+  const swarm = [{ x: 4, z: 5 }, { x: 5, z: 4 }, { x: 6, z: 5 }]
+    .map((t) => ({ ...t, reach: REACH.DEFAULT }));
   assert.equal(provokedBy(swarm, 5, 5, 5, 9).length, 3); // walking out of a surround
 });
 

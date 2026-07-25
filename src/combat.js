@@ -1547,7 +1547,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   //     (actors.js update), and only deliberate moves seed `moveStart` - so
   //     shove is the safe way to break contact (TACTICS_PLAN #9).
   const reactions = new Map(); // combatant -> reactions spent this round
-  const moveStart = new Map(); // combatant -> tile its current move began on
+  // combatant -> where its current move began: { x, z } logical tile plus
+  // { px, pz } continuous position (what threat radii are measured against)
+  const moveStart = new Map();
   // LOGICAL facing (TACTICS_PLAN M5): a sign-vector per combatant, written
   // only when a unit attacks (it faces its target) or moves (it faces its
   // heading). Never read off the actor's eased visual yaw. A unit that has
@@ -1578,11 +1580,23 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   };
   // Mark the tile a deliberate move begins on. Only moves that come through
   // here can provoke - which is exactly how forced movement stays exempt.
-  const beginMove = (u) => { if (u) moveStart.set(u, { x: bodyOf(u).x, z: bodyOf(u).z }); };
-  // Everyone on the far side of `mover` able to punish it right now.
+  // Carries the tile (for facing and per-leg bookkeeping) AND the continuous
+  // position, which is what threat is measured from now that reach is a radius.
+  const beginMove = (u) => {
+    if (!u) return;
+    const b = bodyOf(u);
+    const p = posOf(u);
+    moveStart.set(u, { x: b.x, z: b.z, px: p.x, pz: p.z });
+  };
+  // Everyone on the far side of `mover` able to punish it right now. Each
+  // carries its OWN reach: threat is whatever ground that unit could swing at,
+  // so a long weapon zones further than a pair of fists.
   const threatsAgainst = (mover) => (mover.sheet ? engaged : members)
     .filter((u) => canReact(u))
-    .map((u) => ({ x: bodyOf(u).x, z: bodyOf(u).z, ref: u }));
+    .map((u) => {
+      const p = posOf(u);
+      return { x: p.x, z: p.z, reach: reachOfUnit(u), ref: u };
+    });
 
   // `ref` entered (x, z) under its own power. Anyone whose reach it just left
   // gets one free swing. The walk is NOT interrupted - its AP was charged up
@@ -1604,16 +1618,21 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (!from) return; // not a tracked deliberate move (a shove glide, a spawn)
     if (from.x === x && from.z === z) return;
     setFacing(mover, x - from.x, z - from.z); // you face where you're going
-    moveStart.set(mover, { x, z }); // the next leg starts here
+    // Threat is a radius now, so the leg is measured between the BODY's real
+    // positions rather than the tiles they round to. The hook still fires on
+    // tile changes, so a reaction can land up to a tile after the radius was
+    // actually crossed - bounded, and cheap compared with sampling every frame.
+    const to = posOf(mover);
+    moveStart.set(mover, { x, z, px: to.x, pz: to.z }); // the next leg starts here
     if (!standing(mover)) return;
     if (flier) {
       // Say so once per escape, or "nothing happened" reads as a missing rule.
-      if (provokedBy(threatsAgainst(mover), from.x, from.z, x, z).length) {
+      if (provokedBy(threatsAgainst(mover), from.px, from.pz, to.x, to.z, world.stepOpen).length) {
         log(`${mover.sheet ? mover.sheet.name : mover.def.name} walks off untouched. Frequent flier.`);
       }
       return;
     }
-    for (const t of provokedBy(threatsAgainst(mover), from.x, from.z, x, z)) {
+    for (const t of provokedBy(threatsAgainst(mover), from.px, from.pz, to.x, to.z, world.stepOpen)) {
       if (!canReact(t.ref)) continue; // an earlier swing this step spent it
       reactions.set(t.ref, (reactions.get(t.ref) || 0) + 1);
       opportunityStrike(t.ref, mover);
