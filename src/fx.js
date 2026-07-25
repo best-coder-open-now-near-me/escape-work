@@ -21,7 +21,7 @@ const pc = window.pc;
 // passing one vector as both corrupts the projection.
 const _projIn = new pc.Vec3();
 const _projOut = new pc.Vec3();
-export function worldToScreenCss(app, cameraEntity, wx, wy, wz) {
+export function worldToScreenCss(cameraEntity, wx, wy, wz) {
   cameraEntity.camera.worldToScreen(_projIn.set(wx, wy, wz), _projOut);
   return { x: _projOut.x, y: _projOut.y, behind: _projOut.z < 0 };
 }
@@ -143,7 +143,7 @@ export function spawnDamageText(app, cameraEntity, wx, wy, wz, text, color = '#f
       div.remove();
       return;
     }
-    const s = worldToScreenCss(app, cameraEntity, wx, wy + 0.6 + k * 0.55, wz);
+    const s = worldToScreenCss(cameraEntity, wx, wy + 0.6 + k * 0.55, wz);
     // A point behind the camera projects to a mirrored/garbage screen position -
     // hide the popup that frame rather than flash it somewhere wrong (matches
     // the loot-label projection guard).

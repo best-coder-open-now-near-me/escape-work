@@ -535,7 +535,7 @@ export function startEditor(app, levelData, stashKey) {
     // World point -> CSS-pixel screen point, so tests can click precise
     // ground points (mouse events arrive in CSS pixels).
     project(x, z) {
-      const s = worldToScreenCss(app, controls.cameraEntity, x, 0, z);
+      const s = worldToScreenCss(controls.cameraEntity, x, 0, z);
       return { x: s.x, y: s.y };
     },
     charAt: (x, z) => rows[z]?.[x],

@@ -1954,7 +1954,7 @@ function startGame(level) {
     // The loot overlay tracks the world while held (the camera keeps easing).
     if (loot.labelsVisible) {
       loot.repositionLabels((w) => {
-        const s = worldToScreenCss(app, controls.cameraEntity, w.x, w.y, w.z);
+        const s = worldToScreenCss(controls.cameraEntity, w.x, w.y, w.z);
         return s.behind ? null : s;
       });
     }
@@ -2057,13 +2057,13 @@ function startGame(level) {
     // World point -> CSS-pixel screen point, so tests can click precise
     // ground points (mouse events arrive in CSS pixels).
     project(x, z) {
-      const s = worldToScreenCss(app, controls.cameraEntity, x, 0, z);
+      const s = worldToScreenCss(controls.cameraEntity, x, 0, z);
       return { x: s.x, y: s.y };
     },
     // Project an arbitrary world point (y too), so tests can aim at a tall
     // mesh - a door panel, an enemy's body - not just the floor under it.
     project3(x, y, z) {
-      const s = worldToScreenCss(app, controls.cameraEntity, x, y, z);
+      const s = worldToScreenCss(controls.cameraEntity, x, y, z);
       return { x: s.x, y: s.y };
     },
     get inCombat() { return inCombat; },
