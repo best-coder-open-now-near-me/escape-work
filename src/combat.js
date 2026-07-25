@@ -125,7 +125,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // so it is computed at roll time and never cached on a unit.
     const A = bodyOf(attacker);
     const D = bodyOf(defender);
-    const pos = positionMods(A.x, A.z, D.x, D.z, world.stepOpen);
+    // The attacker's own side, minus itself: a pincer needs a second body.
+    const allies = (attacker.sheet ? members : engaged)
+      .filter((u) => u !== attacker && standing(u))
+      .map((u) => ({ x: bodyOf(u).x, z: bodyOf(u).z }));
+    const pos = positionMods(A.x, A.z, D.x, D.z, {
+      edgeOpen: world.stepOpen,
+      allies,
+      facing: facings.get(defender) || null,
+    });
     return {
       ...toHitTerms({
         accuracy: accuracyOf(attacker),
@@ -136,6 +144,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         positional: pos.positional,
       }),
       covered: pos.covered, // for the hover tag's reason string
+      flanked: pos.flanked,
+      behind: pos.behind,
     };
   };
   // The chance `attacker` lands on `defender` right now - what the hover tag
@@ -278,7 +288,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // as randomness (TACTICS_PLAN, ui.js note).
     const t = attackMods(active, en);
     hoverHitChance = hitChance(t.acc, t.dodge, t.mods);
-    costTag.textContent = `${Math.round(hoverHitChance * 100)}% to hit${t.covered ? ' - in cover' : ''}`;
+    const why = t.covered ? ' - in cover'
+      : (t.behind ? ' - from behind' : (t.flanked ? ' - flanked' : ''));
+    costTag.textContent = `${Math.round(hoverHitChance * 100)}% to hit${why}`;
     costTag.style.left = `${sx + 14}px`;
     costTag.style.top = `${sy + 14}px`;
     costTag.style.display = 'block';
@@ -592,6 +604,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     } else {
       active.actor.lunge(en.x, en.z);
     }
+    faceTarget(active, en.x, en.z); // you face what you swing at
     active.ap -= a.ap;
     // The attack roll: a miss spends the cost above and does nothing else - no
     // damage, no purge, no rider. Surprise, the attacker's accMod, the
@@ -643,6 +656,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (!test) { log('Aim somewhere.'); return; }
     active.ap = roundAp(active.ap - a.ap);
     active.actor.lunge(tx, tz);
+    faceTarget(active, tx, tz); // the cone points where you aimed it
     let hits = 0;
     for (const en of world.liveEnemies()) {
       if (!test(en.x, en.z)) continue;
@@ -699,6 +713,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const tz = en.z + dz;
       active.ap -= a.ap;
       active.actor.lunge(en.x, en.z);
+      faceTarget(active, en.x, en.z);
       // A partition between the tiles counts as "something solid" too.
       if (!world.isWalkable(tx, tz) || !world.stepOpen(en.x, en.z, tx, tz)) {
         const died = en.takeDamage(2);
@@ -1020,6 +1035,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function aiAttack(unit, target) {
     const atk = unit.def.attacks[rand(0, unit.def.attacks.length - 1)];
     unit.lunge(target.actor.x, target.actor.z);
+    faceTarget(unit, target.actor.x, target.actor.z); // you face what you swing at
     if (target.member) unitStrikesMember(unit, target.member, atk);
   }
 
@@ -1092,6 +1108,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   //     shove is the safe way to break contact (TACTICS_PLAN #9).
   const reactions = new Map(); // combatant -> reactions spent this round
   const moveStart = new Map(); // combatant -> tile its current move began on
+  // LOGICAL facing (TACTICS_PLAN M5): a sign-vector per combatant, written
+  // only when a unit attacks (it faces its target) or moves (it faces its
+  // heading). Never read off the actor's eased visual yaw. A unit that has
+  // not acted has no entry and cannot be backstabbed.
+  const facings = new Map();
+  const setFacing = (u, fx, fz) => { if (fx || fz) facings.set(u, { x: Math.sign(fx), z: Math.sign(fz) }); };
+  const faceTarget = (u, tx, tz) => {
+    const b = bodyOf(u);
+    setFacing(u, tx - b.x, tz - b.z);
+  };
   const bodyOf = (u) => u.actor || u; // a member wraps an actor; a unit IS one
   const standing = (u) => (u.sheet ? u.sheet.hp > 0 && !u.toppled : !!u.alive);
   const canReact = (u) => standing(u)
@@ -1125,6 +1151,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const from = moveStart.get(mover);
     if (!from) return; // not a tracked deliberate move (a shove glide, a spawn)
     if (from.x === x && from.z === z) return;
+    setFacing(mover, x - from.x, z - from.z); // you face where you're going
     moveStart.set(mover, { x, z }); // the next leg starts here
     if (!standing(mover)) return;
     for (const t of provokedBy(threatsAgainst(mover), from.x, from.z, x, z)) {
@@ -1144,6 +1171,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const a = ACTIONS[equippedAction(attacker.sheet)];
       if (!a) return; // no basic swing to make (shouldn't happen - punch is the floor)
       attacker.actor.lunge(defender.x, defender.z);
+      faceTarget(attacker, defender.x, defender.z);
       if (!rollAgainst(attacker, defender)) {
         fx.damageText(defender.x, defender.z, 'MISS', MISS_COLOR);
         log(`${attacker.sheet.name} swings at ${defender.def.name} breaking away - and misses.`);

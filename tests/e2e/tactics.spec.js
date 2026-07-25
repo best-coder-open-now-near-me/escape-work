@@ -2,7 +2,7 @@
 // and forced movement doesn't. Both assertions run inside the player's OWN
 // turn, so the enemy's scheduled attack can't be mistaken for a reaction.
 import { test, expect } from '@playwright/test';
-import { bootStash, enterCombat, clickWorld } from './helpers.js';
+import { bootStash, enterCombat, clickWorld, endTurnUntilPlayer } from './helpers.js';
 
 // An open room with space to run: the player engages the Manager, then has
 // somewhere far enough to break contact.
@@ -131,6 +131,44 @@ test('a partition gives the defender cover against a ranged attacker', async ({ 
   expect(open.chance - behind.chance).toBeCloseTo(0.20, 5);
   expect(behind.tag).toContain('in cover'); // and the player can SEE why
   expect(open.tag).not.toContain('in cover');
+});
+
+test('striking a foe from behind its committed facing is a backstab', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, DISENGAGE_ARENA, 'office-drone');
+  await enterCombat(page);
+  // Let the Manager take a turn: attacking commits its LOGICAL facing toward
+  // where we were standing. Before that it has no facing and cannot be
+  // backstabbed at all - which is the rule we rely on below.
+  await endTurnUntilPlayer(page);
+
+  const readTag = async (x, z) => {
+    for (let i = 0; i < 8; i++) {
+      await page.waitForTimeout(400);
+      if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#act-attack');
+      const fp = await page.evaluate(([wx, wz]) => window.__game.project(wx, wz), [x, z]);
+      await page.mouse.move(fp.x, fp.y);
+      await page.waitForTimeout(150);
+      if (await page.evaluate(() => window.__combat.hoverHitChance) != null) break;
+    }
+    return (await page.locator('#combat-move-cost').textContent()) || '';
+  };
+
+  const foe = await foeOf(page);
+  const pt = await page.evaluate(() => window.__game.playerTile);
+  // It just swung at us, so we are squarely in its front arc.
+  expect(await readTag(foe.x, foe.z)).not.toContain('from behind');
+
+  // Step to the tile directly opposite, across its body. Still adjacent to it
+  // the whole way, so nothing is provoked - but it puts us in its rear arc.
+  const bx = foe.x + (foe.x - pt.x);
+  const bz = foe.z + (foe.z - pt.z);
+  if (await page.evaluate(() => window.__combat.armed)) await clickWorld(page, bx, bz); // lower it first
+  expect(await clickWorld(page, bx, bz)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__game.playerTile),
+    { timeout: 30_000 }).toEqual({ x: bx, z: bz });
+
+  expect(await readTag(foe.x, foe.z)).toContain('from behind');
 });
 
 test('a shove does not provoke - forced movement is the safe disengage', async ({ page }) => {

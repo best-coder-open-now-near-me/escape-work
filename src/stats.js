@@ -54,6 +54,9 @@ export const HIT = {
   // hitChance, assembled per attacker/defender pair in tactics.js - never
   // stored on a unit, because each depends on where the OTHER one is standing.
   COVER_DODGE: 0.20,     // a solid edge shielding the defender from a RANGED attacker
+  FLANK_ACC_BONUS: 0.15, // a pincer: an ally on the exactly opposite side (MELEE)
+  BACKSTAB_ACC_BONUS: 0.20, // striking from behind the defender's logical facing
+  POSITION_CAP: 0.35,    // ceiling on the summed POSITIVE positional terms
 };
 
 export const ATTR_KEYS = ['grit', 'hustle', 'savvy', 'composure'];

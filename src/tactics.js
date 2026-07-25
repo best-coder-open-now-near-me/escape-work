@@ -101,11 +101,75 @@ export function hasCover(ax, az, dx, dz, edgeOpen) {
   return false;
 }
 
-// The signed positional term for one attack. Cover is DEFENDER-favouring, so
-// it is negative. Melee ignores it: a cubicle wall is no help once someone is
-// already swinging at you from the next tile (TACTICS_PLAN #3).
-export function positionMods(ax, az, dx, dz, edgeOpen) {
-  const ranged = cheb(ax, az, dx, dz) > 1;
-  const covered = ranged && hasCover(ax, az, dx, dz, edgeOpen);
-  return { positional: covered ? -HIT.COVER_DODGE : 0, covered };
+// --- flanking (TACTICS_PLAN M4) ---------------------------------------------
+
+// Is the defender at (dx, dz) caught in a pincer - the attacker on one side
+// and one of the attacker's allies on the EXACTLY opposite side?
+//
+// Strict opposition rather than a headcount (TACTICS_PLAN #7): a crowd bunched
+// on one flank is not a sandwich, and rewarding "stand next to each other"
+// would reward clumping, which is the opposite of the point. `allies` is any
+// list carrying x/z - the attacker's own side, attacker excluded.
+export function isFlanked(ax, az, dx, dz, allies) {
+  const sx = Math.sign(ax - dx);
+  const sz = Math.sign(az - dz);
+  if (sx === 0 && sz === 0) return false; // attacker standing on the defender
+  return (allies || []).some((a) =>
+    threatens(a.x, a.z, dx, dz)            // must be in its face, not lobbing from afar
+    && Math.sign(a.x - dx) === -sx
+    && Math.sign(a.z - dz) === -sz);
+}
+
+// --- backstab (TACTICS_PLAN M5) ---------------------------------------------
+
+// Is the attacker behind the defender's facing?
+//
+// `facing` is the defender's LOGICAL heading - a sign-vector {x, z} combat
+// writes at two well-defined moments (when the unit attacks, and when it
+// moves). Never the actor's visual yaw: that is an eased tween, usually
+// mid-interpolation and frame-rate dependent, and a damage-affecting rule
+// cannot hang off a cosmetic value (TACTICS_PLAN #5).
+//
+// A unit that has never acted has NO facing and is never backstabbed. That is
+// deliberate: a stale or invented heading would hand out a free bonus for
+// standing in the right spot at the start of a fight.
+export function isBackstab(ax, az, dx, dz, facing) {
+  if (!facing) return false;
+  const fx = Math.sign(facing.x || 0);
+  const fz = Math.sign(facing.z || 0);
+  if (fx === 0 && fz === 0) return false;
+  const sx = Math.sign(ax - dx);
+  const sz = Math.sign(az - dz);
+  if (sx === 0 && sz === 0) return false; // standing on them - no angle at all
+  return (sx * fx + sz * fz) < 0; // negative dot: the attacker is in the rear arc
+}
+
+// The signed positional term for one attack, and the flags the UI explains it
+// with. Cover is DEFENDER-favouring (negative); flanking and backstab are
+// attacker-favouring (positive) and share one cap.
+//
+// The two are deliberately complementary: cover is RANGED-only (a cubicle wall
+// is no help once someone is swinging at you from the next tile) and flanking
+// is MELEE-only (a pincer means bodies, not angles). Surprise is not capped
+// here - it rides the accuracy term in toHitTerms - but hitChance's CLAMP_HI
+// still bounds everything, so nothing becomes a guaranteed hit.
+export function positionMods(ax, az, dx, dz, opts = {}) {
+  const { edgeOpen = null, allies = [], facing = null } = opts;
+  const melee = cheb(ax, az, dx, dz) <= 1;
+  const covered = !melee && hasCover(ax, az, dx, dz, edgeOpen);
+  const flanked = melee && isFlanked(ax, az, dx, dz, allies);
+  // Backstab is range-agnostic: shooting someone in the back counts, which is
+  // also why it can coexist with the defender's cover - the cap and
+  // hitChance's CLAMP_HI keep the stack honest.
+  const behind = isBackstab(ax, az, dx, dz, facing);
+  const positive = Math.min(
+    HIT.POSITION_CAP,
+    (flanked ? HIT.FLANK_ACC_BONUS : 0) + (behind ? HIT.BACKSTAB_ACC_BONUS : 0),
+  );
+  return {
+    positional: positive - (covered ? HIT.COVER_DODGE : 0),
+    covered,
+    flanked,
+    behind,
+  };
 }

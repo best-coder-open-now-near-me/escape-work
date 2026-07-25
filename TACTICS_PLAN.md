@@ -169,12 +169,21 @@ One extension to the existing `HIT` constants block in `stats.js` — the same
 place `BASE`, `STEP`, `CLAMP_LO/HI` and `SURPRISE_ACC_BONUS` already live:
 
 ```
-COVER_DODGE:      0.20  // a solid edge between you and a ranged attacker
-FLANK_ACC_BONUS:  0.15  // a pincer: hostiles on opposite sides
+COVER_DODGE:        0.20  // a solid edge between you and a ranged attacker
+FLANK_ACC_BONUS:    0.15  // a pincer: hostiles on exactly opposite sides
 BACKSTAB_ACC_BONUS: 0.20  // struck from behind its facing
-POSITION_CAP:     0.35  // ceiling on the summed positive positional terms
-OA_REACTIONS:     1     // reactions per unit per round
+POSITION_CAP:       0.35  // ceiling on the summed positive positional terms
 ```
+
+*As landed:* the four hit-chance magnitudes live in `stats.HIT` beside `BASE`
+and the clamps. The reaction economy is not a to-hit number, so it lives with
+the rule that owns it — `tactics.TACTICS.REACTIONS_PER_ROUND` (= 1).
+
+One deviation from the sketch above: **surprise is not inside the cap.** It
+rides the accuracy term in `toHitTerms` (where `HIT_PLAN` put it), and folding
+it in would have churned the seam M1 had just proved behavior-neutral.
+`hitChance`'s `CLAMP_HI` still bounds the total, so nothing becomes a
+guaranteed hit.
 
 Numbers are first drafts, deliberately deferred to playtest like the other
 three plans. No new items, actions, statuses, or enemies are required — an
@@ -266,11 +275,41 @@ None. See decision #6.
    reuses `world.stepOpen` exactly as the shove's wall-slam does, so walls and
    closed doors grant cover too. The hover tag now says "— in cover", because
    a modifier the player can't see reads as randomness.
-4. **Flanking.** `tactics.isFlanked`, symmetric for both sides.
-5. **Backstab.** Logical `facing` + `tactics.isBackstab`. Last because it is
-   the only feature introducing new per-unit state.
+4. **Flanking.** ✅ Landed. `tactics.isFlanked` — a true pincer (an ally on the
+   *exactly* opposite side), melee-only, symmetric for both sides. Cover and
+   flanking end up cleanly complementary: cover is ranged-only, flanking
+   melee-only, so no single attack can claim both. `positionMods` grew an
+   options object (`{ edgeOpen, allies, facing }`) here.
+5. **Backstab.** ✅ Landed. A transient logical `facing` per combatant, written
+   at exactly two moments — when a unit **attacks** (it faces its target) and
+   when it **moves** (it faces its heading) — plus `tactics.isBackstab`, a
+   negative-dot-product rear-arc test. Range-agnostic (shooting someone in the
+   back counts), so it can coexist with the defender's cover; the shared
+   `POSITION_CAP` and `hitChance`'s `CLAMP_HI` keep the stack honest. A unit
+   that has never acted has no facing and cannot be backstabbed — the honest
+   resolution of the open question, and one that can't be gamed.
 
 Milestones 1 and 2 are independent and may be swapped; 3–5 all depend on 1.
+
+### Verification as landed
+
+- **Unit:** 193 passing, of which ~40 are `tests/unit/tactics.test.js` —
+  assembler arithmetic, threat/provoke set-diffing, cover geometry (orthogonal,
+  diagonal, far-side, corner, missing-edge-test), the pincer (including the
+  "crowd on one flank is not a sandwich" case), and every backstab arc
+  boundary.
+- **e2e:** `tests/e2e/tactics.spec.js` — an opportunity attack fires on
+  disengage, *circling* fires nothing, a shove fires nothing, a partition
+  costs a ranged attacker exactly `COVER_DODGE` (with the tag reading "in
+  cover"), and stepping across a foe that has committed its facing reads
+  "from behind".
+- **Regression:** the full 14-spec suite passed unchanged after M1 (48/48) and
+  again after M5.
+- **Not covered by e2e:** flanking. Getting a party member positioned exactly
+  opposite a foe needs a multi-step recruit dialogue and companions follow the
+  leader rather than taking orders, so a browser test would be flaky for
+  little gain — the geometry has direct unit coverage and rides the same
+  `attackMods` wiring cover already proves in-browser.
 
 ## Testing
 
