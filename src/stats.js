@@ -147,7 +147,14 @@ export function createSheetFrom(block, extra = {}) {
   const maxHp = block.maxHp ?? block.hp;
   const base = baseFrom(maxHp, block.ap, attr); // reproduces the block's maxHp/ap
   const sheet = {
-    className: block.name,
+    // The JOB, and then the PERSON. A block built from a class (fromClass -
+    // companions, and enemies that are a class) carries `classId`, so the job
+    // is the class's own label; the person keeps their own name. Without that
+    // split both fields read the same string and a companion's sheet announced
+    // "Nervous IT Intern - Nervous IT Intern", listing a person as their own
+    // profession. A picked class has no `classId` on the block itself (it IS
+    // the class), so the player still gets the class label for both.
+    className: (block.classId && CLASSES[block.classId]?.name) || block.name,
     name: block.name, // display name - the class label, or the companion's own
     model: block.model,
     hp: maxHp,

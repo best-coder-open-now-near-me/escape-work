@@ -7,6 +7,7 @@ import {
 } from '../../src/party.js';
 import { createSheet, spendClassPoint, damageBonus, PROGRESSION, EQUIP_SLOTS } from '../../src/stats.js';
 import { COMPANIONS } from '../../src/data/companions.js';
+import { CLASSES } from '../../src/data/classes.js';
 
 test('createParty starts with the leader as its only member', () => {
   const sheet = createSheet('office-drone');
@@ -173,6 +174,26 @@ test('createCompanionSheet joins at the given level, fully rested, points banked
   assert.equal(s.classPoints, 2 * PROGRESSION.CP_PER_LEVEL);
   assert.equal(s.hp, s.maxHp);
   assert.equal(s.classId, undefined); // a companion is not a picked class
+});
+
+test('a companion sheet names the PERSON and labels them with their CLASS', () => {
+  // These are two different strings and used to be the same one, so a
+  // companion's sheet read "Nervous IT Intern - Nervous IT Intern", listing a
+  // person as their own profession. `name` is who they are; `className` is the
+  // job, resolved through the classId they inherit from (data/classes.js).
+  const s = createCompanionSheet(COMPANIONS['it-intern'], 'it-intern', 1);
+  assert.equal(s.name, 'Nervous IT Intern');
+  assert.equal(s.className, 'IT Support');
+  const v = createCompanionSheet(COMPANIONS['mail-veteran'], 'mail-veteran', 1);
+  assert.equal(v.name, 'Mail Room Veteran');
+  assert.equal(v.className, 'Mail Room');
+  // The class the veteran inherits is the one the sheet reports, so the label
+  // follows the class instead of drifting from it.
+  assert.equal(v.className, CLASSES[COMPANIONS['mail-veteran'].classId].name);
+  // A PICKED class is its own job - both fields stay the class label.
+  const p = createSheet('it-support');
+  assert.equal(p.name, 'IT Support');
+  assert.equal(p.className, 'IT Support');
 });
 
 test('every companion recruit option leads to a real node', () => {
