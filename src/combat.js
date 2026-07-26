@@ -442,7 +442,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const REACH_RING = new pc.Color(0.55, 0.62, 0.78);
   let preview = null; // { reach: [[x,z],...], tail: [[x,z],...] | null }
   let aimPoint = null; // hover point while a cone attack is armed
-  let hoverPoint = null; // last world point under the cursor (null once it leaves)
+  // The enemy the cursor is on as of the last hover event - the body pick when
+  // main.js has one, else the ground-point fallback (enemyAtPoint). This is
+  // the ONE answer to "am I aiming at someone?": the crosshair cursor, the
+  // to-hit readout and the reach ring all read it, because computing it per
+  // consumer is what let the crosshair promise a swing the readout denied.
+  // Tracked even on gated frames (mid-move, AI turn) so the reach ring keeps
+  // drawing while a walk finishes.
+  let hoverFoe = null;
   let hoverHitChance = null; // to-hit chance shown for the enemy under an armed cursor
 
   function hidePreview() {
@@ -451,12 +458,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     costTag.style.display = 'none';
   }
 
-  // The live enemy under a hover point, if any (within a tile's reach of it).
+  // The live enemy near a ground point, if any - the fallback for pick rays
+  // that miss the body mesh. Measured against the BODY's continuous position,
+  // not the derived x/z tile: a body rests wherever its last walk clamped it
+  // (approach points, budget truncation), and at this camera pitch the ground
+  // point under a body pixel already lands ~0.7 tiles of parallax past the
+  // feet - measuring the tile centre on top of that blanked the readout while
+  // the cursor sat plainly on a coworker.
   function enemyAtPoint(point) {
     let best = null;
     for (const en of world.liveEnemies()) {
       if (!en.entity) continue;
-      const d = Math.hypot(en.x - point.x, en.z - point.z);
+      const pos = en.entity.getPosition();
+      const d = Math.hypot(pos.x - point.x, pos.z - point.z);
       if (d < 0.7 && (!best || d < best.d)) best = { en, d };
     }
     return best?.en || null;
@@ -466,7 +480,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // for the enemy under the cursor - the rings show range/validity, this shows
   // the odds (DOS2's most load-bearing bit of UI). A cone's wedge is its own
   // feedback and a shove auto-hits, so neither shows a percentage.
-  function showHitPreview(point, sx, sy) {
+  function showHitPreview(en, sx, sy) {
     hoverHitChance = null;
     // The readout REPLACES the movement trail. Clearing it here rather than at
     // the call sites is what makes that true: `preview` is redrawn every frame,
@@ -474,9 +488,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // hanging off the character while they were plainly aiming at someone.
     preview = null;
     const a = ACTIONS[previewAction()];
-    if (!a || a.type !== 'attack' || a.cone) { costTag.style.display = 'none'; return; }
-    const en = enemyAtPoint(point);
-    if (!en) { costTag.style.display = 'none'; return; }
+    if (!a || a.type !== 'attack' || a.cone || !en) { costTag.style.display = 'none'; return; }
     // The same terms the swing will roll - not a second copy of the math. The
     // reason string matters: a positional modifier the player can't see reads
     // as randomness (TACTICS_PLAN, ui.js note).
@@ -506,27 +518,37 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     costTag.style.display = 'block';
   }
 
-  function handleHover(point, sx, sy) {
+  // Resolve the hover and return the enemy a click would swing at RIGHT NOW,
+  // or null. main.js keys the crosshair cursor off the return value, so the
+  // cursor, the to-hit readout and the click all run the same resolution AND
+  // the same gate (handleEnemyClick's: your turn, standing still) - the cursor
+  // used to read its own ungated body pick, promising a swing mid-walk or on
+  // an AI turn that the readout and the click both refused.
+  function handleHover(point, sx, sy, picked = null) {
     // While aiming, target rings replace the movement trail entirely. Cone
     // attacks and summon placement additionally track the cursor - the wedge
     // (or the drop zone) follows it.
     if (armed && (ACTIONS[armed].cone || ACTIONS[armed].type === 'summon')) aimPoint = point;
-    // Tracked unconditionally, before any early return: the reach ring reads it
-    // every frame, so it has to stay honest even on the frames where there's no
-    // preview to show (mid-move, or the cursor off the world entirely).
-    hoverPoint = point || null;
-    if (phase !== 'player' || active.actor.moving || !point) { hidePreview(); return; }
+    // Who is the cursor on? The body pick wins - it sees what the pixel shows.
+    // The ground point is only a fallback for rays that miss the mesh, and a
+    // pick can land on a body whose ground ray misses the world entirely (a
+    // chest pixel next to a wall), so the pick must not require a point.
+    hoverFoe = (picked?.alive ? picked : null) || (point ? enemyAtPoint(point) : null);
+    if (phase !== 'player' || active.actor.moving || (!point && !hoverFoe)) { hidePreview(); return null; }
     // Armed: the movement trail yields to the to-hit readout over a target.
     if (armed) {
-      if (ACTIONS[armed].type === 'summon') { showSummonPreview(point, sx, sy); return; }
-      showHitPreview(point, sx, sy);
-      return;
+      if (ACTIONS[armed].type === 'summon') {
+        if (point) showSummonPreview(point, sx, sy); else hidePreview();
+        return hoverFoe;
+      }
+      showHitPreview(hoverFoe, sx, sy);
+      return hoverFoe;
     }
     // Nothing armed, but a coworker under the cursor is still a target - the
     // click swings by default, so preview the odds rather than falling through
     // to a movement route (their tile isn't walkable, so that showed nothing at
     // all, which read as "a click here does nothing").
-    if (enemyAtPoint(point)) { showHitPreview(point, sx, sy); return; }
+    if (hoverFoe) { showHitPreview(hoverFoe, sx, sy); return hoverFoe; }
     const tx = Math.round(point.x);
     const tz = Math.round(point.z);
     if (!world.isWalkable(tx, tz)) { hidePreview(); return; } // enemies/walls: no route preview
@@ -673,10 +695,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // the shape, and without any affordance a long weapon is an invisible
     // statistic - the player would feel the extra tile without being told why.
     // Drawn on the ACTOR's continuous position, which is what the rule measures,
-    // and ONLY while a coworker is under the cursor: it's the answer to "can I
-    // hit them from here?", which is a question you only ask while aiming at
-    // someone. Always-on, it was just a circle that followed you around.
-    if (hoverPoint && enemyAtPoint(hoverPoint)) {
+    // and ONLY while a coworker is under the cursor - the same hoverFoe the
+    // crosshair and the readout key off, so the three affordances can't
+    // disagree about whether you're aiming at someone. It's the answer to "can
+    // I hit them from here?", a question you only ask while aiming; always-on,
+    // it was just a circle that followed you around.
+    if (hoverFoe?.alive) {
       const me = posOf(active);
       drawRing(me.x, me.z, a.type === 'shove' ? REACH.SHOVE : reachOfUnit(active), REACH_RING);
     }
@@ -1986,6 +2010,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     handleTileClick,
     handleEnemyClick,
     handleHover,
+    // The hover's ground fallback, exported so main.js's combat click runs the
+    // SAME near-a-body test the crosshair just ran - an exact-tile match there
+    // was a third authority, and it routed clicks into a walk on points where
+    // the cursor was promising a swing.
+    enemyAtPoint,
     notifyMemberDown,
     // The body whose turn it is - a party member OR a summon you're driving.
     // main.js needs this because party.active can't point at a summon.
