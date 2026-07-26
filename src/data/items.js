@@ -116,6 +116,10 @@ export const ITEMS = {
     slot: 'weapon',
     stats: { reach: 0.7, acc: -0.05 },
     attack: 'grabber-swipe',
+    // Priced like the letter opener: the two weapons that buy something other
+    // than raw damage. Without a value the economy merge left it unfenceable -
+    // the one weapon no merchant would touch.
+    value: 14,
     examine: 'Facilities uses it for litter and high shelves. Telescopes to a metre and a bit.',
   },
   'company-fleece': {
