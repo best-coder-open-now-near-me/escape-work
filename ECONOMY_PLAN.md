@@ -427,10 +427,18 @@ full existing e2e suite re-run for regressions.
 - **e2e** (`tests/e2e/economy.spec.js`, 4 tests): a dropped fiver picked up
   through a real ground click banks itself and leaves the bag empty; a real
   click on the machine's body opens it, and buying moves cash, stock and
-  pockets together; the machine can be bought dry, says SOLD OUT, and still
-  labels itself as spent in the Alt overlay; and on Floor 2 the Veteran's
+  pockets together; an emptied machine says SOLD OUT and still labels itself
+  spent in the Alt overlay; and on Floor 2 the Veteran's
   dialogue opens the cart, closes the conversation, and buys a toner cartridge
   at exactly the marked-down price.
+  - **On draining the machine:** that test buys nothing. It used to clear the
+    stock with a real click per item, which cost the entire 300s test budget on
+    CI - ~9 purchases, each rebuilding the panel under software GL - to
+    re-prove coverage that already exists twice: the UI buy path is the test
+    before it, and `shop.test.js` pins "buying the last one empties the row,
+    and the row refuses after" with real atomicity assertions. The e2e's job is
+    the STATE a cleaned-out machine presents, so it drains in one step
+    (`__god.emptyShop`, a god-mode mutator in its own right) and asserts that.
 - **Regression:** the full e2e suite re-run unchanged. Cash is additive state
   nothing else reads - a character who never finds a dollar plays exactly the
   game they played yesterday.

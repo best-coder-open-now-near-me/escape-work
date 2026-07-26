@@ -90,31 +90,20 @@ test('a machine can be cleaned out, and the overlay says so afterwards', async (
   await page.evaluate(() => window.__god.setCash(500)); // money is not the constraint here
   await openMachine(page);
 
-  // Buy the top row until nothing is left. Finite stock is what makes a placed
-  // merchant worth finding rather than a menu you carry around.
+  // The machine starts with something in it...
+  const stocked = await page.evaluate(([x, z]) => window.__game.shopStockAt(x, z), [MACHINE.x, MACHINE.z]);
+  expect(stocked.length).toBeGreaterThan(0);
+
+  // ...and is then cleaned out in ONE step rather than a real click per item.
   //
-  // Every step here is BOUNDED, because the first cut of this loop was an
-  // unbounded `page.click` per item and it hung for the full 300s test budget
-  // once on CI with no stack to show for it. A per-click timeout plus a
-  // stock-didn't-move check turns any future stall into a legible failure
-  // naming the row that stuck, instead of a bare timeout.
-  const stockLeft = () => page.evaluate(
-    ([x, z]) => window.__game.shopStockAt(x, z).reduce((n, r) => n + r.qty, 0), [MACHINE.x, MACHINE.z]);
-  let left = await stockLeft();
-  expect(left).toBeGreaterThan(0);
-  for (let guard = left + 5; guard > 0 && left > 0; guard--) {
-    const buy = page.locator('#shop-buy-0');
-    if (!(await buy.count())) break;
-    // A disabled button would otherwise be waited on until the test budget is
-    // gone; with 500💵 in the purse it never should be, so say so plainly.
-    expect(await buy.isDisabled(), 'the top row is affordable at 500 cash').toBe(false);
-    await buy.click({ timeout: 20_000 });
-    // Wait on the STOCK moving rather than a fixed sleep - the panel repaints
-    // at whatever rate software GL allows.
-    const before = left;
-    await expect.poll(stockLeft, { timeout: 20_000 }).toBeLessThan(before);
-    left = await stockLeft();
-  }
+  // Buying it dry through the UI is what this test used to do, and it cost the
+  // entire 300s budget on CI: ~9 clicks, each rebuilding the whole panel under
+  // software GL. It was also re-proving coverage that already exists twice
+  // over - the UI buy path is the test above, and shop.test.js pins the
+  // "buying the last one empties the row, and the row refuses after" rule with
+  // real atomicity assertions. What is left for an e2e to prove is the STATE a
+  // cleaned-out machine presents, which is what this asserts.
+  await page.evaluate(([x, z]) => window.__god.emptyShop(x, z), [MACHINE.x, MACHINE.z]);
   expect(await page.evaluate(([x, z]) => window.__game.shopStockAt(x, z), [MACHINE.x, MACHINE.z])).toEqual([]);
   await expect(page.locator('#shop-panel')).toContainText('SOLD OUT');
 

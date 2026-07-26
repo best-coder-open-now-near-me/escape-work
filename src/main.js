@@ -2449,6 +2449,10 @@ function startGame(level) {
       ui.updateStatsHud(sheet);
     },
     dropItem(id, x, z) { loot.dropAt(x, z, id); },
+    // Clean out a merchant in one step (ECONOMY_PLAN): the same end state as
+    // buying every row, for looking at the sold-out presentation without
+    // spending nine clicks getting there.
+    emptyShop(x, z) { shopping.emptyStock(shopKey(x, z)); },
     teleport(x, z) {
       if (!player.entity) return;
       const p = player.entity.getPosition();

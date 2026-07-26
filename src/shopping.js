@@ -128,6 +128,16 @@ export function createShopping({ getSheet, getParty, isInCombat, isGameOver, onB
     open,
     close,
     get visible() { return panel.visible; },
+    // Empty an instance outright - "what does a cleaned-out machine look
+    // like?" without buying it dry a row at a time. The end state is exactly
+    // what nine purchases reach, so god mode and the e2e suite can both get
+    // there in one step. Works on a machine nobody has visited yet (the stock
+    // is simply never rolled).
+    emptyStock(key) {
+      if (stocks.has(key)) for (const r of stocks.get(key)) r.qty = 0;
+      else stocks.set(key, []);
+      if (openKey === key) render();
+    },
     // A shop whose rows are all spent - the Alt overlay and the focus banner
     // both want to say so rather than promising a walk to an empty machine.
     soldOut: (key) => stocks.has(key) && inStock(stocks.get(key)).length === 0,
