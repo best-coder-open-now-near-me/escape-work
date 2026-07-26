@@ -163,14 +163,19 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   look absent, because nothing on screen said a click would land.
   **Hold Ctrl or Alt to glow what you're hovering** (`shading.addHighlight`) -
   a Divinity-style aura of stacked back-face shells at growing push and falling
-  opacity, drawn additively so it reads as light rather than paint. The glow is
-  an INSPECT verb, gated behind the two keys that already mean "show me what's
-  there" (Ctrl's ground rings, Alt's loot labels); lit on plain hover it fired
-  on every door and desk the cursor crossed, and a light that is always on says
-  nothing. What the cursor is over is tracked ALWAYS (`hoverTarget`) and the
-  modifier only decides whether it's lit, so pressing the key lights what you
-  are already pointing at instead of waiting for a fresh hover event. The
-  cursor and the focus banner stay ungated - they cost no attention.
+  opacity, drawn additively so it reads as light rather than paint. OUT of
+  combat the glow is an INSPECT verb, gated behind the two keys that already
+  mean "show me what's there" (Ctrl's ground rings, Alt's loot labels); lit on
+  plain hover it fired on every door and desk the cursor crossed, and a light
+  that is always on says nothing. IN combat it is ungated: the cursor there is
+  only ever aiming, and combat's hover path hands the tracker characters and
+  nothing else, so the glow can't spill onto scenery - making the player hold a
+  key to see who they are about to swing at asked for the modifier in the one
+  half of the game where the answer is always wanted. What the cursor is over is
+  tracked ALWAYS (`hoverTarget`) and the gate only decides whether it's lit, so
+  pressing the key lights what you are already pointing at instead of waiting
+  for a fresh hover event. The cursor and the focus banner stay ungated - they
+  cost no attention.
 - **Attacks are available outside combat via the persistent hotbar.** The
   offensive slice of the sheet's actions (attacks, shove, throws) lives on an
   always-on bar (`ui.createHotbar`, ids `#hotbar-act-<id>` so they never

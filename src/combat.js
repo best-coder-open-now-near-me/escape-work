@@ -409,10 +409,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const PREVIEW_OK = new pc.Color(0.42, 0.78, 0.35);
   const PREVIEW_FAR = new pc.Color(0.85, 0.28, 0.24);
   // The reach ring: dim and cool, so it reads as information about YOU rather
-  // than a judgement about a target (TACTICS_PLAN revision M5).
+  // than a judgement about a target (TACTICS_PLAN revision M5). Drawn only
+  // while the cursor is actually over a coworker - "can I swing at THEM from
+  // here?" is a question you ask about a target, and burning it into every
+  // frame of your turn turned the answer into wallpaper nobody read.
   const REACH_RING = new pc.Color(0.55, 0.62, 0.78);
   let preview = null; // { reach: [[x,z],...], tail: [[x,z],...] | null }
   let aimPoint = null; // hover point while a cone attack is armed
+  let hoverPoint = null; // last world point under the cursor (null once it leaves)
   let hoverHitChance = null; // to-hit chance shown for the enemy under an armed cursor
 
   function hidePreview() {
@@ -475,6 +479,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // attacks and summon placement additionally track the cursor - the wedge
     // (or the drop zone) follows it.
     if (armed && (ACTIONS[armed].cone || ACTIONS[armed].type === 'summon')) aimPoint = point;
+    // Tracked unconditionally, before any early return: the reach ring reads it
+    // every frame, so it has to stay honest even on the frames where there's no
+    // preview to show (mid-move, or the cursor off the world entirely).
+    hoverPoint = point || null;
     if (phase !== 'player' || active.actor.moving || !point) { hidePreview(); return; }
     // Armed: the movement trail yields to the to-hit readout over a target.
     if (armed) {
@@ -632,8 +640,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Highlighting whole tiles would draw a plus-with-corners that lies about
     // the shape, and without any affordance a long weapon is an invisible
     // statistic - the player would feel the extra tile without being told why.
-    // Drawn on the ACTOR's continuous position, which is what the rule measures.
-    {
+    // Drawn on the ACTOR's continuous position, which is what the rule measures,
+    // and ONLY while a coworker is under the cursor: it's the answer to "can I
+    // hit them from here?", which is a question you only ask while aiming at
+    // someone. Always-on, it was just a circle that followed you around.
+    if (hoverPoint && enemyAtPoint(hoverPoint)) {
       const me = posOf(active);
       drawRing(me.x, me.z, a.type === 'shove' ? REACH.SHOVE : reachOfUnit(active), REACH_RING);
     }

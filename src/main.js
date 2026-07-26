@@ -929,25 +929,33 @@ function startGame(level) {
   const clearHoverHighlight = () => setHoverHighlight(null, null);
   const setCursor = (c) => { if (canvasEl) canvasEl.style.cursor = c || ''; };
 
-  // The body glow is an INSPECT verb, not an ambient one: held behind Ctrl or
-  // Alt, the two keys that already mean "show me what's there" (rings under
-  // every character, labels over every lootable). Lit on plain hover it fired
-  // on everything the cursor crossed - doors, desks, bystanders - and a light
-  // that is always on stops meaning anything.
+  // OUT of combat the body glow is an INSPECT verb, not an ambient one: held
+  // behind Ctrl or Alt, the two keys that already mean "show me what's there"
+  // (rings under every character, labels over every lootable). Lit on plain
+  // hover it fired on everything the cursor crossed - doors, desks, bystanders
+  // - and a light that is always on stops meaning anything.
   //
-  // What the cursor is over is tracked ALWAYS (`hoverTarget`), and the modifier
+  // IN combat it's ungated. There the cursor is only ever aiming, and the hover
+  // path (onHover) hands us characters and nothing else, so the glow can't
+  // spill onto scenery the way it does out of combat. Making the player hold a
+  // key to see who they're about to swing at was asking for the modifier in the
+  // one half of the game where the answer is always wanted.
+  //
+  // What the cursor is over is tracked ALWAYS (`hoverTarget`), and the gate
   // only decides whether it's lit. That's what lets pressing the key light up
   // what you're already pointing at, instead of nothing happening until you
   // jiggle the mouse to provoke a fresh hover event.
   let hoverTarget = null; // { entity, rgb } under the cursor, lit or not
   const glowHeld = () => ctrlHeld || altHeld;
+  const glowLit = () => glowHeld() || (inCombat && !!combat);
   function applyHoverGlow() {
-    if (glowHeld() && hoverTarget) setHoverHighlight(hoverTarget.entity, hoverTarget.rgb);
+    if (glowLit() && hoverTarget) setHoverHighlight(hoverTarget.entity, hoverTarget.rgb);
     else clearHoverHighlight();
   }
-  // Remember what's under the cursor and light it if a modifier is down.
+  // Remember what's under the cursor and light it if the glow is active.
+  // The hit rides along so the reach ring can ask what KIND of thing this is.
   function trackHoverGlow(hit) {
-    hoverTarget = hit?.entity ? { entity: hit.entity, rgb: colorForHit(hit) } : null;
+    hoverTarget = hit?.entity ? { entity: hit.entity, rgb: colorForHit(hit), hit } : null;
     applyHoverGlow();
   }
 
@@ -1009,6 +1017,19 @@ function startGame(level) {
       const pos = en.entity.getPosition();
       drawRing(pos.x, pos.z, 0.5, oocTargetOk(armedOoc, en) ? RING_OK : RING_FAR);
     }
+  }
+
+  // The reach ring, out of combat: the same dim, cool circle combat draws, on
+  // the same terms - it says how far YOU can swing, so it belongs over a
+  // coworker and nowhere else. Behind the inspect modifier, alongside the hover
+  // aura it accompanies, because out here nothing is aiming by default.
+  const REACH_RING = new pc.Color(0.55, 0.62, 0.78);
+  function drawOocReachRing() {
+    const hit = hoverTarget?.hit;
+    if (!hit || hit.kind !== 'enemy' || !hit.ref.alive) return;
+    const p = player.entity?.getPosition();
+    if (!p) return;
+    drawRing(p.x, p.z, reachOf(sheet), REACH_RING);
   }
 
   // Hold Ctrl: a ground ring under EVERY character at their true position -
@@ -2153,6 +2174,9 @@ function startGame(level) {
     // Ctrl rings redraw each frame while held (immediate-mode lines last one
     // frame) - in and out of combat alike.
     if (ctrlHeld && sheet && !gameOver) drawCharacterRings();
+    // Same deal for the out-of-combat reach ring: immediate-mode, so it has to
+    // be reissued every frame it's meant to be visible.
+    if (glowHeld() && sheet && !inCombat && !gameOver && !modalOpen()) drawOocReachRing();
     // Party bar: redraw only when the roster state changes (names/HP/active,
     // plus per-member AP mid-fight); visible only once there's an actual
     // party to show.
@@ -2374,9 +2398,9 @@ function startGame(level) {
     get armed() { return armedOoc; },
     get hoverKind() { return hoverKind; },
     get ctrlHeld() { return ctrlHeld; },
-    // Is the hover body-glow actually LIT right now? (tracked target + a held
-    // modifier - the two halves the gate is made of)
-    get hoverGlow() { return !!(glowHeld() && hoverTarget); },
+    // Is the hover body-glow actually LIT right now? (a tracked target, plus
+    // either a held modifier or being in combat - the two halves of the gate)
+    get hoverGlow() { return !!(glowLit() && hoverTarget); },
     get cursor() { return canvasEl ? canvasEl.style.cursor : ''; },
     get dialogueOpen() { return dialogue.visible; },
   };

@@ -55,6 +55,14 @@ test('hovering a coworker shows the attack cursor and enemy highlight', async ({
     return page.evaluate(() => window.__game.hoverKind);
   }, { timeout: 20_000 }).toBe('enemy');
   expect(await page.evaluate(() => window.__game.cursor)).toBe('crosshair');
+  // Out of combat the body glow stays an INSPECT verb: dark until Ctrl (or
+  // Alt) is held, and lit the moment it is, without needing a fresh mouse
+  // move. Combat ungates it - see the in-combat click test below.
+  expect(await page.evaluate(() => window.__game.hoverGlow)).toBe(false);
+  await page.keyboard.down('Alt');
+  expect(await page.evaluate(() => window.__game.hoverGlow)).toBe(true);
+  await page.keyboard.up('Alt');
+  expect(await page.evaluate(() => window.__game.hoverGlow)).toBe(false);
 });
 
 test('the persistent hotbar shows attacks and arming targets a coworker', async ({ page }) => {
@@ -209,13 +217,16 @@ test('clicking a coworker in combat attacks with the basic swing - no action arm
   expect(chance).toBeGreaterThan(0); // the odds of the swing a click would make
   // The cursor is on a coworker, so the glow has a target...
   expect(await page.evaluate(() => window.__game.hoverKind)).toBe('enemy');
-  // ...but the body glow is an INSPECT verb: dark until Ctrl (or Alt) is held,
-  // and lit the moment it is, without needing a fresh mouse move.
-  expect(await page.evaluate(() => window.__game.hoverGlow)).toBe(false);
+  // ...and IN COMBAT that target is lit with no modifier at all: the cursor is
+  // only ever aiming here, so who you're about to swing at is never a question
+  // worth holding a key for. (Out of combat the same glow stays behind Ctrl or
+  // Alt - asserted in the coworker-hover test above.)
+  expect(await page.evaluate(() => window.__game.hoverGlow)).toBe(true);
+  // Holding and releasing Ctrl doesn't take it away.
   await page.keyboard.down('Control');
   expect(await page.evaluate(() => window.__game.hoverGlow)).toBe(true);
   await page.keyboard.up('Control');
-  expect(await page.evaluate(() => window.__game.hoverGlow)).toBe(false);
+  expect(await page.evaluate(() => window.__game.hoverGlow)).toBe(true);
   // ...and hovering it did NOT quietly arm anything - the default stays implicit.
   expect(await page.evaluate(() => window.__combat.armed)).toBe(null);
 

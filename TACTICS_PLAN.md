@@ -252,6 +252,13 @@ when its path leaves the threatener's reach circle. Two notes:
      whole tiles would draw a plus-with-corners that lies about the shape.
      `drawTargets` rings the active member at their own reach, on the actor's
      continuous position. Without it a long weapon is an invisible statistic.
+   - **It is a HOVER affordance, not an ambient one.** The circle answers "can I
+     hit *them* from here?", so it is drawn only while a coworker is under the
+     cursor - in combat whenever `handleHover`'s last point resolves to an
+     enemy, out of combat behind the same Ctrl/Alt inspect modifier that lights
+     the hover aura (`drawOocReachRing`). Painted into every frame of your turn
+     it was a circle that followed you around, which is wallpaper, not
+     information.
    - **Difficulty note:** every other enemy defaults to `REACH.DEFAULT`, so the
      bestiary's effective reach is slightly SHORTER than under the tile rule.
      Intended, but it is a quiet across-the-board easing, and the guard's 2.1 is
