@@ -17,9 +17,13 @@
 //   slot       - equippable slot: 'weapon' | 'outfit' | 'trinket'. Equipping
 //                moves the item out of the bag into sheet.equipped[slot].
 //   stats      - equipped bonuses folded into derived numbers (stats.js
-//                equippedStats): dmg, soak, maxHp, maxAp, acc, dodge,
+//                equippedStats): dmg, soak, maxHp, maxAp, acc, dodge, reach,
 //                slipProof, moveCost, attrBonus:{grit,hustle,savvy,composure}
 //                moveCost multiplies the AP a tile costs - under 1 is faster
+//                reach ADDS tile-units to REACH.DEFAULT (a long handle). Keep
+//                it positive: below 1.41 a weapon can't hit a diagonally
+//                adjacent target and reads as broken, so shortness is
+//                expressed through dmg/acc instead (TACTICS_PLAN revision).
 //   attack     - (weapons) the basic-swing action id this weapon grants
 //                (data/actions.js), read by stats.equippedAction
 //   examine    - flavor line (items with no use are pure office archaeology)
@@ -98,6 +102,21 @@ export const ITEMS = {
     attack: 'letter-opener-stab',
     value: 14,
     examine: 'Technically for envelopes. Technically.',
+  },
+  // --- reach content (TACTICS_PLAN revision, M5) ------------------------------
+  // The first weapon whose point is WHERE it hits from rather than how hard.
+  // reach 0.7 takes it to 2.2 tile-units, which clears a full orthogonal tile
+  // (2.0) - so you can swing from outside a bare-handed reply, and you zone a
+  // wider ring for opportunity attacks. Paid for on both other axes: no damage
+  // bonus at all, and a penalty to accuracy, because a metre of aluminium
+  // between your hand and the business end is not precision equipment.
+  'reach-grabber': {
+    name: 'Reach Extender',
+    icon: '🦯',
+    slot: 'weapon',
+    stats: { reach: 0.7, acc: -0.05 },
+    attack: 'grabber-swipe',
+    examine: 'Facilities uses it for litter and high shelves. Telescopes to a metre and a bit.',
   },
   'company-fleece': {
     name: 'Company Fleece',
@@ -260,6 +279,7 @@ export const LOOT_TABLES = {
     { item: 'warehouse-boots', chance: 0.2 },
     { item: 'running-shoes', chance: 0.18 },
     { item: 'usb-stick', chance: 0.15 },
+    { item: 'reach-grabber', chance: 0.15 }, // the litter picker, left by the bins
   ],
   printer: [
     { item: 'toner-cartridge', chance: 1 },

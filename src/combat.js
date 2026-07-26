@@ -11,9 +11,9 @@
 import { ACTIONS } from './data/actions.js';
 import { SURFACES, GUM } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
-import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, MOVE } from './stats.js';
-import { applyStatus, hasStatus, statusFx, tickTurn, clearStatuses, removeStatus, statusList } from './statuses.js';
-import { toHitTerms, provokedBy, positionMods, TACTICS } from './tactics.js';
+import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, reachOf, MOVE, REACH } from './stats.js';
+import { applyStatus, hasStatus, statusFx, tickTurn, clearStatuses, removeStatus, statusList, blockedBy } from './statuses.js';
+import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { buildInitiativeOrder, rollInitiative, insertionIndex } from './initiative.js';
@@ -34,6 +34,16 @@ const appliesLine = (src, name) => {
   if (src.appliesLog) return src.appliesLog;
   const def = STATUSES[src.applies];
   return def?.log ? def.log.replace('{name}', name) : `${def?.name || 'A status'} sets in.`;
+};
+
+// The counterpart for a status TURNED AWAY by a live anti-chain window
+// (statuses.js). The bound is only fair if the player can watch it work - on
+// their target and on themselves alike - so a stun that doesn't land says why
+// instead of silently doing nothing. `id` is the blocking window's id, from
+// blockedBy.
+const immunityLine = (id, name) => {
+  const def = STATUSES[id];
+  return def?.log ? def.log.replace('{name}', name) : `${def?.name || 'An immunity'} holds.`;
 };
 
 export function startCombat({ app, party, engaged, world, fx, callbacks, opening = null, allies = [], rng = Math.random }) {
@@ -64,11 +74,38 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // The AI enemies hunt the whole player side - members and summons alike, all
   // members now. A target wraps { actor, member }; combat reads `member` to take
   // the hit on its sheet (deflect, gum, the downed rules).
+  // The route to a tile the unit could stand on and swing from: the shortest
+  // path to any of the target's eight neighbours, or null if none is reachable.
+  // Shared by pickTarget and aiAdvance so the two can never disagree about who
+  // is engageable - if the target picker says yes, the mover must find a route.
+  function standTilePath(unit, target) {
+    let best = null;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const tx = target.actor.x + dx;
+      const tz = target.actor.z + dz;
+      if (!world.isWalkable(tx, tz) && !(unit.x === tx && unit.z === tz)) continue;
+      const p = world.findEnemyPath(unit.x, unit.z, tx, tz);
+      if (p && p.length > 1 && (!best || p.length < best.length)) best = p;
+    }
+    return best;
+  }
+
+  // Nearest living member - but ENGAGEABLE first. Once a partition blocks a
+  // swing (M3), the closest member by distance can be one the unit can neither
+  // reach nor walk to: on the far side of a cubicle wall with the way round
+  // sealed. Targeting them means walking to the wall and swinging at nothing,
+  // every turn, forever. So a member the unit can actually fight outranks a
+  // nearer one it cannot, and distance only breaks ties within each group.
   function pickTarget(unit) {
     let best = null;
     for (const m of livingMembers()) {
       const d = cheb(unit.x, unit.z, m.actor.x, m.actor.z);
-      if (!best || d < best.d || (d === best.d && m.sheet.hp < best.m.sheet.hp)) best = { m, d };
+      const engageable = canReach(unit, m) || !!standTilePath(unit, m);
+      const better = !best
+        || (engageable && !best.engageable)
+        || (engageable === best.engageable
+          && (d < best.d || (d === best.d && m.sheet.hp < best.m.sheet.hp)));
+      if (better) best = { m, d, engageable };
     }
     return best ? { actor: best.m.actor, member: best.m } : null;
   }
@@ -151,6 +188,58 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const statusesOf = (u) => u.sheet || u;
   const accuracyOf = (u) => (u.sheet ? accuracy(u.sheet) : (u.def?.accuracy || 0));
   const dodgeOf = (u) => (u.sheet ? dodge(u.sheet) : (u.def?.dodge || 0));
+  // Reach joins them - but as hoisted FUNCTION declarations, not the const
+  // arrows the three above use. pickTarget is called eagerly during
+  // startCombat (the surprise sweep, well before this point in the body), and
+  // it now needs canReach: a const here would sit in its temporal dead zone
+  // and throw ReferenceError mid-setup, starting a fight whose panel never
+  // gets built. Functions hoist, so call order stops mattering.
+
+  // A member's reach comes from their weapon, an AI unit's from its def (like
+  // attackAp). REACH.DEFAULT is the floor for both.
+  function reachOfUnit(u) {
+    return u.sheet ? reachOf(u.sheet) : (u.def?.reach ?? REACH.DEFAULT);
+  }
+
+  // The CONTINUOUS position reach measures against. `actor.x/.z` are only
+  // Math.round of this, which is why the old tile test let two units at
+  // opposite far corners of diagonally adjacent tiles (2.83 apart) trade
+  // swings while a deliberate walk-up stops at 0.85 (TACTICS_PLAN revision).
+  // Falls back to the logical tile for a unit with no body in the scene yet.
+  function posOf(u) {
+    const a = u.actor || u;
+    if (a.entity) {
+      const p = a.entity.getPosition();
+      return { x: p.x, z: p.z };
+    }
+    return { x: a.x, z: a.z };
+  }
+
+  // Is the defender within the attacker's reach DISTANCE? Ignores anything
+  // solid in between on purpose: this is the melee/ranged split positionMods
+  // needs, and whether a cubicle wall spoils a shot is a question about
+  // proximity, not about whether the swing is legal.
+  function withinReach(attacker, defender, r = null) {
+    const a = posOf(attacker);
+    const d = posOf(defender);
+    return inReach(a.x, a.z, d.x, d.z, r ?? reachOfUnit(attacker));
+  }
+
+  // Can the attacker actually TOUCH the defender - reach distance, and nothing
+  // solid in the way? THE melee predicate: swings, shoves and opportunity
+  // attacks all read it, so reach means one thing everywhere. `r` overrides the
+  // attacker's own reach, which the shove needs - a shove is arms-length
+  // whatever you happen to be holding.
+  //
+  // The line test is what makes a partition terrain rather than decoration:
+  // before it, cover was ranged-only AND melee ignored edges, so a cubicle wall
+  // cost a melee attacker nothing - not even a step around it.
+  function canReach(attacker, defender, r = null) {
+    const a = posOf(attacker);
+    const d = posOf(defender);
+    return inReach(a.x, a.z, d.x, d.z, r ?? reachOfUnit(attacker), world.stepOpen);
+  }
+
   // The to-hit terms for one attacker/defender pair (TACTICS_PLAN #1). THE
   // single place the terms are assembled: every roll site and the hover
   // preview read it, so the percentage the player sees is always the
@@ -166,6 +255,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       .filter((u) => u !== attacker && standing(u))
       .map((u) => ({ x: bodyOf(u).x, z: bodyOf(u).z }));
     const pos = positionMods(A.x, A.z, D.x, D.z, {
+      // Cover/flank/backstab geometry stays on TILE octants - a cover face and
+      // a pincer are genuinely grid-shaped. Only the melee/ranged SPLIT moves
+      // to real distance, and it reads reach without the line test so turning
+      // walls on (M3) can't silently change who gets cover.
+      melee: withinReach(attacker, defender),
       edgeOpen: world.stepOpen,
       allies,
       facing: facings.get(defender) || null,
@@ -314,6 +408,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   document.body.appendChild(costTag);
   const PREVIEW_OK = new pc.Color(0.42, 0.78, 0.35);
   const PREVIEW_FAR = new pc.Color(0.85, 0.28, 0.24);
+  // The reach ring: dim and cool, so it reads as information about YOU rather
+  // than a judgement about a target (TACTICS_PLAN revision M5).
+  const REACH_RING = new pc.Color(0.55, 0.62, 0.78);
   let preview = null; // { reach: [[x,z],...], tail: [[x,z],...] | null }
   let aimPoint = null; // hover point while a cone attack is armed
   let hoverHitChance = null; // to-hit chance shown for the enemy under an armed cursor
@@ -531,11 +628,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
       return;
     }
+    // Reach is a RADIUS, so the honest affordance is a circle on the floor.
+    // Highlighting whole tiles would draw a plus-with-corners that lies about
+    // the shape, and without any affordance a long weapon is an invisible
+    // statistic - the player would feel the extra tile without being told why.
+    // Drawn on the ACTOR's continuous position, which is what the rule measures.
+    {
+      const me = posOf(active);
+      drawRing(me.x, me.z, a.type === 'shove' ? REACH.SHOVE : reachOfUnit(active), REACH_RING);
+    }
     for (const en of world.liveEnemies()) {
       if (!en.entity) continue;
       let ok;
       if (a.type === 'shove') {
-        ok = cheb(active.actor.x, active.actor.z, en.x, en.z) <= 1 && active.ap >= a.ap;
+        ok = canReach(active, en, REACH.SHOVE) && active.ap >= a.ap;
       } else if (a.ammoCost) {
         ok = cheb(active.actor.x, active.actor.z, en.x, en.z) <= THROW_RANGE
           && world.hasLos(active.actor.x, active.actor.z, en.x, en.z)
@@ -779,8 +885,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     // A status the action carries lands on a live target (enemies have no
     // Composure, so no resist). This is the player-action `applies` vector.
-    if (a.applies && !died && applyStatus(en, a.applies)) {
-      line += ` ${appliesLine(a, en.def.name)}`;
+    // A window read BEFORE the apply, so a stun Detain can't land is narrated
+    // rather than swallowed - checking after would see the window this very
+    // application just granted.
+    if (a.applies && !died) {
+      const blocked = blockedBy(en, a.applies);
+      if (applyStatus(en, a.applies)) line += ` ${appliesLine(a, en.def.name)}`;
+      else if (blocked) line += ` ${immunityLine(blocked, en.def.name)}`;
     }
     // The equipped weapon's on-hit proc - but only when this attack IS that
     // weapon's own swing (swing the gum stapler, fling gum).
@@ -879,7 +990,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // them to swarm is a reasonable thing to click.
     if (a.type === 'summon') { placeSummon(en.x, en.z); return; }
     if (a.type === 'shove') {
-      if (cheb(active.actor.x, active.actor.z, en.x, en.z) > 1) { log('Too far to shove.'); return; }
+      if (!canReach(active, en, REACH.SHOVE)) { log('Too far to shove.'); return; }
       if (active.ap < a.ap) { log('Not enough AP.'); return; }
       joinCombat(en); // shoving a bystander is also an opinion they'll return
       const dx = Math.sign(en.x - active.actor.x);
@@ -901,7 +1012,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         // A slam into a wall knocks the wind out of them - stunned (they lose
         // their next turn). The knockdown DOS2 shoves are for.
         let msg = `You shove ${en.def.name} into something solid. -2.`;
-        if (!died && applyStatus(en, 'stunned')) msg += ' They crumple - dazed.';
+        // The shove is the one UNRATIONED stun in the game (2 AP, no use
+        // limit), so it is the chain the anti-chain window exists to break -
+        // and the site where the player most needs to be told why the second
+        // slam didn't daze.
+        if (!died) {
+          const blocked = blockedBy(en, 'stunned');
+          if (applyStatus(en, 'stunned')) msg += ' They crumple - dazed.';
+          else if (blocked) msg += ` ${immunityLine(blocked, en.def.name)}`;
+        }
         log(msg);
         if (died) callbacks.onEnemyKilled(en);
       } else {
@@ -934,7 +1053,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return;
     }
     // melee: walk up if needed, then strike
-    if (cheb(active.actor.x, active.actor.z, en.x, en.z) <= 1) {
+    if (canReach(active, en)) {
       if (active.ap < a.ap) { log('Not enough AP to attack.'); return; }
       active.actor.faceToward(en.x, en.z);
       performOn(armed, en);
@@ -952,7 +1071,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const ep = en.entity ? en.entity.getPosition() : { x: en.x, z: en.z };
     const walk = walkActive(best, active.ap - a.ap, world.approach(gx, gz, ep.x, ep.z));
     if (!walk) { log('Not enough AP to reach them.'); return; }
-    if (cheb(Math.round(walk.end[0]), Math.round(walk.end[1]), en.x, en.z) <= 1) {
+    // The walk's endpoint is already a free point, so this asks the honest
+    // question directly instead of rounding it back to a tile first: will we
+    // be standing inside reach when the walk finishes?
+    const endPos = posOf(en);
+    if (inReach(walk.end[0], walk.end[1], endPos.x, endPos.z, reachOfUnit(active))) {
       pendingMelee = { en, action: armed }; // strike on arrival
     } else {
       armed = null;
@@ -1387,9 +1510,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const dead = applyDamage(m.sheet, dmg);
     fx.damageText(m.actor.x, m.actor.z, `-${dmg}`);
     // Any status the attack carries lands here (gum, and now stun etc.),
-    // Composure shrugging off some of a resistable one. Not onto a corpse.
-    if (atk.applies && !dead && applyStatus(m.sheet, atk.applies, {}, statusResist(m.sheet))) {
-      line += ` ${appliesLine(atk, m.sheet.name)}`;
+    // Composure shrugging off some of a resistable one. Not onto a corpse. This
+    // is the side of the anti-chain window that matters most: the Security Guard
+    // and the Regional Executive both stun on an ordinary attack, with nothing
+    // rationing it, so without a window a party member could lose every turn of
+    // a fight in a row.
+    if (atk.applies && !dead) {
+      const blocked = blockedBy(m.sheet, atk.applies);
+      if (applyStatus(m.sheet, atk.applies, {}, statusResist(m.sheet))) {
+        line += ` ${appliesLine(atk, m.sheet.name)}`;
+      } else if (blocked) line += ` ${immunityLine(blocked, m.sheet.name)}`;
     }
     log(line);
     refresh();
@@ -1429,7 +1559,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   //     (actors.js update), and only deliberate moves seed `moveStart` - so
   //     shove is the safe way to break contact (TACTICS_PLAN #9).
   const reactions = new Map(); // combatant -> reactions spent this round
-  const moveStart = new Map(); // combatant -> tile its current move began on
+  // combatant -> where its current move began: { x, z } logical tile plus
+  // { px, pz } continuous position (what threat radii are measured against)
+  const moveStart = new Map();
   // LOGICAL facing (TACTICS_PLAN M5): a sign-vector per combatant, written
   // only when a unit attacks (it faces its target) or moves (it faces its
   // heading). Never read off the actor's eased visual yaw. A unit that has
@@ -1460,11 +1592,23 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   };
   // Mark the tile a deliberate move begins on. Only moves that come through
   // here can provoke - which is exactly how forced movement stays exempt.
-  const beginMove = (u) => { if (u) moveStart.set(u, { x: bodyOf(u).x, z: bodyOf(u).z }); };
-  // Everyone on the far side of `mover` able to punish it right now.
+  // Carries the tile (for facing and per-leg bookkeeping) AND the continuous
+  // position, which is what threat is measured from now that reach is a radius.
+  const beginMove = (u) => {
+    if (!u) return;
+    const b = bodyOf(u);
+    const p = posOf(u);
+    moveStart.set(u, { x: b.x, z: b.z, px: p.x, pz: p.z });
+  };
+  // Everyone on the far side of `mover` able to punish it right now. Each
+  // carries its OWN reach: threat is whatever ground that unit could swing at,
+  // so a long weapon zones further than a pair of fists.
   const threatsAgainst = (mover) => (mover.sheet ? engaged : members)
     .filter((u) => canReact(u))
-    .map((u) => ({ x: bodyOf(u).x, z: bodyOf(u).z, ref: u }));
+    .map((u) => {
+      const p = posOf(u);
+      return { x: p.x, z: p.z, reach: reachOfUnit(u), ref: u };
+    });
 
   // `ref` entered (x, z) under its own power. Anyone whose reach it just left
   // gets one free swing. The walk is NOT interrupted - its AP was charged up
@@ -1486,16 +1630,21 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (!from) return; // not a tracked deliberate move (a shove glide, a spawn)
     if (from.x === x && from.z === z) return;
     setFacing(mover, x - from.x, z - from.z); // you face where you're going
-    moveStart.set(mover, { x, z }); // the next leg starts here
+    // Threat is a radius now, so the leg is measured between the BODY's real
+    // positions rather than the tiles they round to. The hook still fires on
+    // tile changes, so a reaction can land up to a tile after the radius was
+    // actually crossed - bounded, and cheap compared with sampling every frame.
+    const to = posOf(mover);
+    moveStart.set(mover, { x, z, px: to.x, pz: to.z }); // the next leg starts here
     if (!standing(mover)) return;
     if (flier) {
       // Say so once per escape, or "nothing happened" reads as a missing rule.
-      if (provokedBy(threatsAgainst(mover), from.x, from.z, x, z).length) {
+      if (provokedBy(threatsAgainst(mover), from.px, from.pz, to.x, to.z, world.stepOpen).length) {
         log(`${mover.sheet ? mover.sheet.name : mover.def.name} walks off untouched. Frequent flier.`);
       }
       return;
     }
-    for (const t of provokedBy(threatsAgainst(mover), from.x, from.z, x, z)) {
+    for (const t of provokedBy(threatsAgainst(mover), from.px, from.pz, to.x, to.z, world.stepOpen)) {
       if (!canReact(t.ref)) continue; // an earlier swing this step spent it
       reactions.set(t.ref, (reactions.get(t.ref) || 0) + 1);
       opportunityStrike(t.ref, mover);
@@ -1543,20 +1692,31 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // hop-pause-hop. Surface damage lands per tile entered via the actor's
   // onTile hook. Returns the AP actually spent (0 = couldn't move).
   function aiAdvance(unit, budget, target) {
-    let best = null;
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-      const tx = target.actor.x + dx;
-      const tz = target.actor.z + dz;
-      if (!world.isWalkable(tx, tz) && !(unit.x === tx && unit.z === tz)) continue;
-      const p = world.findEnemyPath(unit.x, unit.z, tx, tz);
-      if (p && p.length > 1 && (!best || p.length < best.length)) best = p;
+    let best = standTilePath(unit, target);
+    const pp = posOf(target);
+    // Nowhere better to stand, but the tile is already the right one and only
+    // the sub-tile position is wrong. Now that reach is a DISTANCE, one tile
+    // can hold both a spot inside reach and a spot outside it, so close the
+    // last of the gap in place instead of burning the turn. Without this an AI
+    // hemmed into the single adjacent tile of a corridor can never get in
+    // range, ends every turn having done nothing, and the fight never resolves.
+    if (!best) {
+      if (cheb(unit.x, unit.z, target.actor.x, target.actor.z) > 1) return 0;
+      const here = posOf(unit);
+      const step = world.approach(unit.x, unit.z, pp.x, pp.z);
+      if (dist(here.x, here.z, step[0], step[1]) < 0.05) return 0; // as close as this tile allows
+      // And only if shuffling would actually earn a swing. A partition between
+      // the two bodies isn't a distance problem, so closing the gap can't solve
+      // it - spending AP to end up equally unable to swing is the same stall
+      // wearing a different hat.
+      if (!inReach(step[0], step[1], pp.x, pp.z, reachOfUnit(unit), world.stepOpen)) return 0;
+      best = [[here.x, here.z], step];
+    } else {
+      // Stand at reach of the target's BODY, not the middle of the adjacent
+      // tile (the point stays inside that tile, so adjacency still holds).
+      const [gx, gz] = best[best.length - 1];
+      best[best.length - 1] = world.approach(gx, gz, pp.x, pp.z);
     }
-    if (!best) return 0;
-    // Stand at reach of the target's BODY, not the middle of the adjacent
-    // tile (the point stays inside that tile, so adjacency still holds).
-    const [gx, gz] = best[best.length - 1];
-    const pp = target.actor.entity ? target.actor.entity.getPosition() : { x: target.actor.x, z: target.actor.z };
-    best[best.length - 1] = world.approach(gx, gz, pp.x, pp.z);
     const s = world.smoothEnemy(unit, best);
     // AI units pay the same surface movement tax the player does, plus their
     // own gum surcharge if they've stepped in a wad.
@@ -1620,7 +1780,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (pendingMelee && !active.actor.moving) {
         const { en, action } = pendingMelee;
         pendingMelee = null;
-        if (en.alive && cheb(active.actor.x, active.actor.z, en.x, en.z) <= 1
+        if (en.alive && canReach(active, en)
           && active.ap >= ACTIONS[action].ap) {
           active.actor.faceToward(en.x, en.z);
           performOn(action, en);
@@ -1664,12 +1824,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       refresh();
       return;
     }
-    if (cheb(unit.x, unit.z, target.actor.x, target.actor.z) <= 1 && acting.ap >= unit.def.attackAp) {
+    if (canReach(unit, target) && acting.ap >= unit.def.attackAp) {
       aiAttack(unit, target);
       acting.ap -= unit.def.attackAp;
       acting.wait = 0.85; // outlast the swing animation so hits read one at a time
     } else if (moveBudget(acting) >= MOVE.COST_PER_TILE
-      && cheb(unit.x, unit.z, target.actor.x, target.actor.z) > 1) {
+      && !canReach(unit, target)) {
       const spent = aiAdvance(unit, moveBudget(acting), target);
       // Nothing walkable: burn the real AP so the turn can end, but never the
       // allowance - it cannot buy anything else, so leaving it is harmless.

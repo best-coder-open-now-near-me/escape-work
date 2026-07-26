@@ -12,6 +12,12 @@
 //                  map (gum, bleed). See STATUS_PLAN decision #1.
 //   duration     - default ticks/steps when applied (a source may override)
 //   resistable   - whether Composure's statusResist shortens it
+//   immunity     - id of a companion status this one GRANTS on landing (for
+//                  IMMUNITY_WINDOW_MULT x the duration actually applied) and
+//                  which BLOCKS re-application while it is live. The anti-chain
+//                  rule; see src/statuses.js. The window must share this
+//                  status's `clock`, or it would tick on a schedule the thing
+//                  it guards never reaches.
 //   log          - narration when it applies/ticks; '{name}' is filled with the
 //                  owner's name by the caller
 //   effects      - the engine-understood vocabulary the runtime aggregates
@@ -55,8 +61,25 @@ export const STATUSES = {
   stunned: {
     name: 'Mandatory Training', icon: '🪑', harmful: true, clock: 'turn',
     duration: 1, resistable: true,
+    immunity: 'training-credit', // no stun-locks: see src/statuses.js
     effects: { skipTurn: true },
     log: '{name} is pulled into mandatory training. Attendance will be taken.',
+  },
+  // The anti-chain window `stunned` grants when it lands. Carries no effects at
+  // all - its entire job is to exist, be seen (a HUD chip with a countdown),
+  // and turn the next stun away. Not harmful, so a debuff-only sweep spares it;
+  // a full purge (reboot) clears it with everything else, which is the honest
+  // reading of power-cycling somebody.
+  //
+  // Named off the stun it guards: the stun IS mandatory training, so the
+  // immunity is having the certificate already. The duration below is only a
+  // fallback for a direct hand-application - the granting stun computes the
+  // real one (IMMUNITY_WINDOW_MULT x its own length).
+  'training-credit': {
+    name: 'Training Credit', icon: '✅', harmful: false, clock: 'turn',
+    duration: 3, resistable: false,
+    effects: {},
+    log: '{name} completed that training this quarter. It does not take.',
   },
   burning: {
     name: 'On Fire', icon: '🔥', harmful: true, clock: 'turn',

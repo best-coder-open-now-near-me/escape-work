@@ -11,7 +11,7 @@
 //
 // `positional` is the seam the later milestones fill in (cover, flanking,
 // backstab). It is 0 everywhere today, so this milestone changes no number.
-import { HIT } from './stats.js';
+import { HIT, REACH } from './stats.js';
 
 // The to-hit terms for one attacker/defender pair, in the shape
 // stats.hitChance consumes: { acc, dodge, mods }.
@@ -46,28 +46,103 @@ export const TACTICS = {
   REACTIONS_PER_ROUND: 1, // free swings a unit may take between its own turns
 };
 
-// Chebyshev distance: a diagonal costs the same as an orthogonal, which is how
-// the grid treats adjacency everywhere else (movement, shove range, melee).
+// Chebyshev distance: a diagonal costs the same as an orthogonal. Still the
+// right model for AREAS - which cells a blast or a summon placement covers -
+// but no longer how reach is measured (see inReach below).
 export const cheb = (ax, az, bx, bz) => Math.max(Math.abs(ax - bx), Math.abs(az - bz));
 
-// A unit threatens the eight tiles around it. Everyone can threaten: since
-// EQUIPMENT_PLAN M3 every combatant has a basic melee swing (its weapon's, or
-// a punch), so this needs no per-unit capability check.
-export const threatens = (tx, tz, x, z) => cheb(tx, tz, x, z) <= 1;
+// --- reach (TACTICS_PLAN "Revision - reach is a DISTANCE") -------------------
 
-// Which of `threats` a step from (fx, fz) to (tx, tz) provokes: those that
-// threatened the tile being LEFT and no longer threaten the tile being
-// ENTERED. Comparing threat SETS rather than raw adjacency is what keeps a
-// unit circling a foe - sliding from one threatened tile to another - from
-// provoking, and stops a diagonal shuffle past someone from double-firing
-// (TACTICS_PLAN, "continuous movement and tile-granular reactions").
+// True distance between two continuous positions. Reach measures in this, not
+// in tiles: bodies live at continuous positions and the logical tile is only
+// Math.round of one, so a tile test can be off by up to 2.83 units.
+export const dist = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
+
+const SWEEP = 0.1; // segment sampling step for reachOpen, in tile-units
+
+// Is the straight line from (ax, az) to (bx, bz) free of solid edges? An arm
+// travels in a straight line, so this walks the segment and demands an open
+// edge at every tile boundary it crosses.
 //
-// Pure: `threats` is any list of things carrying x/z, and eligibility (alive,
-// aware, still holding a reaction) is the caller's filter, not this rule's.
-export function provokedBy(threats, fx, fz, tx, tz) {
-  if (fx === tx && fz === tz) return []; // standing still is not leaving
-  return (threats || []).filter((t) =>
-    threatens(t.x, t.z, fx, fz) && !threatens(t.x, t.z, tx, tz));
+// Deliberately NOT `stepOpen`. That test's diagonal rule requires all four
+// edges around the crossed corner so a BODY cannot slip past a partition's end
+// - correct for movement, wrong for arms: reaching diagonally around the end of
+// a cubicle wall is a legitimate swing. Here a diagonal crossing (both axes
+// changing in one sample) passes if EITHER L-path around the corner is open,
+// which is the same permissiveness hasCover uses.
+//
+// Inert without an edge test (returns true), so a caller that hasn't wired one
+// gets pure distance rather than an exception - the shape hasCover uses.
+export function reachOpen(ax, az, bx, bz, edgeOpen) {
+  if (typeof edgeOpen !== 'function') return true;
+  const d = dist(ax, az, bx, bz);
+  if (d < 1e-9) return true;
+  const steps = Math.ceil(d / SWEEP);
+  let cx = Math.round(ax);
+  let cz = Math.round(az);
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const nx = Math.round(ax + (bx - ax) * t);
+    const nz = Math.round(az + (bz - az) * t);
+    if (nx === cx && nz === cz) continue;
+    if (nx !== cx && nz !== cz) {
+      // Corner crossing: either way around is a legal swing.
+      const viaX = edgeOpen(cx, cz, nx, cz) && edgeOpen(nx, cz, nx, nz);
+      const viaZ = edgeOpen(cx, cz, cx, nz) && edgeOpen(cx, nz, nx, nz);
+      if (!viaX && !viaZ) return false;
+    } else if (!edgeOpen(cx, cz, nx, nz)) {
+      return false;
+    }
+    cx = nx;
+    cz = nz;
+  }
+  return true;
+}
+
+// Can something at (ax, az) with reach `r` touch (bx, bz)? Distance within
+// reach AND nothing solid in the way. The one predicate every melee site reads
+// - swings, shoves, opportunity attacks, and the melee/ranged split in
+// positionMods - so reach means one thing everywhere.
+export function inReach(ax, az, bx, bz, r, edgeOpen = null) {
+  if (dist(ax, az, bx, bz) > r) return false;
+  return reachOpen(ax, az, bx, bz, edgeOpen);
+}
+
+// A unit threatens wherever it could swing: the same reach test an actual
+// attack uses. Everyone can threaten - since EQUIPMENT_PLAN M3 every combatant
+// has a basic melee swing (its weapon's, or a punch) - so this needs no
+// per-unit capability check, only a reach.
+//
+// Threat used to be the eight surrounding TILES. Reading it off `inReach`
+// instead is what makes an opportunity attack agree with the swing it becomes:
+// a unit can no longer threaten a spot it would be unable to hit, and a long
+// weapon zones the ground its own reach covers rather than a fixed ring.
+export const threatens = (tx, tz, x, z, reach, edgeOpen = null) =>
+  inReach(tx, tz, x, z, reach, edgeOpen);
+
+// Which of `threats` a move from (fx, fz) to (tx, tz) provokes: those whose
+// reach covered the point being LEFT and no longer covers the point being
+// ENTERED. Comparing threat SETS rather than raw proximity is what keeps a unit
+// circling a foe - sliding around inside its reach - from provoking, and stops
+// a shuffle past someone from double-firing.
+//
+// The set-diff was an APPROXIMATION of "are you still in reach" while reach was
+// a tile ring; now that reach is a radius it is that question exactly, so the
+// circling case holds for a reason rather than by construction.
+//
+// Pure: `threats` is any list of things carrying x/z plus their own `reach`
+// (they differ - a long weapon zones further), and eligibility (alive, aware,
+// still holding a reaction) is the caller's filter, not this rule's.
+export function provokedBy(threats, fx, fz, tx, tz, edgeOpen = null) {
+  if (dist(fx, fz, tx, tz) < 1e-9) return []; // standing still is not leaving
+  return (threats || []).filter((t) => {
+    // A threat that forgot to state its reach would otherwise compare against
+    // `undefined`, and every NaN comparison is false - so it would threaten
+    // EVERYWHERE and therefore provoke nowhere. Silent, and exactly backwards.
+    const r = t.reach ?? REACH.DEFAULT;
+    return threatens(t.x, t.z, fx, fz, r, edgeOpen)
+      && !threatens(t.x, t.z, tx, tz, r, edgeOpen);
+  });
 }
 
 // --- cover (TACTICS_PLAN M3) ------------------------------------------------
@@ -115,7 +190,7 @@ export function isFlanked(ax, az, dx, dz, allies) {
   const sz = Math.sign(az - dz);
   if (sx === 0 && sz === 0) return false; // attacker standing on the defender
   return (allies || []).some((a) =>
-    threatens(a.x, a.z, dx, dz)            // must be in its face, not lobbing from afar
+    cheb(a.x, a.z, dx, dz) <= 1            // must be in its face, not lobbing from afar
     && Math.sign(a.x - dx) === -sx
     && Math.sign(a.z - dz) === -sz);
 }
@@ -153,9 +228,16 @@ export function isBackstab(ax, az, dx, dz, facing) {
 // is MELEE-only (a pincer means bodies, not angles). Surprise is not capped
 // here - it rides the accuracy term in toHitTerms - but hitChance's CLAMP_HI
 // still bounds everything, so nothing becomes a guaranteed hit.
+//
+// `ax/az/dx/dz` are TILE coordinates: a cover face and an exactly-opposite
+// pincer are genuinely grid-shaped, and octant signs are the honest way to ask
+// them. Only `melee` moved to real distance - the caller decides it, because
+// only the caller knows the attacker's reach (TACTICS_PLAN revision). It
+// defaults to the old tile rule so a caller that hasn't been updated behaves
+// exactly as before.
 export function positionMods(ax, az, dx, dz, opts = {}) {
   const { edgeOpen = null, allies = [], facing = null } = opts;
-  const melee = cheb(ax, az, dx, dz) <= 1;
+  const melee = opts.melee ?? (cheb(ax, az, dx, dz) <= 1);
   const covered = !melee && hasCover(ax, az, dx, dz, edgeOpen);
   const flanked = melee && isFlanked(ax, az, dx, dz, allies);
   // Backstab is range-agnostic: shooting someone in the back counts, which is

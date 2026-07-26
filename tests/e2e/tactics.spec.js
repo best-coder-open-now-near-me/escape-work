@@ -2,7 +2,7 @@
 // and forced movement doesn't. Both assertions run inside the player's OWN
 // turn, so the enemy's scheduled attack can't be mistaken for a reaction.
 import { test, expect } from '@playwright/test';
-import { bootStash, enterCombat, clickWorld, endTurnUntilPlayer } from './helpers.js';
+import { bootStash, enterCombat, clickWorld, endTurnUntilPlayer, waitForPlayerTurn } from './helpers.js';
 
 // An open room with space to run: the player engages the Manager, then has
 // somewhere far enough to break contact.
@@ -269,4 +269,147 @@ test('a shove does not provoke - forced movement is the safe disengage', async (
   // The point of the test: no reaction rolled on the way out.
   expect(await page.evaluate(() => JSON.stringify(window.__combat.lastRoll ?? null)))
     .toBe(rollBefore);
+});
+
+// --- reach as a distance (TACTICS_PLAN revision, M5) -------------------------
+
+// Two tiles of clear floor between the two bodies: bare hands cannot cross it,
+// the Reach Extender can. The whole point of reach being data.
+const REACH_LAB = {
+  name: 'Reach Lab',
+  tiles: { '#': 'wall', '.': 'floor' },
+  actors: { '@': 'player', M: 'manager' },
+  map: [
+    '##########',
+    '#........#',
+    '#..@.M...#',
+    '#........#',
+    '##########',
+  ],
+};
+
+// Did the armed action land on the foe WITHOUT the player closing the distance?
+//
+// MOVEMENT IS CHECKED FIRST, and against the CONTINUOUS position, which is the
+// whole subtlety: clicking a distant foe with a melee action walks up and then
+// strikes on arrival, so a walk-up also ends with the foe's HP down. Reading HP
+// first would score that as a reach hit and make `moved: false` vacuous in the
+// positive test too.
+async function swingInPlace(page, actionId) {
+  const start = await page.evaluate(() => ({
+    hp: window.__combat.enemies.find((e) => e.alive)?.hp,
+    pos: window.__game.playerPos,
+  }));
+  const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
+  for (let i = 0; i < 3; i++) {
+    if (await page.evaluate(() => window.__combat.armed) !== actionId) {
+      await page.click(`#act-${actionId}`);
+    }
+    const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
+    await page.mouse.click(fp.x, fp.y);
+    await page.waitForTimeout(900); // long enough for a walk-up to have happened
+    const now = await page.evaluate(() => ({
+      hp: window.__combat.enemies.find((e) => e.alive)?.hp,
+      pos: window.__game.playerPos,
+    }));
+    const moved = Math.hypot(now.pos.x - start.pos.x, now.pos.z - start.pos.z) > 0.15;
+    const hurt = now.hp != null && now.hp < start.hp;
+    if (moved) return { hit: hurt, moved: true };   // closed the distance - not reach
+    if (hurt) return { hit: true, moved: false };   // struck from where it stood
+  }
+  return { hit: false, moved: false };
+}
+
+test('a long weapon strikes from a tile bare hands cannot cross', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, REACH_LAB, 'office-drone');
+  // Equip the extender out of combat, and clear the Drone's starting trinket so
+  // nothing else is in play.
+  await page.evaluate(() => {
+    const s = window.__god.player;
+    s.equipped.weapon = null;
+    s.inventory = ['reach-grabber'];
+  });
+  // The equip flow equipment.spec.js established: open the pockets, WAIT for the
+  // row to exist, then click once. An earlier version of this test retried the
+  // click with the error swallowed, which turned "the row was not there yet"
+  // into four silent no-ops and a confusing timeout.
+  await page.keyboard.press('i');
+  await expect(page.locator('#inventory-panel')).toBeVisible();
+  await expect(page.locator('#inv-equip-0')).toBeVisible();
+  await page.click('#inv-equip-0');
+  await expect.poll(() => page.evaluate(() => window.__game.stats.equipped.weapon),
+    { timeout: 20_000 }).toBe('reach-grabber');
+  await page.keyboard.press('i');
+  await enterCombat(page);
+  await page.evaluate(() => { window.__combat.forceHit = true; });
+  await waitForPlayerTurn(page);
+
+  // Engaging walks the player up, so stage the geometry explicitly: park them
+  // 1.9 tile-units off the Manager's BODY - outside REACH.DEFAULT (1.5) and
+  // inside the extender's 2.2. The gap is asserted below, so a staging slip
+  // fails the test rather than quietly weakening it.
+  await page.evaluate(() => {
+    const a = window.__god.playerActor;
+    const m = window.__game.enemies.find((e) => e.alive);
+    const y = a.entity.getPosition().y;
+    const tx = m.px - 1.9;
+    a.path = null;
+    a.slideTo = null;
+    a.entity.setPosition(tx, y, m.pz);
+    a.x = Math.round(tx);
+    a.z = Math.round(m.pz);
+  });
+  await page.waitForTimeout(400);
+  const gap = await page.evaluate(() => {
+    const m = window.__game.enemies.find((e) => e.alive);
+    const p = window.__game.playerPos;
+    return Math.hypot(p.x - m.px, p.z - m.pz);
+  });
+  expect(gap).toBeGreaterThan(1.5); // bare hands could not make this swing
+  expect(gap).toBeLessThan(2.2);    // ...the extender can
+
+  await expect(page.locator('#act-grabber-swipe')).toBeVisible();
+  const res = await swingInPlace(page, 'grabber-swipe');
+  expect(res.hit).toBe(true);   // it landed
+  expect(res.moved).toBe(false); // ...without closing the distance first
+});
+
+// The control for the test above. Without it, "the extender reached" proves
+// nothing: it could be that ANY swing crosses that gap.
+test('bare hands cannot make the swing the extender makes - they walk up first', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, REACH_LAB, 'office-drone');
+  await page.evaluate(() => {
+    const s = window.__god.player;
+    s.equipped.weapon = null; // fists: REACH.DEFAULT and nothing more
+  });
+  await enterCombat(page);
+  await page.evaluate(() => { window.__combat.forceHit = true; });
+  await waitForPlayerTurn(page);
+
+  await page.evaluate(() => {
+    const a = window.__god.playerActor;
+    const m = window.__game.enemies.find((e) => e.alive);
+    const y = a.entity.getPosition().y;
+    const tx = m.px - 1.9;
+    a.path = null;
+    a.slideTo = null;
+    a.entity.setPosition(tx, y, m.pz);
+    a.x = Math.round(tx);
+    a.z = Math.round(m.pz);
+  });
+  await page.waitForTimeout(400);
+  const gap = await page.evaluate(() => {
+    const m = window.__game.enemies.find((e) => e.alive);
+    const p = window.__game.playerPos;
+    return Math.hypot(p.x - m.px, p.z - m.pz);
+  });
+  expect(gap).toBeGreaterThan(1.5); // the same gap the extender cleared
+
+  // The claim is about REACH, not about whether damage ever happens: clicking a
+  // distant foe with fists walks up and then strikes, so damage does eventually
+  // land. What separates the two weapons is that fists had to move at all.
+  const res = await swingInPlace(page, 'punch');
+  expect(res.moved).toBe(true);
 });

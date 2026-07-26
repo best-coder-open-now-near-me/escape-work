@@ -215,6 +215,16 @@ export const ACTIONS = {
     log: 'You jab with the stapler. Ka-chunk.',
     missLog: 'The stapler jams. Naturally.',
   },
+  'grabber-swipe': {
+    type: 'attack',
+    ap: 2,
+    label: 'Grabber Swipe',
+    desc: 'Swipe at arm\'s length plus a metre. Reaches further than it hurts.',
+    min: 1,
+    max: 3,
+    log: 'You swipe with the extender. It telescopes alarmingly.',
+    missLog: 'The extender flexes, and the pincer closes on air.',
+  },
   'letter-opener-stab': {
     type: 'attack',
     ap: 2, // no longer the cheap one now every attack is 2 - its edge is accuracy

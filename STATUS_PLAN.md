@@ -277,7 +277,39 @@ map seeds `{}`.
    - **Balance note (risk):** fire now double-dips (instant `onEnter` damage +
      a burning dot). Left for the same playtest pass HIT's whiff tuning waits
      on; the god pins make it a live-tuning session.
-5. **Mind control (deferred design, own PR).** Fear ("Performance
+5. **The anti-chain window.** ✅ Landed. Borrowed from Shadowbane
+   (`SHADOWBANE_NOTES.md` §3): a status may declare `immunity: '<id>'`, and on
+   landing it grants that companion status for `IMMUNITY_WINDOW_MULT` (3) × the
+   duration it *actually* applied, which then blocks re-application while live.
+   `stunned` declares `training-credit`; nothing else does yet, and deliberately
+   — only turn-DENYING effects need the bound, and giving `surprised` a window
+   would hand the combat opener three free turns of stun immunity.
+   - **Why it was needed:** two of the three stun sources are unrationed. The
+     Security Guard and the Regional Executive stun on an ordinary attack, and
+     the player's shove-stun is 2 AP with no use limit, so either side could
+     lock the other out of a whole fight. Decision #7's resist/immunity hooks
+     shortened stuns but never stopped them arriving.
+   - **The window IS a status**, which is what keeps this small: it ticks on the
+     granting status's clock, expires, serializes, renders as a HUD chip with a
+     countdown, is spared by a debuff-only sweep (`harmful: false`) and cleared
+     by a full purge — all for free. It's written straight into the map rather
+     than recursed through `applyStatus`, so it can't itself be resisted or
+     blocked.
+   - **Sizing off the applied duration** means Composure resisting a stun also
+     shortens the shield that stun buys. Faithful to "three times the length of
+     the stun", and it keeps Composure from being paid twice.
+   - **Narration:** `blockedBy(target, id)` names the blocking window so
+     `combat.js` can say why a stun didn't land, at all three stun sites
+     (player action, shove slam, AI attack). A fairness rule the player can't
+     see reads as a bug. Call it BEFORE `applyStatus`, which grants the window
+     on success.
+   - **Intended behavior change:** a reboot purge clears the window along with
+     everything else, so power-cycling an ally re-opens them to stuns. Same
+     honest reading of "purge wipes the map" as the gum change in M3.
+   - Unit 217/217 (six new window tests); e2e `statuses.spec.js` 5/5 with a new
+     double-shove test, plus targeting/classes/tactics 15/15 green (including
+     Security's Detain stun).
+6. **Mind control (deferred design, own PR).** Fear ("Performance
    Improvement" — flee toward the nearest exit-ward tile for N turns) and
    charm (`mandatory-fun` — swaps `team` for targeting purposes). Needs:
    `pickTarget` honoring a charm flag, forced-move resolution in the AI

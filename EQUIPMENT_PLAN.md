@@ -54,7 +54,12 @@ dependency on either — only the stretch content does.
 - **Equipment items** in `data/items.js`: an entry gains `slot` plus a
   `stats` block drawn from a small engine-understood vocabulary —
   `dmg`, `soak`, `maxHp`, `maxAp`, `attrBonus: { grit… }`, and (post
-  HIT_PLAN) `acc`/`dodge`.
+  HIT_PLAN) `acc`/`dodge`. Later additions: `slipProof`/`moveCost` (footwear,
+  MOVEMENT_PLAN) and **`reach`** — a weapon's melee reach in tile-units, added
+  to `REACH.DEFAULT`. Reach is owned by `TACTICS_PLAN.md` ("Revision — reach is
+  a DISTANCE, and weapons own it"), which holds the geometry and the reason the
+  default is a floor rather than a midpoint; this doc owns only the slot and the
+  fold through `equippedStats`.
 - **`sheet.equipped = { weapon, outfit, trinket }`**, folded into the derived
   numbers by `recomputeDerived`/`damageBonus`/`deflect` — the same one-seam
   pattern attributes used, so combat and the HUD pick equipment up with

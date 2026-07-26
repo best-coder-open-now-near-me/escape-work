@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   applyStatus, hasStatus, statusLeft, statusFx,
   tickTurn, tickStep, clearStatuses, removeStatus, statusList,
+  blockedBy, IMMUNITY_WINDOW_MULT,
 } from '../../src/statuses.js';
 
 test('applyStatus applies a status at its default duration', () => {
@@ -48,6 +49,63 @@ test('immunity blocks application (statusImmune list and the paperCutImmune alia
   const listImmune = { talent: { effects: { statusImmune: ['stunned'] } } };
   assert.equal(applyStatus(listImmune, 'stunned'), false);
   assert.equal(applyStatus(listImmune, 'gum'), true); // not on the list - applies
+});
+
+// --- the anti-chain window (SHADOWBANE_NOTES.md §3) --------------------------
+
+test('a stun grants a window of IMMUNITY_WINDOW_MULT x the duration it applied', () => {
+  const t = {};
+  assert.equal(applyStatus(t, 'stunned'), true); // duration 1
+  assert.equal(statusLeft(t, 'stunned'), 1);
+  assert.equal(statusLeft(t, 'training-credit'), 1 * IMMUNITY_WINDOW_MULT);
+  // The window sizes off the duration ACTUALLY applied, not the def's default.
+  const long = {};
+  applyStatus(long, 'stunned', { duration: 2 });
+  assert.equal(statusLeft(long, 'training-credit'), 2 * IMMUNITY_WINDOW_MULT);
+});
+
+test('the window blocks a second stun, and blockedBy names it', () => {
+  const t = {};
+  applyStatus(t, 'stunned');
+  assert.equal(blockedBy(t, 'stunned'), 'training-credit');
+  assert.equal(applyStatus(t, 'stunned'), false); // no stun-lock
+  assert.equal(statusLeft(t, 'stunned'), 1);      // not even refreshed
+  assert.equal(blockedBy(t, 'gum'), null);        // gum declares no window
+  assert.equal(applyStatus(t, 'gum'), true);      // ...so it still lands
+});
+
+test('the window outlives the stun, leaving free turns behind it', () => {
+  const t = {};
+  applyStatus(t, 'stunned'); // stun 1, window 3
+  tickTurn(t);               // the turn the stun costs
+  assert.equal(hasStatus(t, 'stunned'), false);
+  assert.equal(statusLeft(t, 'training-credit'), 2); // two free turns owed
+  assert.equal(applyStatus(t, 'stunned'), false);
+  tickTurn(t); tickTurn(t);
+  assert.equal(hasStatus(t, 'training-credit'), false); // window shut...
+  assert.equal(applyStatus(t, 'stunned'), true);        // ...and stuns land again
+});
+
+test('resisting a stun shortens the window it buys - Composure is not paid twice', () => {
+  const stoic = {};
+  applyStatus(stoic, 'stunned', { duration: 3 }, 2); // resisted 3 -> 1
+  assert.equal(statusLeft(stoic, 'stunned'), 1);
+  assert.equal(statusLeft(stoic, 'training-credit'), 1 * IMMUNITY_WINDOW_MULT);
+});
+
+test('the window is a status like any other: charted, spared by a debuff sweep, purged', () => {
+  const t = {};
+  applyStatus(t, 'stunned');
+  const chip = statusList(t).find((s) => s.id === 'training-credit');
+  assert.deepEqual(chip, {
+    id: 'training-credit', left: 3, name: 'Training Credit', icon: '✅', harmful: false,
+  });
+  clearStatuses(t, { harmfulOnly: true });          // the stun goes, the credit stays
+  assert.equal(hasStatus(t, 'stunned'), false);
+  assert.equal(hasStatus(t, 'training-credit'), true);
+  clearStatuses(t);                                  // a full purge takes it too
+  assert.equal(hasStatus(t, 'training-credit'), false);
+  assert.equal(applyStatus(t, 'stunned'), true);      // so a reboot re-opens the target
 });
 
 test('statusFx merges: booleans OR, *Mult keys multiply, other numerics sum', () => {

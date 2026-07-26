@@ -111,7 +111,12 @@ test('confronting a coworker starts combat and an attack lands', async ({ page }
     ([fx, fz]) => window.__combat.enemies.find((e) => e.x === fx && e.z === fz)?.hp,
     [x, z],
   );
-  for (let i = 0; i < 4 && (await foeHp([foe.x, foe.z])) >= foe.hp; i++) {
+  // Tile adjacency no longer means in reach: reach is a DISTANCE now
+  // (TACTICS_PLAN revision), and `findFoe` above still scans by tile, so the
+  // foe it picks can be up to 2.8 units away. A click then walks up and strikes
+  // on arrival rather than swinging instantly - so wait for the damage instead
+  // of assuming one click resolves inside 300ms.
+  for (let i = 0; i < 6 && (await foeHp([foe.x, foe.z])) >= foe.hp; i++) {
     await page.waitForTimeout(1000); // camera settle
     if (await page.evaluate(() => window.__combat.armed) !== 'attack') {
       await page.click('#act-attack');
@@ -119,7 +124,7 @@ test('confronting a coworker starts combat and an attack lands', async ({ page }
     }
     const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
     await page.mouse.click(fp.x, fp.y);
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(1400); // a walk-up plus the strike on arrival
   }
   expect(await foeHp([foe.x, foe.z])).toBeLessThan(foe.hp);
 });
