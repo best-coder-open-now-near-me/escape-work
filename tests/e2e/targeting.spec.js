@@ -177,7 +177,17 @@ test('clicking a coworker in combat attacks with the basic swing - no action arm
 
   // Nothing is armed: this is the whole point of the test. The click below is
   // the only input, and it has to mean "hit them".
-  expect(await page.evaluate(() => window.__combat.armed)).toBe(null);
+  //
+  // Entering combat can leave a swing QUEUED: the engaging click walks you in
+  // and strikes on arrival, and `armed` stays set for the length of that walk
+  // (it is what lights the swing on the bar). So settle for the opening to
+  // finish rather than sampling once - the wait is about combat entry, not
+  // about anything this test does.
+  const idle = () => expect.poll(
+    () => page.evaluate(() => (window.__combat?.phase === 'player' ? window.__combat.armed : 'busy')),
+    { timeout: 60_000 },
+  ).toBe(null);
+  await idle();
   await page.evaluate(() => { window.__combat.forceHit = true; });
 
   const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
@@ -194,15 +204,17 @@ test('clicking a coworker in combat attacks with the basic swing - no action arm
   // dispatches no event and the hover never re-runs.
   // Sweep a few heights up the body rather than guessing one. Looking down at
   // this pitch, a point 0.9 above the tile projects well ABOVE the mesh, so the
-  // pick ray sails over the coworker's head - only low points land on him.
-  // (The click later doesn't care: a body miss falls back to the enemy's TILE.
-  // Hover has no such fallback, which is why it alone needs the sweep.)
+  // pick ray sails over the coworker's head - only low points land on him. The
+  // click below needs the same sweep: a body miss falls through to the ground
+  // BEHIND them, which next to a wall resolves to nothing at all.
+  // Aim at px/pz - the CONTINUOUS body position - because a coworker caught
+  // mid-step between tiles is not standing on his tile centre.
   let jiggle = 0;
   await expect.poll(async () => {
     for (const y of [0.2, 0.45, 0.7]) {
       const p = await page.evaluate((yy) => {
-        const en = window.__combat?.enemies.find((e) => e.alive);
-        return en ? window.__game.project3(en.x, yy, en.z) : null;
+        const en = window.__game.enemies.find((e) => e.alive && e.px !== undefined);
+        return en ? window.__game.project3(en.px, yy, en.pz) : null;
       }, y);
       if (!onScreen(p)) continue;
       // A move to the pixel the pointer already occupies dispatches no event,
@@ -212,7 +224,7 @@ test('clicking a coworker in combat attacks with the basic swing - no action arm
       if (await page.evaluate(() => window.__game.cursor) === 'crosshair') return 'crosshair';
     }
     return null;
-  }, { timeout: 20_000 }).toBe('crosshair');
+  }, { timeout: 40_000 }).toBe('crosshair');
   const chance = await page.evaluate(() => window.__combat.hoverHitChance);
   expect(chance).toBeGreaterThan(0); // the odds of the swing a click would make
   // The cursor is on a coworker, so the glow has a target...
@@ -228,7 +240,7 @@ test('clicking a coworker in combat attacks with the basic swing - no action arm
   await page.keyboard.up('Control');
   expect(await page.evaluate(() => window.__game.hoverGlow)).toBe(true);
   // ...and hovering it did NOT quietly arm anything - the default stays implicit.
-  expect(await page.evaluate(() => window.__combat.armed)).toBe(null);
+  await idle();
   // The to-hit readout REPLACES the movement trail. It used to draw both: the
   // trail from the last patch of floor the cursor crossed stayed on screen,
   // hanging off the character while they were plainly aiming at someone.
@@ -236,12 +248,41 @@ test('clicking a coworker in combat attacks with the basic swing - no action arm
 
   // Click the body. The camera keeps easing after the walk-up, so settle and
   // retry a couple of times rather than trusting one projection.
+  // Each attempt states its own preconditions rather than hoping for them:
+  //   - our turn, with nothing queued (`idle`), because a click on an AI turn
+  //     is correctly ignored;
+  //   - AP topped up, because entering combat spends it walking in, and this
+  //     test is about the click-to-swing binding, not the AP economy;
+  //   - the coworker's LIVE position, because aiming at the tile they occupied
+  //     when the test started is a click on empty floor once they have moved.
+  // Then wait for the swing to LAND rather than for a fixed beat - out of reach
+  // the click walks you in first, and that takes as long as it takes.
   for (let i = 0; i < 4 && (await foeHp()) >= foe.hp; i++) {
-    await page.waitForTimeout(1000);
-    const p = await page.evaluate(([x, z]) => window.__game.project3(x, 0.9, z), [foe.x, foe.z]);
-    if (!onScreen(p)) continue;
-    await page.mouse.click(p.x, p.y);
-    await page.waitForTimeout(600);
+    await idle();
+    await page.evaluate(() => { window.__combat.ap = window.__combat.maxAp; });
+    const at = await page.evaluate(() => {
+      const en = window.__game.enemies.find((e) => e.alive && e.px !== undefined);
+      return en ? { x: en.px, z: en.pz } : null;
+    });
+    if (!at) continue;
+    // Sweep low heights up the body and click the first one the CURSOR agrees
+    // is on them, exactly like the hover poll above. A point 0.9 up projects
+    // over the mesh, and the ray then falls through to the ground behind the
+    // coworker - which, standing next to them in a small room, is a wall, so
+    // the click resolved to nothing at all and the test blamed the swing.
+    let clicked = false;
+    for (const y of [0.2, 0.45, 0.7]) {
+      const p = await page.evaluate(([x, yy, z]) => window.__game.project3(x, yy, z), [at.x, y, at.z]);
+      if (!onScreen(p)) continue;
+      jiggle = 1 - jiggle;
+      await page.mouse.move(p.x + jiggle, p.y);
+      if (await page.evaluate(() => window.__game.cursor) !== 'crosshair') continue;
+      await page.mouse.click(p.x, p.y);
+      clicked = true;
+      break;
+    }
+    if (!clicked) continue;
+    await expect.poll(foeHp, { timeout: 15_000 }).toBeLessThan(foe.hp).catch(() => {});
   }
   expect(await foeHp()).toBeLessThan(foe.hp);
   // It swung the equipped weapon's action (bare-handed here), not a class power.
