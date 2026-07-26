@@ -90,6 +90,32 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return best;
   }
 
+  // Can this unit actually FIGHT that member - reach it now, or walk to a tile
+  // it could swing from?
+  //
+  // Memoized, and that is not an optimisation detail: pickTarget runs on the
+  // PER-FRAME driver (see update), and standTilePath is up to eight A* searches
+  // per member. Paying that every frame of every AI turn is a real frame-rate
+  // cost, and it is one this revision introduced - before reach became a
+  // distance, picking a target was pure arithmetic. It cost enough on CI's
+  // software GL to push combat tests past their timeouts.
+  //
+  // The key is exactly what the answer depends on: both bodies' tiles. Cleared
+  // at the top of every turn (beginTurn), so an opened door or a destroyed prop
+  // can never leave a stale "unreachable" behind for longer than one turn -
+  // within a turn the only thing moving is the unit itself, and its tile is in
+  // the key.
+  const engageMemo = new Map(); // "ux,uz|mx,mz" -> boolean
+  function canEngage(unit, m) {
+    const key = `${unit.x},${unit.z}|${m.actor.x},${m.actor.z}`;
+    const memo = engageMemo.get(key);
+    if (memo !== undefined) return memo;
+    // Cheap test first: already in reach needs no pathfinding at all.
+    const val = canReach(unit, m) || !!standTilePath(unit, m);
+    engageMemo.set(key, val);
+    return val;
+  }
+
   // Nearest living member - but ENGAGEABLE first. Once a partition blocks a
   // swing (M3), the closest member by distance can be one the unit can neither
   // reach nor walk to: on the far side of a cubicle wall with the way round
@@ -100,7 +126,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     let best = null;
     for (const m of livingMembers()) {
       const d = cheb(unit.x, unit.z, m.actor.x, m.actor.z);
-      const engageable = canReach(unit, m) || !!standTilePath(unit, m);
+      const engageable = canEngage(unit, m);
       const better = !best
         || (engageable && !best.engageable)
         || (engageable === best.engageable
@@ -1321,6 +1347,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     beginTurn();
   }
   function beginTurn() {
+    engageMemo.clear(); // bounds how stale an engageability answer can get
     // The fight can end on the boundary (a kill emptied one side).
     if (!engaged.some((e) => e.alive)) { victory(); return; }
     if (!livingParty().length) { defeat(); return; }

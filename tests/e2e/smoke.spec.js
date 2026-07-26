@@ -73,6 +73,11 @@ test.describe('smoke', () => {
   });
 
   test('a fight opens and the combat panel takes over', async () => {
+    // The one step here that drives a whole engage loop rather than a single
+    // click, so it needs the headroom every other combat spec takes explicitly.
+    // At the file's 120s default it timed out twice on CI's software GL while
+    // passing locally - a runner-speed cliff, not a behaviour change.
+    test.setTimeout(300_000);
     // The core loop. Pinned to always hit once combat exists, so this step
     // tests "can a fight start and resolve a swing", not the dice.
     const { enterCombat } = await import('./helpers.js');
