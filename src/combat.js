@@ -442,6 +442,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // feedback and a shove auto-hits, so neither shows a percentage.
   function showHitPreview(point, sx, sy) {
     hoverHitChance = null;
+    // The readout REPLACES the movement trail. Clearing it here rather than at
+    // the call sites is what makes that true: `preview` is redrawn every frame,
+    // so a trail left over from the last patch of floor the cursor crossed kept
+    // hanging off the character while they were plainly aiming at someone.
+    preview = null;
     const a = ACTIONS[previewAction()];
     if (!a || a.type !== 'attack' || a.cone) { costTag.style.display = 'none'; return; }
     const en = enemyAtPoint(point);
@@ -462,6 +467,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // While a summon is armed, the cursor previews the DROP: how many applicants
   // that spot fits, or why it doesn't work. Same rule the click runs.
   function showSummonPreview(point, sx, sy) {
+    preview = null; // the drop zone replaces the trail, same as the hit readout
     const a = ACTIONS[armed];
     const tx = Math.round(point.x);
     const tz = Math.round(point.z);
@@ -1070,17 +1076,22 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       performOn(armed, en);
       return;
     }
-    // walk the cheapest route to their side, as far as AP allows
+    // walk the cheapest route to their side, as far as the budget allows
     let best = null;
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
       const p = world.findPath(active.actor.x, active.actor.z, en.x + dx, en.z + dz, active.actor);
       if (p && (!best || p.length < best.length)) best = p;
     }
     if (!best || best.length < 2) { log('No way to reach them.'); return; }
-    // walk up to their body, not the centre of the neighbouring tile
+    // walk up to their body, not the centre of the neighbouring tile.
+    // The budget is the SAME one an ordinary move spends - allowance first,
+    // then real AP (`moveBudget`) - minus the swing this walk is for. Billing
+    // the walk against bare `ap` ignored the free movement allowance entirely,
+    // so a character wearing it stopped short of a target they could plainly
+    // afford to reach and stood there instead of hitting anyone.
     const [gx, gz] = best[best.length - 1];
     const ep = en.entity ? en.entity.getPosition() : { x: en.x, z: en.z };
-    const walk = walkActive(best, active.ap - a.ap, world.approach(gx, gz, ep.x, ep.z));
+    const walk = walkActive(best, moveBudget(active) - a.ap, world.approach(gx, gz, ep.x, ep.z));
     if (!walk) { log('Not enough AP to reach them.'); return; }
     // The walk's endpoint is already a free point, so this asks the honest
     // question directly instead of rounding it back to a tile first: will we
@@ -1888,6 +1899,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // assert the previewed odds match the math that actually rolls.
     get lastRoll() { return lastRoll; },
     get hoverHitChance() { return hoverHitChance; },
+    // Is the movement trail currently drawn? Aiming at a coworker must replace
+    // it with the to-hit readout, not draw both.
+    get movePreview() { return !!preview; },
     get usesLeft() { return active.usesLeft; }, // live { actionId: count } - edit in place, then call refresh()
     get party() {
       return members.map((m) => ({ name: m.sheet.name, hp: m.sheet.hp, ap: m.ap, active: m === active, statuses: statusList(m.sheet) }));

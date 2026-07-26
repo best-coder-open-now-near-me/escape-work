@@ -229,6 +229,10 @@ test('clicking a coworker in combat attacks with the basic swing - no action arm
   expect(await page.evaluate(() => window.__game.hoverGlow)).toBe(true);
   // ...and hovering it did NOT quietly arm anything - the default stays implicit.
   expect(await page.evaluate(() => window.__combat.armed)).toBe(null);
+  // The to-hit readout REPLACES the movement trail. It used to draw both: the
+  // trail from the last patch of floor the cursor crossed stayed on screen,
+  // hanging off the character while they were plainly aiming at someone.
+  expect(await page.evaluate(() => window.__combat.movePreview)).toBe(false);
 
   // Click the body. The camera keeps easing after the walk-up, so settle and
   // retry a couple of times rather than trusting one projection.
@@ -242,6 +246,36 @@ test('clicking a coworker in combat attacks with the basic swing - no action arm
   expect(await foeHp()).toBeLessThan(foe.hp);
   // It swung the equipped weapon's action (bare-handed here), not a class power.
   expect(await page.evaluate(() => window.__combat.lastRoll)).not.toBe(null);
+
+  // Right-click during a fight opens the context menu - the Examine verb had
+  // no way in mid-combat at all - and asking twice SHOWS twice: an identical
+  // line used to be swallowed as a stutter, which read as a dead button.
+  const menu = page.locator('#context-menu');
+  const examineHere = async () => {
+    const p = await page.evaluate(() => {
+      const t = window.__game.playerTile;
+      return window.__game.project3(t.x, 0.05, t.z + 1);
+    });
+    await page.mouse.click(p.x, p.y, { button: 'right' });
+    await expect(menu).toBeVisible({ timeout: 10_000 });
+    await menu.getByText('Examine').click();
+  };
+  await examineHere();
+  const said = await page.evaluate(() => window.__game.narration.at(-1));
+  expect(said).toBeTruthy();
+  // How many times that line has been narrated - as a repeat count on one row,
+  // or as separate rows if something else narrated in between. Either is fine;
+  // what must NOT happen is the second ask vanishing.
+  const timesSaid = () => page.evaluate((t) => window.__game.narration
+    .filter((l) => l === t || l.startsWith(`${t} (×`))
+    .reduce((n, l) => n + (l === t ? 1 : Number(/\(×(\d+)\)$/.exec(l)[1])), 0), said);
+  expect(await timesSaid()).toBe(1);
+  await examineHere();
+  await expect.poll(timesSaid, { timeout: 10_000 }).toBe(2);
+  expect(await page.evaluate(() => window.__game.inCombat)).toBe(true); // menu didn't end the fight
+  // Examine names what it is looking at. Every solid prop used to report as a
+  // cubicle wall, because the menu's catch-all branch hardcoded that line.
+  expect(await page.evaluate(() => window.__game.examineTile(0, 0))).toMatch(/cubicle wall/i);
 });
 
 test('the tactical camera button sits on the HUD rail and looks straight down', async ({ page }) => {

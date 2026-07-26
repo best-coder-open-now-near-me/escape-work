@@ -13,6 +13,13 @@
 //                { effect: 'damage', amount, message }       -> hazard
 //   loot     - loot table id (data/items.js LOOT_TABLES); makes the prop
 //              rummageable (click it, or its Alt label). `label` names it.
+//   label    - what the thing is CALLED, in the Alt overlay, the focus banner
+//              and the Examine line. Worth setting on anything solid: without
+//              one, Examine can only fall back to naming it a cubicle wall.
+//   examine  - the flavor line Examine prints (main.js examineTile). Optional:
+//              a prop with a `label` and no `examine` gets a plain generated
+//              line naming it, which is correct but not funny. Write one for
+//              anything a player will actually stand next to.
 //   scale    - model scale; props are authored to sit inside one tile
 //   category - groups the brush in the level editor's palette. With a large
 //              furniture kit a flat button bar is unusable, so the editor
@@ -45,6 +52,8 @@ export const TILE_TYPES = {
     solid: true,
     height: 0.6,
     color: [0.22, 0.22, 0.3],
+    label: 'Cubicle Wall',
+    examine: 'A cubicle wall. It has seen things.',
   },
   floor: {
     char: '.',
@@ -163,6 +172,8 @@ export const TILE_TYPES = {
     model: 'furniture/chair',
     scale: 0.55,
     rotY: 90,
+    label: 'Chair',
+    examine: 'An office chair, lowered to its saddest setting. Someone\'s back gave up here.',
   },
   cabinet: {
     char: 'B',
@@ -171,6 +182,8 @@ export const TILE_TYPES = {
     color: [0.55, 0.38, 0.24],
     model: 'furniture/cabinet',
     scale: 0.5,
+    label: 'Filing Cabinet',
+    examine: 'A filing cabinet. The second drawer has not opened since the merger.',
   },
   // The merchant you can paint (ECONOMY_PLAN M2). `shop` points at a SHOPS
   // entry (data/shops.js) exactly the way `loot` points at a loot table, and
@@ -201,6 +214,8 @@ export const TILE_TYPES = {
     color: [0.35, 0.62, 0.3],
     model: 'furniture/plant',
     scale: 0.9,
+    label: 'Potted Plant',
+    examine: 'A potted plant, watered by rumour and the occasional coffee dregs.',
   },
   couch: {
     char: 'C',
@@ -209,6 +224,8 @@ export const TILE_TYPES = {
     color: [0.72, 0.45, 0.32],
     model: 'furniture/couch',
     scale: 0.5,
+    label: 'Couch',
+    examine: 'A breakout-area couch. Load-bearing for at least one nap a day.',
   },
   bookshelf: {
     char: 'S',
@@ -217,6 +234,8 @@ export const TILE_TYPES = {
     color: [0.5, 0.36, 0.22],
     model: 'furniture/bookshelf',
     scale: 0.5,
+    label: 'Bookshelf',
+    examine: 'A bookshelf of binders nobody has opened. The spines are immaculate.',
   },
   lamp: {
     char: 'L',
@@ -225,6 +244,8 @@ export const TILE_TYPES = {
     color: [0.92, 0.85, 0.55],
     model: 'furniture/lamp',
     scale: 0.55,
+    label: 'Floor Lamp',
+    examine: 'A floor lamp, on. The overheads are also on. Nobody knows who owns either switch.',
   },
 
   // --- Kenney Furniture Kit props (assets/furniture/kit) --------------------

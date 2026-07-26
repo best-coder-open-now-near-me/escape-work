@@ -176,6 +176,26 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   pressing the key lights what you are already pointing at instead of waiting
   for a fresh hover event. The cursor and the focus banner stay ungated - they
   cost no attention.
+- **Examine is one function, and it names what it is looking at**
+  (`main.examineTile` / `examineAt`). Every menu that offers Examine routes
+  through it, so the same object reads the same way wherever you ask. Flavor is
+  DATA: a tile type's `examine` in `data/tiles.js`, an enemy's or NPC's on its
+  def; the helper only decides which applies, falling back to a line built from
+  the def's `label`. Only a thing with no label at all is called a cubicle wall
+  - that string used to be the catch-all for every solid tile, so chairs,
+  sofas, fridges and bookshelves all introduced themselves as one.
+  **Right-click opens the menu in combat too.** It stays the universal "back
+  out" first (an armed action or a pending confirm lowers, and consumes the
+  click); with nothing to cancel it opens an Examine-only menu, because Examine
+  had no way in mid-fight at all. Only Examine: every other verb in the
+  out-of-combat menu spends a turn, and those belong on the action bar where
+  their AP cost is visible.
+- **The narrator box counts repeats instead of swallowing them** (`ui.narrate`).
+  A line identical to the one above it becomes `… (×2)` on the same row rather
+  than a second row - but it is never dropped. It used to return early as "no
+  stutter", so examining the same desk twice printed nothing the second time,
+  which is exactly the case where the player is deliberately asking again and
+  reads silence as a dead button.
 - **Attacks are available outside combat via the persistent hotbar.** The
   offensive slice of the sheet's actions (attacks, shove, throws) lives on an
   always-on bar (`ui.createHotbar`, ids `#hotbar-act-<id>` so they never

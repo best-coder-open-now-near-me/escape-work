@@ -68,23 +68,37 @@ export function setNarrationGate(ok) {
 }
 
 // Append a line and re-render. The newest sits at the bottom, like a chat log.
+//
+// A line identical to the one above it does NOT get swallowed. It used to:
+// repeats returned early as "no stutter", which meant examining the same desk
+// twice in a row printed nothing the second time and read as a dead button -
+// the one case where the player is deliberately asking again. Instead the
+// repeat stays a single row carrying a count, and the row flashes, so asking
+// twice looks like asking twice rather than like nothing happening.
 function narrate(text) {
   if (!text) return;
   const line = String(text);
-  if (narrationLines[narrationLines.length - 1] === line) return; // no stutter
-  narrationLines.push(line);
-  while (narrationLines.length > NARRATION_KEEP) narrationLines.shift();
+  const last = narrationLines[narrationLines.length - 1];
+  if (last && last.text === line) last.count += 1;
+  else {
+    narrationLines.push({ text: line, count: 1 });
+    while (narrationLines.length > NARRATION_KEEP) narrationLines.shift();
+  }
   const el = ensureNarrator();
   el.innerHTML = '';
   narrationLines.forEach((t, i) => {
     const p = document.createElement('div');
-    p.textContent = t;
+    p.textContent = t.count > 1 ? `${t.text} (×${t.count})` : t.text;
     // Older lines recede so the newest reads first.
     p.style.opacity = String(0.35 + (0.65 * (i + 1)) / narrationLines.length);
     el.appendChild(p);
   });
   el.style.opacity = narrationOk ? '1' : '0';
+  el.lastElementChild?.animate?.([{ opacity: 0.2 }, { opacity: 1 }], { duration: 220, easing: 'ease-out' });
 }
+
+// The narration box's current lines, newest last - for the e2e suite.
+export const narrationLog = () => narrationLines.map((t) => (t.count > 1 ? `${t.text} (×${t.count})` : t.text));
 
 // --- focused-object banner (Divinity/BG3 examine-on-hover) --------------------
 // Naming whatever the cursor is over, up top, before you click it. Cosmetic +

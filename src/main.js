@@ -907,6 +907,49 @@ function startGame(level) {
     }
     return null;
   }
+
+  // --- Examine ------------------------------------------------------------
+  // One source of truth for "what is this?", so every menu that offers Examine
+  // - out of combat, in combat - says the same thing about the same object.
+  // Flavor lives in the registries (data/tiles.js `examine`, an enemy or NPC
+  // def's `examine`); this only decides which one applies.
+  function examineTile(tx, tz) {
+    const def = grid.defAt(tx, tz);
+    if (isWalkable(tx, tz)) {
+      if (runtime.isBurning(tx, tz)) return FIRE.examine;
+      if (grid.isElectrified(tx, tz)) return ELECTRIFIED.examine;
+      const surfId = runtime.surfaceAt(tx, tz);
+      return (surfId && SURFACES[surfId].examine) || 'Standard-issue office carpet. Faintly damp.';
+    }
+    // Burning first: a trash can on fire is a different object than a trash can.
+    if (def.ignitable && runtime.isBurning(tx, tz)) {
+      return 'The trash can is thoroughly on fire. Somewhere, an alarm should be going off.';
+    }
+    if (def.examine) return def.examine;
+    if (def.ignitable) return 'A trash can. Sixty percent paper, forty percent regret.';
+    if (def.explosive) return 'The printer. It has jammed 4 times today. It is waiting.';
+    if (def.shop) return 'A snack machine, humming. Row E7 has been stuck since before you were hired.';
+    if (def.loot) return `${def.label}. Probably contains secrets. Or staples.`;
+    // Naming it beats miscalling it. The cubicle wall is the LAST resort now:
+    // as the catch-all for everything solid it introduced half the furniture in
+    // the office - chairs, sofas, fridges, bookshelves - as a cubicle wall.
+    return def.label
+      ? `${def.label}. Office issue, and not going anywhere.`
+      : 'A cubicle wall. It has seen things.';
+  }
+  const doorExamine = (open) => (open
+    ? 'An office door, ajar. A bold statement of availability.'
+    : 'A closed office door. The universal sign for "do not perceive me."');
+  // Whatever the cursor resolves to: a body first, then a door, then the tile.
+  function examineAt(hit, tile, point) {
+    if (hit?.kind === 'npc') return hit.ref.def.examine || 'A coworker. Non-hostile, for now.';
+    if (hit?.kind === 'party') return hit.ref.def?.examine || 'One of yours. Holding up, mostly.';
+    if (hit?.kind === 'enemy') return hit.ref.def.examine || 'A coworker, in the way.';
+    const doorKey = hit?.kind === 'door' ? hit.ref : (point ? doorNearPoint(point) : null);
+    if (doorKey) return doorExamine(grid.doors.get(doorKey)?.open);
+    return tile ? examineTile(tile.x, tile.z) : null;
+  }
+
   const canvasEl = document.getElementById('app');
   const hlShells = new WeakMap(); // holder entity -> highlight shell (or null)
   let hoverEntity = null;
@@ -1848,16 +1891,28 @@ function startGame(level) {
     },
     onRightClickTile: (tile, sx, sy, point) => {
       if (!sheet || gameOver) return;
-      // In combat, right-click is the universal "back out": it lowers an armed
-      // action or a pending confirm. Left-click never cancels (it reports an
-      // invalid target), so aiming survives a near-miss.
-      if (inCombat) { combat?.cancelArmed(); return; }
+      // In combat, right-click is first the universal "back out": it lowers an
+      // armed action or a pending confirm. Left-click never cancels (it reports
+      // an invalid target), so aiming survives a near-miss.
+      //
+      // With nothing to back out of, it opens the context menu instead - the
+      // Examine verb had no way in during a fight, which is the half of the
+      // game where you most want to know what you're looking at. Only Examine:
+      // every other verb in here spends a turn, and those belong on the action
+      // bar where their AP cost is visible.
+      if (inCombat) {
+        if (combat?.cancelArmed()) return;
+        const chit = picking.pick(controls.cameraEntity, sx, sy);
+        const text = examineAt(chit, tile, point);
+        if (text) ui.showMenu(sx, sy, [{ label: 'Examine', action: () => ui.say(text) }]);
+        return;
+      }
       if (modalOpen()) return;
       const hit = picking.pick(controls.cameraEntity, sx, sy);
       if (hit && hit.kind === 'npc') {
         ui.showMenu(sx, sy, [
           { label: `Talk to ${hit.ref.def.name}`, action: () => approachAndDo(hit.ref.x, hit.ref.z, () => dialogue.open(hit.ref)) },
-          { label: 'Examine', action: () => ui.say(hit.ref.def.examine || 'A coworker. Non-hostile, for now.') },
+          { label: 'Examine', action: () => ui.say(examineAt(hit, tile, point)) },
         ]);
         return;
       }
@@ -1875,7 +1930,7 @@ function startGame(level) {
             const i = party.members.indexOf(m);
             if (i !== party.active) items.push({ label: `Switch to ${m.sheet.name}`, action: () => switchLeader(i) });
           }
-          items.push({ label: 'Examine', action: () => ui.say(hit.ref.def?.examine || 'One of yours. Holding up, mostly.') });
+          items.push({ label: 'Examine', action: () => ui.say(examineAt(hit, tile, point)) });
           ui.showMenu(sx, sy, items);
           return;
         }
@@ -1886,12 +1941,7 @@ function startGame(level) {
         const open = grid.doors.get(doorKey).open;
         ui.showMenu(sx, sy, [
           { label: open ? 'Close the door' : 'Open the door', action: () => approachDoor(doorKey) },
-          {
-            label: 'Examine',
-            action: () => ui.say(open
-              ? 'An office door, ajar. A bold statement of availability.'
-              : 'A closed office door. The universal sign for "do not perceive me."'),
-          },
+          { label: 'Examine', action: () => ui.say(doorExamine(open)) },
         ]);
         return;
       }
@@ -1900,18 +1950,13 @@ function startGame(level) {
         ui.showMenu(sx, sy, [
           { label: `Confront ${en.def.name}`, action: () => confront(en) },
           { label: 'Avoid eye contact', action: () => ui.say('You study your shoes intently.') },
-          { label: 'Examine', action: () => ui.say(en.def.examine) },
+          { label: 'Examine', action: () => ui.say(en.def.examine || 'A coworker, in the way.') },
         ]);
       } else if (isWalkable(tile.x, tile.z)) {
         const surfId = runtime.surfaceAt(tile.x, tile.z);
-        const flavor = runtime.isBurning(tile.x, tile.z)
-          ? FIRE.examine
-          : grid.isElectrified(tile.x, tile.z)
-            ? ELECTRIFIED.examine
-            : (surfId && SURFACES[surfId].examine) || 'Standard-issue office carpet. Faintly damp.';
         const items = [
           { label: 'Walk here', action: () => moveTo(tile, point) },
-          { label: 'Examine', action: () => ui.say(flavor) },
+          { label: 'Examine', action: () => ui.say(examineTile(tile.x, tile.z)) },
         ];
         const here = loot.looseAt(tile.x, tile.z);
         if (here.length) {
@@ -1937,12 +1982,7 @@ function startGame(level) {
         }
         ui.showMenu(sx, sy, items);
       } else if (grid.defAt(tile.x, tile.z).ignitable) {
-        const items = [{
-          label: 'Examine',
-          action: () => ui.say(runtime.isBurning(tile.x, tile.z)
-            ? 'The trash can is thoroughly on fire. Somewhere, an alarm should be going off.'
-            : 'A trash can. Sixty percent paper, forty percent regret.'),
-        }];
+        const items = [{ label: 'Examine', action: () => ui.say(examineTile(tile.x, tile.z)) }];
         if (canIgnite() && runtime.ignitable(tile.x, tile.z)) {
           items.unshift({
             label: igniteVerb(),
@@ -1957,20 +1997,18 @@ function startGame(level) {
       } else if (grid.defAt(tile.x, tile.z).explosive) {
         ui.showMenu(sx, sy, [
           { label: 'Rummage', action: () => approachAndDo(tile.x, tile.z, () => loot.lootContainer(tile.x, tile.z)) },
-          { label: 'Examine', action: () => ui.say('The printer. It has jammed 4 times today. It is waiting.') },
+          { label: 'Examine', action: () => ui.say(examineTile(tile.x, tile.z)) },
         ]);
       } else {
         const def = grid.defAt(tile.x, tile.z);
-        const items = [{ label: 'Examine', action: () => ui.say('A cubicle wall. It has seen things.') }];
+        const items = [{ label: 'Examine', action: () => ui.say(examineTile(tile.x, tile.z)) }];
         if (def.shop) {
-          items[0] = { label: 'Examine', action: () => ui.say('A snack machine, humming. Row E7 has been stuck since before you were hired.') };
           items.unshift({
             label: `Buy from the ${def.label}`,
             action: () => approachAndDo(tile.x, tile.z, () => openShopAt(tile.x, tile.z)),
           });
         }
         if (def.loot && !def.shop) {
-          items[0] = { label: 'Examine', action: () => ui.say(`${def.label}. Probably contains secrets. Or staples.`) };
           items.unshift({
             label: 'Rummage',
             action: () => approachAndDo(tile.x, tile.z, () => loot.lootContainer(tile.x, tile.z)),
@@ -2397,6 +2435,10 @@ function startGame(level) {
     // Out-of-combat targeting + hover state, for the e2e suite.
     get armed() { return armedOoc; },
     get hoverKind() { return hoverKind; },
+    // The narration box's lines, newest last - for the e2e suite.
+    get narration() { return ui.narrationLog(); },
+    // What Examine would say about a tile, without opening a menu to find out.
+    examineTile: (x, z) => examineTile(x, z),
     get ctrlHeld() { return ctrlHeld; },
     // Is the hover body-glow actually LIT right now? (a tracked target, plus
     // either a held modifier or being in combat - the two halves of the gate)
