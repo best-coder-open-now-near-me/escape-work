@@ -24,7 +24,7 @@ import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP, addCash,
 } from './party.js';
-import { applyStatus, statusFx, hasStatus, tickStep, statusLeft } from './statuses.js';
+import { applyStatus, statusFx, hasStatus, tickStep, statusLeft, statusList } from './statuses.js';
 import { inReach } from './tactics.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
@@ -32,7 +32,10 @@ import { createApp, buildLevel } from './scene.js';
 import { placeModel, applyCharacterProportions } from './models.js';
 import { createPortraits } from './portraits.js';
 import { addHighlight, setHighlight } from './shading.js';
-import { throwProjectile, spawnDamageText, worldToScreenCss } from './fx.js';
+import {
+  throwProjectile, spawnDamageText, worldToScreenCss, impact as impactFx, statusBurst,
+  createAuraLayer, footstep, bloodSplat, CHEST_Y,
+} from './fx.js';
 import { createControls } from './controls.js';
 import { createPicker } from './picking.js';
 import { createLooting } from './looting.js';
@@ -579,6 +582,11 @@ function startGame(level) {
     if (dead.summoned) return; // summoned minions pay no XP (SUMMON_PLAN #6)
     for (const m of gainXpAll(party, dead.def.xp)) {
       const pts = m.sheet.attrPoints;
+      // A promotion should look like one, wherever the promoted are standing.
+      if (m.actor?.entity) {
+        const p = m.actor.entity.getPosition();
+        vfx.impact(p.x, p.z, 'levelup', { y: 0.4 });
+      }
       ui.say(`Promotion! ${m.sheet.name} reaches level ${m.sheet.level} - ${pts} point${pts === 1 ? '' : 's'} to spend.`);
     }
     ui.updateStatsHud(sheet);
@@ -587,6 +595,8 @@ function startGame(level) {
   // Blowing up a printer: flash, clear the tile, flatten anyone beside it.
   function handleExplosion(x, z) {
     scene.explosionFlash(x, z);
+    vfx.impact(x, z, 'toner', { y: 0.5, scale: 1.4 });
+    vfx.shake(0.16, 0.45); // the one moment in the office that earns a jolt
     grid.setType(x, z, 'floor');
     scene.removePropVisual(x, z);
     const slain = enemies.filter((en) =>
@@ -606,6 +616,7 @@ function startGame(level) {
       if (Math.abs(m.actor.x - x) > 1 || Math.abs(m.actor.z - z) > 1) continue;
       const dead = applyDamage(m.sheet, EXPLOSION_DAMAGE);
       m.actor.flinch();
+      vfx.impact(m.actor.x, m.actor.z, 'slam');
       vfx.damageText(m.actor.x, m.actor.z, `-${EXPLOSION_DAMAGE}`);
       msg += m === partyLeader(party)
         ? ` You catch shrapnel. -${EXPLOSION_DAMAGE} HP.`
@@ -1649,6 +1660,7 @@ function startGame(level) {
       if (fx.effect === 'damage' && changed) {
         const dead = applyDamage(ms, fx.amount);
         actor.flinch();
+        vfx.impact(x, z, 'slam', { y: 0.35, scale: 0.8 });
         vfx.damageText(x, z, `-${fx.amount}`);
         ui.say(fx.message);
         syncHudFor(ms);
@@ -1666,6 +1678,11 @@ function startGame(level) {
       const { damage, expired } = tickStep(ms);
       if (damage > 0) {
         const bled = applyDamage(ms, damage);
+        // "You drip on the carpet" is literal now - the carpet keeps it. On
+        // the BODY's spot, not the tile centre, so the drip lands under the
+        // walker rather than in the middle of the square they're crossing.
+        const drip = actor.entity ? actor.entity.getPosition() : { x, z };
+        vfx.splat(drip.x, drip.z, { scale: 0.5 });
         vfx.damageText(x, z, `-${damage}`);
         ui.say('You drip on the carpet. -1 HP.');
         syncHudFor(ms);
@@ -1686,12 +1703,15 @@ function startGame(level) {
     if (sfx) {
       if (sfx.ammo) {
         ms.paper = Math.min(PAPER_CAP, ms.paper + sfx.ammo);
+        vfx.impact(x, z, 'shreds', { y: 0.3, scale: 0.8 });
         vfx.damageText(x, z, '+📄', '#8adf76');
       }
       // Gum on shoe: slowed, no kicking, but genuine traction (can't slip).
       if (sfx.applies === 'gum' && stickGum(x, z)) {
         const had = hasStatus(ms, 'gum');
         applyStatus(ms, 'gum');
+        vfx.impact(x, z, 'gum', { y: 0.12 });
+        vfx.status(x, z, 'gum');
         ui.say(had ? 'More gum. You are building a collection.' : sfx.message);
         syncHudFor(ms);
       }
@@ -1699,6 +1719,7 @@ function startGame(level) {
       // turns to tick, so it only takes hold in a fight; the instant surface
       // damage below is the out-of-combat story.
       if (sfx.applies && sfx.applies !== 'gum' && inCombat && applyStatus(ms, sfx.applies)) {
+        vfx.status(x, z, sfx.applies);
         syncHudFor(ms);
       }
       const amount = effectiveSurfDamage(x, z, ms);
@@ -1706,6 +1727,7 @@ function startGame(level) {
         if (sfx.bleed) applyStatus(ms, 'bleed', { duration: sfx.bleed });
         const dead = applyDamage(ms, amount);
         actor.flinch();
+        vfx.impact(x, z, surfaceImpactKind(x, z), { y: 0.3 });
         vfx.damageText(x, z, `-${amount}`);
         ui.say(sfx.message);
         syncHudFor(ms);
@@ -1732,11 +1754,19 @@ function startGame(level) {
       if (chance && Math.random() < chance) {
         actor.clearPath();
         actor.flinch();
+        vfx.impact(x, z, 'slip', { y: 0.12 });
         vfx.damageText(x, z, 'slip!', '#8ad4df');
         if (inCombat) combat?.notifySlip();
         else ui.say('The floor was, in fact, wet. You go down. Gracefully? No.');
       }
     }
+    // The trail you leave behind. A drift of shredded TPS reports CUTS
+    // (data/surfaces.js), so crossing one is exactly how a walker starts
+    // bleeding - and from that tile on they stamp bloody prints across the
+    // office, darkest on the paper itself. Wet and coffee-soaked soles print
+    // too, for a few tiles, until the shoe dries out. fx.js owns the shoe
+    // state; this only reports the step and what's underfoot.
+    if (changed && !gameOver) leaveFootprint(actor, ms, x, z);
     // Walk-up interactions (lighting trash cans) fire on deliberate arrival.
     if (isLeader && pendingAction && pathDone
       && Math.abs(x - pendingAction.x) <= 1 && Math.abs(z - pendingAction.z) <= 1) {
@@ -1767,6 +1797,7 @@ function startGame(level) {
         if (sfx.bleed) applyStatus(ms, 'bleed', { duration: sfx.bleed });
         const dead = applyDamage(ms, amount);
         actor.flinch();
+        vfx.impact(x, z, surfaceImpactKind(x, z), { y: 0.3 });
         vfx.damageText(x, z, `-${amount}`);
         syncHudFor(ms); // it's the summon's own card while it has the floor
         if (dead) { if (inCombat && combat) combat.notifyMemberDown(); return; }
@@ -1776,10 +1807,13 @@ function startGame(level) {
     const { damage } = tickStep(ms);
     if (damage > 0) {
       const bled = applyDamage(ms, damage);
+      vfx.splat(x, z, { scale: 0.5 });
       vfx.damageText(x, z, `-${damage}`);
       syncHudFor(ms);
       if (bled && inCombat && combat) combat.notifyMemberDown();
     }
+    // A temp bleeds on the carpet like anybody else.
+    if (!gameOver) leaveFootprint(actor, ms, x, z);
   }
 
   // --- input --------------------------------------------------------------------
@@ -2087,13 +2121,76 @@ function startGame(level) {
     applyHoverGlow(); // a key can't be 'still held' across a focus loss
   });
 
-  // Cosmetic combat feedback (projectiles, floating numbers). Defined after
-  // controls exist because the damage text projects through the camera.
+  // Cosmetic feedback: projectiles, floating numbers, particle bursts, ground
+  // decals and the camera's flinch. Defined after controls exist because the
+  // damage text projects through the camera and the shake drives the rig.
+  // Everything here is fire-and-forget - combat and the step handlers hand it
+  // world coordinates and never wait on it (see fx.js).
+  const auras = createAuraLayer(app);
   const vfx = {
     projectile: (from, to, kind) => throwProjectile(app, from, to, kind),
-    damageText: (x, z, text, color) =>
-      spawnDamageText(app, controls.cameraEntity, x, 0.2, z, text, color),
+    damageText: (x, z, text, color, opts) =>
+      spawnDamageText(app, controls.cameraEntity, x, 0.2, z, text, color, opts),
+    // A burst at chest height on a body, or at ground level for a floor event.
+    impact: (x, z, kind, opts) => impactFx(app, x, opts?.y ?? CHEST_Y, z, kind, opts),
+    status: (x, z, id) => statusBurst(app, x, z, id),
+    splat: (x, z, opts) => bloodSplat(app, x, z, opts),
+    footstep: (actor, x, z, info) => footstep(app, actor, x, z, info),
+    shake: (amp, dur) => controls.shake(amp, dur),
   };
+
+  // Everyone on the map who could be wearing a status aura, in one list the
+  // tracker re-reads (see the update loop). Bodies only: a downed member and a
+  // dismissed summon have nothing to wreathe.
+  const auraScratch = [];
+  function collectStatusCarriers() {
+    auraScratch.length = 0;
+    if (party) {
+      for (const m of party.members) {
+        if (m.actor?.entity && m.sheet.hp > 0) {
+          auraScratch.push({ entity: m.actor.entity, statuses: statusList(m.sheet) });
+        }
+      }
+    }
+    for (const s of summons) {
+      if (s.actor?.entity && s.sheet.hp > 0) {
+        auraScratch.push({ entity: s.actor.entity, statuses: statusList(s.sheet) });
+      }
+    }
+    for (const en of enemies) {
+      if (en.alive && en.entity) auraScratch.push({ entity: en.entity, statuses: statusList(en) });
+    }
+    return auraScratch;
+  }
+
+  // Is this walker leaving a trail? A live bleed is the obvious case; so is
+  // being badly enough hurt that you're dripping without a status saying so.
+  const isBleeding = (s) => hasStatus(s, 'bleed') || s.hp <= Math.max(1, s.maxHp * 0.3);
+
+  // What a hurting floor looks like when it bites: the burst matches the
+  // hazard the tile actually IS right now (fire beats electrified beats the
+  // painted surface), so a paper cut throws shreds and live water throws
+  // sparks without either side hard-coding the other's list.
+  function surfaceImpactKind(x, z) {
+    if (runtime.isBurning(x, z)) return 'fire';
+    if (grid.isElectrified(x, z)) return 'zap';
+    const surf = runtime.surfaceAt(x, z);
+    if (surf === 'paper') return 'paper';
+    if (surf === 'cable') return 'zap';
+    return 'slam';
+  }
+
+  // One tile entered, one print left (or not) - the bookkeeping of which foot
+  // and how bloody the sole still is lives in fx.js, keyed by the actor.
+  function leaveFootprint(actor, s, x, z) {
+    if (!actor?.entity) return;
+    const surf = runtime.surfaceAt(x, z);
+    vfx.footstep(actor, x, z, {
+      bleeding: isBleeding(s),
+      surface: surf,
+      onPaper: surf === 'paper',
+    });
+  }
 
   // --- main loop ------------------------------------------------------------------
   const BASE_SPEED = 4;
@@ -2255,6 +2352,12 @@ function startGame(level) {
       }
     }
     animateSurfaces(dt);
+    // Live statuses wear their look: embers off a burning coworker, drips off
+    // a bleeding one, motes circling whoever is stuck in mandatory training.
+    // What each one emits is DATA (`fx` on the status, data/statuses.js); this
+    // only reports who is carrying what. The tracker throttles itself, and
+    // only asks for the roster on the frames it emits on.
+    if (!gameOver) auras.sync(dt, collectStatusCarriers);
     // The loot overlay tracks the world while held (the camera keeps easing).
     if (loot.labelsVisible) {
       loot.repositionLabels((w) => {

@@ -62,6 +62,7 @@ export function buildLevel(app, grid, { picking = null } = {}) {
       if (type === null) continue;
       r.renderFloor(x, z, carpetAt.get(x + ',' + z) || type);
       if (type === 'floor') continue;
+      if (type === 'exit') r.addExitBeacon(x, z); // motes rising off the stairwell
       // Rummageable / shoppable / ignitable / explosive props are left-clickable
       // and hover-highlightable: register their holder for object picking. Model
       // props (desks) load async, so catch them via onAsync too.

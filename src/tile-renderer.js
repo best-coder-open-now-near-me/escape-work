@@ -7,6 +7,7 @@ import { TILE_TYPES } from './data/tiles.js';
 import { SURFACES, ELECTRIFIED, FIRE } from './data/surfaces.js';
 import { makeMaterial } from './shading.js';
 import { placeModel } from './models.js';
+import { burst } from './fx.js';
 
 const pc = window.pc;
 
@@ -394,6 +395,38 @@ export function createTileRenderer(app) {
     return { kind: 'marker', entities: [addBox(tileMats[type], x, def.height / 2, z, 1, def.height, 1)] };
   }
 
+  // The way out gets a beacon: the exit tile already glows a little (its
+  // emissive tint, above), and a slow column of motes off the stairwell is
+  // what makes it findable across a dim floor plate - the one piece of
+  // information the whole game is about. Registered by the level builder
+  // (scene.js), not by renderMarker: the EDITOR repaints cells constantly, and
+  // a per-render registration would stack an emitter per repaint and keep one
+  // burning over an exit that had been erased.
+  const exits = [];
+  const addExitBeacon = (x, z) => exits.push({ x, z });
+  let exitClock = 0;
+  const EXIT_INTERVAL = 0.4;
+  function shedExitMotes(dt) {
+    if (!exits.length) return;
+    exitClock += dt;
+    if (exitClock < EXIT_INTERVAL) return;
+    exitClock = 0;
+    for (const e of exits) {
+      burst(app, { x: e.x, y: floorDef.height / 2 + 0.1, z: e.z }, {
+        count: 1, color: [1, 0.85, 0.35], speed: 0.16, up: 0.9, upVar: 0.3,
+        size: 0.09, life: 1.7, lifeVar: 0.2, gravity: 0, drag: 0.2,
+        jitter: 0.34, floor: false,
+      });
+    }
+  }
+
+  // Every live flame is registered so animate() can shed embers from it. The
+  // cones alone read as a decal at this camera distance; what says "fire" is
+  // the ash going up. Entries prune themselves when the runtime destroys the
+  // holder (a destroyed entity has no parent).
+  const flames = [];
+  let emberClock = 0;
+
   function addFlame(x, z, lift = 0.16) {
     const holder = new pc.Entity();
     const outer = new pc.Entity();
@@ -408,6 +441,7 @@ export function createTileRenderer(app) {
     holder.addChild(inner);
     holder.setPosition(x, floorDef.height / 2 + lift, z);
     app.root.addChild(holder);
+    flames.push({ x, z, lift, holder });
     return holder;
   }
 
@@ -439,12 +473,44 @@ export function createTileRenderer(app) {
     if (s) { s.holder.destroy(); smokeVisuals.delete(k); }
   }
 
+  // Embers and soot off every burning cell. Deliberately sparse (a couple of
+  // motes a cell per emission at ~7Hz): a room-wide fire is a dozen cells, and
+  // the point is drifting light, not a smoke machine.
+  const EMBER_INTERVAL = 0.14;
+  function shedEmbers(dt) {
+    if (!flames.length) return;
+    emberClock += dt;
+    if (emberClock < EMBER_INTERVAL) return;
+    emberClock = 0;
+    for (let i = flames.length - 1; i >= 0; i--) {
+      const f = flames[i];
+      if (!f.holder.parent) { flames.splice(i, 1); continue; }
+      const y = floorDef.height / 2 + f.lift + 0.35;
+      burst(app, { x: f.x, y, z: f.z }, {
+        count: 1, color: [1, 0.6, 0.18], speed: 0.35, up: 1.5, upVar: 0.5,
+        size: 0.09, life: 1, lifeVar: 0.3, gravity: 0.9, drag: 1.1,
+        jitter: 0.22, floor: false,
+      });
+      if (Math.random() < 0.4) {
+        burst(app, { x: f.x, y: y + 0.2, z: f.z }, {
+          count: 1, color: [0.3, 0.29, 0.3], additive: false, speed: 0.3,
+          up: 1.2, size: 0.16, life: 1.3, gravity: 0.7, drag: 1.3, grow: 1.5,
+          jitter: 0.25, floor: false,
+        });
+      }
+    }
+  }
+
   // A brief expanding toner-cloud boom.
   function explosionFlash(x, z) {
     const e = new pc.Entity();
     e.addComponent('render', { type: 'sphere', material: fireCore });
     e.setPosition(x, 0.5, z);
     app.root.addChild(e);
+    burst(app, { x, y: 0.5, z }, {
+      count: 10, color: [1, 0.7, 0.25], speed: 5.5, up: 2.4, size: 0.14,
+      life: 0.45, gravity: -7, drag: 0.8,
+    });
     let t = 0;
     const anim = (dt) => {
       t += dt;
@@ -472,10 +538,13 @@ export function createTileRenderer(app) {
         pf.e.setLocalPosition(p.x, pf.baseY + 0.05 * Math.sin(clock * 1.4 + pf.phase), p.z);
       }
     }
+    shedEmbers(dt);
+    shedExitMotes(dt);
   }
 
   return {
     renderFloor, renderMarker, renderEdgeWall, renderDoor, addFlame, explosionFlash, animate,
+    addExitBeacon,
     addSmoke, removeSmoke,
     tileMats, wallGhost, doorMat, doorGhost, floorHeight: floorDef.height,
     // World Y of the top face of an edge wall / a door panel. The occlusion

@@ -138,12 +138,51 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   // class carousel frames a candidate.
   let focusHeight = 0.3;
 
+  // Camera shake: an impact nudges the rig's focus point and lets it settle.
+  // Deliberately SMALL and SHORT (a hit is ~5 screen pixels at the default
+  // boom, gone in a quarter second) - this is punctuation for an explosion or
+  // a body hitting the floor, not a screen-wrecking rumble, and anything
+  // aiming at a projected world point (the loot labels, the e2e helpers)
+  // still lands where it looked.
+  const SHAKE_MAX = 0.16; // world units of focus displacement, hard cap
+  let shakeT = 0;
+  let shakeDur = 0.25;
+  let shakeAmp = 0;
+  let shakeClock = 0;
+  function shake(amp = 0.08, dur = 0.25) {
+    // A second impact during a shake takes over only if it's bigger - a volley
+    // of small hits must not sum into a quake.
+    if (shakeT > 0 && amp <= shakeAmp) return;
+    shakeAmp = Math.min(amp, SHAKE_MAX);
+    shakeDur = dur;
+    shakeT = dur;
+  }
+
   // Ease the rig toward the target each frame so the camera trails the player.
   // Time-based smoothing, so the trailing speed is framerate-independent.
+  // The shake offset is added to a base point tracked SEPARATELY from the
+  // entity's transform: easing from the shaken position would feed each
+  // frame's wobble back into the next one's start.
+  let baseX = focus.x;
+  let baseZ = focus.z;
   function follow(target, dt = 1 / 60) {
     const k = 1 - Math.exp(-dt * 7);
-    const c = camYaw.getPosition();
-    camYaw.setPosition(pc.math.lerp(c.x, target.x, k), focusHeight, pc.math.lerp(c.z, target.z, k));
+    baseX = pc.math.lerp(baseX, target.x, k);
+    baseZ = pc.math.lerp(baseZ, target.z, k);
+    let ox = 0;
+    let oz = 0;
+    if (shakeT > 0) {
+      shakeT = Math.max(0, shakeT - dt);
+      shakeClock += dt;
+      // Squared falloff, and two incommensurable frequencies so the wobble
+      // never looks like a loop. No Math.random per frame: a deterministic
+      // shake is one less thing that can differ between two runs of a test.
+      const decay = (shakeT / shakeDur) ** 2;
+      ox = Math.sin(shakeClock * 47) * shakeAmp * decay;
+      oz = Math.sin(shakeClock * 39 + 1.7) * shakeAmp * decay;
+      if (shakeT === 0) shakeAmp = 0;
+    }
+    camYaw.setPosition(baseX + ox, focusHeight, baseZ + oz);
   }
 
   // Programmatic camera override (the class-picker carousel frames the
@@ -185,6 +224,7 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     screenToTile,
     screenToGround,
     follow,
+    shake,
     setView,
     setTactical,
     toggleTactical: () => setTactical(!tactical),
