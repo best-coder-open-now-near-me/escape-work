@@ -275,9 +275,13 @@ test('clicking a coworker in combat attacks with the basic swing - no action arm
       const p = await page.evaluate(([x, yy, z]) => window.__game.project3(x, yy, z), [at.x, y, at.z]);
       if (!onScreen(p)) continue;
       jiggle = 1 - jiggle;
-      await page.mouse.move(p.x + jiggle, p.y);
+      // Verify and click the SAME pixel. This used to hover p.x + jiggle but
+      // click p.x - one pixel to the left of the spot the cursor had vouched
+      // for, which at a mesh edge is a different resolution entirely.
+      const cx = p.x + jiggle;
+      await page.mouse.move(cx, p.y);
       if (await page.evaluate(() => window.__game.cursor) !== 'crosshair') continue;
-      await page.mouse.click(p.x, p.y);
+      await page.mouse.click(cx, p.y);
       clicked = true;
       break;
     }

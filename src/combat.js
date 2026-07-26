@@ -451,6 +451,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // drawing while a walk finishes.
   let hoverFoe = null;
   let hoverHitChance = null; // to-hit chance shown for the enemy under an armed cursor
+  // Test-only: what the last combat click resolved to. Every silent path
+  // stamps a reason, so a wedged e2e run can say WHY a click did nothing
+  // instead of leaving a trace full of clicks with no visible effect.
+  let lastClickOutcome = null;
 
   function hidePreview() {
     preview = null;
@@ -1040,7 +1044,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const previewAction = () => (phase === 'player' && active?.sheet ? (armed || defaultAttack()) : null);
 
   function handleEnemyClick(en) {
-    if (phase !== 'player' || active.actor.moving || !en.alive) return;
+    if (phase !== 'player' || active.actor.moving || !en.alive) {
+      // This return is SILENT by design - a click on an AI turn or mid-walk
+      // is simply ignored - which also made it invisible in flake traces:
+      // "the click did nothing and nothing said why". The breadcrumb names
+      // the reason for the e2e suite without changing behavior.
+      lastClickOutcome = phase !== 'player' ? 'gate:phase'
+        : (active.actor.moving ? 'gate:moving' : 'gate:dead');
+      return;
+    }
     hidePreview();
     let autoArmed = false;
     if (!armed) {
@@ -1058,9 +1070,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Left dangling, it sat lit on the bar until a right-click, and anything
     // waiting for the swing to resolve (the e2e idle() helper) hung forever.
     const refuse = (msg) => {
+      lastClickOutcome = `refused:${msg}`;
       log(msg);
       if (autoArmed) { armed = null; refresh(); }
     };
+    lastClickOutcome = 'acted'; // overwritten by refuse(); the gate stamped its own
     const a = ACTIONS[armed];
     if (a.cone) { fireCone(en.x, en.z); return; }
     // Placing a summon on top of a coworker: the tile is taken, so they report
@@ -1200,6 +1214,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   }
 
   function handleTileClick(tile, point = null) {
+    lastClickOutcome = 'tile'; // the click resolved to ground, not a coworker
     if (phase !== 'player' || active.actor.moving || !tile) return;
     if (armed) {
       const a = ACTIONS[armed];
@@ -1971,6 +1986,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // assert the previewed odds match the math that actually rolls.
     get lastRoll() { return lastRoll; },
     get hoverHitChance() { return hoverHitChance; },
+    get lastClickOutcome() { return lastClickOutcome; },
     // Is the movement trail currently drawn? Aiming at a coworker must replace
     // it with the to-hit readout, not draw both.
     get movePreview() { return !!preview; },
