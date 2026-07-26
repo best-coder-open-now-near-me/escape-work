@@ -408,6 +408,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   document.body.appendChild(costTag);
   const PREVIEW_OK = new pc.Color(0.42, 0.78, 0.35);
   const PREVIEW_FAR = new pc.Color(0.85, 0.28, 0.24);
+  // The reach ring: dim and cool, so it reads as information about YOU rather
+  // than a judgement about a target (TACTICS_PLAN revision M5).
+  const REACH_RING = new pc.Color(0.55, 0.62, 0.78);
   let preview = null; // { reach: [[x,z],...], tail: [[x,z],...] | null }
   let aimPoint = null; // hover point while a cone attack is armed
   let hoverHitChance = null; // to-hit chance shown for the enemy under an armed cursor
@@ -624,6 +627,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         drawRing(pos.x, pos.z, TARGET_R, hit && active.ap >= a.ap ? PREVIEW_OK : PREVIEW_FAR);
       }
       return;
+    }
+    // Reach is a RADIUS, so the honest affordance is a circle on the floor.
+    // Highlighting whole tiles would draw a plus-with-corners that lies about
+    // the shape, and without any affordance a long weapon is an invisible
+    // statistic - the player would feel the extra tile without being told why.
+    // Drawn on the ACTOR's continuous position, which is what the rule measures.
+    {
+      const me = posOf(active);
+      drawRing(me.x, me.z, a.type === 'shove' ? REACH.SHOVE : reachOfUnit(active), REACH_RING);
     }
     for (const en of world.liveEnemies()) {
       if (!en.entity) continue;

@@ -129,6 +129,12 @@ const KITS = {
     attackAp: 3,
     xp: 11,
     dodge: 0.05, // trained to stay on his feet (HIT_PLAN)
+    // The maglite is already in his attack lines, and a long one is genuinely a
+    // reach weapon (TACTICS_PLAN revision M5). 2.1 clears a full orthogonal tile
+    // (2.0) with room to spare, so he can hold you at a distance you cannot
+    // answer bare-handed - which is exactly what "escorts you toward the door"
+    // should feel like, and it gives the player a reason to notice reach exists.
+    reach: 2.1,
     // Badge first, force second: he wants to see your lanyard before anything
     // escalates, which is exactly what 'yellow' means.
     aggression: 'yellow',

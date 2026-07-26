@@ -31,10 +31,10 @@ these four features are that parameter finally earning its keep. The fourth
 ## Revision — reach is a DISTANCE, and weapons own it
 
 The milestones below all shipped on one assumption: **melee reach is
-`cheb(logical tile) <= 1`.** That assumption is wrong for this engine, and it's
-the reason positioning feels loose. No code yet for this revision — it restates
-the rule, the constants, and the milestone order, then the sections below stand
-as the record of what the tile-adjacency version shipped.
+`cheb(logical tile) <= 1`.** That assumption is wrong for this engine, and it was
+the reason positioning felt loose. **This revision is landed** — all five of its
+milestones, see the list below; the sections after it stand as the record of what
+the tile-adjacency version shipped.
 
 ### The mismatch
 
@@ -181,25 +181,81 @@ when its path leaves the threatener's reach circle. Two notes:
 
 ### Milestones (each a PR that keeps `npm test` + e2e green)
 
-1. **Reach as data, inert.** The `REACH` block, `reachOf`, `equippedStats.reach`,
-   `unitCombat` passthrough, `inReach`/`reachOpen` in `tactics.js`, the items
-   vocabulary comment. **Nothing calls `inReach`** — zero observable change,
-   full unit coverage first. Mirrors how M1 landed the `mods` seam.
-2. **Melee reach goes continuous.** The ten sites above swap onto `inReach`,
-   **edge test off**, so the only change in this PR is distance. Isolates the
-   feel change from the walls change — if fights get worse, this is the PR to
-   bisect to.
-3. **Walls block swings.** Turn `reachOpen` on, and author `#` cells into both
-   levels (content, no code). **The risk lives here:** `pickTarget` and
-   `aiAdvance` assume reach follows from adjacency, so an enemy will path to a
-   tile across a partition and swing at nothing. Both need reach-awareness in
-   this PR or fights stall.
-4. **Opportunity attacks go continuous.** The radius-crossing reformulation and
-   the move off the tile hook onto distance sampling.
-5. **Reach content.** A long weapon or two (a Reach Grabber, the broom from the
-   supply closet) with `stats: { reach: 0.7, … }`, and an enemy that has one.
-   This is the milestone where positioning gets *more* interesting rather than
-   just more correct — and it's the reason reach is a data param at all.
+1. **Reach as data, inert.** ✅ Landed. The `REACH` block (`DEFAULT` 1.5,
+   `SHOVE` its own constant), `reachOf`, `equippedStats.reach`, `unitCombat`
+   passing `def.reach` through with `??` so an explicit 0 survives,
+   `dist`/`reachOpen`/`inReach` in `tactics.js`, the items vocabulary comment.
+   Nothing called `inReach` — zero observable change, full unit coverage first,
+   the same way M1 landed the `mods` seam. Unit 217→229.
+2. **Melee reach goes continuous.** ✅ Landed. Ten sites onto `inReach`, **edge
+   test off**, so the only change was distance. `combat.js` grew `reachOfUnit` /
+   `posOf` / `withinReach` / `canReach` beside `statusesOf`/`accuracyOf`/
+   `dodgeOf`, which is where the member-vs-unit difference already lived. The
+   walk-up endpoint check *improved* rather than ported: `walk.end` is already a
+   free point, so it asks whether we will be standing in reach instead of
+   rounding back to a tile first.
+   - **A stall this milestone introduced, fixed in it.** `aiAdvance` only ever
+     considered OTHER stand-tiles (its own tile pathed at length 1 and was
+     skipped) — fine when a tile was atomically in-or-out of reach. With reach a
+     distance, one tile holds both in-range and out-of-range positions, so a
+     unit hemmed into the single adjacent tile of a corridor could never close
+     the last 0.7 units: the turn burned, every turn, and the fight never
+     resolved. It now closes the gap in place when the tile is already right and
+     only the sub-tile position is wrong.
+3. **Walls block swings.** ✅ Landed. `canReach` passes `world.stepOpen`.
+   `standTilePath` extracted from `aiAdvance` and **shared with `pickTarget`**,
+   so the target picker and the mover can never disagree about who is
+   engageable; `pickTarget` now prefers an ENGAGEABLE member over a merely
+   nearer one, and the in-place shuffle checks that closing the gap would
+   actually earn a swing (a wall is not a distance problem).
+   - **The risk was real, and it was not the one the plan named.** The AI held
+     up fine; what broke was that `pickTarget` is called *eagerly* during
+     `startCombat` (the surprise sweep), so `const canReach` sat in its temporal
+     dead zone and threw `ReferenceError` mid-setup — starting a fight whose
+     combat panel never got built. The reach accessors are hoisted `function`
+     declarations now, so call order stops mattering. Caught by smoke, not by
+     units: the failure needed a real `startCombat`.
+   - Both levels gained a `#` legend entry and two structural pillars each
+     (level 1 at (9,7) and (8,14); level 2 at (19,14) and (11,16), one beside
+     the senior manager). Until now neither shipped level placed a single wall
+     CELL. Pillars are the conservative form — isolated, open on every side, so
+     nothing is sealed and pathfinding walks around one tile.
+4. **Opportunity attacks go continuous.** ✅ Landed. `threatens` is now `inReach`,
+   so a unit cannot zone ground it would be unable to hit, and threat stops at
+   walls. Each threat carries its own reach, which is what lets a long weapon
+   zone a wider ring.
+   - **`provokedBy` kept its shape**, which is the plan's guess confirmed: the
+     threat-set diff was an *approximation* of "are you still in reach" while
+     reach was a tile ring, and against a radius it is that question exactly.
+     Circling still provokes nothing, now for a reason rather than by
+     construction.
+   - **The granularity cost stands, and was not paid down.** `moveStart` records
+     the continuous position beside the tile, so a leg is measured between real
+     positions — but the hook still fires on *tile* changes, so a reaction can
+     land up to a tile after the radius was truly crossed. Bounded, and far
+     cheaper than the per-slice sampling this plan proposed. Revisit only if it
+     reads badly in play.
+   - Two traps closed: `provokedBy` defaults a missing `reach` to
+     `REACH.DEFAULT` (comparing against `undefined` is false both ways, so an
+     unstated reach would have threatened *everywhere* and therefore provoked
+     *nowhere*), and `isFlanked`'s "in its face" check says `cheb <= 1` outright
+     instead of borrowing `threatens` — it always meant tile adjacency, and
+     leaving it would have made a pincer depend on the ally's weapon.
+5. **Reach content + the UI affordance.** ✅ Landed. `reach-grabber` (the
+   Reach Extender, `stats: { reach: 0.7, acc: -0.05 }`, its own
+   `grabber-swipe`, 0.15 in the `trash` table) is the first weapon whose point
+   is *where* it hits from: 2.2 clears a full orthogonal tile, paid for with no
+   damage bonus and worse accuracy. The Security Guard gets `reach: 2.1` — the
+   maglite was already in his attack lines — so the player meets reach as a
+   threat before finding it as an upgrade.
+   - **The affordance is a circle, not tiles.** Reach is a radius; highlighting
+     whole tiles would draw a plus-with-corners that lies about the shape.
+     `drawTargets` rings the active member at their own reach, on the actor's
+     continuous position. Without it a long weapon is an invisible statistic.
+   - **Difficulty note:** every other enemy defaults to `REACH.DEFAULT`, so the
+     bestiary's effective reach is slightly SHORTER than under the tile rule.
+     Intended, but it is a quiet across-the-board easing, and the guard's 2.1 is
+     the only thing pushing back.
 
 ### Test impact
 

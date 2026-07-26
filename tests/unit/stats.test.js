@@ -497,7 +497,7 @@ test('gear attrBonus flows through every attribute derivation', () => {
 });
 
 test('every equippable item declares a valid slot, stat vocabulary, and weapon swing', () => {
-  const STAT_KEYS = new Set(['dmg', 'soak', 'maxHp', 'maxAp', 'acc', 'dodge', 'slipProof', 'moveCost', 'attrBonus']);
+  const STAT_KEYS = new Set(['dmg', 'soak', 'maxHp', 'maxAp', 'acc', 'dodge', 'reach', 'slipProof', 'moveCost', 'attrBonus']);
   for (const [id, def] of Object.entries(ITEMS)) {
     if (!def.slot && !def.stats) continue; // not gear
     assert.ok(EQUIP_SLOTS.includes(def.slot), `${id} has a valid slot`);
@@ -587,13 +587,42 @@ test('a character with no weapon still has REACH.DEFAULT', () => {
   assert.ok(REACH.DEFAULT > Math.SQRT2, 'the floor must clear a diagonal');
 });
 
-test('every current weapon leaves reach at the floor', () => {
-  // Reach is an upgrade axis, so the existing kit is deliberately unchanged -
-  // M2 must not silently shorten anybody's swing.
+test('reach on gear is an upgrade axis - never negative, and rare', () => {
+  // Below the floor a weapon could not hit a diagonal neighbour and would read
+  // as broken, so no item may shorten reach. And the ordinary desk kit stays at
+  // the floor: only a deliberately long thing extends it.
+  const long = [];
   for (const [id, def] of Object.entries(ITEMS)) {
-    if (def.slot !== 'weapon') continue;
-    assert.equal(def.stats?.reach ?? 0, 0, `${id} carries no reach yet`);
+    const r = def.stats?.reach ?? 0;
+    assert.ok(r >= 0, `${id} must not shorten reach`);
+    if (r > 0) long.push(id);
   }
+  assert.deepEqual(long, ['reach-grabber']);
+});
+
+test('the Reach Extender actually extends reach, through the equip fold', () => {
+  const s = createSheet('office-drone');
+  const bare = reachOf(s);
+  s.inventory = ['reach-grabber'];
+  assert.equal(equipItem(s, 0), true);
+  assert.equal(equippedStats(s).reach, 0.7);
+  assert.equal(reachOf(s), bare + 0.7);
+  // Long enough to clear a full orthogonal tile, which is the legible promise:
+  // you can swing from one tile further out in a straight line.
+  assert.ok(reachOf(s) > 2.0);
+  // ...and it pays for it. No damage bonus, and worse accuracy than bare hands.
+  assert.equal(equippedStats(s).dmg, 0);
+  assert.ok(accuracy(s) < accuracy(createSheet('office-drone')) + 1e-9);
+  assert.equal(equippedAction(s), 'grabber-swipe');
+});
+
+test('unequipping a long weapon returns reach to the floor', () => {
+  const s = createSheet('office-drone');
+  s.inventory = ['reach-grabber'];
+  equipItem(s, 0);
+  assert.ok(reachOf(s) > REACH.DEFAULT);
+  assert.equal(unequipItem(s, 'weapon'), true);
+  assert.equal(reachOf(s), REACH.DEFAULT);
 });
 
 test('an AI unit reads reach off its def, defaulting to the floor', () => {
@@ -603,8 +632,18 @@ test('an AI unit reads reach off its def, defaulting to the floor', () => {
   assert.equal(unitCombat({ name: 'Ghost', hp: 1, reach: 0 }).reach, 0);
 });
 
-test('the whole current bestiary inherits the default reach', () => {
+test('the bestiary sits at the floor except the one that states otherwise', () => {
+  const long = [];
   for (const [id, def] of Object.entries(ENEMY_TYPES)) {
-    assert.equal(unitCombat(def).reach, REACH.DEFAULT, `${id} is at the floor`);
+    const r = unitCombat(def).reach;
+    assert.ok(r >= REACH.DEFAULT, `${id} must not be under the floor`);
+    if (r > REACH.DEFAULT) long.push(id);
   }
+  assert.deepEqual(long, ['security-guard']); // the maglite, already in his lines
+  assert.ok(unitCombat(ENEMY_TYPES['security-guard']).reach > 2.0); // clears a tile
+});
+
+test('a scaled enemy keeps its stated reach - depth grows stats, not arms', () => {
+  const deep = scaleEnemy(ENEMY_TYPES['security-guard'], 7);
+  assert.equal(unitCombat(deep).reach, unitCombat(ENEMY_TYPES['security-guard']).reach);
 });

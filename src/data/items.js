@@ -88,6 +88,21 @@ export const ITEMS = {
     attack: 'letter-opener-stab',
     examine: 'Technically for envelopes. Technically.',
   },
+  // --- reach content (TACTICS_PLAN revision, M5) ------------------------------
+  // The first weapon whose point is WHERE it hits from rather than how hard.
+  // reach 0.7 takes it to 2.2 tile-units, which clears a full orthogonal tile
+  // (2.0) - so you can swing from outside a bare-handed reply, and you zone a
+  // wider ring for opportunity attacks. Paid for on both other axes: no damage
+  // bonus at all, and a penalty to accuracy, because a metre of aluminium
+  // between your hand and the business end is not precision equipment.
+  'reach-grabber': {
+    name: 'Reach Extender',
+    icon: '🦯',
+    slot: 'weapon',
+    stats: { reach: 0.7, acc: -0.05 },
+    attack: 'grabber-swipe',
+    examine: 'Facilities uses it for litter and high shelves. Telescopes to a metre and a bit.',
+  },
   'company-fleece': {
     name: 'Company Fleece',
     icon: '🧥',
@@ -182,6 +197,7 @@ export const LOOT_TABLES = {
     { item: 'warehouse-boots', chance: 0.2 },
     { item: 'running-shoes', chance: 0.18 },
     { item: 'usb-stick', chance: 0.15 },
+    { item: 'reach-grabber', chance: 0.15 }, // the litter picker, left by the bins
   ],
   printer: [
     { item: 'toner-cartridge', chance: 1 },
