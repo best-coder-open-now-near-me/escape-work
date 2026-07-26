@@ -2,7 +2,7 @@
 // projected clicks, walk settling, and combat entry. Everything here assumes
 // the CI reality of software GL - generous waits, and no projection trusted
 // before frames tick smoothly (see game.spec.js header).
-import { expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 // Wait until two consecutive animation frames arrive close together - i.e.
 // shader warmup is over and wall-clock waits mean what they say.
@@ -152,12 +152,26 @@ const onCanvas = (page, p) => page.evaluate(
 // says how many coworkers it tried and why it gave up. A healthy run is
 // unchanged - it still gets all 18 attempts, because it never approaches the
 // deadline.
-const ENGAGE_BUDGET_MS = 200_000; // of a caller's 300s, leaving room to fail loudly
+// The budget is a FRACTION OF THE CALLER'S OWN TIMEOUT, not a constant. A flat
+// 200s was the first attempt at this and it was wrong in a way worth recording:
+// most specs call test.setTimeout(300_000), but smoke.spec takes the config
+// default of 120s - so for that one caller the "budget" was larger than the
+// whole test, and the helper reproduced the exact bug it was written to remove
+// (an unattributable "Test timeout of 120000ms exceeded" instead of a
+// diagnosis). Deriving it from test.info().timeout makes the guarantee hold for
+// every caller, including any added later with a budget nobody thought about.
+const ENGAGE_BUDGET_FRACTION = 0.6; // leave the caller ~40% to report and finish
 const SETTLE_MS = 8_000; // per-attempt camera settle; it is a nicety, not the test
+
+function engageBudgetMs() {
+  let timeout = 300_000;
+  try { timeout = test.info().timeout || timeout; } catch { /* called outside a test */ }
+  return Math.max(30_000, Math.floor(timeout * ENGAGE_BUDGET_FRACTION));
+}
 
 export async function enterCombat(page) {
   const started = Date.now();
-  const deadline = started + ENGAGE_BUDGET_MS;
+  const deadline = started + engageBudgetMs();
   const left = () => deadline - Date.now();
   let inCombat = false;
   let attempts = 0;
