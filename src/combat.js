@@ -318,6 +318,51 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // A weapon's on-hit proc chance, honoring the debug pin.
   const resolveProc = (chance) => (forceProc !== null ? forceProc : rollHit(chance, rng));
   const MISS_COLOR = '#b8c0d0';
+
+  // --- the FX vocabulary ------------------------------------------------------
+  // Combat's cosmetics all route through these four, so a swing that lands in
+  // three different code paths (a turn attack, an opportunity swing, a cone)
+  // looks the same in all of them. Every one of them is fire-and-forget - the
+  // fight has already resolved by the time a particle exists (fx.js).
+  //
+  // Hits land on the BODY, not the tile centre: posOf is the continuous
+  // position everything else in this file measures against, and a spark
+  // pluming from a tile centre while the model stands half a tile away reads
+  // as a miss that dealt damage.
+  const hitFx = (target, kind = 'melee', from = null) => {
+    const p = posOf(target);
+    let dir = null;
+    if (from) {
+      const a = posOf(from);
+      const dx = p.x - a.x;
+      const dz = p.z - a.z;
+      const d = Math.hypot(dx, dz) || 1;
+      dir = { x: dx / d, z: dz / d }; // debris flies away from the attacker
+    }
+    fx.impact(p.x, p.z, kind, { dir });
+  };
+  // A status landing is worth seeing on the body it landed on - buffs bloom
+  // upward off the feet, debuffs fall onto the head (data/statuses.js `fx`).
+  const statusFxAt = (carrier, id) => {
+    const p = posOf(carrier);
+    fx.status(p.x, p.z, id);
+  };
+  // Somebody hits the carpet: debris, blood, and the smallest jolt the camera
+  // is willing to give a death.
+  const deathFx = (target) => {
+    const p = posOf(target);
+    fx.impact(p.x, p.z, 'death', { y: 0.7 });
+    fx.shake(0.07, 0.22);
+  };
+  // What the floor of a tile throws when it hurts somebody standing on it.
+  const hazardKind = (x, z) => {
+    if (world.isElectrified && world.isElectrified(x, z)) return 'zap';
+    const surf = world.surfaceIdAt(x, z);
+    if (surf === 'fire') return 'fire';
+    if (surf === 'paper') return 'paper';
+    if (surf === 'cable') return 'zap';
+    return 'slam';
+  };
   // Movement cost per unit distance, derived from the surface's `slow`
   // multiplier (0.5 => twice the AP) - one number in data drives both walk
   // speed and AP pricing, for everyone. Gum on a shoe surcharges every step;
@@ -937,6 +982,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // damage, no purge, no rider. Surprise, the attacker's accMod, the
     // target's dodgeMod (and later, position) are assembled by attackMods.
     if (!rollAgainst(active, en)) {
+      hitFx(en, 'whiff');
       fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
       log(a.missLog || `${a.log} It misses.`);
       armed = null;
@@ -946,7 +992,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     let dmg = rand(a.min, a.max) + damageBonus(active.sheet); // carried staplers count
     if (a.ammoCost) dmg += talentFxOf(active).paperDamageBonus || 0;
     const died = en.takeDamage(dmg);
-    fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b');
+    hitFx(en, a.ammoCost ? 'paper' : 'melee', active);
+    if (died) deathFx(en);
+    fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b', { big: died });
     let line = `${a.log} ${dmg} damage!`;
     // A purge (reboot) wipes the target's statuses - good and bad alike.
     if (a.purge && !died) {
@@ -961,14 +1009,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // application just granted.
     if (a.applies && !died) {
       const blocked = blockedBy(en, a.applies);
-      if (applyStatus(en, a.applies)) line += ` ${appliesLine(a, en.def.name)}`;
-      else if (blocked) line += ` ${immunityLine(blocked, en.def.name)}`;
+      if (applyStatus(en, a.applies)) {
+        statusFxAt(en, a.applies);
+        line += ` ${appliesLine(a, en.def.name)}`;
+      } else if (blocked) line += ` ${immunityLine(blocked, en.def.name)}`;
     }
     // The equipped weapon's on-hit proc - but only when this attack IS that
     // weapon's own swing (swing the gum stapler, fling gum).
     const proc = weaponProc(active.sheet);
     if (proc && !died && id === equippedAction(active.sheet)
       && resolveProc(proc.chance) && applyStatus(en, proc.applies)) {
+      statusFxAt(en, proc.applies);
       line += ` ${appliesLine(proc, en.def.name)}`;
     }
     log(line);
@@ -1001,12 +1052,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // `leaves` surface still carpets below (HIT_PLAN #4). A surprised target
       // is easier to catch.
       if (!rollAgainst(active, en)) {
+        hitFx(en, 'whiff');
         fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
         continue;
       }
       const dmg = rand(a.min, a.max) + damageBonus(active.sheet);
       const died = en.takeDamage(dmg);
-      fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b');
+      hitFx(en, 'paper', active);
+      if (died) deathFx(en);
+      fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b', { big: died });
       hits += 1;
       if (died) callbacks.onEnemyKilled(en);
     }
@@ -1100,7 +1154,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         m.sheet.hp > 0 && m.actor && m.actor.x === tx && m.actor.z === tz);
       if (occupied || !world.isWalkable(tx, tz) || !world.stepOpen(en.x, en.z, tx, tz)) {
         const died = en.takeDamage(2);
-        fx.damageText(en.x, en.z, '-2', '#ffd76b');
+        hitFx(en, 'slam', active);
+        fx.shake(0.06, 0.2); // a body meeting drywall
+        if (died) deathFx(en);
+        fx.damageText(en.x, en.z, '-2', '#ffd76b', { big: died });
         // A slam into a wall knocks the wind out of them - stunned (they lose
         // their next turn). The knockdown DOS2 shoves are for.
         let msg = `You shove ${en.def.name} into something solid. -2.`;
@@ -1110,8 +1167,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         // slam didn't daze.
         if (!died) {
           const blocked = blockedBy(en, 'stunned');
-          if (applyStatus(en, 'stunned')) msg += ' They crumple - dazed.';
-          else if (blocked) msg += ` ${immunityLine(blocked, en.def.name)}`;
+          if (applyStatus(en, 'stunned')) {
+            statusFxAt(en, 'stunned');
+            msg += ' They crumple - dazed.';
+          } else if (blocked) msg += ` ${immunityLine(blocked, en.def.name)}`;
         }
         log(msg);
         if (died) callbacks.onEnemyKilled(en);
@@ -1122,7 +1181,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           const live = world.isElectrified && world.isElectrified(tx, tz);
           const surf = world.surfaceIdAt(tx, tz);
           const died = en.takeDamage(dmg);
-          fx.damageText(tx, tz, `-${dmg}`, '#ffd76b');
+          fx.impact(tx, tz, hazardKind(tx, tz), { y: 0.4 });
+          if (died) deathFx(en);
+          fx.damageText(tx, tz, `-${dmg}`, '#ffd76b', { big: died });
           log(`You shove ${en.def.name} into the ${live ? 'LIVE water' : surf || 'hazard'}! -${dmg}.`);
           if (died) callbacks.onEnemyKilled(en);
         } else {
@@ -1328,6 +1389,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (hasStatus(active.sheet, 'deflecting')) { log('You are already deflecting. Save the AP.'); return; }
       active.ap = roundAp(active.ap - a.ap);
       applyStatus(active.sheet, 'deflecting');
+      statusFxAt(active, 'deflecting');
       log(a.log);
       refresh();
     } else if (a.type === 'heal') {
@@ -1336,6 +1398,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (a.uses) active.usesLeft[id] -= 1;
       active.ap = roundAp(active.ap - a.ap);
       active.sheet.hp = Math.min(active.sheet.maxHp, active.sheet.hp + a.amount);
+      hitFx(active, 'heal');
       fx.damageText(active.actor.x, active.actor.z, `+${a.amount}`, '#8adf76');
       log(a.log);
       refresh();
@@ -1483,6 +1546,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // now-empty slot), false if the turn should proceed.
   function applyTurnDot(s, damage) {
     const actor = s.member ? s.member.actor : s.unit;
+    hitFx(actor, 'fire');
     fx.damageText(actor.x, actor.z, `-${damage}`, '#ff7a3c');
     if (s.member) {
       const dead = applyDamage(s.member.sheet, damage);
@@ -1565,9 +1629,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (team === 'enemy') {
         if (!engaged.includes(rec)) engaged.push(rec);
         applyStatus(rec, 'surprised');
+        // Arriving is an event: the temp lands in a puff of onboarding.
+        fx.impact(body.x, body.z, 'toner', { y: 0.5, scale: 0.55 });
         insertSlot(unitSlot(rec));
       } else {
         const m = asMember(rec, { isSummon: true, summonedBy: summoner });
+        fx.impact(body.x, body.z, 'toner', { y: 0.5, scale: 0.55 });
         members.push(m);
         insertSlot(memberSlot(m)); // slots in by its own roll; acts when its turn comes
       }
@@ -1598,6 +1665,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Same assembler as the player's swings, with the roles reversed - the
     // unit attacks, the member defends (attackMods reads either shape).
     if (!rollAgainst(unit, m)) {
+      hitFx(m, 'whiff');
       fx.damageText(m.actor.x, m.actor.z, 'MISS', MISS_COLOR);
       log(atk.missLog || `${unit.def.name}'s attack goes wide.`);
       refresh();
@@ -1617,7 +1685,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     m.actor.flinch();
     const dead = applyDamage(m.sheet, dmg);
-    fx.damageText(m.actor.x, m.actor.z, `-${dmg}`);
+    hitFx(m, 'melee', unit);
+    // Taking one is worth a flinch from the camera too - small, and only when
+    // it's a body you control, so the office stays still while you swing.
+    fx.shake(dead ? 0.09 : 0.05, 0.2);
+    fx.damageText(m.actor.x, m.actor.z, `-${dmg}`, undefined, { big: dead });
     // Any status the attack carries lands here (gum, and now stun etc.),
     // Composure shrugging off some of a resistable one. Not onto a corpse. This
     // is the side of the anti-chain window that matters most: the Security Guard
@@ -1627,6 +1699,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (atk.applies && !dead) {
       const blocked = blockedBy(m.sheet, atk.applies);
       if (applyStatus(m.sheet, atk.applies, {}, statusResist(m.sheet))) {
+        statusFxAt(m, atk.applies);
         line += ` ${appliesLine(atk, m.sheet.name)}`;
       } else if (blocked) line += ` ${immunityLine(blocked, m.sheet.name)}`;
     }
@@ -1634,6 +1707,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     refresh();
     if (dead) {
       m.toppled = true;
+      deathFx(m);
       m.actor.clearPath();
       m.actor.fx = { kind: 'death', t: 0 };
       if (!livingParty().length) { defeat(); return; } // party wipe - the only true loss
@@ -1772,6 +1846,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       attacker.actor.lunge(defender.x, defender.z);
       faceTarget(attacker, defender.x, defender.z);
       if (!rollAgainst(attacker, defender)) {
+        hitFx(defender, 'whiff');
         fx.damageText(defender.x, defender.z, 'MISS', MISS_COLOR);
         log(`${attacker.sheet.name} swings at ${defender.def.name} breaking away - and misses.`);
         refresh();
@@ -1779,7 +1854,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
       const dmg = rand(a.min, a.max) + damageBonus(attacker.sheet);
       const died = defender.takeDamage(dmg);
-      fx.damageText(defender.x, defender.z, `-${dmg}`, '#ffd76b');
+      hitFx(defender, 'melee', attacker);
+      if (died) deathFx(defender);
+      fx.damageText(defender.x, defender.z, `-${dmg}`, '#ffd76b', { big: died });
       log(`${attacker.sheet.name} catches ${defender.def.name} breaking away. ${dmg} damage!`);
       if (died) callbacks.onEnemyKilled(defender);
       refresh();
@@ -1845,7 +1922,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         const surf = world.enemySurfDamage(x, z);
         if (surf > 0) {
           const died = unit.takeDamage(surf);
-          fx.damageText(x, z, `-${surf}`, '#ffd76b');
+          fx.impact(x, z, hazardKind(x, z), { y: 0.35 });
+          if (died) deathFx(unit);
+          fx.damageText(x, z, `-${surf}`, '#ffd76b', { big: died });
           log(`${unit.def.name} stumbles through the hazard. -${surf}.`);
           if (died) {
             callbacks.onEnemyKilled(unit);
@@ -1858,6 +1937,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         // stays slowed and sure-footed for the rest of the fight.
         if (unit.alive && !hasStatus(unit, 'gum') && world.stickGum(x, z)) {
           applyStatus(unit, 'gum');
+          statusFxAt(unit, 'gum');
           unit.speed *= GUM.slow;
           log(`${unit.def.name} steps in gum. It's theirs now.`);
         }
@@ -1867,8 +1947,18 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           unit.clearPath();
           unit.flinch();
           unit.slipped = true;
+          fx.impact(x, z, 'slip', { y: 0.12 });
           fx.damageText(x, z, 'slip!', '#8ad4df');
           log(`${unit.def.name} slips in the water and goes down.`);
+        }
+        // Coworkers track the floor around too: a wounded one crossing a paper
+        // drift prints blood behind it exactly like a party member does.
+        if (unit.alive) {
+          fx.footstep(unit, x, z, {
+            bleeding: unit.hp <= unit.maxHp * 0.45,
+            surface: world.surfaceIdAt(x, z),
+            onPaper: world.surfaceIdAt(x, z) === 'paper',
+          });
         }
       }
       if (done || !unit.alive) unit.onTile = null;

@@ -32,7 +32,9 @@ src/
                        effect: { recruit } to sign them onto the party
     levels.js          the floor registry: id -> level JSON + display name
     statuses.js        status registry: name/icon, clock (turn vs step),
-                       duration, and the effects they carry
+                       duration, the effects they carry, and the `fx` block
+                       that says what they LOOK like (colour, landing burst,
+                       live aura)
   grid.js            Level parsing, terrain + edge-wall queries (pure logic)
   occlusion.js       Which walls stand between camera and character (pure logic)
   pathfinding.js     8-dir Dijkstra, string-pulling smoother, free-point
@@ -55,7 +57,9 @@ src/
   tile-renderer.js   Shared game/editor tile renderer (pools, props, edge
                      walls) + carpet-zone inference
   models.js          .glb loading, anim graph wiring, character proportions
-  fx.js              Cosmetic combat FX (projectiles, damage popups) and the
+  fx.js              Cosmetic FX: the pooled particle pump (impact bursts,
+                     status auras, embers), ground decals (bloody footprints,
+                     splats), projectiles, damage popups, and the
                      world -> CSS-pixel projection every DOM overlay uses
   controls.js        Camera rig + mouse -> semantic input (click tile, menu)
   picking.js         Screen pixel -> interactable ENTITY under it (ray vs the
@@ -383,6 +387,35 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   Throws render as arcing projectiles with fading trails (`throwProjectile` in
   fx.js); all damage/heals show floating popups (`spawnDamageText`). The
   FX layer is purely cosmetic - gameplay resolves instantly.
+- **The FX layer** (`fx.js`) is one pooled particle pump, one recycling decal
+  ring, and the DOM popups - all fire-and-forget, all reached through the `vfx`
+  object main.js hands to combat and its own step handlers, so no system ever
+  waits on a cosmetic. **A new impact kind is a data entry** (`IMPACTS`): a
+  list of bursts (count/colour/speed/size/life, additive for light, lit for
+  matter) that callers name by id - `fx.impact(x, z, 'zap')`. **A status's
+  look is data too**: its `fx` block in `data/statuses.js` gives the colour,
+  the shape of the burst when it LANDS (`rise` for buffs off the feet, `fall`
+  for debuffs onto the head, `pop`), and the `aura` it wears while live
+  (embers, orbiting motes, drips, haze) - fx.js is that block's runtime the
+  same way statuses.js is the rules' runtime, and a status with no `fx` simply
+  shows nothing. Cost is bounded by construction: particles reuse pooled
+  entities behind a hard ceiling and fade by SHRINKING (so one material per
+  colour serves every particle of it), decals recycle oldest-first past a
+  fixed ring, and the aura tracker samples the roster at ~16Hz rather than
+  per frame.
+- **Blood stays on the floor.** A bleeding walker prints bloody footprints
+  tile by tile (`fx.footstep`, called from `onMemberStep` and from combat's AI
+  step hook), darkest on a paper drift - which is where most bleeding starts,
+  since paper CUTS (data/surfaces.js). Wet and coffee-soaked soles print for a
+  few tiles too, then dry out; fx.js owns that shoe state, keyed by the actor,
+  so callers only report "entered this tile, standing in this". Splats land
+  under kills, hits and bleed ticks.
+- **The camera flinches** (`controls.shake`, driven through `vfx.shake`):
+  explosions, deaths and slams nudge the rig's focus and let it settle. It is
+  deliberately tiny and short (capped at 0.16 world units, ~a quarter second,
+  a handful of screen pixels) and uses fixed frequencies rather than random
+  jitter - anything that aims at a projected world point (the loot labels, the
+  e2e helpers' `project`/`project3` clicks) still lands where it looked.
 - **Combat** is tactical and on-map: each action in `data/actions.js` carries
   an `ap` cost; classes/enemies have per-turn AP budgets, and each enemy
   type's swing cost is its `attackAp` (data/enemies.js). Movement is priced

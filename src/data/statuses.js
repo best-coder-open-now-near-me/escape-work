@@ -20,6 +20,15 @@
 //                  it guards never reaches.
 //   log          - narration when it applies/ticks; '{name}' is filled with the
 //                  owner's name by the caller
+//   fx           - what it LOOKS like (src/fx.js is the runtime that reads it,
+//                  exactly as src/statuses.js is the runtime for the rules):
+//     color          [r, g, b] 0..1 for both the landing burst and the aura
+//     burst          the shape of the one-shot when it lands: 'rise' (off the
+//                    feet - the default for a buff), 'fall' (onto the head -
+//                    the default for a debuff), 'pop' (straight out)
+//     aura           the trickle drawn WHILE it is live: 'ember' | 'orbit' |
+//                    'drip' | 'haze' | 'shield' | 'cling'. Omit for no aura.
+//     rate           seconds between aura emissions (default 0.25)
 //   effects      - the engine-understood vocabulary the runtime aggregates
 //                  (statusFx merges all live statuses into one view):
 //     dot            damage per tick (turn or step, per the clock)
@@ -38,11 +47,13 @@ export const STATUSES = {
     duration: 1, resistable: false,
     effects: { skipTurn: true },
     log: '{name} is still grabbing their lanyard.',
+    fx: { color: [1, 0.85, 0.25], burst: 'pop', aura: 'orbit', rate: 0.16 },
   },
   deflecting: {
     name: 'Deflecting', icon: '🛡️', harmful: false, clock: 'turn',
     duration: 1, resistable: false,
     effects: { incomingMult: 0.5 },
+    fx: { color: [0.45, 0.78, 1], burst: 'rise', aura: 'shield', rate: 0.12 },
   },
   gum: {
     // Numbers mirror GUM in data/surfaces.js (steps 20, moveCost 1.5, slow 0.6);
@@ -50,11 +61,13 @@ export const STATUSES = {
     name: 'Gum on shoe', icon: '🍬', harmful: true, clock: 'step',
     duration: 20, resistable: true,
     effects: { moveCostMult: 1.5, speedMult: 0.6, noFootwork: true, slipProof: true },
+    fx: { color: [0.93, 0.5, 0.65], burst: 'pop', aura: 'cling', rate: 0.5 },
   },
   bleed: {
     name: 'Bleeding', icon: '🩸', harmful: true, clock: 'step',
     duration: 2, resistable: false,
     effects: { dot: 1 },
+    fx: { color: [0.55, 0.05, 0.05], burst: 'fall', aura: 'drip', rate: 0.42 },
   },
 
   // --- new content this framework makes possible ----------------------------
@@ -64,6 +77,7 @@ export const STATUSES = {
     immunity: 'training-credit', // no stun-locks: see src/statuses.js
     effects: { skipTurn: true },
     log: '{name} is pulled into mandatory training. Attendance will be taken.',
+    fx: { color: [0.72, 0.5, 1], burst: 'fall', aura: 'orbit', rate: 0.13 },
   },
   // The anti-chain window `stunned` grants when it lands. Carries no effects at
   // all - its entire job is to exist, be seen (a HUD chip with a countdown),
@@ -80,17 +94,20 @@ export const STATUSES = {
     duration: 3, resistable: false,
     effects: {},
     log: '{name} completed that training this quarter. It does not take.',
+    fx: { color: [0.45, 1, 0.55], burst: 'rise', aura: 'shield', rate: 0.4 },
   },
   burning: {
     name: 'On Fire', icon: '🔥', harmful: true, clock: 'turn',
     duration: 2, resistable: false,
     effects: { dot: 2 },
     log: '{name} is on fire. This is not fine.',
+    fx: { color: [1, 0.52, 0.12], burst: 'pop', aura: 'ember', rate: 0.09 },
   },
   blinded: {
     name: 'Toner Blast', icon: '🌫️', harmful: true, clock: 'turn',
     duration: 2, resistable: true,
     effects: { accMod: -0.3 },
     log: '{name} takes toner to the eyes.',
+    fx: { color: [0.34, 0.34, 0.4], burst: 'fall', aura: 'haze', rate: 0.3 },
   },
 };
