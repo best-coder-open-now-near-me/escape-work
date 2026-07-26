@@ -161,6 +161,14 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   describe the swing a click would actually make, so the default attack is
   visible before it is used - shipping it without them made a working feature
   look absent, because nothing on screen said a click would land.
+  **And they all share one answer to "who is the cursor on?"**
+  (`combat.handleHover`): main.js hands in the body pick, combat falls back to
+  a body near the ground point (`enemyAtPoint`, measured against continuous
+  body positions - the tile is derived), and the crosshair, the readout, the
+  reach ring and the click resolve from that single result, behind the click's
+  own gate (your turn, standing still). Each consumer used to compute its own -
+  the cursor an ungated pick, the readout a gated tile-centre distance - so the
+  crosshair could promise a swing while the readout blanked and a click walked.
   **Hold Ctrl or Alt to glow what you're hovering** (`shading.addHighlight`) -
   a Divinity-style aura of stacked back-face shells at growing push and falling
   opacity, drawn additively so it reads as light rather than paint. OUT of
@@ -174,8 +182,9 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   half of the game where the answer is always wanted. What the cursor is over is
   tracked ALWAYS (`hoverTarget`) and the gate only decides whether it's lit, so
   pressing the key lights what you are already pointing at instead of waiting
-  for a fresh hover event. The cursor and the focus banner stay ungated - they
-  cost no attention.
+  for a fresh hover event. The focus banner stays ungated - it costs no
+  attention; the crosshair follows the click gate above, because a crosshair
+  on a turn where a click is ignored is a lie.
 - **Examine is one function, and it names what it is looking at**
   (`main.examineTile` / `examineAt`). Every menu that offers Examine routes
   through it, so the same object reads the same way wherever you ask. Flavor is

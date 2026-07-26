@@ -442,8 +442,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const REACH_RING = new pc.Color(0.55, 0.62, 0.78);
   let preview = null; // { reach: [[x,z],...], tail: [[x,z],...] | null }
   let aimPoint = null; // hover point while a cone attack is armed
-  let hoverPoint = null; // last world point under the cursor (null once it leaves)
+  // The enemy the cursor is on as of the last hover event - the body pick when
+  // main.js has one, else the ground-point fallback (enemyAtPoint). This is
+  // the ONE answer to "am I aiming at someone?": the crosshair cursor, the
+  // to-hit readout and the reach ring all read it, because computing it per
+  // consumer is what let the crosshair promise a swing the readout denied.
+  // Tracked even on gated frames (mid-move, AI turn) so the reach ring keeps
+  // drawing while a walk finishes.
+  let hoverFoe = null;
   let hoverHitChance = null; // to-hit chance shown for the enemy under an armed cursor
+  // Test-only: what the last combat click resolved to. Every silent path
+  // stamps a reason, so a wedged e2e run can say WHY a click did nothing
+  // instead of leaving a trace full of clicks with no visible effect.
+  let lastClickOutcome = null;
 
   function hidePreview() {
     preview = null;
@@ -451,12 +462,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     costTag.style.display = 'none';
   }
 
-  // The live enemy under a hover point, if any (within a tile's reach of it).
+  // The live enemy near a ground point, if any - the fallback for pick rays
+  // that miss the body mesh. Measured against the BODY's continuous position,
+  // not the derived x/z tile: a body rests wherever its last walk clamped it
+  // (approach points, budget truncation), and at this camera pitch the ground
+  // point under a body pixel already lands ~0.7 tiles of parallax past the
+  // feet - measuring the tile centre on top of that blanked the readout while
+  // the cursor sat plainly on a coworker.
   function enemyAtPoint(point) {
     let best = null;
     for (const en of world.liveEnemies()) {
       if (!en.entity) continue;
-      const d = Math.hypot(en.x - point.x, en.z - point.z);
+      const pos = en.entity.getPosition();
+      const d = Math.hypot(pos.x - point.x, pos.z - point.z);
       if (d < 0.7 && (!best || d < best.d)) best = { en, d };
     }
     return best?.en || null;
@@ -466,7 +484,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // for the enemy under the cursor - the rings show range/validity, this shows
   // the odds (DOS2's most load-bearing bit of UI). A cone's wedge is its own
   // feedback and a shove auto-hits, so neither shows a percentage.
-  function showHitPreview(point, sx, sy) {
+  function showHitPreview(en, sx, sy) {
     hoverHitChance = null;
     // The readout REPLACES the movement trail. Clearing it here rather than at
     // the call sites is what makes that true: `preview` is redrawn every frame,
@@ -474,9 +492,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // hanging off the character while they were plainly aiming at someone.
     preview = null;
     const a = ACTIONS[previewAction()];
-    if (!a || a.type !== 'attack' || a.cone) { costTag.style.display = 'none'; return; }
-    const en = enemyAtPoint(point);
-    if (!en) { costTag.style.display = 'none'; return; }
+    if (!a || a.type !== 'attack' || a.cone || !en) { costTag.style.display = 'none'; return; }
     // The same terms the swing will roll - not a second copy of the math. The
     // reason string matters: a positional modifier the player can't see reads
     // as randomness (TACTICS_PLAN, ui.js note).
@@ -506,27 +522,37 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     costTag.style.display = 'block';
   }
 
-  function handleHover(point, sx, sy) {
+  // Resolve the hover and return the enemy a click would swing at RIGHT NOW,
+  // or null. main.js keys the crosshair cursor off the return value, so the
+  // cursor, the to-hit readout and the click all run the same resolution AND
+  // the same gate (handleEnemyClick's: your turn, standing still) - the cursor
+  // used to read its own ungated body pick, promising a swing mid-walk or on
+  // an AI turn that the readout and the click both refused.
+  function handleHover(point, sx, sy, picked = null) {
     // While aiming, target rings replace the movement trail entirely. Cone
     // attacks and summon placement additionally track the cursor - the wedge
     // (or the drop zone) follows it.
     if (armed && (ACTIONS[armed].cone || ACTIONS[armed].type === 'summon')) aimPoint = point;
-    // Tracked unconditionally, before any early return: the reach ring reads it
-    // every frame, so it has to stay honest even on the frames where there's no
-    // preview to show (mid-move, or the cursor off the world entirely).
-    hoverPoint = point || null;
-    if (phase !== 'player' || active.actor.moving || !point) { hidePreview(); return; }
+    // Who is the cursor on? The body pick wins - it sees what the pixel shows.
+    // The ground point is only a fallback for rays that miss the mesh, and a
+    // pick can land on a body whose ground ray misses the world entirely (a
+    // chest pixel next to a wall), so the pick must not require a point.
+    hoverFoe = (picked?.alive ? picked : null) || (point ? enemyAtPoint(point) : null);
+    if (phase !== 'player' || active.actor.moving || (!point && !hoverFoe)) { hidePreview(); return null; }
     // Armed: the movement trail yields to the to-hit readout over a target.
     if (armed) {
-      if (ACTIONS[armed].type === 'summon') { showSummonPreview(point, sx, sy); return; }
-      showHitPreview(point, sx, sy);
-      return;
+      if (ACTIONS[armed].type === 'summon') {
+        if (point) showSummonPreview(point, sx, sy); else hidePreview();
+        return hoverFoe;
+      }
+      showHitPreview(hoverFoe, sx, sy);
+      return hoverFoe;
     }
     // Nothing armed, but a coworker under the cursor is still a target - the
     // click swings by default, so preview the odds rather than falling through
     // to a movement route (their tile isn't walkable, so that showed nothing at
     // all, which read as "a click here does nothing").
-    if (enemyAtPoint(point)) { showHitPreview(point, sx, sy); return; }
+    if (hoverFoe) { showHitPreview(hoverFoe, sx, sy); return hoverFoe; }
     const tx = Math.round(point.x);
     const tz = Math.round(point.z);
     if (!world.isWalkable(tx, tz)) { hidePreview(); return; } // enemies/walls: no route preview
@@ -673,10 +699,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // the shape, and without any affordance a long weapon is an invisible
     // statistic - the player would feel the extra tile without being told why.
     // Drawn on the ACTOR's continuous position, which is what the rule measures,
-    // and ONLY while a coworker is under the cursor: it's the answer to "can I
-    // hit them from here?", which is a question you only ask while aiming at
-    // someone. Always-on, it was just a circle that followed you around.
-    if (hoverPoint && enemyAtPoint(hoverPoint)) {
+    // and ONLY while a coworker is under the cursor - the same hoverFoe the
+    // crosshair and the readout key off, so the three affordances can't
+    // disagree about whether you're aiming at someone. It's the answer to "can
+    // I hit them from here?", a question you only ask while aiming; always-on,
+    // it was just a circle that followed you around.
+    if (hoverFoe?.alive) {
       const me = posOf(active);
       drawRing(me.x, me.z, a.type === 'shove' ? REACH.SHOVE : reachOfUnit(active), REACH_RING);
     }
@@ -1016,16 +1044,37 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const previewAction = () => (phase === 'player' && active?.sheet ? (armed || defaultAttack()) : null);
 
   function handleEnemyClick(en) {
-    if (phase !== 'player' || active.actor.moving || !en.alive) return;
+    if (phase !== 'player' || active.actor.moving || !en.alive) {
+      // This return is SILENT by design - a click on an AI turn or mid-walk
+      // is simply ignored - which also made it invisible in flake traces:
+      // "the click did nothing and nothing said why". The breadcrumb names
+      // the reason for the e2e suite without changing behavior.
+      lastClickOutcome = phase !== 'player' ? 'gate:phase'
+        : (active.actor.moving ? 'gate:moving' : 'gate:dead');
+      return;
+    }
     hidePreview();
+    let autoArmed = false;
     if (!armed) {
       // Not enough AP for even the basic swing: say so once, rather than
       // silently walking them into the enemy's face.
       const id = defaultAttack();
       if (active.ap < ACTIONS[id].ap) { log('Not enough AP to attack.'); return; }
       armed = id;
+      autoArmed = true;
       refresh(); // the bar lights the swing that is about to happen
     }
+    // A refusal keeps a USER-armed action armed - aim survives a near-miss,
+    // right-click lowers it. The default the click just auto-armed is not
+    // aim: the player never raised it, so a refusal must put it back down.
+    // Left dangling, it sat lit on the bar until a right-click, and anything
+    // waiting for the swing to resolve (the e2e idle() helper) hung forever.
+    const refuse = (msg) => {
+      lastClickOutcome = `refused:${msg}`;
+      log(msg);
+      if (autoArmed) { armed = null; refresh(); }
+    };
+    lastClickOutcome = 'acted'; // overwritten by refuse(); the gate stamped its own
     const a = ACTIONS[armed];
     if (a.cone) { fireCone(en.x, en.z); return; }
     // Placing a summon on top of a coworker: the tile is taken, so they report
@@ -1033,8 +1082,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // them to swarm is a reasonable thing to click.
     if (a.type === 'summon') { placeSummon(en.x, en.z); return; }
     if (a.type === 'shove') {
-      if (!canReach(active, en, REACH.SHOVE)) { log('Too far to shove.'); return; }
-      if (active.ap < a.ap) { log('Not enough AP.'); return; }
+      if (!canReach(active, en, REACH.SHOVE)) { refuse('Too far to shove.'); return; }
+      if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
       joinCombat(en); // shoving a bystander is also an opinion they'll return
       const dx = Math.sign(en.x - active.actor.x);
       const dz = Math.sign(en.z - active.actor.z);
@@ -1087,17 +1136,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     if (a.ammoCost) {
       // ranged: needs range, line of sight, ammo, AP
-      if (cheb(active.actor.x, active.actor.z, en.x, en.z) > THROW_RANGE) { log('Too far to throw.'); return; }
-      if (!world.hasLos(active.actor.x, active.actor.z, en.x, en.z)) { log('No clear line to throw.'); return; }
-      if (active.sheet.paper < ammoCostOf(armed)) { log('Out of paper.'); return; }
-      if (active.ap < a.ap) { log('Not enough AP.'); return; }
+      if (cheb(active.actor.x, active.actor.z, en.x, en.z) > THROW_RANGE) { refuse('Too far to throw.'); return; }
+      if (!world.hasLos(active.actor.x, active.actor.z, en.x, en.z)) { refuse('No clear line to throw.'); return; }
+      if (active.sheet.paper < ammoCostOf(armed)) { refuse('Out of paper.'); return; }
+      if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
       active.actor.faceToward(en.x, en.z);
       performOn(armed, en);
       return;
     }
     // melee: walk up if needed, then strike
     if (canReach(active, en)) {
-      if (active.ap < a.ap) { log('Not enough AP to attack.'); return; }
+      if (active.ap < a.ap) { refuse('Not enough AP to attack.'); return; }
       active.actor.faceToward(en.x, en.z);
       performOn(armed, en);
       return;
@@ -1105,10 +1154,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // walk the cheapest route to their side, as far as the budget allows
     let best = null;
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-      const p = world.findPath(active.actor.x, active.actor.z, en.x + dx, en.z + dz, active.actor);
-      if (p && (!best || p.length < best.length)) best = p;
+      const gx = en.x + dx;
+      const gz = en.z + dz;
+      // Already STANDING on a goal tile - out of reach only because the body
+      // rests on its far side - means the "route" is a shuffle inside this
+      // tile; the approach point below closes the last half-tile to their
+      // body. findPath returns the one-tile path [[gx,gz]] here, and its
+      // length of 1 used to win the shortest-path contest and then fail the
+      // >= 2 check: the player CLOSEST to the target was the one told there
+      // was no way to reach them.
+      if (gx === active.actor.x && gz === active.actor.z) { best = [[gx, gz], [gx, gz]]; break; }
+      const p = world.findPath(active.actor.x, active.actor.z, gx, gz, active.actor);
+      if (p && p.length >= 2 && (!best || p.length < best.length)) best = p;
     }
-    if (!best || best.length < 2) { log('No way to reach them.'); return; }
+    if (!best || best.length < 2) { refuse('No way to reach them.'); return; }
     // walk up to their body, not the centre of the neighbouring tile.
     // The budget is the SAME one an ordinary move spends - allowance first,
     // then real AP (`moveBudget`) - minus the swing this walk is for. Billing
@@ -1118,7 +1177,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const [gx, gz] = best[best.length - 1];
     const ep = en.entity ? en.entity.getPosition() : { x: en.x, z: en.z };
     const walk = walkActive(best, moveBudget(active) - a.ap, world.approach(gx, gz, ep.x, ep.z));
-    if (!walk) { log('Not enough AP to reach them.'); return; }
+    if (!walk) { refuse('Not enough AP to reach them.'); return; }
     // The walk's endpoint is already a free point, so this asks the honest
     // question directly instead of rounding it back to a tile first: will we
     // be standing inside reach when the walk finishes?
@@ -1155,6 +1214,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   }
 
   function handleTileClick(tile, point = null) {
+    lastClickOutcome = 'tile'; // the click resolved to ground, not a coworker
     if (phase !== 'player' || active.actor.moving || !tile) return;
     if (armed) {
       const a = ACTIONS[armed];
@@ -1926,6 +1986,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // assert the previewed odds match the math that actually rolls.
     get lastRoll() { return lastRoll; },
     get hoverHitChance() { return hoverHitChance; },
+    get lastClickOutcome() { return lastClickOutcome; },
     // Is the movement trail currently drawn? Aiming at a coworker must replace
     // it with the to-hit readout, not draw both.
     get movePreview() { return !!preview; },
@@ -1986,6 +2047,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     handleTileClick,
     handleEnemyClick,
     handleHover,
+    // The hover's ground fallback, exported so main.js's combat click runs the
+    // SAME near-a-body test the crosshair just ran - an exact-tile match there
+    // was a third authority, and it routed clicks into a walk on points where
+    // the cursor was promising a swing.
+    enemyAtPoint,
     notifyMemberDown,
     // The body whose turn it is - a party member OR a summon you're driving.
     // main.js needs this because party.active can't point at a summon.

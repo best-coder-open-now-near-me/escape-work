@@ -1798,9 +1798,10 @@ function startGame(level) {
         return;
       }
       if (!sheet || gameOver) return;
-      // In combat, targeting stays tile-based: the tactical grid (movement
-      // previews, AP, target rings) is all tile/ground-keyed, and a click must
-      // hit the enemy on the CLICKED tile, not whichever body the ray grazes.
+      // In combat a click resolves in the same order the hover affordances do:
+      // the body under the pixel, then a body near the ground point, then the
+      // tile - so what the crosshair and the to-hit readout said is what the
+      // click does.
       if (inCombat) {
         // Initiative: you control whoever's turn it is - a party member or a
         // summon you conjured. combat.actingActor is that body (party.active
@@ -1822,9 +1823,14 @@ function startGame(level) {
           combat?.handleEnemyClick(bodyHit.ref);
           return;
         }
+        // Ground fallback: the same near-a-body test the hover affordances
+        // run (combat.enemyAtPoint), so a click can't route into a walk on a
+        // point where the crosshair was promising a swing. An exact-tile
+        // match here was a third authority on "is this a coworker?" - it said
+        // no on the outer band of a body the cursor said yes to.
+        const near = point && combat?.enemyAtPoint(point);
+        if (near) { combat?.handleEnemyClick(near); return; }
         if (!tile) return;
-        const en = enemyAt(tile.x, tile.z);
-        if (en) { combat?.handleEnemyClick(en); return; }
         combat?.handleTileClick(tile, point);
         return;
       }
@@ -1854,14 +1860,18 @@ function startGame(level) {
     },
     onHover: (point, sx, sy) => {
       if (inCombat && combat) {
-        combat.handleHover(point, sx, sy);
         const hit = picking.pick(controls.cameraEntity, sx, sy);
         // A coworker under the cursor is a TARGET, armed or not - a bare click
         // swings the basic attack (combat.js), so the cursor has to say so.
-        // Combat used to leave the cursor alone entirely, which meant the one
-        // place you spend every click aiming was the one place it never
-        // showed you were aiming.
-        setCursor(hit?.kind === 'enemy' && hit.ref.alive ? 'crosshair' : null);
+        // combat.handleHover resolves WHO that is (this body pick first, the
+        // ground point as fallback) and WHETHER a click would swing right now
+        // (the click's own gate: your turn, standing still) - and the
+        // crosshair keys off that one answer. Reading the raw pick here showed
+        // a crosshair mid-walk and on AI turns, promising a swing while the
+        // to-hit readout and the click itself refused.
+        const picked = hit?.kind === 'enemy' && hit.ref.alive ? hit.ref : null;
+        const foe = combat.handleHover(point, sx, sy, picked);
+        setCursor(foe ? 'crosshair' : null);
         // Hovering a character glows their BODY and names them in the banner -
         // the DOS2 read, and the same one you already get out of combat. This
         // used to be held behind Ctrl, which meant the half of the game where
@@ -1869,11 +1879,16 @@ function startGame(level) {
         // aiming at. Ctrl still adds the ground rings under EVERY character
         // (drawCharacterRings) - that's the at-a-glance read of the whole
         // board, which is a different question from "what is under my cursor".
-        const character = hit && (hit.kind === 'party' || hit.kind === 'npc'
-          || (hit.kind === 'enemy' && hit.ref.alive));
-        hoverKind = character ? hit.kind : null;
-        trackHoverGlow(character ? hit : null);
-        ui.setFocusBanner(character ? focusInfoFor(hit, point) : null);
+        // A foe the hover resolved through the GROUND fallback (the pick ray
+        // missed the mesh, but the point is on their body) counts as hovered
+        // too: the crosshair is claiming you're aiming at them, so the glow
+        // and the banner have to name the same coworker.
+        const charHit = foe && !picked ? { kind: 'enemy', ref: foe, entity: foe.entity } : hit;
+        const character = charHit && (charHit.kind === 'party' || charHit.kind === 'npc'
+          || (charHit.kind === 'enemy' && charHit.ref.alive));
+        hoverKind = character ? charHit.kind : null;
+        trackHoverGlow(character ? charHit : null);
+        ui.setFocusBanner(character ? focusInfoFor(charHit, point) : null);
         return;
       }
       if (!sheet || gameOver || modalOpen()) { clearHoverHighlight(); setCursor(null); ui.setFocusBanner(null); return; }
