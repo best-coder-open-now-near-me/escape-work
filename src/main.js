@@ -22,7 +22,7 @@ import {
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
-  serializeProgress, parseProgress, PARTY_CAP,
+  serializeProgress, parseProgress, PARTY_CAP, addCash,
 } from './party.js';
 import { applyStatus, statusFx, hasStatus, tickStep, statusLeft } from './statuses.js';
 import { inReach } from './tactics.js';
@@ -36,6 +36,7 @@ import { throwProjectile, spawnDamageText, worldToScreenCss } from './fx.js';
 import { createControls } from './controls.js';
 import { createPicker } from './picking.js';
 import { createLooting } from './looting.js';
+import { createShopping } from './shopping.js';
 import { startCombat } from './combat.js';
 import { startEditor } from './editor.js';
 import { NPCS } from './data/npcs.js';
@@ -155,6 +156,33 @@ function startGame(level) {
   const STAIRWELL_HEAL = 6; // the breather between floors
   const OOC_TURN_SECONDS = 1.6; // out-of-combat seconds that count as one fire/smoke turn
 
+  // Merchants (ECONOMY_PLAN.md). Built before looting because the Alt overlay
+  // labels shop props through it. A machine's instance key is its tile.
+  const shopping = createShopping({
+    getSheet: () => sheet,
+    getParty: () => party,
+    isInCombat: () => inCombat,
+    isGameOver: () => gameOver,
+    // A purchase changes the bag and the purse; a sale changes both too. Both
+    // repaint the pockets so the panel behind the shop is never stale.
+    onBought: () => loot.refreshPanel(sheet),
+    onSold: () => loot.refreshPanel(sheet),
+  });
+  const shopKey = (x, z) => x + ',' + z;
+  // Walk up to a machine and open it. The tile's `shop` field names the SHOPS
+  // entry; the tile itself is the instance, so two machines on a floor keep
+  // separate stock.
+  function openShopAt(x, z) {
+    const def = grid.defAt(x, z);
+    if (!def.shop) return;
+    if (runtime.isBurning(x, z)) { ui.say('It is on fire. The snacks are a write-off.'); return; }
+    if (!shopping.open(shopKey(x, z), def.shop)) return;
+    loot.hideLabels();
+    clearHoverHighlight();
+    setCursor(null);
+    ui.setFocusBanner(null);
+  }
+
   // Looting (containers, bodies, pockets, the Alt overlay) lives in its own
   // module; approachAndDo is hoisted, so wiring it here is safe.
   const loot = createLooting({
@@ -174,6 +202,12 @@ function startGame(level) {
     recipients: () => (party?.members || [])
       .filter((m) => m !== partyLeader(party) && m.sheet.hp > 0)
       .map((m) => ({ name: m.sheet.name, take: (id) => m.sheet.inventory.push(id) })),
+    // The purse is party state, so looting reaches it through the host rather
+    // than the sheet (ECONOMY_PLAN #2).
+    addCash: (n) => { if (party) addCash(party, n); },
+    getCash: () => party?.cash || 0,
+    openShop: (x, z) => openShopAt(x, z),
+    shopSoldOut: (key) => shopping.soldOut(key),
   });
 
   function abortCombat() {
@@ -848,8 +882,10 @@ function startGame(level) {
       }
       if (kind === 'prop') {
         const def = grid.defAt(ref.x, ref.z);
-        const sub = def.loot ? 'Rummage' : def.explosive ? 'Volatile' : def.ignitable ? 'Flammable' : 'Object';
-        return { name: def.label || 'Object', sub, color: rgbCss(def.loot ? HL.loot : HL.interact) };
+        const sub = def.shop
+          ? (shopping.soldOut(shopKey(ref.x, ref.z)) ? 'Sold out' : 'Merchant · buy')
+          : def.loot ? 'Rummage' : def.explosive ? 'Volatile' : def.ignitable ? 'Flammable' : 'Object';
+        return { name: def.label || 'Object', sub, color: rgbCss(def.loot || def.shop ? HL.loot : HL.interact) };
       }
     }
     if (point) {
@@ -1032,7 +1068,15 @@ function startGame(level) {
       if (ref.loot?.length) approachAndDo(ref.x, ref.z, () => loot.lootBody(ref)); // corpse
       return true;
     }
-    if (kind === 'prop') { approachAndDo(ref.x, ref.z, () => loot.lootContainer(ref.x, ref.z)); return true; }
+    if (kind === 'prop') {
+      // A merchant prop sells; everything else rummages. A prop could one day
+      // carry both, and `shop` winning is the right default - the machine's
+      // coin return is a lesser prize than its contents.
+      const def = grid.defAt(ref.x, ref.z);
+      if (def.shop) { approachAndDo(ref.x, ref.z, () => openShopAt(ref.x, ref.z)); return true; }
+      approachAndDo(ref.x, ref.z, () => loot.lootContainer(ref.x, ref.z));
+      return true;
+    }
     return false;
   }
 
@@ -1064,17 +1108,37 @@ function startGame(level) {
     close() { dialogueNpc = null; dialogueTree = null; dialoguePanel.hide(); },
     get visible() { return dialoguePanel.visible; },
   };
+
+  // Anything that owns the screen and the clicks while it is up. The dialogue
+  // panel and the shop panel are both modal in exactly the same way, and every
+  // gate below cares about "is a panel talking to me", not which one - so they
+  // ask this rather than naming one and quietly forgetting the other.
+  const modalOpen = () => dialogue.visible || shopping.visible;
   function renderDialogueNode(nodeId) {
     const node = dialogueTree?.nodes[nodeId];
     if (!node) { dialogue.close(); return; }
+    const speaker = dialogueNpc;
     const options = (node.options || [{ label: 'Leave', next: null }])
       // A recruit offer only shows while it can be accepted (not already
       // aboard, roster not full).
       .filter((o) => !o.effect?.recruit || canRecruit(dialogueNpc))
+      // ...and a trade offer only from someone who actually has a cart.
+      .filter((o) => !o.effect?.shop || !!dialogueNpc.def?.shop)
       .map((o) => ({
         label: o.label,
         action: () => {
           if (o.effect?.recruit) recruitCompanion(dialogueNpc);
+          // Trading REPLACES the conversation rather than layering on it: the
+          // shop is its own modal, and two panels stacked over each other is
+          // how you get a click that lands on neither (ECONOMY_PLAN #5).
+          if (o.effect?.shop && speaker.def?.shop) {
+            dialogue.close();
+            // Keyed by WHO, not where: a person carries their stock around
+            // (and a recruited one literally walks off with it), so their
+            // instance key must survive them moving.
+            shopping.open(`npc:${speaker.typeId || speaker.def.name}`, speaker.def.shop);
+            return;
+          }
           if (o.next) renderDialogueNode(o.next); else dialogue.close();
         },
       }));
@@ -1201,7 +1265,7 @@ function startGame(level) {
     next();
   }
   function switchLeader(i) {
-    if (!party || inCombat || gameOver || dialogue.visible) return;
+    if (!party || inCombat || gameOver || modalOpen()) return;
     const m = party.members[i];
     if (!m?.actor || m === partyLeader(party) || m.sheet.hp <= 0) return;
     player.clearPath();
@@ -1225,7 +1289,7 @@ function startGame(level) {
     }
   }
   function toggleOocArm(id) {
-    if (!sheet || inCombat || gameOver || dialogue.visible || !ACTIONS[id]) return;
+    if (!sheet || inCombat || gameOver || modalOpen() || !ACTIONS[id]) return;
     armedOoc = armedOoc === id ? null : id;
     hotbar?.setArmed(armedOoc);
     ui.say(armedOoc ? `${ACTIONS[armedOoc].label} ready — click a coworker to start it.` : 'You stand down.');
@@ -1255,6 +1319,7 @@ function startGame(level) {
     armedOoc = null;
     hotbar?.setArmed(null);
     dialogue.close();
+    shopping.close(); // the machine can wait; it is not going anywhere
     inCombat = true;
     ui.hideMenu();
     loot.hideLabels(); // no browsing the shelves mid-fight
@@ -1699,7 +1764,7 @@ function startGame(level) {
         combat?.handleTileClick(tile, point);
         return;
       }
-      if (dialogue.visible) return; // talking: clicks belong to the panel
+      if (modalOpen()) return; // talking: clicks belong to the panel
       // Out of combat, the interactable ENTITY under the cursor wins over the
       // floor tile behind it - what finally makes a click on the tall door
       // mesh (or a standing enemy) land on the thing you aimed at.
@@ -1747,7 +1812,7 @@ function startGame(level) {
         ui.setFocusBanner(character ? focusInfoFor(hit, point) : null);
         return;
       }
-      if (!sheet || gameOver || dialogue.visible) { clearHoverHighlight(); setCursor(null); ui.setFocusBanner(null); return; }
+      if (!sheet || gameOver || modalOpen()) { clearHoverHighlight(); setCursor(null); ui.setFocusBanner(null); return; }
       worldHover(point, sx, sy);
     },
     // The cursor left the world for the DOM UI: drop the world hover rather
@@ -1766,7 +1831,7 @@ function startGame(level) {
       // action or a pending confirm. Left-click never cancels (it reports an
       // invalid target), so aiming survives a near-miss.
       if (inCombat) { combat?.cancelArmed(); return; }
-      if (dialogue.visible) return;
+      if (modalOpen()) return;
       const hit = picking.pick(controls.cameraEntity, sx, sy);
       if (hit && hit.kind === 'npc') {
         ui.showMenu(sx, sy, [
@@ -1876,7 +1941,14 @@ function startGame(level) {
       } else {
         const def = grid.defAt(tile.x, tile.z);
         const items = [{ label: 'Examine', action: () => ui.say('A cubicle wall. It has seen things.') }];
-        if (def.loot) {
+        if (def.shop) {
+          items[0] = { label: 'Examine', action: () => ui.say('A snack machine, humming. Row E7 has been stuck since before you were hired.') };
+          items.unshift({
+            label: `Buy from the ${def.label}`,
+            action: () => approachAndDo(tile.x, tile.z, () => openShopAt(tile.x, tile.z)),
+          });
+        }
+        if (def.loot && !def.shop) {
           items[0] = { label: 'Examine', action: () => ui.say(`${def.label}. Probably contains secrets. Or staples.`) };
           items.unshift({
             label: 'Rummage',
@@ -1910,20 +1982,20 @@ function startGame(level) {
       applyHoverGlow();
     } else if ((e.key === 'i' || e.key === 'I') && sheet && !gameOver) {
       loot.togglePanel(sheet);
-    } else if (/^[1-9]$/.test(e.key) && sheet && !inCombat && !gameOver && !dialogue.visible) {
+    } else if (/^[1-9]$/.test(e.key) && sheet && !inCombat && !gameOver && !modalOpen()) {
       // Number keys arm the matching hotbar slot (out-of-combat targeting).
       const id = offensiveActionIds()[Number(e.key) - 1];
       if (id) toggleOocArm(id);
-    } else if (e.key === 'Tab' && sheet && !inCombat && !gameOver && !dialogue.visible) {
+    } else if (e.key === 'Tab' && sheet && !inCombat && !gameOver && !modalOpen()) {
       // Tab cycles which member you lead OUT of combat. In a fight there's no
       // switching - initiative decides who acts, and you control each on their
       // own turn.
       e.preventDefault();
       cycleLeader();
-    } else if ((e.key === 'c' || e.key === 'C') && sheet && !gameOver && !dialogue.visible) {
+    } else if ((e.key === 'c' || e.key === 'C') && sheet && !gameOver && !modalOpen()) {
       // The read-only character sheet for whoever you're controlling.
       charSheet.toggle(charSheetVm(sheet));
-    } else if ((e.key === 't' || e.key === 'T') && sheet && !gameOver && !dialogue.visible) {
+    } else if ((e.key === 't' || e.key === 'T') && sheet && !gameOver && !modalOpen()) {
       // Overhead tactical view - the same toggle as the rail button.
       controls.toggleTactical();
       tacticalBtn?.refresh();
@@ -2073,7 +2145,7 @@ function startGame(level) {
     // when they change (the gate keeps DOM writes off the hot path). Armed
     // out-of-combat target rings redraw each frame, like combat's own.
     if (hotbar) {
-      const show = !!sheet && !inCombat && !gameOver && !dialogue.visible;
+      const show = !!sheet && !inCombat && !gameOver && !modalOpen();
       hotbar.setVisible(show);
       if (show && sheet.paper !== hotbarPaper) { hotbarPaper = sheet.paper; hotbar.refresh(sheet); }
       if (show && armedOoc) drawOocTargets();
@@ -2092,7 +2164,7 @@ function startGame(level) {
       if (key !== partyBarKey) { partyBarKey = key; partyBar.refresh(party, cp); }
       partyBar.setVisible(party.members.length > 1 && !gameOver);
       // The HUD level-up pip tracks the leader's banked points, out of combat.
-      levelUpPip.refresh(!inCombat && !gameOver && !dialogue.visible && sheet ? pending(sheet) : 0);
+      levelUpPip.refresh(!inCombat && !gameOver && !modalOpen() && sheet ? pending(sheet) : 0);
     }
     // Fire/smoke age in TURNS. In combat, combat.js advances one per round (via
     // the onRound callback in beginCombat). Out of combat there are no rounds, so
@@ -2153,6 +2225,7 @@ function startGame(level) {
     party = createParty(restoredProgress.sheets[0]);
     for (const s of restoredProgress.sheets.slice(1)) addMember(party, s);
     party.active = restoredProgress.active;
+    party.cash = restoredProgress.cash || 0; // the purse rides the stairwell too
     partyLeader(party).actor = player;
     sheet = partyLeader(party).sheet;
     spawnPlayerModel();
@@ -2256,6 +2329,11 @@ function startGame(level) {
     isSmoke: (x, z) => runtime.isSmoke(x, z),
     losClear: (ax, az, bx, bz) => hasLos({ x: ax, z: az }, { x: bx, z: bz }),
     get inventory() { return sheet ? [...sheet.inventory] : []; },
+    get cash() { return party?.cash || 0; },
+    get shopOpen() { return shopping.visible; },
+    // A machine's remaining stock, by tile - the shop's answer to
+    // containerLootAt, so a spec can assert a sold-out row without the DOM.
+    shopStockAt: (x, z) => shopping.debug.stockAt(shopKey(x, z)),
     get looseItems() { return loot.debug.looseItems(); },
     get lootLabelCount() { return document.querySelectorAll('.loot-label').length; },
     containerLootAt: loot.debug.containerLootAt,
@@ -2312,6 +2390,15 @@ function startGame(level) {
     get player() { return sheet; }, // the ACTIVE member's live sheet, or null pre-pick
     get playerActor() { return player; },
     get party() { return party; }, // live - the god panel reflects every member's sheet
+    // The purse is party state (ECONOMY_PLAN #2), so it gets its own live
+    // setter rather than hiding on a sheet card. Clamped at zero by addCash.
+    get cash() { return party?.cash || 0; },
+    setCash(n) {
+      if (!party) return 0;
+      party.cash = Math.max(0, Math.floor(Number(n) || 0));
+      loot.refreshPanel(sheet);
+      return party.cash;
+    },
     switchTo(i) {
       if (!inCombat) switchLeader(i); // in combat, initiative controls the turn - no manual switch
     },
@@ -2378,6 +2465,10 @@ function startGame(level) {
       ui.updateStatsHud(sheet);
     },
     dropItem(id, x, z) { loot.dropAt(x, z, id); },
+    // Clean out a merchant in one step (ECONOMY_PLAN): the same end state as
+    // buying every row, for looking at the sold-out presentation without
+    // spending nine clicks getting there.
+    emptyShop(x, z) { shopping.emptyStock(shopKey(x, z)); },
     teleport(x, z) {
       if (!player.entity) return;
       const p = player.entity.getPosition();

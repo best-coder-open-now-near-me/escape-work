@@ -14,6 +14,7 @@ import { COMPANIONS, COMPANION_KITS } from '../../src/data/companions.js';
 import { CLASSES, MERGED_PER_KEY } from '../../src/data/classes.js';
 import { ACTIONS } from '../../src/data/actions.js';
 import { ITEMS, LOOT_TABLES } from '../../src/data/items.js';
+import { SHOPS } from '../../src/data/shops.js';
 import { LEVELS, FIRST_LEVEL } from '../../src/data/levels.js';
 import { STATUSES } from '../../src/data/statuses.js';
 import { SURFACES, ELECTRIFIED, FIRE } from '../../src/data/surfaces.js';
@@ -123,6 +124,63 @@ test('every registry cross-reference resolves', () => {
   // Tile loot tables exist, and every table entry names a real item.
   for (const [id, def] of Object.entries(TILE_TYPES)) {
     if (def.loot) assert.ok(LOOT_TABLES[def.loot], `tile "${id}" loot table "${def.loot}" exists`);
+  }
+  // Merchants (ECONOMY_PLAN.md). Anything that can open a shop names a real
+  // one, and a shop only stocks things a merchant could actually price - an
+  // item with no `value` would render a "Buy - 0" row that shop.js then
+  // refuses, which is a dead button rather than an error anyone would see.
+  const shopSites = [];
+  for (const [id, def] of Object.entries(TILE_TYPES)) {
+    if (def.shop) shopSites.push([`TILE_TYPES.${id}`, def.shop]);
+  }
+  for (const [regName, reg] of [['NPCS', NPCS], ['COMPANIONS', COMPANIONS]]) {
+    for (const [id, def] of Object.entries(reg)) {
+      if (def.shop) shopSites.push([`${regName}.${id}`, def.shop]);
+    }
+  }
+  for (const [where, shopId] of shopSites) {
+    assert.ok(SHOPS[shopId], `${where} shop "${shopId}" is a real merchant`);
+  }
+  assert.ok(shopSites.length > 0, 'the lint actually found merchants to check');
+  for (const [id, shop] of Object.entries(SHOPS)) {
+    assert.ok(shop.stock?.length, `shop "${id}" stocks something`);
+    for (const row of shop.stock) {
+      assert.ok(ITEMS[row.item], `shop "${id}" stock item "${row.item}" exists`);
+      assert.ok(ITEMS[row.item].value > 0, `shop "${id}" stock item "${row.item}" has a value`);
+      assert.ok((row.qty ?? 1) > 0, `shop "${id}" stock item "${row.item}" has a positive qty`);
+    }
+    assert.ok((shop.markup ?? 1) > 0, `shop "${id}" markup is positive`);
+  }
+  // Every item can actually be OBTAINED. An entry nothing drops, stocks or
+  // starts you with is dead data that no other lint can see - it type-checks,
+  // it prices, it just never reaches a player. (This caught a `coin-return`
+  // authored for a machine-shaking verb that was then deliberately not built.)
+  const obtainable = new Set();
+  for (const entries of Object.values(LOOT_TABLES)) for (const e of entries) obtainable.add(e.item);
+  for (const def of Object.values(ENEMY_TYPES)) for (const e of def.loot || []) obtainable.add(e.item);
+  for (const shop of Object.values(SHOPS)) for (const r of shop.stock || []) obtainable.add(r.item);
+  for (const reg of [CLASSES, COMPANIONS]) {
+    for (const def of Object.values(reg)) {
+      for (const id of Object.values(def.startGear || {})) obtainable.add(id);
+    }
+  }
+  for (const id of Object.keys(ITEMS)) {
+    assert.ok(obtainable.has(id),
+      `item "${id}" is unobtainable - no loot table, enemy, shop or startGear produces it`);
+  }
+
+  // Money and worth are integers. A fractional `value` would put a price like
+  // "7.2" in a button and a fraction in the purse, and cash is counted, not
+  // measured.
+  for (const [id, it] of Object.entries(ITEMS)) {
+    if (it.value !== undefined) {
+      assert.ok(Number.isInteger(it.value) && it.value > 0, `item "${id}" value is a positive integer`);
+    }
+    if (it.cash !== undefined) {
+      assert.ok(Number.isInteger(it.cash) && it.cash > 0, `item "${id}" cash is a positive integer`);
+      assert.ok(!it.value, `cash item "${id}" has no resale value - it never reaches the bag`);
+      assert.ok(!it.slot && !it.heal && !it.ammo, `cash item "${id}" is only money`);
+    }
   }
   // A level's map is one CHARACTER per cell and the editor exports canonical
   // registry chars, so a duplicate `char` silently makes one prop unpaintable

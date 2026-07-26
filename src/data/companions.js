@@ -123,6 +123,14 @@ const KITS = {
     look: { build: { torso: 1.38 } },
     examine: 'Eleven years in the mail room. Knows every corridor. Fears no wet floor.',
     maxHp: 18, // a companion line, not a protagonist's
+    // He runs the cart (ECONOMY_PLAN M3). The person merchant is deliberately
+    // NOT a new NPC standing in a supply closet: the map legend is one
+    // character per cell and the printable set is all but spent, so a merchant
+    // who already has a character on the map is the only kind we can still
+    // afford. It also happens to be the better story - he has pushed a cart
+    // down every corridor in this building, and he takes it with him when he
+    // signs on, so the party's fence is a member of the party.
+    shop: 'mail-cart',
     dialogue: {
       start: 'hi',
       nodes: {
@@ -131,6 +139,7 @@ const KITS = {
           options: [
             { label: 'Fleeing. Escaping, technically.', next: 'escape' },
             { label: 'Who are you?', next: 'who' },
+            { label: 'What\'s on the cart?', effect: { shop: true }, next: null },
             { label: 'Neither. Carry on.', next: null },
           ],
         },
@@ -138,6 +147,7 @@ const KITS = {
           text: '"Mail room, eleven years. I\'ve pushed a cart down every corridor in this building. There\'s nothing on these floors I haven\'t delivered, dodged, or mopped around."',
           options: [
             { label: 'Then you know the way out. Come with me.', next: 'joined', effect: { recruit: true } },
+            { label: 'Anything on that cart worth having?', effect: { shop: true }, next: null },
             { label: 'Good for you.', next: null },
           ],
         },
@@ -163,6 +173,7 @@ const KITS = {
           text: '"Still here. Still not slipping. You get used to the floors betraying you - and then one day they simply can\'t anymore."',
           options: [
             { label: 'Any advice?', next: 'advice' },
+            { label: 'Show me the cart.', effect: { shop: true }, next: null },
             { label: 'Keep moving.', next: null },
           ],
         },

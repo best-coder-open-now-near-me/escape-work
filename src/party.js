@@ -10,10 +10,23 @@ import { CLASSES } from './data/classes.js';
 import { COMPANIONS } from './data/companions.js';
 
 export const PARTY_CAP = 3; // leader + 2 companions - see PARTY_PLAN.md
-export const SAVE_VERSION = 5; // v5 adds equipment slots (EQUIPMENT_PLAN.md)
+export const SAVE_VERSION = 6; // v6 adds the shared purse (ECONOMY_PLAN.md)
 
+// Petty Cash is PARTY state, not sheet state (ECONOMY_PLAN #2): one purse the
+// whole roster spends from, so buying a sandwich never means switching leaders
+// first. It lives here for the same reason XP fan-out does - the party is the
+// unit of ownership, and a wallet on member 0 would invent an owner who can be
+// swapped out or knocked down mid-run.
 export function createParty(sheet, actor = null) {
-  return { members: [{ sheet, actor }], active: 0 };
+  return { members: [{ sheet, actor }], active: 0, cash: 0 };
+}
+
+// Bank (or spend, with a negative amount) Petty Cash. Clamped at zero so no
+// caller can drive the purse negative - shop.js refuses unaffordable buys
+// before it ever gets here, and this is the backstop that keeps that true.
+export function addCash(party, amount) {
+  party.cash = Math.max(0, (party.cash || 0) + amount);
+  return party.cash;
 }
 
 export const leader = (party) => party.members[party.active];
@@ -44,7 +57,10 @@ export function createCompanionSheet(def, id, level = 1) {
 }
 
 // --- campaign progress -------------------------------------------------------
-// current (SAVE_VERSION): { version, levelId, party: [sheet, ...], active }
+// current (SAVE_VERSION): { version, levelId, party: [sheet, ...], active, cash }
+//   - v6 added the shared purse. It is NEW state rather than migrated state,
+//     so an older save simply reads 0 - no invents-state-on-every-load hazard
+//     of the kind the v5 auto-equip needed a version gate for.
 //   - v3 added attributes + banked points; older v2 saves (same party shape,
 //     pre-attributes) backfill on load via normalizeSheet/ensureAttributes.
 // v1 (legacy): { levelId, sheet } - loads as a one-member party.
@@ -56,6 +72,7 @@ export function serializeProgress(party, levelId) {
     levelId,
     party: party.members.map((m) => m.sheet),
     active: party.active,
+    cash: party.cash || 0,
   };
 }
 
@@ -117,13 +134,16 @@ export function parseProgress(raw) {
   // Shape still decides HOW to read the save; `version` decides which one-time
   // migrations still need to run over it (0 for the pre-version legacy shape).
   const version = Number.isInteger(raw.version) ? raw.version : 0;
+  // A save older than v6 has no purse; a corrupted one gets zero rather than a
+  // NaN that would poison every later arithmetic.
+  const cash = Number.isFinite(raw.cash) && raw.cash > 0 ? Math.floor(raw.cash) : 0;
   if (Array.isArray(raw.party) && raw.party.length) {
     const active = Number.isInteger(raw.active) && raw.active >= 0 && raw.active < raw.party.length
       ? raw.active : 0;
-    return { levelId: raw.levelId, sheets: raw.party.map((s) => normalizeSheet(s, version)), active };
+    return { levelId: raw.levelId, sheets: raw.party.map((s) => normalizeSheet(s, version)), active, cash };
   }
   if (raw.sheet && typeof raw.sheet === 'object') {
-    return { levelId: raw.levelId, sheets: [normalizeSheet(raw.sheet, version)], active: 0 };
+    return { levelId: raw.levelId, sheets: [normalizeSheet(raw.sheet, version)], active: 0, cash };
   }
   return null;
 }

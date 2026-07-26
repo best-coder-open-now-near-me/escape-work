@@ -33,6 +33,7 @@ const KITS = {
     loot: [
       { item: 'performance-review', chance: 1 },
       { item: 'cold-coffee', chance: 0.5 },
+      { item: 'crumpled-fiver', chance: 0.45 }, // lunch money, and now yours
       { item: 'company-fleece', chance: 0.3 },
     ],
     attacks: [
@@ -62,6 +63,9 @@ const KITS = {
       { item: 'performance-review', chance: 1 },
       { item: 'red-stapler', chance: 0.35 },
       { item: 'cold-coffee', chance: 0.5 },
+      // He is the one who signs for petty cash. The single richest body in the
+      // game, and the only reliable source of the envelope on a shipped floor.
+      { item: 'petty-cash-envelope', chance: 0.35 },
       { item: 'interview-blazer', chance: 0.4 },
     ],
     attacks: [
@@ -85,6 +89,7 @@ const KITS = {
     loot: [
       { item: 'hr-pamphlet', chance: 1 },
       { item: 'half-sandwich', chance: 0.4 },
+      { item: 'crumpled-fiver', chance: 0.3 },
       { item: 'laminated-lanyard', chance: 0.4 },
     ],
     attacks: [
@@ -141,6 +146,7 @@ const KITS = {
     examine: 'Security. Knows the badge policy by heart. Has never once been asked about it.',
     loot: [
       { item: 'laminated-lanyard', chance: 1 },
+      { item: 'crumpled-fiver', chance: 0.35 },
       { item: 'warehouse-boots', chance: 0.35 },
       { item: 'cold-coffee', chance: 0.5 },
       { item: 'usb-stick', chance: 0.2 },
@@ -176,6 +182,7 @@ const KITS = {
       { item: 'performance-review', chance: 1 },
       { item: 'red-stapler', chance: 0.3 },
       { item: 'cold-coffee', chance: 0.5 },
+      { item: 'petty-cash-envelope', chance: 0.3 },
       { item: 'company-fleece', chance: 0.4 },
     ],
     attacks: [
@@ -204,6 +211,7 @@ const KITS = {
       { item: 'performance-review', chance: 1 },
       { item: 'red-stapler', chance: 0.5 },
       { item: 'cold-coffee', chance: 0.5 },
+      { item: 'petty-cash-envelope', chance: 0.5 },
       { item: 'interview-blazer', chance: 0.5 },
     ],
     attacks: [

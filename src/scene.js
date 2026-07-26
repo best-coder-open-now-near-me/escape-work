@@ -62,11 +62,11 @@ export function buildLevel(app, grid, { picking = null } = {}) {
       if (type === null) continue;
       r.renderFloor(x, z, carpetAt.get(x + ',' + z) || type);
       if (type === 'floor') continue;
-      // Rummageable / ignitable / explosive props are left-clickable and
-      // hover-highlightable: register their holder for object picking. Model
+      // Rummageable / shoppable / ignitable / explosive props are left-clickable
+      // and hover-highlightable: register their holder for object picking. Model
       // props (desks) load async, so catch them via onAsync too.
       const def = TILE_TYPES[type];
-      const interactive = !!def && (def.loot || def.ignitable || def.explosive);
+      const interactive = !!def && (def.loot || def.shop || def.ignitable || def.explosive);
       const res = r.renderMarker(x, z, type, {
         electrified: grid.isElectrified(x, z),
         surfaceAt: (sx, sz) => TILE_TYPES[grid.typeAt(sx, sz)]?.surface || null,

@@ -2,7 +2,7 @@
 // projected clicks, walk settling, and combat entry. Everything here assumes
 // the CI reality of software GL - generous waits, and no projection trusted
 // before frames tick smoothly (see game.spec.js header).
-import { expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 // Wait until two consecutive animation frames arrive close together - i.e.
 // shader warmup is over and wall-clock waits mean what they say.
@@ -138,18 +138,54 @@ const onCanvas = (page, p) => page.evaluate(
 // we target only enemies the game reports as `reachable` right now, nearest
 // first, and re-query every attempt so a coworker who just wandered into reach
 // becomes eligible. Each click's walk plays out fully before the next attempt.
+//
+// THE LOOP IS BUDGETED, and that budget is load-bearing. Each attempt can
+// spend stableProject (20s) plus combatOrWalkDone (25s), so 18 attempts was a
+// ~810s worst case running inside a caller's 300s `test.setTimeout` - nearly
+// 3x. A struggling engage could therefore never reach the assertion at the
+// bottom of this function: Playwright's own timeout fired first, mid
+// `page.waitForTimeout`, and reported a bare "Test timeout of 300000ms
+// exceeded" with a stack pointing into this helper and no indication of what
+// it had been attempting. That is why these failures read as random.
+//
+// Now the loop stops while there is still time to REPORT, and the assertion
+// says how many coworkers it tried and why it gave up. A healthy run is
+// unchanged - it still gets all 18 attempts, because it never approaches the
+// deadline.
+// The budget is a FRACTION OF THE CALLER'S OWN TIMEOUT, not a constant. A flat
+// 200s was the first attempt at this and it was wrong in a way worth recording:
+// most specs call test.setTimeout(300_000), but smoke.spec takes the config
+// default of 120s - so for that one caller the "budget" was larger than the
+// whole test, and the helper reproduced the exact bug it was written to remove
+// (an unattributable "Test timeout of 120000ms exceeded" instead of a
+// diagnosis). Deriving it from test.info().timeout makes the guarantee hold for
+// every caller, including any added later with a budget nobody thought about.
+const ENGAGE_BUDGET_FRACTION = 0.6; // leave the caller ~40% to report and finish
+const SETTLE_MS = 8_000; // per-attempt camera settle; it is a nicety, not the test
+
+function engageBudgetMs() {
+  let timeout = 300_000;
+  try { timeout = test.info().timeout || timeout; } catch { /* called outside a test */ }
+  return Math.max(30_000, Math.floor(timeout * ENGAGE_BUDGET_FRACTION));
+}
+
 export async function enterCombat(page) {
+  const started = Date.now();
+  const deadline = started + engageBudgetMs();
+  const left = () => deadline - Date.now();
   let inCombat = false;
-  for (let i = 0; i < 18 && !inCombat; i++) {
+  let attempts = 0;
+  let why = 'no reachable coworker ever projected onto the canvas';
+  for (let i = 0; i < 18 && !inCombat && left() > 3_000; i++) {
     // Let the camera settle before projecting - a walk-up leaves it easing,
     // and a stale projection lands the click a tile off (walks past the
     // target instead of engaging). Settling on the player fixes the whole
     // projection, enemies included.
     const pp = await page.evaluate(() => window.__game.playerPos);
-    await stableProject(page, pp.x, pp.z).catch(() => {});
+    await stableProject(page, pp.x, pp.z, Math.max(1_000, Math.min(SETTLE_MS, left()))).catch(() => {});
     const pt = await page.evaluate(() => window.__game.playerTile);
     const ens = await page.evaluate(() => window.__game.enemies.filter((e) => e.alive && e.reachable));
-    if (!ens.length) { await page.waitForTimeout(700); continue; } // all sealed/far - let them wander
+    if (!ens.length) { why = 'every coworker was sealed off or out of reach'; await page.waitForTimeout(700); continue; }
     // ALWAYS the nearest reachable coworker: the shortest walk-up gives them
     // the least chance to wander out of reach before we arrive (a long walk
     // across the floor can arrive where the target no longer is - no
@@ -170,14 +206,22 @@ export async function enterCombat(page) {
     if (!onScreen(p) || !(await onCanvas(page, p))) {
       p = await page.evaluate(([x, z]) => window.__game.project(x, z), [en.x, en.z]);
     }
-    if (!onScreen(p) || !(await onCanvas(page, p))) continue; // covered by UI - next
+    if (!onScreen(p) || !(await onCanvas(page, p))) { why = 'the target was off-screen or under fixed UI'; continue; }
+    attempts += 1;
+    why = `walked at ${ens.length} reachable coworker(s) without a fight starting`;
     await page.mouse.click(p.x, p.y);
-    inCombat = await combatOrWalkDone(page, 25_000);
+    // Never wait past the budget: an attempt that would overrun it is an
+    // attempt whose result we could not report anyway.
+    inCombat = await combatOrWalkDone(page, Math.max(2_000, Math.min(25_000, left())));
   }
-  expect(inCombat).toBe(true);
+  expect(inCombat,
+    `never entered combat: ${attempts} engage attempt(s) over ${Math.round((Date.now() - started) / 1000)}s - ${why}`,
+  ).toBe(true);
   // Initiative may hand the enemy the first turn(s); settle on the player's
   // turn so callers can act. (If the fight somehow ends first, don't hang.)
-  if (await page.evaluate(() => window.__game.inCombat)) await waitForPlayerTurn(page).catch(() => {});
+  if (await page.evaluate(() => window.__game.inCombat)) {
+    await waitForPlayerTurn(page, Math.max(5_000, left())).catch(() => {});
+  }
 }
 
 // Wait until it's a party member's turn (phase 'player'). Under initiative an
