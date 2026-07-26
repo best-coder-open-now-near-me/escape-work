@@ -1042,14 +1042,25 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function handleEnemyClick(en) {
     if (phase !== 'player' || active.actor.moving || !en.alive) return;
     hidePreview();
+    let autoArmed = false;
     if (!armed) {
       // Not enough AP for even the basic swing: say so once, rather than
       // silently walking them into the enemy's face.
       const id = defaultAttack();
       if (active.ap < ACTIONS[id].ap) { log('Not enough AP to attack.'); return; }
       armed = id;
+      autoArmed = true;
       refresh(); // the bar lights the swing that is about to happen
     }
+    // A refusal keeps a USER-armed action armed - aim survives a near-miss,
+    // right-click lowers it. The default the click just auto-armed is not
+    // aim: the player never raised it, so a refusal must put it back down.
+    // Left dangling, it sat lit on the bar until a right-click, and anything
+    // waiting for the swing to resolve (the e2e idle() helper) hung forever.
+    const refuse = (msg) => {
+      log(msg);
+      if (autoArmed) { armed = null; refresh(); }
+    };
     const a = ACTIONS[armed];
     if (a.cone) { fireCone(en.x, en.z); return; }
     // Placing a summon on top of a coworker: the tile is taken, so they report
@@ -1057,8 +1068,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // them to swarm is a reasonable thing to click.
     if (a.type === 'summon') { placeSummon(en.x, en.z); return; }
     if (a.type === 'shove') {
-      if (!canReach(active, en, REACH.SHOVE)) { log('Too far to shove.'); return; }
-      if (active.ap < a.ap) { log('Not enough AP.'); return; }
+      if (!canReach(active, en, REACH.SHOVE)) { refuse('Too far to shove.'); return; }
+      if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
       joinCombat(en); // shoving a bystander is also an opinion they'll return
       const dx = Math.sign(en.x - active.actor.x);
       const dz = Math.sign(en.z - active.actor.z);
@@ -1111,17 +1122,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     if (a.ammoCost) {
       // ranged: needs range, line of sight, ammo, AP
-      if (cheb(active.actor.x, active.actor.z, en.x, en.z) > THROW_RANGE) { log('Too far to throw.'); return; }
-      if (!world.hasLos(active.actor.x, active.actor.z, en.x, en.z)) { log('No clear line to throw.'); return; }
-      if (active.sheet.paper < ammoCostOf(armed)) { log('Out of paper.'); return; }
-      if (active.ap < a.ap) { log('Not enough AP.'); return; }
+      if (cheb(active.actor.x, active.actor.z, en.x, en.z) > THROW_RANGE) { refuse('Too far to throw.'); return; }
+      if (!world.hasLos(active.actor.x, active.actor.z, en.x, en.z)) { refuse('No clear line to throw.'); return; }
+      if (active.sheet.paper < ammoCostOf(armed)) { refuse('Out of paper.'); return; }
+      if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
       active.actor.faceToward(en.x, en.z);
       performOn(armed, en);
       return;
     }
     // melee: walk up if needed, then strike
     if (canReach(active, en)) {
-      if (active.ap < a.ap) { log('Not enough AP to attack.'); return; }
+      if (active.ap < a.ap) { refuse('Not enough AP to attack.'); return; }
       active.actor.faceToward(en.x, en.z);
       performOn(armed, en);
       return;
@@ -1129,10 +1140,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // walk the cheapest route to their side, as far as the budget allows
     let best = null;
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-      const p = world.findPath(active.actor.x, active.actor.z, en.x + dx, en.z + dz, active.actor);
-      if (p && (!best || p.length < best.length)) best = p;
+      const gx = en.x + dx;
+      const gz = en.z + dz;
+      // Already STANDING on a goal tile - out of reach only because the body
+      // rests on its far side - means the "route" is a shuffle inside this
+      // tile; the approach point below closes the last half-tile to their
+      // body. findPath returns the one-tile path [[gx,gz]] here, and its
+      // length of 1 used to win the shortest-path contest and then fail the
+      // >= 2 check: the player CLOSEST to the target was the one told there
+      // was no way to reach them.
+      if (gx === active.actor.x && gz === active.actor.z) { best = [[gx, gz], [gx, gz]]; break; }
+      const p = world.findPath(active.actor.x, active.actor.z, gx, gz, active.actor);
+      if (p && p.length >= 2 && (!best || p.length < best.length)) best = p;
     }
-    if (!best || best.length < 2) { log('No way to reach them.'); return; }
+    if (!best || best.length < 2) { refuse('No way to reach them.'); return; }
     // walk up to their body, not the centre of the neighbouring tile.
     // The budget is the SAME one an ordinary move spends - allowance first,
     // then real AP (`moveBudget`) - minus the swing this walk is for. Billing
@@ -1142,7 +1163,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const [gx, gz] = best[best.length - 1];
     const ep = en.entity ? en.entity.getPosition() : { x: en.x, z: en.z };
     const walk = walkActive(best, moveBudget(active) - a.ap, world.approach(gx, gz, ep.x, ep.z));
-    if (!walk) { log('Not enough AP to reach them.'); return; }
+    if (!walk) { refuse('Not enough AP to reach them.'); return; }
     // The walk's endpoint is already a free point, so this asks the honest
     // question directly instead of rounding it back to a tile first: will we
     // be standing inside reach when the walk finishes?
