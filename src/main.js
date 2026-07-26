@@ -18,7 +18,7 @@ import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DI
 import {
   createSheet, createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
   scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
-  reachOf, REACH,
+  reachOf, ammoCostOf, REACH,
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
@@ -199,6 +199,10 @@ function startGame(level) {
     // Equipping changes derived stats AND the basic weapon swing on the bars -
     // refresh the HUD, hotbar, and char sheet.
     onGearChange: () => refreshProgressUi(),
+    // The pockets stay usable with a merchant open, and every verb in them
+    // splices the bag - so the shop's sell column has to be repainted from the
+    // live inventory rather than left holding the indexes it rendered with.
+    onBagChange: () => shopping.refreshIfOpen(),
     // Everyone else still standing can be handed an item. The recipient's
     // sheet takes it directly - pockets are unlimited, so there is nothing to
     // refuse for.
@@ -398,12 +402,29 @@ function startGame(level) {
     }
   }
   const portraits = createPortraits(app);
+  // The face on the HUD card belongs to whoever the card is SHOWING. It rides
+  // the actor (portraits.js), so resolve it from the sheet on every repaint
+  // rather than leaving it sticky in ui.js: the sticky copy was only ever
+  // written when a portrait FINISHED RENDERING, so a leader switch, a combat
+  // turn handoff and a summon taking the floor each left the previous
+  // character's face sitting over the new one's name and HP - for the rest of
+  // the session, since nothing else ever wrote it again.
+  // Whose sheet the card is reflecting right now: the member whose combat turn
+  // it is, else the leader.
+  const hudSheetNow = () => (inCombat && combat?.actingSheet) || sheet;
+  const actorForSheet = (s) => (
+    party?.members.find((m) => m.sheet === s)?.actor
+    || summons.find((x) => x.sheet === s)?.actor
+    || (s === sheet ? partyLeader(party)?.actor || player : null)
+  );
+  const paintHud = (s = sheet) => {
+    if (!s) return;
+    ui.updateStatsHud(s, actorForSheet(s)?.portraitUrl || null);
+  };
   // A portrait finishing is the only reason to repaint for it: refresh the
-  // corner readout (if it belongs to whoever we are controlling) and the
-  // in-fight initiative strip.
+  // corner readout and the in-fight initiative strip.
   const onPortraitReady = () => {
-    const lead = party ? partyLeader(party) : null;
-    if (sheet) ui.updateStatsHud(sheet, lead?.actor?.portraitUrl || player?.portraitUrl || null);
+    paintHud(hudSheetNow());
     if (inCombat) combat?.refresh?.();
   };
   // Proportions BEFORE attach (it captures the rig lift); tint AFTER, because
@@ -446,7 +467,7 @@ function startGame(level) {
       lift, rotY: 90, animate: true,
       onReady: (e) => { dressUp(e, player, sheetLook(sheet), sheet.model); picking.register(e, 'party', player); },
     });
-    ui.updateStatsHud(sheet);
+    paintHud(sheet);
   }
 
   // --- class-carousel 3D preview ------------------------------------------------
@@ -543,7 +564,7 @@ function startGame(level) {
     pendingAction = null;
     armedOoc = null;
     buildHotbar();
-    ui.updateStatsHud(sheet);
+    paintHud(sheet);
     loot.refreshPanel(sheet);
     ui.say(`${m.sheet.name} takes over.`);
   }
@@ -559,7 +580,7 @@ function startGame(level) {
     pendingAction = null;
     armedOoc = null;
     buildHotbar();
-    ui.updateStatsHud(sheet);
+    paintHud(sheet);
     loot.refreshPanel(sheet);
   }
   function downCompanion(m) {
@@ -589,7 +610,7 @@ function startGame(level) {
       }
       ui.say(`Promotion! ${m.sheet.name} reaches level ${m.sheet.level} - ${pts} point${pts === 1 ? '' : 's'} to spend.`);
     }
-    ui.updateStatsHud(sheet);
+    paintHud(sheet);
   }
 
   // Blowing up a printer: flash, clear the tile, flatten anyone beside it.
@@ -625,7 +646,7 @@ function startGame(level) {
     }
     ui.say(msg);
     for (const en of slain) awardKill(en);
-    if (sheet) ui.updateStatsHud(sheet);
+    if (sheet) paintHud(sheet);
     for (const m of downed) {
       downOrLose(m, 'PC LOAD LETTER. Fatal.');
       if (gameOver) return; // that was the wipe
@@ -826,11 +847,10 @@ function startGame(level) {
   const sightClear = (x, z) => grid.terrainOpen(x, z) && !runtime.isSmoke(x, z);
   // Throws sail over chest-high partitions but not closed doors (grid.sightOpen).
   const hasLos = (a, b) => segmentClear(sightClear, a.x, a.z, b.x, b.z, grid.sightOpen);
-  const throwAmmoCost = (id) => {
-    const base = ACTIONS[id].ammoCost || 0;
-    const disc = sheet?.talent?.effects?.paperAmmoDiscount || 0;
-    return base > 1 ? Math.max(1, base - disc) : base;
-  };
+  // The shared rule (stats.js), bound to the leader. A declaration, not a
+  // const: the hotbar builder reads it and runs from paths that fire before
+  // this point in the closure body.
+  function throwAmmoCost(id) { return ammoCostOf(sheet, id); }
   // Out of combat there's no AP budget: a thrown opener needs range + line +
   // ammo; melee/shove just walk you in, so they can always open a fight.
   const oocTargetOk = (id, en) => {
@@ -1135,8 +1155,20 @@ function startGame(level) {
       if (!m) return false;
       if (m.sheet.hp <= 0) { approachAndDo(ref.x, ref.z, () => helpUp(m)); return true; }
       if (m === partyLeader(party)) return false; // your own body: a ground click
-      approachAndDo(ref.x, ref.z, () => dialogue.open(ref));
-      return true;
+      // Talk only to somebody who HAS something to say - a recruited companion
+      // carries a tree on their def (and it is how you reach a merchant
+      // coworker's stock). Your original character is a PlayerActor with no
+      // def at all, so an unguarded dialogue.open threw mid-walk and took the
+      // rest of the frame's update with it. Everyone else falls through to the
+      // documented body-click verb: switch to them. Same priority the
+      // right-click menu already uses.
+      if (ref.def?.dialogue || ref.def?.recruitedDialogue) {
+        approachAndDo(ref.x, ref.z, () => dialogue.open(ref));
+        return true;
+      }
+      const i = party.members.indexOf(m);
+      if (i >= 0) { switchLeader(i); return true; }
+      return false;
     }
     if (kind === 'enemy') {
       if (ref.alive) { attackOrConfront(ref); return true; }
@@ -1256,10 +1288,21 @@ function startGame(level) {
     hotbar?.destroy(); // a leader switch rebuilds it for the new sheet
     const ids = offensiveActionIds();
     hotbar = ui.createHotbar(
-      ids.map((id) => ({ id, label: ACTIONS[id].label, ap: ACTIONS[id].ap, ammoCost: ACTIONS[id].ammoCost })),
+      // The ammo cost handed to the bar is THIS character's (the Origami
+      // Specialist throws an airplane for one sheet, not two) - the same number
+      // the targeting gate and combat itself charge. The bar used to be given
+      // the raw data cost and greyed out throws the other two would allow.
+      ids.map((id) => ({
+        id, label: ACTIONS[id].label, ap: ACTIONS[id].ap, ammoCost: throwAmmoCost(id),
+      })),
       { onArm: toggleOocArm },
     );
     hotbar.refresh(sheet);
+    // A rebuild starts with no slot lit, but `armedOoc` survives it - spending
+    // a level-up point mid-aim left the bar looking unarmed while the rings,
+    // the crosshair and the next click all still acted on the armed action.
+    // The bar shows what is actually armed, or nothing is.
+    hotbar.setArmed(armedOoc);
     hotbarPaper = sheet.paper;
   }
 
@@ -1316,7 +1359,7 @@ function startGame(level) {
     };
   }
   function refreshProgressUi() {
-    if (sheet) { ui.updateStatsHud(sheet); buildHotbar(); } // a learned action joins the bar
+    if (sheet) { paintHud(sheet); buildHotbar(); } // a learned action joins the bar
     partyBarKey = ''; // force the bar to re-render its pips next frame
     levelUpPip.refresh(!inCombat && !gameOver && sheet ? pending(sheet) : 0);
     if (sheet) charSheet.refresh(charSheetVm(sheet)); // keep an open sheet live
@@ -1350,7 +1393,7 @@ function startGame(level) {
     sheet = m.sheet;
     player = m.actor;
     buildHotbar(); // their attacks, their ammo count
-    ui.updateStatsHud(sheet);
+    paintHud(sheet);
     loot.refreshPanel(sheet);
     charSheet.refresh(charSheetVm(sheet)); // an open sheet follows control
     ui.say(`You take point as ${m.sheet.name}.`);
@@ -1532,7 +1575,7 @@ function startGame(level) {
         say: ui.say,
         // Combat passes the acting member's sheet (initiative controls who you
         // drive); default to the leader for any callless use.
-        updateHud: (s = sheet) => ui.updateStatsHud(s || sheet),
+        updateHud: (s = sheet) => paintHud(s || sheet),
         // One combat round = one fire/smoke turn (combat.js calls this as it
         // hands the turn back to the player).
         onRound: () => { runtime.advanceTurn(); ageTempSurfaces(); },
@@ -1558,7 +1601,7 @@ function startGame(level) {
             }
           }
           ui.say(`The floor is yours. You catch your breath. (+${VICTORY_HEAL} HP)`);
-          ui.updateStatsHud(sheet);
+          paintHud(sheet);
           openLevelUps(); // spend the fight's promotions now that it's safe
         },
         onLose: () => {
@@ -1624,8 +1667,7 @@ function startGame(level) {
   // the leader. A stepping member repaints the card only when it's their own -
   // otherwise a member taking surface damage on their combat turn redrew the
   // pre-combat LEADER's card, so the damage appeared to hit nobody.
-  const hudSheetNow = () => (inCombat && combat?.actingSheet) || sheet;
-  const syncHudFor = (s) => { if (s && s === hudSheetNow()) ui.updateStatsHud(s); };
+  const syncHudFor = (s) => { if (s && s === hudSheetNow()) paintHud(s); };
 
   function onMemberStep(member, x, z, pathDone, changed = true) {
     // Stepping out of an enemy's reach mid-fight provokes it (TACTICS_PLAN M2).
@@ -2646,7 +2688,7 @@ function startGame(level) {
       if (!sheet) return;
       sheet.inventory.push(id);
       loot.refreshPanel(sheet);
-      ui.updateStatsHud(sheet);
+      paintHud(sheet);
     },
     dropItem(id, x, z) { loot.dropAt(x, z, id); },
     // Clean out a merchant in one step (ECONOMY_PLAN): the same end state as
@@ -2661,7 +2703,7 @@ function startGame(level) {
       player.x = Math.round(x);
       player.z = Math.round(z);
     },
-    refreshHud() { if (sheet) { ui.updateStatsHud(sheet); loot.refreshPanel(sheet); } },
+    refreshHud() { if (sheet) { paintHud(sheet); loot.refreshPanel(sheet); } },
     // Click-to-place: the panel arms a callback, the next left-click on the
     // ground (handled in onLeftClickTile) fires it with the picked tile/point.
     armPick(cb) { pendingGodPick = cb; },

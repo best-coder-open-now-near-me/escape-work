@@ -21,7 +21,11 @@ export const INV_CAP = Infinity;
 
 // `extraEntries` (optional) lets the host add non-loot entries to the Alt
 // overlay (doors) without this module knowing what they are.
-export function createLooting({ app, grid, runtime, enemies, getActor, getSheet, isInCombat, isGameOver, approachAndDo, extraEntries = null, onGearChange = null, recipients = null, addCash = null, getCash = null, openShop = null, shopSoldOut = null }) {
+// `onBagChange` fires after any mutation of the pockets (use, drop, equip,
+// hand-over, pick-up). Anything ELSE on screen that addresses the bag by index
+// - the shop's sell column is the one today - has to hear about it, or it goes
+// on offering a button bound to a pocket that has since moved.
+export function createLooting({ app, grid, runtime, enemies, getActor, getSheet, isInCombat, isGameOver, approachAndDo, extraEntries = null, onGearChange = null, onBagChange = null, recipients = null, addCash = null, getCash = null, openShop = null, shopSoldOut = null }) {
   const containerLoot = new Map(); // "x,z" -> remaining item ids (rolled on first rummage)
   const looseItems = []; // { x, z, id, entity } - dropped/overflowed floor items
   const harvestedPaper = new Set(); // "x,z" of paper drifts already gathered for ammo
@@ -69,6 +73,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
         m.take(id);
         ui.say(`You hand the ${itemName(id)} to ${m.name}.`);
         invPanel.refresh(sheet);
+        onBagChange?.();
       },
     })));
   }
@@ -112,6 +117,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     if (banked) msg += ` Banked ${banked}💵.`;
     ui.toast(msg);
     invPanel.refresh(sheet);
+    onBagChange?.();
   }
 
   // Containers roll their table once, on first rummage; after that they're
@@ -188,6 +194,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     ui.say(def.useLog || `You use the ${itemName(id)}.`);
     ui.updateStatsHud(sheet);
     invPanel.refresh(sheet);
+    onBagChange?.();
   }
 
   // Equip the item at pocket index `i` into its slot; the incumbent (if any)
@@ -202,6 +209,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     if (equipItem(sheet, i)) {
       ui.say(`You equip the ${itemName(id)}.`);
       invPanel.refresh(sheet);
+      onBagChange?.();
       onGearChange?.(); // derived stats + the basic weapon swing changed
     } else {
       ui.say('That is not something you can equip.');
@@ -219,6 +227,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     if (unequipItem(sheet, slot, INV_CAP)) {
       ui.say(`You stow the ${itemName(id)}.`);
       invPanel.refresh(sheet);
+      onBagChange?.();
       onGearChange?.(); // derived stats + the basic weapon swing changed
     } else {
       ui.say('Pockets are full - nowhere to stow it.');
@@ -235,6 +244,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     dropLoose(getActor().x, getActor().z, id);
     ui.say(`You leave the ${itemName(id)} on the floor. Someone's problem now.`);
     invPanel.refresh(sheet);
+    onBagChange?.();
     if (lootLabels.visible) showLabels(); // the floor just changed
   }
 

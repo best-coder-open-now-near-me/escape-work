@@ -2,6 +2,7 @@
 import { CLASSES } from './data/classes.js';
 import { COMPANIONS } from './data/companions.js';
 import { ITEMS } from './data/items.js';
+import { ACTIONS } from './data/actions.js';
 
 // Thrown-weapon ammo: paper picked up from spills, spent on throws. There is
 // no longer a carry limit - hoarding sheets is the whole fantasy, and the cap
@@ -368,6 +369,23 @@ export function damageBonus(sheet) {
 // consumes for a party member; AI units read `def.reach` (see unitCombat).
 export function reachOf(sheet) {
   return REACH.DEFAULT + (equippedStats(sheet).reach || 0);
+}
+
+// What one throw actually costs THIS character in paper. The `paperAmmoDiscount`
+// talent (the Office Drone's Origami Specialist) shaves a sheet off anything
+// that costs more than one, never below one - a talent that made a throw free
+// would make ammo meaningless.
+//
+// This lives here, with the other sheet-derived numbers, because it is read by
+// three layers that must agree: combat's affordability gate, main.js's
+// out-of-combat targeting gate, and the hotbar's enabled/disabled paint. When
+// the hotbar carried its own copy that ignored the discount, a Drone holding
+// exactly one sheet of paper watched the airplane grey out on a throw the
+// other two layers would both have allowed.
+export function ammoCostOf(sheet, actionId) {
+  const base = ACTIONS[actionId]?.ammoCost || 0;
+  if (base <= 1) return base;
+  return Math.max(1, base - (sheet?.talent?.effects?.paperAmmoDiscount || 0));
 }
 
 // Composure buys flat damage mitigation - a small amount shaved off every

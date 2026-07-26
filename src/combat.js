@@ -11,7 +11,7 @@
 import { ACTIONS } from './data/actions.js';
 import { SURFACES, GUM } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
-import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, reachOf, MOVE, REACH } from './stats.js';
+import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, reachOf, ammoCostOf as ammoCost, MOVE, REACH } from './stats.js';
 import { applyStatus, hasStatus, statusFx, tickTurn, clearStatuses, removeStatus, statusList, blockedBy } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
 import { STATUSES } from './data/statuses.js';
@@ -53,7 +53,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // switching mid-fight arrives with the party bar.
   const asMember = (rec, extra) => {
     const usesLeft = {};
-    for (const id of rec.sheet.actions) if (ACTIONS[id].uses) usesLeft[id] = ACTIONS[id].uses;
+    // The equipped weapon's own swing joins the bar without being in the
+    // sheet's list, so it is seeded here too - otherwise a rationed weapon
+    // attack would read as unlimited.
+    for (const id of [...rec.sheet.actions, equippedAction(rec.sheet)]) {
+      if (ACTIONS[id]?.uses) usesLeft[id] = ACTIONS[id].uses;
+    }
     return { sheet: rec.sheet, actor: rec.actor, ap: rec.sheet.maxAp, usesLeft, ...extra };
   };
   const members = party.members.map((m) => asMember(m));
@@ -186,10 +191,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Everyone can shove - it's an office, not a fencing academy - and everyone
   // has a basic weapon swing (the equipped weapon's, or bare-handed 'punch').
   const actionIdsOf = (m) => [...m.sheet.actions, equippedAction(m.sheet), 'shove', ...throwablesFor(m)];
-  const ammoCostOf = (id) => {
-    const base = ACTIONS[id].ammoCost || 0;
-    return base > 1 ? Math.max(1, base - (talentFxOf(active).paperAmmoDiscount || 0)) : base;
-  };
+  // The acting member's cost for a throw - the shared rule (stats.js), bound to
+  // whoever currently has the floor.
+  const ammoCostOf = (id) => ammoCost(active.sheet, id);
   // A debug/test pin (exposed as window.__combat.forceHit): true forces every
   // roll to hit, false forces a miss, null (the default) rolls honestly. It
   // lets the e2e suite make combat deterministic and a tester slam hit rates
@@ -965,10 +969,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       refresh();
       return;
     }
+    // Rationed attacks (Detain) are rationed HERE too, not only on heals and
+    // summons: the button gate alone left the counter frozen, so Detain fired
+    // as often as the AP allowed while its tooltip went on promising "2 of 2
+    // uses left this fight" forever.
+    if (a.uses && active.usesLeft[id] <= 0) {
+      log(`No ${a.label.toLowerCase()} left this fight.`);
+      armed = null;
+      refresh();
+      return;
+    }
     joinCombat(en); // attacking a bystander drags them into the fight
-    // Spend the cost first: a miss still burns the AP and the paper (HIT_PLAN
-    // #4). The projectile/lunge also fires either way - the swing happened, it
-    // just may not land.
+    // Spend the cost first: a miss still burns the AP, the paper and the use
+    // (HIT_PLAN #4 - a swing that happened is spent whether or not it landed).
+    // The projectile/lunge also fires either way.
     if (a.ammoCost) {
       active.sheet.paper -= ammoCostOf(id);
       fx.projectile({ x: active.actor.x, z: active.actor.z }, { x: en.x, z: en.z },
@@ -978,6 +992,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     faceTarget(active, en.x, en.z); // you face what you swing at
     active.ap -= a.ap;
+    if (a.uses) active.usesLeft[id] -= 1;
     // The attack roll: a miss spends the cost above and does nothing else - no
     // damage, no purge, no rider. Surprise, the attacker's accMod, the
     // target's dodgeMod (and later, position) are assembled by attackMods.
@@ -2121,8 +2136,22 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // which a later assignment would have resurrected, leaving a dead controller
   // on window while __game.inCombat said the fight was over.
   if (opening && ACTIONS[opening.actionId] && opening.target?.alive) {
+    // Leading off means moving to the FRONT of the order - NOT jumping the
+    // pointer to the initiator's own slot. `advanceTurn` only ever walks
+    // forward and `newRound` resets to 0 only after the pass completes, so a
+    // pointer jump silently costs every slot ahead of the initiator its entire
+    // first round: a teammate who rolled higher than you simply never acts, and
+    // a non-surprised enemy ahead of you loses a turn it was owed.
+    // The ambusher's roll is raised above the field rather than left where it
+    // rolled, so the array stays sorted by init - which is exactly what
+    // `insertionIndex` assumes when a bystander or a summon joins mid-fight.
     const oi = order.findIndex((s) => s.member === members[party.active]);
-    if (oi >= 0) turnPtr = oi;
+    if (oi >= 0) {
+      const [lead] = order.splice(oi, 1);
+      lead.init = Math.max(lead.init, ...order.map((s) => s.init)) + 1;
+      order.unshift(lead);
+    }
+    turnPtr = 0;
     beginTurn();
     if (phase === 'player') {
       armed = opening.actionId;

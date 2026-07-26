@@ -1209,7 +1209,9 @@ export function createShopPanel({ onBuy, onSell, onClose }) {
       view.sellable.forEach((s) => {
         const b = btn(`Sell +${s.paid}💵`, '', true);
         b.id = `shop-sell-${s.index}`;
-        b.onclick = () => onSell(s.index);
+        // The item id rides along with the index: the host verifies the pocket
+        // still holds what this button was drawn for before selling anything.
+        b.onclick = () => onSell(s.index, s.id);
         yours.appendChild(row(s.icon, s.name, '', b));
       });
       cols.appendChild(finish(yours));

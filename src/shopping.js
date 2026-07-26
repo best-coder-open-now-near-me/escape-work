@@ -24,7 +24,7 @@ export function createShopping({ getSheet, getParty, isInCombat, isGameOver, onB
 
   const panel = ui.createShopPanel({
     onBuy: (i) => buyRow(i),
-    onSell: (i) => sellRow(i),
+    onSell: (i, id) => sellRow(i, id),
     onClose: () => close(),
   });
 
@@ -108,10 +108,22 @@ export function createShopping({ getSheet, getParty, isInCombat, isGameOver, onB
     render();
   }
 
-  function sellRow(index) {
+  // `expected` is the item the BUTTON was drawn for. The bag is addressed by
+  // index, and the pockets panel stays usable with a merchant open - so between
+  // the render and the click, a swig of coffee at index 0 can slide everything
+  // after it down one. Selling on the raw index then hands over whatever moved
+  // into that slot: the click says "Cold Coffee, +1" and the red stapler
+  // leaves the bag for good. Verify the slot still holds what was offered, and
+  // repaint instead of selling if it doesn't.
+  function sellRow(index, expected) {
     if (!openShop) return;
     const sheet = getSheet();
     const id = sheet?.inventory?.[index];
+    if (expected !== undefined && id !== expected) {
+      render();
+      ui.say('Your pockets have moved on. Take another look.');
+      return;
+    }
     const res = sell(openShop, sheet.inventory, index, getParty());
     if (!res.ok) {
       ui.say(res.reason === 'not-buying'
@@ -127,6 +139,9 @@ export function createShopping({ getSheet, getParty, isInCombat, isGameOver, onB
   return {
     open,
     close,
+    // Repaint from live state - the host calls this when something OUTSIDE the
+    // shop moves the bag or the purse (a pockets verb, mainly).
+    refreshIfOpen: () => { if (openShop) render(); },
     get visible() { return panel.visible; },
     // Empty an instance outright - "what does a cleaned-out machine look
     // like?" without buying it dry a row at a time. The end state is exactly
