@@ -1870,7 +1870,8 @@ function startGame(level) {
         // a crosshair mid-walk and on AI turns, promising a swing while the
         // to-hit readout and the click itself refused.
         const picked = hit?.kind === 'enemy' && hit.ref.alive ? hit.ref : null;
-        setCursor(combat.handleHover(point, sx, sy, picked) ? 'crosshair' : null);
+        const foe = combat.handleHover(point, sx, sy, picked);
+        setCursor(foe ? 'crosshair' : null);
         // Hovering a character glows their BODY and names them in the banner -
         // the DOS2 read, and the same one you already get out of combat. This
         // used to be held behind Ctrl, which meant the half of the game where
@@ -1878,11 +1879,16 @@ function startGame(level) {
         // aiming at. Ctrl still adds the ground rings under EVERY character
         // (drawCharacterRings) - that's the at-a-glance read of the whole
         // board, which is a different question from "what is under my cursor".
-        const character = hit && (hit.kind === 'party' || hit.kind === 'npc'
-          || (hit.kind === 'enemy' && hit.ref.alive));
-        hoverKind = character ? hit.kind : null;
-        trackHoverGlow(character ? hit : null);
-        ui.setFocusBanner(character ? focusInfoFor(hit, point) : null);
+        // A foe the hover resolved through the GROUND fallback (the pick ray
+        // missed the mesh, but the point is on their body) counts as hovered
+        // too: the crosshair is claiming you're aiming at them, so the glow
+        // and the banner have to name the same coworker.
+        const charHit = foe && !picked ? { kind: 'enemy', ref: foe, entity: foe.entity } : hit;
+        const character = charHit && (charHit.kind === 'party' || charHit.kind === 'npc'
+          || (charHit.kind === 'enemy' && charHit.ref.alive));
+        hoverKind = character ? charHit.kind : null;
+        trackHoverGlow(character ? charHit : null);
+        ui.setFocusBanner(character ? focusInfoFor(charHit, point) : null);
         return;
       }
       if (!sheet || gameOver || modalOpen()) { clearHoverHighlight(); setCursor(null); ui.setFocusBanner(null); return; }
