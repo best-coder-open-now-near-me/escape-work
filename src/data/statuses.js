@@ -11,7 +11,12 @@
 //                  deflect); 'step' ticks per tile walked and persists on the
 //                  map (gum, bleed). See STATUS_PLAN decision #1.
 //   duration     - default ticks/steps when applied (a source may override)
-//   resistable   - whether Composure's statusResist shortens it
+//   resistable   - whether Composure's statusResist applies. It does two things
+//                  to a resistable status: shortens it (fewer ticks) and BLUNTS
+//                  it (every magnitude in `effects` scales by the severity
+//                  stored at application - see SEVERITY_PER_RESIST in
+//                  src/statuses.js). Booleans never scale, so a `resistable`
+//                  status whose only effect is a boolean is shortened alone.
 //   immunity     - id of a companion status this one GRANTS on landing (for
 //                  IMMUNITY_WINDOW_MULT x the duration actually applied) and
 //                  which BLOCKS re-application while it is live. The anti-chain
@@ -40,6 +45,15 @@
 //     incomingMult   incoming-damage multiplier (deflect: 0.5)
 //     accMod         flat accuracy modifier (HIT_PLAN's hitChance `mods`)
 //     dodgeMod       flat dodge modifier
+//     aimSway        0..1 - how hard the PLAYER's aim drifts off their mouse
+//                    while steering this character (src/vision.js is the
+//                    runtime). An AI unit carries it harmlessly: nothing aims
+//                    a mouse for them, so for units it is accMod that bites.
+//     sightBlots     0..1 - how much ink swims across the player's view. Same
+//                    runtime, same "only the character you steer" rule.
+//     shuffleActions the combat action bar is reordered every turn, so the
+//                    power you reach for by muscle memory is not where you
+//                    left it (combat.js buildActionBar)
 export const STATUSES = {
   // --- the incumbents, now data ---------------------------------------------
   surprised: {
@@ -111,8 +125,23 @@ export const STATUSES = {
     // later without renaming a status id that lives in saves.
     name: 'Blinded', icon: '🌫️', harmful: true, clock: 'turn',
     duration: 2, resistable: true,
-    effects: { accMod: -0.3 },
+    // accMod is what blind costs a BODY - it applies to whoever carries it,
+    // player or coworker. aimSway/sightBlots are what it costs a PLAYER, and
+    // they only bite while you are steering the blinded character: DOS1 and
+    // DOS2 stop at the accuracy line, which is why being blinded there feels
+    // like nothing at all.
+    effects: { accMod: -0.3, aimSway: 1, sightBlots: 1 },
     log: '{name} cannot see straight.',
     fx: { color: [0.34, 0.34, 0.4], burst: 'fall', aura: 'haze', rate: 0.3 },
+  },
+  confused: {
+    // Not damage and not a lost turn - a lost BEARING. Everything you can do is
+    // still available and still does what its label says; you just have to read
+    // the bar instead of hitting the button where the power used to be.
+    name: 'Reorg', icon: '🌀', harmful: true, clock: 'turn',
+    duration: 2, resistable: true,
+    effects: { shuffleActions: true, aimSway: 0.45 },
+    log: '{name} is reorganised. Nothing is where it was.',
+    fx: { color: [0.72, 0.45, 0.95], burst: 'pop', aura: 'orbit', rate: 0.22 },
   },
 };

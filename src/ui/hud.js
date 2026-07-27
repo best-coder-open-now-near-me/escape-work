@@ -30,7 +30,7 @@ function effectChips(sheet) {
   // Any active status renders a chip generically (STATUS_PLAN): buffs green,
   // debuffs amber, remaining count trailing. Gum and bleed out of combat, plus
   // Deflect and the rest during a fight.
-  return statusList(sheet).map((s) => ({ icon: s.icon, label: s.name, left: s.left, good: !s.harmful }));
+  return statusList(sheet).map((s) => ({ icon: s.icon, label: s.name, left: s.left, good: !s.harmful, sev: s.sev }));
 }
 
 function renderStatusEffects(sheet) {
@@ -46,6 +46,15 @@ function renderStatusEffects(sheet) {
       padding: '3px 9px', borderRadius: '6px', whiteSpace: 'nowrap', letterSpacing: '.3px',
       background: 'rgba(20,20,32,.72)', border: `1px solid ${accent}`, color: '#eef',
     });
+    // One your Composure blunted (statuses.js severity) wears a dashed, dimmer
+    // chip and says how much by. A defence the player cannot see is a defence
+    // they will not spend a point on - and the narration line that reported the
+    // shrug is four messages up the log by the time it matters.
+    if (c.sev < 0.999) {
+      chip.textContent += ` −${Math.round((1 - c.sev) * 100)}%`;
+      chip.style.opacity = '0.78';
+      chip.style.borderStyle = 'dashed';
+    }
     el.appendChild(chip);
   }
 }

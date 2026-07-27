@@ -70,7 +70,9 @@ const KITS = {
     ],
     attacks: [
       { min: 3, max: 5, log: 'The Executive restructures your reporting line.' },
-      { min: 2, max: 4, log: 'The Executive asks what it is you even do here.' },
+      // A reorg, delivered as a question. The action bar comes back in a
+      // different order for a couple of turns (statuses: `confused`).
+      { min: 2, max: 4, log: 'The Executive asks what it is you even do here.', applies: 'confused', appliesLog: 'Good question. Your whole remit swims for a moment.' },
       { min: 2, max: 5, log: 'The Executive aligns you with the new strategy.' },
       { min: 1, max: 2, log: 'The Executive parks his gum on your shoe. Delegation.', applies: 'gum', appliesLog: 'Gum. On your shoe.' },
     ],
@@ -154,7 +156,10 @@ const KITS = {
     attacks: [
       { min: 3, max: 4, log: 'The Security Guard asks to see your badge. Firmly.', missLog: 'You pat your pockets convincingly. He waits.' },
       { min: 2, max: 5, log: 'The Security Guard escorts you toward the door. You are not going that way.', missLog: 'You sidestep the escort. He recovers his footing.' },
-      { min: 2, max: 4, log: 'The Security Guard shines a flashlight directly into your morning.', missLog: 'The beam sweeps past you into an empty cubicle.' },
+      // The line was already describing a blind; now it applies one. The one
+      // source that puts BLINDED on the player, which is the half of the status
+      // the framework had never been asked for (see src/vision.js).
+      { min: 2, max: 4, log: 'The Security Guard shines a flashlight directly into your morning.', applies: 'blinded', appliesLog: 'You are seeing spots. Several of them are moving.', missLog: 'The beam sweeps past you into an empty cubicle.' },
       { min: 1, max: 3, log: 'The Security Guard writes you up in the incident log.', applies: 'stunned', appliesLog: 'You are detained for a statement - you lose a turn to it.', missLog: 'His pen is out of ink. Reprieve.' },
     ],
   },

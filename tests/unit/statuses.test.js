@@ -5,6 +5,7 @@ import {
   applyStatus, hasStatus, statusLeft, statusFx,
   tickTurn, tickStep, clearStatuses, removeStatus, statusList,
   blockedBy, IMMUNITY_WINDOW_MULT,
+  severityFor, statusSeverity, SEVERITY_PER_RESIST, SEVERITY_FLOOR,
 } from '../../src/statuses.js';
 
 test('applyStatus applies a status at its default duration', () => {
@@ -98,7 +99,7 @@ test('the window is a status like any other: charted, spared by a debuff sweep, 
   applyStatus(t, 'stunned');
   const chip = statusList(t).find((s) => s.id === 'training-credit');
   assert.deepEqual(chip, {
-    id: 'training-credit', left: 3, name: 'Training Credit', icon: '✅', harmful: false,
+    id: 'training-credit', left: 3, sev: 1, name: 'Training Credit', icon: '✅', harmful: false,
   });
   clearStatuses(t, { harmfulOnly: true });          // the stun goes, the credit stays
   assert.equal(hasStatus(t, 'stunned'), false);
@@ -194,5 +195,84 @@ test('statusList snapshots id, display fields, and remaining', () => {
   applyStatus(t, 'gum');
   const list = statusList(t);
   assert.equal(list.length, 1);
-  assert.deepEqual(list[0], { id: 'gum', left: 20, name: 'Gum on shoe', icon: '🍬', harmful: true });
+  assert.deepEqual(list[0], { id: 'gum', left: 20, sev: 1, name: 'Gum on shoe', icon: '🍬', harmful: true });
+});
+
+// --- severity: the second thing Composure buys -------------------------------
+
+test('resist blunts a resistable status as well as shortening it', () => {
+  const t = {};
+  applyStatus(t, 'blinded', {}, 3);
+  assert.equal(statusLeft(t, 'blinded'), 1); // 2 - 3, floored at 1
+  assert.equal(statusSeverity(t, 'blinded'), 1 - 3 * SEVERITY_PER_RESIST);
+  // ...and every magnitude comes through the merged view scaled by it.
+  const fx = statusFx(t);
+  assert.ok(Math.abs(fx.accMod - -0.3 * statusSeverity(t, 'blinded')) < 1e-9);
+  assert.ok(Math.abs(fx.aimSway - 1 * statusSeverity(t, 'blinded')) < 1e-9);
+});
+
+test('an unresisted status lands at full severity', () => {
+  const t = {};
+  applyStatus(t, 'blinded');
+  assert.equal(statusSeverity(t, 'blinded'), 1);
+  assert.equal(statusFx(t).accMod, -0.3);
+});
+
+test('a non-resistable status ignores resist entirely', () => {
+  const t = {};
+  applyStatus(t, 'bleed', {}, 5); // bleed is resistable: false
+  assert.equal(statusLeft(t, 'bleed'), 2);
+  assert.equal(statusSeverity(t, 'bleed'), 1);
+  assert.equal(severityFor('bleed', 5), 1);
+});
+
+test('severity floors out - resist blunts a status, it never switches it off', () => {
+  assert.equal(severityFor('blinded', 999), SEVERITY_FLOOR);
+  const t = {};
+  applyStatus(t, 'blinded', {}, 999);
+  assert.equal(statusSeverity(t, 'blinded'), SEVERITY_FLOOR);
+  assert.ok(statusFx(t).accMod < 0); // still bites
+});
+
+test('booleans never scale - a resisted stun still costs the whole turn', () => {
+  const t = {};
+  applyStatus(t, 'stunned', {}, 4);
+  assert.equal(statusFx(t).skipTurn, true);
+  assert.ok(statusSeverity(t, 'stunned') < 1); // blunted on paper...
+  assert.equal(statusLeft(t, 'stunned'), 1); // ...and shortened, which is the real defence
+});
+
+test('multipliers ease back toward 1, not toward 0', () => {
+  const t = {};
+  applyStatus(t, 'gum', {}, 4); // severity 1 - 4*0.12 = 0.52
+  const sev = statusSeverity(t, 'gum');
+  const fx = statusFx(t);
+  assert.ok(Math.abs(fx.moveCostMult - (1 + 0.5 * sev)) < 1e-9); // 1.5 -> 1.26
+  assert.ok(Math.abs(fx.speedMult - (1 - 0.4 * sev)) < 1e-9);    // 0.6 -> 0.79
+  assert.ok(fx.moveCostMult < 1.5 && fx.moveCostMult > 1);
+  assert.ok(fx.speedMult > 0.6 && fx.speedMult < 1);
+});
+
+test('a re-apply keeps the WORSE severity, as it keeps the longer duration', () => {
+  const t = {};
+  applyStatus(t, 'blinded', {}, 4);          // blunted
+  const blunted = statusSeverity(t, 'blinded');
+  applyStatus(t, 'blinded');                 // ...then a clean hit lands
+  assert.equal(statusSeverity(t, 'blinded'), 1);
+  applyStatus(t, 'blinded', {}, 4);          // a resisted re-apply cannot soften it back
+  assert.equal(statusSeverity(t, 'blinded'), 1);
+  assert.ok(blunted < 1);
+});
+
+test('a dot scales with severity, rounded and never below 1', () => {
+  const t = { statuses: { burning: { left: 2, sev: 0.4 } } };
+  assert.equal(tickTurn(t).damage, 1); // round(2 * 0.4) = 1
+  const floored = { statuses: { bleed: { left: 2, sev: 0.4 } } };
+  assert.equal(tickStep(floored).damage, 1); // round(1 * 0.4) = 0 -> floored at 1
+});
+
+test('a status map written before severity existed reads as full strength', () => {
+  const legacy = { statuses: { blinded: { left: 2 } } }; // no `sev` - an old save
+  assert.equal(statusSeverity(legacy, 'blinded'), 1);
+  assert.equal(statusFx(legacy).accMod, -0.3);
 });
