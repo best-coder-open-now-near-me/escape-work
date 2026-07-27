@@ -84,7 +84,18 @@ src/
   looting.js         Containers, bodies, loose items, pockets, Alt overlay
   shopping.js        The merchant runtime: per-instance stock, the shop panel,
                      the buy/sell verbs (ECONOMY_PLAN.md)
-  ui.js              All DOM: HUD, context menu, overlays, shared chrome
+  ui.js              All DOM. The FRONT DOOR only - it re-exports ui/,
+                     so every caller keeps `import * as ui from './ui.js'`
+  ui/                grouped by what a thing IS on screen:
+    chrome.js          shared palette + the bottom-left HUD rail
+    readouts.js        narrator box, focus banner, loot toast (nothing
+                       to click)
+    hud.js             profile card + status chips, tactical button,
+                       attack hotbar, party bar, level-up pip
+    menus.js           context menu, Alt loot labels (at the cursor)
+    panels.js          pockets, character sheet, dialogue, shop
+    screens.js         level-up, win/floor-clear/lose, class picker,
+                       game menu, playtest badge (they take the frame)
   god.js             God-mode tweak panel (` / F8): live-reflects the sheet,
                      enemies, combat + world; edit/pin values, pause, spawn
   editor.js          In-browser level editor (paint/erase, export, playtest)
@@ -116,6 +127,13 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   `looting` touch both (combat draws its own previews/rings and builds its own
   panel; hover writes the canvas cursor and draws rings; looting spawns
   dropped-item entities).
+- **A panel is a dumb VIEW.** Everything in `ui/` takes a host-supplied
+  view-model plus callbacks, renders it, and reports clicks - it never reads a
+  rule. Where a rule leaked in it drifted: the hotbar carried its own ammo-cost
+  copy without the talent discount and greyed out a legal throw, and the
+  banked-points sum was re-derived on four surfaces. Both now arrive from
+  `stats.js` (`ammoCostOf`, `pendingPoints`). New UI joins the file matching
+  what it IS on screen, and asks for its numbers.
 - **`hover.js` owns every affordance, so they cannot disagree.** The glow, the
   cursor, the focus banner and the ground rings all answer one question -
   "what am I pointing at, and what would a click do?" - and when they were

@@ -18,7 +18,7 @@ import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DI
 import {
   createSheet, createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
   scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
-  reachOf, ammoCostOf, REACH, THROW_RANGE,
+  reachOf, ammoCostOf, pendingPoints as pending, REACH, THROW_RANGE,
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
@@ -1115,7 +1115,6 @@ function startGame(level) {
   // pip by the HUD covers the leader (and the solo case); the party bar carries
   // a pip per companion.
   const levelUpPip = ui.createLevelUpPip({ onOpen: openLevelUps });
-  const pending = (s) => (s.attrPoints || 0) + (s.classPoints || 0); // either pool
   // A short human blurb for a track node's effect, for the screen.
   function describeNode(effect = {}) {
     const bits = [];

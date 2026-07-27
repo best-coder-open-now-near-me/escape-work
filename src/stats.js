@@ -459,6 +459,16 @@ export function gainXp(sheet, amount) {
   return promoted;
 }
 
+// How many points this character has banked and unspent, across BOTH pools -
+// the number every surface that nudges you toward the character sheet shows.
+//
+// It lives here, with the pools it adds up, because five places used to derive
+// it independently: the HUD card, the party bar, the level-up screen, the
+// character sheet and main.js's own helper. A third pool - or a rename - meant
+// finding all five, and missing one left that surface quietly under-reporting
+// points the others were advertising.
+export const pendingPoints = (sheet) => (sheet?.attrPoints || 0) + (sheet?.classPoints || 0);
+
 // Spend one banked attribute point raising `attr` by 1, then re-derive. Returns
 // false (and changes nothing) if the pool is empty or the attribute unknown.
 export function spendAttrPoint(sheet, attr) {
