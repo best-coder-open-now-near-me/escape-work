@@ -119,6 +119,46 @@ test('every registry cross-reference resolves', () => {
   for (const [id, a] of Object.entries(ACTIONS)) {
     if (a.type === 'summon') assert.ok(CLASSES[a.archetype] || ENEMY_TYPES[a.archetype], `action "${id}" summons a real archetype`);
   }
+  // Every playable class is FOR something, and no two are for the same thing
+  // (POWERS_PLAN M8). This is the lint that stops the roster converging back
+  // into six vocabularies over one character - which is exactly what it was
+  // before the verb vocabulary grew, and which no test could have caught
+  // because every kit was individually valid.
+  const primaries = new Map();
+  for (const [id, def] of Object.entries(CLASSES)) {
+    if (def.playable === false) continue;
+    assert.ok(def.primary, `class "${id}" declares a primary verb`);
+    assert.ok(!primaries.has(def.primary),
+      `class primary "${def.primary}" is unique (${id} collides with ${primaries.get(def.primary)})`);
+    primaries.set(def.primary, id);
+    // ...and the kit has to actually contain it. A class whose primary is a
+    // verb it cannot perform is a promise on the résumé card and nowhere else.
+    const kit = (def.actions || []).map((a) => ACTIONS[a]?.type);
+    assert.ok(kit.includes(def.primary),
+      `class "${id}" primary "${def.primary}" appears in its kit (has: ${kit.join(', ')})`);
+  }
+  // No orphaned actions. `firewall` sat in the registry unreferenced after IT
+  // Support's kit was re-cut - dead content that still costs a reader's time
+  // and still looks like something the game does.
+  const reachable = new Set(['shove', 'punch']); // universal
+  for (const regs of [CLASSES, COMPANIONS]) {
+    for (const def of Object.values(regs)) {
+      for (const a of def.actions || []) reachable.add(a);
+      for (const n of def.track || []) if (n.effect?.grantsAction) reachable.add(n.effect.grantsAction);
+      if (def.talent?.effects?.grantsAction) reachable.add(def.talent.effects.grantsAction);
+    }
+  }
+  for (const def of Object.values(ENEMY_TYPES)) {
+    for (const a of def.actions || []) reachable.add(a);
+    if (def.talent?.effects?.grantsAction) reachable.add(def.talent.effects.grantsAction);
+  }
+  for (const it of Object.values(ITEMS)) if (it.attack) reachable.add(it.attack);
+  for (const [id, a] of Object.entries(ACTIONS)) {
+    if (a.ammoCost) reachable.add(id); // throwables join the bar automatically
+  }
+  for (const id of Object.keys(ACTIONS)) {
+    assert.ok(reachable.has(id), `action "${id}" is reachable by somebody`);
+  }
   // Anything that paints the floor names a real tile type - the cone's
   // `leaves` and the zone verb's alike (POWERS_PLAN M3). A typo here is
   // invisible until someone fires the power in a real fight and the surface

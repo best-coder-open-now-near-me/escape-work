@@ -343,6 +343,35 @@ on the carpet, and it stops "topple everything" from being a universal answer.
 Everything else — statuses, the anti-chain window, resist, severity, cover,
 the reaction budget, `setType`, `pushTo` — is consumed as-is.
 
+## Status: all eight milestones shipped
+
+Where the implementation departed from this document, and why:
+
+- **Both stance modes landed** — `watch` in M5, `guard` in M7. `guard` was
+  deferred out of M5 because it looked like it needed a third mechanism; it
+  did not. Once cover became a CELL question ("does the thing standing here
+  shield the defender?"), a teammate holding the line answers it exactly as a
+  fallen cabinet does, so it joined the same predicate.
+- **`control` ships `applies` and `displace`**, as planned — and the shove's
+  displacement was lifted into a shared `displaceBody` to make that possible
+  without a second copy of the occupancy check, wall-slam and surface damage.
+- **Two `defend` entries survive** (Deflect Blame, Decline the Invite), not
+  one. Three of the five became class identities and `firewall` was deleted
+  outright; these two stay because the Manager's primary is rationed and
+  because the problem was never a duplicated data row — it was five classes
+  with no other idea. See the note in `data/actions.js`.
+- **`primary` is now a real field** on every playable class, linted unique and
+  linted to appear in the kit. The six are: attack (Drone), control (Manager),
+  mobility (Mail Room), buff (IT), summon (HR), stance (Security).
+- **Not shipped**: explosions as a topple trigger, and non-shove attacks
+  toppling props. Both need a topple path reachable outside combat (or an
+  attack that can target a tile), which is a larger change than the verb work
+  and did not block anything else. The shove path — direct, and via a body
+  slammed into a prop — covers the case the feature was asked for.
+- **New debug surface**, used by the specs and documented with the rest:
+  `__combat.actingAt`, `__combat.watching`, `__combat.applyStatus(..., targetName)`,
+  `__game.walkable`, `__game.debugPlaceEnemy`.
+
 ## Milestones (each a PR that keeps `npm test` + e2e green)
 
 1. **`buff`, and the first friendly target.** The verb, friendly target

@@ -32,6 +32,17 @@
 // person's name is the exact confusion this shape exists to remove.
 const PICKER_ONLY = ['name', 'tagline', 'experience', 'startGear', 'playable'];
 
+// `primary` (POWERS_PLAN M8): the ONE verb a class is for. Six playable classes
+// once shipped as attack + defend + heal with different words on the buttons -
+// only HR departed from it, and only because `summon` happened to get built -
+// so the roster read as one character with six vocabularies. Stating the
+// intent in data lets a lint hold the line: every playable class declares one,
+// no two share one, and the kit must actually contain an action of that type.
+//
+// It is the DEFINING verb, not an exclusive one. Security also carries a
+// control and HR also carries a buff; what the lint prevents is two classes
+// being *about* the same thing.
+
 /**
  * Build a character FROM a class: `{ classId, ...overrides }` in, a full def
  * out. This is the one mechanism behind "a class is the shared unit archetype"
@@ -72,6 +83,7 @@ export const MERGED_PER_KEY = ['attr'];
 export const CLASSES = {
   'office-drone': {
     name: 'Office Drone',
+    primary: 'attack', // the baseline the other five read against
     model: 'worker',
     tagline: 'Seen everything. Feels nothing. Balanced stats.',
     experience: 'Cubicle Occupant, 2019–present. Duties: unclear.',
@@ -103,6 +115,7 @@ export const CLASSES = {
   },
   'middle-manager': {
     name: 'Middle Manager',
+    primary: 'control', // he does not out-hit you, he takes your turn
     // Sole wearer of the veteran rig. Short and settled from six years in the
     // chair - the build is character here, not a way to tell two people apart.
     model: 'veteran',
@@ -137,6 +150,7 @@ export const CLASSES = {
   },
   'mail-room': {
     name: 'Mail Room',
+    primary: 'mobility', // knows every corridor, and can now use one
     // Rangy from eleven years of corridors. Shared with the Mail Room Veteran
     // companion, who inherits this rig along with the rest of the class - he
     // reads apart by torso (data/companions.js), so keep the two builds
@@ -169,6 +183,7 @@ export const CLASSES = {
   },
   'it-support': {
     name: 'IT Support',
+    primary: 'buff', // the only class that can take a status OFF anybody
     model: 'itsupport',
     tagline: 'Fragile, caffeinated, devastating.',
     experience: '"Have you tried turning it off and on again," 10 yrs.',
@@ -200,6 +215,7 @@ export const CLASSES = {
 
   'human-resources': {
     name: 'Human Resources',
+    primary: 'summon', // it staffs the fight; the buffs are the other half
     model: 'midmanager',
     tagline: 'Doesn\'t fight so much as staff. Brings friends to your review.',
     experience: 'People Ops "Business Partner". Owns the offsite. Tenure: undisclosed.',
@@ -232,6 +248,7 @@ export const CLASSES = {
 
   security: {
     name: 'Security',
+    primary: 'stance', // holds ground, and the reaction budget is how
     // The cop rig - the one the Mail Room clerk used to wear before it went to
     // the person whose job actually IS the uniform. Shared with the Security
     // Guard ENEMY (data/enemies.js), who is squarer through the vest; the

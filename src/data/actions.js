@@ -112,6 +112,18 @@ export const ACTIONS = {
     log: 'You delegate the problem back to them.',
     missLog: 'They delegate it right back. Nothing lands.',
   },
+  // One of the two `defend` entries left standing, and deliberately so
+  // (POWERS_PLAN M8). There used to be FIVE - Deflect Blame, Blame the
+  // Firewall, Return to Sender, Own Calendar and Stand Post - which is what
+  // made five of six classes read as the same character: whatever else a kit
+  // had, its middle button was always "halve the next hit". Three of them
+  // became their class's actual identity (a mobility, a stance, a control) and
+  // Blame the Firewall was deleted outright once nothing referenced it.
+  //
+  // These two stay because the Manager's primary (control) is RATIONED at two
+  // uses, so he needs something to spend a turn on afterwards, and because two
+  // entries sharing a type with different flavour is content - the problem was
+  // never a duplicated data row, it was five classes with no other idea.
   'own-calendar': {
     type: 'defend',
     ap: 2,
@@ -188,17 +200,6 @@ export const ACTIONS = {
     uses: 2,
     log: 'You apply percussive maintenance.',
     missLog: 'You miss, and hit the desk. The desk works fine now.',
-  },
-  firewall: {
-    type: 'defend',
-    ap: 2,
-    label: 'Blame the Firewall',
-    // Says what it DOES: a defend action halves incoming damage until your
-    // next turn. It used to promise "blocks the lane behind it" - a
-    // lane-blocking mechanic that has never existed in the code, so the only
-    // thing the line ever did was make a working ability look broken.
-    desc: 'Drop a barrier of policy. Halves incoming damage until your next turn.',
-    log: '"That\'s a firewall issue." Incoming damage halved.',
   },
   // NB: there is also an `energy-drink` ITEM (data/items.js) - a lootable
   // consumable. They are distinct ids in separate registries and never share a
