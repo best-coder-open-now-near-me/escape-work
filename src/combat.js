@@ -9,9 +9,9 @@
 // the fight; enemies have persistent map HP and take surface damage like you
 // do. Fire keeps burning throughout.
 import { ACTIONS } from './data/actions.js';
-import { SURFACES, GUM } from './data/surfaces.js';
+import { SURFACES } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
-import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, reachOf, ammoCostOf as ammoCost, MOVE, REACH } from './stats.js';
+import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, reachOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH, THROW_RANGE } from './stats.js';
 import { applyStatus, hasStatus, statusFx, tickTurn, clearStatuses, removeStatus, statusList, blockedBy } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
 import { STATUSES } from './data/statuses.js';
@@ -24,7 +24,6 @@ const cheb = (ax, az, bx, bz) => Math.max(Math.abs(ax - bx), Math.abs(az - bz));
 // Radius of a target's ring marker. Cone tests use it so a body counts when
 // the wedge CLIPS it, matching what the ring shows.
 const TARGET_R = 0.5;
-const THROW_RANGE = 5;
 const SURPRISE_RADIUS = 2; // engaged from beyond this = loses the first turn
 
 // The narration when a landed hit applies a status: an explicit per-attack/
@@ -67,7 +66,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // members they already were: same sheet, same body, whatever turns they have
   // left. They enter after the real roster, so party.active still indexes right.
   for (const s of allies) {
-    if (s.sheet.hp > 0 && s.actor) members.push(asMember(s, { isSummon: true, summonedBy: null }));
+    // Carrying the summoner in with them is what keeps the live cap honest
+    // across fights: counted as summonedBy: null, two applicants who survived
+    // the last fight were invisible to the cap check and their summoner could
+    // post a full new batch on top of them.
+    if (s.sheet.hp > 0 && s.actor) {
+      members.push(asMember(s, { isSummon: true, summonedBy: s.summonedBy || null }));
+    }
   }
   let active = members[party.active];
   // Everyone you control: party members plus any summons you've conjured
@@ -194,6 +199,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // The acting member's cost for a throw - the shared rule (stats.js), bound to
   // whoever currently has the floor.
   const ammoCostOf = (id) => ammoCost(active.sheet, id);
+  // An AI unit's walk speed, DERIVED from its live statuses against a base
+  // remembered once - the way a member's is (main.js `memberSpeed`).
+  //
+  // Gum used to be multiplied into `unit.speed` in place when it landed, which
+  // nothing could undo: the player's reboot cleared the status but left the
+  // limp, so the coworker walked at 0.6x for the rest of the fight with no
+  // status to explain it - and the `!hasStatus` guard then let a SECOND wad
+  // multiply it again, down to 0.36x on one gum status.
+  const syncUnitSpeed = (u) => {
+    if (!u) return;
+    if (u.baseSpeed === undefined) u.baseSpeed = u.speed;
+    u.speed = u.baseSpeed * (statusFx(u).speedMult ?? 1);
+  };
   // A debug/test pin (exposed as window.__combat.forceHit): true forces every
   // roll to hit, false forces a miss, null (the default) rolls honestly. It
   // lets the e2e suite make combat deterministic and a tester slam hit rates
@@ -308,12 +326,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       behind: pos.behind,
     };
   };
-  // The chance `attacker` lands on `defender` right now - what the hover tag
-  // reads. Never rolls, never pins; purely the number.
-  const chanceFor = (attacker, defender) => {
-    const t = attackMods(attacker, defender);
-    return hitChance(t.acc, t.dodge, t.mods);
-  };
+  // (There was a `chanceFor` helper here that claimed to be "what the hover tag
+  // reads". Nothing called it - the tag needs the whole term set, not just the
+  // number, so it goes through `attackMods` directly like the roll does. A dead
+  // helper describing itself as the live one is a trap: the next edit to it
+  // would have changed nothing and looked like it changed the preview.)
   // Roll that attack (honors the forceHit pin, records lastRoll).
   const rollAgainst = (attacker, defender) => {
     const t = attackMods(attacker, defender);
@@ -423,7 +440,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // (an AI actor - enemy or player-team summon). buildInitiativeOrder rolls
   // d20 + `initMod` and sorts; `turnPtr` is whose turn it is.
   const initRng = () => Math.random();
-  const memberSlot = (m) => ({ member: m, team: 'player', initMod: m.sheet.attr?.hustle ?? 0 });
+  // Hustle through `effectiveAttr`, like every other attribute-derived number:
+  // gear `attrBonus` flows through EVERY derivation (EQUIPMENT_PLAN #3), and
+  // reading the raw attr here meant a +1 Hustle lanyard lifted your AP and your
+  // dodge but not the roll that decides when you act - while the identical +1
+  // from a class-track node, baked into `attr`, did.
+  const memberSlot = (m) => ({ member: m, team: 'player', initMod: effectiveAttr(m.sheet).hustle ?? 0 });
   // AI-driven units are always enemy-side; player-side summons are members
   // (memberSlot), never units.
   const unitSlot = (u) => ({ unit: u, team: 'enemy', initMod: u.def.ap || 0 });
@@ -942,6 +964,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // body to loot and no revive courtesy, so sweep it here rather than leaving
     // a toppled temp lying on the carpet forever.
     for (const m of members) if (m.isSummon && m.actor && m.sheet.hp <= 0) dismissSummon(m);
+    // Drop the per-walk step hooks the AI installed. An enemy still MID-WALK
+    // when the fight tears down keeps walking (actors run their path before the
+    // paused check, and main.js updates every enemy each frame regardless of
+    // gameOver), and the closure it was carrying belongs to a fight that no
+    // longer exists: it dealt surface damage, logged into a panel already
+    // removed from the DOM, and called onEnemyKilled - handing XP and a kill
+    // line to a party that had just been wiped.
+    for (const e of engaged) e.onTile = null;
     phase = 'done';
     app.off('update', update);
     panel.remove();
@@ -1015,6 +1045,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (a.purge && !died) {
       const woke = hasStatus(en, 'surprised');
       clearStatuses(en);
+      syncUnitSpeed(en); // the gum goes with it, and so does the limp
       if (woke) line += ' Their surprise is power-cycled away.';
     }
     // A status the action carries lands on a live target (enemies have no
@@ -1509,6 +1540,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // bites, and every duration decrements - so a member's Deflect expires when
     // their next turn begins, and surprise/stun clear after they burn this one.
     const { damage } = tickTurn(carrier);
+    if (!s.member) syncUnitSpeed(s.unit); // a gum wad that just wore off gives the legs back
     if (damage > 0 && applyTurnDot(s, damage)) return; // owner fell to the dot
     if (skip) {
       if (s.member) {
@@ -1953,7 +1985,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         if (unit.alive && !hasStatus(unit, 'gum') && world.stickGum(x, z)) {
           applyStatus(unit, 'gum');
           statusFxAt(unit, 'gum');
-          unit.speed *= GUM.slow;
+          syncUnitSpeed(unit);
           log(`${unit.def.name} steps in gum. It's theirs now.`);
         }
         // wet floor: a slip ends their whole turn (they spend it getting up).

@@ -33,10 +33,18 @@ export function rollInitiative(initMod, rng) {
 export function buildInitiativeOrder(entries, rng) {
   for (const e of entries) e.init = rollInitiative(e.initMod, rng);
   const teamRank = (e) => (e.team === 'player' ? 0 : 1);
+  // The same-team tiebreak is a SHUFFLE KEY drawn once per entry, not a coin
+  // flipped inside the comparator. `rng() - 0.5` as a comparator is not a
+  // consistent ordering - it answers differently every time the sort asks about
+  // the same pair - so the result depended on the sort's internal pivot walk
+  // rather than on chance, which is the opposite of the input-order fairness it
+  // was written for. One draw per entry, compared like any other field, is an
+  // honest shuffle and a valid comparator.
+  const shuffleKey = new Map(entries.map((e) => [e, rng()]));
   return [...entries].sort((a, b) =>
     b.init - a.init
     || teamRank(a) - teamRank(b)
-    || rng() - 0.5);
+    || shuffleKey.get(a) - shuffleKey.get(b));
 }
 
 // Where a mid-fight joiner (a pulled-in bystander, a fresh summon) slots into

@@ -57,3 +57,45 @@ test('insertionIndex slots a joiner after equal-init entries, before lower', () 
   assert.equal(insertionIndex(order, 12), 3); // between 18s and 9
   assert.equal(insertionIndex(order, 1), 4); // slowest -> end
 });
+
+// The same-team tiebreak used to be `rng() - 0.5` INSIDE the comparator, which
+// is not a consistent ordering: asked about the same pair twice it could answer
+// differently, so the result fell out of the sort's pivot walk rather than out
+// of chance. A shuffle key drawn once per entry is both an honest shuffle and a
+// valid comparator - and, unlike the old form, it is checkable.
+test('same-team ties break by a per-entry shuffle key, not a coin in the comparator', () => {
+  // Three tied player-side entries. After the three die rolls, the next three
+  // draws are the shuffle keys - handed out in entry order, so the entry with
+  // the SMALLEST key must come first.
+  const rng = seqRng([0.5, 0.5, 0.5, 0.9, 0.1, 0.5]);
+  const order = buildInitiativeOrder([
+    { id: 'a', team: 'player', initMod: 2 },
+    { id: 'b', team: 'player', initMod: 2 },
+    { id: 'c', team: 'player', initMod: 2 },
+  ], rng);
+  assert.deepEqual(order.map((e) => e.init), [order[0].init, order[0].init, order[0].init]);
+  assert.deepEqual(order.map((e) => e.id), ['b', 'c', 'a']);
+});
+
+test('the tie shuffle asks the rng a bounded number of times', () => {
+  // One draw per entry for the roll, one per entry for the shuffle key - and
+  // nothing per COMPARISON, which is what made the old comparator's draw count
+  // depend on the sort algorithm.
+  let calls = 0;
+  const rng = () => { calls += 1; return 0.5; };
+  const entries = Array.from({ length: 6 }, (_, i) => ({ id: i, team: 'player', initMod: 1 }));
+  buildInitiativeOrder(entries, rng);
+  assert.equal(calls, entries.length * 2);
+});
+
+test('a tie shuffle still never outranks init or team', () => {
+  // Whatever the keys say, a higher roll goes first and a tied player beats a
+  // tied enemy - the shuffle is the LAST word, not the first.
+  const rng = seqRng([0.95, 0.05, 0.5, 0.0, 0.99]);
+  const order = buildInitiativeOrder([
+    { id: 'fast', team: 'enemy', initMod: 0 },
+    { id: 'slow', team: 'player', initMod: 0 },
+  ], rng);
+  assert.equal(order[0].id, 'fast'); // the roll wins outright
+  assert.ok(order[0].init > order[1].init);
+});

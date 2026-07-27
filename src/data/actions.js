@@ -99,7 +99,11 @@ export const ACTIONS = {
     type: 'defend',
     ap: 2,
     label: 'Blame the Firewall',
-    desc: 'Drop a barrier of policy. Blocks the lane behind it.',
+    // Says what it DOES: a defend action halves incoming damage until your
+    // next turn. It used to promise "blocks the lane behind it" - a
+    // lane-blocking mechanic that has never existed in the code, so the only
+    // thing the line ever did was make a working ability look broken.
+    desc: 'Drop a barrier of policy. Halves incoming damage until your next turn.',
     log: '"That\'s a firewall issue." Incoming damage halved.',
   },
   // NB: there is also an `energy-drink` ITEM (data/items.js) - a lootable
@@ -143,7 +147,10 @@ export const ACTIONS = {
     type: 'heal',
     ap: 2,
     label: 'Snack Cart Raid',
-    desc: 'Liberate a pastry. Strong heal, limited raids per fight.',
+    // 5 HP over 3 raids: a shade under the Office Drone's coffee (6), which the
+    // registry itself calls a "small heal". It read "Strong heal" while healing
+    // less than the heal it was being compared against.
+    desc: 'Liberate a pastry. Steady heal, limited raids per fight.',
     amount: 5,
     uses: 3,
     log: 'You liberate a pastry from the cart. +5 HP.',

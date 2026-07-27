@@ -104,10 +104,15 @@ export const STATUSES = {
     fx: { color: [1, 0.52, 0.12], burst: 'pop', aura: 'ember', rate: 0.09 },
   },
   blinded: {
-    name: 'Toner Blast', icon: '🌫️', harmful: true, clock: 'turn',
+    // Named for what it DOES, not for one imagined source: the only thing in
+    // the game that applies it is the Office Drone's folded dart, and a chip
+    // reading "Toner Blast" over a paper cut to the eye described an event that
+    // had not happened. Generic enough that a real toner source can apply it
+    // later without renaming a status id that lives in saves.
+    name: 'Blinded', icon: '🌫️', harmful: true, clock: 'turn',
     duration: 2, resistable: true,
     effects: { accMod: -0.3 },
-    log: '{name} takes toner to the eyes.',
+    log: '{name} cannot see straight.',
     fx: { color: [0.34, 0.34, 0.4], burst: 'fall', aura: 'haze', rate: 0.3 },
   },
 };

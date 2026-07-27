@@ -119,10 +119,14 @@ export function createPortraits(app) {
     if (!ensureRig()) return Promise.resolve(null);
 
     const render = () => new Promise((resolve) => {
-      const finish = (url, entity) => {
+      // `remember: false` leaves the cache untouched, for a failure that says
+      // nothing about the model - a slow load that ran out the clock. Caching
+      // that null made the timeout permanent: the character wore no face for
+      // the rest of the session and nothing would ever try again.
+      const finish = (url, entity, { remember = true } = {}) => {
         cam.enabled = false;
         if (entity) entity.destroy();
-        cache.set(key, url);
+        if (remember) cache.set(key, url);
         inflight.delete(key);
         resolve(url);
       };
@@ -132,6 +136,12 @@ export function createPortraits(app) {
         rotY: 180, // face the camera
         animate: false,
         onReady: (e) => {
+          // The timeout below may already have given up on this load - a .glb
+          // that resolves afterwards has missed its render, and staging it
+          // anyway did real damage: the rig was never destroyed, so it stood on
+          // the portrait stage and photobombed every LATER portrait, and the
+          // camera it switched back on had nothing left to switch it off.
+          if (settled) { e.destroy(); return; }
           try {
             applyCharacterProportions(e, look?.build);
             tint(e, look?.tint);
@@ -168,7 +178,11 @@ export function createPortraits(app) {
       });
       // A .glb that never loads must not leave a caller waiting forever - and
       // must not wedge the queue behind it either.
-      setTimeout(() => { if (!settled) { settled = true; finish(null, null); } }, 8000);
+      setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        finish(null, null, { remember: false });
+      }, 8000);
     });
 
     const p = queue.then(render);

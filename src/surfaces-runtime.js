@@ -116,7 +116,15 @@ export function createSurfaceRuntime({ grid, hooks, onExplosion }) {
         exploded.add(k);
         onExplosion(f.x, f.z);
         for (const [dx, dz] of N4) {
-          if (flammable(f.x + dx, f.z + dz)) ignite(f.x + dx, f.z + dz);
+          const nx = f.x + dx;
+          const nz = f.z + dz;
+          // Partitions stop fire - the blast's ignition included. Spread checks
+          // this edge, and so does arming a fuse (a printer behind a partition
+          // cannot be lit by the flame beside it), so lighting the paper drift
+          // through that same sealed partition when the printer finally went up
+          // contradicted the module's own rule twice over.
+          if (!grid.edgeOpen(f.x, f.z, nx, nz)) continue;
+          if (flammable(nx, nz)) ignite(nx, nz);
         }
       }
     }

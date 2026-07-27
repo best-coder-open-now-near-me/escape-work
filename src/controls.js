@@ -5,7 +5,12 @@ import { applyCameraPostFx } from './shading.js';
 
 const pc = window.pc;
 
-export function createControls({ app, canvas, focus, onLeftClickTile, onRightClickTile, onAnyLeftPress, onLeftDragTile, onHover, onHoverLeave }) {
+// `onTacticalChange` fires whenever the tactical view goes on or off - by the
+// button, by the T key, by a pitch drag, or by a raw setView. Anything PAINTING
+// that state has to hear about all four: the HUD button used to repaint only on
+// its own click, so an orbit drag left it lit over a view it no longer had, and
+// clicking it to "turn it off" toggled a null state back ON.
+export function createControls({ app, canvas, focus, onLeftClickTile, onRightClickTile, onAnyLeftPress, onLeftDragTile, onHover, onHoverLeave, onTacticalChange = null }) {
   // Rig: camYaw (spins around the focus) -> camPitch (tilts) -> camera (sits
   // back at a fixed distance, looking at the focus).
   const camYaw = new pc.Entity('camYaw');
@@ -40,6 +45,13 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   // remembers the view to put back.
   let tactical = null;
   const TACTICAL_PITCH = 90;
+  // Every exit from the view goes through here, so the notification can't be
+  // forgotten by whichever path drops it next.
+  function dropTactical() {
+    if (!tactical) return;
+    tactical = null;
+    onTacticalChange?.(false);
+  }
   function apply() {
     camYaw.setLocalEulerAngles(0, CAM.yaw, 0);
     camPitch.setLocalEulerAngles(-CAM.pitch, 0, 0);
@@ -88,7 +100,7 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
       // Tilting by hand is how you leave the tactical view - it sits past the
       // orbit's own pitch clamp, so the first drag would otherwise snap the
       // camera down to maxPitch while the button still claimed it was on.
-      if (e.dy) tactical = null;
+      if (e.dy) dropTactical();
       CAM.pitch = pc.math.clamp(CAM.pitch + e.dy * 0.3, CAM.minPitch, CAM.maxPitch);
       apply();
     } else if (leftHeld && onLeftDragTile && onCanvas(e)) {
@@ -192,7 +204,7 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     if (dist !== undefined) CAM.dist = pc.math.clamp(dist, 1, CAM.maxDist);
     // A raw pitch override (the class carousel) supersedes the tactical view -
     // drop the banked framing rather than restoring it over the caller later.
-    if (pitch !== undefined) { CAM.pitch = pitch; tactical = null; }
+    if (pitch !== undefined) { CAM.pitch = pitch; dropTactical(); }
     if (yaw !== undefined) CAM.yaw = yaw;
     if (focusY !== undefined) focusHeight = focusY;
     apply();
@@ -213,9 +225,10 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     } else {
       CAM.pitch = tactical.pitch;
       CAM.dist = tactical.dist;
-      tactical = null;
+      dropTactical();
     }
     apply();
+    if (on) onTacticalChange?.(true);
     return !!tactical;
   }
 

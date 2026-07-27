@@ -102,6 +102,11 @@ export const REACH = {
   SHOVE: 1.5,
 };
 
+// How far a thrown weapon carries, in tiles (Chebyshev). Combat's throw gate
+// and main.js's out-of-combat targeting gate must agree on it, and they used to
+// keep private copies held together by a `// must match combat.js` comment.
+export const THROW_RANGE = 5;
+
 export const ATTR_KEYS = ['grit', 'hustle', 'savvy', 'composure'];
 
 // Equipment slots (EQUIPMENT_PLAN.md): a damage choice, a defense choice, a

@@ -18,7 +18,7 @@ import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DI
 import {
   createSheet, createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
   scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
-  reachOf, ammoCostOf, REACH,
+  reachOf, ammoCostOf, REACH, THROW_RANGE,
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
@@ -796,6 +796,7 @@ function startGame(level) {
     grid.setDoorOpen(key, open);
     scene.refreshDoor(key);
     for (const e of enemies) e.clearPath(); // their routes may have just changed
+    approachEpoch += 1; // ...and so may yours: the armed target rings recheck
     ui.say(open ? 'The door swings open.' : 'You pull the door shut.');
     if (loot.labelsVisible) loot.showLabels();
   }
@@ -825,7 +826,6 @@ function startGame(level) {
   }
 
   // --- targeting, hover highlight, cursor --------------------------------------
-  const THROW_RANGE = 5; // must match combat.js
   const cheb = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.z - b.z));
   // Melee reach out of combat, measured the same way combat measures it: real
   // distance between continuous positions against the leader's weapon reach
@@ -851,14 +851,39 @@ function startGame(level) {
   // const: the hotbar builder reads it and runs from paths that fire before
   // this point in the closure body.
   function throwAmmoCost(id) { return ammoCostOf(sheet, id); }
-  // Out of combat there's no AP budget: a thrown opener needs range + line +
-  // ammo; melee/shove just walk you in, so they can always open a fight.
+  // Can the leader actually get to a swing at `en`? The cheap half is reach;
+  // the expensive half - "is there a route at all" - is a fan of Dijkstras and
+  // cannot run per enemy per frame, so it is memoized against the only two
+  // things that move the answer: the leader's tile, the target's tile, and a
+  // door-change epoch.
+  const approachCache = new Map(); // enemy -> { key, ok }
+  let approachEpoch = 0;
+  function canApproach(en) {
+    const key = `${Math.round(player.x)},${Math.round(player.z)},${en.x},${en.z},${approachEpoch}`;
+    const seen = approachCache.get(en);
+    if (seen && seen.key === key) return seen.ok;
+    const ok = !!bestApproachPath(en.x, en.z);
+    approachCache.set(en, { key, ok });
+    return ok;
+  }
+  // Out of combat there's no AP budget, but the affordances still have to
+  // describe the click they precede - THE PREVIEW IS THE RULE (ARCHITECTURE.md
+  // on previewAction). These are the same three tests engageWithAction runs
+  // before it opens a fight: a throw needs range, line and ammo; a SHOVE needs
+  // to already be in shove reach (it does not walk you in, and it refuses);
+  // a melee swing needs reach or a route to it.
+  //
+  // This used to answer `true` for everything but a throw, so a Shove armed
+  // across the room rang every coworker green under a crosshair, and the click
+  // printed a refusal - the affordance promising the one thing the resolver
+  // would not do.
   const oocTargetOk = (id, en) => {
     const a = ACTIONS[id];
     if (a.ammoCost) {
       return cheb(player, en) <= THROW_RANGE && hasLos(player, en) && (sheet?.paper || 0) >= throwAmmoCost(id);
     }
-    return true;
+    if (a.type === 'shove') return playerReaches(en, REACH.SHOVE);
+    return playerReaches(en) || canApproach(en);
   };
 
   // BG3-style hover glow: one colored inverted-hull shell per interactable
@@ -1556,7 +1581,14 @@ function startGame(level) {
             const actor = ally
               ? new CompanionActor(x, z, archetypeId, def)
               : new EnemyActor(x, z, archetypeId, def, { team, summoned: true, summonedBy: summoner });
-            const rec = ally ? { sheet: createSheetFrom(def, { summon: true }), actor } : actor;
+            // Who called them is part of the record, not just of the fight they
+            // were called in: a summon that outlives its fight walks into the
+            // NEXT one, and the per-summoner live cap can only see it if the
+            // link survives the trip (SUMMON_PLAN #7). Enemy-side summons carry
+            // the same link on the actor itself.
+            const rec = ally
+              ? { sheet: createSheetFrom(def, { summon: true }), actor, summonedBy: summoner }
+              : actor;
             (ally ? summons : enemies).push(rec);
             placeModel(app, `assets/characters/${def.model}.glb`, x, z, {
               lift, rotY: ally ? 90 : -90, animate: true,
@@ -1669,6 +1701,112 @@ function startGame(level) {
   // pre-combat LEADER's card, so the damage appeared to hit nobody.
   const syncHudFor = (s) => { if (s && s === hudSheetNow()) paintHud(s); };
 
+  // --- the per-tile rules, written once ----------------------------------------
+  // Everything a body ON YOUR SIDE meets by standing somewhere: the step clock,
+  // the surface under it, and the chance the floor takes its feet away. Members
+  // and the temps you summon obey all three.
+  //
+  // These were hand-copied into onSummonStep, and the copy had already lost
+  // two of them: a summon could not slip on water, and never caught a surface's
+  // turn-clock status - so marching one through a puddle and into a fire
+  // skipped both the spill and the burning that the same route lands on any
+  // member. New effects are added HERE now, and reach both callers.
+  //
+  // `say` is the one thing that legitimately differs: the lines are written in
+  // the player's voice, and a temp is not the player - so a summon passes a
+  // no-op and takes the rules in silence.
+  const quiet = () => {};
+
+  // Step-clock statuses: bleed drips its dot, gum wears down. True if it
+  // dropped them.
+  function tickStepOn(ms, actor, x, z, say) {
+    const { damage, expired } = tickStep(ms);
+    let down = false;
+    if (damage > 0) {
+      down = applyDamage(ms, damage);
+      // "You drip on the carpet" is literal - the carpet keeps it. On the
+      // BODY's spot, not the tile centre, so the drip lands under the walker
+      // rather than in the middle of the square they're crossing.
+      const drip = actor.entity ? actor.entity.getPosition() : { x, z };
+      vfx.splat(drip.x, drip.z, { scale: 0.5 });
+      vfx.damageText(x, z, `-${damage}`);
+      say('You drip on the carpet. -1 HP.');
+      syncHudFor(ms);
+    }
+    if (expired.includes('gum')) {
+      say('The gum finally lets go of your sole. Freedom.');
+      syncHudFor(ms);
+    }
+    return down;
+  }
+
+  // Surfaces (data/surfaces.js): fire and electrified pools hurt, paper cuts
+  // (and arms you), gum sticks, water and coffee editorialize. The walker's own
+  // talents can shrug the damage off. True if it dropped them.
+  function applySurfaceOn(ms, actor, x, z, say) {
+    const sfx = surfEffect(x, z);
+    if (!sfx) return false;
+    if (sfx.ammo) {
+      ms.paper = Math.min(PAPER_CAP, ms.paper + sfx.ammo);
+      vfx.impact(x, z, 'shreds', { y: 0.3, scale: 0.8 });
+      vfx.damageText(x, z, '+📄', '#8adf76');
+    }
+    // Gum on shoe: slowed, no kicking, but genuine traction (can't slip).
+    if (sfx.applies === 'gum' && stickGum(x, z)) {
+      const had = hasStatus(ms, 'gum');
+      applyStatus(ms, 'gum');
+      vfx.impact(x, z, 'gum', { y: 0.12 });
+      vfx.status(x, z, 'gum');
+      say(had ? 'More gum. You are building a collection.' : sfx.message);
+      syncHudFor(ms);
+    }
+    // A turn-clock status a surface applies (fire -> burning) needs combat's
+    // turns to tick, so it only takes hold in a fight; the instant surface
+    // damage below is the out-of-combat story.
+    if (sfx.applies && sfx.applies !== 'gum' && inCombat && applyStatus(ms, sfx.applies)) {
+      vfx.status(x, z, sfx.applies);
+      syncHudFor(ms);
+    }
+    const amount = effectiveSurfDamage(x, z, ms);
+    if (amount > 0) {
+      if (sfx.bleed) applyStatus(ms, 'bleed', { duration: sfx.bleed });
+      const down = applyDamage(ms, amount);
+      actor.flinch();
+      vfx.impact(x, z, surfaceImpactKind(x, z), { y: 0.3 });
+      vfx.damageText(x, z, `-${amount}`);
+      say(sfx.message);
+      syncHudFor(ms);
+      return down;
+    }
+    if (sfx.amount) {
+      say(ms.talent?.effects?.shockImmune && grid.isElectrified(x, z)
+        ? 'The water crackles. Your ESD soles rate this a non-event. 0 damage.'
+        : 'You glide across the drift; the edges respect a master. Not a scratch.');
+      syncHudFor(ms);
+    } else if (sfx.message && !sfx.applies) {
+      say(sfx.message);
+    }
+    return false;
+  }
+
+  // Slippery surfaces: every wet tile entered risks a spill that ends the walk
+  // right there. In combat the movement AP already spent stays spent - that IS
+  // the penalty. slipImmune tread never slips; neither does a gummed shoe - gum
+  // is traction. `wasSlipProof` is sampled BEFORE the step clock ticks, so the
+  // tile a gum wad wears off on still keeps its grip.
+  function maybeSlip(ms, actor, x, z, wasSlipProof, say) {
+    if (gameOver || ms.talent?.effects?.slipImmune) return;
+    if (wasSlipProof || statusFx(ms).slipProof || equippedStats(ms).slipProof) return;
+    const chance = slipChanceAt(x, z);
+    if (!chance || Math.random() >= chance) return;
+    actor.clearPath();
+    actor.flinch();
+    vfx.impact(x, z, 'slip', { y: 0.12 });
+    vfx.damageText(x, z, 'slip!', '#8ad4df');
+    if (inCombat) combat?.notifySlip();
+    else say('The floor was, in fact, wet. You go down. Gracefully? No.');
+  }
+
   function onMemberStep(member, x, z, pathDone, changed = true) {
     // Stepping out of an enemy's reach mid-fight provokes it (TACTICS_PLAN M2).
     // Combat owns the rule and the bookkeeping; this just reports the step.
@@ -1712,95 +1850,19 @@ function startGame(level) {
         }
       }
     }
-    // Step-clock statuses tick on every tile entered: bleed drips its dot, gum
-    // wears down. Capture slip-proofing BEFORE the tick so the tile gum wears
-    // off on still keeps its traction.
+    // Capture slip-proofing BEFORE the step clock ticks, so the tile a gum wad
+    // wears off on still keeps its traction.
     const wasSlipProof = !!statusFx(ms).slipProof;
     if (changed) {
-      const { damage, expired } = tickStep(ms);
-      if (damage > 0) {
-        const bled = applyDamage(ms, damage);
-        // "You drip on the carpet" is literal now - the carpet keeps it. On
-        // the BODY's spot, not the tile centre, so the drip lands under the
-        // walker rather than in the middle of the square they're crossing.
-        const drip = actor.entity ? actor.entity.getPosition() : { x, z };
-        vfx.splat(drip.x, drip.z, { scale: 0.5 });
-        vfx.damageText(x, z, `-${damage}`);
-        ui.say('You drip on the carpet. -1 HP.');
-        syncHudFor(ms);
-        if (bled) {
-          downOrLose(member, 'Death by a thousand paper cuts. Well - several.');
-          return;
-        }
+      if (tickStepOn(ms, actor, x, z, ui.say)) {
+        downOrLose(member, 'Death by a thousand paper cuts. Well - several.');
+        return;
       }
-      if (expired.includes('gum')) {
-        ui.say('The gum finally lets go of your sole. Freedom.');
-        syncHudFor(ms);
+      if (applySurfaceOn(ms, actor, x, z, ui.say)) {
+        downOrLose(member, 'Done in by the office itself. Facilities sends their regards.');
+        return;
       }
-    }
-    // Surface effects (data/surfaces.js): fire and electrified pools hurt,
-    // paper cuts (and arms you), water and coffee editorialize. The walking
-    // member's talents can shrug damage off. Only on genuine tile entry.
-    const sfx = changed ? surfEffect(x, z) : null;
-    if (sfx) {
-      if (sfx.ammo) {
-        ms.paper = Math.min(PAPER_CAP, ms.paper + sfx.ammo);
-        vfx.impact(x, z, 'shreds', { y: 0.3, scale: 0.8 });
-        vfx.damageText(x, z, '+📄', '#8adf76');
-      }
-      // Gum on shoe: slowed, no kicking, but genuine traction (can't slip).
-      if (sfx.applies === 'gum' && stickGum(x, z)) {
-        const had = hasStatus(ms, 'gum');
-        applyStatus(ms, 'gum');
-        vfx.impact(x, z, 'gum', { y: 0.12 });
-        vfx.status(x, z, 'gum');
-        ui.say(had ? 'More gum. You are building a collection.' : sfx.message);
-        syncHudFor(ms);
-      }
-      // A turn-clock status a surface applies (fire -> burning) needs combat's
-      // turns to tick, so it only takes hold in a fight; the instant surface
-      // damage below is the out-of-combat story.
-      if (sfx.applies && sfx.applies !== 'gum' && inCombat && applyStatus(ms, sfx.applies)) {
-        vfx.status(x, z, sfx.applies);
-        syncHudFor(ms);
-      }
-      const amount = effectiveSurfDamage(x, z, ms);
-      if (amount > 0) {
-        if (sfx.bleed) applyStatus(ms, 'bleed', { duration: sfx.bleed });
-        const dead = applyDamage(ms, amount);
-        actor.flinch();
-        vfx.impact(x, z, surfaceImpactKind(x, z), { y: 0.3 });
-        vfx.damageText(x, z, `-${amount}`);
-        ui.say(sfx.message);
-        syncHudFor(ms);
-        if (dead) {
-          downOrLose(member, 'Done in by the office itself. Facilities sends their regards.');
-          return;
-        }
-      } else if (sfx.amount) {
-        ui.say(ms.talent?.effects?.shockImmune && grid.isElectrified(x, z)
-          ? 'The water crackles. Your ESD soles rate this a non-event. 0 damage.'
-          : 'You glide across the drift; the edges respect a master. Not a scratch.');
-        syncHudFor(ms);
-      } else if (sfx.message && !sfx.applies) {
-        ui.say(sfx.message);
-      }
-    }
-    // Slippery surfaces: every wet tile entered risks a spill that ends the
-    // walk right there. In combat the movement AP already spent stays spent -
-    // that IS the penalty. slipImmune tread never slips; neither does a
-    // gummed shoe - gum is traction.
-    if (changed && !gameOver && !ms.talent?.effects?.slipImmune
-      && !(wasSlipProof || statusFx(ms).slipProof || equippedStats(ms).slipProof)) {
-      const chance = slipChanceAt(x, z);
-      if (chance && Math.random() < chance) {
-        actor.clearPath();
-        actor.flinch();
-        vfx.impact(x, z, 'slip', { y: 0.12 });
-        vfx.damageText(x, z, 'slip!', '#8ad4df');
-        if (inCombat) combat?.notifySlip();
-        else ui.say('The floor was, in fact, wet. You go down. Gracefully? No.');
-      }
+      maybeSlip(ms, actor, x, z, wasSlipProof, ui.say);
     }
     // The trail you leave behind. A drift of shredded TPS reports CUTS
     // (data/surfaces.js), so crossing one is exactly how a walker starts
@@ -1830,30 +1892,18 @@ function startGame(level) {
     if (inCombat && combat) combat.notifyStep(s, x, z);
     const ms = s.sheet;
     const actor = s.actor;
-    const sfx = surfEffect(x, z);
-    if (sfx) {
-      if (sfx.ammo) ms.paper = Math.min(PAPER_CAP, ms.paper + sfx.ammo);
-      if (sfx.applies === 'gum' && stickGum(x, z)) applyStatus(ms, 'gum');
-      const amount = effectiveSurfDamage(x, z, ms);
-      if (amount > 0) {
-        if (sfx.bleed) applyStatus(ms, 'bleed', { duration: sfx.bleed });
-        const dead = applyDamage(ms, amount);
-        actor.flinch();
-        vfx.impact(x, z, surfaceImpactKind(x, z), { y: 0.3 });
-        vfx.damageText(x, z, `-${amount}`);
-        syncHudFor(ms); // it's the summon's own card while it has the floor
-        if (dead) { if (inCombat && combat) combat.notifyMemberDown(); return; }
-      }
+    const wasSlipProof = !!statusFx(ms).slipProof;
+    // The same three rules a member's feet obey, in the same order - the temp
+    // just takes them without the narration (the lines are the player's voice).
+    if (tickStepOn(ms, actor, x, z, quiet)) {
+      if (inCombat && combat) combat.notifyMemberDown();
+      return;
     }
-    // Step-clock statuses tick per tile (bleed's dot, gum wearing down).
-    const { damage } = tickStep(ms);
-    if (damage > 0) {
-      const bled = applyDamage(ms, damage);
-      vfx.splat(x, z, { scale: 0.5 });
-      vfx.damageText(x, z, `-${damage}`);
-      syncHudFor(ms);
-      if (bled && inCombat && combat) combat.notifyMemberDown();
+    if (applySurfaceOn(ms, actor, x, z, quiet)) {
+      if (inCombat && combat) combat.notifyMemberDown();
+      return;
     }
+    maybeSlip(ms, actor, x, z, wasSlipProof, quiet);
     // A temp bleeds on the carpet like anybody else.
     if (!gameOver) leaveFootprint(actor, ms, x, z);
   }
@@ -1864,6 +1914,9 @@ function startGame(level) {
     canvas: document.getElementById('app'),
     focus: grid.playerSpawn,
     onAnyLeftPress: () => ui.hideMenu(),
+    // However the view is left - the button, T, a pitch drag, a raw setView -
+    // the rail button repaints, so its lit state can never outlive the view.
+    onTacticalChange: () => tacticalBtn?.refresh(),
     onLeftClickTile: (tile, point, sx, sy) => {
       // God-mode click-to-place (spawn/drop/teleport) consumes the click before
       // any normal handling, reusing the game's own ground raycast.
@@ -2261,7 +2314,23 @@ function startGame(level) {
   function updateFollowers(dt) {
     const lead = partyLeader(party);
     if (!lead.actor?.entity) return;
+    // Where everybody on your side already IS, or is already walking to. The
+    // parking spots below are picked with `isWalkable`, which is deliberately
+    // pass-through for the party (so a follower can route THROUGH a teammate) -
+    // but routing through one and parking on one are different questions, and
+    // asking the movement predicate got the second one wrong. A follower
+    // already standing beside the leader has no reason to repath, so it never
+    // reached the old claim set at all, and the next follower cheerfully
+    // picked the tile it was standing on.
     const claimed = new Set();
+    const claim = (a) => {
+      if (!a) return;
+      claimed.add(Math.round(a.x) + ',' + Math.round(a.z));
+      const dest = a.path?.[a.path.length - 1];
+      if (dest) claimed.add(Math.round(dest[0]) + ',' + Math.round(dest[1]));
+    };
+    for (const m of party.members) if (m.sheet.hp > 0) claim(m.actor);
+    for (const s of summons) if (s.sheet.hp > 0) claim(s.actor);
     for (const m of party.members) {
       if (m === lead || !m.actor?.entity || m.sheet.hp <= 0) continue;
       m.followT = (m.followT ?? 0) - dt;
@@ -2391,6 +2460,13 @@ function startGame(level) {
         oocTurnClock -= OOC_TURN_SECONDS;
         runtime.advanceTurn();
         ageSummons(); // temps you brought out of the last fight are on the clock
+        // ...and so is the litter a power dropped. This clock stands in for
+        // combat's rounds, so it has to spend everything a round spends (see
+        // the onRound callback): without it, a Bulk Mail drift laid in the last
+        // round of a fight froze mid-countdown the moment the fight ended -
+        // permanently repainting the floor, permanently cutting anyone who
+        // crossed it, and leaving a paper pile you could harvest forever.
+        ageTempSurfaces();
       }
     }
     animateSurfaces(dt);

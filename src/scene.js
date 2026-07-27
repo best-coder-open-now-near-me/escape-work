@@ -71,7 +71,17 @@ export function buildLevel(app, grid, { picking = null } = {}) {
       const res = r.renderMarker(x, z, type, {
         electrified: grid.isElectrified(x, z),
         surfaceAt: (sx, sz) => TILE_TYPES[grid.typeAt(sx, sz)]?.surface || null,
-        onAsync: interactive && picking ? (holder) => picking.register(holder, 'prop', { x, z }) : null,
+        // A model prop's holder only exists once its .glb lands, so this is the
+        // one moment it is offered. Track it exactly like a primitive prop's
+        // visual: `removePropVisual` is otherwise a silent no-op for it, and
+        // ARCHITECTURE.md's growth path promises a new prop is pure DATA - so
+        // the first model prop given `explosive: true` would have had its grid
+        // cell cleared to walkable floor with the mesh still standing on it,
+        // still registered for picking.
+        onAsync: (holder) => {
+          propVisuals.set(x + ',' + z, holder);
+          if (interactive && picking) picking.register(holder, 'prop', { x, z });
+        },
       });
       // `top` is the world Y of the wall's top face - the fade test needs it to
       // know whether the sightline clears this wall (see occlusion.js). A solid

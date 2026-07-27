@@ -21,7 +21,9 @@ await esbuild.build({
   format: 'iife',
   target: 'es2020',
   outfile: `${OUT}/bundle.js`,
-  loader: { '.json': 'json' },
+  // (No `loader` entry for '.json': esbuild bundles JSON with the json loader
+  // by default, so spelling it out only looked like it was load-bearing. The
+  // level JSON imported by data/levels.js rides that default.)
 });
 
 cpSync('src/index.html', `${OUT}/index.html`);

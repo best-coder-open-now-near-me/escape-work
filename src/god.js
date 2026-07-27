@@ -86,8 +86,13 @@ export function installGodMode(api) {
   // it back - hp held at max is invulnerability, AP held at max is infinite
   // actions. Registered after the game's own update handler, so these writes
   // win the frame; still fires at timeScale 0 (update runs with dt 0).
+  // Closing the panel stops the holds. They used to keep enforcing with the
+  // panel shut, and because a combat-scope pin resolves its target live, a pin
+  // made in one fight silently re-attached to the NEXT one - a tester who
+  // pinned AP and closed the panel ran every later fight of that session on
+  // infinite actions with nothing on screen saying so.
   api.app.on('update', () => {
-    if (!panel || panel.pins.size === 0) return;
+    if (!panel || !panel.open || panel.pins.size === 0) return;
     for (const pin of panel.pins.values()) {
       const o = pin.getObj();
       if (!o) continue;
@@ -224,11 +229,18 @@ function buildPanel(api, requestToggle) {
     row.append(el('div', { flex: '1', font: '11px system-ui', opacity: f.readOnly ? '.55' : '.9' }, { textContent: f.key }));
 
     const commit = (val) => {
-      obj[f.key] = val;
+      // A field with a real SETTER goes through it rather than around it. The
+      // panel edits live state in place by design, but "in place" must not mean
+      // "past the invariant": the purse is clamped to a whole number at or
+      // above zero, and a raw write of -5 (or 2.5) put the party in a hole
+      // buying refused its way out of.
+      const set = target.setters?.[f.key];
+      if (set) set(val); else obj[f.key] = val;
       afterEdit(target);
-      // A pinned field follows the new value.
+      // A pinned field follows the value that actually LANDED, which a setter
+      // may have clamped.
       const id = pinId(target, f.key);
-      if (panel.pins.has(id)) panel.pins.get(id).value = val;
+      if (panel.pins.has(id)) panel.pins.get(id).value = obj[f.key];
     };
 
     let input;
@@ -316,6 +328,7 @@ function buildPanel(api, requestToggle) {
       obj: party,
       getObj: () => api.party,
       hide: new Set(['active']),
+      setters: { cash: (n) => api.setCash(n) }, // clamped, whole, and repaints
     });
     // One live sheet card per party member; the active one carries the
     // inventory editor (Give lands in the controlled member's pockets).
@@ -364,7 +377,15 @@ function buildPanel(api, requestToggle) {
 
   function enemyTargets() {
     return api.enemies.map((en, i) => ({
-      id: `enemy-${i}`, scope: `enemy-${i}`, obj: en, getObj: () => api.enemies[i],
+      // A pin resolves its target by IDENTITY, not by array index. `enemies`
+      // is spliced when an expired enemy summon leaves the board, and every
+      // later index shifts down - an index-based pin then force-wrote its held
+      // value into a DIFFERENT coworker every frame (holding a fresh one at
+      // hp 1, resurrecting a wounded one) while the watch row still named the
+      // old one. Once this body is off the board the pin resolves to null and
+      // simply stops.
+      id: `enemy-${i}`, scope: `enemy-${i}`, obj: en,
+      getObj: () => (api.enemies.includes(en) ? en : null),
       title: `${en.def.name} @ (${en.x}, ${en.z})${en.alive ? '' : ' †'}`,
       hide: RIG_INTERNALS, readOnly: new Set(['x', 'z', 'typeId']),
       actions: [

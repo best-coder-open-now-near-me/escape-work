@@ -7,8 +7,8 @@ import {
   spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist,
   accuracy, dodge, hitChance, rollHit, unitCombat,
   equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf,
-  reachOf,
-  PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH,
+  reachOf, ammoCostOf,
+  PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
@@ -646,4 +646,53 @@ test('the bestiary sits at the floor except the one that states otherwise', () =
 test('a scaled enemy keeps its stated reach - depth grows stats, not arms', () => {
   const deep = scaleEnemy(ENEMY_TYPES['security-guard'], 7);
   assert.equal(unitCombat(deep).reach, unitCombat(ENEMY_TYPES['security-guard']).reach);
+});
+
+// --- thrown-weapon ammo cost ---------------------------------------------------
+// One rule, three readers: combat's affordability gate, main.js's out-of-combat
+// targeting gate, and the hotbar's enabled/disabled paint. They each carried a
+// copy, and the hotbar's copy left out the discount - so a Drone with one sheet
+// of paper watched a legal throw grey out.
+const withDiscount = (n) => ({ talent: { effects: { paperAmmoDiscount: n } } });
+
+test('ammoCostOf is 0 for anything that is not thrown', () => {
+  assert.equal(ammoCostOf(createSheet('office-drone'), 'punch'), 0);
+  assert.equal(ammoCostOf(createSheet('office-drone'), 'shove'), 0);
+  assert.equal(ammoCostOf(createSheet('office-drone'), 'no-such-action'), 0);
+});
+
+test('ammoCostOf is the data cost without the talent', () => {
+  const plain = createSheet('security');
+  for (const [id, a] of Object.entries(ACTIONS)) {
+    if (!a.ammoCost) continue;
+    assert.equal(ammoCostOf(plain, id), a.ammoCost, `${id} costs what it says`);
+  }
+});
+
+test('the discount shaves a sheet off a multi-sheet throw, never below one', () => {
+  const airplane = Object.entries(ACTIONS).find(([, a]) => a.ammoCost > 1);
+  assert.ok(airplane, 'a throw costing more than one sheet exists to discount');
+  const [id, a] = airplane;
+  assert.equal(ammoCostOf(withDiscount(1), id), a.ammoCost - 1);
+  assert.equal(ammoCostOf(withDiscount(99), id), 1, 'a throw is never free');
+});
+
+test('the discount cannot make a one-sheet throw free', () => {
+  // The floor is the POINT: ammo that costs nothing is not ammo. A single-sheet
+  // throw is already at the floor, so the talent leaves it alone entirely.
+  for (const [id, a] of Object.entries(ACTIONS)) {
+    if (a.ammoCost !== 1) continue;
+    assert.equal(ammoCostOf(withDiscount(1), id), 1, `${id} still costs a sheet`);
+  }
+});
+
+test('ammoCostOf survives a missing sheet', () => {
+  // The hotbar paints before a class is picked, and asked about a throw then.
+  const [id, a] = Object.entries(ACTIONS).find(([, x]) => x.ammoCost > 1);
+  assert.equal(ammoCostOf(null, id), a.ammoCost);
+  assert.equal(ammoCostOf({}, id), a.ammoCost);
+});
+
+test('THROW_RANGE is a shared constant, not a per-module copy', () => {
+  assert.ok(Number.isInteger(THROW_RANGE) && THROW_RANGE > 0);
 });

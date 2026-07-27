@@ -3,12 +3,14 @@
 // data/actions.js). Weapons/perks later modify or extend the same action list.
 //
 // `model` names a RIG FILE, not a role. The rigs get passed around as the cast
-// changes - hr.glb is the Mail Room clerk's, midmanager.glb is HR's, veteran.glb
-// is the Middle Manager's and the Mail Room Veteran companion's - so read the
-// entry, never the filename, to know who wears what. (Renaming them to chase
-// the current owner just moves the confusion into git history.) Where two
-// entries share a rig, each carries a `look.build` that makes them read as
-// different people; keep that up when you hand a rig to someone new.
+// changes - hr.glb is the Mail Room clerk's (and the Mail Room Veteran
+// companion's, who INHERITS it with the class), midmanager.glb is HR's, and
+// veteran.glb is the Middle Manager's - so read the entry, never the filename,
+// to know who wears what. (Renaming them to chase the current owner just moves
+// the confusion into git history.) Where two entries share a rig, each carries
+// a `look.build` that makes them read as different people; keep that up when
+// you hand a rig to someone new - and remember that an INHERITED rig makes a
+// second wearer without either entry naming it.
 //
 // A class is becoming the shared unit archetype - not just what you pick, but
 // what companions and (increasingly) enemies are (see SUMMON_PLAN.md). Two
@@ -99,10 +101,8 @@ export const CLASSES = {
   },
   'middle-manager': {
     name: 'Middle Manager',
-    // Shares the veteran rig with the Mail Room Veteran companion, and reads
-    // apart from them by height: the companion is tall and stocky from eleven
-    // years on his feet, the manager is short and settled from six years in
-    // the chair. Same jacket, opposite silhouette.
+    // Sole wearer of the veteran rig. Short and settled from six years in the
+    // chair - the build is character here, not a way to tell two people apart.
     model: 'veteran',
     look: { build: { legs: 1.68 } },
     tagline: 'Absorbs blame like a sponge. Tough, but hits like a memo.',
@@ -132,8 +132,10 @@ export const CLASSES = {
   },
   'mail-room': {
     name: 'Mail Room',
-    // Rangy from eleven years of corridors. Sole wearer of this rig, so the
-    // build is character rather than a way to tell two people apart.
+    // Rangy from eleven years of corridors. Shared with the Mail Room Veteran
+    // companion, who inherits this rig along with the rest of the class - he
+    // reads apart by torso (data/companions.js), so keep the two builds
+    // distinct when either one is retuned.
     model: 'hr',
     look: { build: { legs: 2.0 } },
     tagline: 'Knows every corridor. Slips on nothing. Delivers regardless.',

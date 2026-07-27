@@ -288,7 +288,7 @@ const IMPACTS = {
       { count: 5, color: [0.32, 0.3, 0.3], additive: false, speed: 0.8, up: 1.8, size: 0.2, life: 1.1, gravity: 0.9, drag: 1.6, grow: 1.4 },
     ],
   },
-  // A printer's dying breath, and the Toner Blast that borrows its look.
+  // A printer's dying breath.
   toner: {
     flash: { color: [0.8, 0.82, 0.9], size: 0.42, life: 0.22, grow: 3.2 },
     bursts: [

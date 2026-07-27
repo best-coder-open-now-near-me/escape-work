@@ -124,3 +124,37 @@ test('ignitable props relight after burning out; paper does not', () => {
   assert.equal(rt.burningCount, 0);
   assert.equal(rt.ignite(0, 0), true, 'the can takes a second lighting');
 });
+
+// A blast lights its flammable neighbours - but "partitions stop fire" is the
+// module's own rule, enforced on ordinary spread AND on arming a fuse. Ignition
+// by explosion used to be the one path that skipped the edge test, so a printer
+// standing against a partition lit the drift on the FAR side of a wall the fire
+// could never have crossed on its own.
+test('an explosion lights its flammable neighbours, but not through a wall', () => {
+  const grid = stubGrid({
+    surfaces: { '0,0': 'paper', '1,0': 'paper', '2,0': 'paper', '1,1': 'paper' },
+    defs: { '1,0': { explosive: true } },
+    closedEdges: [[1, 0, 1, 1]], // a partition between the printer and the drift below it
+  });
+  const rt = createSurfaceRuntime({ grid, hooks, onExplosion: () => {} });
+  rt.ignite(0, 0);
+  rt.advanceTurn(); // spread reaches the printer and arms its fuse
+  rt.advanceTurn(); // the fuse elapses: the blast ignites what it can see
+  assert.equal(rt.isBurning(2, 0), true, 'the drift on the open side catches');
+  assert.equal(rt.isBurning(1, 1), false, 'the sealed partition holds');
+});
+
+test('a sealed neighbour still cannot catch on later turns', () => {
+  // The blast is not merely delayed by the wall - ordinary spread respects the
+  // same edge, so the far side stays cold for good.
+  const grid = stubGrid({
+    surfaces: { '0,0': 'paper', '1,0': 'paper', '1,1': 'paper' },
+    defs: { '1,0': { explosive: true } },
+    closedEdges: [[1, 0, 1, 1]],
+  });
+  const rt = createSurfaceRuntime({ grid, hooks, onExplosion: () => {} });
+  rt.ignite(0, 0);
+  for (let i = 0; i < 8; i++) rt.advanceTurn();
+  assert.equal(rt.isBurning(1, 1), false);
+  assert.equal(rt.surfaceAt(1, 1), 'paper', 'the drift behind the wall is untouched');
+});
