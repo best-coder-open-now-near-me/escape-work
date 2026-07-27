@@ -8,6 +8,7 @@
 // and the grid can be grown/shrunk from the right/bottom edges.
 import { TILE_TYPES } from './data/tiles.js';
 import { ENEMY_TYPES } from './data/enemies.js';
+import { actorChar, actorLegend } from './data/actor-registries.js';
 import { LEVELS } from './data/levels.js';
 import { createControls } from './controls.js';
 import { createTileRenderer, computeCarpetZones } from './tile-renderer.js';
@@ -263,7 +264,13 @@ export function startEditor(app, levelData, stashKey) {
       if (ch === ' ') return ' ';
       const actor = (data.actors || {})[ch];
       if (actor === 'player') return PLAYER_CHAR;
-      if (actor) return ENEMY_TYPES[actor]?.char ?? TILE_TYPES.floor.char;
+      // Any actor the registries know, not just the ones this editor can PAINT.
+      // NPCs and companions were normalised to floor here, and the export
+      // legend never named them - so opening a shipped floor and exporting it
+      // deleted the recruitable coworkers from it, silently, in the one tool
+      // the docs point you at for editing levels. Both shipped floors place a
+      // companion, so both lost one.
+      if (actor) return actorChar(actor) ?? TILE_TYPES.floor.char;
       const raw = (data.tiles || {})[ch] || 'floor';
       const type = TYPE_ALIASES[raw] || raw;
       return TILE_TYPES[type]?.char ?? TILE_TYPES.floor.char;
@@ -369,8 +376,10 @@ export function startEditor(app, levelData, stashKey) {
   function toJson() {
     const tiles = {};
     for (const [id, def] of Object.entries(TILE_TYPES)) tiles[def.char] = id;
-    const actors = { [PLAYER_CHAR]: 'player' };
-    for (const [id, def] of Object.entries(ENEMY_TYPES)) actors[def.char] = id;
+    // Every actor registry, so a companion that survived the load also
+    // survives the export - a map char with no legend entry parses as floor,
+    // which is the same data loss one step later.
+    const actors = { [PLAYER_CHAR]: 'player', ...actorLegend() };
     // Key order mirrors the hand-authored files in levels/, so a re-export
     // diffs cleanly against the original.
     const out = { name: levelName };

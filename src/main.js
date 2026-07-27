@@ -599,7 +599,7 @@ function startGame(level) {
   function awardKill(dead) {
     if (!party) return;
     if (dead.summoned) return; // summoned minions pay no XP (SUMMON_PLAN #6)
-    for (const m of gainXpAll(party, dead.def.xp)) {
+    for (const m of gainXpAll(party, dead.combat.xp)) {
       const pts = m.sheet.attrPoints;
       // A promotion should look like one, wherever the promoted are standing.
       if (m.actor?.entity) {
@@ -2429,6 +2429,11 @@ function startGame(level) {
     containerLootAt: loot.debug.containerLootAt,
     get doors() { return [...grid.doors].map(([key, d]) => ({ key, open: d.open })); },
     surfaceAt: (x, z) => runtime.surfaceAt(x, z),
+    // The TILE TYPE under a point, as the grid currently holds it. Terrain is
+    // mutable - a printer that detonates becomes floor (grid.setType), a prop
+    // that burns out is spent - and a spec has no other way to see that the
+    // world actually changed rather than merely stopped burning.
+    tileAt: (x, z) => grid.typeAt(x, z),
     get enemies() {
       return enemies.map((e) => {
         const p = e.entity?.getPosition();

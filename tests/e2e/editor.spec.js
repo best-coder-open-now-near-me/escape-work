@@ -1,6 +1,7 @@
 // Editor visual parity: the carpet-under-items pass runs live in the editor,
 // so what you paint is what the game shows.
 import { test, expect } from '@playwright/test';
+import level1 from '../../levels/level1.json' with { type: 'json' };
 import { waitForSmoothFrames } from './helpers.js';
 
 test('carpet flows under items and repaints live', async ({ page }) => {
@@ -30,4 +31,44 @@ test('carpet flows under items and repaints live', async ({ page }) => {
     () => page.evaluate(() => window.__editor.carpetAt(8, 2)),
     { timeout: 30_000 },
   ).toBe(null);
+});
+
+// The editor is what the export modal - and ARCHITECTURE.md - point you at for
+// editing levels/, so a load -> export round trip must not LOSE anything. It
+// used to: `canonical()` mapped any actor id outside ENEMY_TYPES to the floor
+// char on the way in, and the export legend only ever named the player and the
+// enemies on the way out. Both shipped floors place a recruitable companion, so
+// opening either one and exporting it deleted a companion - no error, no
+// warning, and the level lint would not object because a floor without
+// companions is perfectly valid.
+test('loading a shipped level and exporting it keeps its companions', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.goto('/#editor');
+  await page.waitForFunction(() => window.__editor, null, { timeout: 90_000 });
+  await waitForSmoothFrames(page);
+
+  // Level 1 places the IT Intern ('N' -> it-intern in its own legend).
+  await page.selectOption('#ed-level', 'level1');
+  await page.waitForTimeout(500);
+
+  const out = JSON.parse(await page.evaluate(() => window.__editor.toJson()));
+
+  // The legend can NAME him...
+  const named = Object.entries(out.actors).find(([, id]) => id === 'it-intern');
+  expect(named, 'the exported legend names the intern').toBeTruthy();
+  // ...and he is still standing somewhere on the map under that char.
+  const [char] = named;
+  expect(out.map.some((row) => row.includes(char)),
+    'the intern is still placed on the exported map').toBe(true);
+
+  // ...and the WHOLE roster survives, not just the one we went looking for:
+  // every actor the source file places is still placed in the export. Compared
+  // against the shipped JSON itself, so adding an actor to level1 extends this
+  // check for free instead of quietly falling outside it.
+  const placed = (level) => {
+    const used = new Set(level.map.flatMap((r) => r.split('')));
+    return Object.entries(level.actors)
+      .filter(([c]) => used.has(c)).map(([, id]) => id).sort();
+  };
+  expect(placed(out)).toEqual(placed(level1));
 });

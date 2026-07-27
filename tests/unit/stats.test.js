@@ -696,3 +696,56 @@ test('ammoCostOf survives a missing sheet', () => {
 test('THROW_RANGE is a shared constant, not a per-module copy', () => {
   assert.ok(Number.isInteger(THROW_RANGE) && THROW_RANGE > 0);
 });
+
+// --- unitCombat: the AI archetype seam ----------------------------------------
+// This is no longer decorative. An AI unit can be backed by an ENEMY_TYPES entry
+// OR by a CLASS - an enemy-side summon resolves its archetype from CLASSES
+// first - and the two registries disagree: a class spells max HP `maxHp` where
+// an enemy spells it `hp`, and states no accuracy, dodge or reach at all.
+// Normalizing once is what lets every consumer stop re-implementing those
+// defaults (combat.js had three such copies).
+
+test('unitCombat reads max HP from either registry spelling', () => {
+  assert.equal(unitCombat({ hp: 9 }).maxHp, 9); // enemy registry
+  assert.equal(unitCombat({ maxHp: 12 }).maxHp, 12); // class registry
+  assert.equal(unitCombat({ maxHp: 12, hp: 9 }).maxHp, 12, 'maxHp outranks hp');
+});
+
+test('unitCombat defaults the stats a class never states', () => {
+  const u = unitCombat({ name: 'Temp', maxHp: 5 });
+  assert.equal(u.accuracy, 0);
+  assert.equal(u.dodge, 0);
+  assert.equal(u.reach, REACH.DEFAULT);
+  assert.equal(u.xp, 0);
+  assert.deepEqual(u.loot, []);
+  assert.deepEqual(u.attacks, [], 'an absent attack set is a LIST, never undefined');
+});
+
+test('unitCombat keeps a stated reach of zero rather than defaulting it', () => {
+  // `?? REACH.DEFAULT`, not `|| REACH.DEFAULT`: 0 is a real answer.
+  assert.equal(unitCombat({ hp: 1, reach: 0 }).reach, 0);
+});
+
+test('every playable class survives unitCombat without an undefined stat', () => {
+  // A class can back an AI unit (ARCHITECTURE.md's on-ramp to class-based
+  // enemies). The attack picker indexes `attacks` and the AI beat compares
+  // `attackAp`, so neither may come back undefined-shaped.
+  for (const [id, def] of Object.entries(CLASSES)) {
+    const u = unitCombat(def);
+    assert.ok(Array.isArray(u.attacks), `${id}: attacks must be an array`);
+    assert.equal(typeof u.maxHp, 'number', `${id}: maxHp`);
+    assert.equal(typeof u.accuracy, 'number', `${id}: accuracy`);
+    assert.equal(typeof u.dodge, 'number', `${id}: dodge`);
+    assert.equal(typeof u.reach, 'number', `${id}: reach`);
+    assert.ok(Array.isArray(u.loot), `${id}: loot`);
+  }
+});
+
+test('every enemy survives unitCombat with a usable attack set', () => {
+  for (const [id, def] of Object.entries(ENEMY_TYPES)) {
+    const u = unitCombat(def);
+    assert.ok(u.attacks.length > 0, `${id}: a hostile needs something to swing`);
+    assert.equal(typeof u.attackAp, 'number', `${id}: attackAp`);
+    assert.equal(typeof u.ap, 'number', `${id}: ap`);
+  }
+});

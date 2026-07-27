@@ -16,6 +16,7 @@ import { ACTIONS } from '../../src/data/actions.js';
 import { ITEMS, LOOT_TABLES } from '../../src/data/items.js';
 import { SHOPS } from '../../src/data/shops.js';
 import { LEVELS, FIRST_LEVEL } from '../../src/data/levels.js';
+import { ACTOR_REGISTRIES, actorChar, actorLegend } from '../../src/data/actor-registries.js';
 import { STATUSES } from '../../src/data/statuses.js';
 import { SURFACES, ELECTRIFIED, FIRE } from '../../src/data/surfaces.js';
 
@@ -345,3 +346,47 @@ for (const f of files) {
     }
   });
 }
+
+// The editor round-trips a level through CANONICAL registry chars: loading
+// remaps every map char to the one its registry declares, and exporting writes
+// the legend back from those same registries. An actor id that no registry can
+// name is therefore dropped to floor on the way in and has no legend entry on
+// the way out - deleted from the file, silently, by the tool ARCHITECTURE.md
+// points at for editing levels.
+//
+// This is the cheap half of that guarantee (editor.spec.js drives the real
+// round trip). It is worth having separately because it fails the moment a new
+// actor registry appears and nobody adds it to the editor's list.
+
+test('every actor a shipped level places can be named by a registry', () => {
+  for (const [levelId, level] of Object.entries(LEVELS)) {
+    const used = new Set(level.map.flatMap((r) => r.split('')));
+    for (const [ch, id] of Object.entries(level.actors || {})) {
+      if (!used.has(ch) || id === 'player') continue;
+      assert.ok(
+        actorChar(id),
+        `${levelId}: places '${id}' as '${ch}', but no actor registry declares a char for it `
+        + '- the editor would drop it on a load -> export round trip',
+      );
+    }
+  }
+});
+
+test('actor chars are unique across every registry the editor exports', () => {
+  // The export legend is one char -> one id map built from all the registries;
+  // two registries claiming the same char would silently overwrite, and a
+  // level using it would reload as the wrong actor. `actorLegend` collapses
+  // them, so compare its size against the number of declared chars.
+  const owner = new Map();
+  for (const reg of ACTOR_REGISTRIES) {
+    for (const [id, def] of Object.entries(reg)) {
+      if (!def.char) continue;
+      assert.ok(!owner.has(def.char),
+        `char '${def.char}' is claimed by both '${owner.get(def.char)}' and '${id}'`);
+      owner.set(def.char, id);
+    }
+  }
+  assert.ok(!owner.has('@'), 'the player char must stay reserved');
+  // Nothing was lost collapsing them into the legend the editor writes.
+  assert.equal(Object.keys(actorLegend()).length, owner.size);
+});

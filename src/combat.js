@@ -234,8 +234,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // uniform - and lets an enemy and a member be attacker or defender
   // interchangeably. Statuses live on a member's sheet, but on a unit itself.
   const statusesOf = (u) => u.sheet || u;
-  const accuracyOf = (u) => (u.sheet ? accuracy(u.sheet) : (u.def?.accuracy || 0));
-  const dodgeOf = (u) => (u.sheet ? dodge(u.sheet) : (u.def?.dodge || 0));
+  const accuracyOf = (u) => (u.sheet ? accuracy(u.sheet) : (u.combat?.accuracy || 0));
+  const dodgeOf = (u) => (u.sheet ? dodge(u.sheet) : (u.combat?.dodge || 0));
   // Reach joins them - but as hoisted FUNCTION declarations, not the const
   // arrows the three above use. pickTarget is called eagerly during
   // startCombat (the surprise sweep, well before this point in the body), and
@@ -246,7 +246,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // A member's reach comes from their weapon, an AI unit's from its def (like
   // attackAp). REACH.DEFAULT is the floor for both.
   function reachOfUnit(u) {
-    return u.sheet ? reachOf(u.sheet) : (u.def?.reach ?? REACH.DEFAULT);
+    return u.sheet ? reachOf(u.sheet) : (u.combat?.reach ?? REACH.DEFAULT);
   }
 
   // The CONTINUOUS position reach measures against. `actor.x/.z` are only
@@ -448,7 +448,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const memberSlot = (m) => ({ member: m, team: 'player', initMod: effectiveAttr(m.sheet).hustle ?? 0 });
   // AI-driven units are always enemy-side; player-side summons are members
   // (memberSlot), never units.
-  const unitSlot = (u) => ({ unit: u, team: 'enemy', initMod: u.def.ap || 0 });
+  const unitSlot = (u) => ({ unit: u, team: 'enemy', initMod: u.combat.ap || 0 });
   const slotActor = (s) => (s.member ? s.member.actor : s.unit);
   const slotAlive = (s) => (s.member ? s.member.sheet.hp > 0 && !!s.member.actor : !!s.unit.alive);
   const slotName = (s) => (s.member ? s.member.sheet.name : s.unit.def.name);
@@ -1546,7 +1546,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return;
     }
     phase = 'ai';
-    acting = { unit: s.unit, ap: s.unit.def.ap, freeAp: freeMoveOf(s.unit), wait: 0.5 };
+    acting = { unit: s.unit, ap: s.unit.combat.ap, freeAp: freeMoveOf(s.unit), wait: 0.5 };
     refresh();
   }
 
@@ -1685,7 +1685,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // ever returns a party-side member, so the hit always lands on a member's
   // sheet (deflect, gum, and the downed/handoff/party-wipe rules).
   function aiAttack(unit, target) {
-    const atk = unit.def.attacks[rand(0, unit.def.attacks.length - 1)];
+    const atk = unit.combat.attacks[rand(0, unit.combat.attacks.length - 1)];
     unit.lunge(target.actor.x, target.actor.z);
     faceTarget(unit, target.actor.x, target.actor.z); // you face what you swing at
     if (target.member) unitStrikesMember(unit, target.member, atk);
@@ -1902,7 +1902,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     // An enemy catches a fleeing member (or summon) - same rules as its turn
     // attack, just reworded so the log reads as a punish, not a swing in turn.
-    const base = attacker.def.attacks[rand(0, attacker.def.attacks.length - 1)];
+    // A unit with no attack set has nothing to punish with: `unitCombat`
+    // normalizes that to an empty list rather than undefined, so this is a
+    // check instead of a crash (a CLASS backing an AI unit need not declare
+    // `attacks` at all - see stats.js).
+    if (!attacker.combat.attacks.length) return;
+    const base = attacker.combat.attacks[rand(0, attacker.combat.attacks.length - 1)];
     attacker.lunge(defender.actor.x, defender.actor.z);
     unitStrikesMember(attacker, defender, {
       ...base,
@@ -2061,9 +2066,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       refresh();
       return;
     }
-    if (canReach(unit, target) && acting.ap >= unit.def.attackAp) {
+    if (canReach(unit, target) && unit.combat.attacks.length && acting.ap >= unit.combat.attackAp) {
       aiAttack(unit, target);
-      acting.ap -= unit.def.attackAp;
+      acting.ap -= unit.combat.attackAp;
       acting.wait = 0.85; // outlast the swing animation so hits read one at a time
     } else if (moveBudget(acting) >= MOVE.COST_PER_TILE
       && !canReach(unit, target)) {

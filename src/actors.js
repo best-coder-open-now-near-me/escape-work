@@ -9,6 +9,7 @@
 // kinds extend GridActor the same way.
 const pc = window.pc;
 import { rollLoot } from './data/items.js';
+import { unitCombat } from './stats.js';
 import { GUM } from './data/surfaces.js';
 import { applyStatus, hasStatus, statusFx } from './statuses.js';
 
@@ -354,9 +355,18 @@ export class EnemyActor extends GridActor {
     super(x, z, { speed: 2.2, ...opts });
     this.typeId = typeId;
     this.def = def;
-    // Classes spell max HP `maxHp`, the enemy registry spells it `hp` - an
-    // AI unit can be backed by either now (SUMMON_PLAN.md / stats.js unitCombat).
-    this.maxHp = def.maxHp ?? def.hp;
+    // The unit's combat stats, NORMALIZED once at construction (stats.js
+    // `unitCombat`). This is the seam SUMMON_PLAN.md and PROGRESSION_PLAN.md
+    // describe, and it is load-bearing rather than decorative: an AI unit can
+    // be backed by an ENEMY_TYPES entry OR by a CLASS (an enemy-side summon
+    // resolves its archetype from CLASSES first), and the two registries do not
+    // agree - a class spells max HP `maxHp` where an enemy spells it `hp`, and
+    // a class states no `accuracy`, `dodge` or `reach` at all. Reading `def`
+    // directly meant every consumer re-implemented those defaults; combat.js
+    // had three such copies, and its attack picker indexed `def.attacks`
+    // with no fallback at all.
+    this.combat = unitCombat(def);
+    this.maxHp = this.combat.maxHp;
     this.hp = this.maxHp; // map HP - damage persists outside combat too
     this.spawnX = x;
     this.spawnZ = z;
@@ -393,7 +403,7 @@ export class EnemyActor extends GridActor {
     this.onTile = null;
     // Summoned minions leave nothing to rummage - they're spent, not slain
     // (SUMMON_PLAN #6). A hand-placed coworker rolls their loot table.
-    this.loot = this.summoned ? [] : rollLoot(this.def.loot); // body carry (lootable)
+    this.loot = this.summoned ? [] : rollLoot(this.combat.loot); // body carry (lootable)
     if (this.entity) this.fx = { kind: 'death', t: 0 };
   }
 
