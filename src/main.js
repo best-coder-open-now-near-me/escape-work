@@ -2438,8 +2438,12 @@ function startGame(level) {
         // suite uses this to avoid wasting engage attempts on them.
         const reachable = e.alive
           && (playerReaches(e) || !!bestApproachPath(e.x, e.z));
+        // `moving`: is this body part-way through a walk? An AI unit still
+        // moving at the top of its beat is what stops its turn from ending
+        // (combat.js's driver returns early on it), so it is the one field
+        // that separates "the fight is slow" from "the fight is stuck".
         return { name: e.def.name, x: e.x, z: e.z, px: p?.x, pz: p?.z, alive: e.alive, reachable,
-          level: e.def.level || 1, hp: e.hp, maxHp: e.maxHp };
+          moving: !!e.moving, level: e.def.level || 1, hp: e.hp, maxHp: e.maxHp };
       });
     },
     get npcs() { return npcs.map((n) => ({ name: n.def.name, x: n.x, z: n.z })); },

@@ -8,7 +8,7 @@
 // stays slower than local. Every wait here is therefore generous, and boot
 // helpers gate on frames actually ticking before any projection is trusted.
 import { test, expect } from '@playwright/test';
-import { waitForSmoothFrames, onScreen, bootAndPick, combatOrWalkDone, enterCombat, endTurnUntilPlayer, waitForPlayerTurn } from './helpers.js';
+import { waitForSmoothFrames, onScreen, bootAndPick, combatOrWalkDone, enterCombat, endTurnUntilPlayer, waitForPlayerTurn, clickAction } from './helpers.js';
 
 test('the class carousel browses every resume and hires one', async ({ page }) => {
   // This test renders EVERY class's .glb, one per slide, and under CI's
@@ -119,7 +119,7 @@ test('confronting a coworker starts combat and an attack lands', async ({ page }
   for (let i = 0; i < 6 && (await foeHp([foe.x, foe.z])) >= foe.hp; i++) {
     await page.waitForTimeout(1000); // camera settle
     if (await page.evaluate(() => window.__combat.armed) !== 'attack') {
-      await page.click('#act-attack');
+      await clickAction(page, 'attack');
       expect(await page.evaluate(() => window.__combat.armed)).toBe('attack');
     }
     const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);

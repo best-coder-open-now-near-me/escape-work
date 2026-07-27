@@ -218,20 +218,116 @@ export async function enterCombat(page) {
     `never entered combat: ${attempts} engage attempt(s) over ${Math.round((Date.now() - started) / 1000)}s - ${why}`,
   ).toBe(true);
   // Initiative may hand the enemy the first turn(s); settle on the player's
-  // turn so callers can act. (If the fight somehow ends first, don't hang.)
+  // turn so callers can act.
+  //
+  // This used to swallow the timeout entirely, on a budget that could collapse
+  // to 5s once the engage loop had eaten the rest. On a slow runner it returned
+  // MID-AI-TURN, and the caller's next click then waited out its whole timeout
+  // against a legitimately disabled button - a 300s hang reported as "element
+  // is not enabled", with nothing about the fight that caused it. The floor is
+  // 20s now, and the only tolerated failure is the documented one: a fight that
+  // ENDED while we waited is not a hang.
   if (await page.evaluate(() => window.__game.inCombat)) {
-    await waitForPlayerTurn(page, Math.max(5_000, left())).catch(() => {});
+    try {
+      await waitForPlayerTurn(page, Math.max(20_000, left()));
+    } catch (err) {
+      if (await page.evaluate(() => window.__game.inCombat)) throw err;
+    }
   }
+}
+
+// Everything worth knowing when a fight misbehaves, in one snapshot. Cheap, and
+// it is the whole difference between "the button was disabled" and "the button
+// was disabled because the Manager never finished its walk".
+//
+// A hung e2e run cannot be re-observed after the fact - the trace is an
+// artifact somebody has to download - so the failure message has to carry the
+// diagnosis with it.
+export async function combatState(page) {
+  return page.evaluate(() => {
+    const g = window.__game;
+    if (!g) return { note: 'no __game - the page never booted' };
+    const base = { inCombat: g.inCombat, gameOver: g.gameOver };
+    const c = window.__combat;
+    if (!c) return { ...base, note: 'no __combat - no fight in progress' };
+    return {
+      ...base,
+      phase: c.phase,
+      turn: c.turn,
+      ap: c.ap,
+      armed: c.armed,
+      acting: c.acting, // null on a player turn; { wait, moving, ... } on an AI one
+      order: c.order.map((s) => `${s.name}${s.current ? '<' : ''}${s.alive ? '' : '(down)'}`),
+      party: c.party.map((m) => `${m.name} hp${m.hp} ap${m.ap}${m.active ? '<' : ''}`),
+      enemies: g.enemies.filter((e) => e.alive)
+        .map((e) => `${e.name} hp${e.hp} @${e.x},${e.z}${e.moving ? ' MOVING' : ''}`),
+    };
+  });
 }
 
 // Wait until it's a party member's turn (phase 'player'). Under initiative an
 // enemy can win the roll and act first, so a fresh fight may open on an AI
 // turn - a test that wants to act must wait for control to come around.
+//
+// On timeout it reports WHY control never came, rather than the bare poll
+// failure: `acting.moving` true means the AI is stuck part-way through a walk,
+// `acting.wait` counting means it is merely slow, and no `acting` at all on a
+// non-player phase means the turn engine handed the floor to nobody.
 export async function waitForPlayerTurn(page, timeout = 90_000) {
-  await expect.poll(
-    () => page.evaluate(() => window.__combat?.phase),
-    { timeout },
-  ).toBe('player');
+  try {
+    await expect.poll(
+      () => page.evaluate(() => window.__combat?.phase),
+      { timeout },
+    ).toBe('player');
+  } catch {
+    const state = await combatState(page);
+    throw new Error(
+      `control never came back to the player within ${timeout}ms.\n`
+      + `combat state: ${JSON.stringify(state, null, 2)}`,
+    );
+  }
+}
+
+// Give the acting member a full AP budget for this turn.
+//
+// `enterCombat` walks you into the fight, and combat triggers on ADJACENCY -
+// which can happen PART-WAY along that walk, so the steps still queued are then
+// priced as in-combat movement. A test that opens a fight and immediately
+// spends AP therefore starts with an unpredictable budget: full on a fast
+// machine, 3.7 of 6 on a slow one - and a 4 AP action simply greys out, which
+// looks from the outside exactly like a hung fight.
+//
+// `__combat.ap` is a documented live setter (ARCHITECTURE.md's debug surface)
+// meant for this. A test whose SUBJECT is the AP economy must not use it - it
+// wants the real number - but a test about targeting rules should not be at the
+// mercy of how far the walk-up got before the trigger fired.
+export async function refillAp(page) {
+  await page.evaluate(() => {
+    window.__combat.ap = window.__game?.stats?.maxAp ?? window.__combat.ap;
+  });
+}
+
+// Arm a combat action by clicking its bar button - but assert the preconditions
+// instead of clicking blind. A bare page.click on a disabled button waits out
+// the WHOLE test timeout and then reports only "element is not enabled", which
+// is how a five-minute mystery gets logged instead of a diagnosis.
+export async function clickAction(page, id, timeout = 30_000) {
+  await waitForPlayerTurn(page);
+  const btn = page.locator(`#act-${id}`);
+  try {
+    await expect(btn).toBeEnabled({ timeout });
+  } catch {
+    const [state, title] = await Promise.all([
+      combatState(page),
+      btn.getAttribute('title').catch(() => null),
+    ]);
+    throw new Error(
+      `#act-${id} never became clickable within ${timeout}ms.\n`
+      + `button title: ${title}\n`
+      + `combat state: ${JSON.stringify(state, null, 2)}`,
+    );
+  }
+  await btn.click();
 }
 
 // End the current member's turn and wait for control to come back around

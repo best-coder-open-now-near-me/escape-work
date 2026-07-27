@@ -3,7 +3,7 @@
 // MEMBER you control - it takes its own initiative turn in PLAYER phase, with
 // its own action bar - not an autopilot ally (SUMMON_PLAN.md).
 import { test, expect } from '@playwright/test';
-import { bootStash, enterCombat } from './helpers.js';
+import { bootStash, enterCombat, clickAction, refillAp } from './helpers.js';
 
 // Just you and one HR Rep, two tiles apart, in an open room with plenty of
 // free floor for applicants to spawn onto. No other coworkers, so enterCombat
@@ -150,9 +150,12 @@ test('the HR class posts the role AT a spot you pick', async ({ page }) => {
   await expect(page.locator('#act-summon-applicants')).toBeVisible();
   expect(await page.evaluate(() => window.__game.summons.length)).toBe(0);
 
+  // A full turn: the walk-up into this fight can bleed AP (see refillAp), and
+  // this test is about WHERE a summon lands, not about the AP economy.
+  await refillAp(page);
   // A summon is TARGETED: arming it picks the action, not the spot. The press
   // must not spend a thing until you say where they report.
-  await page.click('#act-summon-applicants');
+  await clickAction(page, 'summon-applicants');
   await expect.poll(() => page.evaluate(() => window.__combat?.armed),
     { timeout: 10_000 }).toBe('summon-applicants');
   expect(await page.evaluate(() => window.__game.summons.length)).toBe(0);
@@ -213,8 +216,12 @@ test('an out-of-range spot is refused, and the posting is not spent', async ({ p
   test.setTimeout(300_000);
   await bootStash(page, LONG_ARENA, 'human-resources');
   await enterCombat(page);
+  // As above: start from a known budget so a 4 AP posting is affordable. The
+  // assertion below is that a REFUSED posting spends nothing - which needs a
+  // stable `apBefore`, not a full one.
+  await refillAp(page);
 
-  await page.click('#act-summon-applicants');
+  await clickAction(page, 'summon-applicants');
   await expect.poll(() => page.evaluate(() => window.__combat?.armed),
     { timeout: 10_000 }).toBe('summon-applicants');
   const apBefore = await page.evaluate(() => window.__combat.ap);

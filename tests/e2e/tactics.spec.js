@@ -2,7 +2,7 @@
 // and forced movement doesn't. Both assertions run inside the player's OWN
 // turn, so the enemy's scheduled attack can't be mistaken for a reaction.
 import { test, expect } from '@playwright/test';
-import { bootStash, enterCombat, clickWorld, endTurnUntilPlayer, waitForPlayerTurn } from './helpers.js';
+import { bootStash, enterCombat, clickWorld, endTurnUntilPlayer, waitForPlayerTurn, clickAction } from './helpers.js';
 
 // An open room with space to run: the player engages the Manager, then has
 // somewhere far enough to break contact.
@@ -191,7 +191,7 @@ test('striking a foe from behind its committed facing is a backstab', async ({ p
         // instead of reporting the real problem.
         expect(await page.locator('#act-attack').isEnabled(),
           'attack must be affordable to read a to-hit').toBe(true);
-        await page.click('#act-attack');
+        await clickAction(page, 'attack');
       }
       const fp = await page.evaluate(([wx, wz]) => window.__game.project(wx, wz), [x, z]);
       await page.mouse.move(fp.x, fp.y);

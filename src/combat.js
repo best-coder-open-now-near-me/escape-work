@@ -2087,6 +2087,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // to the ACTIVE member.
   window.__combat = {
     get phase() { return phase; },
+    // The AI's working state for the unit whose turn it is, or null on a
+    // player turn. This exists for DIAGNOSIS: when a fight stops handing out
+    // turns, the action bar just reads "disabled", and the three explanations -
+    // the AI beat is waiting, the acting unit is stuck part-way through a walk
+    // (the driver returns early while `moving`), or the turn engine stalled -
+    // are indistinguishable from outside. `wait` and `moving` tell them apart.
+    get acting() {
+      if (!acting) return null;
+      const u = acting.unit;
+      return {
+        name: u.def.name, ap: acting.ap, wait: Number(acting.wait?.toFixed?.(2) ?? acting.wait),
+        moving: !!u.moving, alive: !!u.alive, x: u.x, z: u.z,
+      };
+    },
     get ap() { return active.ap; },
     // The movement allowance left this turn (MOVEMENT_PLAN M2). 0 for a
     // character without the talent.

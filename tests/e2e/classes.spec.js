@@ -2,7 +2,7 @@
 // reboot, the Mail Room's cone attack with its paper aftermath, and Security's
 // stun-riding Detain.
 import { test, expect } from '@playwright/test';
-import { bootAndPick, bootStash, clickWorld, enterCombat, waitStill, stableProject, onScreen } from './helpers.js';
+import { bootAndPick, bootStash, clickWorld, enterCombat, waitStill, stableProject, onScreen, clickAction } from './helpers.js';
 
 test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ page }) => {
   test.setTimeout(300_000);
@@ -13,7 +13,7 @@ test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ pa
   // A stray projected click during combat entry can have pre-armed (or a
   // first click can toggle OFF) an action - ensure reboot ends up armed.
   for (let i = 0; i < 3 && await page.evaluate(() => window.__combat.armed) !== 'reboot'; i++) {
-    await page.click('#act-reboot');
+    await clickAction(page, 'reboot');
   }
   expect(await page.evaluate(() => window.__combat.armed)).toBe('reboot');
   const ap0 = await page.evaluate(() => window.__combat.ap);
@@ -33,7 +33,7 @@ test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ pa
     // and spent AP; never click a disabled button - that would hang).
     if (await page.evaluate(() => window.__combat.armed) !== 'reboot') {
       if (!(await page.locator('#act-reboot').isEnabled())) break;
-      await page.click('#act-reboot');
+      await clickAction(page, 'reboot');
     }
     // Aim at the tile CENTRE (what the purge check compares), and wait for
     // the camera to actually settle so the projection lands true - not just
@@ -72,7 +72,7 @@ test('Mail Room: Bulk Mail cones damage and leave paper drifts', async ({ page }
   // The cone rolls to hit per target now (HIT_PLAN) - pin it so the fired cone
   // reliably damages this foe.
   await page.evaluate(() => { window.__combat.forceHit = true; });
-  await page.click('#act-mail-cone');
+  await clickAction(page, 'mail-cone');
   await page.waitForTimeout(800); // camera settle before projecting
   expect(await clickWorld(page, foe.x, foe.z)).toBe(true);
   await expect.poll(() => page.evaluate(
