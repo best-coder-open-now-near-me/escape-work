@@ -393,6 +393,15 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
   return {
     itemName, looseAt, corpseAt,
     lootContainer, lootBody, pickUpAt,
+    // Use one of an item BY ID rather than by pocket index - what a hotbar slot
+    // holds is "a cold coffee", not "pocket 4", and the pockets shuffle every
+    // time anything is picked up or spent. Refuses out loud when the last one is
+    // gone, because a slot the player is still pressing has to say something.
+    useItemById: (id) => {
+      const i = getSheet()?.inventory.indexOf(id) ?? -1;
+      if (i < 0) { ui.say(`No ${itemName(id)} left in your pockets.`); return; }
+      useItem(i);
+    },
     refreshPanel: (sheet) => invPanel.refresh(sheet),
     togglePanel: (sheet) => invPanel.toggle(sheet),
     showLabels,

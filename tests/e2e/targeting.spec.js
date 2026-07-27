@@ -36,19 +36,35 @@ test('clicking the raised door mesh opens it (parallax fix)', async ({ page }) =
   ).toBe(true);
 });
 
+// One coworker, mid-room, in a small arena - so the body projects into open
+// screen well clear of the HUD. This used to hover whichever coworker Floor 1
+// listed first, which made it a test of where that one happened to wander: the
+// hotbar is a real element over the bottom of the frame and it eats the pointer,
+// so a coworker projected behind it can never be hovered at all. Widening the
+// bar (the full kit now lives on it) is what finally caught that.
+const HOVER_ARENA = {
+  name: 'Hover Room',
+  tiles: { '#': 'wall', '.': 'floor' },
+  actors: { '@': 'player', 'M': 'manager' },
+  map: [
+    '#########',
+    '#.......#',
+    '#.@...M.#',
+    '#.......#',
+    '#########',
+  ],
+};
+
 test('hovering a coworker shows the attack cursor and enemy highlight', async ({ page }) => {
-  await bootAndPick(page);
-  // Hover the body (~0.8 up). Enemies WANDER, so re-read the live position on
-  // every attempt rather than aiming at where one stood when the test started -
-  // and use px/pz (the entity's CONTINUOUS position) rather than the x/z tile,
-  // so a coworker caught mid-step between tiles is still under the cursor.
-  // NB `__game.enemies` is a projection, not the live actors: it exposes
-  // px/pz for exactly this, and has no `entity` to read a position off.
+  await bootStash(page, HOVER_ARENA);
+  // Hover the body (~0.8 up) rather than its tile, and re-read the live position
+  // each attempt: a coworker caught mid-step is still under the cursor that way.
+  // NB `__game.enemies` is a projection, not the live actors: it exposes px/pz
+  // for exactly this, and has no `entity` to read a position off.
   await expect.poll(async () => {
     const p = await page.evaluate(() => {
       const en = window.__game.enemies.find((e) => e.alive && e.px !== undefined);
-      if (!en) return null;
-      return window.__game.project3(en.px, 0.8, en.pz);
+      return en ? window.__game.project3(en.px, 0.8, en.pz) : null;
     });
     if (!onScreen(p)) return null;
     await page.mouse.move(p.x, p.y);
@@ -134,7 +150,8 @@ const TALK_LEVEL = {
 test('clicking an NPC walks up and opens a dialogue you can advance and close', async ({ page }) => {
   await bootStash(page, TALK_LEVEL);
   const npc = await page.evaluate(() => window.__game.npcs[0]);
-  expect(npc.name).toContain('Intern');
+  // Named for the job, like every unnamed coworker who does one (companions.js).
+  expect(npc.name).toBe('IT Support');
 
   // Talk cursor on hover.
   await hover3(page, npc.x, 0.8, npc.z);

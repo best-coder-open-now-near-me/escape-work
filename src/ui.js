@@ -28,7 +28,8 @@
 export { PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, addVignette } from './ui/chrome.js';
 export { say, setNarrationGate, narrationLog, setFocusBanner, toast } from './ui/readouts.js';
 export {
-  updateStatsHud, createTacticalButton, createHotbar, createPartyBar, createLevelUpPip,
+  updateStatsHud, createTacticalButton, createHotbar, HOTBAR_ROW_SLOTS,
+  createPartyBar, createLevelUpPip,
 } from './ui/hud.js';
 export { showMenu, hideMenu, createLootLabels } from './ui/menus.js';
 export {

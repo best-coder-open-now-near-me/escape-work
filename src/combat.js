@@ -11,7 +11,7 @@
 import { ACTIONS, arrivalLine } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
-import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, reachOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH, THROW_RANGE } from './stats.js';
+import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH, THROW_RANGE } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
 import { STATUSES } from './data/statuses.js';
@@ -195,7 +195,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   });
   // Everyone can shove - it's an office, not a fencing academy - and everyone
   // has a basic weapon swing (the equipped weapon's, or bare-handed 'punch').
-  const actionIdsOf = (m) => [...m.sheet.actions, equippedAction(m.sheet), 'shove', ...throwablesFor(m)];
+  // In the canonical order (stats.orderedActionIds), the same one the
+  // out-of-combat hotbar renders: the basic swing, shove, throws, class powers,
+  // what a talent granted, what is in hand. The two bars showing one kit in two
+  // different orders is a tax paid mid-fight, when there is least attention to
+  // spare for re-reading a row of buttons.
+  const actionIdsOf = (m) => orderedActionIds(
+    m.sheet, [...m.sheet.actions, equippedAction(m.sheet), 'shove', ...throwablesFor(m)],
+  );
   // The acting member's cost for a throw - the shared rule (stats.js), bound to
   // whoever currently has the floor.
   const ammoCostOf = (id) => ammoCost(active.sheet, id);
