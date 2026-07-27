@@ -346,7 +346,7 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   `__game` is read-only state (beyond `npcs`, `party`, `summons`, `armed`,
   `hoverKind`, `cursor`, `dialogueOpen`, it exposes the world queries the
   specs need: `doors`, `looseItems`, `burning`, `smoking`, `surfaceAt`,
-  `losClear`, `cash`, `shopOpen`, `shopStockAt`, …). `__combat` is mostly read-only (`phase`, `order`, `turn`,
+  `losClear`, `cash`, `shopOpen`, `shopStockAt`, `levelId`, …). `__combat` is mostly read-only (`phase`, `order`, `turn`,
   `party`, `summons`, `enemies`, `lastRoll`, `hoverHitChance`) but also
   carries deliberate LIVE setters god mode and the specs drive: `ap`,
   `defended`, `usesLeft` (edit in place, then `refresh()`), `applyStatus`,

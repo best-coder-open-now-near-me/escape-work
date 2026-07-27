@@ -2402,6 +2402,10 @@ function startGame(level) {
     },
     get inCombat() { return inCombat; },
     get gameOver() { return gameOver; },
+    // Which floor is under you. The campaign transition is the one seam where
+    // that changes, and a spec crossing it has no other way to tell level2 from
+    // level1 once the page has reloaded into it.
+    get levelId() { return activeLevelId; },
     get lastPath() { return lastPath; },
     get fadedWallCount() { return walls.filter((w) => w.faded).length; },
     get stats() {
