@@ -14,6 +14,13 @@
 //   summon - conjures `count` allies of `archetype` (a class id) on your side,
 //            up to a live `cap`; instant, `uses` per fight. Each one serves
 //            `lifetimeTurns` of its own turns and then files out (SUMMON_PLAN)
+//   control- the no-damage verb (POWERS_PLAN M2). Aim at an ENEMY and land
+//            `applies` on them and/or push them `displace` tiles. It ROLLS TO
+//            HIT like any attack (a guaranteed stun at 2 AP is the degenerate
+//            case) but deals no damage - a power that stuns AND hits is two
+//            powers, and the AP economy cannot price both. Touch-range by
+//            default (a click walks you in, like a melee swing); `range` makes
+//            it thrown, `cone` makes it a wedge.
 //   buff   - the friendly-target verb (POWERS_PLAN M1). Aim at an ALLY (a
 //            party member or one of your summons) within `range` with a clear
 //            line, or at yourself: restores `amount` HP, clears their statuses
@@ -57,13 +64,21 @@ export const ACTIONS = {
   },
 
   // --- Middle Manager ---------------------------------------------------------
+  // The Manager's primary verb is CONTROL (POWERS_PLAN M2): he does not out-hit
+  // anybody, he takes their turn away. Delegate used to be a 2-4 damage swing -
+  // the Office Drone's attack with a worse spread and a better name - which is
+  // what made the tankiest class in the game read as a slower Drone.
   delegate: {
-    type: 'attack',
+    type: 'control',
     ap: 2,
     label: 'Delegate Ruthlessly',
-    desc: 'Make it someone else\'s problem. Hits hard for a manager.',
-    min: 2,
-    max: 4,
+    desc: 'Make it someone else\'s problem. They spend their next turn on it instead of on you.',
+    // `stunned`, not a new status: turn denial is turn denial, and reusing it
+    // means Delegate inherits the anti-chain immunity window for free rather
+    // than becoming a second, parallel way to lock somebody out of a fight.
+    applies: 'stunned',
+    appliesLog: 'It is their problem now - they lose the turn to it.',
+    uses: 2, // turn denial is the strongest thing in the game; ration it
     log: 'You delegate the problem back to them.',
     missLog: 'They delegate it right back. Nothing lands.',
   },
@@ -73,6 +88,20 @@ export const ACTIONS = {
     label: 'Decline the Invite',
     desc: 'Block out the afternoon. Buys you back some action.',
     log: 'You decline their meeting invite. Incoming damage halved.',
+  },
+  // The Manager's track control: a cone that roots (POWERS_PLAN M2). His track
+  // granted only passive talents, so levelling a Manager never changed what he
+  // could DO. A room-wide root is the class fantasy stated plainly.
+  'all-hands': {
+    type: 'control',
+    ap: 3,
+    label: 'All-Hands',
+    desc: 'Call the room into a meeting. Everyone in the wedge is held where they stand.',
+    cone: { range: 4, halfAngle: 40 },
+    applies: 'detained',
+    appliesLog: 'Attendance is mandatory.',
+    uses: 1,
+    log: 'You call an all-hands.',
   },
   espresso: {
     type: 'heal',
@@ -115,6 +144,20 @@ export const ACTIONS = {
     range: 5,
     uses: 2,
     log: 'You remote in and power-cycle them.',
+  },
+  // IT's track control (POWERS_PLAN M2), replacing a grant of the Middle
+  // Manager's `cigarette` - a track that handed one class another class's
+  // talent action was converging the roster, not separating it.
+  'percussive-maintenance': {
+    type: 'control',
+    ap: 2,
+    label: 'Percussive Maintenance',
+    desc: 'Hit it until it works. Hit them until they do not. They lose their next turn.',
+    applies: 'stunned',
+    appliesLog: 'They reboot, briefly and involuntarily.',
+    uses: 2,
+    log: 'You apply percussive maintenance.',
+    missLog: 'You miss, and hit the desk. The desk works fine now.',
   },
   firewall: {
     type: 'defend',
@@ -178,18 +221,37 @@ export const ACTIONS = {
   },
 
   // --- Security -------------------------------------------------------------------
+  // Detain is now a ROOT, not a stun (POWERS_PLAN M2). It is the difference
+  // between Security and the Manager: the Manager takes your turn, Security
+  // takes your GROUND. A detained coworker keeps their turn and everything on
+  // their bar - they simply cannot walk away from the guard, which is what
+  // holds a thrower in your reach and stops a wounded manager retreating.
+  // It also stops being a third copy of "attack that stuns": Detain, the
+  // shove's slam and the old Delegate were converging on one power.
   detain: {
-    type: 'attack',
+    type: 'control',
     ap: 3,
     label: 'Detain',
-    desc: 'Write them up on the spot. Solid damage, and they lose their next turn to the paperwork.',
-    min: 3,
-    max: 5,
+    desc: 'Ask them to wait right there. They keep their turn - they just cannot leave.',
     uses: 2, // an incident report is a big enough hammer to ration it
-    applies: 'stunned',
-    appliesLog: 'They are detained for a statement - they lose a turn to it.',
+    applies: 'detained',
+    appliesLog: 'They are held for a statement - they are not going anywhere.',
     log: 'You open an incident report. Name, badge number, time of entry.',
     missLog: 'They produce a lanyard from somewhere. It even scans.',
+  },
+  // The Security track's own control (POWERS_PLAN M2), replacing a third copy
+  // of `kick`.
+  lockdown: {
+    type: 'control',
+    ap: 2,
+    label: 'Badge Lockdown',
+    desc: 'Kill their badge from the panel. They are held where they stand - from across the floor.',
+    range: 5,
+    applies: 'detained',
+    appliesLog: 'Their badge goes red. The floor stops letting them through.',
+    uses: 2,
+    log: 'You pull their access from the panel.',
+    missLog: 'The panel spins. Somebody has been putting off that firmware update.',
   },
   'stand-post': {
     type: 'defend',

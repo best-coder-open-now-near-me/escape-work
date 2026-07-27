@@ -41,6 +41,11 @@
 //     moveCostMult   combat move-AP multiplier
 //     speedMult      walk-speed multiplier
 //     noFootwork     footwork actions (the kick) disabled
+//     rooted         cannot MOVE at all this turn, but may still act. Read by
+//                    combat.js's moveBudget - the one choke point both sides
+//                    price movement through - so it binds a member and an AI
+//                    unit by the same line. Distinct from skipTurn: a root
+//                    costs you the ground, a stun costs you the turn.
 //     slipProof      cannot slip (gum's upside)
 //     incomingMult   incoming-damage multiplier (deflect: 0.5)
 //     accMod         flat accuracy modifier (HIT_PLAN's hitChance `mods`)
@@ -143,6 +148,21 @@ export const STATUSES = {
     effects: { shuffleActions: true, aimSway: 0.45 },
     log: '{name} is reorganised. Nothing is where it was.',
     fx: { color: [0.72, 0.45, 0.95], burst: 'pop', aura: 'orbit', rate: 0.22 },
+  },
+  // --- what the control verb lands (POWERS_PLAN M2) -------------------------
+  // A ROOT, not a stun. The distinction is the whole reason this status exists
+  // rather than reusing `stunned`: a detained coworker still gets their turn
+  // and everything on their bar - they simply cannot walk away from you. That
+  // is a real tactical state (it holds a thrower in your reach, it stops a
+  // wounded manager retreating) and it is NOT turn denial, so it deliberately
+  // carries no anti-chain window: re-detaining someone who is standing right
+  // there is a legitimate way to spend AP, and it never costs them a turn.
+  detained: {
+    name: 'Detained', icon: '🪪', harmful: true, clock: 'turn',
+    duration: 2, resistable: true,
+    effects: { rooted: true },
+    log: '{name} is being asked to wait right there.',
+    fx: { color: [0.95, 0.78, 0.25], burst: 'fall', aura: 'cling', rate: 0.28 },
   },
   // --- the friendly half (POWERS_PLAN M1) -----------------------------------
   // Until the `buff` verb landed, every status in this registry arrived from

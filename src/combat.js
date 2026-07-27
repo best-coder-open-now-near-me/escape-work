@@ -14,7 +14,7 @@ import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, reachOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH, THROW_RANGE } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
-import { buffProblem, buffOutcome, buffRangeOf, isFriendly } from './powers.js';
+import { buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl } from './powers.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
@@ -189,7 +189,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     holder.ap = Math.max(0, roundAp(holder.ap - fromAp));
     return fromAp;
   };
-  const moveBudget = (holder) => Math.max(0, (holder.freeAp || 0) + holder.ap);
+  // A ROOT zeroes the movement budget (POWERS_PLAN M2). This is the one place
+  // both sides price movement through - the player's click, the route preview,
+  // and the AI's advance all reach it - so one line binds a rooted member and
+  // a rooted coworker identically. `holder` is a member ({sheet}), the AI's
+  // working turn state ({unit}), or a bare unit.
+  const rootedNow = (holder) => !!statusFx(holder.sheet || holder.unit || holder).rooted;
+  const moveBudget = (holder) => (rootedNow(holder)
+    ? 0
+    : Math.max(0, (holder.freeAp || 0) + holder.ap));
   const throwableIds = Object.keys(ACTIONS).filter((id) => ACTIONS[id].ammoCost);
   // A throwable can be gated behind a talent effect (`needsTalent`): folding a
   // dart that lands in someone's eye is a craft, so paper airplanes belong to
@@ -605,7 +613,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // hanging off the character while they were plainly aiming at someone.
     preview = null;
     const a = ACTIONS[previewAction()];
-    if (!a || a.type !== 'attack' || a.cone || !en) { costTag.style.display = 'none'; return; }
+    // A control rolls to hit like a swing does, so it earns the same readout -
+    // an odds display that vanished the moment you armed Detain would make the
+    // one power you most want to know the odds of the one that hides them.
+    if (!a || (a.type !== 'attack' && !isControl(a)) || a.cone || !en) {
+      costTag.style.display = 'none';
+      return;
+    }
     // The same terms the swing will roll - not a second copy of the math. The
     // reason string matters: a positional modifier the player can't see reads
     // as randomness (TACTICS_PLAN, ui.js note).
@@ -833,7 +847,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
       return;
     }
-    if (a.type !== 'attack' && a.type !== 'shove') return;
+    if (a.type !== 'attack' && a.type !== 'shove' && !isControl(a)) return;
     if (a.cone) {
       const test = aimPoint && coneTest(a, aimPoint.x, aimPoint.z);
       if (test) {
@@ -880,6 +894,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       let ok;
       if (a.type === 'shove') {
         ok = canReach(active, en, REACH.SHOVE) && active.ap >= a.ap;
+      } else if (isControl(a) && controlIsRanged(a)) {
+        // A thrown control needs the range and the line, same as a throw. A
+        // touch-range one falls to the melee case below: clicking a distant
+        // target walks you in, so every reachable body rings green.
+        ok = !controlProblem(a, {
+          dist: cheb(active.actor.x, active.actor.z, en.x, en.z),
+          los: world.hasLos(active.actor.x, active.actor.z, en.x, en.z),
+          ap: active.ap,
+          usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
+          alive: en.alive,
+        });
       } else if (a.ammoCost) {
         ok = cheb(active.actor.x, active.actor.z, en.x, en.z) <= THROW_RANGE
           && world.hasLos(active.actor.x, active.actor.z, en.x, en.z)
@@ -1198,6 +1223,138 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (!engaged.some((e) => e.alive)) victory();
   }
 
+  // --- displacement, shared (POWERS_PLAN M2) -------------------------------
+  // Push a body one tile along (dx, dz): onto whatever is behind them, or into
+  // the solid thing that stops them. Lifted out of the shove so a `control`
+  // carrying `displace` moves people by EXACTLY the same rules - the shove's
+  // occupancy check, its wall-slam, its surface damage and its anti-chain
+  // narration were a paragraph of behaviour trapped inside one click handler,
+  // and a second verb that moved bodies would otherwise have grown a second,
+  // subtly different copy of all of it.
+  //
+  // Returns { slammed, died, msg }; the caller logs. It does NOT spend AP or
+  // clear `armed` - displacement is a consequence, not an action.
+  function displaceBody(en, dx, dz, { verb = 'shove', slamDmg = 2 } = {}) {
+    if (!dx && !dz) return { slammed: false, died: false, msg: '' };
+    const tx = en.x + dx;
+    const tz = en.z + dz;
+    // A partition between the tiles counts as "something solid" too - and so
+    // does a body. isWalkable only excludes enemies and NPCs, so without the
+    // occupancy check a shove could glide a coworker onto a teammate's (or a
+    // summon's) tile and leave two combatants permanently stacked.
+    const occupied = members.some((m) =>
+      m.sheet.hp > 0 && m.actor && m.actor.x === tx && m.actor.z === tz);
+    if (occupied || !world.isWalkable(tx, tz) || !world.stepOpen(en.x, en.z, tx, tz)) {
+      const died = slamDmg > 0 ? en.takeDamage(slamDmg) : false;
+      hitFx(en, 'slam', active);
+      fx.shake(0.06, 0.2); // a body meeting drywall
+      if (died) deathFx(en);
+      if (slamDmg > 0) fx.damageText(en.x, en.z, `-${slamDmg}`, '#ffd76b', { big: died });
+      // A slam into a wall knocks the wind out of them - stunned (they lose
+      // their next turn). The knockdown DOS2 shoves are for.
+      let msg = `You ${verb} ${en.def.name} into something solid.${slamDmg > 0 ? ` -${slamDmg}.` : ''}`;
+      // The shove is the one UNRATIONED stun in the game (2 AP, no use
+      // limit), so it is the chain the anti-chain window exists to break -
+      // and the site where the player most needs to be told why the second
+      // slam didn't daze.
+      if (!died) {
+        const blocked = blockedBy(en, 'stunned');
+        if (applyStatus(en, 'stunned')) {
+          statusFxAt(en, 'stunned');
+          msg += ' They crumple - dazed.';
+        } else if (blocked) msg += ` ${immunityLine(blocked, en.def.name)}`;
+      }
+      if (died) callbacks.onEnemyKilled(en);
+      return { slammed: true, died, msg };
+    }
+    en.pushTo(tx, tz);
+    const dmg = world.enemySurfDamage(tx, tz);
+    if (dmg > 0) {
+      const live = world.isElectrified && world.isElectrified(tx, tz);
+      const surf = world.surfaceIdAt(tx, tz);
+      const died = en.takeDamage(dmg);
+      fx.impact(tx, tz, hazardKind(tx, tz), { y: 0.4 });
+      if (died) deathFx(en);
+      fx.damageText(tx, tz, `-${dmg}`, '#ffd76b', { big: died });
+      if (died) callbacks.onEnemyKilled(en);
+      return {
+        slammed: false,
+        died,
+        msg: `You ${verb} ${en.def.name} into the ${live ? 'LIVE water' : surf || 'hazard'}! -${dmg}.`,
+      };
+    }
+    return { slammed: false, died: false, msg: `You ${verb} ${en.def.name} back a step.` };
+  }
+
+  // --- the control verb (POWERS_PLAN M2) -----------------------------------
+  // Control deals NO damage. That is the design rule, not an omission: a power
+  // that stuns AND hits is two powers, and the AP economy (2 AP against a 5-7
+  // pool) cannot price both. It still rolls to hit, because a guaranteed stun
+  // at 2 AP is the degenerate case - and because HIT_PLAN's "a miss spends the
+  // cost and does nothing else" is what keeps the anti-chain window from being
+  // the only counterplay control has.
+  function performControl(id, en) {
+    const a = ACTIONS[id];
+    const ranged = controlIsRanged(a);
+    const problem = controlProblem(a, {
+      dist: cheb(active.actor.x, active.actor.z, en.x, en.z),
+      los: world.hasLos(active.actor.x, active.actor.z, en.x, en.z),
+      inReach: canReach(active, en),
+      ap: active.ap,
+      usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
+      alive: en.alive,
+    });
+    if (problem) { lastClickOutcome = `refused:${problem}`; log(problem); return; }
+    joinCombat(en);
+    // Spend first, as every other action does: a miss burns the AP and the use
+    // (HIT_PLAN #4).
+    active.ap = roundAp(active.ap - a.ap);
+    if (a.uses) active.usesLeft[id] -= 1;
+    if (ranged) {
+      fx.projectile({ x: active.actor.x, z: active.actor.z }, { x: en.x, z: en.z }, 'ball');
+    } else {
+      active.actor.lunge(en.x, en.z);
+    }
+    faceTarget(active, en.x, en.z);
+    if (!rollAgainst(active, en)) {
+      hitFx(en, 'whiff');
+      fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
+      log(a.missLog || `${a.log} It does not take.`);
+      armed = null;
+      refresh();
+      return;
+    }
+    const plan = controlOutcome(a);
+    let line = a.log || `${a.label}.`;
+    // The status first, THEN the displacement: a control that both roots and
+    // pushes should root them where they LAND, and the reverse order would
+    // also let a lethal slam swallow the status silently.
+    if (plan.applies) {
+      const blocked = blockedBy(en, plan.applies);
+      if (applyStatus(en, plan.applies, {}, 0)) {
+        statusFxAt(en, plan.applies);
+        line += ` ${appliesLine(a, en.def.name)}`;
+      } else if (blocked) line += ` ${immunityLine(blocked, en.def.name)}`;
+    }
+    if (plan.displace) {
+      const dx = Math.sign(en.x - active.actor.x) * plan.displace;
+      const dz = Math.sign(en.z - active.actor.z) * plan.displace;
+      const res = displaceBody(en, dx, dz, { verb: 'send', slamDmg: 0 });
+      if (res.msg) line += ` ${res.msg}`;
+    }
+    log(line);
+    armed = null;
+    refresh();
+    if (!engaged.some((e) => e.alive)) victory();
+  }
+
+  // What a landed melee action DOES on arrival. The walk-up path and the
+  // already-in-reach path both route through here, so a control that walked
+  // you in resolves as a control and not as a swing - the one dispatch a new
+  // touch-range verb has to join, instead of a branch in each of the three
+  // places that finish an approach.
+  const strike = (id, en) => (isControl(ACTIONS[id]) ? performControl(id, en) : performOn(id, en));
+
   // --- the friendly verb (POWERS_PLAN M1) ----------------------------------
   // Everyone a buff may be aimed at: living party members AND your summons,
   // yourself included. A summon is a member with a sheet, so healing or
@@ -1299,6 +1456,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (active.ap < a.ap) { log('Not enough AP.'); return; }
     const test = coneTest(a, tx, tz);
     if (!test) { log('Aim somewhere.'); return; }
+    // A rationed cone (All Hands) spends its use here. fireCone never
+    // decremented one because the only cone that existed was unlimited - which
+    // is exactly the bug Detain already had on the single-target path: a
+    // counter that never moves while the tooltip goes on promising uses left.
+    if (a.uses) {
+      if (active.usesLeft[armed] <= 0) { log(`No ${a.label.toLowerCase()} left this fight.`); return; }
+      active.usesLeft[armed] -= 1;
+    }
     active.ap = roundAp(active.ap - a.ap);
     active.actor.lunge(tx, tz);
     faceTarget(active, tx, tz); // the cone points where you aimed it
@@ -1316,6 +1481,21 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (!rollAgainst(active, en)) {
         hitFx(en, 'whiff');
         fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
+        continue;
+      }
+      // A CONTROL cone (All Hands) lands its status on everyone it catches and
+      // rolls no damage - the verb's rule holds whether it is aimed at one
+      // coworker or a wedge of them. Sharing fireCone rather than forking it is
+      // what keeps the wedge geometry, the LOS test and the per-target roll
+      // identical between the two.
+      if (isControl(a)) {
+        const blocked = blockedBy(en, a.applies);
+        if (a.applies && applyStatus(en, a.applies, {}, 0)) {
+          statusFxAt(en, a.applies);
+          hits += 1;
+        } else if (blocked) {
+          log(immunityLine(blocked, en.def.name));
+        }
         continue;
       }
       const dmg = rand(a.min, a.max) + damageBonus(active.sheet);
@@ -1338,9 +1518,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         }
       }
     }
-    log(hits
-      ? `${a.log} ${hits} hit${hits > 1 ? 's' : ''}. The paperwork settles everywhere.`
-      : `${a.log} No casualties. Plenty of litter.`);
+    log(isControl(a)
+      ? (hits
+        ? `${a.log} ${hits} caught.`
+        : `${a.log} Nobody in the room is having it.`)
+      : (hits
+        ? `${a.log} ${hits} hit${hits > 1 ? 's' : ''}. The paperwork settles everywhere.`
+        : `${a.log} No casualties. Plenty of litter.`));
     armed = null;
     aimPoint = null;
     refresh();
@@ -1397,61 +1581,21 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // to the free ground ringing outward from it. Aiming at the enemy you want
     // them to swarm is a reasonable thing to click.
     if (a.type === 'summon') { placeSummon(en.x, en.z); return; }
+    // A RANGED control (a cone, or one carrying `range`) resolves from where
+    // you stand. A touch-range one deliberately falls through to the melee
+    // walk-up below rather than getting its own copy of it - Detain refusing
+    // "too far" would make it the one arm's-length action in the game that
+    // will not approach, and `strike` is what makes the arrival resolve as a
+    // control instead of a swing.
+    if (isControl(a) && controlIsRanged(a)) { performControl(armed, en); return; }
     if (a.type === 'shove') {
       if (!canReach(active, en, REACH.SHOVE)) { refuse('Too far to shove.'); return; }
       if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
       joinCombat(en); // shoving a bystander is also an opinion they'll return
-      const dx = Math.sign(en.x - active.actor.x);
-      const dz = Math.sign(en.z - active.actor.z);
-      const tx = en.x + dx;
-      const tz = en.z + dz;
       active.ap -= a.ap;
       active.actor.lunge(en.x, en.z);
       faceTarget(active, en.x, en.z);
-      // A partition between the tiles counts as "something solid" too - and so
-      // does a body. isWalkable only excludes enemies and NPCs, so without the
-      // occupancy check a shove could glide a coworker onto a teammate's (or a
-      // summon's) tile and leave two combatants permanently stacked.
-      const occupied = members.some((m) =>
-        m.sheet.hp > 0 && m.actor && m.actor.x === tx && m.actor.z === tz);
-      if (occupied || !world.isWalkable(tx, tz) || !world.stepOpen(en.x, en.z, tx, tz)) {
-        const died = en.takeDamage(2);
-        hitFx(en, 'slam', active);
-        fx.shake(0.06, 0.2); // a body meeting drywall
-        if (died) deathFx(en);
-        fx.damageText(en.x, en.z, '-2', '#ffd76b', { big: died });
-        // A slam into a wall knocks the wind out of them - stunned (they lose
-        // their next turn). The knockdown DOS2 shoves are for.
-        let msg = `You shove ${en.def.name} into something solid. -2.`;
-        // The shove is the one UNRATIONED stun in the game (2 AP, no use
-        // limit), so it is the chain the anti-chain window exists to break -
-        // and the site where the player most needs to be told why the second
-        // slam didn't daze.
-        if (!died) {
-          const blocked = blockedBy(en, 'stunned');
-          if (applyStatus(en, 'stunned')) {
-            statusFxAt(en, 'stunned');
-            msg += ' They crumple - dazed.';
-          } else if (blocked) msg += ` ${immunityLine(blocked, en.def.name)}`;
-        }
-        log(msg);
-        if (died) callbacks.onEnemyKilled(en);
-      } else {
-        en.pushTo(tx, tz);
-        const dmg = world.enemySurfDamage(tx, tz);
-        if (dmg > 0) {
-          const live = world.isElectrified && world.isElectrified(tx, tz);
-          const surf = world.surfaceIdAt(tx, tz);
-          const died = en.takeDamage(dmg);
-          fx.impact(tx, tz, hazardKind(tx, tz), { y: 0.4 });
-          if (died) deathFx(en);
-          fx.damageText(tx, tz, `-${dmg}`, '#ffd76b', { big: died });
-          log(`You shove ${en.def.name} into the ${live ? 'LIVE water' : surf || 'hazard'}! -${dmg}.`);
-          if (died) callbacks.onEnemyKilled(en);
-        } else {
-          log(`You shove ${en.def.name} back a step.`);
-        }
-      }
+      log(displaceBody(en, Math.sign(en.x - active.actor.x), Math.sign(en.z - active.actor.z)).msg);
       armed = null;
       refresh();
       if (!engaged.some((e) => e.alive)) victory();
@@ -1471,7 +1615,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (canReach(active, en)) {
       if (active.ap < a.ap) { refuse('Not enough AP to attack.'); return; }
       active.actor.faceToward(en.x, en.z);
-      performOn(armed, en);
+      strike(armed, en);
       return;
     }
     // walk the cheapest route to their side, as far as the budget allows
@@ -1634,7 +1778,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // something else and spend the AP it was priced against.
     const wasPending = pendingConfirm;
     pendingConfirm = null;
-    if (a.type === 'attack' || a.type === 'shove' || a.type === 'summon' || isFriendly(a)) {
+    if (a.type === 'attack' || a.type === 'shove' || a.type === 'summon'
+      || isFriendly(a) || isControl(a)) {
       armed = id; // arm it; clicking a ringed target (or a spot) fires it
       hidePreview(); // aiming now - the movement trail yields to targets
       log(a.type === 'summon'
@@ -2233,7 +2378,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         if (en.alive && canReach(active, en)
           && active.ap >= ACTIONS[action].ap) {
           active.actor.faceToward(en.x, en.z);
-          performOn(action, en);
+          strike(action, en);
         } else {
           armed = null;
           refresh();

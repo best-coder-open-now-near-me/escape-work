@@ -122,6 +122,9 @@ export const CLASSES = {
       // which is a better spread than piling every movement talent on the
       // clerk.
       { id: 'mgr-frequent-flier', name: 'Frequent Flier', cost: 1, effect: { talent: { noProvoke: true } } },
+      // The Manager's track granted only passive talents, so levelling one
+      // never changed what he could DO (POWERS_PLAN M2).
+      { id: 'mgr-all-hands', name: 'All-Hands', cost: 1, requires: ['mgr-stonewall'], effect: { grantsAction: 'all-hands' } },
     ],
     actions: ['delegate', 'own-calendar', 'espresso'],
     talent: {
@@ -174,7 +177,9 @@ export const CLASSES = {
     track: [
       { id: 'it-root', name: 'Root Access', cost: 1, effect: { attrBonus: { savvy: 1 } } },
       { id: 'it-ergonomic', name: 'Ergonomic Chair', cost: 1, effect: { attrBonus: { grit: 1 } } },
-      { id: 'it-server-breaks', name: 'Server-Room Breaks', cost: 1, effect: { grantsAction: 'cigarette' } },
+      // Was a grant of the Middle Manager's `cigarette` - one class's track
+      // handing out another class's talent action (POWERS_PLAN M2).
+      { id: 'it-percussive', name: 'Percussive Maintenance', cost: 1, requires: ['it-root'], effect: { grantsAction: 'percussive-maintenance' } },
     ],
     // Reboot (an enemy or yourself) plus Remote Restart (a teammate): the
     // purge, pointed at both halves of the board. That is IT's primary verb -
@@ -242,7 +247,10 @@ export const CLASSES = {
       { id: 'sec-post', name: 'Standing Post', cost: 1, effect: { attrBonus: { grit: 1 } } },
       { id: 'sec-rounds', name: 'Night Rounds', cost: 1, effect: { attrBonus: { hustle: 1 } } },
       { id: 'sec-deescalate', name: 'De-escalation Training', cost: 1, effect: { attrBonus: { composure: 1 } } },
-      { id: 'sec-boots', name: 'Duty Boots', cost: 1, requires: ['sec-post'], effect: { grantsAction: 'kick' } },
+      // Was a third copy of `kick` (POWERS_PLAN M2): the Drone, the Mail Room
+      // and Security all granted the same action, so levelling up converged
+      // the roster instead of separating it.
+      { id: 'sec-lockdown', name: 'Badge Lockdown', cost: 1, requires: ['sec-post'], effect: { grantsAction: 'lockdown' } },
     ],
     actions: ['detain', 'stand-post', 'night-thermos'],
     talent: {

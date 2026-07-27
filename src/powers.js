@@ -69,3 +69,43 @@ export function buffOutcome(a, t = {}) {
 // the board a verb points at - the drift that made the crosshair promise a
 // swing the click refused (ARCHITECTURE, hover.js note).
 export const isFriendly = (a) => !!a && a.type === 'buff';
+
+// --- control (POWERS_PLAN M2) ------------------------------------------------
+
+// A control action carries no damage roll, so it needs its own reach rule. It
+// is a REACH action (arm's length, like a shove) unless it declares a `range`,
+// which makes it a thrown one - Detain is something you do to somebody you can
+// touch; All Hands is something you send.
+export const controlIsRanged = (a) => a.range != null || !!a.cone;
+
+// Why this control cannot be thrown at that target right now, or null.
+//
+// Note what is NOT here: the hit roll. Control rolls to hit like any attack
+// (POWERS_PLAN #4 - a guaranteed stun at 2 AP is the degenerate case), and
+// that roll belongs to combat's `resolveHit` against its injectable rng. This
+// answers only the questions that are true before any dice.
+export function controlProblem(a, t = {}) {
+  const { dist = 0, los = true, inReach = true, ap = 0, usesLeft = null, alive = true } = t;
+  if (ap < a.ap) return 'Not enough AP.';
+  if (usesLeft !== null && usesLeft <= 0) return `No ${(a.label || 'uses').toLowerCase()} left this fight.`;
+  if (!alive) return 'They are already down.';
+  if (controlIsRanged(a)) {
+    if (a.range != null && dist > a.range) return 'Too far.';
+    if (!los) return 'No clear line to them.';
+  } else if (!inReach) {
+    // Melee control walks you in, exactly as a melee swing does - the refusal
+    // is the caller's to skip. Returning a problem here would make Detain the
+    // one arm's-length action in the game that refuses instead of approaching.
+    return null;
+  }
+  return null;
+}
+
+// Everything a landed control does, as a plan. Kept beside buffOutcome so the
+// two verbs' payload shapes stay legible against each other.
+export function controlOutcome(a) {
+  return { applies: a.applies || null, displace: a.displace || 0 };
+}
+
+// Is this action a control? Used by the same one-predicate rule as isFriendly.
+export const isControl = (a) => !!a && a.type === 'control';
