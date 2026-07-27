@@ -7,9 +7,12 @@
   <style>
     html, body { margin: 0; height: 100%; background: #1a1a26; overflow: hidden; }
     #app { width: 100%; height: 100%; display: block; touch-action: none; }
+    /* Above the vignette and the blind overlay (src/vision.js): losing sight of
+       the WORLD is the effect; losing your own HP readout to a black splotch is
+       just an unreadable screen. Everything else in the UI already sits at 6+. */
     #hud {
       position: fixed; top: 14px; left: 0; right: 0; text-align: center;
-      pointer-events: none; color: #f0f0f5;
+      z-index: 6; pointer-events: none; color: #f0f0f5;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
     }
     #hud p  { margin: 0 0 5px; font-size: 13px; letter-spacing: 1px; opacity: .65; }

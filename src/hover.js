@@ -67,7 +67,11 @@ const RING_FRIENDLY = new pc.Color(0.42, 0.85, 0.42);
 //   doorNear(point) / doorOpen(key)     the door under a ground point
 //   tileDef(x, z) / shopSoldOut(x, z)   what a prop tile is and whether it's out
 //   corpseAt / looseAt / itemName       flat things the pick ray skims over
-export function createHoverLayer({ app, canvas, picking, controls, ui, queries }) {
+//
+// `vision` (src/vision.js, optional) is the impaired-sight layer. This module
+// still owns WHAT the cursor says; while a status is swaying the aim, vision
+// owns whether the OS draws it at all - it is drawing three of them itself.
+export function createHoverLayer({ app, canvas, picking, controls, ui, queries, vision = null }) {
   // --- highlight shells -----------------------------------------------------
   // BG3-style inverted-hull glow, one shell per interactable, built lazily and
   // cached against the holder so a repeat hover costs nothing.
@@ -91,7 +95,10 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries }
     if (hoverShell) setHighlight(hoverShell, true, rgb);
   }
   const clearHighlight = () => setHoverHighlight(null, null);
-  const setCursor = (c) => { if (canvas) canvas.style.cursor = c || ''; };
+  const setCursor = (c) => {
+    if (!canvas) return;
+    canvas.style.cursor = vision ? vision.cursorFor(c) : (c || '');
+  };
 
   // --- the glow gate --------------------------------------------------------
   // OUT of combat the body glow is an INSPECT verb, not an ambient one: held

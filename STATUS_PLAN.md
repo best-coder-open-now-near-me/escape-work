@@ -309,7 +309,36 @@ map seeds `{}`.
    - Unit 217/217 (six new window tests); e2e `statuses.spec.js` 5/5 with a new
      double-shove test, plus targeting/classes/tactics 15/15 green (including
      Security's Detain stun).
-6. **Mind control (deferred design, own PR).** Fear ("Performance
+6. **Player-facing blind, and severity.** ✅ Landed. Two halves of the same
+   gap: `blinded` was a to-hit number and nothing else, and nothing in the
+   game could put it on the PLAYER (the only source was the player's own
+   airplane, aimed outward). Now the Security Guard's flashlight applies it,
+   `src/vision.js` renders it — the aim drifts off the mouse, the cursor
+   triples, ink swims across the view — and a new `confused` (Reorg) re-deals
+   the combat action bar each turn. Effect vocabulary gained `aimSway`,
+   `sightBlots` and `shuffleActions`; the first two are read by vision.js off
+   the STEERED character only, so a blinded companion you aren't driving still
+   costs you their accuracy and not your screen.
+   - **Severity (decision #7, second half).** `statusResist` used to only
+     shorten. It now also blunts: `applyStatus` stores the severity the status
+     landed at (`{ left, sev }`), and `statusFx` scales every magnitude by it —
+     flat mods toward 0, `*Mult` keys toward 1, dots rounded and floored at 1.
+     **Booleans never scale.** A turn cannot be half-skipped and a bar cannot
+     be half-shuffled, so for `stunned` and `confused` duration remains the
+     only defence — which is what stops Composure from quietly becoming stun
+     immunity. Floored at `SEVERITY_FLOOR` for the same reason durations floor
+     at 1: a counter-stat should make a status survivable, never a no-op.
+   - **Stored, not recomputed.** Severity is fixed at application from the
+     resist the target had then; recomputing on read would let a mid-fight gear
+     swap retroactively soften a status already on you. A re-apply keeps the
+     WORSE of the two, exactly as it keeps the longer duration.
+   - **Both halves are visible.** The chip goes dashed and dimmed with the
+     percentage shaved off (`🌫️ Blinded −48%`), and the attack line says the
+     target shrugged off the worst of it. A defence the player can't see is a
+     defence they won't spend a point on.
+   - **Old saves read as full strength** (`sev ?? 1`) — status maps serialize.
+   - Unit 314/314 (severity + sway math); e2e statuses/targeting/hit green.
+7. **Mind control (deferred design, own PR).** Fear ("Performance
    Improvement" — flee toward the nearest exit-ward tile for N turns) and
    charm (`mandatory-fun` — swaps `team` for targeting purposes). Needs:
    `pickTarget` honoring a charm flag, forced-move resolution in the AI

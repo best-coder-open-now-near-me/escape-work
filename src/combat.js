@@ -12,7 +12,7 @@ import { ACTIONS, arrivalLine } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH, THROW_RANGE } from './stats.js';
-import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy } from './statuses.js';
+import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
@@ -75,6 +75,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
   }
   let active = members[party.active];
+  // Which deal the confused action bar is on. Declared up here with the rest of
+  // the turn state because the turn engine's `turnStart` hook bumps it, and
+  // that closure is built long before the action bar itself (`scrambled`).
+  let scrambleTurn = 0;
   // Everyone you control: party members plus any summons you've conjured
   // (temporary members, appended by resolveSummon). `livingParty` is the real
   // roster only - a party WIPE (no real member standing) is the sole game-over;
@@ -492,7 +496,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         reactions.clear(); // everyone gets their reaction back (TACTICS_PLAN M2)
         callbacks.onRound?.();
       },
-      turnStart: () => engageMemo.clear(), // bounds how stale an answer can get
+      turnStart: () => {
+        engageMemo.clear(); // bounds how stale an answer can get
+        scrambleTurn += 1; // a confused character's bar re-deals each turn
+      },
       afterTick: (s) => { if (!s.member) syncUnitSpeed(s.unit); }, // gum wearing off gives the legs back
       beforeAdvance: () => {
         armed = null;
@@ -855,10 +862,37 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // changes hands, because different sheets bring different actions. The
   // `#act-<id>` DOM ids always mean "the active member's action".
   let buttons = [];
+  // The reorg (`confused`). Every power still works and still says what it
+  // does - it is just not where you left it. Deterministic per turn rather than
+  // Math.random, and re-dealt only at turnStart: a bar that reshuffled on every
+  // incidental repaint would move the button out from under a click in flight,
+  // which is a different (and much worse) thing than losing your bearings.
+  //
+  // The seed is AVALANCHED (mulberry32's mixer) rather than fed to a plain
+  // LCG: consecutive turn numbers differ by one bit, and a bare
+  // `seed * A + C` walk turned that into consecutive deals that shared their
+  // first swaps - Deflect Blame led the bar and Shove closed it three turns
+  // running, which is a reorg that keeps giving you back your two landmarks.
+  function scrambled(ids) {
+    const out = [...ids];
+    let seed = scrambleTurn >>> 0;
+    const next = () => {
+      seed = (seed + 0x6d2b79f5) >>> 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return (t ^ (t >>> 14)) >>> 0;
+    };
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = next() % (i + 1);
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
+  }
   function buildActionBar() {
     actionsRow.innerHTML = '';
     buttons = [];
-    for (const id of actionIdsOf(active)) {
+    const ids = actionIdsOf(active);
+    for (const id of (statusFx(active.sheet).shuffleActions ? scrambled(ids) : ids)) {
       const b = document.createElement('button');
       b.id = 'act-' + id;
       b.dataset.action = id;
@@ -1746,6 +1780,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (applyStatus(m.sheet, atk.applies, {}, statusResist(m.sheet))) {
         statusFxAt(m, atk.applies);
         line += ` ${appliesLine(atk, m.sheet.name)}`;
+        // Composure blunted it (statuses.js severity). Say so, once, where the
+        // player is already reading: a stat whose work is invisible is a stat
+        // nobody spends a point on, and "it landed weaker" is not something a
+        // number on the character sheet can show you mid-fight.
+        if (statusSeverity(m.sheet, atk.applies) < 1) line += ' They shrug off the worst of it.';
       } else if (blocked) line += ` ${immunityLine(blocked, m.sheet.name)}`;
     }
     log(line);
@@ -2150,7 +2189,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     },
     // Test/debug: apply a status to the active member (STATUS_PLAN e2e). Enemy
     // statuses arrive naturally (a shove stuns, a fire tile burns).
-    applyStatus: (id, duration) => { applyStatus(active.sheet, id, { duration }); refresh(); },
+    // Debug/e2e pin: land `id` on the acting member. `resist` defaults to 0 -
+    // an unresisted, full-severity application, so a test pinning a status gets
+    // exactly what it asked for - and pass a number to exercise Composure's
+    // blunting (statuses.js severity) without building a character for it.
+    applyStatus: (id, duration, resist = 0) => {
+      applyStatus(active.sheet, id, { duration }, resist);
+      refresh();
+    },
     // The initiative order, top to bottom, with whose turn it is - for the
     // tracker UI and the e2e suite.
     get order() {
