@@ -2484,6 +2484,10 @@ function startGame(level) {
     // that burns out is spent - and a spec has no other way to see that the
     // world actually changed rather than merely stopped burning.
     tileAt: (x, z) => grid.typeAt(x, z),
+    // Terrain-only walkability. The distinction a topple spec needs: a fallen
+    // prop must remain CROSSABLE (it is cover, not a wall), and asking the
+    // full isWalkable would fold in whatever body happens to be standing there.
+    walkable: (x, z) => grid.terrainOpen(x, z),
     // Put a named coworker on an exact tile. A spec about what happens TO a
     // body standing somewhere (a bookcase landing on it, cover being measured
     // across it) otherwise has to wait for the AI to wander there, which makes

@@ -288,6 +288,18 @@ export const ACTIONS = {
     log: 'You open an incident report. Name, badge number, time of entry.',
     missLog: 'They produce a lanyard from somewhere. It even scans.',
   },
+  // The other stance mode (POWERS_PLAN M5/M7): you become cover. A teammate
+  // standing behind you is shielded from shots the way a toppled bookcase
+  // shields them - which is why the cover predicate is a CELL question and not
+  // a prop question: "does the thing standing here shield them?" answers both.
+  'hold-the-line': {
+    type: 'stance',
+    mode: 'guard',
+    ap: 2,
+    label: 'Hold the Line',
+    desc: 'Plant yourself. Teammates on the far side of you are in cover from anything thrown.',
+    log: 'You plant yourself in the lane. Nothing gets a clean shot past.',
+  },
   // The Security track's own control (POWERS_PLAN M2), replacing a third copy
   // of `kick`.
   lockdown: {

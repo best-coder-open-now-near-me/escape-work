@@ -329,8 +329,21 @@ test('overwatch does not fire on a mover already down', () => {
 test('every shipped stance declares a mode the runtime knows', () => {
   for (const [id, a] of Object.entries(ACTIONS)) {
     if (a.type !== 'stance') continue;
-    assert.equal(a.mode, 'watch', `${id} has a known mode (got "${a.mode}")`);
-    assert.ok(watchRadiusOf(a) > 0, `${id} watches some ground`);
+    // 'watch' spends the reaction on somebody crossing the line; 'guard' pays
+    // out as cover on the holder's own tile. They share the held-posture
+    // bookkeeping and the lapse rule, and nothing else - a third mode string
+    // would arm, sit there, and never do anything.
+    assert.ok(['watch', 'guard'].includes(a.mode), `${id} has a known mode (got "${a.mode}")`);
+    if (a.mode === 'watch') assert.ok(watchRadiusOf(a) > 0, `${id} watches some ground`);
+  }
+});
+
+test('both stance chips are visible state, not rules', () => {
+  for (const id of ['watching', 'guarding']) {
+    const def = STATUSES[id];
+    assert.ok(def, `${id} exists`);
+    assert.equal(def.harmful, false);
+    assert.deepEqual(def.effects, {}, `${id} carries no effects - the rule lives in combat`);
   }
 });
 

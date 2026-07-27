@@ -166,6 +166,17 @@ export const STATUSES = {
     log: '{name} is watching the room.',
     fx: { color: [0.55, 0.9, 0.75], burst: 'rise', aura: 'orbit', rate: 0.5 },
   },
+  // The other stance mode (POWERS_PLAN M5, landed with M7's cover work). Same
+  // empty-effects reasoning as `watching`: the rule is that the holder's TILE
+  // shields the faces beside it, which is a cover question, not an effect the
+  // vocabulary can carry.
+  guarding: {
+    name: 'Holding the Line', icon: '🛡️', harmful: false, clock: 'turn',
+    duration: 2, resistable: false,
+    effects: {},
+    log: '{name} plants themselves in the way.',
+    fx: { color: [0.7, 0.75, 0.9], burst: 'rise', aura: 'shield', rate: 0.4 },
+  },
   // --- what the control verb lands (POWERS_PLAN M2) -------------------------
   // A ROOT, not a stun. The distinction is the whole reason this status exists
   // rather than reusing `stunned`: a detained coworker still gets their turn

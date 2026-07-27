@@ -250,6 +250,7 @@ export const CLASSES = {
       { id: 'sec-post', name: 'Standing Post', cost: 1, effect: { attrBonus: { grit: 1 } } },
       { id: 'sec-rounds', name: 'Night Rounds', cost: 1, effect: { attrBonus: { hustle: 1 } } },
       { id: 'sec-deescalate', name: 'De-escalation Training', cost: 1, effect: { attrBonus: { composure: 1 } } },
+      { id: 'sec-hold-line', name: 'Hold the Line', cost: 1, requires: ['sec-post'], effect: { grantsAction: 'hold-the-line' } },
       // Was a third copy of `kick` (POWERS_PLAN M2): the Drone, the Mail Room
       // and Security all granted the same action, so levelling up converged
       // the roster instead of separating it.

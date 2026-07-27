@@ -322,6 +322,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // walls on (M3) can't silently change who gets cover.
       melee: withinReach(attacker, defender),
       edgeOpen: world.stepOpen,
+      // A toppled prop shields the tile behind it (POWERS_PLAN M7). Note this
+      // rides the same `!melee` gate as every other cover: a fallen cabinet
+      // spoils SHOTS, not swings, and a melee attacker walks around it. That
+      // is deliberate - it makes toppling a specific counter to throwers
+      // rather than a universal answer.
+      // ...and so does a teammate holding a GUARD stance, because a body
+      // planted on the face between you and the shooter is doing exactly what
+      // a toppled cabinet does (POWERS_PLAN M5's deferred `guard` mode). This
+      // is why the cell predicate was the right shape: "does the thing
+      // standing here shield the defender?" answers both without a second
+      // mechanism, and it inherits the ranged-only rule and the
+      // at-most-once-per-attack rule for free.
+      coverCell: (x, z) => !!world.tileDefAt(x, z)?.cover || guardStandingAt(x, z),
       allies,
       facing: facings.get(defender) || null,
     });
@@ -443,6 +456,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // giving it a tick count would desynchronise the two the moment a joiner
   // was inserted mid-round.
   const watching = new Map();
+  // Is somebody holding a `guard` stance on this exact tile? Read by the cover
+  // predicate, so a planted teammate shields the face they stand on.
+  const guardStandingAt = (x, z) => {
+    for (const [holder, actionId] of watching) {
+      if (ACTIONS[actionId]?.mode !== 'guard') continue;
+      const b = bodyOf(holder);
+      if (b && b.x === x && b.z === z && standing(holder)) return true;
+    }
+    return false;
+  };
   // Back out of whatever is armed or awaiting confirmation. RIGHT-CLICK does
   // this from anywhere; a left click never cancels (it reports an invalid
   // target instead), so aiming can't be lost by a near-miss.
@@ -518,7 +541,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         // two apart immediately. It fires on skipped turns too, which is
         // correct: a stunned watcher's stance still expires on schedule.
         const holder = s.member || s.unit;
-        if (watching.delete(holder)) removeStatus(statusesOf(holder), 'watching');
+        if (watching.delete(holder)) {
+          // Drop whichever chip the stance wore - the two modes share the map
+          // and the lapse rule, so they have to share the cleanup too.
+          removeStatus(statusesOf(holder), 'watching');
+          removeStatus(statusesOf(holder), 'guarding');
+        }
       },
       beforeAdvance: () => {
         armed = null;
@@ -1412,6 +1440,25 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return { def, x: px, z: pz, lx, lz };
   }
 
+  // The AI's version of the same question: is there a prop next to me that
+  // would land on somebody I am trying to hit? Scored like an attack and taken
+  // like one (POWERS_PLAN M7). Without this, toppling is a trick the player
+  // does to a static world - the office falls on coworkers and never on you.
+  //
+  // The scan is eight neighbours and runs only when a beat is actually TAKEN
+  // (the driver returns early while `acting.wait` is counting down), so it
+  // does not join the per-frame work pickTarget had to be memoised out of.
+  function aiTopplePlan(unit) {
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const plan = topplePlan(unit, unit.x + dx, unit.z + dz);
+      if (!plan) continue;
+      const victim = members.some((m) => m.sheet.hp > 0 && m.actor
+        && m.actor.x === plan.lx && m.actor.z === plan.lz);
+      if (victim) return plan;
+    }
+    return null;
+  }
+
   // Put it over. `by` is whoever caused it (for the narration and the facing).
   function topple(by, plan) {
     const { def, x, z, lx, lz } = plan;
@@ -2222,8 +2269,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (a.uses) active.usesLeft[id] -= 1;
       active.ap = roundAp(active.ap - a.ap);
       watching.set(active, id);
-      applyStatus(active.sheet, 'watching');
-      statusFxAt(active, 'watching');
+      const chip = a.mode === 'guard' ? 'guarding' : 'watching';
+      applyStatus(active.sheet, chip);
+      statusFxAt(active, chip);
       log(a.log);
       refresh();
     } else if (a.type === 'heal') {
@@ -2635,6 +2683,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // and it is why holding a stance is a real cost, not a free extra.
     for (const [watcher, actionId] of watching) {
       if (watcher === mover) continue;
+      // Only a `watch` stance swings. A `guard` shares the same held-posture
+      // bookkeeping (one map, one lapse rule) but pays out as cover, not as a
+      // reaction - so it must not quietly become a second overwatch.
+      if (ACTIONS[actionId]?.mode !== 'watch') continue;
       const w = posOf(watcher);
       const sameSide = !!watcher.sheet === !!mover.sheet;
       if (!watchTriggers(ACTIONS[actionId], {
@@ -2857,6 +2909,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       unit.lunge(target.actor.x, target.actor.z);
       log(sm.log || `${unit.def.name} calls in reinforcements.`);
       acting.wait = 0.6;
+      refresh();
+      return;
+    }
+    // Drop the furniture on them if it is there to drop (POWERS_PLAN M7).
+    // Ahead of the swing because it is strictly better when it is available:
+    // it damages, it stuns, and it leaves cover the party then has to walk
+    // around. Priced at the shove's own AP, so both sides push for the same.
+    const toppleAp = ACTIONS.shove.ap;
+    const tp = acting.ap >= toppleAp ? aiTopplePlan(unit) : null;
+    if (tp) {
+      acting.ap = roundAp(acting.ap - toppleAp);
+      unit.lunge(tp.x, tp.z);
+      log(`${unit.def.name} puts a shoulder into the ${tp.def.label || 'furniture'}. ${topple(unit, tp)}`);
+      acting.wait = 0.85;
       refresh();
       return;
     }

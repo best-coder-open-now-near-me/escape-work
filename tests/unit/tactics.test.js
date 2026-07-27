@@ -247,6 +247,52 @@ test('a diagonal attacker is blocked by either facing edge', () => {
   assert.equal(hasCover(9, 1, 5, 5, wallOn(5, 5, 4, 5)), false); // west face
 });
 
+// --- cover from a CELL (POWERS_PLAN M7) -------------------------------------
+// A toppled bookcase - or a teammate holding a guard stance - occupies a cell
+// rather than an edge, so the same two faces get asked a second question.
+const propAt = (px, pz) => (x, z) => x === px && z === pz;
+const noEdges = () => true;
+
+test('a shielding cell on the attacker side is cover, just like an edge', () => {
+  // Defender at (5,5), a fallen cabinet in the tile to their EAST.
+  const east = propAt(6, 5);
+  assert.equal(hasCover(9, 5, 5, 5, noEdges, east), true);  // attacker east
+  assert.equal(hasCover(1, 5, 5, 5, noEdges, east), false); // attacker west
+  assert.equal(hasCover(5, 1, 5, 5, noEdges, east), false); // wrong axis
+});
+
+test('a diagonal attacker is blocked by a shielding cell on either face', () => {
+  assert.equal(hasCover(9, 1, 5, 5, noEdges, propAt(6, 5)), true); // east face
+  assert.equal(hasCover(9, 1, 5, 5, noEdges, propAt(5, 4)), true); // north face
+  assert.equal(hasCover(9, 1, 5, 5, noEdges, propAt(4, 5)), false); // wrong side
+});
+
+test('edges and cells stack to at most ONE cover', () => {
+  // The boolean rule survives the second source: tucking behind a partition
+  // AND a toppled cabinet on the same face is not double cover.
+  const east = wallOn(5, 5, 6, 5);
+  assert.equal(hasCover(9, 5, 5, 5, east, propAt(6, 5)), true);
+  // ...and either source alone still works with the other absent.
+  assert.equal(hasCover(9, 5, 5, 5, east, () => false), true);
+  assert.equal(hasCover(9, 5, 5, 5, noEdges, propAt(6, 5)), true);
+});
+
+test('omitting the cell predicate leaves the old edge behaviour exactly as it was', () => {
+  const east = wallOn(5, 5, 6, 5);
+  assert.equal(hasCover(9, 5, 5, 5, east), true);
+  assert.equal(hasCover(1, 5, 5, 5, east), false);
+});
+
+test('positionMods routes the cell predicate through, ranged only', () => {
+  const shielded = { edgeOpen: noEdges, coverCell: propAt(6, 5) };
+  // Ranged: the fallen prop spoils the shot.
+  assert.equal(positionMods(9, 5, 5, 5, { ...shielded, melee: false }).covered, true);
+  // Melee: it does not. Cover is ranged-only, so a toppled cabinet is a
+  // counter to throwers and something a melee attacker simply walks around -
+  // which is what stops "topple everything" being a universal answer.
+  assert.equal(positionMods(9, 5, 5, 5, { ...shielded, melee: true }).covered, false);
+});
+
 test('no edges anywhere means no cover', () => {
   const open = () => true;
   assert.equal(hasCover(9, 5, 5, 5, open), false);

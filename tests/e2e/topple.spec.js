@@ -73,4 +73,10 @@ test('a shoved cabinet lands on the coworker behind it, and leaves cover', async
   // Toppling reuses the EXISTING stun, so it inherits the anti-chain window
   // rather than becoming a second way to lock somebody out of a fight.
   expect(after.alive ? after.statuses.some((s) => s.id === 'stunned') : true).toBe(true);
+
+  // Cover, not a wall: the landing tile is still WALKABLE. A shove that could
+  // spawn impassable terrain could seal a doorway and strand a fight the enemy
+  // can no longer reach - which is the failure the design refused, and the one
+  // a `solid: true` twin would have reintroduced silently.
+  expect(await page.evaluate(() => window.__game.walkable(3, 1))).toBe(true);
 });
