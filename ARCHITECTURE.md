@@ -69,6 +69,12 @@ src/
                      ground rings (armed targets, reach, characters).
                      One owner, so every affordance describes the same
                      verb; asks main.js for the world through `queries`
+  vision.js          Impaired sight: while the character you STEER carries a
+                     status with `aimSway`/`sightBlots` (blinded, confused),
+                     the aim drifts off the mouse, three cursors sway over
+                     the floor, and ink swims across the world. controls.js
+                     bends the click and the hover through it; hover.js still
+                     owns what the cursor says
   combat.js          Tactical on-map combat: per-unit INITIATIVE order, AP
                      turns, movement, ranged/melee, AI-driven units - costs
                      from data

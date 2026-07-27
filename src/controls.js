@@ -10,7 +10,13 @@ const pc = window.pc;
 // that state has to hear about all four: the HUD button used to repaint only on
 // its own click, so an orbit drag left it lit over a view it no longer had, and
 // clicking it to "turn it off" toggled a null state back ON.
-export function createControls({ app, canvas, focus, onLeftClickTile, onRightClickTile, onAnyLeftPress, onLeftDragTile, onHover, onHoverLeave, onTacticalChange = null }) {
+//
+// `aim` is the impairment hook (src/vision.js): a blinded character's aim does
+// not land where their player's mouse is, so every pointer coordinate that asks
+// the WORLD a question goes through it first. Deliberately only the left click
+// and the hover - the right-click menu and the editor's drag-paint stay exact,
+// because blind should make you fumble a swing, not a menu.
+export function createControls({ app, canvas, focus, onLeftClickTile, onRightClickTile, onAnyLeftPress, onLeftDragTile, onHover, onHoverLeave, onTacticalChange = null, aim = null }) {
   // Rig: camYaw (spins around the focus) -> camPitch (tilts) -> camera (sits
   // back at a fixed distance, looking at the focus).
   const camYaw = new pc.Entity('camYaw');
@@ -76,6 +82,13 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   let orbiting = false;
   let leftHeld = false; // for drag-painting in the editor
   let hoveringCanvas = false; // was the last hover over the world, not the UI?
+  // The last RAW pointer position on the canvas. Kept because an impaired aim
+  // keeps drifting while the mouse sits still: refreshHover below re-asks the
+  // world what is under the swaying crosshair on frames no mouse event arrives.
+  let lastX = 0;
+  let lastY = 0;
+  let haveMouse = false;
+  const aimed = (sx, sy) => (aim ? aim(sx, sy) : [sx, sy]);
   app.mouse.on(pc.EVENT_MOUSEDOWN, (e) => {
     if (!onCanvas(e)) return;
     if (e.button === pc.MOUSEBUTTON_MIDDLE) {
@@ -83,7 +96,8 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     } else if (e.button === pc.MOUSEBUTTON_LEFT) {
       leftHeld = true;
       onAnyLeftPress && onAnyLeftPress();
-      onLeftClickTile && onLeftClickTile(screenToTile(e.x, e.y), screenToGround(e.x, e.y), e.x, e.y);
+      const [ax, ay] = aimed(e.x, e.y);
+      onLeftClickTile && onLeftClickTile(screenToTile(ax, ay), screenToGround(ax, ay), ax, ay);
     } else if (e.button === pc.MOUSEBUTTON_RIGHT) {
       onRightClickTile && onRightClickTile(screenToTile(e.x, e.y), e.x, e.y, screenToGround(e.x, e.y));
     }
@@ -107,7 +121,11 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
       onLeftDragTile(screenToTile(e.x, e.y), screenToGround(e.x, e.y));
     } else if (onCanvas(e)) {
       hoveringCanvas = true;
-      onHover && onHover(screenToGround(e.x, e.y), e.x, e.y);
+      lastX = e.x;
+      lastY = e.y;
+      haveMouse = true;
+      const [ax, ay] = aimed(e.x, e.y);
+      onHover && onHover(screenToGround(ax, ay), ax, ay);
     } else if (hoveringCanvas) {
       // The cursor slid off the world and onto DOM UI. Say so ONCE: hover
       // events over UI used to be dropped entirely, so nothing ever told the
@@ -236,6 +254,17 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     cameraEntity,
     screenToTile,
     screenToGround,
+    // Re-ask the world what the aim is on, from the last known mouse position.
+    // Only an impaired aim needs this: a hover reading is normally as fresh as
+    // the mouse that produced it, but a drifting one goes stale the instant the
+    // player stops moving - the crosshair would sit lit on a coworker the sway
+    // had already carried it off, and hover.js's whole rule is that the preview
+    // IS the click. main.js calls it per frame while the sway is live.
+    refreshHover() {
+      if (!haveMouse || !hoveringCanvas || !onHover) return;
+      const [ax, ay] = aimed(lastX, lastY);
+      onHover(screenToGround(ax, ay), ax, ay);
+    },
     follow,
     shake,
     setView,

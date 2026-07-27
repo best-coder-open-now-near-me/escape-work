@@ -38,6 +38,7 @@ import {
 import { createControls } from './controls.js';
 import { createPicker } from './picking.js';
 import { createHoverLayer } from './hover.js';
+import { createVisionLayer } from './vision.js';
 import { createLooting } from './looting.js';
 import { createShopping } from './shopping.js';
 import { startCombat } from './combat.js';
@@ -1670,10 +1671,17 @@ function startGame(level) {
   }
 
   // --- input --------------------------------------------------------------------
+  // Impaired sight (vision.js), built before the controls because it is what
+  // bends their aim: while the character you are steering is blinded, the point
+  // the world is asked about drifts away from the mouse, three cursors sway
+  // over the floor, and ink swims across the view. Fed per frame from the
+  // steered sheet's merged statuses, down in the update loop.
+  const vision = createVisionLayer({ canvas: canvasEl });
   const controls = createControls({
     app,
     canvas: document.getElementById('app'),
     focus: grid.playerSpawn,
+    aim: (sx, sy) => vision.aim(sx, sy),
     onAnyLeftPress: () => ui.hideMenu(),
     // However the view is left - the button, T, a pitch drag, a raw setView -
     // the rail button repaints, so its lit state can never outlive the view.
@@ -1934,6 +1942,7 @@ function startGame(level) {
     picking,
     controls,
     ui,
+    vision, // it still owns what the cursor SAYS; vision hides the OS one
     queries: {
       party: () => party,
       enemies: () => enemies,
@@ -2264,6 +2273,19 @@ function startGame(level) {
     // only reports who is carrying what. The tracker throttles itself, and
     // only asks for the roster on the frames it emits on.
     if (!gameOver) auras.sync(dt, collectStatusCarriers);
+    // Impaired sight, off whoever you are STEERING - in a fight that's the
+    // member whose turn it is (combat.actingSheet stays pointed at the last
+    // party-side body even on the AI's turn, which is right: you are still
+    // looking through their eyes while the coworkers move), out of one it's the
+    // leader. A blinded companion you are not driving costs you their accuracy,
+    // not your screen.
+    const steered = inCombat && combat ? combat.actingSheet : sheet;
+    vision.set(!gameOver && steered ? (statusFx(steered).aimSway || 0) : 0);
+    vision.update(dt);
+    // A drifting aim goes stale the moment the mouse stops, so re-ask the world
+    // what the crosshair is on. hover.js's rule is that the preview IS the
+    // click, and the click is sampling a sway that never stops moving.
+    if (vision.strength > 0) controls.refreshHover();
     // The loot overlay tracks the world while held (the camera keeps easing).
     if (loot.labelsVisible) {
       loot.repositionLabels((w) => {
@@ -2472,6 +2494,9 @@ function startGame(level) {
     // either a held modifier or being in combat - the two halves of the gate)
     get hoverGlow() { return hover.glowing; },
     get cursor() { return canvasEl ? canvasEl.style.cursor : ''; },
+    // Impaired sight (vision.js): how hard the aim is swaying, how far off the
+    // mouse it currently is, and the verb the swaying reticles are wearing.
+    get vision() { return vision.debug; },
     get dialogueOpen() { return dialogue.visible; },
   };
 
