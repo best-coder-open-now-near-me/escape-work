@@ -149,6 +149,23 @@ export const STATUSES = {
     log: '{name} is reorganised. Nothing is where it was.',
     fx: { color: [0.72, 0.45, 0.95], burst: 'pop', aura: 'orbit', rate: 0.22 },
   },
+  // --- what a stance looks like (POWERS_PLAN M5) ----------------------------
+  // Overwatch carries no `effects` at all: the rule lives in combat's
+  // `watching` map, because it is about the REACTION budget and a sightline,
+  // neither of which the effect vocabulary can express. This entry exists so
+  // the state is VISIBLE - a chip on the HUD, an aura on the body, a line in
+  // the initiative strip. A tactical commitment nobody can see is one nobody
+  // plays around, and holding a stance is meant to be read by both sides.
+  //
+  // Its duration is nominal for the same reason: combat clears it the moment
+  // the stance lapses or fires, so the number only bounds a leak.
+  watching: {
+    name: 'Overwatch', icon: '👁️', harmful: false, clock: 'turn',
+    duration: 2, resistable: false,
+    effects: {},
+    log: '{name} is watching the room.',
+    fx: { color: [0.55, 0.9, 0.75], burst: 'rise', aura: 'orbit', rate: 0.5 },
+  },
   // --- what the control verb lands (POWERS_PLAN M2) -------------------------
   // A ROOT, not a stun. The distinction is the whole reason this status exists
   // rather than reusing `stunned`: a detained coworker still gets their turn

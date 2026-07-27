@@ -110,6 +110,28 @@ export function controlOutcome(a) {
 // Is this action a control? Used by the same one-predicate rule as isFriendly.
 export const isControl = (a) => !!a && a.type === 'control';
 
+// --- stance (POWERS_PLAN M5) -------------------------------------------------
+
+export const isStance = (a) => !!a && a.type === 'stance';
+// How far an overwatch watches, in tiles.
+export const watchRadiusOf = (a) => a.radius ?? 3;
+
+// Would a watcher fire on this mover? The rule, with no scene in it.
+//
+// Overwatch is NOT an opportunity attack, and the difference is the whole
+// verb: an opportunity attack punishes LEAVING your reach, overwatch punishes
+// ENTERING the ground you are covering. So this asks about where the mover
+// ended up, not about the leg they walked.
+//
+// The caller supplies `hasReaction` and `los` - the reaction budget and the
+// sightline both live in combat - and this owns the geometry and the sides.
+export function watchTriggers(a, t = {}) {
+  const { dist = 0, los = true, hasReaction = true, sameSide = false, moverStanding = true } = t;
+  if (!hasReaction || !moverStanding || sameSide) return false;
+  if (dist > watchRadiusOf(a)) return false;
+  return los;
+}
+
 // --- mobility (POWERS_PLAN M4) -----------------------------------------------
 
 export const isMobility = (a) => !!a && a.type === 'mobility';

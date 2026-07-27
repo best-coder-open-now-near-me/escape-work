@@ -21,6 +21,13 @@
 //            powers, and the AP economy cannot price both. Touch-range by
 //            default (a click walks you in, like a melee swing); `range` makes
 //            it thrown, `cone` makes it a wedge.
+//   stance - a posture held until your NEXT TURN (POWERS_PLAN M5).
+//            `mode: 'watch'` covers `radius` tiles: the first enemy to move
+//            within it takes a free swing, paid for out of the same
+//            once-per-round REACTION budget opportunity attacks spend - so the
+//            two can never stack into two free swings on one mover, and
+//            holding a stance is a real cost rather than a free extra. Firing
+//            SPENDS the stance; it does not re-arm when the budget refills.
 //   mobility- repositioning the AP economy cannot buy (POWERS_PLAN M4).
 //            `mode: 'dash'` carries you `distance` tile-lengths toward a
 //            clicked point for a FLAT `ap` (terrain's `slow` does not tax it -
@@ -295,12 +302,20 @@ export const ACTIONS = {
     log: 'You pull their access from the panel.',
     missLog: 'The panel spins. Somebody has been putting off that firmware update.',
   },
+  // Security's primary verb is the STANCE (POWERS_PLAN M5). Stand Post used to
+  // be `type: 'defend'` - the third copy of Deflect Blame - on the class whose
+  // entire tagline is about holding ground. It now does what it says: you
+  // cover the room, and the first coworker to cross your line takes a free
+  // swing for it. The reaction budget (TACTICS.REACTIONS_PER_ROUND) was built
+  // for opportunity attacks and had exactly one customer until this.
   'stand-post': {
-    type: 'defend',
+    type: 'stance',
+    mode: 'watch',
     ap: 2,
+    radius: 4,
     label: 'Stand Post',
-    desc: 'Plant yourself in the doorway. Incoming damage is halved until your next turn.',
-    log: 'You plant yourself in the doorway. Nobody is getting past. Damage halved.',
+    desc: 'Cover the room. The first coworker to move within 4 tiles takes a free swing - once.',
+    log: 'You plant yourself and watch the room. Nobody is getting past unremarked.',
   },
   'night-thermos': {
     type: 'heal',

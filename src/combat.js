@@ -14,7 +14,7 @@ import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, reachOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH, THROW_RANGE } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
-import { buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf } from './powers.js';
+import { buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers } from './powers.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
@@ -435,7 +435,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Targeted actions already worked this way: arm, then commit. Right-click
   // backs out of either. (Summons are targeted now - you pick the spot - so
   // they arm like an attack instead of confirming in place.)
-  const INSTANT_CONFIRM = new Set(['defend', 'heal']);
+  const INSTANT_CONFIRM = new Set(['defend', 'heal', 'stance']);
+  // Who is holding an overwatch right now: combatant -> the action id they
+  // took it with (POWERS_PLAN M5). A stance lasts until the holder's OWN next
+  // turn, so it is cleared in beginTurn rather than on a timer - "until your
+  // next turn" is a position in the initiative order, not a duration, and
+  // giving it a tick count would desynchronise the two the moment a joiner
+  // was inserted mid-round.
+  const watching = new Map();
   // Back out of whatever is armed or awaiting confirmation. RIGHT-CLICK does
   // this from anywhere; a left click never cancels (it reports an invalid
   // target instead), so aiming can't be lost by a near-miss.
@@ -502,7 +509,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         engageMemo.clear(); // bounds how stale an answer can get
         scrambleTurn += 1; // a confused character's bar re-deals each turn
       },
-      afterTick: (s) => { if (!s.member) syncUnitSpeed(s.unit); }, // gum wearing off gives the legs back
+      afterTick: (s) => {
+        if (!s.member) syncUnitSpeed(s.unit); // gum wearing off gives the legs back
+        // A stance lasts UNTIL THE HOLDER'S NEXT TURN, so it lapses as that
+        // turn opens (POWERS_PLAN M5). This hook rather than a tick count
+        // because "until your next turn" is a position in the initiative
+        // order, not a duration - a joiner inserted mid-round would drift the
+        // two apart immediately. It fires on skipped turns too, which is
+        // correct: a stunned watcher's stance still expires on schedule.
+        const holder = s.member || s.unit;
+        if (watching.delete(holder)) removeStatus(statusesOf(holder), 'watching');
+      },
       beforeAdvance: () => {
         armed = null;
         pendingConfirm = null;
@@ -1988,6 +2005,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // thing a player does with an unlabelled armed action is click an enemy.
     if (isFriendly(a)) out.push(`Aim at a teammate or yourself - range ${buffRangeOf(a)}, never misses`);
     if (isControl(a)) out.push('No damage - it takes their turn or their ground, not their HP');
+    if (isStance(a)) {
+      out.push(`Watches ${watchRadiusOf(a)} tiles until your next turn`);
+      out.push('Spends your reaction when it fires - one per round, shared with opportunity attacks');
+    }
     if (isMobility(a)) {
       out.push(aimsAtAlly(a)
         ? `Trade places with a teammate - range ${mobilityRangeOf(a)}`
@@ -2063,6 +2084,22 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       active.ap = roundAp(active.ap - a.ap);
       applyStatus(active.sheet, 'deflecting');
       statusFxAt(active, 'deflecting');
+      log(a.log);
+      refresh();
+    } else if (isStance(a)) {
+      // A stance is the one action that spends nothing NOW and everything
+      // later: it costs the AP up front and then sits on the reaction budget
+      // until the holder's next turn. Re-taking one you already hold is a
+      // refusal rather than a refresh, because the only thing it could buy is
+      // a second reaction, and the round budget is what stops overwatch from
+      // being a blender.
+      if (watching.has(active)) { log('You are already holding that.'); return; }
+      if (a.uses && active.usesLeft[id] <= 0) return;
+      if (a.uses) active.usesLeft[id] -= 1;
+      active.ap = roundAp(active.ap - a.ap);
+      watching.set(active, id);
+      applyStatus(active.sheet, 'watching');
+      statusFxAt(active, 'watching');
       log(a.log);
       refresh();
     } else if (a.type === 'heal') {
@@ -2463,6 +2500,35 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
       return;
     }
+    // OVERWATCH fires first (POWERS_PLAN M5), and it is a different question
+    // from the one below: an opportunity attack punishes LEAVING somebody's
+    // reach, overwatch punishes ENTERING the ground a watcher is covering. A
+    // mover crossing a watched doorway has not left anyone's reach, so the
+    // provokedBy sweep would never see them.
+    //
+    // It shares the ROUND budget rather than getting its own, which is what
+    // keeps the two from stacking into two free swings per mover per round -
+    // and it is why holding a stance is a real cost, not a free extra.
+    for (const [watcher, actionId] of watching) {
+      if (watcher === mover) continue;
+      const w = posOf(watcher);
+      const sameSide = !!watcher.sheet === !!mover.sheet;
+      if (!watchTriggers(ACTIONS[actionId], {
+        dist: cheb(Math.round(w.x), Math.round(w.z), x, z),
+        los: world.hasLos(Math.round(w.x), Math.round(w.z), x, z),
+        hasReaction: canReact(watcher),
+        sameSide,
+        moverStanding: standing(mover),
+      })) continue;
+      reactions.set(watcher, (reactions.get(watcher) || 0) + 1);
+      // The stance is SPENT once it fires. Overwatch that re-armed itself for
+      // free every time the reaction refilled would cover the whole fight off
+      // one turn's AP.
+      watching.delete(watcher);
+      removeStatus(statusesOf(watcher), 'watching');
+      opportunityStrike(watcher, mover, 'overwatch');
+      if (!standing(mover)) return; // dropped in the doorway - nothing left to punish
+    }
     for (const t of provokedBy(threatsAgainst(mover), from.px, from.pz, to.x, to.z, world.stepOpen)) {
       if (!canReact(t.ref)) continue; // an earlier swing this step spent it
       reactions.set(t.ref, (reactions.get(t.ref) || 0) + 1);
@@ -2474,7 +2540,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // The reaction swing: the attacker's own basic attack, at no AP cost, rolled
   // through the same assembler as every other attack. It deliberately carries
   // no weapon on-hit proc - a reflex, not a committed swing.
-  function opportunityStrike(attacker, defender) {
+  // `reason` picks the wording only: 'flee' (the default) is the classic
+  // opportunity attack on somebody breaking away, 'overwatch' is a stance
+  // firing on somebody entering covered ground. The RULES are identical - one
+  // basic swing, one reaction spent - so they share the resolution rather than
+  // growing a second copy of the roll, the damage and the death handling.
+  function opportunityStrike(attacker, defender, reason = 'flee') {
+    const caught = reason === 'overwatch' ? 'crossing your line' : 'breaking away';
     if (attacker.sheet) {
       // A party-side body catches a fleeing enemy.
       const a = ACTIONS[equippedAction(attacker.sheet)];
@@ -2484,7 +2556,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (!rollAgainst(attacker, defender)) {
         hitFx(defender, 'whiff');
         fx.damageText(defender.x, defender.z, 'MISS', MISS_COLOR);
-        log(`${attacker.sheet.name} swings at ${defender.def.name} breaking away - and misses.`);
+        log(`${attacker.sheet.name} swings at ${defender.def.name} ${caught} - and misses.`);
         refresh();
         return;
       }
@@ -2493,7 +2565,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       hitFx(defender, 'melee', attacker);
       if (died) deathFx(defender);
       fx.damageText(defender.x, defender.z, `-${dmg}`, '#ffd76b', { big: died });
-      log(`${attacker.sheet.name} catches ${defender.def.name} breaking away. ${dmg} damage!`);
+      log(`${attacker.sheet.name} catches ${defender.def.name} ${caught}. ${dmg} damage!`);
       if (died) callbacks.onEnemyKilled(defender);
       refresh();
       return;
@@ -2710,6 +2782,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // off by up to half a tile at this camera angle, which is exactly the
     // mis-click the body-pick-first rule exists to prevent.
     get actingAt() { const p = posOf(active); return { x: p.x, z: p.z }; },
+    // Who is holding an overwatch, by name (POWERS_PLAN M5). A stance is a
+    // commitment that pays off on somebody ELSE's turn, so a test that cannot
+    // see it can only assert the swing and guess at the cause.
+    get watching() {
+      return [...watching.keys()].map((u) => (u.sheet ? u.sheet.name : u.def.name));
+    },
     // The movement allowance left this turn (MOVEMENT_PLAN M2). 0 for a
     // character without the talent.
     get freeAp() { return active.freeAp || 0; },

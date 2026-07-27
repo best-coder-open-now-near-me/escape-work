@@ -8,6 +8,7 @@ import {
   controlProblem, controlOutcome, controlIsRanged, isControl,
   isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf,
   isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf,
+  isStance, watchRadiusOf, watchTriggers,
 } from '../../src/powers.js';
 import { TILE_TYPES } from '../../src/data/tiles.js';
 import { ACTIONS } from '../../src/data/actions.js';
@@ -283,6 +284,63 @@ test('every shipped mobility action declares a mode the runtime knows', () => {
     // nothing - the silent class of failure this lint exists to catch.
     if (a.mode === 'dash') assert.ok(dashDistanceOf(a) > 0, `${id} carries a distance`);
   }
+});
+
+// --- stance (POWERS_PLAN M5) ------------------------------------------------
+
+const WATCH = { type: 'stance', mode: 'watch', ap: 2, label: 'Test Watch', radius: 4 };
+const mover = (over = {}) => ({
+  dist: 2, los: true, hasReaction: true, sameSide: false, moverStanding: true, ...over,
+});
+
+test('isStance, and the watch radius default', () => {
+  assert.equal(isStance(WATCH), true);
+  assert.equal(isStance({ type: 'defend' }), false);
+  assert.equal(watchRadiusOf(WATCH), 4);
+  assert.equal(watchRadiusOf({}), 3);
+});
+
+test('overwatch fires on a hostile mover inside the radius, in sight', () => {
+  assert.equal(watchTriggers(WATCH, mover()), true);
+  assert.equal(watchTriggers(WATCH, mover({ dist: 4 })), true); // the edge counts
+  assert.equal(watchTriggers(WATCH, mover({ dist: 5 })), false);
+  assert.equal(watchTriggers(WATCH, mover({ los: false })), false);
+});
+
+test('overwatch never fires on your own side', () => {
+  // Otherwise a guard covering a doorway would shoot the teammate who walked
+  // through it - and the party moves through its own watcher's radius
+  // constantly.
+  assert.equal(watchTriggers(WATCH, mover({ sameSide: true })), false);
+});
+
+test('overwatch needs the reaction it shares with opportunity attacks', () => {
+  // The shared budget is what stops a watcher from getting two free swings on
+  // one mover in a round: an opportunity attack that already fired leaves no
+  // reaction for the stance, and vice versa.
+  assert.equal(watchTriggers(WATCH, mover({ hasReaction: false })), false);
+});
+
+test('overwatch does not fire on a mover already down', () => {
+  assert.equal(watchTriggers(WATCH, mover({ moverStanding: false })), false);
+});
+
+test('every shipped stance declares a mode the runtime knows', () => {
+  for (const [id, a] of Object.entries(ACTIONS)) {
+    if (a.type !== 'stance') continue;
+    assert.equal(a.mode, 'watch', `${id} has a known mode (got "${a.mode}")`);
+    assert.ok(watchRadiusOf(a) > 0, `${id} watches some ground`);
+  }
+});
+
+test('the overwatch status is visible state, not a rule', () => {
+  const def = STATUSES.watching;
+  assert.ok(def, 'watching exists');
+  assert.equal(def.harmful, false);
+  // The rule lives in combat's reaction budget and a sightline, neither of
+  // which the effect vocabulary can express. If this ever grows effects, the
+  // stance has quietly become two implementations.
+  assert.deepEqual(def.effects, {});
 });
 
 // --- the shipped content honors the verb ------------------------------------

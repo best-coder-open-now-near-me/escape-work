@@ -6,9 +6,22 @@
 // that the AP and the use are spent exactly once.
 import { test, expect } from '@playwright/test';
 import {
-  bootAndPick, enterCombat, waitForPlayerTurn, refillAp, clickAction,
-  combatState, onScreen,
+  bootAndPick, bootStash, enterCombat, waitForPlayerTurn, refillAp, clickAction,
+  combatState, onScreen, clickWorld, waitStill,
 } from './helpers.js';
+
+// A long room, so the Manager has to WALK to reach the guard - overwatch fires
+// on somebody entering covered ground, which needs somebody who moves.
+const WATCH_HALL = {
+  name: 'Watch Hall',
+  tiles: { '#': 'wall', '.': 'floor' },
+  actors: { '@': 'player', M: 'manager' },
+  map: [
+    '##########',
+    '#.@.....M#',
+    '##########',
+  ],
+};
 
 // The acting member's live status ids, straight off the combat surface.
 const myStatuses = (page) => page.evaluate(() =>
@@ -95,4 +108,57 @@ test('Performance Review is HR\'s, and it lands the Commended status', async ({ 
   await clickSelf(page);
 
   await expect.poll(() => myStatuses(page), { timeout: 15_000 }).toContain('commended');
+});
+
+test('Stand Post holds an overwatch, and it fires once on somebody crossing the line', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, WATCH_HALL, 'security');
+  await enterCombat(page);
+  await waitForPlayerTurn(page);
+  await refillAp(page);
+  await page.evaluate(() => { window.__combat.forceHit = true; });
+
+  // enterCombat walks you INTO the enemy to trigger the fight, so by now the
+  // Manager is adjacent and has no reason to move - and overwatch only fires
+  // on somebody who moves. Back off down the hall first so there is an
+  // approach to catch. (This provokes the Manager's own opportunity attack on
+  // the way out, which spends THEIR reaction, not ours.)
+  await clickWorld(page, 2, 1);
+  await waitStill(page);
+
+  const foeBefore = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
+  expect(foeBefore, 'a living Manager to walk at us').toBeTruthy();
+  expect(
+    Math.max(Math.abs(foeBefore.x - 2), Math.abs(foeBefore.z - 1)),
+    'the Manager should be far enough away that it has to walk',
+  ).toBeGreaterThan(1);
+
+  // The stance's AP is spent up front; the retreat above already ate some, and
+  // this spec is about the reaction, not the AP economy.
+  await refillAp(page);
+  const apBefore = await page.evaluate(() => window.__combat.ap);
+  // A stance is an instant self-action: first press arms, second commits.
+  await clickAction(page, 'stand-post');
+  await page.click('#act-stand-post');
+
+  // It registers as held, and it cost the AP up front.
+  await expect.poll(() => page.evaluate(() => window.__combat.watching), { timeout: 10_000 })
+    .not.toHaveLength(0);
+  expect(apBefore - (await page.evaluate(() => window.__combat.ap))).toBeCloseTo(2, 1);
+
+  // Hand the floor over. The Manager has to cross the hall to reach us, which
+  // means crossing the watched radius.
+  await page.click('#combat-end-turn');
+
+  // The payoff lands on somebody ELSE's turn: either the Manager took the free
+  // swing on the way in, or the stance lapsed at our next turn without them
+  // ever entering the radius. The first is the feature; assert it.
+  await expect.poll(async () => {
+    const f = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
+    return f ? f.hp : 0;
+  }, { timeout: 60_000 }).toBeLessThan(foeBefore.hp);
+
+  // ...and firing SPENDS it. An overwatch that re-armed itself off one turn's
+  // AP would cover the rest of the fight for free.
+  expect(await page.evaluate(() => window.__combat.watching)).toHaveLength(0);
 });
