@@ -21,6 +21,14 @@
 //            powers, and the AP economy cannot price both. Touch-range by
 //            default (a click walks you in, like a melee swing); `range` makes
 //            it thrown, `cone` makes it a wedge.
+//   mobility- repositioning the AP economy cannot buy (POWERS_PLAN M4).
+//            `mode: 'dash'` carries you `distance` tile-lengths toward a
+//            clicked point for a FLAT `ap` (terrain's `slow` does not tax it -
+//            a dash that got shorter through coffee would be a walk with extra
+//            steps). `mode: 'swap'` trades places with a teammate within
+//            `range`. Neither provokes an opportunity attack: they skip
+//            beginMove, so notifyStep has no record to punish - the same seam
+//            forced movement already uses.
 //   buff   - the friendly-target verb (POWERS_PLAN M1). Aim at an ALLY (a
 //            party member or one of your summons) within `range` with a clear
 //            line, or at yourself: restores `amount` HP, clears their statuses
@@ -215,12 +223,31 @@ export const ACTIONS = {
     max: 4,
     log: 'You fan a fistful of envelopes downrange.',
   },
-  'return-to-sender': {
-    type: 'defend',
+  // The Mail Room's primary verb is MOBILITY (POWERS_PLAN M4): the class
+  // taglined "knows every corridor" carried Return to Sender, which was the
+  // fourth `type: 'defend'` in the game - Deflect Blame with different words -
+  // and nothing at all that crossed a floor. This is the corridor knowledge as
+  // a button.
+  'courier-route': {
+    type: 'mobility',
+    mode: 'dash',
     ap: 2,
-    label: 'Return to Sender',
-    desc: 'Mark the abuse "addressee unknown". Incoming damage halved.',
-    log: 'You mark the incoming abuse "addressee unknown". Damage halved.',
+    label: 'Courier Route',
+    distance: 5,
+    desc: 'You know a shortcut. Cross the floor for a flat fee, and nobody gets a swing at you on the way.',
+    log: 'You take the route only the mail room knows.',
+  },
+  // The Mail Room track's own mobility, replacing a `kick` the Drone and
+  // Security also granted.
+  'courier-swap': {
+    type: 'mobility',
+    mode: 'swap',
+    ap: 2,
+    label: 'Hand-Off',
+    range: 6,
+    uses: 2,
+    desc: 'Trade places with a teammate anywhere in sight. Pull the wounded out; put yourself in.',
+    log: 'You execute a hand-off.',
   },
   'snack-cart': {
     type: 'heal',

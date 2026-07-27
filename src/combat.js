@@ -14,7 +14,7 @@ import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, reachOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH, THROW_RANGE } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
-import { buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf } from './powers.js';
+import { buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf } from './powers.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
@@ -637,21 +637,47 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // would get - or why they would get nothing. The friendly twin of the to-hit
   // readout: the same "say the outcome before the AP is spent" contract, on a
   // verb whose outcome is not a percentage.
-  function showBuffPreview(point, sx, sy) {
+  function showAllyPreview(point, sx, sy) {
     preview = null; // aiming replaces the movement trail, same as a swing
     const a = ACTIONS[armed];
     const m = allyAtPoint(point);
     if (!m) { hidePreview(); return; }
-    const problem = buffProblem(a, {
-      ...buffReach(m),
-      hp: m.sheet.hp,
-      maxHp: m.sheet.maxHp,
-      statusCount: statusList(m.sheet).length,
+    const problem = allyProblemFor(armed, m);
+    const who = m === active ? 'yourself' : m.sheet.name;
+    costTag.textContent = problem || `${a.label} on ${who} · ${a.ap} AP`;
+    costTag.style.left = `${sx + 14}px`;
+    costTag.style.top = `${sy + 14}px`;
+    costTag.style.display = 'block';
+  }
+
+  // While a dash is armed, the cursor prices the RUN: how far of it you would
+  // actually cover, and that it costs a flat fee rather than the per-tile
+  // charge the trail normally shows.
+  function showDashPreview(point, sx, sy) {
+    preview = null;
+    const a = ACTIONS[armed];
+    const tx = Math.round(point.x);
+    const tz = Math.round(point.z);
+    const problem = mobilityProblem(a, {
       ap: active.ap,
       usesLeft: a.uses ? active.usesLeft[armed] ?? 0 : null,
     });
-    const who = m === active ? 'yourself' : m.sheet.name;
-    costTag.textContent = problem || `${a.label} on ${who} · ${a.ap} AP`;
+    if (!problem && world.isWalkable(tx, tz)) {
+      const raw = world.findPath(active.actor.x, active.actor.z, tx, tz, active.actor);
+      if (raw && raw.length >= 2) {
+        const s = world.smooth([...raw.slice(0, -1), world.clampPoint(point.x, point.z)], active.actor);
+        const { points, done } = truncateByBudget(s, dashDistanceOf(a), () => 1);
+        preview = points; // the trail IS the affordance for a move
+        costTag.textContent = done
+          ? `${a.label} · ${a.ap} AP · no opportunity attacks`
+          : `${a.label} · ${a.ap} AP · as far as it reaches`;
+        costTag.style.left = `${sx + 14}px`;
+        costTag.style.top = `${sy + 14}px`;
+        costTag.style.display = 'block';
+        return;
+      }
+    }
+    costTag.textContent = problem || 'No route there.';
     costTag.style.left = `${sx + 14}px`;
     costTag.style.top = `${sy + 14}px`;
     costTag.style.display = 'block';
@@ -731,10 +757,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // coworker while Performance Review is armed promises a swing the click
       // would refuse - the exact class of lie the one-hover-answer rule
       // exists to prevent (ARCHITECTURE, hover.js).
-      if (isFriendly(ACTIONS[armed])) {
-        showBuffPreview(point, sx, sy);
+      if (aimsAtAlly(ACTIONS[armed])) {
+        showAllyPreview(point, sx, sy);
         return null;
       }
+      // A dash is aimed at the FLOOR, so it keeps the movement trail rather
+      // than a target readout - what the player needs to see is where they
+      // would end up, which is the one preview the game already draws well.
+      if (isMobility(ACTIONS[armed])) { showDashPreview(point, sx, sy); return null; }
       showHitPreview(hoverFoe, sx, sy);
       return hoverFoe;
     }
@@ -877,20 +907,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // land on right now, red on the ones out of range, out of line, or who
     // would get nothing from it. Same rule the click runs (buffProblem), so a
     // green ring is a promise.
-    if (isFriendly(a)) {
+    if (aimsAtAlly(a)) {
       if (!armed) return; // never auto-armed - only shown while deliberately aiming
       for (const m of friendlies()) {
         if (!m.actor?.entity) continue;
-        const ok = !buffProblem(a, {
-          ...buffReach(m),
-          hp: m.sheet.hp,
-          maxHp: m.sheet.maxHp,
-          statusCount: statusList(m.sheet).length,
-          ap: active.ap,
-          usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
-        });
         const pos = m.actor.entity.getPosition();
-        drawRing(pos.x, pos.z, TARGET_R, ok ? PREVIEW_OK : PREVIEW_FAR);
+        drawRing(pos.x, pos.z, TARGET_R, allyProblemFor(id, m) ? PREVIEW_FAR : PREVIEW_OK);
       }
       return;
     }
@@ -1333,6 +1355,74 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return { slammed: false, died: false, msg: `You ${verb} ${en.def.name} back a step.` };
   }
 
+  // --- the mobility verb (POWERS_PLAN M4) ----------------------------------
+  // Repositioning that the AP economy cannot buy. A dash carries you a fixed
+  // DISTANCE for a flat cost; a swap trades places with a teammate across the
+  // room. Both are free of opportunity attacks, and that is the point: until
+  // now the only answer to the threat ring was the Manager's `noProvoke`
+  // talent, which is a passive nobody chooses in the moment. This is the
+  // counterplay as a decision.
+  //
+  // NOT provoking is achieved by NOT calling beginMove: `notifyStep` only
+  // punishes a mover it has a `moveStart` record for, which is the same seam a
+  // shove glide already uses ("forced movement never provokes", TACTICS_PLAN
+  // #9). Granted movement joins forced movement rather than growing a second
+  // exemption the threat code would have to learn.
+  function performDash(id, tx, tz, point) {
+    const a = ACTIONS[id];
+    const problem = mobilityProblem(a, {
+      ap: active.ap,
+      usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
+    });
+    if (problem) { lastClickOutcome = `refused:${problem}`; log(problem); return; }
+    const raw = (tx === active.actor.x && tz === active.actor.z)
+      ? null
+      : world.findPath(active.actor.x, active.actor.z, tx, tz, active.actor);
+    if (!raw || raw.length < 2) { log('No route there.'); return; }
+    const end = point ? world.clampPoint(point.x, point.z) : null;
+    const smoothed = world.smooth(end ? [...raw.slice(0, -1), end] : raw, active.actor);
+    // Truncated by DISTANCE, at a flat cost per tile-length, so the terrain's
+    // `slow` does not tax a dash the way it taxes a walk. A dash that got
+    // shorter through coffee would be a walk with extra steps.
+    const { points, done } = truncateByBudget(smoothed, dashDistanceOf(a), () => 1);
+    if (points.length < 2) { log('Nowhere to go.'); return; }
+    active.ap = roundAp(active.ap - a.ap);
+    if (a.uses) active.usesLeft[id] -= 1;
+    hidePreview();
+    active.actor.setPath(points); // deliberately WITHOUT beginMove - see above
+    log(done ? a.log : `${a.log} You run out of corridor.`);
+    armed = null;
+    refresh();
+  }
+
+  // Trade places with a teammate. Both bodies move, neither provokes, and the
+  // swap is legal even when the two tiles could not be walked between - it is
+  // a courier's trick, not a route.
+  function performSwap(id, m) {
+    const a = ACTIONS[id];
+    const problem = mobilityProblem(a, {
+      dist: cheb(active.actor.x, active.actor.z, m.actor.x, m.actor.z),
+      los: world.hasLos(active.actor.x, active.actor.z, m.actor.x, m.actor.z),
+      ap: active.ap,
+      usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
+      allyHp: m.sheet.hp,
+    });
+    if (problem) { lastClickOutcome = `refused:${problem}`; log(problem); return; }
+    if (m === active) { log('You are already there.'); return; }
+    const mine = { x: active.actor.x, z: active.actor.z };
+    const theirs = { x: m.actor.x, z: m.actor.z };
+    active.ap = roundAp(active.ap - a.ap);
+    if (a.uses) active.usesLeft[id] -= 1;
+    // pushTo is the existing "move a body without it counting as a walk" call
+    // (the shove's glide). Using it here means the swap cannot provoke and
+    // cannot trigger a per-tile hazard hook mid-flight.
+    active.actor.pushTo(theirs.x, theirs.z);
+    m.actor.pushTo(mine.x, mine.z);
+    log(`${a.log} You and ${m.sheet.name} trade places.`);
+    armed = null;
+    refresh();
+  }
+
   // --- the zone verb (POWERS_PLAN M3) --------------------------------------
   // `leaves` used to be welded to the cone attack, so the only way to put
   // paper on the floor was to also swing at somebody. Freed into its own verb,
@@ -1484,6 +1574,27 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return best?.m || null;
   }
 
+  // Why an ally-aimed action cannot land on this teammate, or null. ONE
+  // dispatch for the two verbs that point at friends, so the rings, the cursor
+  // and the click ask the same question of both - three call sites each
+  // consulting its own verb's rule is exactly how the crosshair and the
+  // readout came to disagree once already.
+  const allyProblemFor = (id, m) => {
+    const a = ACTIONS[id];
+    const common = {
+      ...buffReach(m),
+      ap: active.ap,
+      usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
+    };
+    if (isMobility(a)) return mobilityProblem(a, { ...common, allyHp: m.sheet.hp });
+    return buffProblem(a, {
+      ...common,
+      hp: m.sheet.hp,
+      maxHp: m.sheet.maxHp,
+      statusCount: statusList(m.sheet).length,
+    });
+  };
+
   // Distance and line to an ally, in the units buffProblem expects.
   const buffReach = (m) => ({
     dist: cheb(active.actor.x, active.actor.z, m.actor.x, m.actor.z),
@@ -1547,10 +1658,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         : (active.actor.moving ? 'gate:moving' : 'gate:dead');
       return;
     }
-    if (!armed || !isFriendly(ACTIONS[armed])) return false;
+    if (!armed || !aimsAtAlly(ACTIONS[armed])) return false;
     hidePreview();
     lastClickOutcome = 'acted';
-    performBuff(armed, m);
+    if (isMobility(ACTIONS[armed])) performSwap(armed, m);
+    else performBuff(armed, m);
     return true;
   }
 
@@ -1807,13 +1919,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // deliberately: Remote Restart is a `buff` that happens to purge, and
       // falling through to the attack-purge path would clear your statuses
       // without spending the use, then narrate it as a reboot.
-      if (isFriendly(a)) {
+      if (aimsAtAlly(a)) {
         const m = allyAtPoint(point)
           || friendlies().find((f) => f.actor.x === tile.x && f.actor.z === tile.z);
-        if (m) { performBuff(armed, m); return; }
+        if (m) {
+          if (isMobility(a)) performSwap(armed, m); else performBuff(armed, m);
+          return;
+        }
         log('Aim at a teammate - or at yourself.');
         return;
       }
+      // A dash is aimed at the ground, like a walk - because that is what it
+      // is, bought at a flat price and free of opportunity attacks.
+      if (isMobility(a)) { performDash(armed, tile.x, tile.z, point); return; }
       // A purge (reboot) can target YOURSELF: wipes your statuses too -
       // paper-cut bleeding stops, but so does your Deflect.
       if (a.purge && tile.x === active.actor.x && tile.z === active.actor.z) {
@@ -1870,6 +1988,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // thing a player does with an unlabelled armed action is click an enemy.
     if (isFriendly(a)) out.push(`Aim at a teammate or yourself - range ${buffRangeOf(a)}, never misses`);
     if (isControl(a)) out.push('No damage - it takes their turn or their ground, not their HP');
+    if (isMobility(a)) {
+      out.push(aimsAtAlly(a)
+        ? `Trade places with a teammate - range ${mobilityRangeOf(a)}`
+        : `Move up to ${dashDistanceOf(a)} tiles for a flat ${a.ap} AP`);
+      out.push('Provokes no opportunity attacks');
+    }
     if (isZone(a)) {
       out.push(`Covers a ${zoneRadiusOf(a) * 2}-tile area with ${a.leaves} - range ${zoneRangeOf(a)}`);
     }
@@ -1896,14 +2020,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const wasPending = pendingConfirm;
     pendingConfirm = null;
     if (a.type === 'attack' || a.type === 'shove' || a.type === 'summon'
-      || isFriendly(a) || isControl(a) || isZone(a)) {
+      || isFriendly(a) || isControl(a) || isZone(a) || isMobility(a)) {
       armed = id; // arm it; clicking a ringed target (or a spot) fires it
       hidePreview(); // aiming now - the movement trail yields to targets
       log(a.type === 'summon'
         ? `${a.label} armed. Click where they should report.`
         : isZone(a)
           ? `${a.label} armed. Click where it should land.`
-          : isFriendly(a)
+          : isMobility(a) && !aimsAtAlly(a)
+            ? `${a.label} armed. Click where you want to be.`
+            : aimsAtAlly(a)
           // Naming the SIDE matters on the one verb that points the other way:
           // armed the same way an attack is, aimed at the opposite half of the
           // board, and nothing else on the bar behaves like that yet.
@@ -2690,7 +2816,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Is the armed action aimed at friends? main.js asks before it decides
     // which side of the board a click belongs to - it must not consult
     // ACTIONS itself, or there would be two answers to one question.
-    get armedIsFriendly() { return isFriendly(ACTIONS[armed]); },
+    get armedIsFriendly() { return aimsAtAlly(ACTIONS[armed]); },
     notifyMemberDown,
     // The body whose turn it is - a party member OR a summon you're driving.
     // main.js needs this because party.active can't point at a summon.

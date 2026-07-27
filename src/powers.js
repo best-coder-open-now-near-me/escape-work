@@ -110,6 +110,44 @@ export function controlOutcome(a) {
 // Is this action a control? Used by the same one-predicate rule as isFriendly.
 export const isControl = (a) => !!a && a.type === 'control';
 
+// --- mobility (POWERS_PLAN M4) -----------------------------------------------
+
+export const isMobility = (a) => !!a && a.type === 'mobility';
+
+// How far a dash carries, in tile-lengths along the smoothed route. This is a
+// DISTANCE, not an AP budget: the whole point of the verb is to reposition in
+// a way the AP economy cannot buy, so pricing it in AP would make it a
+// discount on walking rather than a different thing from walking.
+export const dashDistanceOf = (a) => a.distance ?? 4;
+// How far a swap or a pull reaches, in tiles.
+export const mobilityRangeOf = (a) => a.range ?? 5;
+
+// Which mobility modes point at a TEAMMATE rather than at the ground.
+const ALLY_MODES = new Set(['swap', 'pull']);
+
+// Does this action aim at an ally? The one predicate every targeting decision
+// asks - arming, the rings, the cursor, the click. A buff always does; a
+// mobility action does when its mode moves somebody else. Keeping this
+// separate from isFriendly (which means "is a buff") is what lets the two
+// verbs share the friendly click path without sharing their payloads.
+export const aimsAtAlly = (a) => isFriendly(a) || (isMobility(a) && ALLY_MODES.has(a.mode));
+
+// Why this mobility action cannot be used right now, or null.
+//
+// `dist`/`los` describe the AIM: the ground for a dash, the teammate for a
+// swap or a pull. A dash checks neither - where you may end up is a pathing
+// question, and pathing needs the world.
+export function mobilityProblem(a, t = {}) {
+  const { dist = 0, los = true, ap = 0, usesLeft = null, allyHp = 1 } = t;
+  if (ap < a.ap) return 'Not enough AP.';
+  if (usesLeft !== null && usesLeft <= 0) return `No ${(a.label || 'uses').toLowerCase()} left this fight.`;
+  if (!ALLY_MODES.has(a.mode)) return null;
+  if (allyHp <= 0) return 'They are down - you cannot trade places with that.';
+  if (dist > mobilityRangeOf(a)) return 'Too far - move closer.';
+  if (!los) return 'No clear line to them.';
+  return null;
+}
+
 // --- zone (POWERS_PLAN M3) ---------------------------------------------------
 
 export const isZone = (a) => !!a && a.type === 'zone';

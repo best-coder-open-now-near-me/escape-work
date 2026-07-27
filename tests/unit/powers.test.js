@@ -7,6 +7,7 @@ import {
   buffProblem, buffOutcome, buffRangeOf, isFriendly, BUFF_RANGE,
   controlProblem, controlOutcome, controlIsRanged, isControl,
   isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf,
+  isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf,
 } from '../../src/powers.js';
 import { TILE_TYPES } from '../../src/data/tiles.js';
 import { ACTIONS } from '../../src/data/actions.js';
@@ -232,6 +233,55 @@ test('every shipped zone paints a real surface tile', () => {
     // A zone that painted a plain tile would spend a turn changing the floor's
     // colour. The point of the verb is the SURFACE layer underneath.
     assert.ok(TILE_TYPES[a.leaves].surface, `${id} leaves a tile carrying a surface`);
+  }
+});
+
+// --- mobility (POWERS_PLAN M4) ----------------------------------------------
+
+const DASH = { type: 'mobility', mode: 'dash', ap: 2, label: 'Test Dash', distance: 5 };
+const SWAP = { type: 'mobility', mode: 'swap', ap: 2, label: 'Test Swap', range: 6, uses: 2 };
+
+test('isMobility, and the mobility defaults', () => {
+  assert.equal(isMobility(DASH), true);
+  assert.equal(isMobility({ type: 'attack' }), false);
+  assert.equal(dashDistanceOf(DASH), 5);
+  assert.equal(dashDistanceOf({}), 4);
+  assert.equal(mobilityRangeOf(SWAP), 6);
+  assert.equal(mobilityRangeOf({}), 5);
+});
+
+test('aimsAtAlly covers buffs and the ally-moving modes, not a dash', () => {
+  assert.equal(aimsAtAlly(HEAL), true); // a buff always points at a friend
+  assert.equal(aimsAtAlly(SWAP), true); // swap moves a teammate
+  assert.equal(aimsAtAlly(DASH), false); // a dash points at the floor
+  assert.equal(aimsAtAlly({ type: 'attack' }), false);
+});
+
+test('a dash is gated by AP and uses ONLY - where it lands is pathing', () => {
+  assert.equal(mobilityProblem(DASH, { ap: 10 }), null);
+  assert.match(mobilityProblem(DASH, { ap: 1 }), /AP/);
+  assert.match(mobilityProblem({ ...DASH, uses: 1 }, { ap: 10, usesLeft: 0 }), /left this fight/);
+  // A dash never consults range or line: it is a route, and routes are the
+  // world's business. Handing it a hopeless aim must not refuse it here.
+  assert.equal(mobilityProblem(DASH, { ap: 10, dist: 99, los: false }), null);
+});
+
+test('a swap needs a living teammate, in range, in sight', () => {
+  const t = (over = {}) => ({ dist: 1, los: true, ap: 10, usesLeft: 2, allyHp: 5, ...over });
+  assert.equal(mobilityProblem(SWAP, t()), null);
+  assert.equal(mobilityProblem(SWAP, t({ dist: 6 })), null);
+  assert.match(mobilityProblem(SWAP, t({ dist: 7 })), /Too far/);
+  assert.match(mobilityProblem(SWAP, t({ los: false })), /No clear line/);
+  assert.match(mobilityProblem(SWAP, t({ allyHp: 0 })), /down/);
+});
+
+test('every shipped mobility action declares a mode the runtime knows', () => {
+  for (const [id, a] of Object.entries(ACTIONS)) {
+    if (a.type !== 'mobility') continue;
+    assert.ok(['dash', 'swap'].includes(a.mode), `${id} has a known mode (got "${a.mode}")`);
+    // A mode the dispatch does not recognise would arm, aim, and then do
+    // nothing - the silent class of failure this lint exists to catch.
+    if (a.mode === 'dash') assert.ok(dashDistanceOf(a) > 0, `${id} carries a distance`);
   }
 });
 

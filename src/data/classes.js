@@ -153,13 +153,14 @@ export const CLASSES = {
     track: [
       { id: 'mail-cart-legs', name: 'Cart Legs', cost: 1, effect: { attrBonus: { hustle: 1 } } },
       { id: 'mail-routes', name: 'Route Knowledge', cost: 1, effect: { attrBonus: { savvy: 1 } } },
-      { id: 'mail-dock-boots', name: 'Dock Boots', cost: 1, requires: ['mail-cart-legs'], effect: { grantsAction: 'kick' } },
+      // Was a third copy of `kick` (POWERS_PLAN M4).
+      { id: 'mail-hand-off', name: 'Hand-Off', cost: 1, requires: ['mail-cart-legs'], effect: { grantsAction: 'courier-swap' } },
       // The Pawn (MOVEMENT_PLAN M2): AP that ONLY movement may spend, drawn
       // before real AP. Turns repositioning from a cost into a habit - the
       // clerk flanks and gets behind people without giving up a swing.
       { id: 'mail-always-moving', name: 'Always Moving', cost: 1, requires: ['mail-cart-legs'], effect: { talent: { freeMoveAp: 1 } } },
     ],
-    actions: ['mail-cone', 'return-to-sender', 'snack-cart'],
+    actions: ['mail-cone', 'courier-route', 'snack-cart'],
     talent: {
       name: 'Warehouse Soles',
       blurb: 'Eleven years of ignored wet-floor signs. You cannot slip. Ever.',
