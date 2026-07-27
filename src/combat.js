@@ -11,7 +11,7 @@
 import { ACTIONS, arrivalLine } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
-import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH, THROW_RANGE } from './stats.js';
+import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
 import { STATUSES } from './data/statuses.js';
@@ -823,19 +823,26 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // disagree about whether you're aiming at someone. It's the answer to "can
     // I hit them from here?", a question you only ask while aiming; always-on,
     // it was just a circle that followed you around.
-    if (hoverFoe?.alive) {
+    // A RANGED attack is not answered by this circle: its rule is a Chebyshev
+    // square plus a line of sight, which a radius describes wrongly at the
+    // corners, and the melee reach drawn under a staple gun says the opposite
+    // of the truth. The per-enemy rings below answer it exactly for those.
+    if (hoverFoe?.alive && !rangeOf(id)) {
       const me = posOf(active);
       drawRing(me.x, me.z, a.type === 'shove' ? REACH.SHOVE : reachOfUnit(active), REACH_RING);
     }
     for (const en of world.liveEnemies()) {
       if (!en.entity) continue;
       let ok;
+      const range = rangeOf(id);
       if (a.type === 'shove') {
         ok = canReach(active, en, REACH.SHOVE) && active.ap >= a.ap;
-      } else if (a.ammoCost) {
-        ok = cheb(active.actor.x, active.actor.z, en.x, en.z) <= THROW_RANGE
+      } else if (range) {
+        // Ranged: distance, a clear line, AP - and ammo only if this particular
+        // shot bills for it (the throws do; a staple gun fires for free).
+        ok = cheb(active.actor.x, active.actor.z, en.x, en.z) <= range
           && world.hasLos(active.actor.x, active.actor.z, en.x, en.z)
-          && active.sheet.paper >= ammoCostOf(id) && active.ap >= a.ap;
+          && (!a.ammoCost || active.sheet.paper >= ammoCostOf(id)) && active.ap >= a.ap;
       } else {
         ok = active.ap >= a.ap; // melee: clicking a distant target walks you in
       }
@@ -1088,10 +1095,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Spend the cost first: a miss still burns the AP, the paper and the use
     // (HIT_PLAN #4 - a swing that happened is spent whether or not it landed).
     // The projectile/lunge also fires either way.
-    if (a.ammoCost) {
-      active.sheet.paper -= ammoCostOf(id);
-      fx.projectile({ x: active.actor.x, z: active.actor.z }, { x: en.x, z: en.z },
-        id === 'paper-airplane' ? 'plane' : 'ball');
+    // A ranged attack flies; a melee one lunges. Keyed off rangeOf rather than
+    // `ammoCost`, or a staple gun would lunge its owner across four desks into
+    // the target's face - the exact thing holding a ranged weapon is for.
+    if (rangeOf(id)) {
+      if (a.ammoCost) active.sheet.paper -= ammoCostOf(id);
+      let flight = 'shot'; // fired: a small pellet, flat and quick
+      if (id === 'paper-airplane') flight = 'plane';
+      else if (a.ammoCost) flight = 'ball';
+      fx.projectile({ x: active.actor.x, z: active.actor.z }, { x: en.x, z: en.z }, flight);
     } else {
       active.actor.lunge(en.x, en.z);
     }
@@ -1112,7 +1124,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     let dmg = rand(a.min, a.max) + damageBonus(active.sheet); // carried staplers count
     if (a.ammoCost) dmg += talentFxOf(active).paperDamageBonus || 0;
     const died = en.takeDamage(dmg);
-    hitFx(en, a.ammoCost ? 'paper' : 'melee', active);
+    // Anything that arrived from over there lands as a projectile hit, not a
+    // punch: light debris thrown away from the shooter.
+    hitFx(en, rangeOf(id) ? 'paper' : 'melee', active);
     if (died) deathFx(en);
     fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b', { big: died });
     let line = `${a.log} ${dmg} damage!`;
@@ -1316,14 +1330,58 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (!engaged.some((e) => e.alive)) victory();
       return;
     }
-    if (a.ammoCost) {
-      // ranged: needs range, line of sight, ammo, AP
-      if (cheb(active.actor.x, active.actor.z, en.x, en.z) > THROW_RANGE) { refuse('Too far to throw.'); return; }
-      if (!world.hasLos(active.actor.x, active.actor.z, en.x, en.z)) { refuse('No clear line to throw.'); return; }
-      if (active.sheet.paper < ammoCostOf(armed)) { refuse('Out of paper.'); return; }
-      if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
-      active.actor.faceToward(en.x, en.z);
-      performOn(armed, en);
+    const range = rangeOf(armed);
+    if (range) {
+      const thrown = !!a.ammoCost; // a wad and a staple miss differently
+      const far = cheb(active.actor.x, active.actor.z, en.x, en.z) > range;
+      const blocked = !world.hasLos(active.actor.x, active.actor.z, en.x, en.z);
+      // A THROW refuses where it stands, exactly as it always has: you armed it
+      // deliberately, it is billed in paper, and spending your last sheet at the
+      // end of a walk you did not ask for is worse than being told no.
+      if (thrown) {
+        if (far) { refuse('Too far to throw.'); return; }
+        if (blocked) { refuse('No clear line to throw.'); return; }
+        if (active.sheet.paper < ammoCostOf(armed)) { refuse('Out of paper.'); return; }
+        if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
+        active.actor.faceToward(en.x, en.z);
+        performOn(armed, en);
+        return;
+      }
+      if (!far && !blocked) {
+        if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
+        active.actor.faceToward(en.x, en.z);
+        performOn(armed, en);
+        return;
+      }
+      // A ranged WEAPON closes until it can fire, the same way the melee swing
+      // closes until it can hit. Its basic attack is what a bare click on a
+      // coworker uses (defaultAttack), so refusing here would break the most
+      // obvious verb in the game for anyone holding one: click a coworker two
+      // rooms away with a stapler and you walk over; with a staple gun you
+      // would have stood still and read a refusal. It walks the same route, it
+      // just stops the moment the shot is on rather than at their elbow.
+      const route = routeBeside(en);
+      if (!route || route.length < 2) { refuse('No way to get a shot at them.'); return; }
+      // The first point on that route from which the shot is legal - so a
+      // walk-in costs the steps it needs and not one more.
+      let cut = route.length - 1;
+      for (let i = 0; i < route.length; i++) {
+        const [tx, tz] = route[i];
+        if (cheb(tx, tz, en.x, en.z) <= range && world.hasLos(tx, tz, en.x, en.z)) { cut = i; break; }
+      }
+      const shotWalk = walkActive(route.slice(0, cut + 1), moveBudget(active) - a.ap);
+      if (!shotWalk) { refuse('Not enough AP to get in range.'); return; }
+      // Will we be able to fire when the walk finishes? The arrival check
+      // (pendingMelee, in the update loop) is authoritative either way - this
+      // only decides whether to promise the shot or report the walk.
+      if (cheb(shotWalk.end[0], shotWalk.end[1], en.x, en.z) <= range
+        && world.hasLos(shotWalk.end[0], shotWalk.end[1], en.x, en.z)) {
+        pendingMelee = { en, action: armed }; // fire on arrival
+      } else {
+        armed = null;
+        log('You close the distance.');
+        refresh();
+      }
       return;
     }
     // melee: walk up if needed, then strike
@@ -1334,21 +1392,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return;
     }
     // walk the cheapest route to their side, as far as the budget allows
-    let best = null;
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-      const gx = en.x + dx;
-      const gz = en.z + dz;
-      // Already STANDING on a goal tile - out of reach only because the body
-      // rests on its far side - means the "route" is a shuffle inside this
-      // tile; the approach point below closes the last half-tile to their
-      // body. findPath returns the one-tile path [[gx,gz]] here, and its
-      // length of 1 used to win the shortest-path contest and then fail the
-      // >= 2 check: the player CLOSEST to the target was the one told there
-      // was no way to reach them.
-      if (gx === active.actor.x && gz === active.actor.z) { best = [[gx, gz], [gx, gz]]; break; }
-      const p = world.findPath(active.actor.x, active.actor.z, gx, gz, active.actor);
-      if (p && p.length >= 2 && (!best || p.length < best.length)) best = p;
-    }
+    const best = routeBeside(en);
     if (!best || best.length < 2) { refuse('No way to reach them.'); return; }
     // walk up to their body, not the centre of the neighbouring tile.
     // The budget is the SAME one an ordinary move spends - allowance first,
@@ -1371,6 +1415,28 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       log('You close the distance.');
       refresh();
     }
+  }
+
+  // The cheapest walkable route to a tile BESIDE `en`, or null if the body is
+  // sealed off entirely. Shared by the two walk-ups: the melee swing follows it
+  // to their elbow, a ranged weapon follows it only until the shot is on.
+  function routeBeside(en) {
+    let best = null;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const gx = en.x + dx;
+      const gz = en.z + dz;
+      // Already STANDING on a goal tile - out of reach only because the body
+      // rests on its far side - means the "route" is a shuffle inside this
+      // tile; the caller's approach point closes the last half-tile to their
+      // body. findPath returns the one-tile path [[gx,gz]] here, and its
+      // length of 1 used to win the shortest-path contest and then fail the
+      // >= 2 check: the player CLOSEST to the target was the one told there
+      // was no way to reach them.
+      if (gx === active.actor.x && gz === active.actor.z) return [[gx, gz], [gx, gz]];
+      const p = world.findPath(active.actor.x, active.actor.z, gx, gz, active.actor);
+      if (p && p.length >= 2 && (!best || p.length < best.length)) best = p;
+    }
+    return best;
   }
 
   // Smooth a raw tile route and walk the ACTIVE member along it, charging by
@@ -1451,6 +1517,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     if (a.amount) out.push(`Restores ${a.amount} HP`);
     if (a.cone) out.push(`Cone - ${a.cone.range} tiles, ${a.cone.halfAngle * 2} degrees wide`);
+    // Range is the whole reason to hold a ranged weapon, so the tip says it -
+    // otherwise the only way to learn a staple gun outreaches a straw by two
+    // tiles is to stand somewhere and be refused.
+    if (rangeOf(id) && !a.cone) out.push(`Range ${rangeOf(id)} tiles - needs a clear line`);
     if (a.ammoCost) out.push(`Costs ${ammoCostOf(id)} paper (you have ${active.sheet.paper})`);
     if (a.uses) out.push(`${active.usesLeft[id]} of ${a.uses} uses left this fight`);
     if (a.applies) out.push(`Applies ${STATUSES[a.applies]?.name || a.applies}`);
@@ -2068,7 +2138,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (pendingMelee && !active.actor.moving) {
         const { en, action } = pendingMelee;
         pendingMelee = null;
-        if (en.alive && canReach(active, en)
+        // A queued swing lands if the walk ended in reach; a queued SHOT lands
+        // if it ended in range with a line. Same queue, two arrival rules -
+        // reading reach for a staple gun would cancel every walk-in that
+        // stopped at exactly the distance it was walking to.
+        const arrived = rangeOf(action)
+          ? cheb(active.actor.x, active.actor.z, en.x, en.z) <= rangeOf(action)
+            && world.hasLos(active.actor.x, active.actor.z, en.x, en.z)
+          : canReach(active, en);
+        if (en.alive && arrived
           && active.ap >= ACTIONS[action].ap) {
           active.actor.faceToward(en.x, en.z);
           performOn(action, en);

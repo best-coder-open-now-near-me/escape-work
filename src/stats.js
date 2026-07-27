@@ -459,6 +459,32 @@ export function reachOf(sheet) {
   return REACH.DEFAULT + (equippedStats(sheet).reach || 0);
 }
 
+// How far an attack carries as a PROJECTILE, in tiles (Chebyshev), or 0 for a
+// melee swing that has to be walked into reach first.
+//
+// This exists because `ammoCost` used to answer this question by proxy: every
+// ranged attack in the game was a paper throw, so "costs ammo" and "is fired
+// from over there" were the same set, and five call sites across combat.js and
+// main.js branched on `a.ammoCost` to mean "ranged". They are now two facts. A
+// ranged WEAPON (the staple gun, the straw) has no ammo at all - firing it is
+// free, the way a bow is in the games this borrows from - and an ammo cost is
+// free to appear on something that isn't ranged at all later.
+//
+// The default keeps the paper throws exactly where they were: an `ammoCost`
+// action with no declared `range` carries THROW_RANGE, so the two throwables
+// need no data change and the constant stays the one number for "how far can
+// you chuck a wad". Anything else declares `range` outright.
+//
+// Only attacks answer. Summon placement carries its own `range` (how far from
+// the summoner applicants may report), and reading that as a firing range
+// would make Post the Role look like a gun.
+export function rangeOf(actionId) {
+  const a = ACTIONS[actionId];
+  if (!a || a.type !== 'attack') return 0;
+  if (typeof a.range === 'number') return a.range;
+  return a.ammoCost ? THROW_RANGE : 0;
+}
+
 // What one throw actually costs THIS character in paper. The `paperAmmoDiscount`
 // talent (the Office Drone's Origami Specialist) shaves a sheet off anything
 // that costs more than one, never below one - a talent that made a throw free

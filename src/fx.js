@@ -691,8 +691,15 @@ function ensureFxMats() {
 // another, shedding a fading trail. Fire and forget. It leaves the thrower's
 // hand in a puff of loose sheets and shreds itself on arrival - the arc used
 // to simply blink out of existence at the target.
+//
+// 'shot' is the FIRED one (the staple gun, the straw): the same flight, read
+// differently - a small pellet, quicker, and almost flat, because a lobbed
+// staple looks thrown and the whole point of the weapon is that it wasn't. It
+// also skips the puff of loose sheets at both ends, which is paper's tell and
+// nothing a staple sheds.
 export function throwProjectile(app, from, to, kind = 'ball') {
   const m = ensureFxMats();
+  const shot = kind === 'shot';
   const holder = new pc.Entity('projectile');
   if (kind === 'plane') {
     const spine = new pc.Entity();
@@ -710,7 +717,8 @@ export function throwProjectile(app, from, to, kind = 'ball') {
   } else {
     const wad = new pc.Entity();
     wad.addComponent('render', { type: 'sphere', material: m.paper });
-    wad.setLocalScale(0.17, 0.15, 0.16);
+    if (shot) wad.setLocalScale(0.075, 0.07, 0.075);
+    else wad.setLocalScale(0.17, 0.15, 0.16);
     holder.addChild(wad);
   }
   app.root.addChild(holder);
@@ -718,16 +726,19 @@ export function throwProjectile(app, from, to, kind = 'ball') {
   const dx = to.x - from.x;
   const dz = to.z - from.z;
   const dist = Math.hypot(dx, dz) || 1;
-  const dur = 0.18 + dist * 0.055;
-  const arc = 0.3 + dist * 0.07;
+  const dur = shot ? 0.1 + dist * 0.018 : 0.18 + dist * 0.055;
+  const arc = shot ? 0.05 + dist * 0.012 : 0.3 + dist * 0.07;
   const yaw = Math.atan2(dx, dz) * pc.math.RAD_TO_DEG;
   const Y = 0.55; // hand height
-  // The wind-up: a couple of loose sheets kicked off the throwing hand.
-  burst(app, { x: from.x, y: Y + 0.15, z: from.z }, {
-    count: 4, color: [0.95, 0.93, 0.86], additive: false, shape: 'box',
-    speed: 1.1, up: 0.9, size: 0.06, flat: 0.2, life: 0.55, gravity: -4, drag: 2, spin: 380,
-    dir: { x: dx / dist, z: dz / dist },
-  });
+  // The wind-up: a couple of loose sheets kicked off the throwing hand. A shot
+  // has no wind-up - that is what makes it read as fired.
+  if (!shot) {
+    burst(app, { x: from.x, y: Y + 0.15, z: from.z }, {
+      count: 4, color: [0.95, 0.93, 0.86], additive: false, shape: 'box',
+      speed: 1.1, up: 0.9, size: 0.06, flat: 0.2, life: 0.55, gravity: -4, drag: 2, spin: 380,
+      dir: { x: dx / dist, z: dz / dist },
+    });
+  }
   const parts = [];
   let t = 0;
   let acc = 0;
@@ -758,10 +769,12 @@ export function throwProjectile(app, from, to, kind = 'ball') {
       if (k >= 1) {
         flying = false;
         const end = holder.getPosition();
-        burst(app, { x: end.x, y: end.y, z: end.z }, {
-          count: 7, color: [0.95, 0.93, 0.86], additive: false, shape: 'box',
-          speed: 1.9, size: 0.06, flat: 0.18, life: 0.8, gravity: -3.6, drag: 2, spin: 460,
-        });
+        burst(app, { x: end.x, y: end.y, z: end.z }, shot
+          ? { count: 4, color: [0.95, 0.93, 0.86], additive: false, speed: 2.4, size: 0.04, life: 0.4, gravity: -6, drag: 2.4 }
+          : {
+            count: 7, color: [0.95, 0.93, 0.86], additive: false, shape: 'box',
+            speed: 1.9, size: 0.06, flat: 0.18, life: 0.8, gravity: -3.6, drag: 2, spin: 460,
+          });
         holder.destroy();
       }
     }
