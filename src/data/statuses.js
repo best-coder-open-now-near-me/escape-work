@@ -144,4 +144,35 @@ export const STATUSES = {
     log: '{name} is reorganised. Nothing is where it was.',
     fx: { color: [0.72, 0.45, 0.95], burst: 'pop', aura: 'orbit', rate: 0.22 },
   },
+  // --- the friendly half (POWERS_PLAN M1) -----------------------------------
+  // Until the `buff` verb landed, every status in this registry arrived from
+  // the environment or from something swinging at you: the most expensive
+  // system in the codebase had no player-facing way to help ANYONE, least of
+  // all a teammate. These two are what the verb carries.
+  //
+  // Neither is `resistable`. Composure is a defence, and making it blunt a
+  // compliment would mean the most composed member of the party benefits
+  // least from being supported - which is exactly backwards, and would quietly
+  // make the HR class worse the better your party got.
+  commended: {
+    name: 'Commended', icon: '⭐', harmful: false, clock: 'turn',
+    duration: 3, resistable: false,
+    // The offensive buff: it does not add damage, it adds CONNECTING. Damage
+    // is the equipment layer's currency; accuracy is the one HIT_PLAN left
+    // open to modifiers on both sides, so a support class pushing it is the
+    // spread the to-hit math was built to accept.
+    effects: { accMod: 0.15 },
+    log: '{name} has it in writing that they are doing great.',
+    fx: { color: [1, 0.85, 0.35], burst: 'rise', aura: 'orbit', rate: 0.3 },
+  },
+  onboarded: {
+    name: 'Onboarded', icon: '🧭', harmful: false, clock: 'turn',
+    duration: 3, resistable: false,
+    // The defensive buff. Deliberately WEAKER than Deflect Blame's 0.5 and
+    // longer-lived: a stance you spend your own turn on should beat a favour
+    // somebody else did you, or nobody would ever brace again.
+    effects: { incomingMult: 0.8, dodgeMod: 0.1 },
+    log: '{name} has been walked through the fire exits.',
+    fx: { color: [0.45, 0.85, 1], burst: 'rise', aura: 'shield', rate: 0.35 },
+  },
 };

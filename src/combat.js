@@ -14,6 +14,7 @@ import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, reachOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH, THROW_RANGE } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
+import { buffProblem, buffOutcome, buffRangeOf, isFriendly } from './powers.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
@@ -618,6 +619,30 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     costTag.style.display = 'block';
   }
 
+  // While a buff is armed, the cursor names WHO it would land on and what they
+  // would get - or why they would get nothing. The friendly twin of the to-hit
+  // readout: the same "say the outcome before the AP is spent" contract, on a
+  // verb whose outcome is not a percentage.
+  function showBuffPreview(point, sx, sy) {
+    preview = null; // aiming replaces the movement trail, same as a swing
+    const a = ACTIONS[armed];
+    const m = allyAtPoint(point);
+    if (!m) { hidePreview(); return; }
+    const problem = buffProblem(a, {
+      ...buffReach(m),
+      hp: m.sheet.hp,
+      maxHp: m.sheet.maxHp,
+      statusCount: statusList(m.sheet).length,
+      ap: active.ap,
+      usesLeft: a.uses ? active.usesLeft[armed] ?? 0 : null,
+    });
+    const who = m === active ? 'yourself' : m.sheet.name;
+    costTag.textContent = problem || `${a.label} on ${who} · ${a.ap} AP`;
+    costTag.style.left = `${sx + 14}px`;
+    costTag.style.top = `${sy + 14}px`;
+    costTag.style.display = 'block';
+  }
+
   // While a summon is armed, the cursor previews the DROP: how many applicants
   // that spot fits, or why it doesn't work. Same rule the click runs.
   function showSummonPreview(point, sx, sy) {
@@ -656,6 +681,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (ACTIONS[armed].type === 'summon') {
         if (point) showSummonPreview(point, sx, sy); else hidePreview();
         return hoverFoe;
+      }
+      // A buff points the other way, so it must NOT return a foe: main.js
+      // keys the crosshair off this return value, and a crosshair over a
+      // coworker while Performance Review is armed promises a swing the click
+      // would refuse - the exact class of lie the one-hover-answer rule
+      // exists to prevent (ARCHITECTURE, hover.js).
+      if (isFriendly(ACTIONS[armed])) {
+        showBuffPreview(point, sx, sy);
+        return null;
       }
       showHitPreview(hoverFoe, sx, sy);
       return hoverFoe;
@@ -776,6 +810,27 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const spots = summonSpotProblem(a, tx, tz) ? [] : world.summonSpots(tx, tz, a.count);
       if (!spots.length) { drawRing(tx, tz, 0.42, PREVIEW_FAR); return; }
       for (const [sx, sz] of spots) drawRing(sx, sz, 0.42, PREVIEW_OK);
+      return;
+    }
+    // A buff rings the FRIENDLY side instead: green on every ally it could
+    // land on right now, red on the ones out of range, out of line, or who
+    // would get nothing from it. Same rule the click runs (buffProblem), so a
+    // green ring is a promise.
+    if (isFriendly(a)) {
+      if (!armed) return; // never auto-armed - only shown while deliberately aiming
+      for (const m of friendlies()) {
+        if (!m.actor?.entity) continue;
+        const ok = !buffProblem(a, {
+          ...buffReach(m),
+          hp: m.sheet.hp,
+          maxHp: m.sheet.maxHp,
+          statusCount: statusList(m.sheet).length,
+          ap: active.ap,
+          usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
+        });
+        const pos = m.actor.entity.getPosition();
+        drawRing(pos.x, pos.z, TARGET_R, ok ? PREVIEW_OK : PREVIEW_FAR);
+      }
       return;
     }
     if (a.type !== 'attack' && a.type !== 'shove') return;
@@ -1143,6 +1198,99 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (!engaged.some((e) => e.alive)) victory();
   }
 
+  // --- the friendly verb (POWERS_PLAN M1) ----------------------------------
+  // Everyone a buff may be aimed at: living party members AND your summons,
+  // yourself included. A summon is a member with a sheet, so healing or
+  // commending one is free of special cases - which is the payoff for
+  // SUMMON_PLAN having made player-side summons real members rather than a
+  // parallel kind of thing.
+  const friendlies = () => livingMembers();
+
+  // The ally whose BODY is nearest this ground point, or null. The friendly
+  // twin of enemyAtPoint, measured against continuous positions for the same
+  // reason: the logical tile is rounded, and at this camera angle a tall mesh
+  // reads a tile off.
+  function allyAtPoint(point) {
+    if (!point) return null;
+    let best = null;
+    for (const m of friendlies()) {
+      const p = posOf(m);
+      const d = Math.hypot(p.x - point.x, p.z - point.z);
+      if (d < 0.7 && (!best || d < best.d)) best = { m, d };
+    }
+    return best?.m || null;
+  }
+
+  // Distance and line to an ally, in the units buffProblem expects.
+  const buffReach = (m) => ({
+    dist: cheb(active.actor.x, active.actor.z, m.actor.x, m.actor.z),
+    // Aiming at yourself never needs a line to yourself - and hasLos on your
+    // own tile is a degenerate trace that has no reason to be asked.
+    los: m === active || world.hasLos(active.actor.x, active.actor.z, m.actor.x, m.actor.z),
+  });
+
+  // Commit a buff on an ally. No hit roll: you do not miss a colleague you are
+  // trying to help, and gating a support action behind the same whiff that
+  // gates a swing would make the support class the one that fails at its job
+  // (HIT_PLAN gates DAMAGE, which this deals none of).
+  function performBuff(id, m) {
+    const a = ACTIONS[id];
+    const problem = buffProblem(a, {
+      ...buffReach(m),
+      hp: m.sheet.hp,
+      maxHp: m.sheet.maxHp,
+      statusCount: statusList(m.sheet).length,
+      ap: active.ap,
+      usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
+    });
+    if (problem) { lastClickOutcome = `refused:${problem}`; log(problem); return; }
+    const plan = buffOutcome(a, { hp: m.sheet.hp, maxHp: m.sheet.maxHp });
+    active.ap = roundAp(active.ap - a.ap);
+    if (a.uses) active.usesLeft[id] -= 1;
+    if (m !== active) faceTarget(active, m.actor.x, m.actor.z);
+    const who = m === active ? 'yourself' : m.sheet.name;
+    let line = `${a.log || a.label + '.'}`;
+    if (plan.purges) {
+      clearStatuses(m.sheet);
+      line += m === active
+        ? ' Everything you were carrying clears.'
+        : ` Everything ${m.sheet.name} was carrying clears.`;
+    }
+    if (plan.healed > 0) {
+      m.sheet.hp += plan.healed;
+      hitFx(m, 'heal');
+      fx.damageText(m.actor.x, m.actor.z, `+${plan.healed}`, '#8adf76');
+      line += ` +${plan.healed} HP.`;
+    }
+    // A buff is never resisted - `commended`/`onboarded` are resistable:false,
+    // so the resist argument would be inert anyway, but passing the target's
+    // own Composure would be actively wrong: it would make helping a composed
+    // teammate WORSE than helping a rattled one.
+    if (plan.applies && applyStatus(m.sheet, plan.applies)) {
+      statusFxAt(m, plan.applies);
+      line += ` ${appliesLine(a, who)}`;
+    }
+    log(line);
+    armed = null;
+    refresh();
+  }
+
+  // A click on a friendly body while a buff is armed. Mirrors
+  // handleEnemyClick's gate exactly - your turn, standing still - so the two
+  // halves of the board refuse for the same reasons.
+  function handleAllyClick(m) {
+    if (phase !== 'player' || active.actor.moving || !m?.actor || m.sheet.hp <= 0) {
+      lastClickOutcome = phase !== 'player' ? 'gate:phase'
+        : (active.actor.moving ? 'gate:moving' : 'gate:dead');
+      return;
+    }
+    if (!armed || !isFriendly(ACTIONS[armed])) return false;
+    hidePreview();
+    lastClickOutcome = 'acted';
+    performBuff(armed, m);
+    return true;
+  }
+
   // Fire an armed cone attack toward (tx, tz): per-target damage rolls for
   // every enemy in the wedge with line of sight, then the wedge's plain floor
   // is carpeted with the action's `leaves` surface.
@@ -1397,6 +1545,18 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (a.cone && point) { fireCone(point.x, point.z); return; }
       // A summon is placed at the clicked tile (the whole point of arming it).
       if (a.type === 'summon') { placeSummon(tile.x, tile.z); return; }
+      // A buff aimed at the ground resolves to whoever is STANDING there -
+      // yourself included. This branch sits above the purge self-cast below
+      // deliberately: Remote Restart is a `buff` that happens to purge, and
+      // falling through to the attack-purge path would clear your statuses
+      // without spending the use, then narrate it as a reboot.
+      if (isFriendly(a)) {
+        const m = allyAtPoint(point)
+          || friendlies().find((f) => f.actor.x === tile.x && f.actor.z === tile.z);
+        if (m) { performBuff(armed, m); return; }
+        log('Aim at a teammate - or at yourself.');
+        return;
+      }
       // A purge (reboot) can target YOURSELF: wipes your statuses too -
       // paper-cut bleeding stops, but so does your Deflect.
       if (a.purge && tile.x === active.actor.x && tile.z === active.actor.z) {
@@ -1448,6 +1608,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (a.uses) out.push(`${active.usesLeft[id]} of ${a.uses} uses left this fight`);
     if (a.applies) out.push(`Applies ${STATUSES[a.applies]?.name || a.applies}`);
     if (a.purge) out.push('Clears every status - the good ones too');
+    // The one line that says which HALF of the board a verb points at. Without
+    // it a buff is indistinguishable from an attack on the bar, and the first
+    // thing a player does with an unlabelled armed action is click an enemy.
+    if (isFriendly(a)) out.push(`Aim at a teammate or yourself - range ${buffRangeOf(a)}, never misses`);
     if (a.footwork) out.push('Footwork - gum on your shoe prevents it');
     return out.join('\n');
   }
@@ -1470,12 +1634,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // something else and spend the AP it was priced against.
     const wasPending = pendingConfirm;
     pendingConfirm = null;
-    if (a.type === 'attack' || a.type === 'shove' || a.type === 'summon') {
+    if (a.type === 'attack' || a.type === 'shove' || a.type === 'summon' || isFriendly(a)) {
       armed = id; // arm it; clicking a ringed target (or a spot) fires it
       hidePreview(); // aiming now - the movement trail yields to targets
       log(a.type === 'summon'
         ? `${a.label} armed. Click where they should report.`
-        : `${a.label} armed. Click a target.`);
+        : isFriendly(a)
+          // Naming the SIDE matters on the one verb that points the other way:
+          // armed the same way an attack is, aimed at the opposite half of the
+          // board, and nothing else on the bar behaves like that yet.
+          ? `${a.label} armed. Click a teammate - or yourself.`
+          : `${a.label} armed. Click a target.`);
       refresh();
     } else if (INSTANT_CONFIRM.has(a.type)) {
       // Instant self-actions (Deflect, a heal) used to fire the moment you
@@ -2146,6 +2315,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       };
     },
     get ap() { return active.ap; },
+    // Where the acting member's BODY is (continuous, not the rounded tile) -
+    // what a test aims project3 at to click on themselves. The tile alone is
+    // off by up to half a tile at this camera angle, which is exactly the
+    // mis-click the body-pick-first rule exists to prevent.
+    get actingAt() { const p = posOf(active); return { x: p.x, z: p.z }; },
     // The movement allowance left this turn (MOVEMENT_PLAN M2). 0 for a
     // character without the talent.
     get freeAp() { return active.freeAp || 0; },
@@ -2244,6 +2418,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // was a third authority, and it routed clicks into a walk on points where
     // the cursor was promising a swing.
     enemyAtPoint,
+    // The friendly half of the same contract (POWERS_PLAN M1): main.js routes
+    // a pick on a party/summon body here so a buff lands on the mesh the
+    // player clicked, not on the floor tile behind it.
+    handleAllyClick,
+    allyAtPoint,
+    // Is the armed action aimed at friends? main.js asks before it decides
+    // which side of the board a click belongs to - it must not consult
+    // ACTIONS itself, or there would be two answers to one question.
+    get armedIsFriendly() { return isFriendly(ACTIONS[armed]); },
     notifyMemberDown,
     // The body whose turn it is - a party member OR a summon you're driving.
     // main.js needs this because party.active can't point at a summon.

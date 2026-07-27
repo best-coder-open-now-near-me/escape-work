@@ -1717,6 +1717,16 @@ function startGame(level) {
         // A coworker's body under the cursor is a target (rings mark bodies;
         // the ground fallback behind a tall mesh is a mis-walk that burns AP).
         const bodyHit = picking.pick(controls.cameraEntity, sx, sy);
+        // A FRIENDLY body, while a friendly verb is armed (POWERS_PLAN M1).
+        // Gated on `armedIsFriendly` so a click on a teammate means nothing
+        // different from before unless you are actually aiming a buff -
+        // ungated, it would eat the clicks that walk you past your own party.
+        if (combat?.armedIsFriendly
+          && (bodyHit?.kind === 'party' || bodyHit?.kind === 'summon')) {
+          const ally = combat.allyAtPoint(point)
+            || (bodyHit.ref && combat.allyAtPoint({ x: bodyHit.ref.x, z: bodyHit.ref.z }));
+          if (ally && combat.handleAllyClick(ally)) return;
+        }
         if (bodyHit?.kind === 'enemy' && bodyHit.ref.alive) {
           combat?.handleEnemyClick(bodyHit.ref);
           return;

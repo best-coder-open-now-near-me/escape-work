@@ -176,7 +176,10 @@ export const CLASSES = {
       { id: 'it-ergonomic', name: 'Ergonomic Chair', cost: 1, effect: { attrBonus: { grit: 1 } } },
       { id: 'it-server-breaks', name: 'Server-Room Breaks', cost: 1, effect: { grantsAction: 'cigarette' } },
     ],
-    actions: ['reboot', 'firewall', 'energy-drink'],
+    // Reboot (an enemy or yourself) plus Remote Restart (a teammate): the
+    // purge, pointed at both halves of the board. That is IT's primary verb -
+    // nobody else in the roster can take a status off anybody.
+    actions: ['reboot', 'remote-restart', 'energy-drink'],
     // (An anti-slip footwear talent is reserved for a future talent-choice
     // system - the engine already honors slipImmune. Until then, gum on your
     // shoe is the anti-slip option, at a price.)
@@ -201,10 +204,17 @@ export const CLASSES = {
       { id: 'hr-candor', name: 'Radical Candor', cost: 1, effect: { attrBonus: { composure: 1 } } },
       { id: 'hr-read-room', name: 'Reading the Room', cost: 1, effect: { attrBonus: { savvy: 1 } } },
       { id: 'hr-tenure', name: 'Untouchable Tenure', cost: 1, requires: ['hr-candor'], effect: { attrBonus: { grit: 1 } } },
+      // The HR track granted no action at all, on the one class whose whole
+      // job is doing things TO other people. Onboarding is the defensive twin
+      // of Performance Review (POWERS_PLAN M1).
+      { id: 'hr-onboarding', name: 'Onboarding Buddy', cost: 1, requires: ['hr-read-room'], effect: { grantsAction: 'onboarding' } },
     ],
-    // Post the Role summons applicants to fight for you; Deflect Blame and
-    // Coffee Break round out a support kit that survives while the temps swing.
-    actions: ['summon-applicants', 'defend', 'coffee'],
+    // Post the Role summons applicants to fight for you; Performance Review
+    // makes whoever is already swinging connect more often. HR is the only
+    // class that spends its turns on OTHER people (POWERS_PLAN M1) - it used
+    // to carry Deflect Blame and Coffee Break, which is the Office Drone's
+    // kit, so the support class supported nobody but itself.
+    actions: ['summon-applicants', 'performance-review', 'coffee'],
     talent: {
       name: 'Open Door Policy',
       blurb: 'The door is always open. So is the req. There is always another applicant.',

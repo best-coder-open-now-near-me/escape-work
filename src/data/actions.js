@@ -14,6 +14,11 @@
 //   summon - conjures `count` allies of `archetype` (a class id) on your side,
 //            up to a live `cap`; instant, `uses` per fight. Each one serves
 //            `lifetimeTurns` of its own turns and then files out (SUMMON_PLAN)
+//   buff   - the friendly-target verb (POWERS_PLAN M1). Aim at an ALLY (a
+//            party member or one of your summons) within `range` with a clear
+//            line, or at yourself: restores `amount` HP, clears their statuses
+//            (`purge`), and/or lands `applies` on them. Rolls nothing - you do
+//            not miss a colleague you are trying to help.
 // Modifiers:
 //   purge (on an attack) - hitting a target also wipes their status effects,
 //   harmful and helpful alike; click your own tile while armed to self-cast
@@ -94,6 +99,22 @@ export const ACTIONS = {
     purge: true,
     log: 'You power-cycle their whole workflow.',
     missLog: 'The reboot hangs on a spinning beach ball. Nothing happens.',
+  },
+  // The reboot, aimed at a colleague instead of a target. `purge` on a `buff`
+  // is a CLEANSE - the same one line of runtime, pointed at the other half of
+  // the board - which is what IT Support has always been for and could never
+  // do: the class whose whole identity is "have you tried turning it off and
+  // on again" could power-cycle an enemy and itself, but not the teammate on
+  // fire two tiles away.
+  'remote-restart': {
+    type: 'buff',
+    ap: 2,
+    label: 'Remote Restart',
+    desc: 'Power-cycle a coworker from here. Clears every status they are carrying - their buffs too.',
+    purge: true,
+    range: 5,
+    uses: 2,
+    log: 'You remote in and power-cycle them.',
   },
   firewall: {
     type: 'defend',
@@ -259,6 +280,32 @@ export const ACTIONS = {
   },
 
   // --- Human Resources ----------------------------------------------------------
+  // HR's two friendly verbs (POWERS_PLAN M1). The class taglined itself
+  // "doesn't fight so much as staff" and then shipped with Deflect Blame and
+  // Coffee Break - the Office Drone's kit - so the support class supported
+  // nobody but itself. These are the offensive and defensive halves of
+  // actually helping someone else.
+  'performance-review': {
+    type: 'buff',
+    ap: 2,
+    label: 'Performance Review',
+    desc: 'Tell a coworker in writing that they are doing great. They start connecting.',
+    applies: 'commended',
+    range: 5,
+    uses: 2,
+    log: 'You file a glowing review.',
+  },
+  onboarding: {
+    type: 'buff',
+    ap: 2,
+    label: 'Onboarding',
+    desc: 'Walk a coworker through the fire exits. They take less punishment, and pick up a little.',
+    applies: 'onboarded',
+    amount: 3,
+    range: 5,
+    uses: 2,
+    log: 'You walk them through the fire exits and the espresso machine.',
+  },
   // The HR class's power (SUMMON_PLAN.md): post the role and applicants report
   // for duty on your side. `archetype` is the unit (the applicant class),
   // `count` how many per post, `cap` how many may be live at once, `uses` how
