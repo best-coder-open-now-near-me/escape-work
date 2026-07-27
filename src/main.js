@@ -12,13 +12,13 @@ import { createSurfaceRuntime } from './surfaces-runtime.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { ITEMS } from './data/items.js';
 import { CLASSES } from './data/classes.js';
-import { ACTIONS } from './data/actions.js';
+import { ACTIONS, arrivalLine } from './data/actions.js';
 import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
 import {
   createSheet, createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
   scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
-  reachOf, ammoCostOf, pendingPoints as pending, REACH, THROW_RANGE,
+  orderedActionIds, reachOf, ammoCostOf, pendingPoints as pending, REACH, THROW_RANGE,
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
@@ -146,10 +146,13 @@ function startGame(level) {
   let gameOver = false;
   let lastPath = null; // kept for debugging/tests
   let pendingAction = null; // walk-up interaction, runs on arrival
-  let armedOoc = null; // hotbar action armed OUT of combat (targets an enemy)
-  let hotbar = null; // persistent attack bar (built once a class is picked)
+  let armedOoc = null; // hotbar action armed OUT of combat (a coworker, or a spot)
+  let oocAim = null; // last ground point the cursor was over, out of combat
+  let hotbar = null; // persistent action bar (built once a class is picked)
   let tacticalBtn = null; // overhead-camera toggle on the HUD rail (built with the HUD)
   let hotbarPaper = -1; // last paper count the hotbar rendered (refresh gate)
+  let hotbarBagKey = ''; // last pocket contents the hotbar rendered (item slots)
+  let hotbarRow = 0; // which hotbar row is showing - survives a bar rebuild
   let pendingGodPick = null; // god-mode click-to-place callback (see window.__god)
   let oocTurnClock = 0; // out-of-combat real-time accrued toward the next fire/smoke turn
 
@@ -201,7 +204,9 @@ function startGame(level) {
     // The pockets stay usable with a merchant open, and every verb in them
     // splices the bag - so the shop's sell column has to be repainted from the
     // live inventory rather than left holding the indexes it rendered with.
-    onBagChange: () => shopping.refreshIfOpen(),
+    // ...and an item slot on the hotbar counts what is in the bag, so the bar
+    // repaints too - a coffee drunk from slot 3 has to stop offering itself.
+    onBagChange: () => { shopping.refreshIfOpen(); refreshHotbarSlots(); },
     // Everyone else still standing can be handed an item. The recipient's
     // sheet takes it directly - pockets are unlimited, so there is nothing to
     // refuse for.
@@ -455,6 +460,58 @@ function startGame(level) {
   }
   // (Furniture is no longer set dressing here - props are solid tiles in the
   // level data, rendered by buildLevel and respected by pathfinding.)
+
+  // Summon reinforcements: drop up to `n` archetype units (a class id - e.g.
+  // 'applicant' - or an ENEMY_TYPES id) onto free tiles, wire their models, and
+  // hand the records back to whoever asked.
+  //   enemy team -> an EnemyActor filed into `enemies` (AI-driven); every
+  //     existing enemy system applies for free. Returned as the actor.
+  //   player team -> a { sheet, actor } pair filed into `summons`: a real
+  //     character sheet (HP, AP, actions) on a CompanionActor body, so it's
+  //     CONTROLLED like a party member on its initiative turn. The actor
+  //     registers as a 'summon' pick kind (contextual clicks in combat select
+  //     it, like a teammate).
+  // `at` is a chosen drop point ({x,z}) - the arrivals take that tile and the
+  // free tiles ringing outward from it; without one (enemy AI) they file in
+  // beside their summoner.
+  //
+  // This lives out here rather than on the `world` object handed to combat
+  // because posting a req is no longer something only a fight can do: the
+  // out-of-combat post (postSummonAt) needs the same spawn path, and a second
+  // copy of it would be a second set of rules about who gets a body and a
+  // sheet.
+  function spawnSummonUnits(archetypeId, team, summoner, n, at = null) {
+    const def = CLASSES[archetypeId] || ENEMY_TYPES[archetypeId];
+    if (!def) return [];
+    const ally = team === 'player';
+    const out = [];
+    const spots = at
+      ? freeTilesNear(at.x, at.z, n, 0)
+      : freeTilesNear(summoner.x, summoner.z, n, 1);
+    for (const [x, z] of spots) {
+      const actor = ally
+        ? new CompanionActor(x, z, archetypeId, def)
+        : new EnemyActor(x, z, archetypeId, def, { team, summoned: true, summonedBy: summoner });
+      // Who called them is part of the record, not just of the fight they were
+      // called in: a summon that outlives its fight walks into the NEXT one,
+      // and the per-summoner live cap can only see it if the link survives the
+      // trip (SUMMON_PLAN #7). Enemy-side summons carry the same link on the
+      // actor itself.
+      const rec = ally
+        ? { sheet: createSheetFrom(def, { summon: true }), actor, summonedBy: summoner }
+        : actor;
+      (ally ? summons : enemies).push(rec);
+      placeModel(app, `assets/characters/${def.model}.glb`, x, z, {
+        lift, rotY: ally ? 90 : -90, animate: true,
+        onReady: (e) => {
+          dressUp(e, actor, ally ? sheetLook(rec.sheet) : actor.def?.look, ally ? rec.sheet.model : actor.def?.model);
+          picking.register(e, ally ? 'summon' : 'enemy', actor);
+        },
+      });
+      out.push(rec);
+    }
+    return out;
+  }
 
   // --- game flow ----------------------------------------------------------------
   function spawnPlayerModel() {
@@ -1060,33 +1117,131 @@ function startGame(level) {
     ui.toast(`${npc.def.name} joins the party.`);
   }
 
-  // --- persistent attack hotbar ------------------------------------------------
-  // The offensive slice of the action list: things that target an enemy and
-  // can OPEN a fight. Heal/defend stay combat-only (they're reactive - no
-  // meaning with nobody swinging at you); out of combat you heal from pockets.
-  function offensiveActionIds() {
-    const throwables = Object.keys(ACTIONS).filter((id) => ACTIONS[id].ammoCost);
-    const seen = new Set();
-    return [...sheet.actions, equippedAction(sheet), 'shove', ...throwables].filter((id) => {
-      if (seen.has(id) || !ACTIONS[id]) return false;
-      seen.add(id);
-      const t = ACTIONS[id].type;
-      return t === 'attack' || t === 'shove';
+  // --- persistent hotbar --------------------------------------------------------
+  // Everything the character can DO, in one bar, in and out of a fight.
+  //
+  // It used to be the OFFENSIVE slice only - attacks, shove, throws - on the
+  // theory that with no fight on, the only thing worth aiming at is a coworker.
+  // That quietly hid whole classes from themselves: HR's Post the Role never
+  // appeared until a fight was already running, so the power you picked the
+  // class for was invisible for half the game and looked like it didn't exist.
+  // The bar now lists the full kit and says which slots a fight owns, which is
+  // also what keeps the number-key slots stable - the row you learn out of
+  // combat is the row you get.
+  //
+  // The ORDER is stats.orderedActionIds - the same one combat's bar renders, so
+  // the kit reads the same in and out of a fight: the basic swing, shove, the
+  // throws, the class powers, what a talent granted, what is in hand. A
+  // throwable the character can't fold (needsTalent) is not theirs to list.
+  function hotbarActionIds() {
+    const throwables = Object.keys(ACTIONS).filter((id) => {
+      const a = ACTIONS[id];
+      return a.ammoCost && (!a.needsTalent || !!(sheet.talent?.effects || {})[a.needsTalent]);
     });
+    return orderedActionIds(sheet, [...sheet.actions, equippedAction(sheet), 'shove', ...throwables]);
   }
-  function buildHotbar() {
-    hotbar?.destroy(); // a leader switch rebuilds it for the new sheet
-    const ids = offensiveActionIds();
-    hotbar = ui.createHotbar(
+  // Consumables in the pockets, deduped, with how many are in there. These are
+  // the ITEMS a slot can carry: something with a `heal` or an `ammo` on it does
+  // something when pressed. Gear is deliberately not here - equipping is a
+  // pockets-panel act with a stat fold behind it, not a hotbar press.
+  function hotbarItemIds() {
+    const counts = new Map();
+    for (const id of sheet.inventory || []) {
+      const it = ITEMS[id];
+      if (!it || !(it.heal || it.ammo)) continue;
+      counts.set(id, (counts.get(id) || 0) + 1);
+    }
+    return counts;
+  }
+  // Why this action can't be used with no fight on, or null when it can be.
+  // Attacks, shoves and throws OPEN a fight (engageWithAction); a summon posts
+  // on the spot (postSummonAt). What's left is the reactive pair, and both need
+  // a fight to mean anything: Deflect Blame halves an incoming hit nobody is
+  // throwing, and a heal out here would be a free, per-fight-refilling pool of
+  // HP - which is precisely the thing the pockets exist to sell you.
+  function combatOnlyReason(id) {
+    const a = ACTIONS[id];
+    const t = a?.type;
+    if (!a || t === 'attack' || t === 'shove' || t === 'summon') return null;
+    if (t === 'heal') return `${a.label} is for a fight - out here, heal from your pockets.`;
+    return `${a.label} only means something once someone is swinging at you.`;
+  }
+  // --- the layout ---------------------------------------------------------------
+  // What sits in each slot, in order. The default is the whole kit in canonical
+  // order; `sheet.hotbar` is the player's own arrangement once they've moved
+  // something (right-click a slot), and it lives on the SHEET so it survives a
+  // leader switch, a save and a floor - each character keeps their own bar. An
+  // older save has no such field and simply gets the default.
+  //
+  // A layout entry is { kind: 'action'|'item', id }, or null for a slot left
+  // empty on purpose. Assignments are kept even when what they name is
+  // unreachable right now (a stapler stowed, a coffee drunk): the slot dims and
+  // says why instead of the bar rearranging itself under the player's hands,
+  // which is the one thing a muscle-memory surface must never do.
+  const defaultLayout = () => hotbarActionIds().map((id) => ({ kind: 'action', id }));
+  // The layout the BAR shows: what the character has, plus at least one empty
+  // slot, padded out to whole rows. The spare slot is the whole discoverability
+  // story - a bar with no free space has nowhere to put the coffee, and a player
+  // who can't see an empty slot has no reason to right-click one. It is also
+  // what grows the bar: fill the last row and the next one appears, pager and
+  // all, which is how a second row of items comes to exist at all.
+  const padLayout = (entries) => {
+    const rows = Math.max(1, Math.ceil((entries.length + 1) / ui.HOTBAR_ROW_SLOTS));
+    const out = [...entries];
+    while (out.length < rows * ui.HOTBAR_ROW_SLOTS) out.push(null);
+    return out;
+  };
+  const layoutOf = (s) => padLayout(s?.hotbar?.length ? s.hotbar : defaultLayout());
+  // A slot's view-model. An assignment whose power the character no longer has
+  // (a weapon swing from a weapon now in the bag) still renders - as itself,
+  // greyed, with the reason - rather than vanishing.
+  function slotVm(entry) {
+    if (!entry) return null;
+    if (entry.kind === 'item') {
+      const def = ITEMS[entry.id];
+      if (!def) return null;
+      return {
+        kind: 'item', id: entry.id, label: def.name, icon: def.icon,
+        count: hotbarItemIds().get(entry.id) || 0,
+      };
+    }
+    const a = ACTIONS[entry.id];
+    if (!a) return null;
+    const available = hotbarActionIds().includes(entry.id);
+    return {
+      kind: 'action',
+      id: entry.id,
+      label: a.label,
+      icon: a.icon, // the face it wears on the bar (data/actions.js)
+      ap: a.ap,
       // The ammo cost handed to the bar is THIS character's (the Origami
       // Specialist throws an airplane for one sheet, not two) - the same number
       // the targeting gate and combat itself charge. The bar used to be given
       // the raw data cost and greyed out throws the other two would allow.
-      ids.map((id) => ({
-        id, label: ACTIONS[id].label, ap: ACTIONS[id].ap, ammoCost: throwAmmoCost(id),
-      })),
-      { onArm: toggleOocArm },
-    );
+      ammoCost: throwAmmoCost(entry.id),
+      // Why the slot can't act: not the character's power any more, or one a
+      // fight owns (combatOnlyReason).
+      unavailable: available
+        ? combatOnlyReason(entry.id)
+        : `${a.label} is not something you can do right now.`,
+    };
+  }
+  // What the bar's item slots are counting, as one string - the gate that keeps
+  // a per-frame DOM repaint off the hot path (like hotbarPaper for ammo).
+  const bagKey = () => (sheet?.inventory || []).join(',');
+  // Re-read the slots against live pocket contents: an assigned item can run
+  // out, refill, or change count, and the count is in the label. The slot
+  // view-models carry it, so this is a rebuild - cheap, and it is the same path
+  // a gear change or a level-up already takes.
+  const refreshHotbarSlots = () => { if (hotbar && sheet) buildHotbar(); };
+  function buildHotbar() {
+    hotbarRow = hotbar?.row ?? hotbarRow;
+    hotbar?.destroy(); // a leader switch rebuilds it for the new sheet
+    hotbar = ui.createHotbar(layoutOf(sheet).map(slotVm), {
+      onPress: pressHotbarSlot,
+      onAssign: openAssignMenu,
+      startRow: hotbarRow, // the row you were on survives the rebuild
+    });
     hotbar.refresh(sheet);
     // A rebuild starts with no slot lit, but `armedOoc` survives it - spending
     // a level-up point mid-aim left the bar looking unarmed while the rings,
@@ -1094,6 +1249,70 @@ function startGame(level) {
     // The bar shows what is actually armed, or nothing is.
     hotbar.setArmed(armedOoc);
     hotbarPaper = sheet.paper;
+    hotbarBagKey = bagKey();
+  }
+  // Pressing a slot: arm the power, or use the item. An empty slot says what it
+  // is for rather than nothing at all - a dead button teaches nothing.
+  function pressHotbarSlot(i) {
+    const entry = layoutOf(sheet)[i];
+    if (!entry) { ui.say('That slot is empty - right-click it to assign a power or an item.'); return; }
+    if (entry.kind === 'item') { loot.useItemById(entry.id); return; }
+    toggleOocArm(entry.id);
+  }
+  // Right-click a slot: everything that can go in it, in the bar's own order,
+  // with what is already placed marked as such. Assigning something already on
+  // the bar SWAPS the two slots - that is how the bar gets rearranged, and it
+  // means the same power can never end up in two places.
+  function openAssignMenu(i, x, y) {
+    if (!sheet || inCombat || gameOver || modalOpen()) return;
+    const layout = layoutOf(sheet);
+    const here = layout[i];
+    const placedAt = (kind, id) => layout.findIndex((s) => s && s.kind === kind && s.id === id);
+    const rowOf = (at) => Math.floor(at / ui.HOTBAR_ROW_SLOTS) + 1;
+    const slotHint = (kind, id) => {
+      const at = placedAt(kind, id);
+      if (at < 0) return null;
+      return at === i ? 'in this slot' : `on ${rowOf(at)}·${(at % ui.HOTBAR_ROW_SLOTS) + 1}`;
+    };
+    const items = [{ label: `Slot ${rowOf(i)}·${(i % ui.HOTBAR_ROW_SLOTS) + 1}`, header: true }];
+    if (here) items.push({ label: 'Clear this slot', action: () => assignHotbarSlot(i, null) });
+    items.push({ label: 'Powers', header: true });
+    for (const id of hotbarActionIds()) {
+      items.push({
+        // Iconed like the slot it would fill, so the menu and the bar name the
+        // same thing the same way.
+        label: `${ACTIONS[id].icon || '❔'}  ${ACTIONS[id].label}`,
+        hint: slotHint('action', id),
+        action: () => assignHotbarSlot(i, { kind: 'action', id }),
+      });
+    }
+    const carried = hotbarItemIds();
+    items.push({ label: 'From your pockets', header: true });
+    if (!carried.size) items.push({ label: 'Nothing usable in there' });
+    for (const [id, n] of carried) {
+      items.push({
+        label: `${ITEMS[id].icon || '❔'}  ${ITEMS[id].name}`,
+        hint: slotHint('item', id) || (n > 1 ? `×${n}` : null),
+        action: () => assignHotbarSlot(i, { kind: 'item', id }),
+      });
+    }
+    ui.showMenu(x, y, items);
+  }
+  function assignHotbarSlot(i, entry) {
+    if (!sheet) return;
+    const layout = [...layoutOf(sheet)];
+    while (layout.length <= i) layout.push(null);
+    if (entry) {
+      const at = layout.findIndex((s) => s && s.kind === entry.kind && s.id === entry.id);
+      if (at >= 0) layout[at] = layout[i] || null; // a swap, so nothing is ever in two places
+    }
+    layout[i] = entry;
+    while (layout.length && !layout[layout.length - 1]) layout.pop(); // no trailing empties
+    sheet.hotbar = layout;
+    buildHotbar();
+    ui.say(entry
+      ? `${entry.kind === 'item' ? ITEMS[entry.id].name : ACTIONS[entry.id].label} moves to slot ${Math.floor(i / ui.HOTBAR_ROW_SLOTS) + 1}·${(i % ui.HOTBAR_ROW_SLOTS) + 1}.`
+      : 'You clear the slot.');
   }
 
   // --- leader switching --------------------------------------------------------
@@ -1197,9 +1416,75 @@ function startGame(level) {
   }
   function toggleOocArm(id) {
     if (!sheet || inCombat || gameOver || modalOpen() || !ACTIONS[id]) return;
+    // A slot a fight owns still ARMS nothing, but it says why. Listed-but-inert
+    // was the old behavior of every non-attack (they weren't listed at all),
+    // and a button that does nothing at all is indistinguishable from a bug.
+    const blocked = combatOnlyReason(id);
+    if (blocked) { ui.say(blocked); return; }
     armedOoc = armedOoc === id ? null : id;
     hotbar?.setArmed(armedOoc);
-    ui.say(armedOoc ? `${ACTIONS[armedOoc].label} ready — click a coworker to start it.` : 'You stand down.');
+    if (!armedOoc) { ui.say('You stand down.'); return; }
+    const a = ACTIONS[armedOoc];
+    // What the armed slot is waiting for. A summon aims at the FLOOR, so
+    // "click a coworker" would be aiming instructions for the wrong thing.
+    ui.say(a.type === 'summon'
+      ? `${a.label} ready — click a spot within ${summonRange(a)} tiles to post it.`
+      : `${a.label} ready — click a coworker to start it.`);
+  }
+
+  // --- posting the role with no fight on ----------------------------------------
+  // A summon power is not a combat power, it is a power. Post the Role used to
+  // be unreachable until a fight was already running - the hotbar listed
+  // attacks only, and the placement flow lived entirely inside combat.js - so
+  // the HR class's whole identity switched off the moment the last coworker
+  // fell.
+  //
+  // Out here the rule is combat's, minus the two things a FIGHT owns: there is
+  // no AP pool to spend and no per-fight `uses` to ration. The live `cap` and
+  // the contract clock are the whole limit - `lifetimeTurns` is spent by the
+  // world clock out of combat (ageSummons), so a temp posted between fights
+  // sees itself out on its own, and one posted just before a fight walks into
+  // it (startCombat's `allies`) with whatever assignment is left.
+  const summonRange = (a) => a.range ?? 5;
+  const liveSummonsOf = (summoner) => summons.filter((s) =>
+    s.sheet.hp > 0 && s.actor && s.summonedBy === summoner).length;
+  const summonRoom = (a) => Math.max(0, (a.cap ?? a.count) - liveSummonsOf(player));
+  // Why a spot is unusable, or null when it's good - shared by the click and
+  // the hover rings, so what you see is the rule that runs (ARCHITECTURE.md on
+  // previewAction). Deliberately the same four questions combat's
+  // summonSpotProblem asks, less the AP and uses it can answer and we can't.
+  function summonDropProblem(a, tx, tz) {
+    const spot = { x: tx, z: tz };
+    if (cheb(player, spot) > summonRange(a)) return 'Too far - post it closer.';
+    if (!hasLos(player, spot)) return 'No clear line to that spot.';
+    if (!freeTilesNear(tx, tz, 1, 0).length) return 'No room for anyone to stand there.';
+    if (summonRoom(a) <= 0) return 'Your req is full - that is all the headcount you have.';
+    return null;
+  }
+  // The tiles the arrivals would land on: the clicked tile first, then the free
+  // ground ringing outward, bounded by `count` and by what the cap has left.
+  function summonDropSpots(a, tx, tz) {
+    if (summonDropProblem(a, tx, tz)) return [];
+    return freeTilesNear(tx, tz, Math.min(a.count, summonRoom(a)), 0);
+  }
+  function postSummonAt(id, tx, tz) {
+    const a = ACTIONS[id];
+    const problem = summonDropProblem(a, tx, tz);
+    if (problem) { ui.say(problem); return; }
+    const spawned = spawnSummonUnits(
+      a.archetype, 'player', player, Math.min(a.count, summonRoom(a)), { x: tx, z: tz },
+    );
+    if (!spawned.length) { ui.say('No room - nobody can find a free desk there.'); return; }
+    for (const rec of spawned) {
+      rec.actor.summonTurns = a.lifetimeTurns ?? null;
+      vfx.impact(rec.actor.x, rec.actor.z, 'toner', { y: 0.5, scale: 0.55 });
+    }
+    player.faceToward(tx, tz); // you gesture at where you posted them
+    ui.say(`${a.log} ${arrivalLine(spawned.length)}`);
+    // One click, one post: the slot disarms so a stray second click walks you
+    // somewhere instead of quietly filling the floor with temps.
+    armedOoc = null;
+    hotbar?.setArmed(null);
   }
 
   // First (enemy, member) adjacency in the party - any member can get
@@ -1311,17 +1596,6 @@ function startGame(level) {
         // Anyone alive is a legal target - bystanders outside the initial
         // engagement get pulled in when attacked.
         liveEnemies: () => enemies.filter((e) => e.alive),
-        // Summon reinforcements: drop up to `n` archetype units (a class id -
-        // e.g. 'applicant' - or an ENEMY_TYPES id) on the nearest free tiles
-        // around `summoner`, wire their models, and hand them back for combat.js
-        // to slot into the fight.
-        //   enemy team -> an EnemyActor filed into `enemies` (AI-driven); every
-        //     existing enemy system applies for free. Returned as the actor.
-        //   player team -> a { sheet, actor } pair filed into `summons`: a real
-        //     character sheet (HP, AP, actions) on a CompanionActor body, so
-        //     it's CONTROLLED like a party member on its initiative turn. The
-        //     actor registers as a 'summon' pick kind (contextual clicks in
-        //     combat select it, like a teammate).
         // The tiles a summon aimed at (tx,tz) would actually land on - the
         // placement preview draws these rings, and spawnSummon fills them, so
         // what you see is where they stand.
@@ -1329,40 +1603,9 @@ function startGame(level) {
         // A summon whose assignment lapsed (or one that fell) leaves the board
         // here - combat.js decides when, main.js owns the lists and the body.
         dismissSummon: (body) => dismissSummon(body),
-        spawnSummon: (archetypeId, team, summoner, n, at = null) => {
-          const def = CLASSES[archetypeId] || ENEMY_TYPES[archetypeId];
-          if (!def) return [];
-          const ally = team === 'player';
-          const out = [];
-          // A player-chosen drop point starts at the clicked tile itself;
-          // without one (enemy AI) they file in beside their summoner.
-          const spots = at
-            ? freeTilesNear(at.x, at.z, n, 0)
-            : freeTilesNear(summoner.x, summoner.z, n, 1);
-          for (const [x, z] of spots) {
-            const actor = ally
-              ? new CompanionActor(x, z, archetypeId, def)
-              : new EnemyActor(x, z, archetypeId, def, { team, summoned: true, summonedBy: summoner });
-            // Who called them is part of the record, not just of the fight they
-            // were called in: a summon that outlives its fight walks into the
-            // NEXT one, and the per-summoner live cap can only see it if the
-            // link survives the trip (SUMMON_PLAN #7). Enemy-side summons carry
-            // the same link on the actor itself.
-            const rec = ally
-              ? { sheet: createSheetFrom(def, { summon: true }), actor, summonedBy: summoner }
-              : actor;
-            (ally ? summons : enemies).push(rec);
-            placeModel(app, `assets/characters/${def.model}.glb`, x, z, {
-              lift, rotY: ally ? 90 : -90, animate: true,
-              onReady: (e) => {
-                dressUp(e, actor, ally ? sheetLook(rec.sheet) : actor.def?.look, ally ? rec.sheet.model : actor.def?.model);
-                picking.register(e, ally ? 'summon' : 'enemy', actor);
-              },
-            });
-            out.push(rec);
-          }
-          return out;
-        },
+        // The spawn path itself is shared with the out-of-combat post - see
+        // spawnSummonUnits, above.
+        spawnSummon: spawnSummonUnits,
       },
       fx: vfx,
       callbacks: {
@@ -1733,6 +1976,16 @@ function startGame(level) {
         return;
       }
       if (modalOpen()) return; // talking: clicks belong to the panel
+      // An armed SUMMON aims at the floor, so while it is armed the world is a
+      // placement grid and nothing else: the click posts the role where you
+      // pointed rather than walking there, rummaging the desk behind the point,
+      // or opening a fight with whoever is standing in the way. A refused spot
+      // says why and stays armed (postSummonAt), so the next click can just be
+      // a better one.
+      if (armedOoc && ACTIONS[armedOoc].type === 'summon') {
+        if (tile) postSummonAt(armedOoc, tile.x, tile.z);
+        return;
+      }
       // Out of combat, the interactable ENTITY under the cursor wins over the
       // floor tile behind it - what finally makes a click on the tall door
       // mesh (or a standing enemy) land on the thing you aimed at.
@@ -1787,7 +2040,11 @@ function startGame(level) {
         hover.showCharacter(character ? charHit : null, point);
         return;
       }
-      if (!sheet || gameOver || modalOpen()) { hover.clear(); return; }
+      if (!sheet || gameOver || modalOpen()) { hover.clear(); oocAim = null; return; }
+      // The ground point is remembered, not just consumed: an armed summon
+      // draws its drop rings every frame (immediate-mode lines last one), and
+      // hover events only arrive when the mouse actually moves.
+      oocAim = point;
       hover.hover(point, sx, sy);
     },
     // The cursor left the world for the DOM UI: drop the world hover rather
@@ -1795,6 +2052,7 @@ function startGame(level) {
     // the player is now using.
     onHoverLeave: () => {
       hover.clear();
+      oocAim = null; // no cursor on the floor, no drop rings
       if (inCombat && combat) combat.handleHover(null, 0, 0);
     },
     onRightClickTile: (tile, sx, sy, point) => {
@@ -1954,6 +2212,18 @@ function startGame(level) {
       reach: () => reachOf(sheet),
       armed: () => armedOoc,
       armedTargetOk: oocTargetOk,
+      // Where an armed SUMMON would land right now: the hovered tile, the spots
+      // its arrivals would fill, and why they couldn't. Null unless a summon is
+      // armed with the cursor on the floor - the rings key off this one answer,
+      // which is the same one the click runs (summonDropProblem).
+      summonDrop: () => {
+        if (!armedOoc || inCombat || !oocAim) return null;
+        const a = ACTIONS[armedOoc];
+        if (a.type !== 'summon') return null;
+        const x = Math.round(oocAim.x);
+        const z = Math.round(oocAim.z);
+        return { x, z, problem: summonDropProblem(a, x, z), spots: summonDropSpots(a, x, z) };
+      },
       inCombat: () => inCombat && !!combat,
       doorNear: doorNearPoint,
       doorOpen: (key) => grid.doors.get(key)?.open,
@@ -1986,9 +2256,14 @@ function startGame(level) {
     } else if ((e.key === 'i' || e.key === 'I') && sheet && !gameOver) {
       loot.togglePanel(sheet);
     } else if (/^[1-9]$/.test(e.key) && sheet && !inCombat && !gameOver && !modalOpen()) {
-      // Number keys arm the matching hotbar slot (out-of-combat targeting).
-      const id = offensiveActionIds()[Number(e.key) - 1];
-      if (id) toggleOocArm(id);
+      // Number keys press the matching slot of the VISIBLE row, so 1 is always
+      // the leftmost button on screen however many rows the kit needs.
+      const i = hotbar?.indexAtKey(Number(e.key)) ?? -1;
+      if (i >= 0) pressHotbarSlot(i);
+    } else if ((e.key === '[' || e.key === ']') && sheet && !inCombat && !gameOver && !modalOpen()) {
+      // Page the hotbar rows from the keyboard - the pager buttons and the wheel
+      // over the bar do the same thing.
+      hotbar?.flip(e.key === ']' ? 1 : -1);
     } else if (e.key === 'Tab' && sheet && !inCombat && !gameOver && !modalOpen()) {
       // Tab cycles which member you lead OUT of combat. In a fight there's no
       // switching - initiative decides who acts, and you control each on their
@@ -2227,7 +2502,16 @@ function startGame(level) {
       const show = !!sheet && !inCombat && !gameOver && !modalOpen();
       hotbar.setVisible(show);
       if (show && sheet.paper !== hotbarPaper) { hotbarPaper = sheet.paper; hotbar.refresh(sheet); }
-      if (show && armedOoc) hover.drawArmedTargets();
+      // Item slots count the pockets, and the pockets change from places that
+      // don't route through onBagChange (god mode, a shop, an overflow drop).
+      // Same shape as the party bar's key below: compare, repaint on a change.
+      if (show && bagKey() !== hotbarBagKey) refreshHotbarSlots();
+      // What an armed slot rings depends on what it aims at: a coworker (every
+      // attack, shove and throw) or a spot on the floor (a summon).
+      if (show && armedOoc) {
+        if (ACTIONS[armedOoc].type === 'summon') hover.drawSummonDrop();
+        else hover.drawArmedTargets();
+      }
     }
     // Ctrl rings redraw each frame while held (immediate-mode lines last one
     // frame) - in and out of combat alike.

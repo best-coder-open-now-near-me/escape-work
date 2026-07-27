@@ -31,6 +31,23 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
   const harvestedPaper = new Set(); // "x,z" of paper drifts already gathered for ammo
 
   const itemName = (id) => ITEMS[id]?.name || id;
+
+  // Every looting event goes to BOTH readouts, on purpose. The toast is the
+  // glance - top-left, one nowrap line, gone in under three seconds - which is
+  // right for "you got X" and wrong for everything else about it: a five-item
+  // desk ellipsised away mid-list, the banked cash fell off the end, and there
+  // was nowhere to read what you missed. ui.say() files the same line in the
+  // narrator box, which wraps, keeps the last several lines, and stays up in
+  // combat, so the loot you took is readable back alongside the drops, equips
+  // and paper-gathers that already narrate there.
+  //
+  // Same text in both places rather than two phrasings of one event - a loot
+  // line that reads one way in the corner and another way in the box is two
+  // events as far as the player can tell.
+  function lootNews(msg) {
+    ui.toast(msg);
+    ui.say(msg);
+  }
   // A temporary drift that expires takes its harvested-here mark with it, so a
   // later drift on the same tile is gatherable again (main.js ageTempSurfaces).
   const forgetPaper = (x, z) => harvestedPaper.delete(x + ',' + z);
@@ -115,7 +132,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     let msg = `${from}: ${taken.length ? taken.join(', ') : 'nothing'}.`;
     if (overflowed) msg += ' Pockets full - the rest hits the floor.';
     if (banked) msg += ` Banked ${banked}💵.`;
-    ui.toast(msg);
+    lootNews(msg);
     invPanel.refresh(sheet);
     onBagChange?.();
   }
@@ -129,7 +146,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     const key = x + ',' + z;
     if (!containerLoot.has(key)) containerLoot.set(key, rollLoot(LOOT_TABLES[def.loot]));
     const items = containerLoot.get(key);
-    if (!items.length) { ui.toast(`${def.label}: nothing left but disappointment.`); return; }
+    if (!items.length) { lootNews(`${def.label}: nothing left but disappointment.`); return; }
     containerLoot.set(key, []);
     receiveItems(items, def.label);
   }
@@ -137,7 +154,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
   function lootBody(en) {
     if (!en || en.alive || isInCombat() || isGameOver()) return;
     const items = en.loot || [];
-    if (!items.length) { ui.toast(`${en.def.name} has nothing left to give. Fitting.`); return; }
+    if (!items.length) { lootNews(`${en.def.name} has nothing left to give. Fitting.`); return; }
     en.loot = [];
     receiveItems(items, `${en.def.name}'s pockets`);
   }
@@ -376,6 +393,15 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
   return {
     itemName, looseAt, corpseAt,
     lootContainer, lootBody, pickUpAt,
+    // Use one of an item BY ID rather than by pocket index - what a hotbar slot
+    // holds is "a cold coffee", not "pocket 4", and the pockets shuffle every
+    // time anything is picked up or spent. Refuses out loud when the last one is
+    // gone, because a slot the player is still pressing has to say something.
+    useItemById: (id) => {
+      const i = getSheet()?.inventory.indexOf(id) ?? -1;
+      if (i < 0) { ui.say(`No ${itemName(id)} left in your pockets.`); return; }
+      useItem(i);
+    },
     refreshPanel: (sheet) => invPanel.refresh(sheet),
     togglePanel: (sheet) => invPanel.toggle(sheet),
     showLabels,

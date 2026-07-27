@@ -42,11 +42,12 @@ export const SHOPS = {
       { item: 'mystery-flavor', qty: 1, chance: 0.25 },
     ],
   },
-  // The Mail Room Veteran's cart. Eleven years of corridors means he has
+  // The mail room companion's cart. Eleven years of corridors means he has
   // everything and owes nobody an explanation - a fair hand by office
-  // standards, and the only merchant who will take your junk.
+  // standards, and the only merchant who will take your junk. (Named for the
+  // cart, not for him: he has no name of his own - see data/companions.js.)
   'mail-cart': {
-    name: "The Veteran's Cart",
+    name: 'The Mail Cart',
     greeting: '"Everything on here fell off something. Ask me nothing."',
     markup: 1.0,
     buys: true,

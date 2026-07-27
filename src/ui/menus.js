@@ -7,10 +7,18 @@ function ensureMenu() {
   menuEl = document.createElement('div');
   menuEl.id = 'context-menu';
   Object.assign(menuEl.style, {
-    position: 'fixed', zIndex: '20', minWidth: '170px', display: 'none',
+    // Above the HUD, below the panels and the takeover screens. It used to sit
+    // at 20, UNDER the hotbar (22) and the party bar (21) - which nothing
+    // noticed while menus only ever opened over the floor, and which made the
+    // hotbar's own right-click menu unclickable the moment it overlapped the bar
+    // it was opened from.
+    position: 'fixed', zIndex: '23', minWidth: '170px', display: 'none',
     background: '#232334', color: '#f0f0f5', border: '1px solid #3a3a52',
     borderRadius: '7px', padding: '5px', boxShadow: '0 8px 24px rgba(0,0,0,.45)',
     font: '13px system-ui, sans-serif', userSelect: 'none',
+    // A verb list for one object is three rows; the hotbar's assignment list is
+    // every power and consumable a character has, which can outgrow the screen.
+    maxHeight: '72vh', overflowY: 'auto',
   });
   document.body.appendChild(menuEl);
   // A left-press outside the menu closes it; right-presses only reposition it.
@@ -20,21 +28,52 @@ function ensureMenu() {
   return menuEl;
 }
 
+// `items` is [{ label, action }], plus two optional shapes a longer list needs:
+//   { label, header: true }   a section title - not clickable, no hover
+//   { label, hint }           a dim right-aligned note ("×3", "on slot 2")
+// A row with neither `action` nor `header` renders as an inert line, which is
+// how "nothing here" says so without pretending to be a button.
 export function showMenu(x, y, items) {
   const el = ensureMenu();
   el.innerHTML = '';
   for (const it of items) {
     const row = document.createElement('div');
-    row.textContent = it.label;
-    Object.assign(row.style, { padding: '7px 11px', borderRadius: '5px', cursor: 'pointer' });
-    row.onmouseenter = () => { row.style.background = '#34344f'; };
-    row.onmouseleave = () => { row.style.background = 'transparent'; };
-    row.onclick = () => { hideMenu(); it.action && it.action(); };
+    if (it.header) {
+      row.textContent = it.label;
+      Object.assign(row.style, {
+        padding: '7px 11px 3px', font: '600 10px system-ui, sans-serif',
+        letterSpacing: '.7px', textTransform: 'uppercase', opacity: '.5', cursor: 'default',
+      });
+      el.appendChild(row);
+      continue;
+    }
+    Object.assign(row.style, {
+      padding: '7px 11px', borderRadius: '5px', cursor: it.action ? 'pointer' : 'default',
+      display: 'flex', justifyContent: 'space-between', gap: '14px',
+      opacity: it.action ? '1' : '.5',
+    });
+    const text = document.createElement('span');
+    text.textContent = it.label;
+    row.appendChild(text);
+    if (it.hint) {
+      const hint = document.createElement('span');
+      hint.textContent = it.hint;
+      Object.assign(hint.style, { opacity: '.55', fontSize: '11px', whiteSpace: 'nowrap' });
+      row.appendChild(hint);
+    }
+    if (it.action) {
+      row.onmouseenter = () => { row.style.background = '#34344f'; };
+      row.onmouseleave = () => { row.style.background = 'transparent'; };
+      row.onclick = () => { hideMenu(); it.action(); };
+    }
     el.appendChild(row);
   }
   el.style.left = Math.min(x, window.innerWidth - 190) + 'px';
-  el.style.top = Math.min(y, window.innerHeight - items.length * 34 - 12) + 'px';
+  // Clamped against the menu's own drawn height rather than a row count, which
+  // guessed wrong the moment rows stopped being one uniform size (headers, and
+  // a list tall enough to scroll inside its own max-height).
   el.style.display = 'block';
+  el.style.top = Math.max(6, Math.min(y, window.innerHeight - el.offsetHeight - 8)) + 'px';
 }
 
 export function hideMenu() {

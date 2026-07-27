@@ -7,7 +7,7 @@ import {
   spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist,
   accuracy, dodge, hitChance, rollHit, unitCombat,
   equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf,
-  reachOf, ammoCostOf,
+  reachOf, ammoCostOf, orderedActionIds,
   PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
@@ -691,6 +691,69 @@ test('ammoCostOf survives a missing sheet', () => {
   const [id, a] = Object.entries(ACTIONS).find(([, x]) => x.ammoCost > 1);
   assert.equal(ammoCostOf(null, id), a.ammoCost);
   assert.equal(ammoCostOf({}, id), a.ammoCost);
+});
+
+// --- action order --------------------------------------------------------------
+// One order for both bars (the hotbar and combat's action row), by where a power
+// came from: basic swing, shove, throws, class powers, what a talent granted,
+// what is in hand. Before this they rendered in list order, which put the basic
+// swing wherever the class happened to list it and MOVED buttons the moment a
+// perk pushed a new action onto the sheet.
+const barIds = (sheet, extra = []) => orderedActionIds(
+  sheet, [...sheet.actions, equippedAction(sheet), 'shove', ...extra],
+);
+
+test('the basic attack leads, then shove, then the throws', () => {
+  const s = createSheet('office-drone');
+  const ids = barIds(s, ['paper-ball', 'paper-airplane']);
+  assert.equal(ids[0], 'attack'); // the Drone's own swing, not its first listed action
+  assert.equal(ids[1], 'shove');
+  assert.equal(ids[2], 'paper-ball');
+  assert.equal(ids[3], 'paper-airplane');
+  // Class utilities follow the things you throw, and the bare-handed swing is
+  // last - it is what your EQUIPMENT brings, and it brings the least.
+  assert.deepEqual(ids.slice(4), ['defend', 'coffee', 'punch']);
+});
+
+test('a class with no swing of its own leads with the one in its hands', () => {
+  // HR posts reqs; it does not punch anybody as a class power. The gear swing is
+  // therefore its basic attack, and it goes first rather than last.
+  const hr = createSheet('human-resources');
+  const ids = barIds(hr, ['paper-ball']);
+  assert.equal(ids[0], 'punch');
+  assert.equal(ids[1], 'shove');
+  assert.ok(ids.indexOf('summon-applicants') > ids.indexOf('paper-ball'));
+});
+
+test('a talent power and a perk power sit after the class list, gear last', () => {
+  const s = createSheet('office-drone');
+  s.classPoints = 9;
+  spendClassPoint(s, 'drone-thick-skin');
+  spendClassPoint(s, 'drone-seminar'); // grants 'kick'
+  equipItem(s, s.inventory.push('stapler') - 1); // brings its own swing
+  const ids = barIds(s, ['paper-ball']);
+  assert.ok(ids.indexOf('kick') > ids.indexOf('coffee'), 'a learned power follows the class kit');
+  assert.equal(ids[ids.length - 1], 'staple-jab', 'the weapon swing is last');
+});
+
+test('the order is stable as a kit grows - buttons do not shuffle', () => {
+  // The point of ordering by provenance: learning something appends, it does not
+  // reshuffle what the player has already memorized.
+  const before = barIds(createSheet('office-drone'), ['paper-ball']);
+  const after = (() => {
+    const s = createSheet('office-drone');
+    s.classPoints = 9;
+    spendClassPoint(s, 'drone-thick-skin');
+    spendClassPoint(s, 'drone-seminar');
+    return barIds(s, ['paper-ball']);
+  })();
+  assert.deepEqual(after.filter((id) => before.includes(id)), before);
+});
+
+test('the same id twice is one button, and an unknown id is none', () => {
+  const s = createSheet('office-drone');
+  const ids = orderedActionIds(s, ['attack', 'attack', 'shove', 'no-such-action']);
+  assert.deepEqual(ids, ['attack', 'shove']);
 });
 
 test('THROW_RANGE is a shared constant, not a per-module copy', () => {

@@ -180,11 +180,12 @@ export function createSheetFrom(block, extra = {}) {
   const sheet = {
     // The JOB, and then the PERSON. A block built from a class (fromClass -
     // companions, and enemies that are a class) carries `classId`, so the job
-    // is the class's own label; the person keeps their own name. Without that
-    // split both fields read the same string and a companion's sheet announced
-    // "Nervous IT Intern - Nervous IT Intern", listing a person as their own
-    // profession. A picked class has no `classId` on the block itself (it IS
-    // the class), so the player still gets the class label for both.
+    // is always the class's own label, whatever the block calls itself: that is
+    // what keeps a named archetype (the Security Guard) filed under the job he
+    // does (Security) instead of under himself. Someone with no name of their
+    // own inherits the class's, so both fields read the job - which is exactly
+    // what the player gets too (a picked class has no `classId` on the block,
+    // so `block.name` IS the class label).
     className: (block.classId && CLASSES[block.classId]?.name) || block.name,
     name: block.name, // display name - the class label, or the companion's own
     model: block.model,
@@ -346,6 +347,88 @@ export function weaponProc(sheet) {
 // and the hotbar splice it in beside the class powers.
 export function equippedAction(sheet) {
   return ITEMS[sheet?.equipped?.weapon]?.attack || 'punch';
+}
+
+// --- action order -------------------------------------------------------------
+// The canonical left-to-right order of a character's kit, shared by the
+// out-of-combat hotbar and the in-combat action bar. Both used to render in
+// list order - `[...sheet.actions, weapon swing, shove, ...throwables]` - which
+// put the basic swing wherever the class happened to list it, buried Shove
+// behind the class's utilities, and moved a button the moment a perk pushed a
+// new action onto the sheet. A bar you have to re-read every level is a bar you
+// stop reading.
+//
+// The order is by WHERE A POWER CAME FROM, cheapest and most-used first:
+//   1. the basic attack   - the class's own swing (the punch when it has none)
+//   2. shove              - everyone has it, it costs nothing to know
+//   3. throwables         - paper ball, then anything folded from it
+//   4. class powers       - the rest of the class list, in the class's order
+//   5. talent powers      - what a talent or a spent class point granted
+//   6. equipment powers   - the swing whatever is in hand brings
+// Within a bucket, ties keep the order they arrived in, so a class list stays
+// readable as the class wrote it.
+const ORDER_BASIC = 0;
+const ORDER_SHOVE = 1;
+const ORDER_THROW = 2;
+const ORDER_CLASS = 3;
+const ORDER_TALENT = 4;
+const ORDER_GEAR = 5;
+
+// Which bucket each of a sheet's available action ids belongs to. Provenance is
+// re-derived from the registries rather than remembered on the sheet: a perk
+// bakes its granted action into `sheet.actions` (bakeNodeEffect) with no note of
+// where it came from, and a saved sheet from before this existed carries no note
+// either. The class list, the talent and the taken perks are enough to tell.
+function actionBuckets(sheet) {
+  const def = (sheet?.classId && CLASSES[sheet.classId])
+    || (sheet?.companionId && COMPANIONS[sheet.companionId])
+    || (sheet?.className && Object.values(CLASSES).find((c) => c.name === sheet.className))
+    || null;
+  const classList = def?.actions || [];
+  const bucket = new Map();
+  // The basic attack is the class's FIRST plain attack - not a throw, which
+  // needs ammo, and not something a talent gated. A class with no attack of its
+  // own (HR posts reqs; it does not swing) leaves the slot to the gear swing
+  // below, which is then the only basic attack it has.
+  const basic = classList.find((id) => {
+    const a = ACTIONS[id];
+    return a?.type === 'attack' && !a.ammoCost && !a.needsTalent;
+  }) || null;
+  for (const id of classList) bucket.set(id, id === basic ? ORDER_BASIC : ORDER_CLASS);
+  const granted = [];
+  if (sheet?.talent?.effects?.grantsAction) granted.push(sheet.talent.effects.grantsAction);
+  for (const perkId of sheet?.perks || []) {
+    const node = trackNode(perkId);
+    if (node?.effect?.grantsAction) granted.push(node.effect.grantsAction);
+  }
+  for (const id of granted) bucket.set(id, ORDER_TALENT);
+  const swing = equippedAction(sheet);
+  if (!bucket.has(swing)) bucket.set(swing, basic ? ORDER_GEAR : ORDER_BASIC);
+  return bucket;
+}
+
+/**
+ * Sort available action ids into the canonical order above. `ids` is whatever
+ * the caller considers available right now (the bar's own list - it decides
+ * what a character can reach; this only decides where each one sits), and the
+ * return is a new array, deduplicated: a class that lists the swing its weapon
+ * also brings would otherwise render the same button twice, under one DOM id.
+ * Ids not accounted for by any bucket - shove and the throwables, which belong
+ * to nobody in particular - fall into their own.
+ */
+export function orderedActionIds(sheet, ids) {
+  const bucket = actionBuckets(sheet);
+  const rank = (id) => {
+    if (bucket.has(id)) return bucket.get(id);
+    const a = ACTIONS[id];
+    if (a?.type === 'shove') return ORDER_SHOVE;
+    if (a?.ammoCost) return ORDER_THROW;
+    return ORDER_CLASS; // an id from somewhere new: with the powers, not adrift
+  };
+  return [...new Set(ids)].filter((id) => ACTIONS[id])
+    .map((id, i) => ({ id, i, r: rank(id) }))
+    .sort((a, b) => (a.r - b.r) || (a.i - b.i))
+    .map((e) => e.id);
 }
 
 // A sheet's attributes with equipped `attrBonus` folded in - the "effective"

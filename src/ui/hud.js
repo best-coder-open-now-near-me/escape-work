@@ -137,49 +137,167 @@ export function createTacticalButton({ onToggle, isOn }) {
   return { refresh: paint, setVisible: (v) => { btn.style.display = v ? '' : 'none'; layoutHudRail(); } };
 }
 
-// --- persistent attack hotbar -------------------------------------------------
-// Always-on out-of-combat action bar: the player's OFFENSIVE actions (attacks,
-// shove, thrown weapons) so a coworker can be targeted before a fight starts.
-// Arming a slot and clicking an enemy opens combat with that move (main.js
+// --- persistent action hotbar -------------------------------------------------
+// Always-on out-of-combat action bar: the player's WHOLE kit, so the character
+// you picked is legible without a fight running. Arming a slot and clicking a
+// coworker opens combat with that move; a summon posts where you click (main.js
 // wires the arming + targeting). Ids are `#hotbar-act-<id>` - deliberately NOT
 // the combat bar's `#act-<id>`, so the two never collide in the DOM or tests.
-// `actions` is [{ id, label, ap, ammoCost }]; onArm(id) toggles a slot.
-export function createHotbar(actions, { onArm }) {
+//
+// It is an ICON GRID, not a row of named buttons. Spelled out in words a full
+// kit ran ~900px wide: the leftmost slots sat UNDER the bottom-left HUD rail and
+// could not be clicked at all (the bag button ate them), and the right end slid
+// beneath the narrator box. Square slots fit between the two with the name in
+// the tooltip - and they are what a hotbar looks like in the games this one is
+// borrowing from. `unavailable` is why a slot can't act with no fight on
+// (Deflect Blame, a heal): it dims the slot and titles it with the reason, but
+// leaves it CLICKABLE - the host answers a press with that reason, and a listed
+// power you can ask about beats a power that isn't there. An unaffordable throw
+// (no paper) is the one thing actually disabled: that one is about to change on
+// its own the moment you pick up a sheet.
+// Slots per ROW. The bar holds one row at a time and pages through the rest,
+// which is what lets a kit grow - perks, a talent, a weapon swing, whatever the
+// player assigns - without the row growing until it spans the screen and the
+// number keys stop lining up with it.
+//
+// Eight, because every class's whole kit fits in eight today: a row that pages
+// what a character ALREADY HAS would hide the weapon swing behind a pager on a
+// fresh Office Drone, which is a worse trade than an unused pager. Rows arrive
+// when the player builds past one (the host pads the layout with an empty slot
+// so there is always somewhere to assign to - see main.js layoutOf).
+export const HOTBAR_ROW_SLOTS = 8;
+
+// `slots` is the whole layout, in order, as view-models the host builds:
+//   { kind: 'action', id, label, icon, ap, ammoCost, unavailable }
+//   { kind: 'item',   id, label, icon, count }
+//   null                                   an empty slot, right-clickable
+// The bar shows HOTBAR_ROW_SLOTS of them at a time; `startRow` restores which
+// row was showing across a rebuild. onPress(i) is a left click on slot i (the
+// host decides what pressing one means - arm a power, drink the coffee),
+// onAssign(i, x, y) a right click on it, at the cursor.
+export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
   const bar = document.createElement('div');
   bar.id = 'hotbar';
   Object.assign(bar.style, PANEL_CHROME, {
     position: 'fixed', left: '50%', bottom: '18px', transform: 'translateX(-50%)',
     zIndex: '22', display: 'none', gap: '7px', padding: '8px 10px', borderRadius: '10px',
-    userSelect: 'none',
+    userSelect: 'none', alignItems: 'center',
   });
   document.body.appendChild(bar);
 
-  const buttons = actions.map((a, i) => {
+  const rowCount = Math.max(1, Math.ceil(slots.length / HOTBAR_ROW_SLOTS));
+  let row = Math.min(Math.max(0, startRow), rowCount - 1);
+  const rowOf = (i) => Math.floor(i / HOTBAR_ROW_SLOTS);
+
+  // The pager: one step per click, wrapping, so a two-row bar toggles. Hidden
+  // outright at one row - a control that can only do nothing is noise.
+  const pagerBtn = (glyph, step, id) => {
     const b = document.createElement('button');
-    b.id = 'hotbar-act-' + a.id;
-    b.dataset.action = a.id;
+    b.id = id;
+    b.textContent = glyph;
+    Object.assign(b.style, BUTTON_CHROME, { padding: '7px 9px', borderRadius: '7px', minWidth: '0' });
+    b.onmousedown = (e) => e.stopPropagation();
+    b.onclick = () => flip(step);
+    return b;
+  };
+  const prev = pagerBtn('‹', -1, 'hotbar-prev');
+  const next = pagerBtn('›', 1, 'hotbar-next');
+  const slotsRow = document.createElement('div');
+  Object.assign(slotsRow.style, { display: 'flex', gap: '7px' });
+  const pageTag = document.createElement('div');
+  pageTag.id = 'hotbar-page';
+  Object.assign(pageTag.style, { font: '11px system-ui, sans-serif', opacity: '.6', minWidth: '26px', textAlign: 'center' });
+  bar.append(prev, slotsRow, next, pageTag);
+  // The wheel over the bar pages it - the gesture everyone tries first. Stopped
+  // here so it never reaches the canvas and zooms the camera instead.
+  bar.onwheel = (e) => { e.preventDefault(); e.stopPropagation(); flip(e.deltaY > 0 ? 1 : -1); };
+
+  const buttons = slots.map((slot, i) => {
+    const b = document.createElement('button');
+    // Named for WHAT IS IN the slot, so `#hotbar-act-<id>` still means "that
+    // power is on the bar" wherever it sits; a positional id names an empty one.
+    b.id = slot?.kind === 'action' ? `hotbar-act-${slot.id}`
+      : slot?.kind === 'item' ? `hotbar-item-${slot.id}`
+        : `hotbar-slot-${i}`;
+    if (slot) b.dataset.action = slot.id;
+    b.dataset.slot = String(i);
     Object.assign(b.style, BUTTON_CHROME, {
-      minWidth: '104px', padding: '7px 6px', borderRadius: '7px',
+      position: 'relative', width: '46px', height: '46px', padding: '0',
+      borderRadius: '8px', font: '20px system-ui, sans-serif', lineHeight: '1',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none',
     });
-    b.title = `${a.label} · ${a.ap}AP`;
+    // The key that presses this slot, small in the corner - the number is how
+    // the row is addressed, so it belongs ON the slot rather than in the label.
+    const keyTag = document.createElement('span');
+    Object.assign(keyTag.style, {
+      position: 'absolute', top: '2px', left: '4px', font: '9px system-ui, sans-serif',
+      opacity: '.55', pointerEvents: 'none',
+    });
+    // How many are left, for a slot holding something spendable.
+    const countTag = document.createElement('span');
+    Object.assign(countTag.style, {
+      position: 'absolute', bottom: '1px', right: '3px', font: '700 10px system-ui, sans-serif',
+      opacity: '.85', pointerEvents: 'none',
+    });
+    const face = document.createElement('span');
+    face.style.pointerEvents = 'none';
+    b.append(keyTag, face, countTag);
     b.onmousedown = (e) => e.stopPropagation(); // don't let the canvas see it
-    b.onclick = () => onArm(a.id);
-    bar.appendChild(b);
-    return { b, def: a };
+    b.onclick = () => onPress(i);
+    b.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); onAssign(i, e.clientX, e.clientY); };
+    slotsRow.appendChild(b);
+    return { b, slot, keyTag, countTag, face };
   });
 
   let armed = null;
   let sheet = null;
   function render() {
-    buttons.forEach(({ b, def }, i) => {
-      let label = `${i + 1} · ${def.label}`;
-      if (def.ammoCost) label += ` (${sheet?.paper ?? 0}📄)`;
-      b.textContent = label;
-      const usable = !def.ammoCost || (sheet?.paper ?? 0) >= def.ammoCost;
-      b.disabled = !usable;
-      b.style.opacity = usable ? '1' : '.4';
-      b.style.borderColor = def.id === armed ? '#8adf76' : '#3a3a52';
+    const many = rowCount > 1;
+    prev.style.display = many ? '' : 'none';
+    next.style.display = many ? '' : 'none';
+    pageTag.style.display = many ? '' : 'none';
+    pageTag.textContent = `${row + 1}/${rowCount}`;
+    buttons.forEach(({ b, slot, keyTag, countTag, face }, i) => {
+      b.style.display = rowOf(i) === row ? '' : 'none';
+      const key = (i % HOTBAR_ROW_SLOTS) + 1;
+      keyTag.textContent = String(key);
+      countTag.textContent = '';
+      if (!slot) {
+        face.textContent = '—';
+        b.disabled = false;
+        b.style.opacity = '.32';
+        b.title = 'Empty slot - right-click to assign a power or an item';
+        b.style.borderColor = '#3a3a52';
+        return;
+      }
+      if (slot.kind === 'item') {
+        const count = slot.count ?? 0;
+        face.textContent = slot.icon || '❔';
+        countTag.textContent = count > 1 ? `×${count}` : '';
+        b.disabled = count <= 0;
+        b.style.opacity = count > 0 ? '1' : '.4';
+        b.title = count > 0
+          ? `${slot.label} ×${count} · from your pockets · right-click to reassign`
+          : `${slot.label} · none left`;
+        b.style.borderColor = '#3a3a52';
+        return;
+      }
+      face.textContent = slot.icon || '❔';
+      // A throw counts the sheets it has to spend, where an item counts itself.
+      if (slot.ammoCost) countTag.textContent = String(sheet?.paper ?? 0);
+      const fed = !slot.ammoCost || (sheet?.paper ?? 0) >= slot.ammoCost;
+      b.disabled = !fed;
+      b.style.opacity = fed && !slot.unavailable ? '1' : '.4';
+      b.title = slot.unavailable
+        ? `${slot.label} · ${slot.ap}AP · ${slot.unavailable}`
+        : `${slot.label} · ${slot.ap}AP · right-click to reassign`;
+      b.style.borderColor = slot.id === armed ? '#8adf76' : '#3a3a52';
     });
+  }
+  function flip(step) {
+    if (rowCount < 2) return;
+    row = (row + step + rowCount) % rowCount;
+    render();
   }
   render();
 
@@ -187,7 +305,16 @@ export function createHotbar(actions, { onArm }) {
     setVisible: (v) => { bar.style.display = v ? 'flex' : 'none'; },
     setArmed: (id) => { armed = id; render(); },
     refresh: (s) => { sheet = s; render(); },
+    flip,
     get armed() { return armed; },
+    get row() { return row; },
+    get rowCount() { return rowCount; },
+    // The layout index the number key `n` presses right now - the keys address
+    // the VISIBLE row, so 1 is always the leftmost button you can see.
+    indexAtKey: (n) => {
+      const i = row * HOTBAR_ROW_SLOTS + (n - 1);
+      return n >= 1 && n <= HOTBAR_ROW_SLOTS && i < slots.length ? i : -1;
+    },
     get visible() { return bar.style.display !== 'none'; },
     destroy: () => bar.remove(), // leader switches rebuild the bar wholesale
   };

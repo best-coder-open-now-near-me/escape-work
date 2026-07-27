@@ -12,6 +12,6 @@
 // `next` names the node to advance to; `next: null` ends the conversation.
 // Linear trees just give each node one option; branches give several. Keep it
 // small - this is the minimal talking layer, not a quest engine.
-// (The Nervous IT Intern moved to data/companions.js when he got a stat block
-// and an exit strategy.)
+// (The IT companion moved to data/companions.js when he got a stat block and an
+// exit strategy.)
 export const NPCS = {};

@@ -40,7 +40,10 @@ test.describe('smoke', () => {
   test('the HUD and hotbar are up', async () => {
     await expect(page.locator('#hotbar')).toBeVisible();
     await expect(page.locator('#hotbar-act-attack')).toBeVisible();
-    await expect(page.locator('#hotbar-act-defend')).toHaveCount(0); // combat-only
+    // The bar lists the WHOLE kit, combat-only powers included - dimmed, and
+    // titled with why they can't act out here.
+    await expect(page.locator('#hotbar-act-defend')).toBeVisible();
+    await expect(page.locator('#hotbar-act-defend')).toHaveAttribute('title', /fight|swinging/i);
   });
 
   test('the pockets toggle with I', async () => {

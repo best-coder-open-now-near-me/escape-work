@@ -1,6 +1,6 @@
 // The money loop (ECONOMY_PLAN.md), driven through the real game: cash banks
 // itself on pickup, a snack machine sells you something and can be cleaned out,
-// and the Mail Room Veteran buys the junk a machine will not touch.
+// and the mail room companion buys the junk a machine will not touch.
 //
 // The Floor 1 machine stands in the left break room (levels/level1.json). Tests
 // teleport next to it rather than walking the floor - the walk is covered by
@@ -121,10 +121,10 @@ test('a machine can be cleaned out, and the overlay says so afterwards', async (
   await page.keyboard.up('Alt');
 });
 
-test('the veteran buys the junk a machine will not touch', async ({ page }) => {
+test('the mail room companion buys the junk a machine will not touch', async ({ page }) => {
   test.setTimeout(300_000);
   // Boot Floor 1 normally, then write a campaign save carrying this exact live
-  // sheet onto Floor 2 - where the Mail Room Veteran stands - and reload.
+  // sheet onto Floor 2 - where the mail room companion stands - and reload.
   await bootAndPick(page, 'office-drone');
   await page.evaluate(() => {
     localStorage.setItem('escape-work.progress', JSON.stringify({
@@ -142,8 +142,8 @@ test('the veteran buys the junk a machine will not touch', async ({ page }) => {
     window.__god.setCash(0);
   });
 
-  const v = await page.evaluate(() => window.__game.npcs.find((n) => /Veteran/.test(n.name)));
-  expect(v, 'the Mail Room Veteran is on Floor 2').toBeTruthy();
+  const v = await page.evaluate(() => window.__game.npcs.find((n) => /Mail Room/.test(n.name)));
+  expect(v, 'the mail room companion is on Floor 2').toBeTruthy();
   await standBeside(page, v.x, v.z - 1);
   await clickBody(page, v.x, v.z, 0.9);
   await expect(page.locator('#dialogue-panel')).toBeVisible({ timeout: 60_000 });
