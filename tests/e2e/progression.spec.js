@@ -59,13 +59,19 @@ test('class points learn track nodes (attr bonus, then a prereq-gated action)', 
   // Security also granted, so three classes unlocked one action and levelling
   // up converged the roster.
   //
-  // Clicking it with its prereq unmet must do NOTHING: that is the half of
-  // "prereq-gated" the old spec never actually exercised, because it only ever
-  // clicked the node after the prereq was already paid for.
+  // With its prereq unmet the node is LOCKED, and the screen says so: the
+  // button is disabled and reads "Locked". That is the half of "prereq-gated"
+  // the old spec never exercised - it only ever clicked the node after the
+  // prereq was already paid for, so a node with no `requires` at all would
+  // have passed it.
+  //
+  // Asserted as disabled rather than clicked: a disabled button never becomes
+  // actionable, so page.click waits out the whole timeout and reports "click
+  // timed out" - which looks like a hung UI rather than a working gate.
   expect(await page.evaluate(() => window.__god.player.actions.includes('paper-storm'))).toBe(false);
-  await page.click('#lvlup-node-drone-paper-storm');
-  expect(await page.evaluate(() => window.__god.player.actions.includes('paper-storm'))).toBe(false);
-  expect(await page.evaluate(() => window.__god.player.classPoints)).toBe(2); // refused, nothing spent
+  const gated = page.locator('#lvlup-node-drone-paper-storm');
+  await expect(gated).toBeDisabled();
+  await expect(gated).toHaveText('Locked');
 
   // Pay the prereq, and now it takes.
   await page.click('#lvlup-node-drone-sharp-folds');
