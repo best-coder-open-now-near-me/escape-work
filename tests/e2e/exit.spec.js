@@ -11,7 +11,8 @@
 // edit would stale.
 import { test, expect } from '@playwright/test';
 import level1 from '../../levels/level1.json' with { type: 'json' };
-import { bootStash, bootAndPick, waitStill, enterCombat, waitForPlayerTurn } from './helpers.js';
+import { TILE_TYPES } from '../../src/data/tiles.js';
+import { bootStash, bootAndPick, waitStill, enterCombat } from './helpers.js';
 
 const PROGRESS_KEY = 'escape-work.progress';
 
@@ -24,6 +25,22 @@ function exitTile(level) {
     }
   }
   throw new Error('level has no exit tile');
+}
+
+// Every tile you could stand on, read from the level's own legend and the tile
+// registry. Used to pick walk targets that are actually walkable - clicking a
+// desk does nothing, and a test that silently clicks furniture makes no
+// progress while looking like it tried.
+function walkableTiles(level) {
+  const out = [];
+  for (let z = 0; z < level.map.length; z++) {
+    const row = level.map[z];
+    for (let x = 0; x < row.length; x++) {
+      const def = TILE_TYPES[level.tiles[row[x]]];
+      if (def && !def.solid) out.push([x, z]);
+    }
+  }
+  return out;
 }
 
 // A one-room floor whose exit is two steps away. A stashed playtest level is
@@ -73,6 +90,43 @@ async function walkOnto(page, x, z, tries = 6) {
   return page.evaluate(() => window.__game.gameOver);
 }
 
+// Cross a whole floor in HOPS. A shipped level is bigger than the viewport:
+// its far corner does not project on screen from the spawn, and a click aimed
+// off-screen is a silent no-op - so aiming straight at a distant exit makes no
+// progress at all while looking exactly like a walk that failed.
+//
+// Instead: each round, click the walkable tile NEAREST the target that is
+// currently on screen. The camera follows, more of the floor comes into view,
+// and pathfinding does the routing for each hop. A hop that moves nobody means
+// that tile is unreachable from here (a sealed closet can be on screen and
+// closer to the goal than anywhere useful), so it is struck off and the next
+// round picks another.
+async function walkAcross(page, target, walkables, rounds = 16) {
+  const banned = new Set();
+  const tileNow = () => page.evaluate(() => window.__game.playerTile);
+  for (let i = 0; i < rounds; i++) {
+    if (await page.evaluate(() => window.__game.gameOver)) return true;
+    const options = walkables.filter(([x, z]) => !banned.has(`${x},${z}`));
+    const shots = await page.evaluate((list) => list.map(([x, z]) => {
+      const p = window.__game.project(x, z);
+      return { x, z, sx: p.x, sy: p.y };
+    }), options);
+    // Keep well clear of the fixed UI: the hotbar sits bottom-centre and would
+    // swallow a click meant for the floor behind it.
+    const visible = shots.filter((p) => p.sx > 40 && p.sx < 1240 && p.sy > 70 && p.sy < 660);
+    if (!visible.length) return false;
+    visible.sort((a, b) => Math.hypot(a.x - target.x, a.z - target.z) - Math.hypot(b.x - target.x, b.z - target.z));
+    const aim = visible[0];
+    const before = await tileNow();
+    await page.mouse.click(aim.sx, aim.sy);
+    await waitStill(page);
+    if (await page.evaluate(() => window.__game.gameOver)) return true;
+    const after = await tileNow();
+    if (before.x === after.x && before.z === after.z) banned.add(`${aim.x},${aim.z}`);
+  }
+  return page.evaluate(() => window.__game.gameOver);
+}
+
 test('walking out of the last floor wins the run and clears the campaign save', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, EXIT_ROOM);
@@ -93,8 +147,8 @@ test('the exit mid-campaign banks the save and carries the party to the next flo
   await page.evaluate(() => window.__god.enemies.forEach((e) => { if (e.alive) e.die(); }));
   await page.evaluate(() => { window.__god.player.hp = 4; }); // wounded, to prove the breather heals
 
-  const { x, z } = exitTile(level1);
-  expect(await walkOnto(page, x, z, 8)).toBe(true);
+  const exit = exitTile(level1);
+  expect(await walkAcross(page, exit, walkableTiles(level1))).toBe(true);
 
   await expect(page.locator('#floor-clear')).toBeVisible();
   expect(await page.locator('#floor-clear').textContent()).toMatch(/FLOOR CLEAR/);
