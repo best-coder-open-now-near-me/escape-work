@@ -119,6 +119,16 @@ test('every registry cross-reference resolves', () => {
   for (const [id, a] of Object.entries(ACTIONS)) {
     if (a.type === 'summon') assert.ok(CLASSES[a.archetype] || ENEMY_TYPES[a.archetype], `action "${id}" summons a real archetype`);
   }
+  // Anything that paints the floor names a real tile type - the cone's
+  // `leaves` and the zone verb's alike (POWERS_PLAN M3). A typo here is
+  // invisible until someone fires the power in a real fight and the surface
+  // silently fails to land: grid.setType would take a name nothing renders.
+  for (const [id, a] of Object.entries(ACTIONS)) {
+    if (!a.leaves) continue;
+    assert.ok(TILE_TYPES[a.leaves], `action "${id}" leaves a real tile type ("${a.leaves}")`);
+    assert.ok(TILE_TYPES[a.leaves].surface,
+      `action "${id}" leaves "${a.leaves}", which must carry a surface to be worth painting`);
+  }
   for (const [id, def] of Object.entries(ENEMY_TYPES)) {
     if (def.summon) assert.ok(CLASSES[def.summon.archetype] || ENEMY_TYPES[def.summon.archetype], `enemy "${id}" summons a real archetype`);
   }

@@ -6,7 +6,9 @@ import assert from 'node:assert/strict';
 import {
   buffProblem, buffOutcome, buffRangeOf, isFriendly, BUFF_RANGE,
   controlProblem, controlOutcome, controlIsRanged, isControl,
+  isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf,
 } from '../../src/powers.js';
+import { TILE_TYPES } from '../../src/data/tiles.js';
 import { ACTIONS } from '../../src/data/actions.js';
 import { STATUSES } from '../../src/data/statuses.js';
 
@@ -176,6 +178,61 @@ test('a root is not a stun', () => {
   // A root costs you the ground, not the turn - if it ever also skipped the
   // turn it would need the anti-chain window, and the test above would say so.
   assert.notEqual(detained.effects.skipTurn, true);
+});
+
+// --- zone (POWERS_PLAN M3) --------------------------------------------------
+
+const ZONE = { type: 'zone', ap: 2, label: 'Test Zone', leaves: 'paper', radius: 1.5, range: 5, uses: 2 };
+
+test('isZone, and the zone defaults', () => {
+  assert.equal(isZone(ZONE), true);
+  assert.equal(isZone({ type: 'attack' }), false);
+  assert.equal(zoneRadiusOf({}), 1);
+  assert.equal(zoneRangeOf({}), 5);
+  assert.equal(zoneRadiusOf(ZONE), 1.5);
+});
+
+test('zoneTiles is a DISC, not the bounding square', () => {
+  // radius 1: the centre and its four orthogonal neighbours. The diagonals sit
+  // at 1.41, outside it - a square footprint would carpet corners the player
+  // can plainly see are further away than tiles the ring leaves out.
+  const r1 = zoneTiles(0, 0, 1);
+  assert.equal(r1.length, 5);
+  assert.ok(r1.some(([x, z]) => x === 0 && z === 0));
+  assert.ok(r1.some(([x, z]) => x === 1 && z === 0));
+  assert.ok(!r1.some(([x, z]) => x === 1 && z === 1), 'the diagonal is outside radius 1');
+  // radius 1.5 reaches the diagonals (1.41) but not two tiles out.
+  const r15 = zoneTiles(0, 0, 1.5);
+  assert.ok(r15.some(([x, z]) => x === 1 && z === 1));
+  assert.ok(!r15.some(([x, z]) => x === 2 && z === 0));
+  assert.equal(r15.length, 9);
+});
+
+test('zoneTiles is centred where you aimed it', () => {
+  const cells = zoneTiles(4, 7, 1);
+  assert.ok(cells.some(([x, z]) => x === 4 && z === 7));
+  assert.ok(cells.every(([x, z]) => Math.hypot(x - 4, z - 7) <= 1 + 1e-9));
+});
+
+test('a zone is gated by AP, uses, range and line', () => {
+  const t = (over = {}) => ({ dist: 1, los: true, ap: 10, usesLeft: 2, ...over });
+  assert.equal(zoneProblem(ZONE, t()), null);
+  assert.match(zoneProblem(ZONE, t({ ap: 1 })), /AP/);
+  assert.match(zoneProblem(ZONE, t({ usesLeft: 0 })), /left this fight/);
+  assert.equal(zoneProblem(ZONE, t({ dist: 5 })), null);
+  assert.match(zoneProblem(ZONE, t({ dist: 6 })), /Too far/);
+  assert.match(zoneProblem(ZONE, t({ los: false })), /No clear line/);
+});
+
+test('every shipped zone paints a real surface tile', () => {
+  for (const [id, a] of Object.entries(ACTIONS)) {
+    if (a.type !== 'zone') continue;
+    assert.ok(a.leaves, `${id} names what it leaves`);
+    assert.ok(TILE_TYPES[a.leaves], `${id} leaves a real tile (${a.leaves})`);
+    // A zone that painted a plain tile would spend a turn changing the floor's
+    // colour. The point of the verb is the SURFACE layer underneath.
+    assert.ok(TILE_TYPES[a.leaves].surface, `${id} leaves a tile carrying a surface`);
+  }
 });
 
 // --- the shipped content honors the verb ------------------------------------

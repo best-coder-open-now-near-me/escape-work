@@ -1301,6 +1301,12 @@ function startGame(level) {
         // paper). Only bare floor converts - carpets, surfaces, props stay.
         // `turns` > 0 marks the surface as LITTER rather than terrain: it
         // clears itself after that many rounds (see ageTempSurfaces).
+        // The read-only twin of leaveSurface's own first line. The zone verb's
+        // ring preview and its cursor count both need to know which tiles will
+        // TAKE a surface without painting one to find out - and asking a
+        // different question than the commit asks is how a preview starts
+        // lying (the rings promised tiles the click then skipped).
+        canTakeSurface: (x, z) => grid.typeAt(x, z) === 'floor',
         leaveSurface: (x, z, tileType, turns = 0) => {
           if (grid.typeAt(x, z) !== 'floor') return false;
           grid.setType(x, z, tileType);

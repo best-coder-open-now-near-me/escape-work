@@ -109,3 +109,37 @@ export function controlOutcome(a) {
 
 // Is this action a control? Used by the same one-predicate rule as isFriendly.
 export const isControl = (a) => !!a && a.type === 'control';
+
+// --- zone (POWERS_PLAN M3) ---------------------------------------------------
+
+export const isZone = (a) => !!a && a.type === 'zone';
+export const zoneRangeOf = (a) => a.range ?? 5;
+export const zoneRadiusOf = (a) => a.radius ?? 1;
+
+// The tiles a zone covers, as [x, z] pairs. A DISC measured on tile centres,
+// not the square the loop bounds suggest: a square blast would carpet the
+// diagonal corners a player can plainly see are further away than the tiles
+// the ring excludes, and the preview draws this exact list.
+export function zoneTiles(cx, cz, radius) {
+  const out = [];
+  const r = Math.max(0, radius);
+  const lim = Math.ceil(r);
+  for (let z = cz - lim; z <= cz + lim; z++) {
+    for (let x = cx - lim; x <= cx + lim; x++) {
+      if (Math.hypot(x - cx, z - cz) <= r + 1e-9) out.push([x, z]);
+    }
+  }
+  return out;
+}
+
+// Why this zone cannot be placed there, or null. Placement legality per TILE
+// (is it plain floor? is somebody standing on it?) stays with the caller -
+// that needs the grid - but the spend rules and the aim rules live here.
+export function zoneProblem(a, t = {}) {
+  const { dist = 0, los = true, ap = 0, usesLeft = null } = t;
+  if (ap < a.ap) return 'Not enough AP.';
+  if (usesLeft !== null && usesLeft <= 0) return `No ${(a.label || 'uses').toLowerCase()} left this fight.`;
+  if (dist > zoneRangeOf(a)) return 'Too far to reach with it.';
+  if (!los) return 'No clear line to there.';
+  return null;
+}

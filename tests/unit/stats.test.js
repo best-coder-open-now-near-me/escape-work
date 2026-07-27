@@ -190,13 +190,16 @@ test('spendClassPoint on an attrBonus node raises the attribute and derives', ()
 });
 
 test('spendClassPoint grants an action onto the sheet (respecting prereqs)', () => {
+  // The Drone's grant used to be `kick` - which the Mail Room and Security
+  // handed out too, so three classes unlocked one action and levelling up
+  // converged the roster (POWERS_PLAN M3). It is now Paper Storm, a zone.
   const s = createSheet('office-drone');
   s.classPoints = 2;
-  assert.ok(!s.actions.includes('kick'));
-  assert.equal(spendClassPoint(s, 'drone-seminar'), false); // prereq not met yet
-  assert.equal(spendClassPoint(s, 'drone-thick-skin'), true);
-  assert.equal(spendClassPoint(s, 'drone-seminar'), true); // now unlocks the kick
-  assert.ok(s.actions.includes('kick'));
+  assert.ok(!s.actions.includes('paper-storm'));
+  assert.equal(spendClassPoint(s, 'drone-paper-storm'), false); // prereq not met yet
+  assert.equal(spendClassPoint(s, 'drone-sharp-folds'), true);
+  assert.equal(spendClassPoint(s, 'drone-paper-storm'), true); // now unlocks it
+  assert.ok(s.actions.includes('paper-storm'));
 });
 
 test('spendClassPoint merges a numeric talent effect', () => {

@@ -88,7 +88,9 @@ export const CLASSES = {
     track: [
       { id: 'drone-thick-skin', name: 'Thick Skin', cost: 1, effect: { attrBonus: { grit: 1 } } },
       { id: 'drone-sharp-folds', name: 'Sharp Folds', cost: 1, effect: { talent: { paperDamageBonus: 1 } } },
-      { id: 'drone-seminar', name: 'Self-Defense Seminar', cost: 1, requires: ['drone-thick-skin'], effect: { grantsAction: 'kick' } },
+      // Was a grant of `kick`, which the Mail Room and Security also handed
+      // out - three classes unlocking one action (POWERS_PLAN M3).
+      { id: 'drone-paper-storm', name: 'Paper Storm', cost: 1, requires: ['drone-sharp-folds'], effect: { grantsAction: 'paper-storm' } },
     ],
     actions: ['attack', 'defend', 'coffee'],
     talent: {

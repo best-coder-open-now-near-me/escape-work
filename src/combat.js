@@ -14,7 +14,7 @@ import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, reachOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH, THROW_RANGE } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
-import { buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl } from './powers.js';
+import { buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf } from './powers.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
@@ -657,6 +657,28 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     costTag.style.display = 'block';
   }
 
+  // While a zone is armed, the cursor says how much of it would actually land.
+  // That number is the whole question for this verb: the tiles it can take are
+  // whatever happens to be plain floor, so the same click over open carpet and
+  // over a cubicle row costs the same AP for very different results.
+  function showZonePreview(point, sx, sy) {
+    preview = null;
+    const a = ACTIONS[armed];
+    const tx = Math.round(point.x);
+    const tz = Math.round(point.z);
+    const problem = zoneProblem(a, {
+      dist: cheb(active.actor.x, active.actor.z, tx, tz),
+      los: world.hasLos(active.actor.x, active.actor.z, tx, tz),
+      ap: active.ap,
+      usesLeft: a.uses ? active.usesLeft[armed] ?? 0 : null,
+    });
+    const n = problem ? 0 : zoneCells(a, tx, tz).length;
+    costTag.textContent = problem || `Cover ${n} tile${n === 1 ? '' : 's'} · ${a.ap} AP`;
+    costTag.style.left = `${sx + 14}px`;
+    costTag.style.top = `${sy + 14}px`;
+    costTag.style.display = 'block';
+  }
+
   // While a summon is armed, the cursor previews the DROP: how many applicants
   // that spot fits, or why it doesn't work. Same rule the click runs.
   function showSummonPreview(point, sx, sy) {
@@ -683,7 +705,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // While aiming, target rings replace the movement trail entirely. Cone
     // attacks and summon placement additionally track the cursor - the wedge
     // (or the drop zone) follows it.
-    if (armed && (ACTIONS[armed].cone || ACTIONS[armed].type === 'summon')) aimPoint = point;
+    // A zone tracks the cursor the way a cone and a summon placement do - the
+    // footprint follows the aim, because where it lands IS the decision.
+    if (armed && (ACTIONS[armed].cone || ACTIONS[armed].type === 'summon' || isZone(ACTIONS[armed]))) aimPoint = point;
     // Who is the cursor on? The body pick wins - it sees what the pixel shows.
     // The ground point is only a fallback for rays that miss the mesh, and a
     // pick can land on a body whose ground ray misses the world entirely (a
@@ -695,6 +719,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (ACTIONS[armed].type === 'summon') {
         if (point) showSummonPreview(point, sx, sy); else hidePreview();
         return hoverFoe;
+      }
+      if (isZone(ACTIONS[armed])) {
+        if (point) showZonePreview(point, sx, sy); else hidePreview();
+        // A zone is aimed at the GROUND, so it must not claim a foe - the
+        // crosshair would promise a swing the click does not make.
+        return null;
       }
       // A buff points the other way, so it must NOT return a foe: main.js
       // keys the crosshair off this return value, and a crosshair over a
@@ -814,6 +844,23 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const id = previewAction();
     if (!id) return;
     const a = ACTIONS[id];
+    // A zone rings the tiles it would actually cover - the same list the click
+    // paints (zoneCells), so a tile that shows a ring is a tile that gets the
+    // surface. Red on the aim point alone when the placement itself is refused.
+    if (isZone(a)) {
+      if (!armed || !aimPoint) return;
+      const tx = Math.round(aimPoint.x);
+      const tz = Math.round(aimPoint.z);
+      const problem = zoneProblem(a, {
+        dist: cheb(active.actor.x, active.actor.z, tx, tz),
+        los: world.hasLos(active.actor.x, active.actor.z, tx, tz),
+        ap: active.ap,
+        usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
+      });
+      if (problem) { drawRing(tx, tz, 0.42, PREVIEW_FAR); return; }
+      for (const [x, z] of zoneCells(a, tx, tz)) drawRing(x, z, 0.42, PREVIEW_OK);
+      return;
+    }
     // A summon rings the tiles its applicants would actually land on (green),
     // or the aimed tile alone in red when the spot is unusable - so "where do
     // they go?" is answered before the AP is spent.
@@ -1286,6 +1333,65 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return { slammed: false, died: false, msg: `You ${verb} ${en.def.name} back a step.` };
   }
 
+  // --- the zone verb (POWERS_PLAN M3) --------------------------------------
+  // `leaves` used to be welded to the cone attack, so the only way to put
+  // paper on the floor was to also swing at somebody. Freed into its own verb,
+  // placing a surface becomes a PLAN - fuel you lay before you light it,
+  // caltrops across the doorway they have to come through - and it hands the
+  // fire/conduction simulation a player-driven source instead of only the
+  // hazards the level author painted.
+  //
+  // Which tiles a zone may actually take, given the grid: plain floor only
+  // (leaveSurface's own rule), never under a living body. Shared by the click
+  // and the preview so the tiles you saw are the tiles you get.
+  function zoneCells(a, tx, tz) {
+    const out = [];
+    for (const [x, z] of zoneTiles(tx, tz, zoneRadiusOf(a))) {
+      // The same question leaveSurface asks itself, asked without painting -
+      // so the rings, the cursor's count and the click all agree about which
+      // tiles will take it.
+      if (!world.canTakeSurface(x, z)) continue;
+      if (!world.hasLos(active.actor.x, active.actor.z, x, z)) continue;
+      // Nobody gets a surface dropped on their feet - not a coworker, not a
+      // teammate, not you. The cone already refused to carpet a member's tile;
+      // this extends the same courtesy to everyone, because a zone is aimed
+      // deliberately and "I did not mean to stand in that" is the cone's
+      // problem, not this verb's.
+      if (members.some((m) => m.sheet.hp > 0 && m.actor?.x === x && m.actor?.z === z)) continue;
+      if (world.liveEnemies().some((e) => e.x === x && e.z === z)) continue;
+      out.push([x, z]);
+    }
+    return out;
+  }
+
+  function performZone(id, tx, tz) {
+    const a = ACTIONS[id];
+    const problem = zoneProblem(a, {
+      dist: cheb(active.actor.x, active.actor.z, tx, tz),
+      los: world.hasLos(active.actor.x, active.actor.z, tx, tz),
+      ap: active.ap,
+      usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
+    });
+    if (problem) { lastClickOutcome = `refused:${problem}`; log(problem); return; }
+    const cells = zoneCells(a, tx, tz);
+    active.ap = roundAp(active.ap - a.ap);
+    if (a.uses) active.usesLeft[id] -= 1;
+    faceTarget(active, tx, tz);
+    active.actor.lunge(tx, tz);
+    let laid = 0;
+    for (const [x, z] of cells) {
+      if (world.leaveSurface(x, z, a.leaves, a.leavesTurns || 0)) laid += 1;
+    }
+    // Saying how much of it landed matters more here than on any other verb:
+    // the tiles a zone can take are whatever happens to be plain floor, so the
+    // same click over carpet and over a cubicle row spends the same AP for
+    // very different results, and silence would read as a dud.
+    log(laid ? `${a.log} ${laid} tile${laid > 1 ? 's' : ''} covered.` : `${a.log} Nothing here will take it.`);
+    armed = null;
+    aimPoint = null;
+    refresh();
+  }
+
   // --- the control verb (POWERS_PLAN M2) -----------------------------------
   // Control deals NO damage. That is the design rule, not an omission: a power
   // that stuns AND hits is two powers, and the AP economy (2 AP against a 5-7
@@ -1581,6 +1687,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // to the free ground ringing outward from it. Aiming at the enemy you want
     // them to swarm is a reasonable thing to click.
     if (a.type === 'summon') { placeSummon(en.x, en.z); return; }
+    // Aiming a zone at a coworker is a reasonable thing to click - you want it
+    // under THEM - so it resolves on their tile rather than refusing. Their own
+    // tile is excluded from the footprint (zoneCells), so what lands is the
+    // ring around their feet.
+    if (isZone(a)) { performZone(armed, en.x, en.z); return; }
     // A RANGED control (a cone, or one carrying `range`) resolves from where
     // you stand. A touch-range one deliberately falls through to the melee
     // walk-up below rather than getting its own copy of it - Detain refusing
@@ -1689,6 +1800,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (a.cone && point) { fireCone(point.x, point.z); return; }
       // A summon is placed at the clicked tile (the whole point of arming it).
       if (a.type === 'summon') { placeSummon(tile.x, tile.z); return; }
+      // A zone lands where you clicked - ground, and only ground.
+      if (isZone(a)) { performZone(armed, tile.x, tile.z); return; }
       // A buff aimed at the ground resolves to whoever is STANDING there -
       // yourself included. This branch sits above the purge self-cast below
       // deliberately: Remote Restart is a `buff` that happens to purge, and
@@ -1756,6 +1869,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // it a buff is indistinguishable from an attack on the bar, and the first
     // thing a player does with an unlabelled armed action is click an enemy.
     if (isFriendly(a)) out.push(`Aim at a teammate or yourself - range ${buffRangeOf(a)}, never misses`);
+    if (isControl(a)) out.push('No damage - it takes their turn or their ground, not their HP');
+    if (isZone(a)) {
+      out.push(`Covers a ${zoneRadiusOf(a) * 2}-tile area with ${a.leaves} - range ${zoneRangeOf(a)}`);
+    }
     if (a.footwork) out.push('Footwork - gum on your shoe prevents it');
     return out.join('\n');
   }
@@ -1779,12 +1896,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const wasPending = pendingConfirm;
     pendingConfirm = null;
     if (a.type === 'attack' || a.type === 'shove' || a.type === 'summon'
-      || isFriendly(a) || isControl(a)) {
+      || isFriendly(a) || isControl(a) || isZone(a)) {
       armed = id; // arm it; clicking a ringed target (or a spot) fires it
       hidePreview(); // aiming now - the movement trail yields to targets
       log(a.type === 'summon'
         ? `${a.label} armed. Click where they should report.`
-        : isFriendly(a)
+        : isZone(a)
+          ? `${a.label} armed. Click where it should land.`
+          : isFriendly(a)
           // Naming the SIDE matters on the one verb that points the other way:
           // armed the same way an attack is, aimed at the opposite half of the
           // board, and nothing else on the bar behaves like that yet.

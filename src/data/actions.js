@@ -46,6 +46,21 @@ export const ACTIONS = {
     log: 'You send a passive-aggressive email.',
     missLog: 'Your passive-aggressive email lands in their spam folder.',
   },
+  // The Drone's track zone (POWERS_PLAN M3), replacing a grant of `kick` that
+  // the Mail Room and Security also handed out. Paper is the most useful
+  // surface in the game to be able to PLACE: it is fuel for anything burning,
+  // it cuts bare feet, and it is the ammo the Drone's own throws run on.
+  'paper-storm': {
+    type: 'zone',
+    ap: 2,
+    label: 'Paper Storm',
+    desc: 'Empty the recycling over an area. Fuel, caltrops, and ammunition - all at once.',
+    leaves: 'paper',
+    radius: 1.5,
+    range: 5,
+    uses: 2,
+    log: 'You upend the recycling.',
+  },
   defend: {
     type: 'defend',
     ap: 2,
