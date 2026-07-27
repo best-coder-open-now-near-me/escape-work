@@ -31,13 +31,13 @@ import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel } from './scene.js';
 import { placeModel, applyCharacterProportions } from './models.js';
 import { createPortraits } from './portraits.js';
-import { addHighlight, setHighlight } from './shading.js';
 import {
   throwProjectile, spawnDamageText, worldToScreenCss, impact as impactFx, statusBurst,
   createAuraLayer, footstep, bloodSplat, CHEST_Y,
 } from './fx.js';
 import { createControls } from './controls.js';
 import { createPicker } from './picking.js';
+import { createHoverLayer } from './hover.js';
 import { createLooting } from './looting.js';
 import { createShopping } from './shopping.js';
 import { startCombat } from './combat.js';
@@ -181,9 +181,7 @@ function startGame(level) {
     if (runtime.isBurning(x, z)) { ui.say('It is on fire. The snacks are a write-off.'); return; }
     if (!shopping.open(shopKey(x, z), def.shop)) return;
     loot.hideLabels();
-    clearHoverHighlight();
-    setCursor(null);
-    ui.setFocusBanner(null);
+    hover.clear();
   }
 
   // Looting (containers, bodies, pockets, the Alt overlay) lives in its own
@@ -886,84 +884,6 @@ function startGame(level) {
     return playerReaches(en) || canApproach(en);
   };
 
-  // BG3-style hover glow: one colored inverted-hull shell per interactable
-  // (shading.addHighlight), built lazily, toggled/recolored as the cursor
-  // moves. Color reads the target's nature: hostile red, talkable green,
-  // lootable gold, neutral interactable (doors/props) cyan.
-  const HL = {
-    enemy: [1.0, 0.28, 0.2],
-    npc: [0.42, 0.85, 0.42],
-    party: [0.45, 0.9, 0.8],
-    loot: [1.0, 0.82, 0.4],
-    interact: [0.5, 0.8, 1.0],
-  };
-  const rgbCss = ([r, g, b]) => `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
-
-  // Aggression dot colours (data/enemies.js `aggression`): whether a coworker
-  // will start a fight. Green = won't initiate, yellow = talks first, red =
-  // straight to battle. Tints both the enemy's flanking dots and the banner
-  // border, so the banner reads as one aggression signal.
-  const AGGRO = {
-    green: 'rgb(111, 200, 111)',
-    yellow: 'rgb(224, 178, 58)',
-    red: 'rgb(224, 80, 58)',
-  };
-  const aggroColor = (en) => AGGRO[en.def.aggression] || AGGRO.red;
-
-  // The top focus banner's label for whatever the cursor is over: an
-  // interactable entity, or a flat target the pick ray skims (a corpse,
-  // dropped item, container, or door edge on the floor). Null over bare floor -
-  // nothing worth naming. Mirrors dispatchHit/cursorFor so the banner always
-  // describes the verb a click would actually take.
-  function focusInfoFor(hit, point) {
-    if (hit) {
-      const { kind, ref } = hit;
-      if (kind === 'enemy') {
-        if (ref.alive) {
-          const ag = aggroColor(ref);
-          return { name: ref.def.name, sub: `Lv ${ref.def.level || 1} · HP ${ref.hp}/${ref.maxHp}`, color: ag, dotColor: ag };
-        }
-        return { name: ref.def.name, sub: ref.loot?.length ? 'Body · lootable' : 'Body · picked clean', color: rgbCss(HL.loot) };
-      }
-      if (kind === 'npc') return { name: ref.def.name, sub: 'Coworker · talk', color: rgbCss(HL.npc) };
-      if (kind === 'party') {
-        const m = memberOf(ref);
-        if (!m || (m === partyLeader(party) && m.sheet.hp > 0)) return null; // yourself: not news
-        const sub = m.sheet.hp <= 0 ? 'Down · help up' : `Party · HP ${m.sheet.hp}/${m.sheet.maxHp}`;
-        return { name: m.sheet.name, sub, color: rgbCss(HL.party) };
-      }
-      if (kind === 'door') {
-        const open = grid.doors.get(ref)?.open;
-        return { name: open ? 'Door · open' : 'Door · closed', sub: open ? 'Close' : 'Open', color: rgbCss(HL.interact) };
-      }
-      if (kind === 'prop') {
-        const def = grid.defAt(ref.x, ref.z);
-        const sub = def.shop
-          ? (shopping.soldOut(shopKey(ref.x, ref.z)) ? 'Sold out' : 'Merchant · buy')
-          : def.loot ? 'Rummage' : def.explosive ? 'Volatile' : def.ignitable ? 'Flammable' : 'Object';
-        return { name: def.label || 'Object', sub, color: rgbCss(def.loot || def.shop ? HL.loot : HL.interact) };
-      }
-    }
-    if (point) {
-      const tx = Math.round(point.x);
-      const tz = Math.round(point.z);
-      const corpse = loot.corpseAt(tx, tz);
-      if (corpse) return { name: corpse.def.name, sub: 'Body · lootable', color: rgbCss(HL.loot) };
-      const loose = loot.looseAt(tx, tz);
-      if (loose.length) {
-        const extra = loose.length > 1 ? ` +${loose.length - 1}` : '';
-        return { name: loot.itemName(loose[0].id) + extra, sub: 'Pick up', color: rgbCss(HL.loot) };
-      }
-      const doorKey = doorNearPoint(point);
-      if (doorKey) {
-        const open = grid.doors.get(doorKey)?.open;
-        return { name: open ? 'Door · open' : 'Door · closed', sub: open ? 'Close' : 'Open', color: rgbCss(HL.interact) };
-      }
-      if (grid.defAt(tx, tz).loot) return { name: grid.defAt(tx, tz).label, sub: 'Rummage', color: rgbCss(HL.loot) };
-    }
-    return null;
-  }
-
   // --- Examine ------------------------------------------------------------
   // One source of truth for "what is this?", so every menu that offers Examine
   // - out of combat, in combat - says the same thing about the same object.
@@ -1007,162 +927,8 @@ function startGame(level) {
   }
 
   const canvasEl = document.getElementById('app');
-  const hlShells = new WeakMap(); // holder entity -> highlight shell (or null)
-  let hoverEntity = null;
-  let hoverShell = null;
-  let hoverKind = null; // exposed for tests
-  function highlightShellFor(holder) {
-    if (!hlShells.has(holder)) hlShells.set(holder, addHighlight(holder));
-    return hlShells.get(holder);
-  }
-  function setHoverHighlight(holder, rgb) {
-    if (holder === hoverEntity) {
-      if (holder && hoverShell) setHighlight(hoverShell, true, rgb);
-      return;
-    }
-    if (hoverShell) { try { setHighlight(hoverShell, false); } catch { /* holder gone */ } }
-    hoverEntity = holder;
-    hoverShell = holder ? highlightShellFor(holder) : null;
-    if (hoverShell) setHighlight(hoverShell, true, rgb);
-  }
-  const clearHoverHighlight = () => setHoverHighlight(null, null);
-  const setCursor = (c) => { if (canvasEl) canvasEl.style.cursor = c || ''; };
-
-  // OUT of combat the body glow is an INSPECT verb, not an ambient one: held
-  // behind Ctrl or Alt, the two keys that already mean "show me what's there"
-  // (rings under every character, labels over every lootable). Lit on plain
-  // hover it fired on everything the cursor crossed - doors, desks, bystanders
-  // - and a light that is always on stops meaning anything.
-  //
-  // IN combat it's ungated. There the cursor is only ever aiming, and the hover
-  // path (onHover) hands us characters and nothing else, so the glow can't
-  // spill onto scenery the way it does out of combat. Making the player hold a
-  // key to see who they're about to swing at was asking for the modifier in the
-  // one half of the game where the answer is always wanted.
-  //
-  // What the cursor is over is tracked ALWAYS (`hoverTarget`), and the gate
-  // only decides whether it's lit. That's what lets pressing the key light up
-  // what you're already pointing at, instead of nothing happening until you
-  // jiggle the mouse to provoke a fresh hover event.
-  let hoverTarget = null; // { entity, rgb } under the cursor, lit or not
-  const glowHeld = () => ctrlHeld || altHeld;
-  const glowLit = () => glowHeld() || (inCombat && !!combat);
-  function applyHoverGlow() {
-    if (glowLit() && hoverTarget) setHoverHighlight(hoverTarget.entity, hoverTarget.rgb);
-    else clearHoverHighlight();
-  }
-  // Remember what's under the cursor and light it if the glow is active.
-  // The hit rides along so the reach ring can ask what KIND of thing this is.
-  function trackHoverGlow(hit) {
-    hoverTarget = hit?.entity ? { entity: hit.entity, rgb: colorForHit(hit), hit } : null;
-    applyHoverGlow();
-  }
-
-  const colorForHit = (hit) =>
-    hit.kind === 'enemy' ? (hit.ref.alive ? HL.enemy : HL.loot)
-      : hit.kind === 'npc' ? HL.npc
-        : hit.kind === 'party' ? HL.party : HL.interact;
+  // Which party member owns this actor, if any.
   const memberOf = (actor) => party?.members.find((m) => m.actor === actor) || null;
-
-  function cursorFor(hit, point) {
-    if (armedOoc) {
-      if (hit && hit.kind === 'enemy' && hit.ref.alive) {
-        return oocTargetOk(armedOoc, hit.ref) ? 'crosshair' : 'not-allowed';
-      }
-      return 'default';
-    }
-    if (hit) {
-      if (hit.kind === 'enemy') return hit.ref.alive ? 'crosshair' : 'pointer';
-      if (hit.kind === 'npc') return 'help';
-      return 'pointer'; // door, prop
-    }
-    // Flat targets the pick ray misses (corpses, dropped items, a door edge
-    // clicked on the floor) still deserve the interact cursor.
-    if (point) {
-      const tx = Math.round(point.x);
-      const tz = Math.round(point.z);
-      if (doorNearPoint(point)) return 'pointer';
-      if (loot.corpseAt(tx, tz) || loot.looseAt(tx, tz).length || grid.defAt(tx, tz).loot) return 'pointer';
-    }
-    return 'default';
-  }
-
-  // Out-of-combat hover: highlight what's under the cursor and pick a cursor.
-  function worldHover(point, sx, sy) {
-    const hit = picking.pick(controls.cameraEntity, sx, sy);
-    hoverKind = hit ? hit.kind : null;
-    trackHoverGlow(hit); // lit only while Ctrl/Alt is held
-    setCursor(cursorFor(hit, point));
-    ui.setFocusBanner(focusInfoFor(hit, point));
-  }
-
-  // Immediate-mode target rings for an armed hotbar action (redrawn each frame
-  // while armed, like combat's own target rings).
-  const RING_OK = new pc.Color(0.42, 0.78, 0.35);
-  const RING_FAR = new pc.Color(0.85, 0.28, 0.24);
-  function drawRing(cx, cz, r, color, y = 0.14) {
-    const SEGS = 18;
-    let prev = null;
-    for (let i = 0; i <= SEGS; i++) {
-      const a = (i / SEGS) * Math.PI * 2;
-      const p = new pc.Vec3(cx + Math.cos(a) * r, y, cz + Math.sin(a) * r);
-      if (prev) app.drawLine(prev, p, color);
-      prev = p;
-    }
-  }
-  function drawOocTargets() {
-    for (const en of enemies) {
-      if (!en.alive || !en.entity) continue;
-      const pos = en.entity.getPosition();
-      drawRing(pos.x, pos.z, 0.5, oocTargetOk(armedOoc, en) ? RING_OK : RING_FAR);
-    }
-  }
-
-  // The reach ring, out of combat: the same dim, cool circle combat draws, on
-  // the same terms - it says how far YOU can swing, so it belongs over a
-  // coworker and nowhere else. Behind the inspect modifier, alongside the hover
-  // aura it accompanies, because out here nothing is aiming by default.
-  const REACH_RING = new pc.Color(0.55, 0.62, 0.78);
-  function drawOocReachRing() {
-    const hit = hoverTarget?.hit;
-    if (!hit || hit.kind !== 'enemy' || !hit.ref.alive) return;
-    const p = player.entity?.getPosition();
-    if (!p) return;
-    drawRing(p.x, p.z, reachOf(sheet), REACH_RING);
-  }
-
-  // Hold Ctrl: a ground ring under EVERY character at their true position -
-  // tall meshes read a tile off at this camera angle, so the ring is where a
-  // click actually lands. Party teal, enemies red, NPCs green, the downed
-  // gold (they're a help-up target, not a threat).
-  const RING_PARTY = new pc.Color(0.45, 0.9, 0.8);
-  const RING_DOWN = new pc.Color(1.0, 0.82, 0.4);
-  const RING_HOSTILE = new pc.Color(1.0, 0.28, 0.2);
-  const RING_FRIENDLY = new pc.Color(0.42, 0.85, 0.42);
-  let ctrlHeld = false;
-  let altHeld = false; // Ctrl and Alt both gate the hover glow (see applyHoverGlow)
-  function drawCharacterRings() {
-    for (const m of party?.members || []) {
-      if (!m.actor?.entity) continue;
-      const p = m.actor.entity.getPosition();
-      drawRing(p.x, p.z, 0.42, m.sheet.hp <= 0 ? RING_DOWN : RING_PARTY);
-    }
-    for (const en of enemies) {
-      if (!en.alive || !en.entity) continue;
-      const p = en.entity.getPosition();
-      drawRing(p.x, p.z, 0.5, RING_HOSTILE);
-    }
-    for (const s of summons) {
-      if (s.sheet.hp <= 0 || !s.actor.entity) continue;
-      const p = s.actor.entity.getPosition();
-      drawRing(p.x, p.z, 0.42, RING_PARTY); // your summons ring as friendly
-    }
-    for (const npc of npcs) {
-      if (!npc.entity) continue;
-      const p = npc.entity.getPosition();
-      drawRing(p.x, p.z, 0.42, RING_FRIENDLY);
-    }
-  }
 
   // --- left-click verb dispatch (Divinity-style: the target picks the verb) ---
   function attackOrConfront(en) {
@@ -1232,9 +998,7 @@ function startGame(level) {
       dialogueTree = tree;
       npc.faceToward(player.x, player.z);
       loot.hideLabels();
-      clearHoverHighlight();
-      setCursor(null);
-      ui.setFocusBanner(null);
+      hover.clear();
       renderDialogueNode(dialogueTree.start);
     },
     close() { dialogueNpc = null; dialogueTree = null; dialoguePanel.hide(); },
@@ -1466,9 +1230,7 @@ function startGame(level) {
     inCombat = true;
     ui.hideMenu();
     loot.hideLabels(); // no browsing the shelves mid-fight
-    clearHoverHighlight();
-    setCursor(null);
-    ui.setFocusBanner(null);
+    hover.clear();
     // Everyone close enough joins the brawl (those further than 2 tiles are
     // surprised and lose their first turn - see combat.js). Bystanders
     // outside the radius join later if attacked (combat.js joinCombat).
@@ -2000,7 +1762,7 @@ function startGame(level) {
         // to-hit readout and the click itself refused.
         const picked = hit?.kind === 'enemy' && hit.ref.alive ? hit.ref : null;
         const foe = combat.handleHover(point, sx, sy, picked);
-        setCursor(foe ? 'crosshair' : null);
+        hover.setCursor(foe ? 'crosshair' : null);
         // Hovering a character glows their BODY and names them in the banner -
         // the DOS2 read, and the same one you already get out of combat. This
         // used to be held behind Ctrl, which meant the half of the game where
@@ -2015,22 +1777,17 @@ function startGame(level) {
         const charHit = foe && !picked ? { kind: 'enemy', ref: foe, entity: foe.entity } : hit;
         const character = charHit && (charHit.kind === 'party' || charHit.kind === 'npc'
           || (charHit.kind === 'enemy' && charHit.ref.alive));
-        hoverKind = character ? charHit.kind : null;
-        trackHoverGlow(character ? charHit : null);
-        ui.setFocusBanner(character ? focusInfoFor(charHit, point) : null);
+        hover.showCharacter(character ? charHit : null, point);
         return;
       }
-      if (!sheet || gameOver || modalOpen()) { clearHoverHighlight(); setCursor(null); ui.setFocusBanner(null); return; }
-      worldHover(point, sx, sy);
+      if (!sheet || gameOver || modalOpen()) { hover.clear(); return; }
+      hover.hover(point, sx, sy);
     },
     // The cursor left the world for the DOM UI: drop the world hover rather
     // than leaving the last-hovered body glowing and named behind the panel
     // the player is now using.
     onHoverLeave: () => {
-      hoverKind = null;
-      clearHoverHighlight();
-      setCursor(null);
-      ui.setFocusBanner(null);
+      hover.clear();
       if (inCombat && combat) combat.handleHover(null, 0, 0);
     },
     onRightClickTile: (tile, sx, sy, point) => {
@@ -2163,6 +1920,43 @@ function startGame(level) {
     },
   });
 
+  // Everything the cursor SAYS - the body glow, the cursor shape, the focus
+  // banner and the ground rings - lives in hover.js. It is built here because
+  // it projects through the camera rig, and it asks for the world through live
+  // queries rather than captured values: the leader, their sheet and the armed
+  // action are all re-pointed by a leader switch.
+  //
+  // The one rule worth restating at the seam: `armedTargetOk` hands it the
+  // CLICK RESOLVER's own test. The rings and the crosshair answer the question
+  // the click will answer, rather than a second copy of it that can drift.
+  const hover = createHoverLayer({
+    app,
+    canvas: canvasEl,
+    picking,
+    controls,
+    ui,
+    queries: {
+      party: () => party,
+      enemies: () => enemies,
+      summons: () => summons,
+      npcs: () => npcs,
+      leader: () => (party ? partyLeader(party) : null),
+      memberOf,
+      playerEntity: () => player?.entity || null,
+      reach: () => reachOf(sheet),
+      armed: () => armedOoc,
+      armedTargetOk: oocTargetOk,
+      inCombat: () => inCombat && !!combat,
+      doorNear: doorNearPoint,
+      doorOpen: (key) => grid.doors.get(key)?.open,
+      tileDef: (x, z) => grid.defAt(x, z),
+      shopSoldOut: (x, z) => shopping.soldOut(shopKey(x, z)),
+      corpseAt: (x, z) => loot.corpseAt(x, z),
+      looseAt: (x, z) => loot.looseAt(x, z),
+      itemName: (id) => loot.itemName(id),
+    },
+  });
+
   // The overhead tactical camera toggle - third in the bottom-left cluster,
   // after the profile card and the bag. Built here rather than with the rest of
   // the HUD because it reads the camera rig, which only exists from this point
@@ -2177,12 +1971,10 @@ function startGame(level) {
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Alt') {
       e.preventDefault(); // keep focus off the browser's menu bar
-      altHeld = true;
-      applyHoverGlow(); // light what the cursor is already on, without a re-hover
+      hover.setAlt(true); // lights what the cursor is already on, without a re-hover
       if (!e.repeat && sheet && !inCombat && !gameOver) loot.showLabels();
     } else if (e.key === 'Control') {
-      ctrlHeld = true; // rings under everyone while held (see drawCharacterRings)
-      applyHoverGlow();
+      hover.setCtrl(true); // rings under everyone while held (drawCharacterRings)
     } else if ((e.key === 'i' || e.key === 'I') && sheet && !gameOver) {
       loot.togglePanel(sheet);
     } else if (/^[1-9]$/.test(e.key) && sheet && !inCombat && !gameOver && !modalOpen()) {
@@ -2205,15 +1997,12 @@ function startGame(level) {
     }
   });
   window.addEventListener('keyup', (e) => {
-    if (e.key === 'Alt') { altHeld = false; loot.hideLabels(); }
-    if (e.key === 'Control') ctrlHeld = false;
-    applyHoverGlow();
+    if (e.key === 'Alt') { hover.setAlt(false); loot.hideLabels(); }
+    if (e.key === 'Control') hover.setCtrl(false);
   });
   window.addEventListener('blur', () => {
     loot.hideLabels();
-    ctrlHeld = false;
-    altHeld = false;
-    applyHoverGlow(); // a key can't be 'still held' across a focus loss
+    hover.releaseModifiers(); // a key can't be 'still held' across a focus loss
   });
 
   // Cosmetic feedback: projectiles, floating numbers, particle bursts, ground
@@ -2430,14 +2219,14 @@ function startGame(level) {
       const show = !!sheet && !inCombat && !gameOver && !modalOpen();
       hotbar.setVisible(show);
       if (show && sheet.paper !== hotbarPaper) { hotbarPaper = sheet.paper; hotbar.refresh(sheet); }
-      if (show && armedOoc) drawOocTargets();
+      if (show && armedOoc) hover.drawArmedTargets();
     }
     // Ctrl rings redraw each frame while held (immediate-mode lines last one
     // frame) - in and out of combat alike.
-    if (ctrlHeld && sheet && !gameOver) drawCharacterRings();
+    if (hover.ctrlHeld && sheet && !gameOver) hover.drawCharacterRings();
     // Same deal for the out-of-combat reach ring: immediate-mode, so it has to
     // be reissued every frame it's meant to be visible.
-    if (glowHeld() && sheet && !inCombat && !gameOver && !modalOpen()) drawOocReachRing();
+    if (hover.glowHeld && sheet && !inCombat && !gameOver && !modalOpen()) hover.drawReachRing();
     // Party bar: redraw only when the roster state changes (names/HP/active,
     // plus per-member AP mid-fight); visible only once there's an actual
     // party to show.
@@ -2670,15 +2459,15 @@ function startGame(level) {
     get tactical() { return controls.tactical; },
     // Out-of-combat targeting + hover state, for the e2e suite.
     get armed() { return armedOoc; },
-    get hoverKind() { return hoverKind; },
+    get hoverKind() { return hover.hoverKind; },
     // The narration box's lines, newest last - for the e2e suite.
     get narration() { return ui.narrationLog(); },
     // What Examine would say about a tile, without opening a menu to find out.
     examineTile: (x, z) => examineTile(x, z),
-    get ctrlHeld() { return ctrlHeld; },
+    get ctrlHeld() { return hover.ctrlHeld; },
     // Is the hover body-glow actually LIT right now? (a tracked target, plus
     // either a held modifier or being in combat - the two halves of the gate)
-    get hoverGlow() { return !!(glowLit() && hoverTarget); },
+    get hoverGlow() { return hover.glowing; },
     get cursor() { return canvasEl ? canvasEl.style.cursor : ''; },
     get dialogueOpen() { return dialogue.visible; },
   };

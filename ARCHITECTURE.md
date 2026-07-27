@@ -64,6 +64,11 @@ src/
   controls.js        Camera rig + mouse -> semantic input (click tile, menu)
   picking.js         Screen pixel -> interactable ENTITY under it (ray vs the
                      registered doors/enemies/NPCs/props), not just the floor
+  hover.js           What the cursor SAYS: the body glow + its Ctrl/Alt
+                     gate, the cursor shape, the focus banner, and the
+                     ground rings (armed targets, reach, characters).
+                     One owner, so every affordance describes the same
+                     verb; asks main.js for the world through `queries`
   combat.js          Tactical on-map combat: per-unit INITIATIVE order, AP
                      turns, movement, ranged/melee, AI-driven units - costs
                      from data
@@ -107,9 +112,19 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   a body or the DOM stays in `combat.js`. Reach for this shape when logic worth
   testing is trapped inside something that has to touch the engine.
 - `scene`, `shading`, `tile-renderer`, `models`, `controls`, `picking`,
-  `actors` touch PlayCanvas; `ui` touches the DOM; `fx`, `combat` and
+  `actors` touch PlayCanvas; `ui` touches the DOM; `fx`, `combat`, `hover` and
   `looting` touch both (combat draws its own previews/rings and builds its own
-  panel; looting spawns dropped-item entities).
+  panel; hover writes the canvas cursor and draws rings; looting spawns
+  dropped-item entities).
+- **`hover.js` owns every affordance, so they cannot disagree.** The glow, the
+  cursor, the focus banner and the ground rings all answer one question -
+  "what am I pointing at, and what would a click do?" - and when they were
+  four separate stretches of `main.js` they drifted apart repeatedly (a
+  crosshair over a coworker the click would refuse; a banner naming a body the
+  glow had dropped). None of them decides what a click MEANS - that stays
+  `dispatchHit`. A new affordance goes here, against the same `queries`, and
+  the rules it consults are passed IN (`armedTargetOk` is the click resolver's
+  own test, not a second copy of it).
 - Only `main.js` sees everything. It owns game state (`inCombat`, `gameOver`)
   and game flow (what a click means, when combat starts, tile effects).
 - Enemy AI decisions (pathing costs, wander avoidance) use a talent-free
