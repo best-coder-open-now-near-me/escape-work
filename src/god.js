@@ -17,6 +17,8 @@ import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { ITEMS } from './data/items.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { COMPANIONS } from './data/companions.js';
+import { STATUSES } from './data/statuses.js';
+import { applyStatus, clearStatuses, statusList, severityFor } from './statuses.js';
 
 const PRIM = new Set(['number', 'boolean', 'string']);
 // Animation / rig bookkeeping on an actor - real properties, but noise for a
@@ -161,6 +163,10 @@ function buildPanel(api, requestToggle) {
   // --- state ----------------------------------------------------------------
   const panel = { root, open: false, pins: new Map(), setOpen };
   let activeTab = 'player';
+  // What the STATUSES control (Spawn tab) is set to, kept across the re-render
+  // an Apply triggers. Declared up here with the rest of the panel's state
+  // because render() runs before the section that uses it is reached.
+  const statusPick = { id: Object.keys(STATUSES)[0], dur: 3, res: 0 };
   let showInternals = false;
   let lastSig = '';
   let rows = []; // { input, read } for live value sync (not the focused one)
@@ -444,7 +450,76 @@ function buildPanel(api, requestToggle) {
     }
   }
 
+  // Land any status on the character you're steering, with the duration and the
+  // resist you want, without staging a fight to get one. Written because the
+  // things a status DOES to the player are the things you have to look at to
+  // judge - the sway and the ink of a blind, the re-dealt action bar of a reorg,
+  // how much Composure has to blunt them before they stop being a problem - and
+  // the only way to see them was to walk a Security Guard into you and hope he
+  // rolled the right attack.
+  //
+  // Turn-clock statuses do not tick outside combat (there are no turns), which
+  // makes this a HOLD rather than a countdown out on the map: apply it, walk
+  // around in it for as long as you like, clear it. In a fight it ticks
+  // normally, so the same control tests the real lifecycle.
+  function renderStatuses() {
+    body.append(sectionTitle('STATUSES'));
+    if (!api.player) {
+      body.append(el('div', { opacity: '.55', font: '11px system-ui' }, { textContent: 'Needs a character - pick a class first.' }));
+      return;
+    }
+    const row = el('div', { display: 'flex', gap: '5px', alignItems: 'center', flexWrap: 'wrap' });
+    const sel = el('select', selectStyle());
+    for (const id of Object.keys(STATUSES)) {
+      sel.append(el('option', null, { value: id, textContent: `${STATUSES[id].icon || ''} ${STATUSES[id].name}` }));
+    }
+    sel.id = 'god-status';
+    // The three choices survive the re-render an Apply triggers (`statusPick`,
+    // panel scope). Without that the dropdown snapped back to the first status
+    // after every press, and the loop this control exists for - apply, look at
+    // it, raise the resist, apply again - meant re-picking the status each time.
+    sel.value = statusPick.id;
+    const dur = el('input', { ...numStyle(false), width: '52px' }, { type: 'number', min: '1', step: '1', value: String(statusPick.dur), title: 'Ticks / steps to apply' });
+    const res = el('input', { ...numStyle(false), width: '52px' }, { type: 'number', min: '0', step: '1', value: String(statusPick.res), title: "Composure's statusResist - shortens AND blunts a resistable status" });
+    // The severity that resist buys, shown before you commit to it: the number
+    // the whole stat is worth is otherwise invisible until the effect lands.
+    const sev = el('div', { font: '11px system-ui', opacity: '.7', minWidth: '96px' });
+    const paintSev = () => {
+      const s = severityFor(sel.value, Number(res.value) || 0);
+      sev.textContent = STATUSES[sel.value]?.resistable
+        ? `severity ${s.toFixed(2)}` : 'not resistable';
+    };
+    const remember = () => {
+      statusPick.id = sel.value;
+      statusPick.dur = Math.max(1, Number(dur.value) || 1);
+      statusPick.res = Math.max(0, Number(res.value) || 0);
+    };
+    sel.onchange = () => { remember(); paintSev(); };
+    dur.oninput = remember;
+    res.oninput = () => { remember(); paintSev(); };
+    paintSev();
+    const apply = button('Apply', () => {
+      remember();
+      applyStatus(api.player, statusPick.id, { duration: statusPick.dur }, statusPick.res);
+      afterEdit();
+      render();
+    });
+    apply.id = 'god-apply-status';
+    row.append(sel, dur, res, apply,
+      button('Clear all', () => { clearStatuses(api.player); afterEdit(); render(); }));
+    body.append(row, sev);
+    // What is live on them right now, with what it is actually worth: `left` is
+    // the countdown the chip shows, `sev` is how hard it landed.
+    const live = statusList(api.player);
+    body.append(el('div', { opacity: '.55', font: '11px system-ui', marginTop: '6px' }, {
+      textContent: live.length
+        ? live.map((s) => `${s.icon} ${s.name} ·${s.left}${s.sev < 1 ? ` ·${Math.round(s.sev * 100)}%` : ''}`).join('   ')
+        : 'Nothing live.',
+    }));
+  }
+
   function renderSpawn() {
+    renderStatuses();
     body.append(sectionTitle('SPAWN ENEMY'));
     const eRow = el('div', { display: 'flex', gap: '5px', marginBottom: '8px' });
     const eSel = el('select', selectStyle());
