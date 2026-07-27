@@ -61,6 +61,30 @@ export async function bootAndPick(page, classId = 'office-drone') {
 // small bespoke arenas keep surface tests fast and deterministic. The stash is
 // seeded by an init script so it is already in place on the FIRST load: the
 // old goto -> write -> reload dance booted the whole engine twice per test.
+// Hold the world still for the duration of `steps`.
+//
+// `__god.timeScale = 0` stops dt, so nobody wanders, nobody charges, and no
+// fight can start - while DOM events and the state they mutate still work
+// (PlayCanvas keeps calling update, with dt 0). That is exactly what a test's
+// out-of-combat STAGING needs: equipping from the pockets, arranging the bag,
+// setting up geometry.
+//
+// Without it, staging races the floor. A red-aggression coworker two tiles away
+// is walking at you the whole time a test is waiting for a panel to appear, and
+// on a slow runner it arrives first - at which point a gear swap is correctly
+// refused (mid-fight swaps are out, EQUIPMENT decision #6) and the failure
+// surfaces as "the equip silently did nothing", twenty seconds and one poll
+// away from its actual cause. It cost a red CI run on main to find that, so the
+// idiom is here rather than copied into each spec that needs it.
+export async function withWorldStill(page, steps) {
+  await page.evaluate(() => { window.__god.timeScale = 0; });
+  try {
+    await steps();
+  } finally {
+    await page.evaluate(() => { window.__god.timeScale = 1; });
+  }
+}
+
 export async function bootStash(page, level, classId = 'office-drone') {
   await page.addInitScript((lvl) => {
     localStorage.clear(); // no campaign progress bleeding into a bespoke arena
