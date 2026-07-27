@@ -40,7 +40,10 @@ src/
   pathfinding.js     8-dir Dijkstra, string-pulling smoother, free-point
                      clamping, distance-budget truncation      (pure logic)
   statuses.js        The status runtime: apply/tick/clear over a carrier's
-                     status map, both clocks                   (pure logic)
+                     status map, both clocks, plus the SEVERITY a status
+                     landed at - Composure shortens a resistable status
+                     and blunts it, scaling every magnitude in the merged
+                     effect view (never a boolean)             (pure logic)
   tactics.js         Positional to-hit modifiers: facing, flanking, cover
                      (TACTICS_PLAN.md)                         (pure logic)
   surfaces-runtime.js Fire/smoke/fuse state machine, advanced one turn at a

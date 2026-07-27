@@ -11,7 +11,12 @@
 //                  deflect); 'step' ticks per tile walked and persists on the
 //                  map (gum, bleed). See STATUS_PLAN decision #1.
 //   duration     - default ticks/steps when applied (a source may override)
-//   resistable   - whether Composure's statusResist shortens it
+//   resistable   - whether Composure's statusResist applies. It does two things
+//                  to a resistable status: shortens it (fewer ticks) and BLUNTS
+//                  it (every magnitude in `effects` scales by the severity
+//                  stored at application - see SEVERITY_PER_RESIST in
+//                  src/statuses.js). Booleans never scale, so a `resistable`
+//                  status whose only effect is a boolean is shortened alone.
 //   immunity     - id of a companion status this one GRANTS on landing (for
 //                  IMMUNITY_WINDOW_MULT x the duration actually applied) and
 //                  which BLOCKS re-application while it is live. The anti-chain

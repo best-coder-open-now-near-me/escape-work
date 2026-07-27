@@ -25,6 +25,31 @@ import { STATUSES } from './data/statuses.js';
 // second stunner in the same fight erases. 3x leaves two.
 export const IMMUNITY_WINDOW_MULT = 3;
 
+// SEVERITY: the second thing Composure buys. `statusResist` already shortens a
+// resistable status; it now also blunts one, so a composed character carries a
+// weaker version of it for those fewer turns. Stored per-application (the
+// resist at the moment it landed), because the alternative - recomputing it on
+// every read - would let a mid-fight gear swap retroactively soften a status
+// that is already on you.
+//
+// Every magnitude in the merged view scales with it (statusFx below): a blinded
+// character with Composure sways less, loses less accuracy and sees less ink.
+// BOOLEANS DO NOT. A turn cannot be half-skipped and an action bar cannot be
+// half-shuffled, so those are duration's business alone - which is the honest
+// division, and it keeps Composure from quietly becoming stun immunity.
+export const SEVERITY_PER_RESIST = 0.12;
+// ...and it never reaches zero. The same rule as the duration floor: resist
+// makes a status survivable, never a no-op, or the counter-stat becomes an
+// off switch and the whole status is uninteresting to build against.
+export const SEVERITY_FLOOR = 0.4;
+
+// How hard `id` lands on a target with this much resist, 0..1.
+export function severityFor(id, resist = 0) {
+  const def = STATUSES[id];
+  if (!def?.resistable || !(resist > 0)) return 1;
+  return Math.max(SEVERITY_FLOOR, 1 - resist * SEVERITY_PER_RESIST);
+}
+
 function mapOf(target) {
   if (!target.statuses) target.statuses = {};
   return target.statuses;
@@ -48,6 +73,12 @@ export function hasStatus(target, id) {
 // The remaining ticks/steps of a status (0 when absent).
 export function statusLeft(target, id) {
   return target?.statuses?.[id]?.left || 0;
+}
+
+// How hard it is landing on this target, 0..1 (1 when absent, and for anything
+// applied before severity existed - saves carry these maps).
+export function statusSeverity(target, id) {
+  return target?.statuses?.[id]?.sev ?? 1;
 }
 
 // The live anti-chain window turning `id` away on this target, or null - the id
@@ -76,7 +107,11 @@ export function applyStatus(target, id, opts = {}, resist = 0) {
   if (dur <= 0) return false;
   const map = mapOf(target);
   const cur = map[id]?.left || 0;
-  map[id] = { left: Math.max(cur, dur) };
+  // A re-apply takes the WORSE of the two severities, for the same reason it
+  // takes the longer of the two durations: refreshing a status must never be a
+  // way to weaken one that is already biting.
+  const sev = Math.max(map[id]?.sev ?? 0, severityFor(id, resist));
+  map[id] = { left: Math.max(cur, dur), sev };
   // Grant the anti-chain window LAST, so it can never block the application
   // that created it, and size it off `dur` - the duration actually applied,
   // post-resist - rather than the def's. Composure shortening a stun therefore
@@ -102,12 +137,16 @@ export function statusFx(target) {
   if (!map) return out;
   for (const id in map) {
     if (!(map[id].left > 0)) continue;
+    // Severity scales every magnitude and no boolean (see SEVERITY_PER_RESIST):
+    // flat mods shrink toward 0, multipliers ease back toward 1 - a gummed shoe
+    // resisted at 0.5 severity costs 1.25x move AP rather than 1.5x.
+    const sev = map[id].sev ?? 1;
     const fx = STATUSES[id]?.effects || {};
     for (const k in fx) {
       const v = fx[k];
       if (typeof v === 'boolean') out[k] = (out[k] || false) || v;
-      else if (k.endsWith('Mult')) out[k] = (out[k] == null ? 1 : out[k]) * v;
-      else out[k] = (out[k] || 0) + v;
+      else if (k.endsWith('Mult')) out[k] = (out[k] == null ? 1 : out[k]) * (1 + (v - 1) * sev);
+      else out[k] = (out[k] || 0) + v * sev;
     }
   }
   return out;
@@ -126,7 +165,14 @@ function tick(target, clock) {
     if (!def || def.clock !== clock) continue;
     const entry = map[id];
     if (!(entry.left > 0)) continue;
-    if (def.effects?.dot) result.damage += def.effects.dot;
+    // Dots take severity too, so "Composure blunts it" means the same thing
+    // everywhere - but rounded, and never below 1: a resisted burn should hurt
+    // less, not tick for 0.8 HP and not stop hurting at all. (Nothing shipping
+    // is both `resistable` and a dot; this is here so the first one that is
+    // doesn't silently ignore the stat.)
+    if (def.effects?.dot) {
+      result.damage += Math.max(1, Math.round(def.effects.dot * (entry.sev ?? 1)));
+    }
     entry.left -= 1;
     if (entry.left <= 0) { delete map[id]; result.expired.push(id); }
   }
@@ -170,7 +216,7 @@ export function statusList(target) {
     if (!(map[id].left > 0)) continue;
     const def = STATUSES[id] || {};
     out.push({
-      id, left: map[id].left,
+      id, left: map[id].left, sev: map[id].sev ?? 1,
       name: def.name || id, icon: def.icon || '', harmful: !!def.harmful,
     });
   }

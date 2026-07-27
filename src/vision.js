@@ -131,8 +131,15 @@ const SHAPE_FOR = { crosshair: 'aim', 'not-allowed': 'deny' };
 const EYE_TINTS = ['#f2f4ff', '#ff6a6a', '#63d9ff'];
 
 export function createVisionLayer({ canvas, root = document.body } = {}) {
-  let target = 0; // what the statuses say
-  let level = 0; // ...eased, so sight fails and returns smoothly
+  // Two dials, not one: `sway` bends the aim and triples the cursor, `ink`
+  // swims the blots across the view. A status can ask for either - the reorg
+  // (`confused`) sways your hand without touching your eyes, and a future
+  // smoke cloud could do the reverse. Each is eased separately so sight fails
+  // and returns smoothly rather than snapping.
+  let swayTarget = 0;
+  let sway = 0;
+  let inkTarget = 0;
+  let ink = 0;
   let clock = 0;
   let shape = ''; // the cursor verb hover.js last asked for
   let px = 0;
@@ -213,11 +220,11 @@ export function createVisionLayer({ canvas, root = document.body } = {}) {
   // hover.js stays the one owner of WHAT the cursor says - its verb arrives
   // here through `cursorFor` - and this only decides whether the OS draws it.
   function paintCursor() {
-    if (canvas) canvas.style.cursor = level > 0 ? 'none' : (shape || '');
+    if (canvas) canvas.style.cursor = sway > 0 ? 'none' : (shape || '');
   }
 
   function paint() {
-    if (level <= 0) {
+    if (ink <= 0 && sway <= 0) {
       if (dom) { dom.haze.style.opacity = '0'; dom.cursors.style.display = 'none'; }
       return;
     }
@@ -225,7 +232,7 @@ export function createVisionLayer({ canvas, root = document.body } = {}) {
     // Everything breathes off the same clock as the sway, so the ink and the
     // cursors read as one symptom rather than two effects that happen to be on.
     const breath = 0.86 + 0.14 * Math.sin(clock * 1.9);
-    d.haze.style.opacity = String(level * breath);
+    d.haze.style.opacity = String(ink * breath);
     const vmin = Math.min(window.innerWidth, window.innerHeight) / 100;
     BLOTS.forEach((b, i) => {
       const dx = Math.sin(clock * b.fx * 2 * Math.PI + b.ph) * b.drift * vmin;
@@ -237,15 +244,15 @@ export function createVisionLayer({ canvas, root = document.body } = {}) {
     });
 
     // The cursors: the true aim first, then the two ghosts around it.
-    if (!overCanvas) { d.cursors.style.display = 'none'; return; }
+    if (!overCanvas || sway <= 0) { d.cursors.style.display = 'none'; return; }
     d.cursors.style.display = '';
     const g = GLYPHS[SHAPE_FOR[shape] || 'point'];
     if (g !== d.glyph) {
       d.glyph = g;
       for (const el of d.eyes) el.innerHTML = g.svg;
     }
-    const { dx, dy } = swayAt(clock, level);
-    const ghosts = ghostsAt(clock, level);
+    const { dx, dy } = swayAt(clock, sway);
+    const ghosts = ghostsAt(clock, sway);
     const at = [{ dx, dy }, { dx: dx + ghosts[0].dx, dy: dy + ghosts[0].dy },
       { dx: dx + ghosts[1].dx, dy: dy + ghosts[1].dy }];
     d.eyes.forEach((el, i) => {
@@ -254,43 +261,46 @@ export function createVisionLayer({ canvas, root = document.body } = {}) {
   }
 
   return {
-    // How impaired the character we're steering is, 0..1 (main.js feeds this
-    // the merged `aimSway` of their live statuses, every frame).
-    set(v) {
-      const next = clamp01(v || 0);
-      if (next === target) return;
-      target = next;
+    // How impaired the character we're steering is, 0..1 on each dial: main.js
+    // feeds these the merged `aimSway` and `sightBlots` of their live statuses,
+    // every frame (both already scaled by Composure's severity).
+    set(swayTo, inkTo = swayTo) {
+      swayTarget = clamp01(swayTo || 0);
+      inkTarget = clamp01(inkTo || 0);
     },
-    // Ease toward it, advance the clock, redraw. Called from the frame loop.
+    // Ease toward them, advance the clock, redraw. Called from the frame loop.
     update(dt) {
       const d = Math.min(Math.max(dt || 0, 0), 0.1); // a backgrounded tab must not lurch
-      const was = level > 0;
-      level += (target - level) * (1 - Math.exp(-d * 5));
-      if (target === 0 && level < 0.004) level = 0;
-      if (level > 0) clock += d;
-      if (was !== (level > 0)) paintCursor();
+      const was = sway > 0;
+      const k = 1 - Math.exp(-d * 5);
+      sway += (swayTarget - sway) * k;
+      ink += (inkTarget - ink) * k;
+      if (swayTarget === 0 && sway < 0.004) sway = 0;
+      if (inkTarget === 0 && ink < 0.004) ink = 0;
+      if (sway > 0 || ink > 0) clock += d;
+      if (was !== (sway > 0)) paintCursor();
       paint();
     },
     // Where the character's aim ACTUALLY points, given where the mouse is.
     // controls.js runs the left click and the hover through this and nothing
     // else, so the crosshair, the preview and the click all sway together.
     aim(sx, sy) {
-      if (level <= 0) return [sx, sy];
-      const { dx, dy } = swayAt(clock, level);
+      if (sway <= 0) return [sx, sy];
+      const { dx, dy } = swayAt(clock, sway);
       return [sx + dx, sy + dy];
     },
     // hover.js's verb, on its way to the canvas. Returns what the OS cursor
     // should be - 'none' while the swaying reticles are doing that job.
     cursorFor(c) {
       shape = c || '';
-      return level > 0 ? 'none' : shape;
+      return sway > 0 ? 'none' : shape;
     },
-    get strength() { return level; },
-    // For the e2e suite: how far the aim is off the mouse right now, and what
-    // verb the swaying reticles are wearing.
+    get strength() { return sway; },
+    // For the e2e suite: both dials, how far the aim is off the mouse right
+    // now, and what verb the swaying reticles are wearing.
     get debug() {
-      const { dx, dy } = swayAt(clock, level);
-      return { strength: level, dx, dy, shape: SHAPE_FOR[shape] || 'point' };
+      const { dx, dy } = swayAt(clock, sway);
+      return { strength: sway, ink, dx, dy, shape: SHAPE_FOR[shape] || 'point' };
     },
   };
 }

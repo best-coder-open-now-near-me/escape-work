@@ -2280,7 +2280,8 @@ function startGame(level) {
     // leader. A blinded companion you are not driving costs you their accuracy,
     // not your screen.
     const steered = inCombat && combat ? combat.actingSheet : sheet;
-    vision.set(!gameOver && steered ? (statusFx(steered).aimSway || 0) : 0);
+    const impair = !gameOver && steered ? statusFx(steered) : null;
+    vision.set(impair?.aimSway || 0, impair?.sightBlots || 0);
     vision.update(dt);
     // A drifting aim goes stale the moment the mouse stops, so re-ask the world
     // what the crosshair is on. hover.js's rule is that the preview IS the

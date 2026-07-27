@@ -12,7 +12,7 @@ import { ACTIONS } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, reachOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH, THROW_RANGE } from './stats.js';
-import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy } from './statuses.js';
+import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
@@ -1773,6 +1773,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (applyStatus(m.sheet, atk.applies, {}, statusResist(m.sheet))) {
         statusFxAt(m, atk.applies);
         line += ` ${appliesLine(atk, m.sheet.name)}`;
+        // Composure blunted it (statuses.js severity). Say so, once, where the
+        // player is already reading: a stat whose work is invisible is a stat
+        // nobody spends a point on, and "it landed weaker" is not something a
+        // number on the character sheet can show you mid-fight.
+        if (statusSeverity(m.sheet, atk.applies) < 1) line += ' They shrug off the worst of it.';
       } else if (blocked) line += ` ${immunityLine(blocked, m.sheet.name)}`;
     }
     log(line);
@@ -2158,7 +2163,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     },
     // Test/debug: apply a status to the active member (STATUS_PLAN e2e). Enemy
     // statuses arrive naturally (a shove stuns, a fire tile burns).
-    applyStatus: (id, duration) => { applyStatus(active.sheet, id, { duration }); refresh(); },
+    // Debug/e2e pin: land `id` on the acting member. `resist` defaults to 0 -
+    // an unresisted, full-severity application, so a test pinning a status gets
+    // exactly what it asked for - and pass a number to exercise Composure's
+    // blunting (statuses.js severity) without building a character for it.
+    applyStatus: (id, duration, resist = 0) => {
+      applyStatus(active.sheet, id, { duration }, resist);
+      refresh();
+    },
     // The initiative order, top to bottom, with whose turn it is - for the
     // tracker UI and the e2e suite.
     get order() {
