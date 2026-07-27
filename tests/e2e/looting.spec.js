@@ -23,11 +23,19 @@ test('desk rummage, drop, Alt pickup, and consumable use', async ({ page }) => {
   ).toBe(true);
   expect(await page.evaluate(() => window.__game.containerLootAt(8, 2))).toEqual([]);
 
-  // Re-rummaging an emptied desk yields nothing new.
+  // What the desk gave up is filed in the narrator box, not only in the toast
+  // that clears itself after a couple of seconds.
+  expect(await page.evaluate(() => window.__game.narration.some((l) => /^Desk: .*Coffee/.test(l)))).toBe(true);
+  await expect(page.locator('#narration-box')).toContainText('Desk:');
+
+  // Re-rummaging an emptied desk yields nothing new - and says so in the box.
   const count = await page.evaluate(() => window.__game.inventory.length);
   await clickWorld(page, 8, 2);
   await page.waitForTimeout(4000);
   expect(await page.evaluate(() => window.__game.inventory.length)).toBe(count);
+  await expect.poll(
+    () => page.evaluate(() => window.__game.narration.some((l) => /nothing left but disappointment/.test(l))),
+  ).toBe(true);
 
   // Drop the first item: it becomes a loose parcel on the floor.
   await page.keyboard.press('i');

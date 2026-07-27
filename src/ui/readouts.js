@@ -157,6 +157,10 @@ export function setFocusBanner(info) {
 // loot pickups ("Printer: Toner Cartridge") read as a quick "you got X" instead
 // of taking over the centre HUD. One reused element: rapid loots replace the
 // text and restart the pop rather than stacking.
+//
+// It is the glance, not the record: looting.js files the same line into the
+// narrator box (lootNews), because this element is one nowrap line that clears
+// itself, and a long haul used to ellipsis away with nowhere to read the rest.
 let toastEl = null;
 let toastTimer = null;
 export function toast(text, ms = 2600) {
