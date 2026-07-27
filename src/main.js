@@ -1200,7 +1200,10 @@ function startGame(level) {
     if (entry.kind === 'item') {
       const def = ITEMS[entry.id];
       if (!def) return null;
-      return { kind: 'item', id: entry.id, label: def.name, count: hotbarItemIds().get(entry.id) || 0 };
+      return {
+        kind: 'item', id: entry.id, label: def.name, icon: def.icon,
+        count: hotbarItemIds().get(entry.id) || 0,
+      };
     }
     const a = ACTIONS[entry.id];
     if (!a) return null;
@@ -1209,6 +1212,7 @@ function startGame(level) {
       kind: 'action',
       id: entry.id,
       label: a.label,
+      icon: a.icon, // the face it wears on the bar (data/actions.js)
       ap: a.ap,
       // The ammo cost handed to the bar is THIS character's (the Origami
       // Specialist throws an airplane for one sheet, not two) - the same number
@@ -1275,7 +1279,9 @@ function startGame(level) {
     items.push({ label: 'Powers', header: true });
     for (const id of hotbarActionIds()) {
       items.push({
-        label: ACTIONS[id].label,
+        // Iconed like the slot it would fill, so the menu and the bar name the
+        // same thing the same way.
+        label: `${ACTIONS[id].icon || '❔'}  ${ACTIONS[id].label}`,
         hint: slotHint('action', id),
         action: () => assignHotbarSlot(i, { kind: 'action', id }),
       });
@@ -1285,7 +1291,7 @@ function startGame(level) {
     if (!carried.size) items.push({ label: 'Nothing usable in there' });
     for (const [id, n] of carried) {
       items.push({
-        label: ITEMS[id].name,
+        label: `${ITEMS[id].icon || '❔'}  ${ITEMS[id].name}`,
         hint: slotHint('item', id) || (n > 1 ? `×${n}` : null),
         action: () => assignHotbarSlot(i, { kind: 'item', id }),
       });

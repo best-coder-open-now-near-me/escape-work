@@ -144,13 +144,17 @@ export function createTacticalButton({ onToggle, isOn }) {
 // wires the arming + targeting). Ids are `#hotbar-act-<id>` - deliberately NOT
 // the combat bar's `#act-<id>`, so the two never collide in the DOM or tests.
 //
-// `actions` is [{ id, label, ap, ammoCost, unavailable }]; onArm(id) toggles a
-// slot. `unavailable` is why a slot can't act with no fight on (Deflect Blame,
-// a heal): it dims the slot and titles it with the reason, but leaves it
-// CLICKABLE - the host answers a press with that reason, and a listed power you
-// can ask about beats a power that isn't there. An unaffordable throw (no
-// paper) is the one thing actually disabled: that one is about to change on its
-// own the moment you pick up a sheet.
+// It is an ICON GRID, not a row of named buttons. Spelled out in words a full
+// kit ran ~900px wide: the leftmost slots sat UNDER the bottom-left HUD rail and
+// could not be clicked at all (the bag button ate them), and the right end slid
+// beneath the narrator box. Square slots fit between the two with the name in
+// the tooltip - and they are what a hotbar looks like in the games this one is
+// borrowing from. `unavailable` is why a slot can't act with no fight on
+// (Deflect Blame, a heal): it dims the slot and titles it with the reason, but
+// leaves it CLICKABLE - the host answers a press with that reason, and a listed
+// power you can ask about beats a power that isn't there. An unaffordable throw
+// (no paper) is the one thing actually disabled: that one is about to change on
+// its own the moment you pick up a sheet.
 // Slots per ROW. The bar holds one row at a time and pages through the rest,
 // which is what lets a kit grow - perks, a talent, a weapon swing, whatever the
 // player assigns - without the row growing until it spans the screen and the
@@ -164,8 +168,8 @@ export function createTacticalButton({ onToggle, isOn }) {
 export const HOTBAR_ROW_SLOTS = 8;
 
 // `slots` is the whole layout, in order, as view-models the host builds:
-//   { kind: 'action', id, label, ap, ammoCost, unavailable }
-//   { kind: 'item',   id, label, count }
+//   { kind: 'action', id, label, icon, ap, ammoCost, unavailable }
+//   { kind: 'item',   id, label, icon, count }
 //   null                                   an empty slot, right-clickable
 // The bar shows HOTBAR_ROW_SLOTS of them at a time; `startRow` restores which
 // row was showing across a rebuild. onPress(i) is a left click on slot i (the
@@ -218,21 +222,31 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
     if (slot) b.dataset.action = slot.id;
     b.dataset.slot = String(i);
     Object.assign(b.style, BUTTON_CHROME, {
-      // One line, clipped, and no wider than this. A full kit is eight slots
-      // now, and a bar that sizes itself to "Passive-Aggressive Email" wrapped
-      // to three lines and grew wide enough to cover the bottom third of the
-      // floor - the HUD swallowing the pointer over the very coworkers it is
-      // there to attack. The full name lives in the tooltip.
-      // `minWidth: 0` lets "Shove" be a small button instead of padding itself
-      // out to the width of the longest name in the kit.
-      minWidth: '0', maxWidth: '112px', padding: '7px 8px', borderRadius: '7px',
-      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      position: 'relative', width: '46px', height: '46px', padding: '0',
+      borderRadius: '8px', font: '20px system-ui, sans-serif', lineHeight: '1',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none',
     });
+    // The key that presses this slot, small in the corner - the number is how
+    // the row is addressed, so it belongs ON the slot rather than in the label.
+    const keyTag = document.createElement('span');
+    Object.assign(keyTag.style, {
+      position: 'absolute', top: '2px', left: '4px', font: '9px system-ui, sans-serif',
+      opacity: '.55', pointerEvents: 'none',
+    });
+    // How many are left, for a slot holding something spendable.
+    const countTag = document.createElement('span');
+    Object.assign(countTag.style, {
+      position: 'absolute', bottom: '1px', right: '3px', font: '700 10px system-ui, sans-serif',
+      opacity: '.85', pointerEvents: 'none',
+    });
+    const face = document.createElement('span');
+    face.style.pointerEvents = 'none';
+    b.append(keyTag, face, countTag);
     b.onmousedown = (e) => e.stopPropagation(); // don't let the canvas see it
     b.onclick = () => onPress(i);
     b.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); onAssign(i, e.clientX, e.clientY); };
     slotsRow.appendChild(b);
-    return { b, slot };
+    return { b, slot, keyTag, countTag, face };
   });
 
   let armed = null;
@@ -243,11 +257,13 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
     next.style.display = many ? '' : 'none';
     pageTag.style.display = many ? '' : 'none';
     pageTag.textContent = `${row + 1}/${rowCount}`;
-    buttons.forEach(({ b, slot }, i) => {
+    buttons.forEach(({ b, slot, keyTag, countTag, face }, i) => {
       b.style.display = rowOf(i) === row ? '' : 'none';
       const key = (i % HOTBAR_ROW_SLOTS) + 1;
+      keyTag.textContent = String(key);
+      countTag.textContent = '';
       if (!slot) {
-        b.textContent = `${key} · —`;
+        face.textContent = '—';
         b.disabled = false;
         b.style.opacity = '.32';
         b.title = 'Empty slot - right-click to assign a power or an item';
@@ -256,18 +272,19 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
       }
       if (slot.kind === 'item') {
         const count = slot.count ?? 0;
-        b.textContent = `${key} · ${slot.label}${count > 1 ? ` ×${count}` : ''}`;
+        face.textContent = slot.icon || '❔';
+        countTag.textContent = count > 1 ? `×${count}` : '';
         b.disabled = count <= 0;
         b.style.opacity = count > 0 ? '1' : '.4';
         b.title = count > 0
-          ? `${slot.label} · from your pockets · right-click to reassign`
+          ? `${slot.label} ×${count} · from your pockets · right-click to reassign`
           : `${slot.label} · none left`;
         b.style.borderColor = '#3a3a52';
         return;
       }
-      let label = `${key} · ${slot.label}`;
-      if (slot.ammoCost) label += ` (${sheet?.paper ?? 0}📄)`;
-      b.textContent = label;
+      face.textContent = slot.icon || '❔';
+      // A throw counts the sheets it has to spend, where an item counts itself.
+      if (slot.ammoCost) countTag.textContent = String(sheet?.paper ?? 0);
       const fed = !slot.ammoCost || (sheet?.paper ?? 0) >= slot.ammoCost;
       b.disabled = !fed;
       b.style.opacity = fed && !slot.unavailable ? '1' : '.4';

@@ -25,11 +25,14 @@ const QUIET = {
 
 // The bar's buttons in DOM order: their ids and whether they're on the row
 // currently showing.
+// The bar is an icon grid: the slot's face is an emoji, the key number rides in
+// its corner, and the NAME is in the tooltip - so that is what a test reads.
 const slots = (page) => page.$$eval('#hotbar button[data-slot]', (els) => els.map((e) => ({
   id: e.id,
   slot: Number(e.dataset.slot),
   shown: e.style.display !== 'none',
-  label: e.textContent,
+  text: e.textContent,
+  title: e.title,
 })));
 
 test('the kit is in canonical order, on one row, with room to grow', async ({ page }) => {
@@ -57,9 +60,12 @@ test('the kit is in canonical order, on one row, with room to grow', async ({ pa
   expect(all.every((s) => s.shown)).toBe(true);
   await expect(page.locator('#hotbar-page')).toBeHidden();
   await expect(page.locator('#hotbar-next')).toBeHidden();
-  // Slots are numbered from 1 within the row, which is what the keys address.
-  expect(all[0].label).toMatch(/^1 · /);
-  expect(all[7].label).toMatch(/^8 · —/);
+  // Slots are numbered from 1 within the row, which is what the keys address,
+  // and the tooltip is where the name lives.
+  expect(all[0].text).toMatch(/^1/);
+  expect(all[0].title).toMatch(/^Passive-Aggressive Email · 2AP/);
+  expect(all[7].text).toMatch(/^8—$/);
+  expect(all[7].title).toMatch(/Empty slot/);
 
   await page.keyboard.press('2');
   expect(await page.evaluate(() => window.__game.armed)).toBe('shove');
@@ -105,7 +111,7 @@ test('right-click a slot to reassign it; assigning swaps rather than duplicates'
   await page.click('#hotbar-act-coffee', { button: 'right' });
   await page.click('#context-menu >> text=Clear this slot');
   await expect(page.locator('#hotbar-slot-0')).toBeVisible();
-  await expect(page.locator('#hotbar-slot-0')).toHaveText(/^1 · —/);
+  await expect(page.locator('#hotbar-slot-0')).toHaveText(/^1—$/);
 });
 
 test('a consumable can live in a slot, and pressing it drinks one', async ({ page }) => {
@@ -128,14 +134,15 @@ test('a consumable can live in a slot, and pressing it drinks one', async ({ pag
   // The slot carries the item and how many are in the bag.
   const slot = page.locator('#hotbar-item-cold-coffee');
   await expect(slot).toBeVisible();
-  await expect(slot).toHaveText(/Cold Coffee ×2/);
+  await expect(slot).toHaveText(/×2$/);
+  await expect(slot).toHaveAttribute('title', /Cold Coffee ×2/);
 
   // Pressing it drinks one: HP up by the item's heal, one coffee gone, and the
   // count on the button follows the bag down.
   await slot.click();
   await expect.poll(() => page.evaluate(() => window.__game.stats.hp)).toBe(7);
   await expect.poll(() => page.evaluate(() => window.__game.inventory.length)).toBe(1);
-  await expect(page.locator('#hotbar-item-cold-coffee')).toHaveText(/8 · Cold Coffee$/);
+  await expect(page.locator('#hotbar-item-cold-coffee')).toHaveText(/^8☕$/);
 
   // Filling the row grew the bar: a second row exists now, and it pages. This is
   // the only way rows appear - the game never hides a power you already have
