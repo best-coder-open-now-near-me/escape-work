@@ -465,7 +465,12 @@ function buildPanel(api, requestToggle) {
     body.append(sectionTitle('PARTY'));
     const cRow = el('div', { display: 'flex', gap: '5px' });
     const cSel = el('select', selectStyle());
-    for (const id of Object.keys(COMPANIONS)) cSel.append(el('option', null, { value: id, textContent: COMPANIONS[id].name }));
+    // Labelled by ID as well as name: companions are named for the job they do
+    // (data/companions.js), so two from the same class would be one repeated
+    // string in this dropdown and there'd be no telling which one you recruited.
+    for (const id of Object.keys(COMPANIONS)) {
+      cSel.append(el('option', null, { value: id, textContent: `${COMPANIONS[id].name} (${id})` }));
+    }
     const recruitBtn = button('Recruit', () => { api.recruit(cSel.value); render(); });
     recruitBtn.id = 'god-recruit';
     cRow.append(cSel, recruitBtn);

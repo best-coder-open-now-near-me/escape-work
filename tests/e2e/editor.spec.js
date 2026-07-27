@@ -47,7 +47,7 @@ test('loading a shipped level and exporting it keeps its companions', async ({ p
   await page.waitForFunction(() => window.__editor, null, { timeout: 90_000 });
   await waitForSmoothFrames(page);
 
-  // Level 1 places the IT Intern ('N' -> it-intern in its own legend).
+  // Level 1 places the IT companion ('N' -> it-intern in its own legend).
   await page.selectOption('#ed-level', 'level1');
   await page.waitForTimeout(500);
 

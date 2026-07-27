@@ -367,11 +367,13 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - **A character that IS a class inherits it - never copies it.** A companion or
   an enemy who does one of the playable jobs writes `classId: '<class>'` plus
   ONLY what makes them them, and `fromClass` (data/classes.js) merges the rest:
-  rig, build, attributes, kit, talent, track. The Mail Room Veteran and the
-  Security Guard both work this way. This is the "class as shared unit
+  rig, build, attributes, kit, talent, track - and the class's `name`, so a
+  coworker who does the job is called what the job is called unless they
+  deliberately override it (the Security Guard does; the two companions do not,
+  because neither is a named character). This is the "class as shared unit
   archetype" direction made real, and it exists because the copies drifted -
-  reassigning the Mail Room's rig left the veteran wearing the old one while
-  still calling himself mail room. An override means DEPARTING from the class;
+  reassigning the Mail Room's rig left the mail room companion wearing the old
+  one while still calling himself mail room. An override means DEPARTING from the class;
   a lint fails the build if one merely repeats what the class already says.
   Registries export their raw kit tables (`COMPANION_KITS`, `ENEMY_KITS`) for
   it. Enemies drop the inherited `maxHp` - they spell it `hp`, and `unitCombat`

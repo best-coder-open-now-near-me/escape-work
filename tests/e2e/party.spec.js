@@ -78,7 +78,8 @@ test('recruit the intern, he follows, and the party bar hands him the lead', asy
   // Hand him the lead: portrait click re-keys control, HUD and hotbar.
   await page.click('#party-slot-1');
   await expect.poll(() => page.evaluate(() => window.__game.party[1].active)).toBe(true);
-  expect(await page.evaluate(() => window.__game.stats.name)).toBe('Nervous IT Intern');
+  // Named for the job, like every unnamed coworker who does one (companions.js).
+  expect(await page.evaluate(() => window.__game.stats.name)).toBe('IT Support');
   await expect(page.locator('#hotbar-act-reboot')).toBeAttached(); // his kit, his bar
 
   // Clicks now move HIM - and the ex-leader follows.

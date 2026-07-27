@@ -3,9 +3,9 @@
 // data/actions.js). Weapons/perks later modify or extend the same action list.
 //
 // `model` names a RIG FILE, not a role. The rigs get passed around as the cast
-// changes - hr.glb is the Mail Room clerk's (and the Mail Room Veteran
-// companion's, who INHERITS it with the class), midmanager.glb is HR's, and
-// veteran.glb is the Middle Manager's - so read the entry, never the filename,
+// changes - hr.glb is the Mail Room clerk's (and the mail room COMPANION's, who
+// INHERITS it with the class), midmanager.glb is HR's, and veteran.glb is the
+// Middle Manager's - so read the entry, never the filename,
 // to know who wears what. (Renaming them to chase the current owner just moves
 // the confusion into git history.) Where two entries share a rig, each carries
 // a `look.build` that makes them read as different people; keep that up when
@@ -28,9 +28,18 @@
 // the signature piece flavours a slot, it doesn't inflate the sheet.
 // Fields that belong to the class PICKER, not to a character built from one: a
 // companion is met and an enemy is fought, neither is hired off a résumé card.
-// `name` goes too - they have their own, and inheriting "Mail Room" as a
-// person's name is the exact confusion this shape exists to remove.
-const PICKER_ONLY = ['name', 'tagline', 'experience', 'startGear', 'playable'];
+//
+// `name` is NOT one of them, and used to be. Dropping it forced every
+// class-backed character to invent a display name, and what got invented were
+// personas the game has no story for - a "Nervous IT Intern" who is never
+// written to stop being nervous, a "Mail Room Veteran" whose veterancy is a
+// word in a name and nothing in the rules. The player's own character is named
+// for the job (you are "Mail Room"), so a coworker doing that job inherits the
+// same label and reads as the same kind of thing. An entry that genuinely IS a
+// distinct person - the Security Guard you fight - still says so by overriding
+// `name`; the point is that it has to be a deliberate line, not a blank the
+// shape demands be filled.
+const PICKER_ONLY = ['tagline', 'experience', 'startGear', 'playable'];
 
 /**
  * Build a character FROM a class: `{ classId, ...overrides }` in, a full def
@@ -132,7 +141,7 @@ export const CLASSES = {
   },
   'mail-room': {
     name: 'Mail Room',
-    // Rangy from eleven years of corridors. Shared with the Mail Room Veteran
+    // Rangy from eleven years of corridors. Shared with the mail room
     // companion, who inherits this rig along with the rest of the class - he
     // reads apart by torso (data/companions.js), so keep the two builds
     // distinct when either one is retuned.

@@ -243,20 +243,21 @@ test('createCompanionSheet joins at the given level, fully rested, points banked
   assert.equal(s.classId, undefined); // a companion is not a picked class
 });
 
-test('a companion sheet names the PERSON and labels them with their CLASS', () => {
-  // These are two different strings and used to be the same one, so a
-  // companion's sheet read "Nervous IT Intern - Nervous IT Intern", listing a
-  // person as their own profession. `name` is who they are; `className` is the
-  // job, resolved through the classId they inherit from (data/classes.js).
+test('a companion with no name of their own is called what the job is called', () => {
+  // Neither companion is a named character - one is an IT person, the other a
+  // mail room person - so both fields read the job, resolved through the
+  // classId they inherit from (data/classes.js). They used to carry invented
+  // personas ("Nervous IT Intern") that stated a state the game never advances.
   const s = createCompanionSheet(COMPANIONS['it-intern'], 'it-intern', 1);
-  assert.equal(s.name, 'Nervous IT Intern');
+  assert.equal(s.name, 'IT Support');
   assert.equal(s.className, 'IT Support');
   const v = createCompanionSheet(COMPANIONS['mail-veteran'], 'mail-veteran', 1);
-  assert.equal(v.name, 'Mail Room Veteran');
+  assert.equal(v.name, 'Mail Room');
   assert.equal(v.className, 'Mail Room');
-  // The class the veteran inherits is the one the sheet reports, so the label
-  // follows the class instead of drifting from it.
+  // The label is the CLASS's, not a copy of it, so it follows the class instead
+  // of drifting from it.
   assert.equal(v.className, CLASSES[COMPANIONS['mail-veteran'].classId].name);
+  assert.equal(v.name, CLASSES[COMPANIONS['mail-veteran'].classId].name);
   // A PICKED class is its own job - both fields stay the class label.
   const p = createSheet('it-support');
   assert.equal(p.name, 'IT Support');
