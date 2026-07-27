@@ -128,13 +128,20 @@ export function createTacticalButton({ onToggle, isOn }) {
   return { refresh: paint, setVisible: (v) => { btn.style.display = v ? '' : 'none'; layoutHudRail(); } };
 }
 
-// --- persistent attack hotbar -------------------------------------------------
-// Always-on out-of-combat action bar: the player's OFFENSIVE actions (attacks,
-// shove, thrown weapons) so a coworker can be targeted before a fight starts.
-// Arming a slot and clicking an enemy opens combat with that move (main.js
+// --- persistent action hotbar -------------------------------------------------
+// Always-on out-of-combat action bar: the player's WHOLE kit, so the character
+// you picked is legible without a fight running. Arming a slot and clicking a
+// coworker opens combat with that move; a summon posts where you click (main.js
 // wires the arming + targeting). Ids are `#hotbar-act-<id>` - deliberately NOT
 // the combat bar's `#act-<id>`, so the two never collide in the DOM or tests.
-// `actions` is [{ id, label, ap, ammoCost }]; onArm(id) toggles a slot.
+//
+// `actions` is [{ id, label, ap, ammoCost, unavailable }]; onArm(id) toggles a
+// slot. `unavailable` is why a slot can't act with no fight on (Deflect Blame,
+// a heal): it dims the slot and titles it with the reason, but leaves it
+// CLICKABLE - the host answers a press with that reason, and a listed power you
+// can ask about beats a power that isn't there. An unaffordable throw (no
+// paper) is the one thing actually disabled: that one is about to change on its
+// own the moment you pick up a sheet.
 export function createHotbar(actions, { onArm }) {
   const bar = document.createElement('div');
   bar.id = 'hotbar';
@@ -152,7 +159,6 @@ export function createHotbar(actions, { onArm }) {
     Object.assign(b.style, BUTTON_CHROME, {
       minWidth: '104px', padding: '7px 6px', borderRadius: '7px',
     });
-    b.title = `${a.label} · ${a.ap}AP`;
     b.onmousedown = (e) => e.stopPropagation(); // don't let the canvas see it
     b.onclick = () => onArm(a.id);
     bar.appendChild(b);
@@ -166,9 +172,12 @@ export function createHotbar(actions, { onArm }) {
       let label = `${i + 1} · ${def.label}`;
       if (def.ammoCost) label += ` (${sheet?.paper ?? 0}📄)`;
       b.textContent = label;
-      const usable = !def.ammoCost || (sheet?.paper ?? 0) >= def.ammoCost;
-      b.disabled = !usable;
-      b.style.opacity = usable ? '1' : '.4';
+      const fed = !def.ammoCost || (sheet?.paper ?? 0) >= def.ammoCost;
+      b.disabled = !fed;
+      b.style.opacity = fed && !def.unavailable ? '1' : '.4';
+      b.title = def.unavailable
+        ? `${def.label} · ${def.ap}AP · ${def.unavailable}`
+        : `${def.label} · ${def.ap}AP`;
       b.style.borderColor = def.id === armed ? '#8adf76' : '#3a3a52';
     });
   }

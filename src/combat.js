@@ -8,7 +8,7 @@
 // first), thrown weapons need range and line of sight. Nearby enemies join
 // the fight; enemies have persistent map HP and take surface damage like you
 // do. Fire keeps burning throughout.
-import { ACTIONS } from './data/actions.js';
+import { ACTIONS, arrivalLine } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, reachOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH, THROW_RANGE } from './stats.js';
@@ -1512,7 +1512,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     active.ap = roundAp(active.ap - a.ap);
     active.actor.lunge(tx, tz);
     faceTarget(active, tx, tz); // you gesture at where you posted them
-    log(`${a.log} ${n} report${n === 1 ? 's' : ''} for duty.`);
+    log(`${a.log} ${arrivalLine(n)}`);
     armed = null;
     aimPoint = null;
     refresh();

@@ -3,7 +3,7 @@
 // MEMBER you control - it takes its own initiative turn in PLAYER phase, with
 // its own action bar - not an autopilot ally (SUMMON_PLAN.md).
 import { test, expect } from '@playwright/test';
-import { bootStash, enterCombat, clickAction, refillAp } from './helpers.js';
+import { bootStash, clickWorld, enterCombat, clickAction, refillAp } from './helpers.js';
 
 // Just you and one HR Rep, two tiles apart, in an open room with plenty of
 // free floor for applicants to spawn onto. No other coworkers, so enterCombat
@@ -183,18 +183,70 @@ test('the HR class posts the role AT a spot you pick', async ({ page }) => {
   const p = await page.evaluate(([x, z]) => window.__game.project(x, z), [target.x, target.z]);
   await page.mouse.click(p.x, p.y);
 
-  // Two applicants report for duty on YOUR side (summons, not enemies)...
+  // ONE applicant reports for duty on YOUR side (summons, not enemies) - a post
+  // is a hire, not a batch (ACTIONS['summon-applicants'].count).
   await expect.poll(() => page.evaluate(() => window.__game.summons.length),
-    { timeout: 15_000 }).toBe(2);
+    { timeout: 15_000 }).toBe(1);
   expect(await page.evaluate(() =>
     (window.__combat.enemies || []).some((e) => e.name === 'Applicant'))).toBe(false);
 
-  // ...and they report WHERE YOU CLICKED: the drop point itself plus the free
-  // ground ringing outward from it, not wherever the summoner is standing.
+  // ...and they report WHERE YOU CLICKED: the drop point itself, not wherever
+  // the summoner is standing.
   const placed = await page.evaluate(() => window.__game.summons.map((s) => ({ x: s.x, z: s.z })));
-  for (const s of placed) {
-    expect(Math.max(Math.abs(s.x - target.x), Math.abs(s.z - target.z))).toBeLessThanOrEqual(1);
-  }
+  expect(placed).toEqual([{ x: target.x, z: target.z }]);
+});
+
+// Nobody to fight - the point is that the power works with no fight on.
+const QUIET_ARENA = {
+  name: 'Quiet Office',
+  tiles: { '#': 'wall', '.': 'floor' },
+  actors: { '@': 'player' },
+  map: [
+    '###########',
+    '#.........#',
+    '#.........#',
+    '#....@....#',
+    '#.........#',
+    '#.........#',
+    '###########',
+  ],
+};
+
+test('Post the Role is on the out-of-combat bar, and posts where you click', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, QUIET_ARENA, 'human-resources');
+
+  // The whole kit is listed out of combat - the summon armable, the reactive
+  // pair listed and saying why not.
+  await expect(page.locator('#hotbar-act-summon-applicants')).toBeVisible();
+  await expect(page.locator('#hotbar-act-defend')).toBeVisible();
+  expect(await page.evaluate(() => window.__game.summons.length)).toBe(0);
+
+  await page.click('#hotbar-act-summon-applicants');
+  expect(await page.evaluate(() => window.__game.armed)).toBe('summon-applicants');
+
+  // A spot two tiles off: "where I clicked" and "beside the summoner" are
+  // different answers, and it is inside the action's range of 5.
+  const me = await page.evaluate(() => window.__game.playerTile);
+  const target = { x: me.x + 2, z: me.z };
+  expect(await clickWorld(page, target.x, target.z)).toBe(true);
+
+  await expect.poll(() => page.evaluate(() => window.__game.summons.length),
+    { timeout: 15_000 }).toBe(1);
+  expect(await page.evaluate(() => window.__game.summons.map((s) => ({ x: s.x, z: s.z }))))
+    .toEqual([target]);
+  // No fight was started by posting, and the slot disarmed itself: one click,
+  // one post.
+  expect(await page.evaluate(() => window.__game.inCombat)).toBe(false);
+  expect(await page.evaluate(() => window.__game.armed)).toBe(null);
+
+  // The assignment is on the world clock out here, so the temp shows itself out
+  // rather than following you around the floor forever. (timeScale for the same
+  // reason as the test above: the clock is frame-bound.)
+  await page.evaluate(() => { window.__god.timeScale = 8; });
+  await expect.poll(() => page.evaluate(() => window.__game.summons.length),
+    { timeout: 90_000 }).toBe(0);
+  await page.evaluate(() => { window.__god.timeScale = 1; });
 });
 
 // A long room, so a tile can be genuinely out of the action's range of 5 while

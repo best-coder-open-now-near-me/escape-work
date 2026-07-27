@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { unitCombat } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
-import { ACTIONS } from '../../src/data/actions.js';
+import { ACTIONS, arrivalLine } from '../../src/data/actions.js';
 
 // Resolve a summon descriptor's archetype id the way world.spawnSummon does.
 const archetypeOf = (id) => CLASSES[id] || ENEMY_TYPES[id];
@@ -121,6 +121,32 @@ test('summon actions reference a valid, combat-ready archetype', () => {
     assert.ok(a.ap > 0, `${id}.ap costs something`);
     assert.ok(a.lifetimeTurns > 0, `${id}.lifetimeTurns is a real budget`);
   }
+});
+
+// A posting announces PEOPLE arriving, and it is announced from one place -
+// the in-combat post and the out-of-combat one both call this, so the same
+// event can't read two ways. "1 reports for duty" was the number-where-a-person
+// -should-be that made a single-applicant post look like a spreadsheet row.
+test('a posting announces its arrivals in whole people', () => {
+  assert.match(arrivalLine(1), /^One applicant reports/);
+  assert.equal(arrivalLine(3), '3 applicants report for duty.');
+  // Whatever the count, the line never says "1 applicants" or "One report".
+  for (const n of [1, 2, 5]) {
+    assert.ok(!/\b1 applicants\b/.test(arrivalLine(n)), `${n} reads as people`);
+  }
+});
+
+// Post the Role hires ONE per click today, and the placement path is the only
+// thing that decides how many a click can carry - so raising `count` (a talent,
+// a second-tier req) stays a data change. What the cap must never do is sit
+// BELOW the count, which would make a legal post partly unfillable.
+test('a summon action never posts more than its cap allows', () => {
+  for (const [id, a] of Object.entries(ACTIONS)) {
+    if (a.type !== 'summon') continue;
+    assert.ok(Number.isInteger(a.count) && a.count >= 1, `${id}.count is a whole hire`);
+    assert.ok((a.cap ?? a.count) >= a.count, `${id}.cap can hold a full post`);
+  }
+  assert.equal(ACTIONS['summon-applicants'].count, 1); // one applicant per post
 });
 
 test('Human Resources is a playable summoner class', () => {

@@ -61,6 +61,9 @@ const RING_FRIENDLY = new pc.Color(0.42, 0.85, 0.42);
 //                                       preview is the rule, so the rings and
 //                                       the crosshair ask the same question the
 //                                       click will
+//   summonDrop()                        for an armed summon: the hovered spot,
+//                                       the tiles its arrivals would fill, and
+//                                       why they couldn't (null if not armed)
 //   doorNear(point) / doorOpen(key)     the door under a ground point
 //   tileDef(x, z) / shopSoldOut(x, z)   what a prop tile is and whether it's out
 //   corpseAt / looseAt / itemName       flat things the pick ray skims over
@@ -271,6 +274,17 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries }
         const pos = en.entity.getPosition();
         ring(pos.x, pos.z, 0.5, queries.armedTargetOk(armed, en) ? RING_OK : RING_FAR);
       }
+    },
+    // A SUMMON armed out of combat aims at the floor, so there is no coworker
+    // to ring - the spot is the target. Green on the tiles the arrivals would
+    // actually stand on, red on the aimed tile alone when the spot is unusable:
+    // the same read as combat's placement preview, from the same rule
+    // (queries.summonDrop is main.js's own click test).
+    drawSummonDrop() {
+      const drop = queries.summonDrop?.();
+      if (!drop) return;
+      if (drop.problem || !drop.spots.length) { ring(drop.x, drop.z, 0.42, RING_FAR); return; }
+      for (const [x, z] of drop.spots) ring(x, z, 0.42, RING_OK);
     },
     // A ground ring under EVERY character at their true position - tall meshes
     // read a tile off at this camera angle, so the ring is where a click

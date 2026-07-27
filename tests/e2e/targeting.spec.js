@@ -73,11 +73,17 @@ test('the persistent hotbar shows attacks and arming targets a coworker', async 
   test.setTimeout(300_000);
   await bootAndPick(page);
   await expect(page.locator('#hotbar')).toBeVisible();
-  // Office Drone: attack + shove + two thrown weapons are offensive.
+  // Office Drone: attack + shove + two thrown weapons target a coworker.
   await expect(page.locator('#hotbar-act-attack')).toBeVisible();
-  await expect(page.locator('#hotbar-act-defend')).toHaveCount(0); // defensive stays combat-only
 
   await page.click('#hotbar-act-attack');
+  expect(await page.evaluate(() => window.__game.armed)).toBe('attack');
+
+  // The kit is listed in full, but a power a FIGHT owns still refuses to arm -
+  // it says why instead, and leaves the armed slot alone.
+  await expect(page.locator('#hotbar-act-defend')).toBeVisible();
+  await page.click('#hotbar-act-defend');
+  expect(await page.evaluate(() => window.__game.narration.at(-1))).toMatch(/swinging at you/i);
   expect(await page.evaluate(() => window.__game.armed)).toBe('attack');
 
   // Arming, then clicking a coworker, opens combat with that attack as the

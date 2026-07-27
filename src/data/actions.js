@@ -269,18 +269,26 @@ export const ACTIONS = {
   // of sight, like a throw). They land on the clicked tile and the free tiles
   // ringing outward from it. An enemy `summon` descriptor carries no `range`
   // and drops its reinforcements beside the summoner instead.
+  //
+  // ONE per post. It shipped at two, and a posting that drops a pair reads as a
+  // batch rather than a hire: you point at a spot and two bodies appear, one of
+  // them on a tile you didn't choose. `count` stays the knob - the placement
+  // path fills a ring outward from the click for any count, so a talent (or a
+  // second-tier req) that posts three is a data change and nothing else. What
+  // is deliberately NOT flexible is the click: one placement resolves one post,
+  // however many report to it.
   'summon-applicants': {
     type: 'summon',
     ap: 4,
     archetype: 'applicant',
-    count: 2,
+    count: 1,
     cap: 3,
     uses: 2,
     range: 5,
     lifetimeTurns: 6,
     label: 'Post the Role',
-    desc: 'Post the req. Click where they should report - applicants fight on your side.',
-    log: 'You open a req. Applicants flood in -',
+    desc: 'Post the req. Click where they should report - the applicant fights on your side.',
+    log: 'You open a req.',
   },
 
   // --- talent-granted -----------------------------------------------------------
@@ -338,3 +346,11 @@ export const ACTIONS = {
     missLog: 'The dart banks left and augers into a monitor.',
   },
 };
+
+// How a posting's arrivals are announced. One line, shared by the in-combat
+// posting (combat.js placeSummon) and the out-of-combat one (main.js
+// postSummonAt): the same event said two ways reads as two different events,
+// and "1 reports for duty" is how you get a number where a person should be.
+export const arrivalLine = (n) => (n === 1
+  ? 'One applicant reports for duty.'
+  : `${n} applicants report for duty.`);
