@@ -40,8 +40,15 @@ export function startEditor(app, levelData, stashKey) {
   let vDoors = new Set();
 
   // char <-> meaning, from the registries (single source of truth for export)
+  // `runtimeOnly` tiles (the fallen twins, POWERS_PLAN M6) carry NO char - they
+  // only ever arrive through grid.setType. Skipping them here is not tidiness:
+  // `tileByChar[undefined] = id` would install a bogus lookup that every
+  // unrecognised map character then resolves to.
   const tileByChar = {};
-  for (const [id, def] of Object.entries(TILE_TYPES)) tileByChar[def.char] = id;
+  for (const [id, def] of Object.entries(TILE_TYPES)) {
+    if (def.runtimeOnly) continue;
+    tileByChar[def.char] = id;
+  }
   const enemyByChar = {};
   for (const [id, def] of Object.entries(ENEMY_TYPES)) enemyByChar[def.char] = id;
 
@@ -375,7 +382,10 @@ export function startEditor(app, levelData, stashKey) {
   // --- level JSON in/out -----------------------------------------------------------
   function toJson() {
     const tiles = {};
-    for (const [id, def] of Object.entries(TILE_TYPES)) tiles[def.char] = id;
+    for (const [id, def] of Object.entries(TILE_TYPES)) {
+      if (def.runtimeOnly) continue; // never painted, never exported
+      tiles[def.char] = id;
+    }
     // Every actor registry, so a companion that survived the load also
     // survives the export - a map char with no legend entry parses as floor,
     // which is the same data loss one step later.
@@ -444,6 +454,7 @@ export function startEditor(app, levelData, stashKey) {
     'breakroom', 'decor', 'structure', 'facilities'];
   const byCategory = new Map();
   for (const [id, def] of Object.entries(TILE_TYPES)) {
+    if (def.runtimeOnly) continue; // not a brush - it has no character to paint
     const cat = def.category || 'basics';
     if (!byCategory.has(cat)) byCategory.set(cat, []);
     byCategory.get(cat).push(id);

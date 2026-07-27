@@ -9,6 +9,7 @@ import {
   isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf,
   isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf,
   isStance, watchRadiusOf, watchTriggers,
+  isToppleable, toppleLanding,
 } from '../../src/powers.js';
 import { TILE_TYPES } from '../../src/data/tiles.js';
 import { ACTIONS } from '../../src/data/actions.js';
@@ -341,6 +342,55 @@ test('the overwatch status is visible state, not a rule', () => {
   // which the effect vocabulary can express. If this ever grows effects, the
   // stance has quietly become two implementations.
   assert.deepEqual(def.effects, {});
+});
+
+// --- toppling (POWERS_PLAN M6) ----------------------------------------------
+
+test('isToppleable reads the descriptor', () => {
+  assert.equal(isToppleable(TILE_TYPES.cabinet), true);
+  assert.equal(isToppleable(TILE_TYPES.floor), false);
+  assert.equal(isToppleable(undefined), false);
+  // A desk deliberately does NOT topple: it is the cover the levels are
+  // already built around, and making the most-painted prop in the game mutable
+  // would rewrite every floor's tactical read on contact.
+  assert.equal(isToppleable(TILE_TYPES.desk), false);
+});
+
+test('a prop falls directly AWAY from whoever pushed it', () => {
+  // attacker west of the prop -> it lands east
+  assert.deepEqual(toppleLanding(1, 5, 2, 5), [3, 5]);
+  // attacker east -> it lands west
+  assert.deepEqual(toppleLanding(3, 5, 2, 5), [1, 5]);
+  // attacker north -> it lands south
+  assert.deepEqual(toppleLanding(4, 1, 4, 2), [4, 3]);
+  // diagonals carry both components
+  assert.deepEqual(toppleLanding(0, 0, 1, 1), [2, 2]);
+});
+
+test('a prop you are standing on has nowhere to fall', () => {
+  assert.equal(toppleLanding(2, 2, 2, 2), null);
+});
+
+test('the landing is one tile, however far away the pusher is', () => {
+  // Direction is a SIGN, not a vector: shoving from across the room (which
+  // nothing can do today, but the AI's scoring will ask about) must not
+  // launch the bookcase five tiles.
+  assert.deepEqual(toppleLanding(0, 5, 6, 5), [7, 5]);
+});
+
+test('every toppleable prop names a fallen twin that is cover, not a wall', () => {
+  for (const [id, def] of Object.entries(TILE_TYPES)) {
+    if (!def.topple) continue;
+    const twin = TILE_TYPES[def.topple.becomes];
+    assert.ok(twin, `${id} topples into a real tile`);
+    // The barrier is a TACTICAL barrier. A solid twin would let a shove spawn
+    // impassable terrain, seal a doorway, and strand a fight the enemy can no
+    // longer reach - the wall the design explicitly refused.
+    assert.notEqual(twin.solid, true, `${def.topple.becomes} is not solid`);
+    assert.equal(twin.cover, true, `${def.topple.becomes} grants cover`);
+    assert.equal(twin.runtimeOnly, true, `${def.topple.becomes} costs no map character`);
+    assert.equal(twin.surface, 'debris', `${def.topple.becomes} carries the clamber cost as a surface`);
+  }
 });
 
 // --- the shipped content honors the verb ------------------------------------

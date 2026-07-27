@@ -110,6 +110,25 @@ export function controlOutcome(a) {
 // Is this action a control? Used by the same one-predicate rule as isFriendly.
 export const isControl = (a) => !!a && a.type === 'control';
 
+// --- toppling (POWERS_PLAN M6) -----------------------------------------------
+
+export const isToppleable = (def) => !!def?.topple;
+
+// Where a prop at (px, pz) lands when knocked over by somebody at (ax, az):
+// the tile directly OPPOSITE the attacker. Returns null when the two are on
+// the same tile (nothing to push away from).
+//
+// Direction is derived rather than aimed on purpose: it makes lining up the
+// bookcase and the target the skill, and it needs no second targeting mode for
+// one verb. It is also why toppling composes with the shove instead of
+// competing with it - both push away from you.
+export function toppleLanding(ax, az, px, pz) {
+  const dx = Math.sign(px - ax);
+  const dz = Math.sign(pz - az);
+  if (!dx && !dz) return null;
+  return [px + dx, pz + dz];
+}
+
 // --- stance (POWERS_PLAN M5) -------------------------------------------------
 
 export const isStance = (a) => !!a && a.type === 'stance';

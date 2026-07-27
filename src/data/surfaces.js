@@ -51,6 +51,22 @@ export const SURFACES = {
     onEnter: { applies: 'gum', message: 'Squish. That was gum. It is yours now.' },
     examine: 'A wad of gum, pre-owned. Possibly load-bearing.',
   },
+  // What a toppled prop leaves underfoot (POWERS_PLAN M6). It exists as a
+  // SURFACE rather than as fields on the fallen tile because movement cost is
+  // the surface layer's job - `slow` and `pathCost` already drive walk speed,
+  // combat's AP pricing, the AI's route costing and the pathfinder's
+  // avoidance, and inventing a per-tile `moveCost` would have been a second
+  // implementation of all four.
+  debris: {
+    // No `style`: the fallen prop's own MODEL is the visual (tile-renderer
+    // returns on `def.model` before it reaches the surface styles), so there
+    // is nothing for this layer to draw. The surface is here for the RULES.
+    color: [0.42, 0.36, 0.30],
+    // Clambering over costs about what wading through coffee does.
+    slow: 0.6,
+    pathCost: 2,
+    examine: 'Somebody is going to have to file an incident report about this.',
+  },
   paper: {
     style: 'paper',
     flammable: true,

@@ -197,12 +197,38 @@ test('every registry cross-reference resolves', () => {
   // registry chars, so a duplicate `char` silently makes one prop unpaintable
   // and corrupts the load -> export round trip. With a large furniture kit
   // this is the easiest mistake to make, so pin it.
+  //
+  // `runtimeOnly` tiles are EXEMPT (POWERS_PLAN M6): nobody paints them and
+  // nobody exports them - they only ever arrive through grid.setType - so they
+  // consume none of the character budget, which is what makes the fallen twins
+  // affordable at all with 92 of 94 characters already spoken for. They must
+  // therefore also carry NO char, or they would silently spend one anyway.
   const byChar = new Map();
   for (const [id, def] of Object.entries(TILE_TYPES)) {
+    if (def.runtimeOnly) {
+      assert.equal(def.char, undefined,
+        `runtimeOnly tile "${id}" must not claim a character - that is the point of the flag`);
+      continue;
+    }
     assert.ok(typeof def.char === 'string' && def.char.length === 1, `tile "${id}" has a single-char code`);
     assert.ok(!byChar.has(def.char),
       `tile char "${def.char}" is unique (${id} collides with ${byChar.get(def.char)})`);
     byChar.set(def.char, id);
+  }
+  // Toppling (POWERS_PLAN M6): a prop that goes over must name a fallen twin
+  // that exists, and that twin must be runtimeOnly - a paintable one would be
+  // spending a character nobody asked it to spend. The twin must not itself be
+  // solid, or the "cover, not a wall" rule is broken by data alone: a shove
+  // could spawn impassable terrain, seal a doorway, and strand a fight the
+  // enemy can no longer reach.
+  for (const [id, def] of Object.entries(TILE_TYPES)) {
+    if (!def.topple) continue;
+    const twin = TILE_TYPES[def.topple.becomes];
+    assert.ok(twin, `tile "${id}" topples into a real tile ("${def.topple.becomes}")`);
+    assert.equal(twin.runtimeOnly, true, `"${def.topple.becomes}" is runtimeOnly`);
+    assert.notEqual(twin.solid, true, `"${def.topple.becomes}" is cover, not a wall`);
+    const [lo, hi] = def.topple.damage || [];
+    assert.ok(lo > 0 && hi >= lo, `tile "${id}" topple damage is a sane range`);
   }
   // Every referenced model actually ships - a typo here renders an invisible
   // prop that still blocks movement, which is near-impossible to spot in play.

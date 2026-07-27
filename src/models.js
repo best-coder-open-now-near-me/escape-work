@@ -23,7 +23,12 @@ function setupAnim(inst, asset) {
 
 // Load a .glb, wrap it in a holder (so scaling/rotating is predictable), and
 // drop it on a tile. Reusable for every prop and character.
-export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY = 0, onReady = null, animate = false } = {}) {
+// `tiltX`/`tiltZ` lay a prop over (POWERS_PLAN M6). Everything the game placed
+// before toppling stood upright, so `rotY` alone was the whole vocabulary; a
+// fallen bookcase needs to rotate about an axis in the floor plane, and a
+// bespoke second placement path for the one case would have been a parallel
+// copy of the asset caching, the toonify and the outline pass.
+export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY = 0, tiltX = 0, tiltZ = 0, onReady = null, animate = false } = {}) {
   // Reuse the asset if this .glb was already requested (props repeat a lot,
   // and the editor repaints cells constantly).
   let asset = app.assets.find(url);
@@ -43,7 +48,7 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
     addOutlines(holder);
     if (animate) setupAnim(inst, asset);
     holder.setLocalScale(scale, scale, scale);
-    holder.setEulerAngles(0, rotY, 0);
+    holder.setEulerAngles(tiltX, rotY, tiltZ);
     holder.setPosition(tileX, lift, tileZ);
     app.root.addChild(holder);
     if (onReady) onReady(holder);

@@ -24,6 +24,21 @@
 //   category - groups the brush in the level editor's palette. With a large
 //              furniture kit a flat button bar is unusable, so the editor
 //              renders one labelled row per category (editor.js).
+//   topple   - this prop can be KNOCKED OVER (POWERS_PLAN M6):
+//                { damage: [min, max], becomes: '<tile id>' }
+//              A shove aimed at it, or a body slammed into it, lays it into
+//              the tile directly opposite the attacker. Whoever is standing
+//              there takes `damage` and the EXISTING `stunned` status - reused
+//              rather than a new knocked-down, so toppling inherits the
+//              anti-chain immunity window and cannot become a second way to
+//              lock somebody out of a fight. `becomes` names the fallen twin.
+//   runtimeOnly - this tile is never painted and never exported: it only ever
+//              arrives through grid.setType at runtime (the fallen twins).
+//              Such tiles are EXEMPT from the one-unique-char rule and hidden
+//              from the editor palette, which is what makes them free - see
+//              the character ceiling below. A runtimeOnly tile appearing in a
+//              shipped level is a lint failure, not a tile with no character.
+//   tiltX/tiltZ - degrees of lean for the model (a fallen prop lies over).
 //
 // NOTE ON `char`: a level's map is one CHARACTER per cell, and the editor
 // exports canonical registry chars, so every entry needs a globally unique
@@ -184,6 +199,7 @@ export const TILE_TYPES = {
     scale: 0.5,
     label: 'Filing Cabinet',
     examine: 'A filing cabinet. The second drawer has not opened since the merger.',
+    topple: { damage: [3, 6], becomes: 'cabinet-fallen' },
   },
   // The merchant you can paint (ECONOMY_PLAN M2). `shop` points at a SHOPS
   // entry (data/shops.js) exactly the way `loot` points at a loot table, and
@@ -235,6 +251,7 @@ export const TILE_TYPES = {
     model: 'furniture/bookshelf',
     scale: 0.5,
     label: 'Bookshelf',
+    topple: { damage: [4, 7], becomes: 'bookshelf-fallen' },
     examine: 'A bookshelf of binders nobody has opened. The spines are immaculate.',
   },
   lamp: {
@@ -283,11 +300,13 @@ export const TILE_TYPES = {
     char: 'j', category: 'storage', solid: true,
     height: 0.85, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/bookcaseClosed', label: 'Bookcase',
+    topple: { damage: [4, 7], becomes: 'bookcase-fallen' },
   },
   'bookcase-wide': {
     char: 'l', category: 'storage', solid: true,
     height: 0.79, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/bookcaseClosedWide', label: 'Bookcase Wide',
+    topple: { damage: [4, 8], becomes: 'bookcase-wide-fallen' },
   },
   'bookcase-low': {
     char: 'n', category: 'storage', solid: true,
@@ -308,6 +327,7 @@ export const TILE_TYPES = {
     char: 'r', category: 'storage', solid: true,
     height: 0.77, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/coatRackStanding', label: 'Coat Rack',
+    topple: { damage: [1, 3], becomes: 'coat-rack-fallen' },
   },
   'tv-cabinet': {
     char: 't', category: 'storage', solid: true,
@@ -590,5 +610,85 @@ export const TILE_TYPES = {
     char: '|', category: 'work', solid: true,
     height: 0.34, scale: 2.0, color: [0.3, 0.3, 0.34],
     model: 'office/shredder', label: 'Shredder',
+  },
+
+  // --- fallen twins (POWERS_PLAN M6) ----------------------------------------
+  // Every one of these is `runtimeOnly`: nobody paints them, nobody exports
+  // them, they only ever arrive through grid.setType when something goes over.
+  // That is what makes them AFFORDABLE - the character ceiling above is
+  // reached (92 of 94 spoken for), and six fallen twins would have needed six
+  // characters that do not exist.
+  //
+  // They are deliberately NOT solid. A player who can spawn impassable terrain
+  // can seal a doorway and break every guarantee pathfinding makes, including
+  // the enemy's ability to reach them at all - which turns a fight into a
+  // stalemate the game has no way to resolve. `cover: true` is the barrier
+  // instead: it changes the to-hit maths (tactics.js), which is what "barrier"
+  // should mean in a tactics game. The `debris` surface carries the clamber
+  // cost, because movement cost is the surface layer's job.
+  'cabinet-fallen': {
+    runtimeOnly: true,
+    solid: false,
+    height: 0.3,
+    cover: true,
+    surface: 'debris',
+    color: [0.55, 0.38, 0.24],
+    model: 'furniture/cabinet',
+    scale: 0.5,
+    tiltX: 90,
+    label: 'Toppled Filing Cabinet',
+    examine: 'Eleven years of performance reviews, face down on the carpet.',
+  },
+  'bookcase-fallen': {
+    runtimeOnly: true,
+    solid: false,
+    height: 0.3,
+    cover: true,
+    surface: 'debris',
+    color: [0.55, 0.5, 0.45],
+    model: 'furniture/kit/bookcaseClosed',
+    scale: 1.0,
+    tiltX: 90,
+    label: 'Toppled Bookcase',
+    examine: 'Face down. The binders inside have not moved in years and are not starting now.',
+  },
+  'bookcase-wide-fallen': {
+    runtimeOnly: true,
+    solid: false,
+    height: 0.3,
+    cover: true,
+    surface: 'debris',
+    color: [0.55, 0.5, 0.45],
+    model: 'furniture/kit/bookcaseClosedWide',
+    scale: 1.0,
+    tiltX: 90,
+    label: 'Toppled Bookcase',
+    examine: 'It took two people to put it up and one shove to put it down.',
+  },
+  'bookshelf-fallen': {
+    runtimeOnly: true,
+    solid: false,
+    height: 0.3,
+    cover: true,
+    surface: 'debris',
+    color: [0.5, 0.36, 0.22],
+    model: 'furniture/bookshelf',
+    scale: 0.5,
+    tiltX: 90,
+    label: 'Toppled Bookshelf',
+    examine: 'The immaculate spines are now face down. Still unopened.',
+  },
+  'coat-rack-fallen': {
+    runtimeOnly: true,
+    solid: false,
+    height: 0.2,
+    cover: true,
+    surface: 'debris',
+    color: [0.55, 0.5, 0.45],
+    model: 'furniture/kit/coatRackStanding',
+    scale: 1.0,
+    tiltX: 90,
+    label: 'Fallen Coat Rack',
+    examine: 'Somebody\'s good coat is under there.',
   },
 };

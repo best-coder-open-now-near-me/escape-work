@@ -1307,6 +1307,17 @@ function startGame(level) {
         // different question than the commit asks is how a preview starts
         // lying (the rings promised tiles the click then skipped).
         canTakeSurface: (x, z) => grid.typeAt(x, z) === 'floor',
+        // Toppling (POWERS_PLAN M6) needs to read a prop's definition, test
+        // whether the tile behind it is clear, and mutate both. setType is the
+        // same call the exploding printer already makes, so the grid, the
+        // renderer and pathfinding re-read a toppled prop exactly as they do a
+        // destroyed one - no new invalidation path.
+        tileDefAt: (x, z) => grid.defAt(x, z),
+        terrainOpen: (x, z) => grid.terrainOpen(x, z),
+        setType: (x, z, type) => {
+          grid.setType(x, z, type);
+          scene.refreshTile?.(x, z);
+        },
         leaveSurface: (x, z, tileType, turns = 0) => {
           if (grid.typeAt(x, z) !== 'floor') return false;
           grid.setType(x, z, tileType);
@@ -2473,6 +2484,18 @@ function startGame(level) {
     // that burns out is spent - and a spec has no other way to see that the
     // world actually changed rather than merely stopped burning.
     tileAt: (x, z) => grid.typeAt(x, z),
+    // Put a named coworker on an exact tile. A spec about what happens TO a
+    // body standing somewhere (a bookcase landing on it, cover being measured
+    // across it) otherwise has to wait for the AI to wander there, which makes
+    // the spec a test of pathing instead of the thing it is about. pushTo is
+    // the same glide a shove uses, so nothing about it is a special case.
+    debugPlaceEnemy: (name, x, z) => {
+      const en = enemies.find((e) => e.alive && e.def.name === name);
+      if (!en) return false;
+      en.clearPath();
+      en.pushTo(x, z);
+      return true;
+    },
     get enemies() {
       return enemies.map((e) => {
         const p = e.entity?.getPosition();

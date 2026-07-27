@@ -14,7 +14,7 @@ import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, reachOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH, THROW_RANGE } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
-import { buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers } from './powers.js';
+import { buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding } from './powers.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
@@ -1331,6 +1331,22 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const occupied = members.some((m) =>
       m.sheet.hp > 0 && m.actor && m.actor.x === tx && m.actor.z === tz);
     if (occupied || !world.isWalkable(tx, tz) || !world.stepOpen(en.x, en.z, tx, tz)) {
+      // The "something solid" they hit might be a bookcase (POWERS_PLAN M6).
+      // Slamming somebody into a toppleable prop brings it down on them - the
+      // shove already said "into something solid", and this is the rest of
+      // that sentence. The topple's own damage and stun land on whoever is in
+      // the LANDING tile, which the slammed body may or may not be.
+      const plan = topplePlan(en, tx, tz);
+      if (plan) {
+        const died0 = en.takeDamage(slamDmg);
+        hitFx(en, 'slam', active);
+        if (died0) deathFx(en);
+        if (slamDmg > 0) fx.damageText(en.x, en.z, `-${slamDmg}`, '#ffd76b', { big: died0 });
+        const msg = `You ${verb} ${en.def.name} into the ${plan.def.label || 'furniture'}. `
+          + `${slamDmg > 0 ? `-${slamDmg}. ` : ''}${topple(active, plan)}`;
+        if (died0) callbacks.onEnemyKilled(en);
+        return { slammed: true, died: died0, msg };
+      }
       const died = slamDmg > 0 ? en.takeDamage(slamDmg) : false;
       hitFx(en, 'slam', active);
       fx.shake(0.06, 0.2); // a body meeting drywall
@@ -1370,6 +1386,84 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       };
     }
     return { slammed: false, died: false, msg: `You ${verb} ${en.def.name} back a step.` };
+  }
+
+  // --- toppling (POWERS_PLAN M6) -------------------------------------------
+  // Tall freestanding furniture goes over when shoved, and lands on whoever is
+  // behind it. The office stops being scenery you fight IN and becomes
+  // something you fight WITH - which is what the shove has been implying since
+  // it started slamming people into walls.
+  //
+  // Whether the prop at (px, pz) can be knocked over by `from` right now, and
+  // where it would land. Returns null when it cannot. Shared by the click, the
+  // hover affordance and the AI, so all three agree.
+  function topplePlan(from, px, pz) {
+    const def = world.tileDefAt(px, pz);
+    if (!isToppleable(def)) return null;
+    const b = bodyOf(from);
+    const landing = toppleLanding(b.x, b.z, px, pz);
+    if (!landing) return null;
+    const [lx, lz] = landing;
+    // Nothing behind it to fall into: it rocks and settles. No free
+    // destruction against a wall - a prop pinned by geometry stays up, which
+    // is also what stops toppling from being a way to demolish a corridor.
+    if (!world.terrainOpen(lx, lz)) return null;
+    if (!world.stepOpen(px, pz, lx, lz)) return null;
+    return { def, x: px, z: pz, lx, lz };
+  }
+
+  // Put it over. `by` is whoever caused it (for the narration and the facing).
+  function topple(by, plan) {
+    const { def, x, z, lx, lz } = plan;
+    const t = def.topple;
+    // The prop leaves its tile and lands on the next one. setType is the same
+    // call an exploding printer already makes, so the grid, the renderer and
+    // pathfinding all re-read it exactly as they do for destruction.
+    world.setType(x, z, 'floor');
+    world.setType(lx, lz, t.becomes);
+    fx.impact(lx, lz, 'slam', { y: 0.5 });
+    fx.shake(0.11, 0.28); // a bookcase hitting the carpet is worth more than a punch
+    let msg = `${def.label || 'It'} goes over.`;
+    // Whoever is standing in the landing tile wears it - coworker, teammate or
+    // you. A bookcase does not check your badge.
+    const victimUnit = world.liveEnemies().find((e) => e.x === lx && e.z === lz);
+    const victimMember = members.find((m) => m.sheet.hp > 0 && m.actor
+      && m.actor.x === lx && m.actor.z === lz);
+    const dmg = rand(t.damage[0], t.damage[1]);
+    if (victimUnit) {
+      const died = victimUnit.takeDamage(dmg);
+      hitFx(victimUnit, 'slam', by);
+      if (died) deathFx(victimUnit);
+      fx.damageText(lx, lz, `-${dmg}`, '#ffd76b', { big: died });
+      msg += ` It lands on ${victimUnit.def.name}. -${dmg}.`;
+      if (!died) {
+        // `stunned`, not a new knocked-down: toppling inherits the anti-chain
+        // immunity window rather than becoming a second way to lock somebody
+        // out of a fight. Slam a guard into drywall and then drop a cabinet on
+        // them and they get the same "they have had their daze" refusal, from
+        // the same code.
+        const blocked = blockedBy(victimUnit, 'stunned');
+        if (applyStatus(victimUnit, 'stunned')) {
+          statusFxAt(victimUnit, 'stunned');
+          msg += ' They go down under it.';
+        } else if (blocked) msg += ` ${immunityLine(blocked, victimUnit.def.name)}`;
+      } else {
+        callbacks.onEnemyKilled(victimUnit);
+      }
+    } else if (victimMember) {
+      const dead = applyDamage(victimMember.sheet, dmg);
+      hitFx(victimMember, 'slam', by);
+      victimMember.actor.flinch();
+      fx.damageText(lx, lz, `-${dmg}`, undefined, { big: dead });
+      msg += ` It lands on ${victimMember.sheet.name}. -${dmg}.`;
+      if (!dead) {
+        applyStatus(victimMember.sheet, 'stunned', {}, statusResist(victimMember.sheet));
+        statusFxAt(victimMember, 'stunned');
+      } else {
+        notifyMemberDown();
+      }
+    }
+    return msg;
   }
 
   // --- the mobility verb (POWERS_PLAN M4) ----------------------------------
@@ -1962,6 +2056,36 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           : 'You turn yourself off and on again. All effects cleared. Classic fix.');
         refresh();
         return;
+      }
+      // Shove a PROP over (POWERS_PLAN M6). The same verb, aimed at furniture
+      // instead of a person: walk up, put your shoulder into the bookcase, and
+      // it lands on whoever is behind it. It costs the shove's own AP and
+      // needs the shove's own reach, so nothing new has to be learned.
+      if (a.type === 'shove') {
+        const plan = topplePlan(active, tile.x, tile.z);
+        if (plan) {
+          if (active.ap < a.ap) { log('Not enough AP.'); return; }
+          if (!inReach(posOf(active).x, posOf(active).z, tile.x, tile.z, REACH.SHOVE)) {
+            log('Too far to shove.');
+            return;
+          }
+          active.ap = roundAp(active.ap - a.ap);
+          active.actor.lunge(tile.x, tile.z);
+          faceTarget(active, tile.x, tile.z);
+          log(topple(active, plan));
+          armed = null;
+          refresh();
+          if (!engaged.some((e) => e.alive)) victory();
+          return;
+        }
+        // A toppleable prop with nothing behind it just rocks - say so, rather
+        // than falling through to the generic "Invalid target", which reads as
+        // "this prop is not the kind that falls" and is a different (wrong)
+        // lesson.
+        if (isToppleable(world.tileDefAt(tile.x, tile.z))) {
+          log('It rocks, and settles. Nothing behind it to fall into.');
+          return;
+        }
       }
       // Aiming: a left click NEVER cancels. Missing the target used to lower
       // the action (and, with a cone out of AP, could strand you unable to do
@@ -2828,9 +2952,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // an unresisted, full-severity application, so a test pinning a status gets
     // exactly what it asked for - and pass a number to exercise Composure's
     // blunting (statuses.js severity) without building a character for it.
-    applyStatus: (id, duration, resist = 0) => {
-      applyStatus(active.sheet, id, { duration }, resist);
+    // Apply a status to the acting member, or - with `targetName` - to a named
+    // coworker. The enemy-side target exists because statuses on THEM are half
+    // the system and were unreachable from outside: a spec that wants a
+    // coworker to hold still (to drop a bookcase on them, to measure cover)
+    // could only get there by playing out the power that applies it, which
+    // makes the spec a test of that power instead of the thing it is about.
+    applyStatus: (id, duration, resist = 0, targetName = null) => {
+      const target = targetName
+        ? engaged.find((e) => e.alive && e.def.name === targetName)
+        : active.sheet;
+      if (!target) return false;
+      const ok = applyStatus(target, id, { duration }, resist);
       refresh();
+      return ok;
     },
     // The initiative order, top to bottom, with whose turn it is - for the
     // tracker UI and the e2e suite.
