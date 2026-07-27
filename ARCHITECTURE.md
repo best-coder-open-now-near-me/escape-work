@@ -69,6 +69,11 @@ src/
                      from data
   initiative.js      Combat turn order: d20 + speed roll, sort, joiner
                      insertion                                (pure logic)
+  turn-order.js      The turn ENGINE over that order: advance, the round
+                     wrap, skipping who can't act, a temp's contract,
+                     the turn-start tick. Drives a host interface, so
+                     combat.js keeps only what needs a panel or a body
+                     (see Layering)                            (pure logic)
   shop.js            Merchant arithmetic: price, sell yield, the stock roll,
                      and the atomic buy/sell                  (pure logic)
   looting.js         Containers, bodies, loose items, pockets, Alt overlay
@@ -91,8 +96,16 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - `data/*` imports nothing (`data/levels.js` is the one exception - it imports
   the level JSON files, which are themselves data).
 - `grid`, `pathfinding`, `stats`, `party`, `surfaces-runtime`, `initiative`,
-  `statuses`, `tactics`, `occlusion`, `shop` are pure JS (no PlayCanvas, no DOM) - unit
-  tested in isolation (tests/unit).
+  `turn-order`, `statuses`, `tactics`, `occlusion`, `shop` are pure JS (no
+  PlayCanvas, no DOM) - unit tested in isolation (tests/unit).
+- **A rules module that needs the world takes a HOST, not the world.**
+  `turn-order.js` is the pattern: it owns the turn walk and asks an injected
+  host the questions only combat can answer (is this slot still standing, is
+  the fight over, hand it the turn). The rules stay testable with plain objects
+  - `tests/unit/turn-order.test.js` drives a whole fight's worth of turn
+  boundaries with no sheet, no actor and no panel - while everything that needs
+  a body or the DOM stays in `combat.js`. Reach for this shape when logic worth
+  testing is trapped inside something that has to touch the engine.
 - `scene`, `shading`, `tile-renderer`, `models`, `controls`, `picking`,
   `actors` touch PlayCanvas; `ui` touches the DOM; `fx`, `combat` and
   `looting` touch both (combat draws its own previews/rings and builds its own

@@ -12,11 +12,11 @@ import { ACTIONS } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
 import { truncateByBudget } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, weaponProc, moveCostOf, reachOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH, THROW_RANGE } from './stats.js';
-import { applyStatus, hasStatus, statusFx, tickTurn, clearStatuses, removeStatus, statusList, blockedBy } from './statuses.js';
+import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
-import { buildInitiativeOrder, rollInitiative, insertionIndex } from './initiative.js';
+import { createTurnOrder } from './turn-order.js';
 
 const pc = window.pc;
 const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
@@ -437,8 +437,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
 
   // --- initiative order --------------------------------------------------------
   // A slot wraps one combatant: `{ member }` (player-controlled) or `{ unit }`
-  // (an AI actor - enemy or player-team summon). buildInitiativeOrder rolls
-  // d20 + `initMod` and sorts; `turnPtr` is whose turn it is.
+  // (an AI actor - enemy or player-team summon). initiative.js rolls d20 +
+  // `initMod` and sorts them; turn-order.js walks the result.
   const initRng = () => Math.random();
   // Hustle through `effectiveAttr`, like every other attribute-derived number:
   // gear `attrBonus` flows through EVERY derivation (EQUIPMENT_PLAN #3), and
@@ -452,19 +452,53 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const slotActor = (s) => (s.member ? s.member.actor : s.unit);
   const slotAlive = (s) => (s.member ? s.member.sheet.hp > 0 && !!s.member.actor : !!s.unit.alive);
   const slotName = (s) => (s.member ? s.member.sheet.name : s.unit.def.name);
-  let order = buildInitiativeOrder(
-    [...members.map(memberSlot), ...engaged.filter((e) => e.alive).map(unitSlot)],
-    initRng,
-  );
-  let turnPtr = 0;
-  // Splice a fresh combatant (pulled-in bystander, summon) into the order by
-  // its roll, keeping the current unit current.
-  function insertSlot(slot) {
-    slot.init = rollInitiative(slot.initMod, initRng);
-    const idx = insertionIndex(order, slot.init);
-    order.splice(idx, 0, slot);
-    if (idx <= turnPtr) turnPtr += 1;
-  }
+  const slotCarrier = (s) => (s.member ? s.member.sheet : s.unit);
+  // The traversal, the round wrap and the fixed sequence a turn opens with live
+  // in turn-order.js - pure, and unit tested there. What stays here is what
+  // needs a panel, a body or the app: the host answers below, and the four
+  // functions they point at (takeTurn, skipTurnFor, expireSummon, applyTurnDot),
+  // which sit together further down under "what the turn engine asks this file".
+  // They are declarations, so naming them here before they are written is fine.
+  const turns = createTurnOrder({
+    entries: [...members.map(memberSlot), ...engaged.filter((e) => e.alive).map(unitSlot)],
+    rng: initRng,
+    host: {
+      alive: slotAlive,
+      carrier: slotCarrier,
+      outcome: () => {
+        if (!engaged.some((e) => e.alive)) return 'win';
+        if (!livingParty().length) return 'lose';
+        return null;
+      },
+      win: victory,
+      lose: defeat,
+      lifetimeLeft: (s) => slotActor(s)?.summonTurns ?? null,
+      spendLifetime: (s) => { slotActor(s).summonTurns -= 1; },
+      expire: expireSummon,
+      dot: applyTurnDot,
+      skip: skipTurnFor,
+      take: takeTurn,
+      roundStart: () => {
+        // A full pass through the order is one round: age summoner cooldowns
+        // and the fire/smoke lifecycle a tick.
+        for (const e of engaged) if (e.summonCd > 0) e.summonCd -= 1;
+        reactions.clear(); // everyone gets their reaction back (TACTICS_PLAN M2)
+        callbacks.onRound?.();
+      },
+      turnStart: () => engageMemo.clear(), // bounds how stale an answer can get
+      afterTick: (s) => { if (!s.member) syncUnitSpeed(s.unit); }, // gum wearing off gives the legs back
+      beforeAdvance: () => {
+        armed = null;
+        pendingConfirm = null;
+        pendingMelee = null;
+        hidePreview();
+      },
+    },
+  });
+  // Thin readers, so the rest of the file reads the way it did.
+  const advanceTurn = () => turns.advance();
+  const beginTurn = () => turns.begin();
+  const insertSlot = (slot) => turns.insert(slot);
 
   // --- UI ---------------------------------------------------------------------
   const panel = document.createElement('div');
@@ -921,8 +955,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // marked, your side tinted friendly and the enemies warm. HP rides along;
     // the downed/dead show a dash.
     strip.innerHTML = `<div style="font-weight:700; margin-bottom:5px;">INITIATIVE</div>` +
-      order.map((s, i) => {
-        const cur = i === turnPtr;
+      turns.order.map((s, i) => {
+        const cur = i === turns.index;
         const carrier = s.member ? s.member.sheet : s.unit;
         const hp = s.member
           ? `${Math.max(0, s.member.sheet.hp)}/${s.member.sheet.maxHp}`
@@ -1492,70 +1526,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     advanceTurn();
   };
 
-  // --- the turn order driver ---------------------------------------------------
-  // One combatant acts at a time, in initiative order. advanceTurn moves to the
-  // next slot (wrapping to a fresh round); beginTurn sets up whoever's up -
-  // handing control to you for a member, or arming the AI's working state for a
-  // unit. Dead/downed slots are skipped; a surprised unit burns its turn.
-  function advanceTurn() {
-    armed = null;
-    pendingConfirm = null;
-    pendingMelee = null;
-    hidePreview();
-    turnPtr += 1;
-    if (turnPtr >= order.length) { newRound(); return; }
-    beginTurn();
-  }
-  function newRound() {
-    turnPtr = 0;
-    // A full pass through the order is one round: age summoner cooldowns and
-    // the fire/smoke lifecycle a tick.
-    for (const e of engaged) if (e.summonCd > 0) e.summonCd -= 1;
-    reactions.clear(); // everyone gets their reaction back (TACTICS_PLAN M2)
-    callbacks.onRound?.();
-    beginTurn();
-  }
-  function beginTurn() {
-    engageMemo.clear(); // bounds how stale an engageability answer can get
-    // The fight can end on the boundary (a kill emptied one side).
-    if (!engaged.some((e) => e.alive)) { victory(); return; }
-    if (!livingParty().length) { defeat(); return; }
-    const s = order[turnPtr];
-    if (!slotAlive(s)) { advanceTurn(); return; } // a corpse/downed slot - skip
-    // A summon serves a fixed number of turns and then the contract lapses.
-    // Spending it here - at the top of its own turn - is what makes the budget
-    // legible: "six turns" means six turns it actually got to act, however long
-    // the fight or the walk between fights took.
-    const body = s.member ? s.member.actor : s.unit;
-    if (body?.summonTurns != null) {
-      if (body.summonTurns <= 0) { expireSummon(s); return; }
-      body.summonTurns -= 1;
-    }
-    const carrier = s.member ? s.member.sheet : s.unit;
-    // Read incapacitation BEFORE ticking (the tick expires a 1-turn stun/
-    // surprise): a skipTurn status costs the owner this turn.
-    const skip = !!statusFx(carrier).skipTurn;
-    const skipLine = skip ? skipTurnLine(s, carrier) : null;
-    // Turn-clock statuses tick at the top of the owner's turn: a dot (burning)
-    // bites, and every duration decrements - so a member's Deflect expires when
-    // their next turn begins, and surprise/stun clear after they burn this one.
-    const { damage } = tickTurn(carrier);
-    if (!s.member) syncUnitSpeed(s.unit); // a gum wad that just wore off gives the legs back
-    if (damage > 0 && applyTurnDot(s, damage)) return; // owner fell to the dot
-    if (skip) {
-      if (s.member) {
-        // A stunned member's turn is spent recovering - narrate and pass.
-        log(skipLine);
-        refresh();
-        advanceTurn();
-        return;
-      }
-      phase = 'ai';
-      acting = { unit: s.unit, ap: 0, freeAp: 0, wait: 0.6 };
-      log(skipLine);
-      refresh();
-      return;
-    }
+  // --- what the turn engine asks this file ------------------------------------
+  // turn-order.js owns the walk: advance, wrap into a round, skip anyone who
+  // cannot act, spend a temp's contract, tick the turn clock. These are the
+  // combat-side answers it calls out for - the ones that need a body, a panel
+  // or the app, and so could never live in a pure module.
+
+  // Somebody's turn opens for real: hand a member control (full AP and their
+  // movement allowance), or arm the AI's working state for a unit.
+  function takeTurn(s) {
     if (s.member) {
       makeActive(s.member);
       s.member.ap = s.member.sheet.maxAp; // full AP at the top of your turn
@@ -1570,15 +1549,30 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     acting = { unit: s.unit, ap: s.unit.def.ap, freeAp: freeMoveOf(s.unit), wait: 0.5 };
     refresh();
   }
+
+  // A turn spent incapacitated. A member simply loses it and play moves on; an
+  // AI unit HOLDS the turn for a beat, so a dazed coworker visibly stands there
+  // rather than being skipped between frames.
+  function skipTurnFor(s) {
+    log(skipTurnLine(s, slotCarrier(s)));
+    if (s.member) {
+      refresh();
+      return 'advance';
+    }
+    phase = 'ai';
+    acting = { unit: s.unit, ap: 0, freeAp: 0, wait: 0.6 };
+    refresh();
+    return 'hold';
+  }
+
   // A summon's turns ran out with the fight still on: it leaves mid-battle,
   // which is the cost of fielding temps. Dismissing an enemy-side one can empty
-  // the enemy list, so hand off through advanceTurn - beginTurn re-checks both
-  // win conditions at the top.
+  // the enemy list - the engine re-reads the outcome on the next attempt, so
+  // this only has to take the body off the board.
   function expireSummon(s) {
     log(`${slotName(s)}'s assignment ends. They gather their things and go.`);
     dismissSummon(s.member || s.unit);
     refresh();
-    advanceTurn();
   }
 
   // The line for a turn spent incapacitated - stun reads differently from the
@@ -1588,9 +1582,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (hasStatus(carrier, 'stunned')) return `${name} is stuck in mandatory training. Attendance is taken.`;
     return `${name} is still grabbing their lanyard.`;
   }
-  // Apply a turn-start dot (burning) to the slot's owner, with popup + death
-  // handling. Returns true if the owner died (the caller then advances past the
-  // now-empty slot), false if the turn should proceed.
+  // Apply a turn-start dot (burning) to the slot's owner, with the popup and
+  // the death handling. Returns 'fell' if it dropped them - the engine then
+  // moves past the now-empty slot, re-reading the win/lose outcome as it opens
+  // the next one - or 'stands' if the turn should proceed.
   function applyTurnDot(s, damage) {
     const actor = s.member ? s.member.actor : s.unit;
     hitFx(actor, 'fire');
@@ -1598,26 +1593,22 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (s.member) {
       const dead = applyDamage(s.member.sheet, damage);
       log(`${s.member.sheet.name} is on fire. -${damage}.`);
-      if (!dead) { refresh(); return false; }
+      if (!dead) { refresh(); return 'stands'; }
       s.member.toppled = true;
       s.member.actor.clearPath();
       s.member.actor.fx = { kind: 'death', t: 0 };
-      if (!livingParty().length) { defeat(); return true; }
       // Burning to death at the top of your own turn: move the bindings off the
       // corpse before passing the turn on, or the HUD, the party bar and the
       // post-combat leader all keep pointing at a downed member through the
       // enemies' turns (and past a victory landing in that window).
-      if (s.member === active) makeActive(livingParty()[0]);
-      advanceTurn();
-      return true;
+      if (s.member === active && livingParty().length) makeActive(livingParty()[0]);
+      return 'fell';
     }
     const died = s.unit.takeDamage(damage);
     log(`${s.unit.def.name} is on fire. -${damage}.`);
-    if (!died) { refresh(); return false; }
+    if (!died) { refresh(); return 'stands'; }
     callbacks.onEnemyKilled(s.unit);
-    if (!engaged.some((e) => e.alive)) { victory(); return true; }
-    advanceTurn();
-    return true;
+    return 'fell';
   }
 
   // --- summons ----------------------------------------------------------------
@@ -1782,7 +1773,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Leaving a threatened tile hands the threatener a free swing, so walking
   // out of melee stops being free and kiting stops being strictly dominant.
   // Three rules keep it from becoming a blender:
-  //   - one reaction per unit per ROUND (refilled by newRound)
+  //   - one reaction per unit per ROUND (refilled by the engine's roundStart)
   //   - unaware units don't react (surprised/stunned haven't registered it)
   //   - FORCED movement never provokes. A shove sets the logical tile through
   //     pushTo and glides the body, which skips the per-tile hook entirely
@@ -2137,12 +2128,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // The initiative order, top to bottom, with whose turn it is - for the
     // tracker UI and the e2e suite.
     get order() {
-      return order.map((s, i) => ({
+      return turns.order.map((s, i) => ({
         name: slotName(s), team: s.team, init: s.init,
-        member: !!s.member, current: i === turnPtr, alive: slotAlive(s),
+        member: !!s.member, current: i === turns.index, alive: slotAlive(s),
       }));
     },
-    get turn() { return order[turnPtr] ? slotName(order[turnPtr]) : null; },
+    get turn() { return turns.current ? slotName(turns.current) : null; },
     get summons() {
       return members.filter((m) => m.isSummon && m.sheet.hp > 0 && m.actor)
         .map((m) => ({
@@ -2168,22 +2159,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // which a later assignment would have resurrected, leaving a dead controller
   // on window while __game.inCombat said the fight was over.
   if (opening && ACTIONS[opening.actionId] && opening.target?.alive) {
-    // Leading off means moving to the FRONT of the order - NOT jumping the
-    // pointer to the initiator's own slot. `advanceTurn` only ever walks
-    // forward and `newRound` resets to 0 only after the pass completes, so a
-    // pointer jump silently costs every slot ahead of the initiator its entire
-    // first round: a teammate who rolled higher than you simply never acts, and
-    // a non-surprised enemy ahead of you loses a turn it was owed.
-    // The ambusher's roll is raised above the field rather than left where it
-    // rolled, so the array stays sorted by init - which is exactly what
-    // `insertionIndex` assumes when a bystander or a summon joins mid-fight.
-    const oi = order.findIndex((s) => s.member === members[party.active]);
-    if (oi >= 0) {
-      const [lead] = order.splice(oi, 1);
-      lead.init = Math.max(lead.init, ...order.map((s) => s.init)) + 1;
-      order.unshift(lead);
-    }
-    turnPtr = 0;
+    turns.lead((s) => s.member === members[party.active]);
     beginTurn();
     if (phase === 'player') {
       armed = opening.actionId;
