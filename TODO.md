@@ -22,6 +22,17 @@ line numbers are the review baseline and may be shifted slightly in
 - [ ] **Preserve the active companion's `def` across floor transitions**
       (`main.js:2649`): embody the saved-active member from its registry def,
       not the bare `PlayerActor`.
+- [ ] **Fix the closed-door combat deadlock** — verified reproducible in
+      shipped `level1.json`. Combat triggers *through* a closed door
+      (`adjacentEnemyToParty`, `main.js:1501`, is pure Chebyshev with no edge
+      test) and the `engaged` set is chosen by Chebyshev radius alone
+      (`main.js:1690`, no reachability or LOS test), so an enemy sealed behind
+      a closed door joins a fight it can never take part in. Because doors
+      can't be opened in combat and closed doors block sight, that enemy is
+      unreachable by every verb; victory requires it dead and there is no
+      flee, so the fight never ends. Fix needs two of: an edge test on the
+      trigger, a reachability/LOS filter on `engaged`, and openable doors
+      (below).
 
 ## Phase 1 — High bugs
 
@@ -30,6 +41,29 @@ line numbers are the review baseline and may be shifted slightly in
       (`combat.js:819`).
 - [ ] Clear `moveStart` when a deliberate walk ends so dashes stop provoking
       opportunity attacks after any prior walk (`combat.js:1557`).
+- [ ] **Enemy AI paces between two tiles instead of attacking**
+      (`standTilePath`, `combat.js:96`). It can never select the tile the unit
+      is already standing on: `findEnemyPath` to the unit's own tile returns
+      null (`findPath` rejects a goal that fails `isWalkable`, and main.js's
+      `isWalkable` folds in `enemyAt`), and the `p.length > 1` filter would
+      drop the length-1 self-path anyway — so line 101's explicit
+      `!(unit.x === tx && unit.z === tz)` exemption is dead. Any unit that is
+      adjacent but not in reach is therefore always sent to a *different*
+      adjacent tile, and the same logic sends it back next turn. Verified
+      oscillating (3,2)→(3,3)→(3,2)… forever. The player-side twin
+      `routeBeside` (`combat.js:2094`) already fixes exactly this and carries a
+      comment describing the same symptom — port that special case.
+- [ ] **Ranged walk-in asks a melee question** (`combat.js:2020-2056`): the
+      ranged-weapon path routes via `routeBeside(en)` (a tile *beside* the
+      enemy) when the requirement is any tile within `range` with line of
+      sight, so it refuses "No way to get a shot at them" while reachable
+      firing positions exist. Verified two ways: over a full-height partition
+      (5 legal firing tiles, nearest 3 steps) and — with no walls at all — an
+      enemy ringed by its own allies (33 legal firing tiles, nearest 3 steps),
+      since `isWalkable` excludes enemy tiles. Same wrong question out of
+      combat (`oocTargetOk`/`bestApproachPath`, `main.js:943`/`:799`) — but
+      keep an unreachability guard there, since `main.js:1698` deliberately
+      refuses openers that would start a fight nobody can close.
 
 ## Phase 2 — Medium bugs
 
@@ -47,6 +81,24 @@ line numbers are the review baseline and may be shifted slightly in
 - [ ] Ranged-weapon target rings must match the click's new walk-in behavior
       (`combat.js:1035` vs `2020-2056`) — ring green when a walk-in shot is
       affordable, as melee does. *(New in `e8e53de`.)*
+- [ ] **Let doors be used in combat.** Blocked at four independent layers:
+      `toggleDoor` early-returns on `inCombat` (`main.js:850`, no comment
+      explaining it); the in-combat click path never reaches `dispatchHit`,
+      the only route to `approachDoor` (`main.js:1972+`); the Alt overlay that
+      carries door entries is gated `!inCombat` (`main.js:2289`) and hidden at
+      combat start (`main.js:1523`); and the in-combat right-click menu offers
+      only Examine (`main.js:2105`). Net effect: closed doors are the game's
+      only true line-of-sight blocker and the player can neither open nor close
+      one during the half of the game that is about positioning — while
+      `examineAt` still cheerfully describes the door they cannot touch.
+- [ ] **Ring non-enemy combat targets.** `drawTargets` (`combat.js:919-1050`)
+      rings only zone cells, summon spots, allies, live enemies and the caster
+      — never doors, and never **props**, even though props are valid combat
+      targets (topple via `handleTileClick` → `topplePlan`, `combat.js:2185`).
+      In-combat `onHover` also only inspects `hit?.kind === 'enemy'`
+      (`main.js:2050`), so a door or prop under the cursor gets no glow, no
+      focus banner and no cursor change. Pairs with restoring some form of the
+      Alt overlay in combat.
 
 ## Phase 3 — Low bugs (batchable by file)
 
