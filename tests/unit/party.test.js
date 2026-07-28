@@ -5,7 +5,7 @@ import {
   createParty, leader, addMember, livingMembers, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP, SAVE_VERSION, addCash,
 } from '../../src/party.js';
-import { createSheet, spendClassPoint, damageBonus, PROGRESSION, EQUIP_SLOTS } from '../../src/stats.js';
+import { createSheet, spendClassPoint, damageBonus, gainXp, PROGRESSION, EQUIP_SLOTS } from '../../src/stats.js';
 import { COMPANIONS } from '../../src/data/companions.js';
 import { CLASSES } from '../../src/data/classes.js';
 
@@ -297,4 +297,53 @@ test('parseProgress rejects records in no known format', () => {
   assert.equal(parseProgress('nope'), null);
   assert.equal(parseProgress({}), null);
   assert.equal(parseProgress({ levelId: 'level1', party: [] }), null);
+});
+
+// --- xp/xpNext migration (TODO Phase 0) ------------------------------------
+// A save from before the xp fields existed could never level again: gainXp
+// opens with `sheet.xp += amount`, so an undefined xp turned NaN on the first
+// point of experience and `NaN >= undefined` stayed false forever after.
+const savedAs = (sheets, version) => ({ version, levelId: 'level1', party: sheets, active: 0 });
+
+test('parseProgress backfills xp/xpNext on a save that predates them', () => {
+  const sheet = createSheet('office-drone');
+  delete sheet.xp;
+  delete sheet.xpNext;
+  const [migrated] = parseProgress(savedAs([sheet], 5)).sheets;
+  assert.equal(migrated.xp, 0);
+  assert.equal(migrated.xpNext, PROGRESSION.XP_BASE);
+  assert.ok(gainXp(migrated, PROGRESSION.XP_BASE), 'a migrated sheet can promote again');
+});
+
+test('a migrated veteran gets the threshold for ITS level, not the level-1 one', () => {
+  // Level a real sheet up so the expectation is whatever the live curve
+  // produces - the test must not restate the arithmetic it is checking.
+  const grown = createSheet('office-drone');
+  while (grown.level < 5) gainXp(grown, grown.xpNext);
+  const expected = grown.xpNext;
+
+  const stale = createSheet('office-drone');
+  stale.level = 5;
+  delete stale.xp;
+  delete stale.xpNext;
+  const [migrated] = parseProgress(savedAs([stale], 5)).sheets;
+
+  assert.equal(migrated.xpNext, expected);
+  // The bug this guards: defaulting to XP_BASE would promote a veteran on
+  // their next scrap of xp, and keep promoting them all the way back up.
+  assert.equal(gainXp(migrated, 1), false, 'one point of xp must not promote a level 5');
+});
+
+test('a poisoned xp is repaired whether it survived as NaN or as null', () => {
+  // NaN is what the old gainXp left in memory; JSON.stringify writes it as
+  // null, so a real reload hands back null. `??=` would cover the null and
+  // leave the NaN - Number.isFinite covers both, which is why it is used.
+  for (const poison of [NaN, null]) {
+    const sheet = createSheet('office-drone');
+    sheet.xp = poison;
+    sheet.xpNext = poison;
+    const [migrated] = parseProgress(savedAs([sheet], SAVE_VERSION)).sheets;
+    assert.equal(migrated.xp, 0, `xp repaired from ${String(poison)}`);
+    assert.equal(migrated.xpNext, PROGRESSION.XP_BASE, `xpNext repaired from ${String(poison)}`);
+  }
 });

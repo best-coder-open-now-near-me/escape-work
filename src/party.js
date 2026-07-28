@@ -4,7 +4,7 @@
 // the character the player controls out of combat, and whose turn state is
 // live in combat. Today the roster holds one member; recruitment
 // (data/companions.js) grows it.
-import { gainXp, createSheetFrom, ensureAttributes, EQUIP_SLOTS } from './stats.js';
+import { gainXp, createSheetFrom, ensureAttributes, xpNextForLevel, EQUIP_SLOTS } from './stats.js';
 import { ITEMS } from './data/items.js';
 import { CLASSES } from './data/classes.js';
 import { COMPANIONS } from './data/companions.js';
@@ -123,6 +123,18 @@ function normalizeSheet(sheet, version = 0) {
       sheet.inventory.splice(sheet.inventory.indexOf(best), 1); // out of the bag, into the slot
     }
   }
+  // v6: xp/xpNext. A save that predates the fields could never level again, and
+  // the damage compounded: `gainXp` opens with `sheet.xp += amount`, so an
+  // undefined `xp` became NaN on the first scrap of experience, and `NaN >=
+  // undefined` is false forever after - no promotions, no banked points, and a
+  // permanently poisoned field. Repaired on `Number.isFinite` rather than `??=`
+  // precisely so an already-NaN save is healed too, not just an absent one.
+  if (!Number.isFinite(sheet.level)) sheet.level = 1;
+  if (!Number.isFinite(sheet.xp)) sheet.xp = 0;
+  // The threshold has to be rebuilt from the character's LEVEL, never defaulted
+  // to the level-1 value: hand a veteran `XP_BASE` and they promote on their
+  // next point of xp, then again, and again, all the way back up.
+  if (!Number.isFinite(sheet.xpNext)) sheet.xpNext = xpNextForLevel(sheet.level);
   ensureAttributes(sheet); // pre-attribute saves get their class spread + derive
   return sheet;
 }

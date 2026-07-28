@@ -32,7 +32,24 @@ export const PROGRESSION = {
   // "attributes fast, class points slow".
   ATTR_PER_LEVEL: 1,    // attribute points banked per level-up
   CP_PER_LEVEL: 1,      // class points banked per level-up (spent on the track, M3)
+  // The xp curve, named because THREE places have to agree on it: a new sheet's
+  // first threshold, gainXp's step, and party.js's migration rebuilding the
+  // threshold for a save that predates the fields. Duplicated literals there
+  // would let a migrated veteran promote on their next scrap of xp.
+  XP_BASE: 10,          // xp needed for the first promotion
+  XP_GROWTH: 1.5,       // each promotion multiplies the threshold by this
 };
+
+// The xp threshold a character at `level` should be sitting on. Replays the
+// same rounding gainXp applies step by step, so a rebuilt value and a value
+// that got there by levelling are always identical.
+export function xpNextForLevel(level) {
+  let next = PROGRESSION.XP_BASE;
+  for (let i = 1; i < (Number.isFinite(level) ? level : 1); i++) {
+    next = Math.round(next * PROGRESSION.XP_GROWTH);
+  }
+  return next;
+}
 
 // --- the to-hit / defense model (HIT_PLAN.md) -------------------------------
 // A DOS2-style percentage hit model: hitChance = BASE + accuracy(attacker) -
@@ -199,7 +216,7 @@ export function createSheetFrom(block, extra = {}) {
     perks: [], // class-track node ids taken; each node's effect is baked in place
     level: 1,
     xp: 0,
-    xpNext: 10,
+    xpNext: PROGRESSION.XP_BASE,
     bonusDmg: block.bonusDmg,
     actions,
     talent: block.talent || null,
@@ -561,7 +578,7 @@ export function gainXp(sheet, amount) {
   let promoted = false;
   while (sheet.xp >= sheet.xpNext) {
     sheet.xp -= sheet.xpNext;
-    sheet.xpNext = Math.round(sheet.xpNext * 1.5);
+    sheet.xpNext = Math.round(sheet.xpNext * PROGRESSION.XP_GROWTH);
     sheet.level += 1;
     sheet.attrPoints = (sheet.attrPoints || 0) + PROGRESSION.ATTR_PER_LEVEL;
     sheet.classPoints = (sheet.classPoints || 0) + PROGRESSION.CP_PER_LEVEL;

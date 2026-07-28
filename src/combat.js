@@ -2057,6 +2057,22 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
       return;
     }
+    // Everything above dispatched the verbs that DO resolve on a coworker.
+    // Whatever is still here falls through to the melee walk-up, which ends in
+    // `strike` - and `strike` sends anything that is not a control to
+    // `performOn`, which opens with `rand(a.min, a.max)`. An action carrying no
+    // dice (a buff, a heal, a dash) rolls NaN there, and NaN damage used to
+    // make hp NaN: never `<= 0`, so the target could not die and the fight
+    // could not end. `takeDamage` now refuses non-finite amounts, but arriving
+    // there at all means a verb was pointed at the wrong half of the board -
+    // say so instead of walking them into a swing they never defined.
+    // NOTE: when a dice-less action becomes a legitimate pure effect on an
+    // enemy (TODO Phase 2 - Reboot as an any-target purge), relax this to
+    // admit actions carrying a `purge`/`applies` payload.
+    if (!isControl(a) && !(Number.isFinite(a.min) && Number.isFinite(a.max))) {
+      refuse(`${a.label} is not aimed at them.`);
+      return;
+    }
     // melee: walk up if needed, then strike
     if (canReach(active, en)) {
       if (active.ap < a.ap) { refuse('Not enough AP to attack.'); return; }

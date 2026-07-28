@@ -387,6 +387,13 @@ export class EnemyActor extends GridActor {
   }
 
   takeDamage(amount) {
+    // A non-finite amount is always a bug upstream (an action with no damage
+    // dice reaching a damage roll: `rand(undefined, undefined)` is NaN). Let
+    // it through and `hp` becomes NaN, which is never `<= 0` - the unit can
+    // never die, so a fight that requires it dead can never end. Degrade to a
+    // visible no-op instead: the caller is told nothing died, and the bug
+    // shows up as an attack that does nothing rather than as a soft-lock.
+    if (!Number.isFinite(amount)) return false;
     this.hp = Math.max(0, this.hp - amount);
     if (this.hp <= 0) {
       this.die();

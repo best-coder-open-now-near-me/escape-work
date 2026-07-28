@@ -584,12 +584,17 @@ function startGame(level) {
   }
 
   // Every way to die funnels through here: freeze the world, drop any active
-  // combat, wipe the campaign save, roll credits.
+  // combat, end the campaign run, roll credits.
   function loseGame(message) {
     gameOver = true;
     player.clearPath();
     abortCombat();
-    clearProgress();
+    // Only a CAMPAIGN death ends a campaign run. A level launched from the
+    // editor is standalone (STASH_KEY, its own party, no floor chain), so
+    // dying in a playtest must not delete the saved run sitting in the same
+    // browser - that is somebody's progress, wiped by a tool they were using
+    // to check a room.
+    if (!playtesting) clearProgress();
     ui.showLoseScreen(message);
   }
 
@@ -1863,7 +1868,9 @@ function startGame(level) {
           localStorage.setItem(PROGRESS_KEY, JSON.stringify(serializeProgress(party, level.next)));
           ui.showFloorClear({ nextName: LEVELS[level.next].name }, () => location.reload());
         } else {
-          clearProgress();
+          // Same rule as loseGame: finishing a PLAYTEST level is not finishing
+          // a campaign run, so it must not clear the campaign save either.
+          if (!playtesting) clearProgress();
           ui.showWinScreen({ level: ms.level, defeated: enemies.filter((e) => !e.alive).length });
         }
         return;
