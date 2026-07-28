@@ -47,6 +47,31 @@ point (`e8e53de`) in a worktree rather than assumed to be regressions.
       inherently the slow path. That is the root cause of every timeout above,
       and it would take ~10 minutes off a full run.
 
+## Status
+
+Phases 0-7 are **done and pushed**; Phase 8 is blocked on a real finding (below).
+Unit tests: 435 passing, up from 385 at the branch point. Build clean.
+
+Every item below the line was completed on `claude/project-code-review-fij900`.
+The four bugs reported from play - AI pacing, the burnt-paper desync, party-bar
+float AP, and backwards portraits - were each fixed at the root rather than the
+symptom, as was the out-of-combat cone.
+
+Two things were deliberately NOT done, each recorded where it belongs rather
+than quietly dropped:
+
+- A `New Character` menu item (CHARACTER_PLAN #17). `Restart run` already does
+  exactly that, and a second entry would have been the same action under a
+  different label. See Phase 5's note.
+- Charm (Phase 8). Backed out after the blocker was found; what was learned is
+  written up in full below, in the order it has to be built.
+
+Also recorded: which e2e failures in this environment are pre-existing (verified
+against the branch point in a worktree) and which were caused here. See the
+section above.
+
+---
+
 ## Phase 0 — Critical fix + data-loss fixes
 
 - [ ] **Fix the combat soft-lock** (`combat.js:2060`): guard `handleEnemyClick`'s

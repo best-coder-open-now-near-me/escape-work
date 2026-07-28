@@ -54,8 +54,11 @@ const KITS = {
     examine: 'An intern, hunched behind a monitor. Badge still shrink-wrapped.',
     // Where the intern departs from IT Support, and nowhere else: softer, a
     // step slower, and nothing like their savvy yet. Grit, hustle and composure
-    // are the class's - he is the same person earlier on. The kit (reboot,
-    // firewall, energy drink) is inherited too: he does the same job, badly.
+    // are the class's - he is the same person earlier on. The kit is inherited
+    // too: he does the same job, badly. Deliberately not listed here - this
+    // comment used to name three actions and two of them (`firewall`, then
+    // `remote-restart`) were retired from the game, so it described a character
+    // who no longer existed. The class entry is the one source for that.
     maxHp: 14,
     ap: 6,
     attr: { savvy: 3 }, // the one dial that makes him the intern
