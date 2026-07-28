@@ -1050,7 +1050,9 @@ function startGame(level) {
   // --- left-click verb dispatch (Divinity-style: the target picks the verb) ---
   function attackOrConfront(en) {
     const a = armedOoc && ACTIONS[armedOoc];
-    if (a && (a.type === 'attack' || a.type === 'shove')) engageWithAction(en, armedOoc);
+    if (a && (a.type === 'attack' || a.type === 'shove' || a.type === 'purge')) {
+      engageWithAction(en, armedOoc);
+    }
     else confront(en);
   }
   // Act on the interactable ENTITY under the cursor. Returns true if handled.

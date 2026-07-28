@@ -152,7 +152,7 @@ to stay recognisable. The rule: no two classes share a primary.
 | **Office Drone** | `attack` (generalist) | `attack`, `defend`, `coffee` | Unchanged, deliberately. Something must be the baseline the others read against. |
 | **Middle Manager** | `control` | `delegate`*, `own-calendar`, `espresso` | Removes enemy turns. `delegate` becomes a real control: the target's next turn is spent on the Manager's errand. Meetings root. |
 | **Mail Room** | `mobility` | `mail-cone`, `courier-route`*, `snack-cart` | Crosses the floor. Dash without provoking, swap with a pinned ally, deliver a hazard at range. |
-| **IT Support** | `buff` (cleanse) | `reboot`, `remote-restart`*, `energy-drink` | Anti-status specialist. `reboot` keeps its purge; `remote-restart` is the same purge aimed at a *friend*, which is a cleanse. |
+| **IT Support** | `purge` | `reboot`, `energy-drink` | Anti-status specialist. `reboot` is ONE verb pointed at the whole board - a coworker, a colleague, or yourself - and deals no damage. It shipped as two actions (`reboot` + `remote-restart`) only because targeting was a boolean; `aimsAtAnyone` retired the duplicate. |
 | **Human Resources** | `buff` (empower) | `summon-applicants`, `performance-review`*, `coffee` | Makes the party better. Already summons; now also buffs — the support class that supports. |
 | **Security** | `stance` | `detain`*, `stand-post`*, `night-thermos` | Locks the floor down. `detain` becomes a root (`control`), `stand-post` becomes real overwatch that spends the reaction. |
 
@@ -375,7 +375,7 @@ Where the implementation departed from this document, and why:
 ## Milestones (each a PR that keeps `npm test` + e2e green)
 
 1. **`buff`, and the first friendly target.** The verb, friendly target
-   picking, the ring preview, and `remote-restart` for IT Support. The
+   picking, the ring preview, and the any-target `reboot` for IT Support. The
    smallest new verb that proves the targeting seam, and it immediately fixes
    the "nothing makes your teammates better" hole. Ships with
    `onboarding` for HR so the verb has two consumers from day one.

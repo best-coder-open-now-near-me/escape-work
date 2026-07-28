@@ -78,6 +78,15 @@ export const isFriendly = (a) => !!a && a.type === 'buff';
 // is offered on both sides and refused by neither.
 export const aimsAtAnyone = (a) => !!a && !!a.purge && a.type !== 'buff';
 
+// The purge verb itself (IT Support's primary). Its own type rather than an
+// attack carrying a flag, because it is not a swing: it rolls to hit, deals
+// nothing, and strips state from whoever it lands on - and a class whose
+// identity is "the only one who can take a status OFF anybody" needs a verb to
+// name. Keeping it typed `attack` also meant it competed to BE the class's
+// basic swing (stats.actionBuckets), which IT does not have - it carries a
+// letter opener for that.
+export const isPurge = (a) => !!a && a.type === 'purge';
+
 // --- control (POWERS_PLAN M2) ------------------------------------------------
 
 // A control action carries no damage roll, so it needs its own reach rule. It

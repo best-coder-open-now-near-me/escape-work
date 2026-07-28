@@ -15,7 +15,7 @@ import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, ac
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
 import {
-  buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone,
+  buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, isPurge,
 } from './powers.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
@@ -685,7 +685,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // A control rolls to hit like a swing does, so it earns the same readout -
     // an odds display that vanished the moment you armed Detain would make the
     // one power you most want to know the odds of the one that hides them.
-    if (!a || (a.type !== 'attack' && !isControl(a)) || a.cone || !en) {
+    if (!a || (a.type !== 'attack' && !isControl(a) && !isPurge(a)) || a.cone || !en) {
       costTag.style.display = 'none';
       return;
     }
@@ -1004,7 +1004,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // coworkers - the affordance describing half the verb.
       if (!aimsAtAnyone(a)) return;
     }
-    if (a.type !== 'attack' && a.type !== 'shove' && !isControl(a)) return;
+    if (a.type !== 'attack' && a.type !== 'shove' && !isControl(a) && !isPurge(a)) return;
     if (a.cone) {
       const test = aimPoint && coneTest(a, aimPoint.x, aimPoint.z);
       if (test) {
@@ -2368,7 +2368,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const wasPending = pendingConfirm;
     pendingConfirm = null;
     if (a.type === 'attack' || a.type === 'shove' || a.type === 'summon'
-      || isFriendly(a) || isControl(a) || isZone(a) || isMobility(a)) {
+      || isFriendly(a) || isControl(a) || isZone(a) || isMobility(a) || isPurge(a)) {
       armed = id; // arm it; clicking a ringed target (or a spot) fires it
       hidePreview(); // aiming now - the movement trail yields to targets
       log(a.type === 'summon'

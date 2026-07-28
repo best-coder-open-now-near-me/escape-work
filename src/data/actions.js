@@ -185,7 +185,7 @@ export const ACTIONS = {
 
   // --- IT Support ---------------------------------------------------------------
   reboot: {
-    type: 'attack',
+    type: 'purge',
     ap: 2,
     label: 'Turn It Off And On Again',
     icon: '🔌',
@@ -200,23 +200,6 @@ export const ACTIONS = {
     // No dice, on purpose: a reboot strips state, it does not bruise anybody.
     // performOn reads the absence of `min`/`max` as "this is a pure effect".
     // It used to carry 4-7 damage, which contradicted its own description.
-  },
-  // The reboot, aimed at a colleague instead of a target. `purge` on a `buff`
-  // is a CLEANSE - the same one line of runtime, pointed at the other half of
-  // the board - which is what IT Support has always been for and could never
-  // do: the class whose whole identity is "have you tried turning it off and
-  // on again" could power-cycle an enemy and itself, but not the teammate on
-  // fire two tiles away.
-  'remote-restart': {
-    type: 'buff',
-    ap: 2,
-    icon: '🧱',
-    label: 'Remote Restart',
-    desc: 'Power-cycle a coworker from here. Clears every status they are carrying - their buffs too.',
-    purge: true,
-    range: 5,
-    uses: 2,
-    log: 'You remote in and power-cycle them.',
   },
   // IT's track control (POWERS_PLAN M2), replacing a grant of the Middle
   // Manager's `cigarette` - a track that handed one class another class's

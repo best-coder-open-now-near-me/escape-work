@@ -39,7 +39,7 @@ async function clickSelf(page) {
   await page.mouse.click(p.x, p.y);
 }
 
-test('Remote Restart self-cast clears every status, and spends one use', async ({ page }) => {
+test('Reboot self-cast clears every status', async ({ page }) => {
   await bootAndPick(page, 'it-support');
   await enterCombat(page);
   await waitForPlayerTurn(page);
@@ -51,8 +51,8 @@ test('Remote Restart self-cast clears every status, and spends one use', async (
   expect(await myStatuses(page)).toContain('bleed');
 
   const apBefore = await page.evaluate(() => window.__combat.ap);
-  await clickAction(page, 'remote-restart');
-  expect(await page.evaluate(() => window.__combat.armed)).toBe('remote-restart');
+  await clickAction(page, 'reboot');
+  expect(await page.evaluate(() => window.__combat.armed)).toBe('reboot');
 
   await clickSelf(page);
 
@@ -66,12 +66,15 @@ test('Remote Restart self-cast clears every status, and spends one use', async (
 });
 
 test('a friendly verb does not arm a swing at a coworker', async ({ page }) => {
-  await bootAndPick(page, 'it-support');
+  // Driven through HR's Performance Review rather than an IT verb: Reboot is
+  // an ANY-target purge now, so it legitimately does promise a swing at a
+  // coworker. A friends-ONLY buff is what this rule is about.
+  await bootAndPick(page, 'human-resources');
   await enterCombat(page);
   await waitForPlayerTurn(page);
   await refillAp(page);
 
-  await clickAction(page, 'remote-restart');
+  await clickAction(page, 'performance-review');
 
   const en = await page.evaluate(() => {
     const e = window.__game.enemies.find((x) => x.alive);

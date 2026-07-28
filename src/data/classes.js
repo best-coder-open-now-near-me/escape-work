@@ -192,7 +192,7 @@ export const CLASSES = {
   },
   'it-support': {
     name: 'IT Support',
-    primary: 'buff', // the only class that can take a status OFF anybody
+    primary: 'purge', // the only class that can take a status OFF anybody
     model: 'itsupport',
     tagline: 'Fragile, caffeinated, devastating.',
     experience: '"Have you tried turning it off and on again," 10 yrs.',
@@ -208,10 +208,14 @@ export const CLASSES = {
       // handing out another class's talent action (POWERS_PLAN M2).
       { id: 'it-percussive', name: 'Percussive Maintenance', cost: 1, requires: ['it-root'], effect: { grantsAction: 'percussive-maintenance' } },
     ],
-    // Reboot (an enemy or yourself) plus Remote Restart (a teammate): the
-    // purge, pointed at both halves of the board. That is IT's primary verb -
-    // nobody else in the roster can take a status off anybody.
-    actions: ['reboot', 'remote-restart', 'energy-drink'],
+    // ONE purge, pointed at everybody: Reboot power-cycles a coworker, a
+    // colleague or you. It used to need a second action (Remote Restart) purely
+    // because targeting was a boolean - a verb aimed at friends OR foes had no
+    // shape - so the same effect shipped twice under two names. Now that
+    // `aimsAtAnyone` exists, one verb covers the board, which is what IT's
+    // identity was always describing: nobody else can take a status off
+    // anybody.
+    actions: ['reboot', 'energy-drink'],
     // (An anti-slip footwear talent is reserved for a future talent-choice
     // system - the engine already honors slipImmune. Until then, gum on your
     // shoe is the anti-slip option, at a price.)
