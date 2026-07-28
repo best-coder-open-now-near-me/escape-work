@@ -3302,6 +3302,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       refresh();
       return ok;
     },
+    // End the ACTING turn programmatically. The e2e suite needs this: driving
+    // rounds by clicking End Turn costs a DOM round-trip and a settle per turn,
+    // which under software GL is seconds each - a spec that has to advance
+    // three rounds spends its whole budget on the clicking rather than on what
+    // it is testing. Same call the button makes.
+    endTurn: () => { advanceTurn(); refresh(); },
     // The initiative order, top to bottom, with whose turn it is - for the
     // tracker UI and the e2e suite.
     get order() {

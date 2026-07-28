@@ -55,11 +55,25 @@ test('a borrowed coworker changes sides, keeps its turn, and is returned', async
     expect(borrowed.isMember, 'and it now acts on the player side').toBe(true);
   }
 
+  // Drive the rounds forward. A borrowed coworker is PLAYER-controlled - it
+  // holds a real turn and waits for input - so nothing expires unless somebody
+  // actually takes those turns. That is the feature working, not a stall: the
+  // charm clock spends on the borrowed body's OWN turns.
+  for (let i = 0; i < 30; i++) {
+    const done = await page.evaluate(() => {
+      if (window.__game.enemies.every((e) => !e.charmed)) return true;
+      window.__combat?.endTurn(); // the same call the End Turn button makes
+      return false;
+    });
+    if (done) break;
+    await page.waitForTimeout(250);
+  }
+
   // Either way they are returned: a colleague walks away where a summon would
   // have been destroyed.
   await expect.poll(
     () => page.evaluate(() => window.__game.enemies.filter((e) => e.charmed).length),
-    { timeout: 120_000 },
+    { timeout: 60_000 },
   ).toBe(0);
   const after = await page.evaluate(() => window.__game.enemies.filter((e) => e.alive).length);
   expect(after, 'handed back intact, not deleted').toBe(before.hostiles);
