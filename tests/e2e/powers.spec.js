@@ -28,12 +28,15 @@ import {
 // Detain when the startFightNow fast path tried it - it is just one step now
 // instead of twenty.
 //
-// test.slow() stays on top of that, as insurance rather than as the fix. It
-// costs nothing on a green run: the budget is a ceiling, and engageBudgetMs()
-// derives the engage loop's DEADLINE from it, so neither one makes a passing
-// test wait a moment longer. It only buys tolerance on a runner having a bad
-// day.
-test.slow();
+// There is deliberately NO test.slow() here. The arena fix landed alongside
+// one, as insurance, and it is gone because insurance against a fixed problem
+// only buys a slower way to learn about the next one: a genuine hang now fails
+// in 120s instead of grinding for 360s before saying so. Measured on the
+// slowest environment available, the three arena specs come in at 60s, 55s and
+// 49s - half the default budget, not the edge of a tripled one.
+//
+// If one of these ever times out again, that is a real signal. Read it as one
+// rather than reaching for the budget dial.
 
 // Just you and one Manager, two tiles apart, open room: enterCombat walks one
 // step and the fight opens against the Manager alone. Nothing here depends on
@@ -161,9 +164,12 @@ test('Performance Review is HR\'s, and it lands the Commended status', async ({ 
 });
 
 test('Stand Post holds an overwatch, and it fires once on somebody crossing the line', async ({ page }) => {
-  // (No setTimeout of its own any more: this used to raise 120s to 300s, but
-  // the file-level test.slow() above already grants 360s, so an explicit 300s
-  // would now be a CUT dressed up as a raise.)
+  // The one test here that keeps an explicit budget, the one it always had.
+  // Unlike the three above it does not just walk in and act: it holds an
+  // overwatch and then needs the Manager to cross the WHOLE hall to trip it, so
+  // its cost is a full walk by somebody else. Measured at ~1.4m, comfortably
+  // over the 120s default.
+  test.setTimeout(300_000);
   await bootStash(page, WATCH_HALL, 'security');
   await enterCombat(page);
   await waitForPlayerTurn(page);
