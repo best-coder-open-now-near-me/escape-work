@@ -60,9 +60,11 @@ symptom, as was the out-of-combat cone.
 Two things were deliberately NOT done, each recorded where it belongs rather
 than quietly dropped:
 
-- A `New Character` menu item (CHARACTER_PLAN #17). `Restart run` already does
-  exactly that, and a second entry would have been the same action under a
-  different label. See Phase 5's note.
+- A `New Character` menu item (CHARACTER_PLAN #17). Declined on PLACEMENT:
+  `showGameMenu` is a persistent button available all through a run, so anything
+  put in it is offered mid-fight - the wrong moment to hand somebody a button
+  that discards the character they are playing. Making a new character belongs
+  at the start, next to the résumé desk. See Phase 5's note.
 - Charm (Phase 8). Backed out after the blocker was found; what was learned is
   written up in full below, in the order it has to be built.
 
@@ -400,12 +402,14 @@ is its own PR that keeps unit + e2e green.
 - [ ] **M6 — Polish.** Read-back sentence, `New Character` in the game menu,
       pronouns read by narration lines.
 
-- [ ] *Deferred, with reason:* CHARACTER_PLAN #17 wanted a `New Character` menu
-      item. `Restart run` already does exactly that - the character sheet lives
-      inside the campaign save, so clearing progress drops the character too -
-      and a second item would have been the same action under a different
-      label. The version worth building is "same character, floor one", and
-      that needs run state to separate from character state first.
+- **Declined:** CHARACTER_PLAN #17's `New Character` menu item. Not built, by
+  decision: making a new character belongs at the START, and `showGameMenu` is a
+  persistent ☰ button available all through a run - so anything placed in it is
+  offered mid-fight, which is the wrong moment to hand somebody a button that
+  discards the character they are playing. (`Restart run` is also the same
+  action today, since the sheet lives inside the campaign save, but that is the
+  lesser reason.) If it ever ships it belongs on the boot screen, alongside the
+  résumé desk.
 
 ## Phase 5 — Architecture / SOC
 
