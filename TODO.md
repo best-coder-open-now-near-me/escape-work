@@ -165,6 +165,34 @@ is its own PR that keeps unit + e2e green.
       step rules (above), debug surface — each on the `shopping.js`
       host-callback pattern. *M1/M3 of the creation plan start this.*
 - [ ] Extract `EnemyActor`'s wander brain to a pure module (`actors.js:412`).
+- [ ] **Collapse the two action bars into one.** The combat bar and the
+      persistent hotbar are parallel implementations of the same widget,
+      swapped by mode (`main.js:2538` hides `#hotbar` while `inCombat`, and
+      `combat.js:1092 buildActionBar` builds its own). Duplicated: two builders
+      with different id conventions (`#act-<id>` vs
+      `#hotbar-act-<id>`/`#hotbar-item-<id>`, so e2e must know both); two
+      affordability rule sites (combat's `refresh()` computes
+      `active.ap >= a.ap && (!a.uses || …) && (!a.ammoCost || …)` inline,
+      main.js's `slotVm` computes its own); two tooltip builders (`actionTip`
+      vs the hotbar's); two arming states (`armed` vs `armedOoc`) with two
+      ring-drawing paths; and two ordering rules (`actionIdsOf`/`scrambled` vs
+      `layoutOf`/`defaultLayout`). The player-facing cost is the asymmetry: the
+      hotbar's arranged layout, pager rows, item slots, right-click reassign
+      and number-key shortcuts all vanish in combat — keys `1-9` are gated
+      `!inCombat` (`main.js:2294`), so a fight has no keyboard shortcuts at
+      all. `ui.js`'s own header names the seam: "combat.js and the editor
+      import the palette too — they build their own DOM but must not look like
+      a different game." *(Items being unusable in combat is deliberate —
+      `looting.js:200` — so a unified bar should still grey item slots, not
+      drop them.)*
+- [ ] Port `routeBeside`'s "already standing on the goal tile" special case to
+      the AI's `standTilePath` — the same fix written twice, once. *(Same code
+      as the Phase 1 pacing bug; listed here as the duplication it is.)*
+- [ ] *Checked, genuinely not duplication — leave alone:* `initiative.js` vs
+      `turn-order.js` (the latter imports the former; "what is the order?" vs
+      "whose turn is it?"), `shop.js` vs `shopping.js` (the pure/runtime split
+      `looting.js` is supposed to copy), and `ui.js` vs `ui/` (a re-export
+      barrel).
 - [ ] **Content-is-data fixes**: `matches` → item `ignites` field
       (`main.js:715`); projectile/impact → action data fields
       (`combat.js:1296`, `:1323` — three id-special-cases since `e8e53de`);
