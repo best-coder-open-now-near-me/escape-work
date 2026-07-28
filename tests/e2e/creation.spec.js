@@ -4,6 +4,13 @@
 // it can from that one arrival.
 import { test, expect } from '@playwright/test';
 
+// The carousel is the slow path by design - each slide renders a .glb, and the
+// creation panes then drive a live turntable body under software GL. These two
+// specs are the only ones that walk it, and they need the room: the failures
+// this replaced were the 120s budget running out mid-assertion, not the flow
+// misbehaving (which is why each run died at a different step).
+test.slow();
+
 test('you can name yourself, and the game calls you that', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#resume-card')).toBeVisible();
@@ -29,6 +36,19 @@ test('you can name yourself, and the game calls you that', async ({ page }) => {
   await expect(page.locator('#creation-summary')).toContainText('Dana');
   await expect(page.locator('#creation-summary')).toContainText('she/her');
 
+  // Pane 2 - the exit interview. Same overlay, so the body on the spawn tile is
+  // never rebuilt and no .glb is reloaded.
+  await page.click('#creation-next');
+  await expect(page.locator('#creation-background-night-shift')).toBeVisible();
+
+  // A background is a SWAP: it must cost something as well as give something.
+  await page.click('#creation-background-night-shift'); // +1 grit, -1 hustle
+  await expect(page.locator('#creation-summary')).toContainText('Night Shift');
+
+  // Two points, through the level-up screen's own stepper shape.
+  await page.click('#creation-attr-savvy');
+  await page.click('#creation-attr-savvy');
+
   await page.click('#creation-commit');
   await expect(badge).toBeHidden();
 
@@ -40,6 +60,18 @@ test('you can name yourself, and the game calls you that', async ({ page }) => {
     pronouns: window.__game.stats.pronouns,
   }));
   expect(who).toEqual({ name: 'Dana', className: 'Office Drone', pronouns: 'she' });
+
+  // The background baked, and the points landed on top of it.
+  const built = await page.evaluate(() => {
+    const s = window.__game.stats;
+    return { background: s.background, attr: s.attr, attrPoints: s.attrPoints };
+  });
+  expect(built.background).toBe('night-shift');
+  expect(built.attrPoints).toBe(0); // both spent, not banked
+  const base = await page.evaluate(() => window.__game.classes['office-drone'].attr);
+  expect(built.attr.grit).toBe(base.grit + 1);      // the background's give...
+  expect(built.attr.hustle).toBe(base.hustle - 1);  // ...and its take
+  expect(built.attr.savvy).toBe(base.savvy + 2);    // the two self-assessment points
 });
 
 test('skipping the paperwork produces exactly the express-lane character', async ({ page }) => {

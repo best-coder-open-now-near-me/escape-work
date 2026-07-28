@@ -2896,6 +2896,10 @@ function startGame(level) {
     // re-render - ~45 SECONDS per test under CI's software GL, in every single
     // test. One apply does the same job.
     zoomOut: () => controls.setView({ dist: 1e4 }),
+    // The class registry, read-only. Exposed so a test can assert a created
+    // character AGAINST its class headline rather than restating the numbers -
+    // a test that hardcodes 6 breaks on every balance pass for no reason.
+    get classes() { return CLASSES; },
     get playerTile() { return { x: player.x, z: player.z }; },
     get playerPos() {
       const p = player.entity?.getPosition();

@@ -10,9 +10,10 @@
 // real sheet. Keeping them apart is deliberate: a draft is plain data a test
 // builds in one line, and the sheet-building step carries an invariant that is
 // very easy to break by touching attributes in the wrong order (see below).
-import { createSheet, spendAttrPoint, ATTR_KEYS } from './stats.js';
+import { createSheet, spendAttrPoint, applyEffect, recomputeDerived, ATTR_KEYS } from './stats.js';
 import { CLASSES } from './data/classes.js';
 import { RIGS, TINTS, BUILD_RANGE, clampBuild } from './data/looks.js';
+import { BACKGROUNDS } from './data/backgrounds.js';
 
 // The house voice is already they/them - combat narrates the party in the third
 // person and one victory line reads "They gather their things and go". A field
@@ -52,6 +53,7 @@ export function createDraft(classId) {
     // `rig: null` means "whatever the class wears" rather than naming it - so a
     // later art change still reaches a character who never chose otherwise.
     rig: null,
+    background: null, // the axis that is not your job; absent = none
     tint: cls?.look?.tint || null,
     build: clampBuild(cls?.look?.build) || null,
     // Attribute keys chosen at the self-assessment, in order. An array rather
@@ -103,6 +105,8 @@ export function undoDraftPoint(draft) {
 // makes a screen feel slow.
 export function draftAttr(draft) {
   const base = { ...(CLASSES[draft?.classId]?.attr || {}) };
+  const bonus = BACKGROUNDS[draft?.background]?.effect?.attrBonus || {};
+  for (const k of ATTR_KEYS) base[k] = (base[k] || 0) + (bonus[k] || 0);
   for (const k of draft?.spends || []) base[k] = (base[k] || 0) + 1;
   return base;
 }
@@ -133,6 +137,26 @@ export function createCharacter(draft) {
   if (draft.rig && RIGS[draft.rig]) {
     sheet.rig = draft.rig;
     sheet.model = draft.rig; // normalizeSheet validates this against RIGS on load
+  }
+  // A background BAKES, exactly as a class-track node does: its effect lands in
+  // attr/actions/talent.effects and the id is kept only as a record of what
+  // happened. Nothing re-applies it on load, which is the same rule the perks
+  // list follows. It runs before the points so the self-assessment is spent on
+  // top of the character you actually chose.
+  const bg = BACKGROUNDS[draft.background];
+  if (bg) {
+    sheet.background = draft.background;
+    applyEffect(sheet, bg.effect);
+    // Gear fills only a slot the class left EMPTY - the class's own startGear
+    // is its signature piece, and replacing it would delete the more specific
+    // statement. An Expensed It Drone keeps the class stress ball.
+    for (const [slot, itemId] of Object.entries(bg.gear || {})) {
+      if (sheet.equipped[slot] == null) sheet.equipped[slot] = itemId;
+    }
+    // applyEffect deliberately does not recompute (spendClassPoint samples
+    // maxHp either side of it), so the caller owns it - here, that is us.
+    recomputeDerived(sheet);
+    sheet.hp = sheet.maxHp; // a fresh character starts whole
   }
   // Bank the points, then spend them through the real function. Banking first
   // matters: spendAttrPoint refuses when the pool is empty, which is what stops

@@ -1,26 +1,36 @@
 // The character-creation screens (CHARACTER_PLAN.md). Joins `ui/` as "what
 // TAKES OVER the frame", alongside screens.js.
 //
-// The one structural rule: this screen never builds its own 3D preview. The
-// class picker has already put the candidate on the spawn tile, on a turntable,
-// under a dollied-in camera - and that body stays exactly where it is while the
-// résumé card is replaced by this form. Every control here changes something
-// the player is already looking at, and rebuilding the preview would cost a
-// .glb reload per step (CHARACTER_PLAN #14, the binding constraint).
-import { PRONOUNS, NAME_MAX, draftModel } from '../creation.js';
+// Two structural rules, both about the 3D body:
+//
+// 1. This screen never builds its own preview. The class picker has already put
+//    the candidate on the spawn tile, on a turntable, under a dollied-in
+//    camera, and that body stays exactly where it is - the résumé CARD is what
+//    gets replaced. Every control here changes something already on screen.
+//
+// 2. The two steps are PANES INSIDE ONE OVERLAY, not two overlays. Tearing the
+//    overlay down and rebuilding it would cost a .glb reload per step, which is
+//    the binding constraint this whole design is shaped around
+//    (CHARACTER_PLAN #14). Swapping panes costs nothing.
+//
+// Splitting into panes is also what keeps each card SHORT, and that turned out
+// to be load-bearing rather than cosmetic: with every control on one card it
+// ran past the viewport, and a vertically centred card that overflows does not
+// merely look bad - its lower controls become genuinely unclickable, because
+// scrolling them into view inside the card leaves them clipped by it.
+import {
+  PRONOUNS, NAME_MAX, draftModel, draftAttr, pointsLeft, spendDraftPoint, undoDraftPoint,
+} from '../creation.js';
+import { BACKGROUNDS } from '../data/backgrounds.js';
+import { ATTR_KEYS } from '../stats.js';
 import { RIGS, TINTS, BUILD_RANGE } from '../data/looks.js';
 
 const PRONOUN_LABEL = { she: 'she/her', he: 'he/him', they: 'they/them' };
 
 const CARD = {
   background: '#232334', border: '1px solid #3a3a52', borderRadius: '12px',
-  padding: '22px 24px', boxShadow: '0 12px 40px rgba(0,0,0,.6)',
+  padding: '20px 22px', boxShadow: '0 12px 40px rgba(0,0,0,.6)',
   pointerEvents: 'auto', width: '340px',
-  // Bounded and scrollable, the same way the level-up panel is. The card is
-  // vertically centred, so once the wardrobe row and the dials made it taller
-  // than the viewport it overflowed BOTH edges - and the commit button at the
-  // bottom became genuinely unclickable rather than merely awkward.
-  maxHeight: '88vh', overflowY: 'auto',
 };
 
 const FIELD_LABEL = {
@@ -29,21 +39,63 @@ const FIELD_LABEL = {
 };
 
 const CHIP = {
-  padding: '7px 12px', borderRadius: '999px', border: '1px solid #3a3a52',
-  background: '#2a2a3e', color: '#f0f0f5', font: 'inherit', fontSize: '13px',
+  padding: '6px 11px', borderRadius: '999px', border: '1px solid #3a3a52',
+  background: '#2a2a3e', color: '#f0f0f5', font: 'inherit', fontSize: '12px',
   cursor: 'pointer',
 };
 
-// Step 2 - THE BADGE PHOTO. Returns a cleanup function.
+const SMALL_CHIP = { ...CHIP, fontSize: '11px', padding: '4px 8px' };
+
+const PRIMARY = {
+  flex: '1', padding: '10px', borderRadius: '9px', border: '1px solid #3a3a52',
+  background: '#2e4a34', color: '#f0f0f5', font: 'inherit', fontWeight: '700',
+  letterSpacing: '1px', fontSize: '13px', cursor: 'pointer',
+};
+
+const QUIET = {
+  display: 'block', margin: '10px auto 0', padding: '4px', border: 'none',
+  background: 'none', color: '#8a8aa0', font: 'inherit', fontSize: '11px',
+  textDecoration: 'underline', cursor: 'pointer',
+};
+
+const label = (text) => {
+  const el = document.createElement('div');
+  Object.assign(el.style, FIELD_LABEL);
+  el.textContent = text;
+  return el;
+};
+
+const chipRow = (gap = '6px', margin = '0 0 16px') => {
+  const el = document.createElement('div');
+  Object.assign(el.style, { display: 'flex', flexWrap: 'wrap', gap, margin });
+  return el;
+};
+
+const hint = () => {
+  const el = document.createElement('div');
+  Object.assign(el.style, { fontSize: '11px', opacity: '.55', margin: '-10px 0 14px', minHeight: '1.4em' });
+  return el;
+};
+
+// Paint a set of chips as a single-choice group, greened where chosen.
+const paintGroup = (els, isOn) => {
+  for (const { id, b } of els) {
+    const on = isOn(id);
+    b.style.background = on ? '#2e4a34' : '#2a2a3e';
+    b.style.borderColor = on ? '#8adf76' : '#3a3a52';
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+};
+
+// The creation flow. `draft` is mutated in place - these panes are an editor
+// for it, and the host owns what happens when the player commits.
 //
-// `draft` is mutated in place: this screen is an editor for it, and the host
-// owns what happens when the player commits. `onCommit` receives nothing - the
-// caller already holds the draft.
+// `onPreview(kind)` asks the host to reflect the draft on the live body: 'rig'
+// is the one kind that costs a .glb load, 'look' mutates in place so a slider
+// can drive it every frame.
 export function showBadgeStep(draft, { onCommit, onSkip, onPreview }) {
-  // `onPreview(kind)` asks the host to reflect the draft on the live body.
-  // 'rig' is the one kind that costs a .glb load; 'look' mutates in place, so
-  // a slider can drive it every frame (CHARACTER_PLAN #14).
   const preview = (kind) => onPreview && onPreview(kind);
+
   const root = document.createElement('div');
   root.id = 'creation-badge';
   Object.assign(root.style, {
@@ -51,7 +103,7 @@ export function showBadgeStep(draft, { onCommit, onSkip, onPreview }) {
     color: '#f0f0f5', font: '15px system-ui, sans-serif',
   });
   // Dimmed hardest on the right, matching the picker: the candidate stays lit
-  // on the left, because they are the thing this screen is about.
+  // on the left, because they are what this screen is about.
   const dim = document.createElement('div');
   Object.assign(dim.style, {
     position: 'absolute', inset: '0',
@@ -70,85 +122,65 @@ export function showBadgeStep(draft, { onCommit, onSkip, onPreview }) {
 
   const heading = document.createElement('div');
   Object.assign(heading.style, { fontSize: '11px', letterSpacing: '2px', color: '#8adf76' });
-  heading.textContent = 'EMPLOYEE BADGE';
   const sub = document.createElement('div');
-  Object.assign(sub.style, { opacity: '.7', fontSize: '13px', margin: '2px 0 18px' });
-  sub.textContent = 'Photo on file. The rest is up to you.';
+  Object.assign(sub.style, { opacity: '.7', fontSize: '12px', margin: '2px 0 16px' });
   card.append(heading, sub);
 
-  // --- name ---------------------------------------------------------------
-  const nameLabel = document.createElement('div');
-  Object.assign(nameLabel.style, FIELD_LABEL);
-  nameLabel.textContent = 'Name';
+  // Both panes are built up front and swapped by display, so no control is ever
+  // re-created: no listener can leak, and no paint function can end up holding
+  // a stale node.
+  const paneOne = document.createElement('div');
+  const paneTwo = document.createElement('div');
+  card.append(paneOne, paneTwo);
+
+  // ======================= PANE 1 - THE BADGE PHOTO =======================
   const name = document.createElement('input');
   name.id = 'creation-name';
   name.type = 'text';
   name.maxLength = NAME_MAX;
   name.value = draft.name;
   Object.assign(name.style, {
-    width: '100%', boxSizing: 'border-box', padding: '9px 11px', borderRadius: '8px',
+    width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: '8px',
     border: '1px solid #3a3a52', background: '#1c1c2c', color: '#f0f0f5',
-    font: 'inherit', marginBottom: '18px',
+    font: 'inherit', fontSize: '14px', marginBottom: '16px',
   });
-  // Live, not on-commit: the read-back line under the button quotes it, and a
-  // name that only appears after you press the button is a name you cannot
-  // check before committing to it.
+  // Live, not on-commit: the read-back quotes it, and a name that only appears
+  // after you press the button is a name you cannot check before committing.
   name.oninput = () => { draft.name = name.value; repaintSummary(); };
-  // The canvas must not see typing - the world binds single keys (I, T, 1-9).
+  // The canvas binds single keys (I, T, 1-9), so typing must not reach it.
   name.onkeydown = (e) => {
     e.stopPropagation();
-    if (e.key === 'Enter') commit.click();
+    if (e.key === 'Enter') next.click();
   };
-  card.append(nameLabel, name);
+  paneOne.append(label('Name'), name);
 
-  // --- pronouns -----------------------------------------------------------
-  const pronounLabel = document.createElement('div');
-  Object.assign(pronounLabel.style, FIELD_LABEL);
-  pronounLabel.textContent = 'Pronouns';
-  const chips = document.createElement('div');
-  Object.assign(chips.style, { display: 'flex', gap: '8px', marginBottom: '20px' });
-  const chipEls = PRONOUNS.map((p) => {
+  const pronounRow = chipRow('7px');
+  const pronounEls = PRONOUNS.map((id) => {
     const b = document.createElement('button');
-    b.id = `creation-pronoun-${p}`;
+    b.id = `creation-pronoun-${id}`;
     b.type = 'button';
-    b.textContent = PRONOUN_LABEL[p];
+    b.textContent = PRONOUN_LABEL[id];
     Object.assign(b.style, CHIP);
-    b.onclick = () => { draft.pronouns = p; paintChips(); repaintSummary(); };
-    chips.appendChild(b);
-    return { p, b };
+    b.onclick = () => { draft.pronouns = id; paintPronouns(); repaintSummary(); };
+    pronounRow.appendChild(b);
+    return { id, b };
   });
-  const paintChips = () => {
-    for (const { p, b } of chipEls) {
-      const on = draft.pronouns === p;
-      b.style.background = on ? '#2e4a34' : '#2a2a3e';
-      b.style.borderColor = on ? '#8adf76' : '#3a3a52';
-      b.setAttribute('aria-pressed', on ? 'true' : 'false');
-    }
-  };
-  card.append(pronounLabel, chips);
+  const paintPronouns = () => paintGroup(pronounEls, (id) => draft.pronouns === id);
+  paneOne.append(label('Pronouns'), pronounRow);
 
-  // --- rig ----------------------------------------------------------------
-  // NAMES, not renders. Twelve thumbnails would mean twelve .glb loads, which
-  // is the exact cost this screen is designed around - the preview body on the
-  // spawn tile is the render, and clicking a name is the one place a reload is
-  // legitimate.
-  const rigLabel = document.createElement('div');
-  Object.assign(rigLabel.style, FIELD_LABEL);
-  rigLabel.textContent = 'Wardrobe';
-  const rigRow = document.createElement('div');
-  Object.assign(rigRow.style, {
-    display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '6px',
-  });
+  // NAMES, not renders: twelve thumbnails would mean twelve .glb loads, which
+  // is the exact cost this screen is designed around. The body on the spawn
+  // tile IS the render, and clicking a name is the one legitimate reload.
+  const rigRow = chipRow('5px', '0 0 4px');
   const rigEls = Object.entries(RIGS).map(([id, def]) => {
     const b = document.createElement('button');
     b.id = `creation-rig-${id}`;
     b.type = 'button';
     b.textContent = def.name;
     b.title = def.blurb;
-    Object.assign(b.style, { ...CHIP, fontSize: '11px', padding: '5px 9px' });
+    Object.assign(b.style, SMALL_CHIP);
     b.onclick = () => {
-      // Clicking the rig you are already wearing must not pay for a reload.
-      if (draftModel(draft) === id) return;
+      if (draftModel(draft) === id) return; // already worn - do not pay for a reload
       draft.rig = id;
       paintRigs();
       preview('rig');
@@ -156,74 +188,60 @@ export function showBadgeStep(draft, { onCommit, onSkip, onPreview }) {
     rigRow.appendChild(b);
     return { id, b };
   });
-  const rigBlurb = document.createElement('div');
-  Object.assign(rigBlurb.style, { fontSize: '11px', opacity: '.55', marginBottom: '16px', minHeight: '1.4em' });
+  const rigHint = hint();
   const paintRigs = () => {
     const worn = draftModel(draft);
-    for (const { id, b } of rigEls) {
-      const on = id === worn;
-      b.style.background = on ? '#2e4a34' : '#2a2a3e';
-      b.style.borderColor = on ? '#8adf76' : '#3a3a52';
-      b.setAttribute('aria-pressed', on ? 'true' : 'false');
-      if (on) rigBlurb.textContent = RIGS[id]?.blurb || '';
-    }
+    paintGroup(rigEls, (id) => id === worn);
+    rigHint.textContent = RIGS[worn]?.blurb || '';
   };
-  card.append(rigLabel, rigRow, rigBlurb);
+  paneOne.append(label('Wardrobe'), rigRow, rigHint);
 
-  // --- tint ---------------------------------------------------------------
-  const tintLabel = document.createElement('div');
-  Object.assign(tintLabel.style, FIELD_LABEL);
-  tintLabel.textContent = 'Colour';
-  const tintRow = document.createElement('div');
-  Object.assign(tintRow.style, { display: 'flex', gap: '7px', marginBottom: '18px' });
+  const tintRow = chipRow('7px');
   const tintEls = TINTS.map((t) => {
     const b = document.createElement('button');
     b.id = `creation-tint-${t.id}`;
     b.type = 'button';
     b.title = t.name;
     Object.assign(b.style, {
-      width: '26px', height: '26px', borderRadius: '50%', cursor: 'pointer',
+      width: '25px', height: '25px', borderRadius: '50%', cursor: 'pointer',
       border: '2px solid #3a3a52', padding: '0',
-      // The swatch shows the colour it will PRODUCE - the tint multiplies a
-      // light baked diffuse, so showing the raw triple on white is honest.
+      // The swatch shows the colour it will PRODUCE: the tint multiplies a
+      // light baked diffuse, so showing the triple against a light grey is
+      // honest about the result.
       background: `rgb(${t.rgb.map((c) => Math.round(c * 214)).join(',')})`,
     });
     b.onclick = () => { draft.tint = t.rgb; paintTints(); preview('look'); };
     tintRow.appendChild(b);
-    return { t, b };
+    return { id: t.id, b, rgb: t.rgb };
   });
   const sameRgb = (a, b) => !!a && !!b && a.every((v, i) => Math.abs(v - b[i]) < 1e-6);
   const paintTints = () => {
-    for (const { t, b } of tintEls) {
-      const on = sameRgb(draft.tint, t.rgb);
+    for (const { b, rgb } of tintEls) {
+      const on = sameRgb(draft.tint, rgb);
       b.style.borderColor = on ? '#8adf76' : '#3a3a52';
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
     }
   };
-  card.append(tintLabel, tintRow);
+  paneOne.append(label('Colour'), tintRow);
 
-  // --- build --------------------------------------------------------------
   // Two named dials over checked ranges, not the four raw proportion keys:
-  // `head` and `arms` are counter-scales that cancel the torso stretch, so
+  // `head` and `arms` are counter-scales that CANCEL the torso stretch, so
   // exposing them would let a player undo the correction rather than say
   // anything about who they are (models.js documents the cautions).
   const buildEls = Object.entries(BUILD_RANGE).map(([key, range]) => {
-    const label = document.createElement('div');
-    Object.assign(label.style, FIELD_LABEL);
-    label.textContent = range.label;
     const slider = document.createElement('input');
     slider.id = `creation-build-${key}`;
     slider.type = 'range';
     slider.min = String(range.min);
     slider.max = String(range.max);
     slider.step = String(range.step);
-    Object.assign(slider.style, { width: '100%', marginBottom: '14px', accentColor: '#8adf76' });
+    Object.assign(slider.style, { width: '100%', marginBottom: '10px', accentColor: '#8adf76' });
     slider.oninput = () => {
       draft.build = { ...(draft.build || {}), [key]: Number(slider.value) };
       preview('look'); // mutates the live body in place - no reload
     };
     slider.onkeydown = (e) => e.stopPropagation();
-    card.append(label, slider);
+    paneOne.append(label(range.label), slider);
     return { key, slider, range };
   });
   const paintBuild = () => {
@@ -233,22 +251,113 @@ export function showBadgeStep(draft, { onCommit, onSkip, onPreview }) {
     }
   };
 
-  // --- commit -------------------------------------------------------------
+  // ====================== PANE 2 - THE EXIT INTERVIEW ======================
+  const bgRow = chipRow('5px', '0 0 4px');
+  const bgEls = Object.entries(BACKGROUNDS).map(([id, def]) => {
+    const b = document.createElement('button');
+    b.id = `creation-background-${id}`;
+    b.type = 'button';
+    b.textContent = def.name;
+    b.title = def.blurb;
+    Object.assign(b.style, SMALL_CHIP);
+    // Clicking the chosen one again clears it - "none" has to stay reachable
+    // once you have picked, or the first click is irreversible.
+    b.onclick = () => {
+      draft.background = draft.background === id ? null : id;
+      paintBackgrounds();
+      paintAttrs();
+      repaintSummary();
+    };
+    bgRow.appendChild(b);
+    return { id, b };
+  });
+  const bgHint = hint();
+  bgHint.style.minHeight = '2.8em';
+  const paintBackgrounds = () => {
+    paintGroup(bgEls, (id) => draft.background === id);
+    const chosen = BACKGROUNDS[draft.background];
+    bgHint.textContent = chosen
+      ? `${chosen.blurb} ${chosen.line}`
+      : 'Optional. It costs as much as it gives.';
+  };
+  paneTwo.append(label('So why are you still here?'), bgRow, bgHint);
+
+  // Two points, through the level-up screen's own stepper shape. No second
+  // point economy: createCharacter banks them and spends them through the very
+  // same spendAttrPoint.
+  const saLabel = label('Self-assessment');
+  paneTwo.appendChild(saLabel);
+  const attrRows = ATTR_KEYS.map((key) => {
+    const r = document.createElement('div');
+    Object.assign(r.style, {
+      display: 'flex', alignItems: 'center', gap: '10px', padding: '5px 9px',
+      borderRadius: '7px', background: '#2a2a3e', marginBottom: '5px',
+    });
+    const nameEl = document.createElement('div');
+    Object.assign(nameEl.style, { flex: '1', fontSize: '13px', textTransform: 'capitalize' });
+    nameEl.textContent = key;
+    const value = document.createElement('span');
+    Object.assign(value.style, { opacity: '.85', fontWeight: '600' });
+    const plus = document.createElement('button');
+    plus.id = `creation-attr-${key}`;
+    plus.type = 'button';
+    plus.textContent = '+';
+    Object.assign(plus.style, { ...CHIP, padding: '1px 10px', borderRadius: '7px', fontSize: '13px' });
+    plus.onclick = () => { spendDraftPoint(draft, key); paintAttrs(); repaintSummary(); };
+    r.append(nameEl, value, plus);
+    paneTwo.appendChild(r);
+    return { key, value, plus };
+  });
+  const undo = document.createElement('button');
+  undo.id = 'creation-undo';
+  undo.type = 'button';
+  undo.textContent = 'Take one back';
+  Object.assign(undo.style, { ...QUIET, margin: '4px 0 12px' });
+  undo.onclick = () => { undoDraftPoint(draft); paintAttrs(); repaintSummary(); };
+  paneTwo.appendChild(undo);
+  const paintAttrs = () => {
+    const attr = draftAttr(draft);
+    const left = pointsLeft(draft);
+    saLabel.textContent = `Self-assessment · ${left} point${left === 1 ? '' : 's'} left`;
+    for (const { key, value, plus } of attrRows) {
+      value.textContent = String(attr[key] ?? 0);
+      plus.style.opacity = left > 0 ? '1' : '.35';
+      plus.setAttribute('aria-disabled', left > 0 ? 'false' : 'true');
+    }
+    undo.style.display = draft.spends.length ? 'block' : 'none';
+  };
+
+  // ============================== the footer ==============================
+  const buttons = document.createElement('div');
+  Object.assign(buttons.style, { display: 'flex', gap: '8px', marginTop: '4px' });
+
+  const back = document.createElement('button');
+  back.id = 'creation-back';
+  back.type = 'button';
+  back.textContent = 'BACK';
+  Object.assign(back.style, { ...PRIMARY, flex: '0 0 auto', background: '#2a2a3e', fontWeight: '600' });
+  back.onclick = () => showPane(1);
+
+  const next = document.createElement('button');
+  next.id = 'creation-next';
+  next.type = 'button';
+  next.textContent = 'NEXT: EXIT INTERVIEW';
+  Object.assign(next.style, PRIMARY);
+  next.onclick = () => showPane(2);
+
   const commit = document.createElement('button');
   commit.id = 'creation-commit';
   commit.type = 'button';
   commit.textContent = 'SIGN THE PAPERWORK';
-  Object.assign(commit.style, {
-    width: '100%', padding: '11px', borderRadius: '9px', border: '1px solid #3a3a52',
-    background: '#2e4a34', color: '#f0f0f5', font: 'inherit', fontWeight: '700',
-    letterSpacing: '1px', cursor: 'pointer',
-  });
+  Object.assign(commit.style, PRIMARY);
   commit.onclick = () => { cleanup(); onCommit(); };
-  card.appendChild(commit);
 
-  // The read-back: the character in one sentence, under the button that
-  // commits them. Deliberately not a fourth step - a summary you cannot act on
-  // is a dead click, and it belongs where the acting happens.
+  buttons.append(back, next, commit);
+  card.appendChild(buttons);
+
+  // The character read back in one sentence, under the button that commits
+  // them. Deliberately not a third pane: a summary you cannot act on is a dead
+  // click, and it belongs where the acting happens.
   const summary = document.createElement('div');
   summary.id = 'creation-summary';
   Object.assign(summary.style, {
@@ -260,39 +369,54 @@ export function showBadgeStep(draft, { onCommit, onSkip, onPreview }) {
   skip.id = 'creation-skip';
   skip.type = 'button';
   skip.textContent = 'Skip the paperwork';
-  Object.assign(skip.style, {
-    display: 'block', margin: '12px auto 0', padding: '4px', border: 'none',
-    background: 'none', color: '#8a8aa0', font: 'inherit', fontSize: '12px',
-    textDecoration: 'underline', cursor: 'pointer',
-  });
+  Object.assign(skip.style, QUIET);
   skip.onclick = () => { cleanup(); onSkip(); };
   card.appendChild(skip);
 
+  function showPane(n) {
+    paneOne.style.display = n === 1 ? '' : 'none';
+    paneTwo.style.display = n === 2 ? '' : 'none';
+    back.style.display = n === 2 ? '' : 'none';
+    next.style.display = n === 1 ? '' : 'none';
+    commit.style.display = n === 2 ? '' : 'none';
+    heading.textContent = n === 1 ? 'EMPLOYEE BADGE' : 'EXIT INTERVIEW';
+    sub.textContent = n === 1
+      ? 'Photo on file. The rest is up to you.'
+      : 'Two questions. Then you can go.';
+  }
+
   function repaintSummary() {
-    // Read back what they typed, not what they will get if they leave it blank
-    // - the fallback happens at commit, and showing it here would look like the
-    // field had rejected their input.
+    // Reads back what they TYPED, not what they will get if they leave it
+    // blank - the fallback happens at commit, and showing it here would look
+    // like the field had rejected their input.
     const shown = draft.name.trim() || draft.className || '';
-    summary.textContent = `${shown}, ${PRONOUN_LABEL[draft.pronouns]}, ${draft.className}.`;
+    const bg = BACKGROUNDS[draft.background];
+    summary.textContent = [
+      `${shown}, ${PRONOUN_LABEL[draft.pronouns]}, ${draft.className}.`,
+      bg ? `${bg.name}. ${bg.line}` : '',
+    ].filter(Boolean).join(' ');
   }
 
   function cleanup() {
     window.removeEventListener('keydown', onKey, true);
     root.remove();
   }
-  // Escape backs out to the desk the same way right-click backs out of an aimed
-  // action - captured, so the world's own key bindings never see it.
+  // Escape backs out to the desk, the way right-click backs out of an aimed
+  // action. Captured, so the world's own key bindings never see it.
   const onKey = (e) => {
     if (e.key === 'Escape') { e.stopPropagation(); cleanup(); onSkip(); }
   };
   window.addEventListener('keydown', onKey, true);
 
   document.body.appendChild(root);
-  paintChips();
+  paintPronouns();
   paintRigs();
   paintTints();
   paintBuild();
+  paintBackgrounds();
+  paintAttrs();
   repaintSummary();
+  showPane(1);
   name.focus();
   name.select();
   return cleanup;

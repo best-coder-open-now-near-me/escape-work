@@ -274,3 +274,100 @@ test('draftModel falls back to the class body when nothing is chosen', () => {
   assert.equal(draftModel({ classId: 'it-support', rig: 'not-a-rig' }), CLASSES['it-support'].model,
     'an unknown rig is ignored rather than rendered');
 });
+
+// --- backgrounds (CHARACTER_PLAN M5) ---------------------------------------
+const { BACKGROUNDS } = await import('../../src/data/backgrounds.js');
+const { ITEMS } = await import('../../src/data/items.js');
+const { ACTIONS } = await import('../../src/data/actions.js');
+const { EQUIP_SLOTS, ATTR_KEYS } = await import('../../src/stats.js');
+
+test('every background is a SWAP - its attrBonus sums to zero', () => {
+  // The load-bearing lint. Eight free stat lifts at creation would blow through
+  // the curve-neutrality rule startGear was introduced under, and would make
+  // exactly one background correct for every class. A swap costs something.
+  for (const [id, bg] of Object.entries(BACKGROUNDS)) {
+    const bonus = bg.effect?.attrBonus || {};
+    const sum = Object.values(bonus).reduce((a, b) => a + b, 0);
+    assert.equal(sum, 0, `${id} sums to ${sum} - a background must give and take`);
+    assert.ok(Object.keys(bonus).length >= 2, `${id} must move at least two attributes`);
+    for (const k of Object.keys(bonus)) {
+      assert.ok(ATTR_KEYS.includes(k), `${id} moves "${k}", which is not an attribute`);
+    }
+  }
+});
+
+test('every background is presentable and its content resolves', () => {
+  for (const [id, bg] of Object.entries(BACKGROUNDS)) {
+    assert.ok(bg.name && bg.blurb && bg.line, `${id} needs name, blurb and read-back line`);
+    for (const [slot, itemId] of Object.entries(bg.gear || {})) {
+      assert.ok(EQUIP_SLOTS.includes(slot), `${id} names slot "${slot}"`);
+      assert.ok(ITEMS[itemId], `${id} grants "${itemId}", which is not an item`);
+      assert.equal(ITEMS[itemId].slot, slot, `${id}: ${itemId} does not go in ${slot}`);
+    }
+    if (bg.effect?.grantsAction) {
+      assert.ok(ACTIONS[bg.effect.grantsAction], `${id} grants a missing action`);
+    }
+  }
+});
+
+test('a background swap lands on the sheet and moves the derived numbers', () => {
+  const plain = createCharacter(createDraft('office-drone'));
+  const draft = createDraft('office-drone');
+  draft.background = 'night-shift'; // +1 grit, -1 hustle
+  const built = createCharacter(draft);
+
+  assert.equal(built.background, 'night-shift', 'recorded as what happened');
+  assert.equal(built.attr.grit, plain.attr.grit + 1);
+  assert.equal(built.attr.hustle, plain.attr.hustle - 1);
+  assert.ok(built.maxHp > plain.maxHp, 'and Grit really did buy HP');
+  assert.equal(built.hp, built.maxHp, 'a fresh character starts whole');
+});
+
+test('a background fills only an EMPTY slot - the class keeps its signature piece', () => {
+  // Expensed It grants a stress ball, which is also the Drone's own startGear.
+  const drone = createDraft('office-drone');
+  drone.background = 'expensed-it';
+  const droneSheet = createCharacter(drone);
+  const plainDrone = createCharacter(createDraft('office-drone'));
+  assert.equal(droneSheet.equipped.trinket, plainDrone.equipped.trinket,
+    'the Drone keeps the class trinket - nothing was overwritten');
+
+  // Any other class arrives carrying one.
+  const other = createDraft('it-support');
+  other.background = 'expensed-it';
+  const otherSheet = createCharacter(other);
+  assert.equal(otherSheet.equipped.trinket, 'stress-ball');
+  assert.equal(otherSheet.equipped.weapon, createCharacter(createDraft('it-support')).equipped.weapon,
+    'and its own weapon is untouched');
+});
+
+test('a background talent merges rather than replacing the class talent', () => {
+  const draft = createDraft('office-drone');
+  draft.background = 'former-smoker';
+  const sheet = createCharacter(draft);
+  assert.equal(sheet.talent.effects.hasLighter, true, 'the background verb arrived');
+  // The class's own talent effects must survive the merge.
+  const plain = createCharacter(createDraft('office-drone'));
+  for (const [k, v] of Object.entries(plain.talent?.effects || {})) {
+    assert.deepEqual(sheet.talent.effects[k], v, `class talent effect "${k}" survived`);
+  }
+});
+
+test('a zero-allocation character still equals the class headline exactly', () => {
+  // The invariant, restated with backgrounds in the picture: choosing NO
+  // background and spending NO points must reproduce the class byte for byte.
+  for (const id of Object.keys(CLASSES).filter((k) => CLASSES[k].playable !== false)) {
+    const created = createCharacter(createDraft(id));
+    assert.equal(created.maxHp, CLASSES[id].maxHp, `${id} maxHp`);
+    assert.equal(created.maxAp, CLASSES[id].ap, `${id} maxAp`);
+  }
+});
+
+test('draftAttr previews the background swap and the points together', () => {
+  const draft = createDraft('office-drone');
+  draft.background = 'night-shift';
+  spendDraftPoint(draft, 'grit');
+  const preview = draftAttr(draft);
+  const built = createCharacter(draft);
+  assert.deepEqual(preview, built.attr, 'the preview must match what commit produces');
+});
