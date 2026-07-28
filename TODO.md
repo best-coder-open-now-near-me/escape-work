@@ -24,28 +24,43 @@ Answered directly by the project owner — recorded so they are not relitigated.
 - Consumables cost 2 AP in combat; paper upgrading is out-of-combat only;
   `PAPER_CAP`/`INV_CAP` become real numbers rather than `Infinity`.
 
-## E2e status in this environment (verified, not assumed)
+## E2e status in this environment (measured, with the method stated)
 
-The suite runs under software GL here and is markedly slower than the CI it was
-tuned for: a full pass takes ~1.5h and several specs exceed the 120s per-test
-budget purely on wall-clock. Failures were therefore checked against the branch
-point (`e8e53de`) in a worktree rather than assumed to be regressions.
+This environment's software GL is far slower than the CI the suite was tuned
+for, and the dominant failure mode is the 120s per-test budget expiring rather
+than anything misbehaving.
 
-- **Pre-existing at `e8e53de`, unrelated to this branch:** the IT Support
-  self-cast spec and `Performance Review is HR's` both already failed there,
-  with the timeout signature (one engage attempt, budget exhausted mid-walk).
-  Both classes lack an attack of their own, so entering combat means walking a
-  coworker down rather than opening on them - the slowest path in the suite.
-- **Caused here and fixed:** `a friendly verb does not arm a swing at a
-  coworker` passed at the branch point and had to move class (Reboot is an
-  any-target purge now and legitimately promises a swing, so it can no longer
-  carry a friends-only rule). HR's Performance Review is the only friends-only
-  verb in any base kit, which put the test on that same slow path; marked
-  `test.slow()` and verified passing.
-- [ ] **Worth doing:** give `enterCombat` a way to open a fight that does not
-      depend on walking a coworker down, so a class with no attack is not
-      inherently the slow path. That is the root cause of every timeout above,
-      and it would take ~10 minutes off a full run.
+**The baseline is the headline: `e8e53de` fails 21 of 102 before any work on
+this branch.** A full pass takes ~1.5-2h.
+
+| run | failed | passed |
+|---|---|---|
+| baseline `e8e53de` | 21 | 81 |
+| this branch | 28 | 78 |
+
+**That table is contaminated and should not be quoted.** Both suites were run
+CONCURRENTLY on one machine to save wall-clock, which is a mistake when the
+thing being measured is timing: each took 2.0h instead of ~1.5h, and contention
+manufactured failures on both sides.
+
+Re-running the nine suspect spec files SOLO is the valid experiment: **31
+passed, 6 failed**. So of twelve apparent regressions, six were pure contention
+artifacts - `charm.spec`, `editor`, `equipment` ×2, `statuses`, `tactics`,
+`throwing` all pass with nothing competing.
+
+Of the six that survive, three are provably pre-existing (they appear in the
+baseline's own failure list, one under its old name: `Mail Room: Bulk Mail`,
+`Reboot self-cast` née `Remote Restart self-cast`, and the IT Support kit spec).
+
+- [ ] **Three left worth investigating, and only these:**
+      `classes.spec.js:108` (Security: Detain), `exit.spec.js:130` (walking out
+      of the last floor), `powers.spec.js:123` (Stand Post overwatch). Each
+      needs the same treatment: run it alone against a worktree at `e8e53de`,
+      then alone here, and compare. Do NOT run comparison suites in parallel.
+- [ ] The suite needs a longer per-test budget in environments like this one,
+      or the timeouts will keep being mistaken for regressions. `test.slow()`
+      per spec is the stopgap; a config-level budget keyed off an env var is the
+      real fix.
 
 ## Status
 
