@@ -179,11 +179,42 @@ export function buildLevel(app, grid, { picking = null } = {}) {
     }
   }
 
+  // Re-render whatever this cell has BECOME (POWERS_PLAN M6). The two existing
+  // mutators each know one shape - removePropVisual only deletes,
+  // addSurfaceVisual only keeps a `surface` result and drops a model's async
+  // holder on the floor untracked - and toppling turns a model prop into a
+  // different model prop, which neither could express. This is the general
+  // case they were both special cases of: drop what was there, render the
+  // current type, and file the result the same way the initial pass does.
+  function refreshTile(x, z) {
+    removePropVisual(x, z);
+    hideSurfaceVisual(x, z);
+    const type = grid.typeAt(x, z);
+    if (type === null) return;
+    r.renderFloor(x, z, carpetAt.get(x + ',' + z) || type);
+    if (type === 'floor') return;
+    const def = TILE_TYPES[type];
+    const interactive = !!def && (def.loot || def.shop || def.ignitable || def.explosive);
+    const res = r.renderMarker(x, z, type, {
+      electrified: grid.isElectrified(x, z),
+      surfaceAt: (sx, sz) => TILE_TYPES[grid.typeAt(sx, sz)]?.surface || null,
+      onAsync: (holder) => {
+        propVisuals.set(x + ',' + z, holder);
+        if (interactive && picking) picking.register(holder, 'prop', { x, z });
+      },
+    });
+    if (res.kind === 'surface') surfaceVisuals.set(x + ',' + z, res.entities[0]);
+    else if (res.kind === 'prop') {
+      propVisuals.set(x + ',' + z, res.entities[0]);
+      if (interactive && picking) picking.register(res.entities[0], 'prop', { x, z });
+    }
+  }
+
   return {
     walls, updateWallFade, animateSurfaces: r.animate,
     addFlame: r.addFlame, explosionFlash: r.explosionFlash,
     addSmoke: r.addSmoke, removeSmoke: r.removeSmoke,
-    hideSurfaceVisual, addSurfaceVisual, removePropVisual,
+    hideSurfaceVisual, addSurfaceVisual, removePropVisual, refreshTile,
     refreshDoor: renderDoorAt,
     floorHeight: r.floorHeight,
   };

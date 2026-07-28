@@ -41,6 +41,17 @@
 // shape demands be filled.
 const PICKER_ONLY = ['tagline', 'experience', 'startGear', 'playable'];
 
+// `primary` (POWERS_PLAN M8): the ONE verb a class is for. Six playable classes
+// once shipped as attack + defend + heal with different words on the buttons -
+// only HR departed from it, and only because `summon` happened to get built -
+// so the roster read as one character with six vocabularies. Stating the
+// intent in data lets a lint hold the line: every playable class declares one,
+// no two share one, and the kit must actually contain an action of that type.
+//
+// It is the DEFINING verb, not an exclusive one. Security also carries a
+// control and HR also carries a buff; what the lint prevents is two classes
+// being *about* the same thing.
+
 /**
  * Build a character FROM a class: `{ classId, ...overrides }` in, a full def
  * out. This is the one mechanism behind "a class is the shared unit archetype"
@@ -81,6 +92,7 @@ export const MERGED_PER_KEY = ['attr'];
 export const CLASSES = {
   'office-drone': {
     name: 'Office Drone',
+    primary: 'attack', // the baseline the other five read against
     model: 'worker',
     tagline: 'Seen everything. Feels nothing. Balanced stats.',
     experience: 'Cubicle Occupant, 2019–present. Duties: unclear.',
@@ -97,7 +109,9 @@ export const CLASSES = {
     track: [
       { id: 'drone-thick-skin', name: 'Thick Skin', cost: 1, effect: { attrBonus: { grit: 1 } } },
       { id: 'drone-sharp-folds', name: 'Sharp Folds', cost: 1, effect: { talent: { paperDamageBonus: 1 } } },
-      { id: 'drone-seminar', name: 'Self-Defense Seminar', cost: 1, requires: ['drone-thick-skin'], effect: { grantsAction: 'kick' } },
+      // Was a grant of `kick`, which the Mail Room and Security also handed
+      // out - three classes unlocking one action (POWERS_PLAN M3).
+      { id: 'drone-paper-storm', name: 'Paper Storm', cost: 1, requires: ['drone-sharp-folds'], effect: { grantsAction: 'paper-storm' } },
     ],
     actions: ['attack', 'defend', 'coffee'],
     talent: {
@@ -110,6 +124,7 @@ export const CLASSES = {
   },
   'middle-manager': {
     name: 'Middle Manager',
+    primary: 'control', // he does not out-hit you, he takes your turn
     // Sole wearer of the veteran rig. Short and settled from six years in the
     // chair - the build is character here, not a way to tell two people apart.
     model: 'veteran',
@@ -131,6 +146,9 @@ export const CLASSES = {
       // which is a better spread than piling every movement talent on the
       // clerk.
       { id: 'mgr-frequent-flier', name: 'Frequent Flier', cost: 1, effect: { talent: { noProvoke: true } } },
+      // The Manager's track granted only passive talents, so levelling one
+      // never changed what he could DO (POWERS_PLAN M2).
+      { id: 'mgr-all-hands', name: 'All-Hands', cost: 1, requires: ['mgr-stonewall'], effect: { grantsAction: 'all-hands' } },
     ],
     actions: ['delegate', 'own-calendar', 'espresso'],
     talent: {
@@ -141,6 +159,7 @@ export const CLASSES = {
   },
   'mail-room': {
     name: 'Mail Room',
+    primary: 'mobility', // knows every corridor, and can now use one
     // Rangy from eleven years of corridors. Shared with the mail room
     // companion, who inherits this rig along with the rest of the class - he
     // reads apart by torso (data/companions.js), so keep the two builds
@@ -157,13 +176,14 @@ export const CLASSES = {
     track: [
       { id: 'mail-cart-legs', name: 'Cart Legs', cost: 1, effect: { attrBonus: { hustle: 1 } } },
       { id: 'mail-routes', name: 'Route Knowledge', cost: 1, effect: { attrBonus: { savvy: 1 } } },
-      { id: 'mail-dock-boots', name: 'Dock Boots', cost: 1, requires: ['mail-cart-legs'], effect: { grantsAction: 'kick' } },
+      // Was a third copy of `kick` (POWERS_PLAN M4).
+      { id: 'mail-hand-off', name: 'Hand-Off', cost: 1, requires: ['mail-cart-legs'], effect: { grantsAction: 'courier-swap' } },
       // The Pawn (MOVEMENT_PLAN M2): AP that ONLY movement may spend, drawn
       // before real AP. Turns repositioning from a cost into a habit - the
       // clerk flanks and gets behind people without giving up a swing.
       { id: 'mail-always-moving', name: 'Always Moving', cost: 1, requires: ['mail-cart-legs'], effect: { talent: { freeMoveAp: 1 } } },
     ],
-    actions: ['mail-cone', 'return-to-sender', 'snack-cart'],
+    actions: ['mail-cone', 'courier-route', 'snack-cart'],
     talent: {
       name: 'Warehouse Soles',
       blurb: 'Eleven years of ignored wet-floor signs. You cannot slip. Ever.',
@@ -172,6 +192,7 @@ export const CLASSES = {
   },
   'it-support': {
     name: 'IT Support',
+    primary: 'buff', // the only class that can take a status OFF anybody
     model: 'itsupport',
     tagline: 'Fragile, caffeinated, devastating.',
     experience: '"Have you tried turning it off and on again," 10 yrs.',
@@ -183,9 +204,14 @@ export const CLASSES = {
     track: [
       { id: 'it-root', name: 'Root Access', cost: 1, effect: { attrBonus: { savvy: 1 } } },
       { id: 'it-ergonomic', name: 'Ergonomic Chair', cost: 1, effect: { attrBonus: { grit: 1 } } },
-      { id: 'it-server-breaks', name: 'Server-Room Breaks', cost: 1, effect: { grantsAction: 'cigarette' } },
+      // Was a grant of the Middle Manager's `cigarette` - one class's track
+      // handing out another class's talent action (POWERS_PLAN M2).
+      { id: 'it-percussive', name: 'Percussive Maintenance', cost: 1, requires: ['it-root'], effect: { grantsAction: 'percussive-maintenance' } },
     ],
-    actions: ['reboot', 'firewall', 'energy-drink'],
+    // Reboot (an enemy or yourself) plus Remote Restart (a teammate): the
+    // purge, pointed at both halves of the board. That is IT's primary verb -
+    // nobody else in the roster can take a status off anybody.
+    actions: ['reboot', 'remote-restart', 'energy-drink'],
     // (An anti-slip footwear talent is reserved for a future talent-choice
     // system - the engine already honors slipImmune. Until then, gum on your
     // shoe is the anti-slip option, at a price.)
@@ -198,6 +224,7 @@ export const CLASSES = {
 
   'human-resources': {
     name: 'Human Resources',
+    primary: 'summon', // it staffs the fight; the buffs are the other half
     model: 'midmanager',
     tagline: 'Doesn\'t fight so much as staff. Brings friends to your review.',
     experience: 'People Ops "Business Partner". Owns the offsite. Tenure: undisclosed.',
@@ -210,10 +237,17 @@ export const CLASSES = {
       { id: 'hr-candor', name: 'Radical Candor', cost: 1, effect: { attrBonus: { composure: 1 } } },
       { id: 'hr-read-room', name: 'Reading the Room', cost: 1, effect: { attrBonus: { savvy: 1 } } },
       { id: 'hr-tenure', name: 'Untouchable Tenure', cost: 1, requires: ['hr-candor'], effect: { attrBonus: { grit: 1 } } },
+      // The HR track granted no action at all, on the one class whose whole
+      // job is doing things TO other people. Onboarding is the defensive twin
+      // of Performance Review (POWERS_PLAN M1).
+      { id: 'hr-onboarding', name: 'Onboarding Buddy', cost: 1, requires: ['hr-read-room'], effect: { grantsAction: 'onboarding' } },
     ],
-    // Post the Role summons applicants to fight for you; Deflect Blame and
-    // Coffee Break round out a support kit that survives while the temps swing.
-    actions: ['summon-applicants', 'defend', 'coffee'],
+    // Post the Role summons applicants to fight for you; Performance Review
+    // makes whoever is already swinging connect more often. HR is the only
+    // class that spends its turns on OTHER people (POWERS_PLAN M1) - it used
+    // to carry Deflect Blame and Coffee Break, which is the Office Drone's
+    // kit, so the support class supported nobody but itself.
+    actions: ['summon-applicants', 'performance-review', 'coffee'],
     talent: {
       name: 'Open Door Policy',
       blurb: 'The door is always open. So is the req. There is always another applicant.',
@@ -223,6 +257,7 @@ export const CLASSES = {
 
   security: {
     name: 'Security',
+    primary: 'stance', // holds ground, and the reaction budget is how
     // The cop rig - the one the Mail Room clerk used to wear before it went to
     // the person whose job actually IS the uniform. Shared with the Security
     // Guard ENEMY (data/enemies.js), who is squarer through the vest; the
@@ -241,7 +276,11 @@ export const CLASSES = {
       { id: 'sec-post', name: 'Standing Post', cost: 1, effect: { attrBonus: { grit: 1 } } },
       { id: 'sec-rounds', name: 'Night Rounds', cost: 1, effect: { attrBonus: { hustle: 1 } } },
       { id: 'sec-deescalate', name: 'De-escalation Training', cost: 1, effect: { attrBonus: { composure: 1 } } },
-      { id: 'sec-boots', name: 'Duty Boots', cost: 1, requires: ['sec-post'], effect: { grantsAction: 'kick' } },
+      { id: 'sec-hold-line', name: 'Hold the Line', cost: 1, requires: ['sec-post'], effect: { grantsAction: 'hold-the-line' } },
+      // Was a third copy of `kick` (POWERS_PLAN M2): the Drone, the Mail Room
+      // and Security all granted the same action, so levelling up converged
+      // the roster instead of separating it.
+      { id: 'sec-lockdown', name: 'Badge Lockdown', cost: 1, requires: ['sec-post'], effect: { grantsAction: 'lockdown' } },
     ],
     actions: ['detain', 'stand-post', 'night-thermos'],
     talent: {

@@ -41,6 +41,11 @@
 //     moveCostMult   combat move-AP multiplier
 //     speedMult      walk-speed multiplier
 //     noFootwork     footwork actions (the kick) disabled
+//     rooted         cannot MOVE at all this turn, but may still act. Read by
+//                    combat.js's moveBudget - the one choke point both sides
+//                    price movement through - so it binds a member and an AI
+//                    unit by the same line. Distinct from skipTurn: a root
+//                    costs you the ground, a stun costs you the turn.
 //     slipProof      cannot slip (gum's upside)
 //     incomingMult   incoming-damage multiplier (deflect: 0.5)
 //     accMod         flat accuracy modifier (HIT_PLAN's hitChance `mods`)
@@ -143,5 +148,79 @@ export const STATUSES = {
     effects: { shuffleActions: true, aimSway: 0.45 },
     log: '{name} is reorganised. Nothing is where it was.',
     fx: { color: [0.72, 0.45, 0.95], burst: 'pop', aura: 'orbit', rate: 0.22 },
+  },
+  // --- what a stance looks like (POWERS_PLAN M5) ----------------------------
+  // Overwatch carries no `effects` at all: the rule lives in combat's
+  // `watching` map, because it is about the REACTION budget and a sightline,
+  // neither of which the effect vocabulary can express. This entry exists so
+  // the state is VISIBLE - a chip on the HUD, an aura on the body, a line in
+  // the initiative strip. A tactical commitment nobody can see is one nobody
+  // plays around, and holding a stance is meant to be read by both sides.
+  //
+  // Its duration is nominal for the same reason: combat clears it the moment
+  // the stance lapses or fires, so the number only bounds a leak.
+  watching: {
+    name: 'Overwatch', icon: '👁️', harmful: false, clock: 'turn',
+    duration: 2, resistable: false,
+    effects: {},
+    log: '{name} is watching the room.',
+    fx: { color: [0.55, 0.9, 0.75], burst: 'rise', aura: 'orbit', rate: 0.5 },
+  },
+  // The other stance mode (POWERS_PLAN M5, landed with M7's cover work). Same
+  // empty-effects reasoning as `watching`: the rule is that the holder's TILE
+  // shields the faces beside it, which is a cover question, not an effect the
+  // vocabulary can carry.
+  guarding: {
+    name: 'Holding the Line', icon: '🛡️', harmful: false, clock: 'turn',
+    duration: 2, resistable: false,
+    effects: {},
+    log: '{name} plants themselves in the way.',
+    fx: { color: [0.7, 0.75, 0.9], burst: 'rise', aura: 'shield', rate: 0.4 },
+  },
+  // --- what the control verb lands (POWERS_PLAN M2) -------------------------
+  // A ROOT, not a stun. The distinction is the whole reason this status exists
+  // rather than reusing `stunned`: a detained coworker still gets their turn
+  // and everything on their bar - they simply cannot walk away from you. That
+  // is a real tactical state (it holds a thrower in your reach, it stops a
+  // wounded manager retreating) and it is NOT turn denial, so it deliberately
+  // carries no anti-chain window: re-detaining someone who is standing right
+  // there is a legitimate way to spend AP, and it never costs them a turn.
+  detained: {
+    name: 'Detained', icon: '🪪', harmful: true, clock: 'turn',
+    duration: 2, resistable: true,
+    effects: { rooted: true },
+    log: '{name} is being asked to wait right there.',
+    fx: { color: [0.95, 0.78, 0.25], burst: 'fall', aura: 'cling', rate: 0.28 },
+  },
+  // --- the friendly half (POWERS_PLAN M1) -----------------------------------
+  // Until the `buff` verb landed, every status in this registry arrived from
+  // the environment or from something swinging at you: the most expensive
+  // system in the codebase had no player-facing way to help ANYONE, least of
+  // all a teammate. These two are what the verb carries.
+  //
+  // Neither is `resistable`. Composure is a defence, and making it blunt a
+  // compliment would mean the most composed member of the party benefits
+  // least from being supported - which is exactly backwards, and would quietly
+  // make the HR class worse the better your party got.
+  commended: {
+    name: 'Commended', icon: '⭐', harmful: false, clock: 'turn',
+    duration: 3, resistable: false,
+    // The offensive buff: it does not add damage, it adds CONNECTING. Damage
+    // is the equipment layer's currency; accuracy is the one HIT_PLAN left
+    // open to modifiers on both sides, so a support class pushing it is the
+    // spread the to-hit math was built to accept.
+    effects: { accMod: 0.15 },
+    log: '{name} has it in writing that they are doing great.',
+    fx: { color: [1, 0.85, 0.35], burst: 'rise', aura: 'orbit', rate: 0.3 },
+  },
+  onboarded: {
+    name: 'Onboarded', icon: '🧭', harmful: false, clock: 'turn',
+    duration: 3, resistable: false,
+    // The defensive buff. Deliberately WEAKER than Deflect Blame's 0.5 and
+    // longer-lived: a stance you spend your own turn on should beat a favour
+    // somebody else did you, or nobody would ever brace again.
+    effects: { incomingMult: 0.8, dodgeMod: 0.1 },
+    log: '{name} has been walked through the fire exits.',
+    fx: { color: [0.45, 0.85, 1], burst: 'rise', aura: 'shield', rate: 0.35 },
   },
 };

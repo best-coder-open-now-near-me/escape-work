@@ -165,14 +165,30 @@ export function provokedBy(threats, fx, fz, tx, tz, edgeOpen = null) {
 //
 // Deliberately boolean: cover applies at most once per attack, so tucking
 // into a partition corner can't stack two edges into double cover.
-export function hasCover(ax, az, dx, dz, edgeOpen) {
-  if (typeof edgeOpen !== 'function') return false;
+// `coverCell(x, z)` (POWERS_PLAN M7) reports a CELL that shields - a toppled
+// bookcase lying on the carpet. Cover was edge-only because every cover in the
+// game was an edge; a fallen prop occupies a cell, so the same two faces get
+// asked a second question.
+//
+// The tempting alternative was to mark fallen props `solid: true` so stepOpen
+// reported them and this needed no change - but that is exactly the
+// impassable-terrain-on-demand the design refused (seal a doorway, strand the
+// fight). An extra predicate is the smaller and more honest cost.
+//
+// The "at most once per attack" rule survives: an edge AND a cell on the same
+// face still grant one cover, because this returns on the first hit.
+export function hasCover(ax, az, dx, dz, edgeOpen, coverCell = null) {
+  const edges = typeof edgeOpen === 'function';
+  const cells = typeof coverCell === 'function';
+  if (!edges && !cells) return false;
   const sx = Math.sign(ax - dx);
   const sz = Math.sign(az - dz);
   // Each axis is checked as its own orthogonal face. A diagonal attacker is
   // blocked by either face - going around one corner is enough.
-  if (sx !== 0 && !edgeOpen(dx, dz, dx + sx, dz)) return true;
-  if (sz !== 0 && !edgeOpen(dx, dz, dx, dz + sz)) return true;
+  if (sx !== 0 && edges && !edgeOpen(dx, dz, dx + sx, dz)) return true;
+  if (sz !== 0 && edges && !edgeOpen(dx, dz, dx, dz + sz)) return true;
+  if (sx !== 0 && cells && coverCell(dx + sx, dz)) return true;
+  if (sz !== 0 && cells && coverCell(dx, dz + sz)) return true;
   return false;
 }
 
@@ -236,9 +252,9 @@ export function isBackstab(ax, az, dx, dz, facing) {
 // defaults to the old tile rule so a caller that hasn't been updated behaves
 // exactly as before.
 export function positionMods(ax, az, dx, dz, opts = {}) {
-  const { edgeOpen = null, allies = [], facing = null } = opts;
+  const { edgeOpen = null, allies = [], facing = null, coverCell = null } = opts;
   const melee = opts.melee ?? (cheb(ax, az, dx, dz) <= 1);
-  const covered = !melee && hasCover(ax, az, dx, dz, edgeOpen);
+  const covered = !melee && hasCover(ax, az, dx, dz, edgeOpen, coverCell);
   const flanked = melee && isFlanked(ax, az, dx, dz, allies);
   // Backstab is range-agnostic: shooting someone in the back counts, which is
   // also why it can coexist with the defender's cover - the cap and

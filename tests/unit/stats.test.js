@@ -190,13 +190,16 @@ test('spendClassPoint on an attrBonus node raises the attribute and derives', ()
 });
 
 test('spendClassPoint grants an action onto the sheet (respecting prereqs)', () => {
+  // The Drone's grant used to be `kick` - which the Mail Room and Security
+  // handed out too, so three classes unlocked one action and levelling up
+  // converged the roster (POWERS_PLAN M3). It is now Paper Storm, a zone.
   const s = createSheet('office-drone');
   s.classPoints = 2;
-  assert.ok(!s.actions.includes('kick'));
-  assert.equal(spendClassPoint(s, 'drone-seminar'), false); // prereq not met yet
-  assert.equal(spendClassPoint(s, 'drone-thick-skin'), true);
-  assert.equal(spendClassPoint(s, 'drone-seminar'), true); // now unlocks the kick
-  assert.ok(s.actions.includes('kick'));
+  assert.ok(!s.actions.includes('paper-storm'));
+  assert.equal(spendClassPoint(s, 'drone-paper-storm'), false); // prereq not met yet
+  assert.equal(spendClassPoint(s, 'drone-sharp-folds'), true);
+  assert.equal(spendClassPoint(s, 'drone-paper-storm'), true); // now unlocks it
+  assert.ok(s.actions.includes('paper-storm'));
 });
 
 test('spendClassPoint merges a numeric talent effect', () => {
@@ -729,10 +732,14 @@ test('a talent power and a perk power sit after the class list, gear last', () =
   const s = createSheet('office-drone');
   s.classPoints = 9;
   spendClassPoint(s, 'drone-thick-skin');
-  spendClassPoint(s, 'drone-seminar'); // grants 'kick'
+  // Paper Storm, behind Sharp Folds - the Drone's track grant since
+  // POWERS_PLAN M3 (it used to be `kick`, which the Mail Room and Security
+  // also handed out, so three classes unlocked one action).
+  spendClassPoint(s, 'drone-sharp-folds');
+  spendClassPoint(s, 'drone-paper-storm'); // grants 'paper-storm'
   equipItem(s, s.inventory.push('stapler') - 1); // brings its own swing
   const ids = barIds(s, ['paper-ball']);
-  assert.ok(ids.indexOf('kick') > ids.indexOf('coffee'), 'a learned power follows the class kit');
+  assert.ok(ids.indexOf('paper-storm') > ids.indexOf('coffee'), 'a learned power follows the class kit');
   assert.equal(ids[ids.length - 1], 'staple-jab', 'the weapon swing is last');
 });
 
@@ -744,7 +751,8 @@ test('the order is stable as a kit grows - buttons do not shuffle', () => {
     const s = createSheet('office-drone');
     s.classPoints = 9;
     spendClassPoint(s, 'drone-thick-skin');
-    spendClassPoint(s, 'drone-seminar');
+    spendClassPoint(s, 'drone-sharp-folds');
+    spendClassPoint(s, 'drone-paper-storm');
     return barIds(s, ['paper-ball']);
   })();
   assert.deepEqual(after.filter((id) => before.includes(id)), before);

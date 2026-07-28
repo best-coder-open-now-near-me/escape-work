@@ -44,7 +44,7 @@ test('class points learn track nodes (attr bonus, then a prereq-gated action)', 
   test.setTimeout(120_000);
   await bootStash(page, SOLO_LEVEL); // office-drone track
 
-  await page.evaluate(() => { window.__god.player.classPoints = 2; });
+  await page.evaluate(() => { window.__god.player.classPoints = 3; });
   await page.click('#levelup-pip'); // the pip lights for class points too
   await expect(page.locator('#levelup-screen')).toBeVisible();
 
@@ -54,10 +54,30 @@ test('class points learn track nodes (attr bonus, then a prereq-gated action)', 
   await expect.poll(() => page.evaluate(() => window.__god.player.attr.grit)).toBe(grit0 + 1);
   expect(await page.evaluate(() => window.__god.player.perks.includes('drone-thick-skin'))).toBe(true);
 
-  // Its prereq now met, Self-Defense Seminar unlocks the Steel-Toe Kick action.
-  expect(await page.evaluate(() => window.__god.player.actions.includes('kick'))).toBe(false);
-  await page.click('#lvlup-node-drone-seminar');
-  await expect.poll(() => page.evaluate(() => window.__god.player.actions.includes('kick'))).toBe(true);
+  // The gated node is Paper Storm, behind Sharp Folds (POWERS_PLAN M3). It
+  // used to be Self-Defense Seminar granting `kick` - which the Mail Room and
+  // Security also granted, so three classes unlocked one action and levelling
+  // up converged the roster.
+  //
+  // With its prereq unmet the node is LOCKED, and the screen says so: the
+  // button is disabled and reads "Locked". That is the half of "prereq-gated"
+  // the old spec never exercised - it only ever clicked the node after the
+  // prereq was already paid for, so a node with no `requires` at all would
+  // have passed it.
+  //
+  // Asserted as disabled rather than clicked: a disabled button never becomes
+  // actionable, so page.click waits out the whole timeout and reports "click
+  // timed out" - which looks like a hung UI rather than a working gate.
+  expect(await page.evaluate(() => window.__god.player.actions.includes('paper-storm'))).toBe(false);
+  const gated = page.locator('#lvlup-node-drone-paper-storm');
+  await expect(gated).toBeDisabled();
+  await expect(gated).toHaveText('Locked');
+
+  // Pay the prereq, and now it takes.
+  await page.click('#lvlup-node-drone-sharp-folds');
+  await expect.poll(() => page.evaluate(() => window.__god.player.perks.includes('drone-sharp-folds'))).toBe(true);
+  await page.click('#lvlup-node-drone-paper-storm');
+  await expect.poll(() => page.evaluate(() => window.__god.player.actions.includes('paper-storm'))).toBe(true);
   expect(await page.evaluate(() => window.__god.player.classPoints)).toBe(0);
 
   await page.click('#lvlup-done');
