@@ -1,5 +1,12 @@
 # Shadowbane: research notes, and what fits
 
+**Status `[stated]`** (designer, 2026-07-28): Shadowbane is **not a priority
+inspiration**. This file stays a bounded study — mine it for transferable
+structure (the anti-chain window in `STATUS_PLAN.md` §5 came from here), but
+the games this one is actually in conversation with are the party CRPGs the
+plans cite throughout, DOS2 and BG3. Where Shadowbane's way fights theirs,
+theirs wins by default.
+
 Research notes, not a plan. Shadowbane (Wolfpack Studios, 2003) has a reputation
 for holding together as a balanced system despite an enormous build space, and
 the question this document answers is *which of its structural choices would
