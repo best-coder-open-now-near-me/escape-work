@@ -67,8 +67,15 @@ test('Reboot self-cast clears every status', async ({ page }) => {
 
 test('a friendly verb does not arm a swing at a coworker', async ({ page }) => {
   // Driven through HR's Performance Review rather than an IT verb: Reboot is
-  // an ANY-target purge now, so it legitimately does promise a swing at a
-  // coworker. A friends-ONLY buff is what this rule is about.
+  // an ANY-target purge now, so it legitimately DOES promise a swing at a
+  // coworker, and can no longer carry a rule about friends-only verbs.
+  // Performance Review is the only friends-only verb in any base kit.
+  //
+  // Slow because HR is the slow way into a fight: it has no attack of its own,
+  // so entering combat means walking a coworker down rather than opening on
+  // them, and under software GL that walk can eat the default budget before a
+  // single engage attempt completes.
+  test.slow();
   await bootAndPick(page, 'human-resources');
   await enterCombat(page);
   await waitForPlayerTurn(page);

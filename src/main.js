@@ -1631,12 +1631,20 @@ function startGame(level) {
       if (!m.actor?.entity || m.sheet.hp <= 0) continue;
       const en = enemies.find((e) =>
         e.alive && Math.abs(m.actor.x - e.x) <= 1 && Math.abs(m.actor.z - e.z) <= 1
-        // Adjacency THROUGH a wall or a closed door is not adjacency. Chebyshev
-        // alone started fights across a sealed doorway - and because doors
-        // cannot be opened in combat and closed doors block sight, the coworker
-        // on the far side could then never be reached, shot or seen, while
-        // victory still required them dead. The fight could not end.
-        && grid.stepOpen(Math.round(m.actor.x), Math.round(m.actor.z), e.x, e.z));
+        // Adjacency THROUGH a sealed doorway is not adjacency. Chebyshev alone
+        // started fights across one - and because doors cannot be opened in
+        // combat and closed doors block sight, the coworker on the far side
+        // could then never be reached, shot or seen, while victory still
+        // required them dead. The fight could not end.
+        //
+        // The test is the SAME one that picks the engaged set, deliberately:
+        // "can these two take part in a fight together" should have one answer,
+        // and using movement's stepOpen here asked a different question. That
+        // rule needs all four edges around a diagonal corner open, which is
+        // right for walking a body through and wrong for two people swinging at
+        // each other past the end of a partition - so it refused fights that
+        // plainly should have started.
+        && canTakePart(m.actor, e));
       if (en) return { en, member: m };
     }
     return null;

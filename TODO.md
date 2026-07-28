@@ -24,6 +24,29 @@ Answered directly by the project owner — recorded so they are not relitigated.
 - Consumables cost 2 AP in combat; paper upgrading is out-of-combat only;
   `PAPER_CAP`/`INV_CAP` become real numbers rather than `Infinity`.
 
+## E2e status in this environment (verified, not assumed)
+
+The suite runs under software GL here and is markedly slower than the CI it was
+tuned for: a full pass takes ~1.5h and several specs exceed the 120s per-test
+budget purely on wall-clock. Failures were therefore checked against the branch
+point (`e8e53de`) in a worktree rather than assumed to be regressions.
+
+- **Pre-existing at `e8e53de`, unrelated to this branch:** the IT Support
+  self-cast spec and `Performance Review is HR's` both already failed there,
+  with the timeout signature (one engage attempt, budget exhausted mid-walk).
+  Both classes lack an attack of their own, so entering combat means walking a
+  coworker down rather than opening on them - the slowest path in the suite.
+- **Caused here and fixed:** `a friendly verb does not arm a swing at a
+  coworker` passed at the branch point and had to move class (Reboot is an
+  any-target purge now and legitimately promises a swing, so it can no longer
+  carry a friends-only rule). HR's Performance Review is the only friends-only
+  verb in any base kit, which put the test on that same slow path; marked
+  `test.slow()` and verified passing.
+- [ ] **Worth doing:** give `enterCombat` a way to open a fight that does not
+      depend on walking a coworker down, so a class with no attack is not
+      inherently the slow path. That is the root cause of every timeout above,
+      and it would take ~10 minutes off a full run.
+
 ## Phase 0 — Critical fix + data-loss fixes
 
 - [ ] **Fix the combat soft-lock** (`combat.js:2060`): guard `handleEnemyClick`'s
