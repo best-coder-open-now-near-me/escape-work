@@ -416,3 +416,54 @@ is its own PR that keeps unit + e2e green.
       level-up UI consume `nodeAvailable` instead of re-deriving it,
       `fx.FEET_Y`/`HEAD_Y`/`groundDecal`, `hover.HL`, `pathfinding.BODY_RADIUS`,
       `looting.INV_CAP`), `snack-machine` category.
+
+## Phase 8 — Charm / Dominate (new feature)
+
+IT Support's identity verb, replacing the retired `remote-restart`: take a
+coworker off the board by making them yours for a few turns. DOS2's Charmed /
+BG3's Dominate Person, office-flavoured ("remote in and power-cycle them").
+
+**The load-bearing obstacle: there is no allegiance concept.** Sides are
+inferred from object *shape* — `sameSide = !!watcher.sheet === !!mover.sheet`
+(`combat.js:2768`). Party members and summons carry a `sheet`; enemies carry a
+`def` and don't. Nothing is mutable, so nothing can change sides. Every item
+below follows from fixing that one thing first.
+
+- [ ] **`sideOf(unit)` — one explicit allegiance predicate.** Replace the
+      `!!x.sheet` shape test with a real side, defaulting to today's answer so
+      the change is behaviour-neutral before charm exists. This is the seam the
+      whole feature hangs off, and it is worth landing on its own.
+- [ ] **`charmed` status** in `data/statuses.js`: turn clock, duration, `fx`
+      block (aura colour + landing burst), and a `resist` interaction with
+      Composure like every other resistable status. Content, not code.
+- [ ] **Victory must stop counting charmed units as hostile.** `!engaged.some(
+      (e) => e.alive)` appears at **7 sites** (`combat.js:519, 1358, 1723,
+      1928, 2003, 2198, 2942`). A charmed enemy is still `alive`, so a fight
+      whose last hostile is charmed can never end — the same soft-lock shape as
+      the closed-door deadlock. Collapse all seven into one `hostilesRemain()`
+      helper *first*, then teach that one function about charm.
+- [ ] **`pickTarget` must invert for a charmed unit** (`combat.js:140`) — it
+      iterates `livingMembers()` unconditionally. A charmed unit needs to pick
+      from its former side, which also means `canEngage`'s memo key
+      (`combat.js:125`) has to include allegiance or it will cache pre-charm
+      answers.
+- [ ] **Unit-vs-unit attacks.** `aiAttack` → `unitStrikesMember(unit, target.
+      member, atk)` (`combat.js:2566, 2577`) assumes attacker-has-def and
+      defender-has-sheet. A charmed unit swinging at an enemy is
+      unit-vs-unit, which that path cannot express. Precedent exists:
+      `opportunityStrike` (`combat.js:2801`) already resolves both directions
+      and is the shape to generalise toward.
+- [ ] **Reaction sides**: `watchTriggers`' `sameSide` (`powers.js:149`) and
+      `provokedBy` both need the new predicate, or a charmed ally will provoke
+      your own overwatch and vice versa.
+- [ ] **Targeting + UI**: `enemyAtPoint`/`allyAtPoint`, `friendlies()`
+      (`combat.js:1739`), the ring colours in `drawTargets`, the hover focus
+      banner, and the initiative strip all read sides. A charmed unit must
+      *look* like yours or every affordance lies about what a click will do.
+- [ ] **Expiry**: reverting mid-fight, and specifically expiry landing during
+      the charmed unit's own turn (the turn engine is mid-slot). Also decide
+      whether damage from your side breaks it early, as DOS2's Charmed does.
+- [ ] **Edges to pin with tests**: charm the last living hostile (fight ends?
+      or waits for expiry?); charm a unit that is itself a summon; charm
+      interacting with `engaged` and the summon cap; charm on a unit holding
+      overwatch.
