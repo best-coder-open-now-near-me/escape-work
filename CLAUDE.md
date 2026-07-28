@@ -87,6 +87,23 @@ wrong. `[proposed]` bends: if the designer's visible direction — comments,
 recent asks, the things they keep changing — fights a proposal, the proposal
 loses. Re-open it; don't defend it.
 
+## Container plumbing is not news
+
+Remote sessions run in a throwaway container holding a snapshot clone of the
+repo. Its local branches routinely drift from GitHub — stale `main`,
+forced-update notices, "unrelated histories" errors. This is plumbing, not
+peril: fixing it touches nothing on GitHub.
+
+- Re-sync silently. `git fetch origin <branch>` and reset the local branch
+  to `origin/<branch>` before building on it. Don't mention it in replies,
+  PR descriptions, or commit messages — the designer has heard about it
+  enough.
+- Speak up only when the remote is actually at stake: a push that would need
+  force, remote history that truly rewrote itself, work that would be lost.
+  Those are real; say so plainly.
+- Same rule for the rest of the environment's housekeeping (proxy quirks,
+  disk allowance, tool re-installs): narrate the work, not the workshop.
+
 ## The ratification loop
 
 When the designer answers a question or reacts to a proposal, close the loop
