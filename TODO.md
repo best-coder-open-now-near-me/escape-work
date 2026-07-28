@@ -89,6 +89,29 @@ line numbers are the review baseline and may be shifted slightly in
       ("nor leave a renewable ammo pile behind it"), and it is load-bearing for
       any paper-upgrade system — upgrading only adds a step unless the raw
       supply is bounded by the world.
+- [ ] **`reboot` ("Turn It Off And On Again") should only strip statuses**
+      *(decided)* — it currently deals 4–7 damage when aimed at a coworker.
+      Self-cast is already correct: `combat.js:2168` is a dedicated branch that
+      spends AP, calls `clearStatuses`, and rolls no damage. The enemy cast
+      falls through to `strike` → `performOn`, which rolls
+      `rand(a.min, a.max)` (`combat.js:1318`) and purges only afterward
+      (`:1328`). The registry authorises it — `type: 'attack'`, `min: 4`,
+      `max: 7` — and the entry contradicts itself: `desc` describes the *self*
+      cast ("Turn **yourself** off and on again"), `log` describes an *enemy*
+      cast ("You power-cycle **their** whole workflow").
+      **⚠ There is no safe data-only fix.** Deleting `min`/`max` while it stays
+      `type: 'attack'` walks straight into the Phase 0 critical bug:
+      `rand(undefined, undefined)` is `NaN` → `takeDamage(NaN)` → the target's
+      hp becomes `NaN`, never `<= 0`, so it is permanently unkillable and the
+      fight soft-locks. Do the Phase 0 guard first.
+      Recommended shape: make `performOn` skip the damage roll and its FX
+      entirely when an action declares no dice — "an attack with no `min`/`max`
+      is a pure effect" — then `reboot` becomes a data change (drop the dice,
+      fix `desc`/`log` to agree). That same rule also removes the damage half
+      of the buff/mobility NaN bug, so the two fixes converge. Note
+      `remote-restart` is already the no-damage purge for allies
+      (`type: 'buff'`, `purge: true`, no dice), so the "cleanse" shape exists —
+      it just has no hostile-aimed counterpart.
 - [ ] `paper-storm` needs `leavesTurns` (`data/actions.js:83`) — still a
       separate bug after the harvest rule above, because permanent drifts are a
       *terrain* problem in their own right (every cast repaints ~9 floor tiles
