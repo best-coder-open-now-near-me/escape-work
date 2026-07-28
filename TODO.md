@@ -7,6 +7,23 @@ milestones M1–M6). Items reference REVIEW.md by `file:line` for full detail;
 line numbers are the review baseline and may be shifted slightly in
 `combat.js`.
 
+## Settled decisions
+
+Answered directly by the project owner — recorded so they are not relitigated.
+
+- **Tactics stay as shipped.** Overwatch, cover and flanking all KEEP. The
+  review's "XCOM drift" observation is noted and declined: no deletion work in
+  `TACTICS_PLAN.md`, `COVER_DODGE`, `FLANK_ACC_BONUS` or the `watch` stance.
+- **Movement stays AP-billed** at `MOVE.COST_PER_TILE` from the shared pool
+  (DOS2). `freeMoveAp` remains a Pawn-talent perk, not a universal allowance —
+  do not promote it.
+- **`reboot` targets anything** — self, ally, enemy, and *props/items* (for
+  concepts like a compromised device). See Phase 2.
+- **Charm targets enemies only**, and is **player-controlled** on its own
+  turn (BG3 Dominate, not DOS2's AI-driven Charmed). See Phase 8.
+- Consumables cost 2 AP in combat; paper upgrading is out-of-combat only;
+  `PAPER_CAP`/`INV_CAP` become real numbers rather than `Infinity`.
+
 ## Phase 0 — Critical fix + data-loss fixes
 
 - [ ] **Fix the combat soft-lock** (`combat.js:2060`): guard `handleEnemyClick`'s
@@ -109,17 +126,28 @@ line numbers are the review baseline and may be shifted slightly in
       is a pure effect" — then `reboot` becomes a data change (drop the dice,
       fix `desc`/`log` to agree). That same rule also removes the damage half
       of the buff/mobility NaN bug, so the two fixes converge.
-- [ ] **`reboot` must also target teammates** *(decided)* — cleansing an ally's
-      bleed with it is currently impossible. Cause: ally targeting hangs off
+- [ ] **`reboot` must target ANYTHING** *(decided)* — self, ally, enemy, and
+      props/items (so a "compromised device" can be power-cycled). Cleansing an
+      ally's bleed with it is currently impossible. Cause: ally targeting hangs off
       one binary predicate, `isFriendly = a.type === 'buff'` (`powers.js:71`),
       which feeds `aimsAtAlly` (`:174`), which is what makes main.js route a
       click on a teammate's body into `handleAllyClick` (`main.js:1984`). An
       `attack` never qualifies, so a click on a teammate with Reboot armed does
       nothing. **A verb that aims at either half of the board has no shape in
       the model** — that predicate, not the reboot entry, is the thing to
-      change (e.g. a third state: friendly / hostile / any). Ships naturally
-      with the pure-purge change above: once Reboot rolls no damage, there is
-      no reason it cannot point at an ally.
+      change: it needs a target-CLASS concept (friendly / hostile / any /
+      props), not a third boolean state. Ships naturally with the pure-purge
+      change above: once Reboot rolls no damage, there is no reason it cannot
+      point at an ally.
+      **Props are a second axis, not more of the same one.** Bodies are picked
+      by mesh (`enemyAtPoint`/`allyAtPoint`); furniture is aimed at by TILE and
+      resolved through `topplePlan` (`combat.js:2180`, "the same verb, aimed at
+      furniture instead of a person" — `shove` is the only verb that does this
+      today). So "reboot targets props" means the click path must consult the
+      prop layer as well as the two body layers, which `shove` is the working
+      precedent for. Decide what a purge even DOES to a prop before building
+      it — there is no prop-status system yet, so "compromised item" is new
+      content, not a retarget.
       Note for triage: this is *not* currently a dead end for players —
       `remote-restart` (`type: 'buff'`, `purge: true`, `range: 5`, `uses: 2`)
       is in the same base IT Support kit and does cleanse allies today;
@@ -133,10 +161,11 @@ line numbers are the review baseline and may be shifted slightly in
       a verb it cannot perform is a promise on the résumé card and nowhere
       else"). IT Support declares `primary: 'buff'` and `remote-restart` is its
       **only** `buff` — `reboot` is `attack`, `energy-drink` is `heal` — so
-      deleting it turns the unit suite red. Sequence it with the reboot rework
-      instead: once Reboot is a pure any-target purge, IT's `primary` becomes
-      whatever type that verb ends up as, and `remote-restart` drops out with
-      the lint still green. Removal also touches `data/classes.js:211-214` (kit
+      deleting it turns the unit suite red. **The cheap escape is now closed:**
+      since Reboot targets anything (not ally-only), it cannot simply become
+      `type: 'buff'` to satisfy the lint. So this is strictly sequenced behind
+      the reboot rework — Reboot gets a new purge type, IT's `primary` becomes
+      that type, and `remote-restart` drops out with the lint still green. Removal also touches `data/classes.js:211-214` (kit
       + the comment describing the two-verb split), two e2e tests
       (`powers.spec.js:42` is entirely about it; `:68` merely *uses* it to
       prove a general rule and can repoint at HR's `performance-review`, the
@@ -419,51 +448,49 @@ is its own PR that keeps unit + e2e green.
 
 ## Phase 8 — Charm / Dominate (new feature)
 
-IT Support's identity verb, replacing the retired `remote-restart`: take a
-coworker off the board by making them yours for a few turns. DOS2's Charmed /
-BG3's Dominate Person, office-flavoured ("remote in and power-cycle them").
+IT Support's identity verb, replacing the retired `remote-restart`: remote into
+a coworker and run them for a few turns. **Enemies only**, and **player-
+controlled** — you drive its turn (BG3's Dominate Person), not the AI.
 
-**The load-bearing obstacle: there is no allegiance concept.** Sides are
-inferred from object *shape* — `sameSide = !!watcher.sheet === !!mover.sheet`
-(`combat.js:2768`). Party members and summons carry a `sheet`; enemies carry a
-`def` and don't. Nothing is mutable, so nothing can change sides. Every item
-below follows from fixing that one thing first.
+**The machinery already exists.** A player-side summon is not an AI unit: it is
+pushed straight into `members` with a sheet (`combat.js:75`,
+`asMember(s, { isSummon: true, … })`), so it already takes a normal player turn
+with its own initiative slot, action bar, AP and `usesLeft`. `combat.js:499`
+states the rule outright — "AI-driven units are always enemy-side; player-side
+summons are members." So charm does **not** need a mutable allegiance flag or a
+`sideOf()` predicate, which is what an earlier draft of this phase assumed.
+Charm = *borrow* a unit into `members` the way a summon is *created* into it,
+then give it back.
 
-- [ ] **`sideOf(unit)` — one explicit allegiance predicate.** Replace the
-      `!!x.sheet` shape test with a real side, defaulting to today's answer so
-      the change is behaviour-neutral before charm exists. This is the seam the
-      whole feature hangs off, and it is worth landing on its own.
-- [ ] **`charmed` status** in `data/statuses.js`: turn clock, duration, `fx`
-      block (aura colour + landing burst), and a `resist` interaction with
-      Composure like every other resistable status. Content, not code.
-- [ ] **Victory must stop counting charmed units as hostile.** `!engaged.some(
-      (e) => e.alive)` appears at **7 sites** (`combat.js:519, 1358, 1723,
-      1928, 2003, 2198, 2942`). A charmed enemy is still `alive`, so a fight
-      whose last hostile is charmed can never end — the same soft-lock shape as
-      the closed-door deadlock. Collapse all seven into one `hostilesRemain()`
-      helper *first*, then teach that one function about charm.
-- [ ] **`pickTarget` must invert for a charmed unit** (`combat.js:140`) — it
-      iterates `livingMembers()` unconditionally. A charmed unit needs to pick
-      from its former side, which also means `canEngage`'s memo key
-      (`combat.js:125`) has to include allegiance or it will cache pre-charm
-      answers.
-- [ ] **Unit-vs-unit attacks.** `aiAttack` → `unitStrikesMember(unit, target.
-      member, atk)` (`combat.js:2566, 2577`) assumes attacker-has-def and
-      defender-has-sheet. A charmed unit swinging at an enemy is
-      unit-vs-unit, which that path cannot express. Precedent exists:
-      `opportunityStrike` (`combat.js:2801`) already resolves both directions
-      and is the shape to generalise toward.
-- [ ] **Reaction sides**: `watchTriggers`' `sameSide` (`powers.js:149`) and
-      `provokedBy` both need the new predicate, or a charmed ally will provoke
-      your own overwatch and vice versa.
-- [ ] **Targeting + UI**: `enemyAtPoint`/`allyAtPoint`, `friendlies()`
-      (`combat.js:1739`), the ring colours in `drawTargets`, the hover focus
-      banner, and the initiative strip all read sides. A charmed unit must
-      *look* like yours or every affordance lies about what a click will do.
-- [ ] **Expiry**: reverting mid-fight, and specifically expiry landing during
-      the charmed unit's own turn (the turn engine is mid-slot). Also decide
-      whether damage from your side breaks it early, as DOS2's Charmed does.
-- [ ] **Edges to pin with tests**: charm the last living hostile (fight ends?
-      or waits for expiry?); charm a unit that is itself a summon; charm
-      interacting with `engaged` and the summon cap; charm on a unit holding
-      overwatch.
+- [ ] **`charmed` status** (`data/statuses.js`): turn clock, duration, `fx`
+      block, and a Composure `resist` interaction like every other status.
+- [ ] **Borrow**: on landing, build the sheet (`createSheetFrom(def)` —
+      `main.js:501` already does this for summoned units), pull the actor out of
+      `world.liveEnemies()` and `engaged`, and `members.push(asMember({sheet,
+      actor}, { isCharmed: true, … }))`. The summon lifetime fields
+      (`summonTurns`, `lifetimeLeft`/`spendLifetime`, `combat.js:525`) are
+      already a turn-limited controlled unit — reuse them rather than inventing
+      a second clock.
+- [ ] **Return** — the genuinely new code, since summons are destroyed and a
+      charmed unit must be handed back intact: restore it to `liveEnemies()`
+      and `engaged` with hp, statuses and `def` preserved. `dismissSummon`
+      (`combat.js:2511`) is the shape to follow, and it already solves the
+      nastiest edge — `if (active === target) makeActive(…)` covers expiry
+      landing during the unit's own turn.
+- [ ] **Victory while borrowed.** A charmed unit is out of `liveEnemies()`, so
+      `!engaged.some((e) => e.alive)` — **7 sites** (`combat.js:519, 1358, 1723,
+      1928, 2003, 2198, 2942`) — can fire victory *while it is still charmed*,
+      ending the fight with a borrowed enemy standing in your party. Collapse
+      the seven into one `hostilesRemain()` helper first, then decide the rule:
+      does charming the last hostile win, or does the fight wait for expiry?
+- [ ] **Guard the party-only paths.** `livingParty()` (`combat.js:88`) already
+      excludes summons and `combat.js:1122` keeps a summon out of
+      `party.active`; a charmed unit needs the same exclusions, or it can
+      become the party leader or be saved into the roster.
+- [ ] **Reaction sides**: `sameSide = !!watcher.sheet === !!mover.sheet`
+      (`combat.js:2768`) resolves correctly for free once the unit holds a
+      sheet — worth an explicit test rather than trusting it.
+- [ ] **Edges to pin with tests**: charm the last living hostile; charm a unit
+      that is itself an enemy summon (`summonedBy` set); charm a unit holding
+      overwatch; charm expiring while the unit is mid-turn; save/load with a
+      charm active; the unit dying while charmed.
