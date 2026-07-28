@@ -908,6 +908,12 @@ function startGame(level) {
   const sightClear = (x, z) => grid.terrainOpen(x, z) && !runtime.isSmoke(x, z);
   // Throws sail over chest-high partitions but not closed doors (grid.sightOpen).
   const hasLos = (a, b) => segmentClear(sightClear, a.x, a.z, b.x, b.z, grid.sightOpen);
+  // The same sight line WITHOUT the smoke term. Whether a coworker can take
+  // part in a fight is a question about walls and doors - permanent things -
+  // not about a cloud that clears in two turns. Used to pick the engaged set,
+  // where being briefly hazed must not decide who is in the fight.
+  const canTakePart = (a, b) =>
+    segmentClear(grid.terrainOpen, a.x, a.z, b.x, b.z, grid.sightOpen);
   // The shared rule (stats.js), bound to the leader. A declaration, not a
   // const: the hotbar builder reads it and runs from paths that fire before
   // this point in the closure body.
@@ -1504,7 +1510,13 @@ function startGame(level) {
     for (const m of party?.members || []) {
       if (!m.actor?.entity || m.sheet.hp <= 0) continue;
       const en = enemies.find((e) =>
-        e.alive && Math.abs(m.actor.x - e.x) <= 1 && Math.abs(m.actor.z - e.z) <= 1);
+        e.alive && Math.abs(m.actor.x - e.x) <= 1 && Math.abs(m.actor.z - e.z) <= 1
+        // Adjacency THROUGH a wall or a closed door is not adjacency. Chebyshev
+        // alone started fights across a sealed doorway - and because doors
+        // cannot be opened in combat and closed doors block sight, the coworker
+        // on the far side could then never be reached, shot or seen, while
+        // victory still required them dead. The fight could not end.
+        && grid.stepOpen(Math.round(m.actor.x), Math.round(m.actor.z), e.x, e.z));
       if (en) return { en, member: m };
     }
     return null;
@@ -1693,7 +1705,11 @@ function startGame(level) {
     if (!hit) return;
     const { en, member } = hit;
     const engaged = enemies.filter((e) =>
-      e.alive && Math.max(Math.abs(e.x - member.actor.x), Math.abs(e.z - member.actor.z)) <= ENGAGE_RADIUS);
+      e.alive && Math.max(Math.abs(e.x - member.actor.x), Math.abs(e.z - member.actor.z)) <= ENGAGE_RADIUS
+      // ...and who can actually take part. Somebody inside the radius but
+      // sealed off joins a fight they can never act in, and victory needs
+      // every engaged coworker down - so the fight would never end.
+      && canTakePart(member.actor, e));
     beginCombat({ engaged, primary: en });
   }
 
@@ -1719,7 +1735,8 @@ function startGame(level) {
       return;
     }
     const engaged = enemies.filter((e) =>
-      e.alive && Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= ENGAGE_RADIUS);
+      e.alive && Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= ENGAGE_RADIUS
+      && canTakePart(player, e)); // same rule as checkCombatTrigger - see there
     if (!engaged.includes(en)) engaged.push(en);
     beginCombat({ engaged, primary: en, opening: { actionId, target: en } });
   }
@@ -2662,8 +2679,24 @@ function startGame(level) {
     for (const s of restoredProgress.sheets.slice(1)) addMember(party, s);
     party.active = restoredProgress.active;
     party.cash = restoredProgress.cash || 0; // the purse rides the stairwell too
-    partyLeader(party).actor = player;
-    sheet = partyLeader(party).sheet;
+    // The member on point may be a COMPANION - you can take the stairs with one
+    // leading. Handing them the bare PlayerActor dropped their registry `def`,
+    // and with it their dialogue and their examine line; the loss was permanent
+    // rather than cosmetic, because switchLeader reuses whatever actor a member
+    // already carries, so they never got a proper body again for the rest of
+    // the run. Embody the active member as what they actually are, and let
+    // `player` point at that - which is all `player` has ever meant.
+    const onPoint = partyLeader(party);
+    const onPointDef = COMPANIONS[onPoint.sheet.companionId];
+    if (onPointDef) {
+      const body = new CompanionActor(player.x, player.z, onPoint.sheet.companionId, onPointDef);
+      body.recruited = true; // they are already in the party; they walked here
+      onPoint.actor = body;
+      player = body;
+    } else {
+      onPoint.actor = player;
+    }
+    sheet = onPoint.sheet;
     spawnPlayerModel();
     for (const m of party.members) {
       if (m.actor) continue; // the leader, already placed
