@@ -17,6 +17,19 @@ test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ pa
     await clickAction(page, 'reboot');
   }
   expect(await page.evaluate(() => window.__combat.armed)).toBe('reboot');
+
+  // Give the purge something to purge. Reboot is a PURE purge now, and a purge
+  // that would land on a clean sheet is refused before the commit rather than
+  // billed for nothing (powers.js emptyPayload: "Nothing to clear - they are
+  // running clean."). This test asserts the self-cast spends its AP, so it has
+  // to hand the verb real work first - without it the click is a legitimate
+  // no-op, the retry loop never sees AP move, and the failure surfaces as a
+  // five-minute timeout instead of "you asked it to clear nothing".
+  //
+  // `bleed` specifically: it is a step-clock status, so it cannot tick away
+  // underneath the loop while the camera settles between attempts.
+  await page.evaluate(() => window.__combat.applyStatus('bleed', 4));
+
   const ap0 = await page.evaluate(() => window.__combat.ap);
   // Read the cost from the registry rather than pinning a number here: action
   // costs get re-priced (MOVEMENT_PLAN M5 moved every attack 3 -> 2), and this
@@ -48,6 +61,11 @@ test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ pa
   }
   expect(spent).toBe(true); // reboot self-cast consumed exactly its AP
   expect(await page.evaluate(() => window.__combat.armed)).toBe(null);
+  // ...and it was a PURGE, which is what the test is named for - the AP check
+  // alone would pass on any self-targeted verb that costs the same.
+  const left = await page.evaluate(() =>
+    (window.__combat.party.find((m) => m.active)?.statuses ?? []).map((s) => s.id));
+  expect(left).not.toContain('bleed');
 });
 
 test('Mail Room: Bulk Mail cones damage and leave paper drifts', async ({ page }) => {
