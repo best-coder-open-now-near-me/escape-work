@@ -59,22 +59,22 @@ baseline's own failure list, one under its old name: `Mail Room: Bulk Mail`,
   which is exactly the data-loss bug Phase 0 fixed. A level launched from the
   editor is standalone, and finishing one is not finishing a campaign run. The
   assertion is inverted now, with the reasoning in the test.
-- [ ] **`classes.spec.js:108` (Security: Detain) - a REAL regression.** Fails
-      consistently on this branch (three separate runs) and passes at
-      `e8e53de`. The `detained` status is not landing:
-      `expect(after.statuses.some((s) => s.id === 'detained')).toBe(true)` comes
-      back false, with no timeout involved. Not yet diagnosed - the obvious
-      suspects were checked and cleared (`isControl` still admits it through
-      the Phase 0 fall-through guard; `performControl`'s apply site is
-      unchanged apart from the charm branch, which only runs for `charmed`).
-      Next step is to bisect this branch against that one spec.
-- [ ] **`powers.spec.js:123` (Stand Post overwatch) - FLAKY, not broken.**
-      Passed in two runs on this branch and failed in two others, same commit.
-      The failure is the foe's HP never dropping, so the overwatch did not fire
-      on the mover. `beginMove` and `setPath` are in one synchronous block in
-      `aiAdvance`, so the Phase 1 `moveStart` cleanup cannot be racing it -
-      ruled out, but the real cause is unfound. Worth running under `--repeat-
-      each` to characterise before chasing.
+- **`classes.spec.js:108` (Security: Detain) - was a real regression. FIXED,
+  by reverting its cause.** Bisected to the `enterCombat` fast path added in
+  Phase 6. Detain is TOUCH-range, so it needs a walk-up; engaging by clicking
+  walks the player adjacent, while `startFightNow` opened the fight from
+  wherever they stood - leaving Detain permanently out of reach inside the
+  spec's retry loop. Confirmed by disabling the fast path alone (46s, no
+  timeout) and then by the full revert.
+- **`powers.spec.js:123` (Stand Post) - same cause, also FIXED.** It was called
+  flaky here on the evidence available at the time; it was not. The fast path
+  was destabilising it as well, and it passes consistently once reverted.
+- **The fast path is reverted and its hook removed.** It never delivered what
+  it was for - the HR/IT timeouts were unchanged by it, because it only helps
+  when somebody is already in range at boot - and it changed the geometry specs
+  are written against. A note in `helpers.js` records this so it is not tried
+  again. Walking is slow, but it is what the specs mean.
+
 - [ ] The suite needs a longer per-test budget in environments like this one,
       or the timeouts will keep being mistaken for regressions. `test.slow()`
       per spec is the stopgap; a config-level budget keyed off an env var is the

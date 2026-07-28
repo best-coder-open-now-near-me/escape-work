@@ -198,24 +198,13 @@ function engageBudgetMs() {
 }
 
 export async function enterCombat(page) {
-  // Fast path first. Walking a coworker down is the suite's single largest
-  // cost, and for a class with no attack of its own it is the ONLY way in -
-  // which is why exactly those specs exhaust their budget mid-walk. This goes
-  // through the same beginCombat the trigger does, with the same engaged rule,
-  // so the fight is real; it just skips the walking. Falls through to the
-  // click-and-walk path below when there is nobody in range yet.
-  const opened = await page.evaluate(() => window.__game.startFightNow?.() ?? false);
-  if (opened) {
-    await expect
-      .poll(() => page.evaluate(() => window.__game.inCombat), { timeout: 15_000 })
-      .toBe(true);
-    // Settle on the player's turn exactly as the slow path does - initiative
-    // may hand the enemy the first turns, and returning mid-AI-turn leaves the
-    // caller's next click waiting out its whole timeout against a legitimately
-    // disabled button. Skipping the walk must not mean skipping this.
-    await settleOnPlayerTurn(page, 30_000);
-    return;
-  }
+  // NB: an `startFightNow` fast path was tried here and REVERTED. Opening the
+  // fight from where the player stands, rather than walking them to a coworker,
+  // changes the geometry specs are written against: a touch-range verb like
+  // Detain arrives out of reach, and classes.spec's Detain test failed
+  // consistently because of it. It also never delivered - the HR/IT timeouts it
+  // was meant to fix were unchanged, because it only helps when somebody is
+  // already in range at boot. Walking is slow, but it is what the specs mean.
   const started = Date.now();
   const deadline = started + engageBudgetMs();
   const left = () => deadline - Date.now();
