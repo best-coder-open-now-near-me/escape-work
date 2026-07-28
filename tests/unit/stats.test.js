@@ -7,7 +7,7 @@ import {
   spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist,
   accuracy, dodge, hitChance, rollHit, unitCombat,
   equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf,
-  reachOf, ammoCostOf, orderedActionIds,
+  reachOf, rangeOf, ammoCostOf, orderedActionIds,
   PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
@@ -694,6 +694,82 @@ test('ammoCostOf survives a missing sheet', () => {
   const [id, a] = Object.entries(ACTIONS).find(([, x]) => x.ammoCost > 1);
   assert.equal(ammoCostOf(null, id), a.ammoCost);
   assert.equal(ammoCostOf({}, id), a.ammoCost);
+});
+
+// --- ranged weapons ------------------------------------------------------------
+// `rangeOf` is the split that let a weapon be ranged without being ammo: five
+// call sites across combat.js and main.js used to read `ammoCost` to mean
+// "fired from over there", which is only true while every ranged attack in the
+// game is a paper throw.
+
+test('rangeOf is 0 for a swing, the declared range for a shot', () => {
+  assert.equal(rangeOf('punch'), 0);
+  assert.equal(rangeOf('staple-jab'), 0);
+  assert.equal(rangeOf('staple-gun-fire'), ACTIONS['staple-gun-fire'].range);
+  assert.equal(rangeOf('spitball-shot'), ACTIONS['spitball-shot'].range);
+});
+
+test('rangeOf leaves the paper throws exactly where they were', () => {
+  // No `range` declared: an ammo throw still carries THROW_RANGE, so the split
+  // is invisible to the two throwables that predate it.
+  for (const [id, a] of Object.entries(ACTIONS)) {
+    if (!a.ammoCost || a.range !== undefined) continue;
+    assert.equal(rangeOf(id), THROW_RANGE, `${id} still throws ${THROW_RANGE}`);
+  }
+});
+
+test('rangeOf ignores every range that is not a firing range', () => {
+  // `range` is a shared word: a summon's is how far applicants may report, a
+  // zone's how far it can be dropped, a control's and a buff's their own reach.
+  // Each resolves through its own gate in powers.js. Read as a firing range,
+  // Post the Role would look like a gun and a touch control would stop walking
+  // you in - so this asserts across the whole registry, not one example.
+  const others = Object.entries(ACTIONS).filter(([, a]) => a.type !== 'attack' && a.range);
+  assert.ok(others.length, 'some non-attack verb carries a range to be ignored');
+  for (const [id] of others) assert.equal(rangeOf(id), 0, `${id} is not fired`);
+  assert.equal(rangeOf('no-such-action'), 0);
+  assert.equal(rangeOf(undefined), 0);
+});
+
+test('a ranged weapon grants a ranged attack, and it costs no ammo', () => {
+  const s = createSheet('office-drone');
+  s.inventory = ['staple-gun'];
+  equipItem(s, 0);
+  const shot = equippedAction(s);
+  assert.equal(shot, 'staple-gun-fire');
+  assert.ok(rangeOf(shot) > 0, 'the weapon swing is fired, not swung');
+  // The whole point of the no-ammo rule: a weapon you have to feed is a weapon
+  // you stop carrying. Ammo stays on the specialty shots.
+  assert.equal(ammoCostOf(s, shot), 0);
+  assert.equal(ACTIONS[shot].ammoCost, undefined);
+});
+
+test('range is paid for in damage, and only in damage', () => {
+  // The balance rule for ranged weapons: no ammo, no AP surcharge, no
+  // adjacency penalty - they simply hit for less than the melee weapon of the
+  // same tier. If a ranged weapon ever out-rolls the stapler, the reason to
+  // ever walk up to anyone is gone.
+  const jab = ACTIONS['staple-jab'];
+  for (const [itemId, it] of Object.entries(ITEMS)) {
+    if (it.slot !== 'weapon' || !rangeOf(it.attack)) continue;
+    const shot = ACTIONS[it.attack];
+    assert.equal(shot.ap, jab.ap, `${itemId} costs the same AP as a swing`);
+    assert.ok(shot.max < jab.max, `${itemId} rolls under the stapler`);
+    assert.equal(it.stats?.dmg || 0, 0, `${itemId} adds no damage on top`);
+  }
+});
+
+test('the longest range in the game is the weakest hit in it', () => {
+  const shots = Object.values(ITEMS)
+    .filter((it) => it.slot === 'weapon' && rangeOf(it.attack))
+    .map((it) => it.attack);
+  assert.ok(shots.length >= 2, 'more than one ranged weapon to compare');
+  const furthest = shots.reduce((a, b) => (rangeOf(b) > rangeOf(a) ? b : a));
+  for (const id of shots) {
+    if (id === furthest) continue;
+    assert.ok(ACTIONS[furthest].max <= ACTIONS[id].max,
+      'reach and punch pull against each other');
+  }
 });
 
 // --- action order --------------------------------------------------------------

@@ -58,6 +58,8 @@ export const SHOPS = {
       { item: 'company-fleece', qty: 1, chance: 0.5 },
       { item: 'running-shoes', qty: 1, chance: 0.4 },
       { item: 'letter-opener', qty: 1, chance: 0.35 },
+      // The one place to buy range on purpose, rather than hope a drawer has one.
+      { item: 'staple-gun', qty: 1, chance: 0.3 },
     ],
   },
 };

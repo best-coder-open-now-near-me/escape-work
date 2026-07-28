@@ -18,7 +18,7 @@ import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DI
 import {
   createSheet, createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
   scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
-  orderedActionIds, reachOf, ammoCostOf, pendingPoints as pending, REACH, THROW_RANGE,
+  orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, REACH,
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
@@ -935,8 +935,14 @@ function startGame(level) {
   // would not do.
   const oocTargetOk = (id, en) => {
     const a = ACTIONS[id];
-    if (a.ammoCost) {
-      return cheb(player, en) <= THROW_RANGE && hasLos(player, en) && (sheet?.paper || 0) >= throwAmmoCost(id);
+    const range = rangeOf(id);
+    if (range) {
+      // Range, a line, and ammo only where the shot bills for it. A ranged
+      // WEAPON also passes if it can walk into range, the way a melee swing
+      // passes on a route it hasn't taken yet - combat's opener walks it in.
+      const shot = cheb(player, en) <= range && hasLos(player, en);
+      if (a.ammoCost) return shot && (sheet?.paper || 0) >= throwAmmoCost(id);
+      return shot || canApproach(en);
     }
     if (a.type === 'shove') return playerReaches(en, REACH.SHOVE);
     return playerReaches(en) || canApproach(en);
@@ -1696,8 +1702,11 @@ function startGame(level) {
     // doors) or throw at would otherwise open an unwinnable stalemate -
     // combat would start, and neither side could ever close the distance.
     const a = ACTIONS[actionId];
-    if (a.ammoCost) {
-      if (!oocTargetOk(actionId, en)) { ui.say('No line for that throw from here.'); return; }
+    if (rangeOf(actionId)) {
+      if (!oocTargetOk(actionId, en)) {
+        ui.say(a.ammoCost ? 'No line for that throw from here.' : 'No shot at them from here.');
+        return;
+      }
     } else if (a.type === 'shove') {
       if (!playerReaches(en, REACH.SHOVE)) { ui.say('Too far to shove. Walk your feelings over first.'); return; }
     } else if (!playerReaches(en) && !bestApproachPath(en.x, en.z)) {

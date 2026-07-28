@@ -303,6 +303,48 @@ untouched.
    every existing spec that boots a class still passes, the chosen pieces sit in
    slots the specs don't assert against.
 
+7. **Ranged weapons.** ✅ Landed. The first weapons that are *fired*, and the
+   first ranged attacks that cost **no ammo** — the DOS2/BG3 shape, where the
+   basic shot is free and ammo is reserved for specialty shots. Two items, both
+   `slot: weapon`: the **staple gun** (`staple-gun-fire`, range 4, rolls 1–3)
+   and the **spitball straw** (`spitball-shot`, range 6, rolls 1–2). The
+   staplers are untouched and still melee.
+   - **The refactor underneath it**: `ammoCost` had become the de-facto "is
+     this ranged" flag, because every ranged attack in the game was a paper
+     throw — five sites across `combat.js` and `main.js` branched on it to mean
+     "fired from over there" (the targeting rings, the click resolver, the
+     projectile-vs-lunge choice, the hit FX, and the out-of-combat opener gate).
+     A free-firing weapon was invisible to all of it and would have resolved as
+     a melee swing, lunging its owner across four desks into the target's face.
+     `stats.rangeOf(actionId)` now answers range and `ammoCost` is only a cost.
+     An `ammoCost` action with no declared `range` still carries `THROW_RANGE`,
+     so the two throwables need no data change and behave exactly as before.
+   - **The balance rule (decision):** range is paid for in **damage, and only
+     damage** — no ammo, no AP surcharge, no point-blank penalty. A staple gun
+     rolls 1–3 with `dmg: 0` where the stapler in the same hand jabs 2–4 with
+     +1 on top, so melee stays the kit that ends a fight and ranged is the one
+     that opens it. An adjacency rule was considered and dropped: it is a
+     second thing to learn, and the damage gap is already the whole argument
+     for closing the distance. Cover comes for free — `tactics.positionMods`
+     already gives the defender `COVER_DODGE` against any attacker outside
+     reach, so a shot across a partition is worse than one down an open lane.
+   - **It closes the distance when it has to.** A ranged weapon's attack is
+     what a bare click on a coworker uses (`defaultAttack`), so refusing at
+     range would have broken the most obvious verb in the game for anyone
+     holding one. It walks the same route a melee swing walks (`routeBeside`,
+     extracted so both share one route-finder) and stops the moment the shot is
+     on. A **throw** still refuses where it stands — it is armed deliberately
+     and billed in paper, and spending your last sheet at the end of a walk you
+     did not ask for is worse than being told no.
+   - Placement: staple gun in the `desk` table (0.12) and on the Mail Cart
+     (0.3, the one place to buy range on purpose); straw in `trash` (0.3).
+   - Unit 328→334 (`rangeOf` for swings/shots/throws/summons, the no-ammo
+     invariant, and a lint that every ranged weapon rolls under the stapler and
+     adds no `dmg`). e2e adds `ranged.spec.js`: opens a fight from range without
+     moving or spending paper, walks itself in when out of range and fires on
+     arrival, refuses a sealed pocket for free, and costs AP but no ammo in a
+     fight.
+
 ## Testing
 
 - **Unit** (`tests/unit/stats.test.js`): equip validates slot and swaps the
