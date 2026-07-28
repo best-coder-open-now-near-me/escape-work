@@ -11,6 +11,7 @@ const pc = window.pc;
 import { rollLoot } from './data/items.js';
 import { unitCombat } from './stats.js';
 import { applyStatus, hasStatus, statusFx } from './statuses.js';
+import { cloneMaterials, tintMaterials } from './models.js';
 
 const wrapAngle = (a) => (((a + 180) % 360) + 360) % 360 - 180;
 const TURN_RATE = 10; // how quickly facing eases toward the heading
@@ -55,29 +56,27 @@ export class GridActor {
     this.legL = entity.findByName('leg-left');
     this.legR = entity.findByName('leg-right');
     this.yaw = this.targetYaw = entity.getEulerAngles().y;
-    // Clone materials so damage flashes hit THIS character, not every
-    // character instantiated from the same .glb.
-    this.mats = [];
-    for (const rc of entity.findComponents('render')) {
-      for (const mi of rc.meshInstances) {
-        const clone = mi.material.clone();
-        clone.update();
-        mi.material = clone;
-        this.mats.push({ mat: clone, emissive: clone.emissive.clone() });
-      }
-    }
+    // Clone materials so damage flashes and tints hit THIS character, not every
+    // character instantiated from the same .glb. Shared with the picker preview
+    // (models.js), which has no actor but needs the identical rule.
+    this.mats = cloneMaterials(entity);
   }
 
   // Tint this character's own materials. Must run AFTER attach(), which clones
   // the .glb's shared materials per instance - tinting before the clone would
-  // recolour every character built from the same rig. Multiplies the diffuse,
-  // leaving emissive alone so the damage flash still works.
+  // recolour every character built from the same rig. Emissive is left alone so
+  // the damage flash still works.
+  //
+  // The multiply reads the PRISTINE diffuse, not whatever the material is
+  // currently holding. Multiplying the live value compounds: re-tinting an
+  // already-tinted body multiplies again, so clicking along a row of swatches
+  // walks it toward black instead of between colours. `attach` already keeps a
+  // per-instance baseline for this exact reason on the emissive channel; the
+  // diffuse now gets the same treatment, which is what lets a live swatch row
+  // drive this safely. Passing no rgb RESTORES the untinted body rather than
+  // doing nothing, so "none" is a reachable choice rather than a dead end.
   applyTint(rgb) {
-    if (!rgb) return;
-    for (const { mat } of this.mats) {
-      mat.diffuse.set(mat.diffuse.r * rgb[0], mat.diffuse.g * rgb[1], mat.diffuse.b * rgb[2]);
-      mat.update();
-    }
+    tintMaterials(this.mats, rgb);
   }
 
   faceToward(tx, tz) {

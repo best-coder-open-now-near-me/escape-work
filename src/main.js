@@ -18,7 +18,7 @@ import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, ro
 import {
   createSheet, createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
   scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
-  orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, REACH,
+  orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, lookOf, REACH,
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
@@ -30,7 +30,7 @@ import { aimsAtAlly } from './powers.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel } from './scene.js';
-import { placeModel, applyCharacterProportions } from './models.js';
+import { placeModel, applyCharacterProportions, cloneMaterials, tintMaterials } from './models.js';
 import { createPortraits } from './portraits.js';
 import {
   throwProjectile, spawnDamageText, worldToScreenCss, impact as impactFx, statusBurst,
@@ -391,12 +391,6 @@ function startGame(level) {
 
   // --- populate the scene -----------------------------------------------------
   const lift = floorHeight / 2;
-  // A character's `look` (data/classes.js, data/enemies.js, data/companions.js)
-  // is what keeps the several entries sharing one .glb from being the same
-  // person: a build nudge plus a colour tint. Sheets carry only `model`, so a
-  // sheet's look resolves back through its class/companion entry.
-  const sheetLook = (sh) => (sh?.classId && CLASSES[sh.classId]?.look)
-    || (sh?.companionId && COMPANIONS[sh.companionId]?.look) || null;
   // Surfaces a power DROPS during a fight are litter, not terrain: Bulk Mail's
   // paper drifts clear a few rounds later, so a cone can't permanently repaint
   // the floor (nor leave a renewable ammo pile behind it). Tracked here rather
@@ -515,7 +509,7 @@ function startGame(level) {
       placeModel(app, `assets/characters/${def.model}.glb`, x, z, {
         lift, rotY: ally ? 90 : -90, animate: true,
         onReady: (e) => {
-          dressUp(e, actor, ally ? sheetLook(rec.sheet) : actor.def?.look, ally ? rec.sheet.model : actor.def?.model);
+          dressUp(e, actor, ally ? lookOf(rec.sheet) : actor.def?.look, ally ? rec.sheet.model : actor.def?.model);
           picking.register(e, ally ? 'summon' : 'enemy', actor);
         },
       });
@@ -532,7 +526,7 @@ function startGame(level) {
     // a target.
     placeModel(app, `assets/characters/${sheet.model}.glb`, player.x, player.z, {
       lift, rotY: 90, animate: true,
-      onReady: (e) => { dressUp(e, player, sheetLook(sheet), sheet.model); picking.register(e, 'party', player); },
+      onReady: (e) => { dressUp(e, player, lookOf(sheet), sheet.model); picking.register(e, 'party', player); },
     });
     paintHud(sheet);
   }
@@ -551,19 +545,16 @@ function startGame(level) {
       lift, rotY: 45, animate: true, // start facing the head-on camera
       onReady: (e) => {
         // The picker must show the character you will actually get, tint and
-        // build included - no actor here, so clone the materials by hand.
+        // build included. There is no actor on this body, so it clones and
+        // tints through the shared helpers directly - it used to carry its own
+        // inline copy of the maths, which is how the compounding tint bug came
+        // to exist in two places at once. The clones are kept on the entity so
+        // a later re-tint (the creation flow's swatch row) computes from the
+        // pristine colours rather than from the last tint's result.
         const look = CLASSES[classId].look;
         applyCharacterProportions(e, look?.build);
-        if (look?.tint) {
-          for (const rc of e.findComponents('render')) {
-            for (const mi of rc.meshInstances) {
-              const c = mi.material.clone();
-              c.diffuse.set(c.diffuse.r * look.tint[0], c.diffuse.g * look.tint[1], c.diffuse.b * look.tint[2]);
-              c.update();
-              mi.material = c;
-            }
-          }
-        }
+        e._mats = cloneMaterials(e);
+        tintMaterials(e._mats, look?.tint);
         if (token !== previewToken) { e.destroy(); return; }
         previewEntity = e;
       },
@@ -2814,7 +2805,7 @@ function startGame(level) {
       m.actor = comp;
       placeModel(app, `assets/characters/${m.sheet.model}.glb`, spot.x, spot.z, {
         lift, rotY: 90, animate: true,
-        onReady: (e) => { dressUp(e, comp, sheetLook(m.sheet), m.sheet.model); picking.register(e, 'party', comp); },
+        onReady: (e) => { dressUp(e, comp, lookOf(m.sheet), m.sheet.model); picking.register(e, 'party', comp); },
       });
     }
     loot.refreshPanel(sheet);

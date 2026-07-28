@@ -660,7 +660,26 @@ export function nodeAvailable(sheet, node) {
   return true;
 }
 
-function bakeNodeEffect(sheet, effect = {}) {
+// Resolve a character's APPEARANCE: the sheet's own look wins, then the class
+// entry's, then the companion entry's. This lived as a closure inside main.js's
+// startGame, which meant nothing outside that one function could ask what a
+// character looks like - portraits.js was handed the answer rather than being
+// able to ask for it. Sheet-first is the seam custom appearance plugs into: a
+// character that has chosen a look keeps it, and everyone who has not falls
+// through to exactly today's answer.
+export function lookOf(sheet) {
+  return sheet?.look
+    || (sheet?.classId && CLASSES[sheet.classId]?.look)
+    || (sheet?.companionId && COMPANIONS[sheet.companionId]?.look)
+    || null;
+}
+
+// Bake an effect into a sheet, in place. Promoted from private so creation
+// (backgrounds) and progression (track nodes) spend ONE vocabulary rather than
+// growing a second. The contract is unchanged for its existing caller: it does
+// NOT recompute derived stats, because spendClassPoint has to sample maxHp
+// either side of the bake to credit new capacity undamaged.
+export function applyEffect(sheet, effect = {}) {
   if (effect.grantsAction && !sheet.actions.includes(effect.grantsAction)) {
     sheet.actions.push(effect.grantsAction);
   }
@@ -683,7 +702,7 @@ export function spendClassPoint(sheet, nodeId) {
   const node = TRACK_NODES[nodeId];
   if (!nodeAvailable(sheet, node)) return false;
   const maxHpBefore = sheet.maxHp;
-  bakeNodeEffect(sheet, node.effect);
+  applyEffect(sheet, node.effect);
   (sheet.perks = sheet.perks || []).push(nodeId);
   sheet.classPoints -= (node.cost || 1);
   recomputeDerived(sheet);
