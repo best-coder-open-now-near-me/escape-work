@@ -23,7 +23,12 @@ import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
 
 const pc = window.pc;
-const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
+// Inclusive integer roll. Takes its randomness as an ARGUMENT rather than
+// reading Math.random, because a module-scope read is unreachable from the
+// injected `rng` - which meant damage was the one part of a resolution a seeded
+// test could not pin, and so the whole roll -> damage -> status chain could
+// only ever be tested a piece at a time.
+const randWith = (r, lo, hi) => lo + Math.floor(r() * (hi - lo + 1));
 const cheb = (ax, az, bx, bz) => Math.max(Math.abs(ax - bx), Math.abs(az - bz));
 // Radius of a target's ring marker. Cone tests use it so a body counts when
 // the wedge CLIPS it, matching what the ring shows.
@@ -87,6 +92,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // (temporary members, appended by resolveSummon). `livingParty` is the real
   // roster only - a party WIPE (no real member standing) is the sole game-over;
   // a summon falling never is, and a lone summon can't stave off defeat.
+  // Every damage roll in this fight, bound to the injected rng.
+  const rand = (lo, hi) => randWith(rng, lo, hi);
   const livingMembers = () => members.filter((m) => m.sheet.hp > 0 && m.actor);
   // --- charm (TODO Phase 8) -------------------------------------------------
   // Borrow a coworker: they leave their own side, take their turns under your
@@ -598,7 +605,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // A slot wraps one combatant: `{ member }` (player-controlled) or `{ unit }`
   // (an AI actor - enemy or player-team summon). initiative.js rolls d20 +
   // `initMod` and sorts them; turn-order.js walks the result.
-  const initRng = () => Math.random();
+  // Initiative rolls off the SAME injected source as everything else, so one
+  // seed reproduces a whole fight rather than most of one.
+  const initRng = () => rng();
   // Hustle through `effectiveAttr`, like every other attribute-derived number:
   // gear `attrBonus` flows through EVERY derivation (EQUIPMENT_PLAN #3), and
   // reading the raw attr here meant a +1 Hustle lanyard lifted your AP and your
@@ -3074,7 +3083,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         }
         // wet floor: a slip ends their whole turn (they spend it getting up).
         // Gum is traction (slipProof), so a gummed unit can't slip.
-        if (unit.alive && !statusFx(unit).slipProof && Math.random() < (world.slipChanceAt(x, z) || 0)) {
+        // The last direct Math.random in the fight. Through `rng` like the rest,
+        // so a seeded run reproduces the slips too - they end a whole turn, so
+        // an unseeded one is exactly the kind of thing that makes a resolution
+        // test flaky for reasons that have nothing to do with what it asserts.
+        if (unit.alive && !statusFx(unit).slipProof && rng() < (world.slipChanceAt(x, z) || 0)) {
           unit.clearPath();
           unit.flinch();
           unit.slipped = true;

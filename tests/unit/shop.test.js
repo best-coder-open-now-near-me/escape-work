@@ -4,10 +4,11 @@
 // and bag move together or not at all.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { ENEMY_TYPES } from '../../src/data/enemies.js';
 import {
   SELL_RATE, valueOf, priceOf, sellYield, rollStock, canAfford, buy, sell, inStock,
 } from '../../src/shop.js';
-import { ITEMS } from '../../src/data/items.js';
+import { ITEMS, rollLoot } from '../../src/data/items.js';
 import { SHOPS } from '../../src/data/shops.js';
 
 // A merchant with round numbers, so the assertions are about the RULES rather
@@ -191,4 +192,43 @@ test('the vending machine really is a rip-off, and the cart really is not', () =
   assert.ok(priceOf(SHOPS.vending, both) > priceOf(SHOPS['mail-cart'], both));
   assert.equal(SHOPS.vending.buys, false);
   assert.equal(SHOPS['mail-cart'].buys, true);
+});
+
+// --- loot rolls (TODO Phase 6) ---------------------------------------------
+// `rollLoot` read Math.random directly, so the drop table could only be tested
+// statistically - which is to say flakily, or not at all. It takes its
+// randomness as an argument now.
+test('rollLoot drops exactly what the roll says', () => {
+  const table = [
+    { item: 'always', chance: 1 },
+    { item: 'coin-flip', chance: 0.5 },
+    { item: 'never', chance: 0 },
+  ];
+  // Every roll comes up 0: strictly below 1 and 0.5, not below 0.
+  assert.deepEqual(rollLoot(table, () => 0), ['always', 'coin-flip']);
+  // Every roll comes up just under 1: only the guaranteed drop survives.
+  assert.deepEqual(rollLoot(table, () => 0.999), ['always']);
+  assert.deepEqual(rollLoot([], () => 0), []);
+  assert.deepEqual(rollLoot(undefined, () => 0), [], 'a bodyless def drops nothing');
+});
+
+test('a chance of 1 is a GUARANTEE, not a very likely roll', () => {
+  // The invariant the registries lean on: several bodies promise a signature
+  // drop. `rng() < 1` must hold for every value rng can return, including the
+  // largest one it ever produces.
+  for (const r of [0, 0.5, 0.999999]) {
+    assert.deepEqual(rollLoot([{ item: 'sure-thing', chance: 1 }], () => r), ['sure-thing'],
+      `a guaranteed drop must survive a roll of ${r}`);
+  }
+});
+
+test('every guaranteed drop in the registries names a real item', () => {
+  // A `chance: 1` entry pointing at a missing id is a promise the game cannot
+  // keep, and it fails silently as an empty body.
+  for (const [id, def] of Object.entries(ENEMY_TYPES)) {
+    for (const { item, chance } of def.loot || []) {
+      assert.ok(ITEMS[item], `${id} drops "${item}", which is not an item`);
+      assert.ok(chance > 0 && chance <= 1, `${id}: "${item}" has an impossible chance ${chance}`);
+    }
+  }
 });

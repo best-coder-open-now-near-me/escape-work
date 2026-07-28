@@ -2973,6 +2973,11 @@ function startGame(level) {
     // a test that hardcodes 6 breaks on every balance pass for no reason.
     get classes() { return CLASSES; },
     get playerTile() { return { x: player.x, z: player.z }; },
+    // Is the leader mid-walk? The suite's honest alternative to sleeping: a
+    // spec that wants "and then nothing happens" can poll for stillness rather
+    // than guess a duration, which under software GL is reliably either too
+    // short or wasteful on different runs.
+    get playerMoving() { return !!player?.moving; },
     get playerPos() {
       const p = player.entity?.getPosition();
       return p ? { x: p.x, z: p.z } : { x: player.x, z: player.z };

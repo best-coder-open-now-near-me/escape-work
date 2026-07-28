@@ -165,3 +165,21 @@ test('a closed door leaves an adjacent pair uncrossable AND blind', () => {
   assert.equal(g.stepOpen(0, 0, 1, 0), true);
   assert.equal(g.sightOpen(0, 0, 1, 0), true);
 });
+
+// An unknown actor char used to fall through to `enemySpawns` unchecked, so a
+// typo in a legend produced a spawn for a type that does not exist - surfacing
+// much later as an empty tile, or as a crash deep in actor construction with
+// nothing pointing back at the level file (TODO Phase 6).
+test('parseLevel names an unknown actor rather than spawning a ghost', () => {
+  assert.throws(
+    () => parseLevel(level(['@X'], { actors: { '@': 'player', X: 'not-a-real-type' } })),
+    /unknown actor "not-a-real-type" for char "X"/,
+    'the error has to name the id AND the char, or it does not help');
+});
+
+test('parseLevel still accepts every real kind of actor', () => {
+  const g = parseLevel(level(['@M'], { actors: { '@': 'player', M: 'manager' } }));
+  assert.deepEqual(g.playerSpawn, { x: 0, z: 0 });
+  assert.equal(g.enemySpawns.length, 1);
+  assert.equal(g.enemySpawns[0].type, 'manager');
+});

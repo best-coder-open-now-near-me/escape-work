@@ -97,7 +97,12 @@ test('a staple gun opens the fight from range, and spends no paper doing it', as
   await page.click('#hotbar-act-staple-gun-fire');
   await clickManager(page);
   await expect.poll(() => page.evaluate(() => window.__game.inCombat), { timeout: 30_000 }).toBe(true);
-  await page.waitForTimeout(700);
+  // Wait for the SHOT to resolve, not for a guess at how long it takes: the
+  // opener fires on arrival, and the log line is what says it landed.
+  await expect.poll(
+    () => page.evaluate(() => !window.__game.playerMoving),
+    { timeout: 20_000 },
+  ).toBe(true);
 
   // Fired from where they stood: no walk-up, and the fight opened anyway.
   expect(await playerTile(page)).toEqual(start);
@@ -116,7 +121,13 @@ test('a sealed pocket refuses the shot, and the refusal is free', async ({ page 
 
   await page.click('#hotbar-act-staple-gun-fire');
   await clickManager(page);
-  await page.waitForTimeout(900);
+  // The claim is that NOTHING happens - no fight, no walk - so this waits for
+  // the world to go quiet rather than for an event that never arrives. Polling
+  // for stillness is the honest shape of "and then nothing".
+  await expect.poll(
+    () => page.evaluate(() => !window.__game.playerMoving),
+    { timeout: 20_000 },
+  ).toBe(true);
 
   expect(await page.evaluate(() => window.__game.inCombat)).toBe(false); // no fight opened
   expect(await playerTile(page)).toEqual(start); // and a refusal is not a walk

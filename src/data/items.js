@@ -349,10 +349,10 @@ export const LOOT_TABLES = {
 };
 
 // Roll a table into a list of item ids.
-export function rollLoot(table) {
+export function rollLoot(table, rng = Math.random) {
   const out = [];
   for (const { item, chance } of table || []) {
-    if (Math.random() < chance) out.push(item);
+    if (rng() < chance) out.push(item);
   }
   return out;
 }
