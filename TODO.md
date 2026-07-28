@@ -175,6 +175,28 @@ line numbers are the review baseline and may be shifted slightly in
 - [ ] UI: window-leave never ends hover (`controls.js:129`), disabled hotbar
       slots un-reassignable at 0 count (`ui/hud.js:277`), escape content
       strings before `innerHTML` interpolation (`ui/screens.js:215` et al.).
+- [ ] **Party bar shows raw float AP ("0.7999…").** Two independent defects.
+      (1) Three AP spend sites subtract raw while ~12 others use `roundAp`:
+      `combat.js:1305` (in `performOn` — every basic attack, throw and ranged
+      shot), `:1997` and `:2170`. With `ap` at 2.8 after a partial move,
+      `2.8 - 2` is `0.7999999999999998` in float64 and gets **stored**, so the
+      value itself is wrong, not just its rendering. (2) The party bar has no
+      formatter: `ui/hud.js:346` interpolates `combatInfo[i]?.ap` raw, while
+      combat.js already has `fmtAp` (`:438`,
+      `String(roundAp(v)).replace(/\.0$/, '')`) built for exactly this. Fix
+      both — round at the three spend sites so the stored number is clean, and
+      route the party bar through `fmtAp` so no future raw write can leak
+      through a display again.
+- [ ] **Portraits render the back of the head** (`portraits.js:136`).
+      `faceToward` is `atan2(dx, dz)` (`actors.js:85`), so **yaw 0 faces +Z**,
+      and the portrait camera sits at `(0, y + 0.05, +DIST)` — already on the
+      model's front. `rotY: 180` then spins it to face −Z, directly away; the
+      comment says "face the camera" but the value does the opposite. Should be
+      `rotY: 0` (the picker's `rotY: 45` for the diagonal game camera is
+      consistent with +Z-forward-at-0). Worth checking all twelve rigs after
+      the fix — `fd67296` swapped several character types onto different Kenney
+      source files, so confirm they share one baked orientation rather than
+      assuming.
 - [ ] Rendering: fallback marker for failed `.glb` loads (`models.js:40`),
       `refreshTile` floor-box leak (`scene.js:194`), async model staleness
       guard + stale electrified-pool visuals (`scene.js:201`, `:189`).
