@@ -49,6 +49,12 @@
 //   hits every enemy in the wedge (needs line of sight), rolls damage per
 //   target. `leaves: '<tileType>'` carpets the wedge's plain floor with that
 //   surface tile (Bulk Mail leaves paper - fuel, caltrops, and future ammo).
+//   range (on an attack) - fired from `range` tiles away (Chebyshev) instead
+//   of walked into reach: needs a clear line, refuses past it, and never walks
+//   you in. `ammoCost` is now only a COST - an attack can be ranged and free
+//   (the staple gun), or cost ammo and be ranged (the paper throws, which
+//   default to THROW_RANGE without declaring one). See stats.rangeOf.
+//   ammoCost - sheets of paper the attack spends from `sheet.paper`.
 //
 // `icon` is the face the power wears on the hotbar, which is an icon grid: one
 // emoji, the same way items and loot labels are iconed. It is not decoration.
@@ -428,6 +434,47 @@ export const ACTIONS = {
     max: 3,
     log: 'You stab with the letter opener. Crisp.',
     missLog: 'The opener slides off at a shallow angle.',
+  },
+
+  // --- ranged weapons -----------------------------------------------------------
+  // The first attacks that are fired rather than swung and cost NOTHING to
+  // fire. Every previous ranged option was a paper throw billed against
+  // `sheet.paper`; these are weapons, and a weapon you have to feed is a
+  // weapon you stop carrying. Ammo stays where it earns its keep - the wad and
+  // the airplane, which are specialty shots, not a basic attack.
+  //
+  // What they pay instead is DAMAGE, and only damage. A staple gun rolls 1-3
+  // where the stapler in the same hand jabs 2-4 with +1 on top, so the melee
+  // kit stays the one that ends a fight and the ranged kit is the one that
+  // opens it. There is deliberately no penalty for firing point-blank: an
+  // adjacency rule is a second thing to learn, and the damage gap is already
+  // the whole argument for closing the distance.
+  'staple-gun-fire': {
+    type: 'attack',
+    ap: 2,
+    range: 4,
+    label: 'Staple Gun',
+    icon: '📌',
+    desc: 'Fires staples across the room. Hits softer than a stapler swung in anger.',
+    min: 1,
+    max: 3,
+    log: 'You fire the staple gun. Ka-chunk, from over here.',
+    missLog: 'A staple pings off a filing cabinet.',
+  },
+  // The longest reach in the game and the weakest hit in it: the straw is for
+  // starting a fight from across the floor, or chipping the last point off
+  // something you would rather not walk up to.
+  'spitball-shot': {
+    type: 'attack',
+    ap: 2,
+    range: 6,
+    label: 'Spitball',
+    icon: '🥤',
+    desc: 'A spitball, across the whole floor. Costs nothing, achieves nearly as much.',
+    min: 1,
+    max: 2,
+    log: 'You put a spitball on the back of their neck. They turn around slowly.',
+    missLog: 'The spitball arcs wide and sticks to a monitor.',
   },
 
   // --- applicants (player-controlled summons) -----------------------------------

@@ -123,6 +123,34 @@ export const ITEMS = {
     value: 14,
     examine: 'Facilities uses it for litter and high shelves. Telescopes to a metre and a bit.',
   },
+  // --- ranged content ---------------------------------------------------------
+  // Weapons whose point is that you never walk up. Both grant a ranged attack
+  // (actions.js `range`) that costs nothing to fire - no ammo, the way a bow
+  // needs none - and both pay for it in damage alone: `stats.dmg: 0`, where
+  // every melee weapon in the list adds at least +1 on top of a bigger roll.
+  // Ammo is reserved for the specialty shots (the wad, the airplane).
+  'staple-gun': {
+    name: 'Staple Gun',
+    icon: '📌',
+    slot: 'weapon',
+    stats: { dmg: 0 }, // explicit: the whole cost of shooting is the damage you don't get
+    attack: 'staple-gun-fire',
+    // Priced above the stapler it can't out-hit: range is worth paying for
+    // even when the numbers on it are worse.
+    value: 26,
+    examine: 'Heavy-duty, borrowed from Facilities and never returned. Reaches four desks over. Hits like an argument, not a punch.',
+  },
+  'spitball-straw': {
+    name: 'Spitball Straw',
+    icon: '🥤',
+    slot: 'weapon',
+    stats: { dmg: 0 },
+    attack: 'spitball-shot',
+    // The cheapest weapon in the game, and the one you outgrow fastest - it is
+    // an opener, not a career.
+    value: 6,
+    examine: 'From the break room. Reaches the far wall. Does almost nothing when it gets there.',
+  },
   'company-fleece': {
     name: 'Company Fleece',
     icon: '🧥',
@@ -285,6 +313,7 @@ export const LOOT_TABLES = {
     { item: 'running-shoes', chance: 0.18 },
     { item: 'usb-stick', chance: 0.15 },
     { item: 'reach-grabber', chance: 0.15 }, // the litter picker, left by the bins
+    { item: 'spitball-straw', chance: 0.3 }, // it came off a drink, and it went in the bin
   ],
   printer: [
     { item: 'toner-cartridge', chance: 1 },
@@ -298,6 +327,8 @@ export const LOOT_TABLES = {
     { item: 'okayest-mug', chance: 0.3 },
     { item: 'letter-opener', chance: 0.25 },
     { item: 'stress-ball', chance: 0.2 },
+    // Borrowed from Facilities, filed in a drawer, never given back.
+    { item: 'staple-gun', chance: 0.12 },
     { item: 'red-stapler', chance: 0.06 },
   ],
   // Paperwork, not desk clutter. A filing cabinet reusing the `desk` table
