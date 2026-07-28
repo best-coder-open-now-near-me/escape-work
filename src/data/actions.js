@@ -85,8 +85,14 @@ export const ACTIONS = {
     ap: 2,
     label: 'Paper Storm',
     icon: '🗞️',
-    desc: 'Empty the recycling over an area. Fuel, caltrops, and ammunition - all at once.',
+    desc: 'Empty the recycling over an area. Fuel, caltrops, and a fire waiting to happen.',
     leaves: 'paper',
+    // Litter, not terrain - the same rule Bulk Mail follows. Without this the
+    // drifts were never handed to the ager at all (leaveSurface only registers
+    // a tile when turns > 0), so every cast permanently repainted ~9 tiles of
+    // floor with something that cuts anyone crossing it, for the rest of the
+    // level. Longer than the cone's because a zone is the slower, aimed verb.
+    leavesTurns: 6,
     radius: 1.5,
     range: 5,
     uses: 2,
@@ -183,9 +189,7 @@ export const ACTIONS = {
     ap: 2,
     label: 'Turn It Off And On Again',
     icon: '🔌',
-    desc: 'Turn yourself off and on again. Clears EVERY status - your buffs too.',
-    min: 4,
-    max: 7,
+    desc: 'Power-cycle anyone - yourself, a coworker, a colleague. Clears EVERY status they are carrying, the good ones too.',
     // purge: a reboot wipes the target's status effects - helpful AND harmful
     // alike (a surprised enemy wakes up; rebooting YOURSELF clears paper-cut
     // bleeding but also drops your Deflect). Click your own tile while it's
@@ -193,6 +197,9 @@ export const ACTIONS = {
     purge: true,
     log: 'You power-cycle their whole workflow.',
     missLog: 'The reboot hangs on a spinning beach ball. Nothing happens.',
+    // No dice, on purpose: a reboot strips state, it does not bruise anybody.
+    // performOn reads the absence of `min`/`max` as "this is a pure effect".
+    // It used to carry 4-7 damage, which contradicted its own description.
   },
   // The reboot, aimed at a colleague instead of a target. `purge` on a `buff`
   // is a CLEANSE - the same one line of runtime, pointed at the other half of

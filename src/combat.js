@@ -14,7 +14,9 @@ import { truncateByBudget, routeToFiringPosition } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
-import { buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding } from './powers.js';
+import {
+  buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone,
+} from './powers.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
@@ -835,7 +837,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // coworker while Performance Review is armed promises a swing the click
       // would refuse - the exact class of lie the one-hover-answer rule
       // exists to prevent (ARCHITECTURE, hover.js).
-      if (aimsAtAlly(ACTIONS[armed])) {
+      // An ANY-target verb belongs to whichever half the cursor is on: over a
+      // coworker it must promise the swing the click will make, over a
+      // colleague the friendly cast. Only a friends-ONLY verb returns null
+      // unconditionally - that is the lie-prevention rule, not a ban on verbs
+      // that legitimately point both ways.
+      if (aimsAtAlly(ACTIONS[armed]) && !(aimsAtAnyone(ACTIONS[armed]) && hoverFoe)) {
         showAllyPreview(point, sx, sy);
         return null;
       }
@@ -992,7 +999,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         const pos = m.actor.entity.getPosition();
         drawRing(pos.x, pos.z, TARGET_R, allyProblemFor(id, m) ? PREVIEW_FAR : PREVIEW_OK);
       }
-      return;
+      // An ANY-target verb keeps going and rings the other half too. Returning
+      // here would ring only colleagues while the click still resolved on
+      // coworkers - the affordance describing half the verb.
+      if (!aimsAtAnyone(a)) return;
     }
     if (a.type !== 'attack' && a.type !== 'shove' && !isControl(a)) return;
     if (a.cone) {
@@ -1341,15 +1351,28 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       refresh();
       return;
     }
-    let dmg = rand(a.min, a.max) + damageBonus(active.sheet); // carried staplers count
-    if (a.ammoCost) dmg += talentFxOf(active).paperDamageBonus || 0;
-    const died = en.takeDamage(dmg);
-    // Anything that arrived from over there lands as a projectile hit, not a
-    // punch: light debris thrown away from the shooter.
-    hitFx(en, rangeOf(id) ? 'paper' : 'melee', active);
-    if (died) deathFx(en);
-    fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b', { big: died });
-    let line = `${a.log} ${dmg} damage!`;
+    // AN ACTION WITH NO DICE IS A PURE EFFECT. Reboot is the case that forced
+    // the rule: power-cycling somebody strips their statuses, it does not
+    // bruise them, and the entry used to carry 4-7 damage that contradicted its
+    // own description. Rolling `rand(undefined, undefined)` here produced NaN,
+    // and NaN damage made hp NaN - never `<= 0`, so the target became
+    // unkillable and the fight could not end. Reading the dice as the SIGNAL
+    // means a dice-less verb resolves as what it is, rather than being a
+    // special case bolted on beside a damage step it never wanted.
+    const hasDice = Number.isFinite(a.min) && Number.isFinite(a.max);
+    let dmg = 0;
+    let died = false;
+    if (hasDice) {
+      dmg = rand(a.min, a.max) + damageBonus(active.sheet); // carried staplers count
+      if (a.ammoCost) dmg += talentFxOf(active).paperDamageBonus || 0;
+      died = en.takeDamage(dmg);
+      // Anything that arrived from over there lands as a projectile hit, not a
+      // punch: light debris thrown away from the shooter.
+      hitFx(en, rangeOf(id) ? 'paper' : 'melee', active);
+      if (died) deathFx(en);
+      fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b', { big: died });
+    }
+    let line = hasDice ? `${a.log} ${dmg} damage!` : a.log;
     // A purge (reboot) wipes the target's statuses - good and bad alike.
     if (a.purge && !died) {
       const woke = hasStatus(en, 'surprised');
@@ -2089,10 +2112,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // could not end. `takeDamage` now refuses non-finite amounts, but arriving
     // there at all means a verb was pointed at the wrong half of the board -
     // say so instead of walking them into a swing they never defined.
-    // NOTE: when a dice-less action becomes a legitimate pure effect on an
-    // enemy (TODO Phase 2 - Reboot as an any-target purge), relax this to
-    // admit actions carrying a `purge`/`applies` payload.
-    if (!isControl(a) && !(Number.isFinite(a.min) && Number.isFinite(a.max))) {
+    // A dice-less action IS admitted when it carries a payload to deliver -
+    // Reboot strips statuses and deals nothing, and performOn now resolves that
+    // as a pure effect. What stays refused is a verb with neither dice nor
+    // payload, which is a verb pointed at the wrong half of the board.
+    const carries = a.purge || a.applies || Number.isFinite(a.amount);
+    if (!isControl(a) && !carries
+      && !(Number.isFinite(a.min) && Number.isFinite(a.max))) {
       refuse(`${a.label} is not aimed at them.`);
       return;
     }

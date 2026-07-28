@@ -101,7 +101,17 @@ function startGame(level) {
     grid,
     hooks: {
       addFlame: scene.addFlame,
-      hideSurfaceVisual: scene.hideSurfaceVisual,
+      // Paper caught fire, so the paper is gone. Retire it everywhere at once -
+      // grid, visual, and the harvested-here mark - exactly as stickGum retires
+      // a wad that is now on somebody's shoe. Doing only the visual left the
+      // grid still holding a drift on a tile that plainly had none: no surface
+      // could ever be laid there again (canTakeSurface wants 'floor'), it could
+      // never burn again, and refreshTile would redraw paper over ash.
+      spendFuel: (x, z) => {
+        grid.setType(x, z, 'floor');
+        scene.hideSurfaceVisual(x, z);
+        loot?.forgetPaper?.(x, z); // a fresh drift here later is gatherable
+      },
       addSmoke: scene.addSmoke,
       removeSmoke: scene.removeSmoke,
     },
@@ -1663,6 +1673,17 @@ function startGame(level) {
           grid.setType(x, z, tileType);
           scene.addSurfaceVisual(x, z, tileType);
           if (turns > 0) tempSurfaces.set(x + ',' + z, { left: turns, type: tileType });
+          // Ammo comes from the WORLD, never from a power. A paper-laying verb
+          // that could be harvested afterwards is an AP-to-ammo converter, and
+          // expiry alone does not prevent it: harvesting is refused in combat
+          // but legal the moment a fight ends, and the litter clock runs at
+          // OOC_TURN_SECONDS, so a cone laid late in a fight is still on the
+          // floor for seconds after it - one click takes the whole patch.
+          // Marking the tile picked-clean at birth closes that without touching
+          // the surface itself: the sheets still burn, still cut, still fuel a
+          // fire. `forgetPaper` drops the mark when the tile reverts to bare
+          // floor, so a WORLD drift laid there later is gatherable again.
+          if (tileType === 'paper') loot.markPaperSpent?.(x, z);
           return true;
         },
         // Anyone alive is a legal target - bystanders outside the initial

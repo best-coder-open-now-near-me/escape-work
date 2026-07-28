@@ -3,14 +3,7 @@
 // rather than re-derives.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  buffProblem, buffOutcome, buffRangeOf, isFriendly, BUFF_RANGE,
-  controlProblem, controlOutcome, controlIsRanged, isControl,
-  isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf,
-  isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf,
-  isStance, watchRadiusOf, watchTriggers,
-  isToppleable, toppleLanding,
-} from '../../src/powers.js';
+import { buffProblem, buffOutcome, buffRangeOf, isFriendly, BUFF_RANGE, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone } from '../../src/powers.js';
 import { TILE_TYPES } from '../../src/data/tiles.js';
 import { ACTIONS } from '../../src/data/actions.js';
 import { STATUSES } from '../../src/data/statuses.js';
@@ -429,4 +422,36 @@ test('the statuses buffs apply are helpful and unresistable', () => {
     // composed member of the party the hardest one to support.
     assert.equal(def.resistable, false, `${id} is not resistable`);
   }
+});
+
+// --- any-target verbs (TODO Phase 2) ---------------------------------------
+// Reboot power-cycles anyone: yourself, a colleague, or a coworker. "Which side
+// does this verb point at" therefore stopped being a boolean, and the two
+// predicates had to come apart - isFriendly means "friends ONLY", aimsAtAlly
+// means "MAY be pointed at a friend".
+test('a purge that is not a buff aims at anyone, and at allies too', () => {
+  const reboot = ACTIONS.reboot;
+  assert.equal(aimsAtAnyone(reboot), true, 'reboot points at both halves');
+  assert.equal(aimsAtAlly(reboot), true, 'so a click on a colleague must reach it');
+  assert.equal(isFriendly(reboot), false, 'but it is not a friends-only verb');
+});
+
+test('a buff is still friends-only, and an ordinary attack is neither', () => {
+  const buff = ACTIONS['performance-review'];
+  assert.equal(isFriendly(buff), true);
+  assert.equal(aimsAtAlly(buff), true);
+  assert.equal(aimsAtAnyone(buff), false, 'a buff must never be offered on a coworker');
+
+  const swing = ACTIONS.attack;
+  assert.equal(aimsAtAlly(swing), false);
+  assert.equal(aimsAtAnyone(swing), false);
+});
+
+test('reboot carries no damage dice - it is a pure effect', () => {
+  // performOn reads the ABSENCE of min/max as "resolve this as an effect".
+  // It used to carry 4-7 damage, contradicting its own description, and
+  // deleting the dice without that rule would have rolled NaN.
+  assert.equal(ACTIONS.reboot.min, undefined);
+  assert.equal(ACTIONS.reboot.max, undefined);
+  assert.equal(ACTIONS.reboot.purge, true);
 });

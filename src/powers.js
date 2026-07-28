@@ -70,6 +70,14 @@ export function buffOutcome(a, t = {}) {
 // swing the click refused (ARCHITECTURE, hover.js note).
 export const isFriendly = (a) => !!a && a.type === 'buff';
 
+// ...and some verbs point at BOTH halves. A purge does not care whose statuses
+// it is clearing - Reboot power-cycles a colleague, a coworker or you - so
+// "which side does this aim at" stopped being a boolean. `aimsAtAlly` still
+// answers "may this be pointed at a friend", `isFriendly` still answers "is
+// this ONLY for friends", and the two differ exactly here: an any-target verb
+// is offered on both sides and refused by neither.
+export const aimsAtAnyone = (a) => !!a && !!a.purge && a.type !== 'buff';
+
 // --- control (POWERS_PLAN M2) ------------------------------------------------
 
 // A control action carries no damage roll, so it needs its own reach rule. It
@@ -171,7 +179,8 @@ const ALLY_MODES = new Set(['swap', 'pull']);
 // mobility action does when its mode moves somebody else. Keeping this
 // separate from isFriendly (which means "is a buff") is what lets the two
 // verbs share the friendly click path without sharing their payloads.
-export const aimsAtAlly = (a) => isFriendly(a) || (isMobility(a) && ALLY_MODES.has(a.mode));
+export const aimsAtAlly = (a) =>
+  isFriendly(a) || aimsAtAnyone(a) || (isMobility(a) && ALLY_MODES.has(a.mode));
 
 // Why this mobility action cannot be used right now, or null.
 //

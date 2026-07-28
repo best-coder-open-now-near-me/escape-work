@@ -411,6 +411,11 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     // Spawn a loose floor item at a tile (god mode's "drop on ground").
     dropAt: (x, z, id) => dropLoose(x, z, id),
     forgetPaper,
+    // Mark a drift picked-clean WITHOUT anyone gathering it. Powers that lay
+    // paper call this as they paint, so a cone or a zone can never become a
+    // renewable ammo pile: ammo comes from the world, not from spending AP.
+    // The sheets themselves stay - they still burn, cut and fuel.
+    markPaperSpent: (x, z) => harvestedPaper.add(x + ',' + z),
     // Read-only views for the window.__game debug/test surface.
     debug: {
       looseItems: () => looseItems.map((li) => ({ x: li.x, z: li.z, id: li.id })),

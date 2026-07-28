@@ -10,7 +10,6 @@
 const pc = window.pc;
 import { rollLoot } from './data/items.js';
 import { unitCombat } from './stats.js';
-import { GUM } from './data/surfaces.js';
 import { applyStatus, hasStatus, statusFx } from './statuses.js';
 
 const wrapAngle = (a) => (((a + 180) % 360) + 360) % 360 - 180;
@@ -457,7 +456,14 @@ export class EnemyActor extends GridActor {
         // and granting traction for good.
         if (changed && !hasStatus(this, 'gum') && world.stickGum(x, z)) {
           applyStatus(this, 'gum');
-          this.speed *= GUM.slow;
+          // DERIVE from a captured base, the same way combat's syncUnitSpeed
+          // does, rather than scaling in place. Scaling in place applied the
+          // slow twice on anyone who was gummed before a fight: combat captures
+          // `baseSpeed` lazily on first sync, so it captured an already-slowed
+          // speed and then multiplied the status in on top of it. Deriving is
+          // idempotent, so both sides can run in any order and agree.
+          if (this.baseSpeed === undefined) this.baseSpeed = this.speed;
+          this.speed = this.baseSpeed * (statusFx(this).speedMult ?? 1);
         }
         if (changed && !statusFx(this).slipProof && world.slips(x, z)) {
           this.clearPath();

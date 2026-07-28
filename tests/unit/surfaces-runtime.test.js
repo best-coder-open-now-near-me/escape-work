@@ -8,19 +8,30 @@ import { createSurfaceRuntime } from '../../src/surfaces-runtime.js';
 // A 1-row world described by two maps: surfaces and tile flags.
 function stubGrid({ surfaces = {}, defs = {}, closedEdges = [] } = {}) {
   const closed = new Set(closedEdges.map(([x, z, nx, nz]) => `${x},${z}>${nx},${nz}`));
+  // Live, because fire CONSUMES its fuel: the runtime reports a burnt drift
+  // through spendFuel and the world is expected to clear the tile. A frozen
+  // map would let these tests pass against a grid still holding paper the
+  // runtime believed it had burnt - which is the exact desync being fixed.
+  const live = { ...surfaces };
   return {
-    surfaceAt: (x, z) => surfaces[x + ',' + z] || null,
+    surfaceAt: (x, z) => live[x + ',' + z] || null,
+    setType: (x, z, type) => {
+      if (type === 'floor') delete live[x + ',' + z];
+      else live[x + ',' + z] = type;
+    },
     defAt: (x, z) => defs[x + ',' + z] || {},
     edgeOpen: (x, z, nx, nz) =>
       !closed.has(`${x},${z}>${nx},${nz}`) && !closed.has(`${nx},${nz}>${x},${z}`),
   };
 }
 
-const hooks = { addFlame: () => null, hideSurfaceVisual: () => {} };
+// Bound to a grid, because spending fuel is a real mutation of the world - the
+// same wiring main.js uses, where it also drops the visual and the harvest mark.
+const hooksFor = (grid) => ({ addFlame: () => null, spendFuel: (x, z) => grid.setType(x, z, 'floor') });
 
 test('fire spreads through adjacent flammable surfaces, then burns out', () => {
   const grid = stubGrid({ surfaces: { '0,0': 'paper', '1,0': 'paper', '2,0': 'water' } });
-  const rt = createSurfaceRuntime({ grid, hooks, onExplosion: () => {} });
+  const rt = createSurfaceRuntime({ grid, hooks: hooksFor(grid), onExplosion: () => {} });
   assert.equal(rt.ignite(0, 0), true);
   assert.equal(rt.surfaceAt(0, 0), 'fire');
   rt.advanceTurn(); // spread
@@ -34,7 +45,7 @@ test('fire spreads through adjacent flammable surfaces, then burns out', () => {
 
 test('paper burns 3 turns, then smokes 2 with a 1-turn overlap', () => {
   const grid = stubGrid({ surfaces: { '0,0': 'paper' } });
-  const rt = createSurfaceRuntime({ grid, hooks, onExplosion: () => {} });
+  const rt = createSurfaceRuntime({ grid, hooks: hooksFor(grid), onExplosion: () => {} });
   rt.ignite(0, 0);
   assert.equal(rt.isBurning(0, 0), true); // turn 1: fire
   assert.equal(rt.isSmoke(0, 0), false);
@@ -56,7 +67,7 @@ test('partitions stop fire from spreading across the edge', () => {
     surfaces: { '0,0': 'paper', '1,0': 'paper' },
     closedEdges: [[0, 0, 1, 0]],
   });
-  const rt = createSurfaceRuntime({ grid, hooks, onExplosion: () => {} });
+  const rt = createSurfaceRuntime({ grid, hooks: hooksFor(grid), onExplosion: () => {} });
   rt.ignite(0, 0);
   rt.advanceTurn();
   assert.equal(rt.isBurning(1, 0), false);
@@ -68,7 +79,7 @@ test('fire reaching an explosive prop detonates it exactly once', () => {
     surfaces: { '0,0': 'paper' },
     defs: { '1,0': { explosive: true } },
   });
-  const rt = createSurfaceRuntime({ grid, hooks, onExplosion: (x, z) => booms.push([x, z]) });
+  const rt = createSurfaceRuntime({ grid, hooks: hooksFor(grid), onExplosion: (x, z) => booms.push([x, z]) });
   rt.ignite(0, 0);
   rt.advanceTurn(); // spread arms the fuse
   rt.advanceTurn(); // fuse elapses
@@ -87,7 +98,7 @@ test('an armed fuse does not detonate on the same turn the fire reached it', () 
     surfaces: { '0,0': 'paper' },
     defs: { '1,0': { explosive: true } },
   });
-  const rt = createSurfaceRuntime({ grid, hooks, onExplosion: (x, z) => booms.push([x, z]) });
+  const rt = createSurfaceRuntime({ grid, hooks: hooksFor(grid), onExplosion: (x, z) => booms.push([x, z]) });
   rt.ignite(0, 0);
   rt.advanceTurn(); // the fire spreads to the prop and ARMS the fuse
   assert.deepEqual(booms, [], 'the turn the fuse is lit is a warning, not the boom');
@@ -102,7 +113,7 @@ test('an explosion ignites adjacent flammable surfaces', () => {
     surfaces: { '0,0': 'paper', '2,0': 'paper' },
     defs: { '1,0': { explosive: true } },
   });
-  const rt = createSurfaceRuntime({ grid, hooks, onExplosion: () => {} });
+  const rt = createSurfaceRuntime({ grid, hooks: hooksFor(grid), onExplosion: () => {} });
   rt.ignite(0, 0);
   rt.advanceTurn(); // spread from (0,0) arms the fuse at (1,0)
   rt.advanceTurn(); // fuse elapses -> boom -> ignites the (2,0) paper
@@ -111,14 +122,14 @@ test('an explosion ignites adjacent flammable surfaces', () => {
 
 test('non-flammable, non-ignitable cells refuse to light', () => {
   const grid = stubGrid({ surfaces: { '0,0': 'water' } });
-  const rt = createSurfaceRuntime({ grid, hooks, onExplosion: () => {} });
+  const rt = createSurfaceRuntime({ grid, hooks: hooksFor(grid), onExplosion: () => {} });
   assert.equal(rt.ignite(0, 0), false);
   assert.equal(rt.burningCount, 0);
 });
 
 test('ignitable props relight after burning out; paper does not', () => {
   const grid = stubGrid({ defs: { '0,0': { ignitable: true } } });
-  const rt = createSurfaceRuntime({ grid, hooks, onExplosion: () => {} });
+  const rt = createSurfaceRuntime({ grid, hooks: hooksFor(grid), onExplosion: () => {} });
   assert.equal(rt.ignite(0, 0), true);
   for (let i = 0; i < 6; i++) rt.advanceTurn(); // the can burns out but survives
   assert.equal(rt.burningCount, 0);
@@ -136,7 +147,7 @@ test('an explosion lights its flammable neighbours, but not through a wall', () 
     defs: { '1,0': { explosive: true } },
     closedEdges: [[1, 0, 1, 1]], // a partition between the printer and the drift below it
   });
-  const rt = createSurfaceRuntime({ grid, hooks, onExplosion: () => {} });
+  const rt = createSurfaceRuntime({ grid, hooks: hooksFor(grid), onExplosion: () => {} });
   rt.ignite(0, 0);
   rt.advanceTurn(); // spread reaches the printer and arms its fuse
   rt.advanceTurn(); // the fuse elapses: the blast ignites what it can see
@@ -152,9 +163,41 @@ test('a sealed neighbour still cannot catch on later turns', () => {
     defs: { '1,0': { explosive: true } },
     closedEdges: [[1, 0, 1, 1]],
   });
-  const rt = createSurfaceRuntime({ grid, hooks, onExplosion: () => {} });
+  const rt = createSurfaceRuntime({ grid, hooks: hooksFor(grid), onExplosion: () => {} });
   rt.ignite(0, 0);
   for (let i = 0; i < 8; i++) rt.advanceTurn();
   assert.equal(rt.isBurning(1, 1), false);
   assert.equal(rt.surfaceAt(1, 1), 'paper', 'the drift behind the wall is untouched');
+});
+
+// The desync this replaced (TODO Phase 2): ignite dropped the paper VISUAL but
+// never told the grid, and kept a private `burned` set to mask the difference.
+// So a tile could look bare while every grid reader still saw a drift on it -
+// nothing could be laid there again, it could never burn again, and any repaint
+// would redraw paper over ash. Fuel is now spent at its source instead.
+test('burnt paper leaves the grid, so the tile is genuinely bare', () => {
+  const grid = stubGrid({ surfaces: { '0,0': 'paper' } });
+  const rt = createSurfaceRuntime({ grid, hooks: hooksFor(grid), onExplosion: () => {} });
+  rt.ignite(0, 0);
+  // Spent the instant it catches - the paper IS the fuel, which is why the
+  // visual has always been dropped here too.
+  assert.equal(grid.surfaceAt(0, 0), null, 'the grid stops holding a drift at ignition');
+  assert.equal(rt.surfaceAt(0, 0), 'fire', 'while it is still burning');
+  for (let i = 0; i < 8; i++) rt.advanceTurn();
+  assert.equal(rt.surfaceAt(0, 0), null, 'and nothing once it is out');
+  assert.equal(grid.surfaceAt(0, 0), null, 'grid and runtime agree');
+});
+
+test('a FRESH drift on a burnt tile burns again', () => {
+  // This was the `burned`-never-invalidated bug: the set outlived the fire, so
+  // a tile that had ever burnt was permanently inert. Nothing to invalidate now
+  // - bare floor simply is not flammable, and new paper simply is.
+  const grid = stubGrid({ surfaces: { '0,0': 'paper' } });
+  const rt = createSurfaceRuntime({ grid, hooks: hooksFor(grid), onExplosion: () => {} });
+  rt.ignite(0, 0);
+  for (let i = 0; i < 8; i++) rt.advanceTurn();
+  assert.equal(rt.ignite(0, 0), false, 'bare floor will not light');
+
+  grid.setType(0, 0, 'paper'); // somebody empties the recycling here
+  assert.equal(rt.ignite(0, 0), true, 'the new drift catches like any other');
 });
