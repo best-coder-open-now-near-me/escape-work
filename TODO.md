@@ -475,29 +475,30 @@ is its own PR that keeps unit + e2e green.
 - [ ] Edge-aware `isFlanked` (`tactics.js:208`); decide surprise-vs-POSITION_CAP
       spec question and align code or TACTICS_PLAN (`tactics.js:263`).
 
-## Phase 6 — Test infrastructure
+## Phase 6 — Test infrastructure  ✅ done
 
-- [x] Combat's rng seam is closed: `rand` takes its randomness as an argument
-      (it read `Math.random` at module scope, unreachable from the injected
-      `rng`), and initiative and the slip check went the same way. One seed now
-      reproduces a whole fight. Seeded roll→damage→status test in `hit.test.js`.
-- [x] `rollLoot` takes an rng; drop tables are assertable, including the
-      guaranteed-drop invariant several registries lean on.
+- [x] Combat's rng seam closed: `rand` takes its randomness as an argument (it
+      read `Math.random` at module scope, unreachable from the injected `rng`),
+      and initiative and the slip check followed. One seed reproduces a whole
+      fight; seeded roll→damage→status test in `hit.test.js`.
+- [x] `rollLoot` takes an rng; the guaranteed-drop invariant is linted.
 - [x] Named-error validation for unknown actor ids in `parseLevel`; class/enemy
-      id-collision lint; unplaced-enemy lint (which found `regional-executive`,
+      id-collision lint; unplaced-enemy lint (found `regional-executive`,
       exempted by name as authored-ahead-of-its-floor).
-- [x] Bare sleeps replaced with state polls (`editor.spec.js`,
-      `ranged.spec.js` ×3), on a new `__game.playerMoving` accessor.
-- [ ] **Still open:** hoist the `window.pc` module-scope reads in `actors.js`
-      (and the `tile-renderer` chain under `looting.js`) behind injection seams
-      so their pure logic imports under `node --test`, then unit-test the
-      movement state machine and looting rules. This is the largest remaining
-      item and the one that would unlock the most: `actors.js` holds the
-      movement/animation state machine and is currently untestable at all.
-      `creation.test.js` shows the shape (a minimal `window.pc` stub), but doing
-      it properly means an injection seam rather than a global.
-- [ ] **Still open:** missing coverage - stairwell revive of a downed
-      companion; corrupted-stash boot falling back past a valid campaign save.
+- [x] `window.pc` hoisted behind lazy seams in `actors.js`, `models.js` and
+      `shading.js` - the whole chain was unimportable outside a browser, so the
+      movement state machine (pure arithmetic over a path) had never been
+      tested. `actors.test.js` now covers it, including the Phase 0 NaN guard.
+- [x] Bare sleeps replaced with state polls, on a new `playerMoving` accessor.
+- [x] Missing coverage: the stairwell breather is a named rule with its
+      downed-companion case pinned. The corrupted-stash boot turned out to be a
+      real BUG, not just a gap - one try/catch covered both the stash and the
+      campaign save, so a corrupt scratch file silently discarded a real run.
+      Each source has its own guard now and the fallback goes past the stash.
+- [x] `enterCombat` fast path (`__game.startFightNow`), through the same
+      `beginCombat` the trigger uses. Honest limit: it only helps when somebody
+      is already in range at boot, so specs that start far from anyone still
+      walk. The two pre-existing HR/IT timeouts are unchanged by it.
 
 ## Phase 7 — Docs & dead code
 
