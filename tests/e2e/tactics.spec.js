@@ -44,9 +44,26 @@ test('walking out of an enemy reach provokes a free swing', async ({ page }) => 
   expect(await reachOf(page)).toBeLessThanOrEqual(1); // it threatens our tile
 
   const hp0 = await page.evaluate(() => window.__god.player.hp);
+  const from = await page.evaluate(() => window.__game.playerTile);
   // Break contact for the far corner. Still our turn - the Manager has not
   // been handed a turn to attack in, so any damage is the reaction.
-  expect(await clickWorld(page, 1, 1)).toBe(true);
+  //
+  // Confirm we actually LEFT before waiting on the reaction. clickWorld only
+  // promises the point was on screen - not that the click reached the world
+  // and started a walk - so when this failed on CI it failed as "hp never
+  // dropped", which cannot tell "the reaction did not fire" apart from "we
+  // never disengaged in the first place". Those are now two distinct
+  // failures, and a click that did not take is simply aimed again.
+  let moved = false;
+  for (let i = 0; i < 4 && !moved; i++) {
+    expect(await clickWorld(page, 1, 1)).toBe(true);
+    try {
+      await expect.poll(() => page.evaluate(() => window.__game.playerTile),
+        { timeout: 8_000 }).not.toEqual(from);
+      moved = true;
+    } catch { /* the click never became a walk - aim again */ }
+  }
+  expect(moved, 'never broke contact, so nothing could have provoked').toBe(true);
   await expect.poll(() => page.evaluate(() => window.__god.player.hp),
     { timeout: 30_000 }).toBeLessThan(hp0);
   expect(await reachOf(page)).toBeGreaterThan(1); // we did get out

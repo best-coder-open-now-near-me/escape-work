@@ -170,13 +170,24 @@ test('a weapon on-hit proc applies its status - the red stapler flings gum', asy
   await expect(page.locator('#act-staple-jab')).toBeVisible();
 
   const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
-  const foeGummed = () => page.evaluate(([x, z]) =>
-    !!window.__combat.enemies.find((e) => e.x === x && e.z === z)?.statuses.some((s) => s.id === 'gum'),
-    [foe.x, foe.z]);
+  // Read through whichever surface is still standing. A forced hit that KILLS
+  // the Manager ends the fight, and window.__combat is torn down with it - so
+  // the read meant to observe the gum threw "Cannot read properties of
+  // undefined (reading 'enemies')" instead, and the real answer was sitting on
+  // the body the whole time. __game.enemies outlives the fight.
+  const foeGummed = () => page.evaluate(([x, z]) => {
+    const list = window.__combat?.enemies ?? window.__game.enemies ?? [];
+    return !!list.find((e) => e.x === x && e.z === z)?.statuses?.some((s) => s.id === 'gum');
+  }, [foe.x, foe.z]);
   // Swing the stapler (its staple-jab is on the bar) until it lands; the proc gums.
   let gummed = false;
   for (let i = 0; i < 6 && !gummed; i++) {
     await page.waitForTimeout(700);
+    // Stop the moment the fight is over. Every read below assumes __combat,
+    // and the combat bar this clicks is gone once it ends - waiting on a
+    // vanished #act-staple-jab would hang out the whole timeout. The gum is
+    // still readable off the body, so take the last look and leave.
+    if (!(await page.evaluate(() => !!window.__combat))) { gummed = await foeGummed(); break; }
     if (await page.evaluate(() => window.__combat.armed) !== 'staple-jab') await page.click('#act-staple-jab');
     const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
     await page.mouse.click(fp.x, fp.y);

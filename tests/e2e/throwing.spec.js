@@ -94,6 +94,14 @@ test('a solid wall refuses the throw, and the refusal is free', async ({ page })
   expect(await page.evaluate(() => window.__game.losClear(2, 1, 5, 1))).toBe(false);
 
   await page.click('#hotbar-act-paper-ball');
+  // Confirm the throw is ARMED before aiming it. Arming is async state behind
+  // the click, and until it lands the next click on the Manager is not a
+  // refused throw at all - it is a plain engage click. SEALED_ARENA blocks the
+  // LINE but not the FLOOR (row 3 is open all the way round), so that click
+  // walks the player around the wall and opens the fight, which is exactly how
+  // this failed on CI: "expected inCombat false, received true".
+  await expect.poll(() => page.evaluate(() => window.__game.armed),
+    { timeout: 10_000 }).toBe('paper-ball');
   await clickManager(page);
   await page.waitForTimeout(900);
 
