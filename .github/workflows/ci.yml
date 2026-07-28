@@ -30,7 +30,14 @@ name: CI
 #                    the same code landed on main.
 #
 # Run it on a branch when a change warrants it: the Actions tab ->
-# CI -> "Run workflow", or put [e2e] in the commit message.
+# CI -> "Run workflow", or put [e2e] in the PULL REQUEST TITLE.
+#
+# NB it is the PR title, not the commit message, and that is forced: a branch
+# push triggers nothing here (`push` is main-only), so the only event a branch
+# ever raises is `pull_request` - and `github.event.head_commit` does not exist
+# on that event. The commit-message form was documented for a year and could
+# never once have fired; a commit marked [e2e] pushed to a branch produced no
+# run at all. It is still honoured on main, where head_commit is real.
 on:
   pull_request:
   push:
@@ -96,11 +103,14 @@ jobs:
     name: Full E2E suite
     runs-on: ubuntu-latest
     needs: fast          # never pay 35 min for a tree that fails in 1
-    # On main (what deploy gates on), on demand, or when a commit opts in.
+    # On main (what deploy gates on), on demand, or when a change opts in -
+    # by PR title on a branch, by commit message on main. See the header for
+    # why the branch form cannot be the commit message.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       github.ref == 'refs/heads/main' ||
-      contains(github.event.head_commit.message, '[e2e]')
+      contains(github.event.head_commit.message, '[e2e]') ||
+      contains(github.event.pull_request.title, '[e2e]')
     steps:
       - name: Checkout
         uses: actions/checkout@v4
