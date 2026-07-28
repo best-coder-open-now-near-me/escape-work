@@ -1,6 +1,7 @@
 // Class-specific kit: IT Support's granted kick and self-targeted purging
 // reboot, the Mail Room's cone attack with its paper aftermath, and Security's
-// stun-riding Detain.
+// Detain - which is now a ROOT that deals no damage (POWERS_PLAN M2), not the
+// "attack that also stuns" it used to be.
 import { test, expect } from '@playwright/test';
 import { bootAndPick, bootStash, clickWorld, enterCombat, waitStill, stableProject, onScreen, clickAction } from './helpers.js';
 
@@ -104,7 +105,7 @@ const GUARD_ARENA = {
   ],
 };
 
-test('Security: Detain lands a stun, and the guard wears the cop rig', async ({ page }) => {
+test('Security: Detain roots without damaging, and the guard wears the cop rig', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, GUARD_ARENA, 'security');
   // The class actually boots: its own sheet, its own rig, its own bar.
@@ -124,13 +125,17 @@ test('Security: Detain lands a stun, and the guard wears the cop rig', async ({ 
 
   for (let i = 0; i < 6; i++) {
     const cur = await foeNow();
-    if (cur && cur.hp < foe.hp) break;
+    if (cur && cur.statuses.some((s) => s.id === 'detained')) break;
     await page.waitForTimeout(900); // camera settle before projecting
     if (!(await page.evaluate(() => window.__combat?.phase === 'player'))) continue;
     // Closing the distance spends AP, which can leave the 3 AP Detain
-    // unaffordable and its button disabled. This spec is about the stun rider,
-    // not the AP economy - top the pool up the way forceHit pins the roll.
-    await page.evaluate(() => { window.__combat.ap = window.__combat.maxAp; });
+    // unaffordable and its button disabled. This spec is about the root, not
+    // the AP economy - top the pool up the way forceHit pins the roll. Uses
+    // too: Detain is rationed, and six attempts outlast its two.
+    await page.evaluate(() => {
+      window.__combat.ap = window.__combat.maxAp;
+      window.__combat.usesLeft.detain = 2;
+    });
     if (await page.evaluate(() => window.__combat?.armed) !== 'detain') {
       if (!(await page.locator('#act-detain').isVisible())) break;
       await page.click('#act-detain');
@@ -141,6 +146,13 @@ test('Security: Detain lands a stun, and the guard wears the cop rig', async ({ 
     await page.waitForTimeout(700);
   }
   const after = await foeNow();
-  expect(after.hp).toBeLessThan(foe.hp);          // it hits...
-  expect(after.statuses.some((s) => s.id === 'stunned')).toBe(true); // ...and the rider fires
+  // The root lands...
+  expect(after.statuses.some((s) => s.id === 'detained')).toBe(true);
+  // ...and it deals NO damage. That is the control verb's design rule
+  // (POWERS_PLAN #3), and it is the whole difference between the new Detain
+  // and the "attack that also stuns" it replaced - which was converging on the
+  // same power as the shove's wall-slam and the Manager's Delegate.
+  expect(after.hp).toBe(foe.hp);
+  // A root is not a stun: they keep their turn, they just cannot leave.
+  expect(after.statuses.some((s) => s.id === 'stunned')).toBe(false);
 });

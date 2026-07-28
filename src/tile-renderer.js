@@ -371,6 +371,9 @@ export function createTileRenderer(app) {
     if (def.model) {
       placeModel(app, `assets/${def.model}.glb`, x, z, {
         scale: def.scale || 1, rotY: def.rotY || 0, lift: floorDef.height / 2,
+        // A toppled prop lies over (POWERS_PLAN M6). Data, so a new fallen
+        // twin is a registry entry rather than a renderer change.
+        tiltX: def.tiltX || 0, tiltZ: def.tiltZ || 0,
         onReady: (holder) => onAsync && onAsync(holder),
       });
       return { kind: 'model', entities: [] };

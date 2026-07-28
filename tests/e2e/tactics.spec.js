@@ -2,7 +2,7 @@
 // and forced movement doesn't. Both assertions run inside the player's OWN
 // turn, so the enemy's scheduled attack can't be mistaken for a reaction.
 import { test, expect } from '@playwright/test';
-import { bootStash, enterCombat, clickWorld, endTurnUntilPlayer, waitForPlayerTurn, clickAction } from './helpers.js';
+import { bootStash, enterCombat, clickWorld, endTurnUntilPlayer, waitForPlayerTurn, clickAction, withWorldStill } from './helpers.js';
 
 // An open room with space to run: the player engages the Manager, then has
 // somewhere far enough to break contact.
@@ -324,23 +324,35 @@ test('a long weapon strikes from a tile bare hands cannot cross', async ({ page 
   test.setTimeout(300_000);
   await bootStash(page, REACH_LAB, 'office-drone');
   // Equip the extender out of combat, and clear the Drone's starting trinket so
-  // nothing else is in play.
-  await page.evaluate(() => {
-    const s = window.__god.player;
-    s.equipped.weapon = null;
-    s.inventory = ['reach-grabber'];
+  // nothing else is in play. WITH THE WORLD HELD STILL: the Manager two tiles
+  // away is 'red' aggression and walks at you from the first frame, and on a
+  // slow runner it arrives before the click - a mid-fight gear swap is refused,
+  // so this read as "the equip did nothing". (It went red on main exactly that
+  // way; the probe said `inCombat: true`, "Not mid-fight - swap your kit on your
+  // own time".) The fight this test wants is the one enterCombat starts below,
+  // on purpose, after the staging is done.
+  await withWorldStill(page, async () => {
+    await page.evaluate(() => {
+      const s = window.__god.player;
+      s.equipped.weapon = null;
+      s.inventory = ['reach-grabber'];
+    });
+    // The equip flow equipment.spec.js established: open the pockets, WAIT for
+    // the row to exist, then click once. An earlier version of this test retried
+    // the click with the error swallowed, which turned "the row was not there
+    // yet" into four silent no-ops and a confusing timeout.
+    await page.keyboard.press('i');
+    await expect(page.locator('#inventory-panel')).toBeVisible();
+    await expect(page.locator('#inv-equip-0')).toBeVisible();
+    // Named so a future failure says which of the two it was, rather than
+    // leaving the next reader to rediscover the mid-fight refusal.
+    expect(await page.evaluate(() => window.__game.inCombat),
+      'staging must happen out of combat - gear does not swap mid-fight').toBe(false);
+    await page.click('#inv-equip-0');
+    await expect.poll(() => page.evaluate(() => window.__game.stats.equipped.weapon),
+      { timeout: 20_000 }).toBe('reach-grabber');
+    await page.keyboard.press('i');
   });
-  // The equip flow equipment.spec.js established: open the pockets, WAIT for the
-  // row to exist, then click once. An earlier version of this test retried the
-  // click with the error swallowed, which turned "the row was not there yet"
-  // into four silent no-ops and a confusing timeout.
-  await page.keyboard.press('i');
-  await expect(page.locator('#inventory-panel')).toBeVisible();
-  await expect(page.locator('#inv-equip-0')).toBeVisible();
-  await page.click('#inv-equip-0');
-  await expect.poll(() => page.evaluate(() => window.__game.stats.equipped.weapon),
-    { timeout: 20_000 }).toBe('reach-grabber');
-  await page.keyboard.press('i');
   await enterCombat(page);
   await page.evaluate(() => { window.__combat.forceHit = true; });
   await waitForPlayerTurn(page);

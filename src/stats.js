@@ -475,9 +475,12 @@ export function reachOf(sheet) {
 // need no data change and the constant stays the one number for "how far can
 // you chuck a wad". Anything else declares `range` outright.
 //
-// Only attacks answer. Summon placement carries its own `range` (how far from
-// the summoner applicants may report), and reading that as a firing range
-// would make Post the Role look like a gun.
+// Only ATTACKS answer, and the type test is load-bearing: `range` is a shared
+// word across the registry. A summon's is how far from the summoner applicants
+// may report, a zone's is how far it can be dropped, a control's and a buff's
+// are their own reach, and each of those verbs resolves through its own gate in
+// powers.js. Read here as a firing range, Post the Role would look like a gun -
+// and a touch-range control would stop walking you in.
 export function rangeOf(actionId) {
   const a = ACTIONS[actionId];
   if (!a || a.type !== 'attack') return 0;

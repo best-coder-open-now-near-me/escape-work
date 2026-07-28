@@ -123,6 +123,56 @@ test('every registry cross-reference resolves', () => {
   for (const [id, a] of Object.entries(ACTIONS)) {
     if (a.type === 'summon') assert.ok(CLASSES[a.archetype] || ENEMY_TYPES[a.archetype], `action "${id}" summons a real archetype`);
   }
+  // Every playable class is FOR something, and no two are for the same thing
+  // (POWERS_PLAN M8). This is the lint that stops the roster converging back
+  // into six vocabularies over one character - which is exactly what it was
+  // before the verb vocabulary grew, and which no test could have caught
+  // because every kit was individually valid.
+  const primaries = new Map();
+  for (const [id, def] of Object.entries(CLASSES)) {
+    if (def.playable === false) continue;
+    assert.ok(def.primary, `class "${id}" declares a primary verb`);
+    assert.ok(!primaries.has(def.primary),
+      `class primary "${def.primary}" is unique (${id} collides with ${primaries.get(def.primary)})`);
+    primaries.set(def.primary, id);
+    // ...and the kit has to actually contain it. A class whose primary is a
+    // verb it cannot perform is a promise on the résumé card and nowhere else.
+    const kit = (def.actions || []).map((a) => ACTIONS[a]?.type);
+    assert.ok(kit.includes(def.primary),
+      `class "${id}" primary "${def.primary}" appears in its kit (has: ${kit.join(', ')})`);
+  }
+  // No orphaned actions. `firewall` sat in the registry unreferenced after IT
+  // Support's kit was re-cut - dead content that still costs a reader's time
+  // and still looks like something the game does.
+  const reachable = new Set(['shove', 'punch']); // universal
+  for (const regs of [CLASSES, COMPANIONS]) {
+    for (const def of Object.values(regs)) {
+      for (const a of def.actions || []) reachable.add(a);
+      for (const n of def.track || []) if (n.effect?.grantsAction) reachable.add(n.effect.grantsAction);
+      if (def.talent?.effects?.grantsAction) reachable.add(def.talent.effects.grantsAction);
+    }
+  }
+  for (const def of Object.values(ENEMY_TYPES)) {
+    for (const a of def.actions || []) reachable.add(a);
+    if (def.talent?.effects?.grantsAction) reachable.add(def.talent.effects.grantsAction);
+  }
+  for (const it of Object.values(ITEMS)) if (it.attack) reachable.add(it.attack);
+  for (const [id, a] of Object.entries(ACTIONS)) {
+    if (a.ammoCost) reachable.add(id); // throwables join the bar automatically
+  }
+  for (const id of Object.keys(ACTIONS)) {
+    assert.ok(reachable.has(id), `action "${id}" is reachable by somebody`);
+  }
+  // Anything that paints the floor names a real tile type - the cone's
+  // `leaves` and the zone verb's alike (POWERS_PLAN M3). A typo here is
+  // invisible until someone fires the power in a real fight and the surface
+  // silently fails to land: grid.setType would take a name nothing renders.
+  for (const [id, a] of Object.entries(ACTIONS)) {
+    if (!a.leaves) continue;
+    assert.ok(TILE_TYPES[a.leaves], `action "${id}" leaves a real tile type ("${a.leaves}")`);
+    assert.ok(TILE_TYPES[a.leaves].surface,
+      `action "${id}" leaves "${a.leaves}", which must carry a surface to be worth painting`);
+  }
   for (const [id, def] of Object.entries(ENEMY_TYPES)) {
     if (def.summon) assert.ok(CLASSES[def.summon.archetype] || ENEMY_TYPES[def.summon.archetype], `enemy "${id}" summons a real archetype`);
   }
@@ -191,12 +241,38 @@ test('every registry cross-reference resolves', () => {
   // registry chars, so a duplicate `char` silently makes one prop unpaintable
   // and corrupts the load -> export round trip. With a large furniture kit
   // this is the easiest mistake to make, so pin it.
+  //
+  // `runtimeOnly` tiles are EXEMPT (POWERS_PLAN M6): nobody paints them and
+  // nobody exports them - they only ever arrive through grid.setType - so they
+  // consume none of the character budget, which is what makes the fallen twins
+  // affordable at all with 92 of 94 characters already spoken for. They must
+  // therefore also carry NO char, or they would silently spend one anyway.
   const byChar = new Map();
   for (const [id, def] of Object.entries(TILE_TYPES)) {
+    if (def.runtimeOnly) {
+      assert.equal(def.char, undefined,
+        `runtimeOnly tile "${id}" must not claim a character - that is the point of the flag`);
+      continue;
+    }
     assert.ok(typeof def.char === 'string' && def.char.length === 1, `tile "${id}" has a single-char code`);
     assert.ok(!byChar.has(def.char),
       `tile char "${def.char}" is unique (${id} collides with ${byChar.get(def.char)})`);
     byChar.set(def.char, id);
+  }
+  // Toppling (POWERS_PLAN M6): a prop that goes over must name a fallen twin
+  // that exists, and that twin must be runtimeOnly - a paintable one would be
+  // spending a character nobody asked it to spend. The twin must not itself be
+  // solid, or the "cover, not a wall" rule is broken by data alone: a shove
+  // could spawn impassable terrain, seal a doorway, and strand a fight the
+  // enemy can no longer reach.
+  for (const [id, def] of Object.entries(TILE_TYPES)) {
+    if (!def.topple) continue;
+    const twin = TILE_TYPES[def.topple.becomes];
+    assert.ok(twin, `tile "${id}" topples into a real tile ("${def.topple.becomes}")`);
+    assert.equal(twin.runtimeOnly, true, `"${def.topple.becomes}" is runtimeOnly`);
+    assert.notEqual(twin.solid, true, `"${def.topple.becomes}" is cover, not a wall`);
+    const [lo, hi] = def.topple.damage || [];
+    assert.ok(lo > 0 && hi >= lo, `tile "${id}" topple damage is a sane range`);
   }
   // Every referenced model actually ships - a typo here renders an invisible
   // prop that still blocks movement, which is near-impossible to spot in play.

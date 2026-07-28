@@ -190,13 +190,16 @@ test('spendClassPoint on an attrBonus node raises the attribute and derives', ()
 });
 
 test('spendClassPoint grants an action onto the sheet (respecting prereqs)', () => {
+  // The Drone's grant used to be `kick` - which the Mail Room and Security
+  // handed out too, so three classes unlocked one action and levelling up
+  // converged the roster (POWERS_PLAN M3). It is now Paper Storm, a zone.
   const s = createSheet('office-drone');
   s.classPoints = 2;
-  assert.ok(!s.actions.includes('kick'));
-  assert.equal(spendClassPoint(s, 'drone-seminar'), false); // prereq not met yet
-  assert.equal(spendClassPoint(s, 'drone-thick-skin'), true);
-  assert.equal(spendClassPoint(s, 'drone-seminar'), true); // now unlocks the kick
-  assert.ok(s.actions.includes('kick'));
+  assert.ok(!s.actions.includes('paper-storm'));
+  assert.equal(spendClassPoint(s, 'drone-paper-storm'), false); // prereq not met yet
+  assert.equal(spendClassPoint(s, 'drone-sharp-folds'), true);
+  assert.equal(spendClassPoint(s, 'drone-paper-storm'), true); // now unlocks it
+  assert.ok(s.actions.includes('paper-storm'));
 });
 
 test('spendClassPoint merges a numeric talent effect', () => {
@@ -715,11 +718,15 @@ test('rangeOf leaves the paper throws exactly where they were', () => {
   }
 });
 
-test('rangeOf ignores a range that is not a firing range', () => {
-  // A summon carries `range` too - how far from the summoner applicants may
-  // report. Read as a firing range, Post the Role would look like a gun.
-  const [summonId] = Object.entries(ACTIONS).find(([, a]) => a.type === 'summon' && a.range);
-  assert.equal(rangeOf(summonId), 0);
+test('rangeOf ignores every range that is not a firing range', () => {
+  // `range` is a shared word: a summon's is how far applicants may report, a
+  // zone's how far it can be dropped, a control's and a buff's their own reach.
+  // Each resolves through its own gate in powers.js. Read as a firing range,
+  // Post the Role would look like a gun and a touch control would stop walking
+  // you in - so this asserts across the whole registry, not one example.
+  const others = Object.entries(ACTIONS).filter(([, a]) => a.type !== 'attack' && a.range);
+  assert.ok(others.length, 'some non-attack verb carries a range to be ignored');
+  for (const [id] of others) assert.equal(rangeOf(id), 0, `${id} is not fired`);
   assert.equal(rangeOf('no-such-action'), 0);
   assert.equal(rangeOf(undefined), 0);
 });
@@ -801,10 +808,14 @@ test('a talent power and a perk power sit after the class list, gear last', () =
   const s = createSheet('office-drone');
   s.classPoints = 9;
   spendClassPoint(s, 'drone-thick-skin');
-  spendClassPoint(s, 'drone-seminar'); // grants 'kick'
+  // Paper Storm, behind Sharp Folds - the Drone's track grant since
+  // POWERS_PLAN M3 (it used to be `kick`, which the Mail Room and Security
+  // also handed out, so three classes unlocked one action).
+  spendClassPoint(s, 'drone-sharp-folds');
+  spendClassPoint(s, 'drone-paper-storm'); // grants 'paper-storm'
   equipItem(s, s.inventory.push('stapler') - 1); // brings its own swing
   const ids = barIds(s, ['paper-ball']);
-  assert.ok(ids.indexOf('kick') > ids.indexOf('coffee'), 'a learned power follows the class kit');
+  assert.ok(ids.indexOf('paper-storm') > ids.indexOf('coffee'), 'a learned power follows the class kit');
   assert.equal(ids[ids.length - 1], 'staple-jab', 'the weapon swing is last');
 });
 
@@ -816,7 +827,8 @@ test('the order is stable as a kit grows - buttons do not shuffle', () => {
     const s = createSheet('office-drone');
     s.classPoints = 9;
     spendClassPoint(s, 'drone-thick-skin');
-    spendClassPoint(s, 'drone-seminar');
+    spendClassPoint(s, 'drone-sharp-folds');
+    spendClassPoint(s, 'drone-paper-storm');
     return barIds(s, ['paper-ball']);
   })();
   assert.deepEqual(after.filter((id) => before.includes(id)), before);
