@@ -108,10 +108,25 @@ line numbers are the review baseline and may be shifted slightly in
       entirely when an action declares no dice — "an attack with no `min`/`max`
       is a pure effect" — then `reboot` becomes a data change (drop the dice,
       fix `desc`/`log` to agree). That same rule also removes the damage half
-      of the buff/mobility NaN bug, so the two fixes converge. Note
-      `remote-restart` is already the no-damage purge for allies
-      (`type: 'buff'`, `purge: true`, no dice), so the "cleanse" shape exists —
-      it just has no hostile-aimed counterpart.
+      of the buff/mobility NaN bug, so the two fixes converge.
+- [ ] **`reboot` must also target teammates** *(decided)* — cleansing an ally's
+      bleed with it is currently impossible. Cause: ally targeting hangs off
+      one binary predicate, `isFriendly = a.type === 'buff'` (`powers.js:71`),
+      which feeds `aimsAtAlly` (`:174`), which is what makes main.js route a
+      click on a teammate's body into `handleAllyClick` (`main.js:1984`). An
+      `attack` never qualifies, so a click on a teammate with Reboot armed does
+      nothing. **A verb that aims at either half of the board has no shape in
+      the model** — that predicate, not the reboot entry, is the thing to
+      change (e.g. a third state: friendly / hostile / any). Ships naturally
+      with the pure-purge change above: once Reboot rolls no damage, there is
+      no reason it cannot point at an ally.
+      Note for triage: this is *not* currently a dead end for players —
+      `remote-restart` (`type: 'buff'`, `purge: true`, `range: 5`, `uses: 2`)
+      is in the same base IT Support kit and does cleanse allies today;
+      verified `allyProblemFor` passes a real `statusCount` and `emptyPayload`
+      admits a purge whenever the target carries statuses. So decide whether
+      Reboot-targets-anyone makes `remote-restart` redundant, or whether the
+      two stay split as touch-range vs remote (`range: 5`, rationed).
 - [ ] `paper-storm` needs `leavesTurns` (`data/actions.js:83`) — still a
       separate bug after the harvest rule above, because permanent drifts are a
       *terrain* problem in their own right (every cast repaints ~9 floor tiles
