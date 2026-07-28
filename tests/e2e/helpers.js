@@ -156,7 +156,7 @@ export async function combatOrWalkDone(page, capMs) {
 // (the hotbar and combat panel sit bottom-center) swallow clicks aimed at the
 // world behind them - a stray hit can even ARM an attack, and an armed click
 // on the next enemy means an unintended fight.
-const onCanvas = (page, p) => page.evaluate(
+export const onCanvas = (page, p) => page.evaluate(
   ([x, y]) => document.elementFromPoint(x, y)?.id === 'app', [p.x, p.y]);
 
 // Click live enemies until a fight starts. Two things make a naive round-robin

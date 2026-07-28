@@ -216,10 +216,15 @@ test('Post the Role is on the out-of-combat bar, and posts where you click', asy
   test.setTimeout(300_000);
   await bootStash(page, QUIET_ARENA, 'human-resources');
 
-  // The whole kit is listed out of combat - the summon armable, the reactive
-  // pair listed and saying why not.
+  // The whole kit is listed out of combat, not just the slot we are about to
+  // press. HR's kit is exactly these three (classes.js: summon-applicants,
+  // performance-review, coffee) - this used to ask for #hotbar-act-defend,
+  // which no HR has ever had. Deflect Blame belongs to the Office Drone, so
+  // the assertion could only ever have failed; it sat in the tail of the suite
+  // that CI's maxFailures cap kept it from ever reaching.
   await expect(page.locator('#hotbar-act-summon-applicants')).toBeVisible();
-  await expect(page.locator('#hotbar-act-defend')).toBeVisible();
+  await expect(page.locator('#hotbar-act-performance-review')).toBeVisible();
+  await expect(page.locator('#hotbar-act-coffee')).toBeVisible();
   expect(await page.evaluate(() => window.__game.summons.length)).toBe(0);
 
   await page.click('#hotbar-act-summon-applicants');
