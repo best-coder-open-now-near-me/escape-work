@@ -373,3 +373,29 @@ test('a chosen name and pronouns survive a save round trip', () => {
   assert.equal(loaded.name, 'Dana', 'normalizeSheet must not re-derive a typed name');
   assert.equal(loaded.pronouns, 'she');
 });
+
+test('a chosen rig survives a save; an unknown one degrades to the class body', () => {
+  const draft = createDraft('office-drone');
+  draft.rig = 'executive';
+  const created = createCharacter(draft);
+  const [loaded] = parseProgress(savedAs([created], SAVE_VERSION)).sheets;
+  assert.equal(loaded.rig, 'executive', 'normalizeSheet must not overwrite a deliberate choice');
+  assert.equal(loaded.model, 'executive');
+
+  // A rig retired from the wardrobe must not leave a save naming a missing
+  // .glb - the old re-derive rule guaranteed that, and validate-or-fall-back
+  // keeps the guarantee while no longer clobbering real choices.
+  const stale = createCharacter(createDraft('office-drone'));
+  stale.rig = 'rig-that-was-removed';
+  stale.model = 'rig-that-was-removed';
+  const [repaired] = parseProgress(savedAs([stale], SAVE_VERSION)).sheets;
+  assert.equal(repaired.rig, undefined);
+  assert.equal(repaired.model, CLASSES['office-drone'].model);
+});
+
+test('a hand-edited build is clamped on load rather than handed to the rig', () => {
+  const sheet = createCharacter(createDraft('office-drone'));
+  sheet.look = { build: { legs: 40, torso: 40 } };
+  const [loaded] = parseProgress(savedAs([sheet], SAVE_VERSION)).sheets;
+  assert.ok(loaded.look.build.legs <= 2.05 && loaded.look.build.torso <= 1.4);
+});

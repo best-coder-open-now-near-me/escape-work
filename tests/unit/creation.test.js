@@ -195,3 +195,82 @@ test('a typed name survives onto the sheet, and className stays the job', () => 
   assert.equal(sheet.className, CLASSES['mail-room'].name,
     'every rule that reads the JOB keeps reading the job');
 });
+
+// --- the wardrobe (CHARACTER_PLAN M4) --------------------------------------
+const { RIGS, TINTS, BUILD_RANGE, clampBuild } = await import('../../src/data/looks.js');
+const { draftModel, draftLook } = await import('../../src/creation.js');
+const { lookOf } = await import('../../src/stats.js');
+const fs = await import('node:fs');
+
+test('every rig in the wardrobe is a .glb that actually ships', () => {
+  // A rig naming a missing asset is a character who cannot be rendered - the
+  // failure arrives as a blank spawn tile, which reads as an engine bug.
+  const shipped = new Set(fs.readdirSync('assets/characters')
+    .filter((f) => f.endsWith('.glb')).map((f) => f.replace(/\.glb$/, '')));
+  for (const id of Object.keys(RIGS)) {
+    assert.ok(shipped.has(id), `RIGS.${id} has no assets/characters/${id}.glb`);
+  }
+});
+
+test('every class model is offerable as a rig', () => {
+  // Otherwise a class could wear a body the player is not allowed to choose,
+  // which makes the wardrobe read as arbitrary rather than complete.
+  for (const [id, cls] of Object.entries(CLASSES)) {
+    if (cls.playable === false || !cls.model) continue;
+    assert.ok(RIGS[cls.model], `${id} wears "${cls.model}", which is not in RIGS`);
+  }
+});
+
+test('every tint darkens or shifts - none of them brighten', () => {
+  // Tints multiply the rig's baked diffuse, so a channel above 1 would blow the
+  // colour out rather than tint it.
+  for (const t of TINTS) {
+    assert.equal(t.rgb.length, 3, `${t.id} needs three channels`);
+    for (const c of t.rgb) {
+      assert.ok(c > 0 && c <= 1, `${t.id} channel ${c} must be within (0, 1]`);
+    }
+  }
+  assert.equal(new Set(TINTS.map((t) => t.id)).size, TINTS.length, 'tint ids are unique');
+});
+
+test('the build dials stay inside the range the shipped art already uses', () => {
+  for (const [key, r] of Object.entries(BUILD_RANGE)) {
+    assert.ok(r.min < r.max, `${key} range is inverted`);
+    assert.ok(r.step > 0, `${key} needs a step`);
+    assert.ok(r.label, `${key} needs a player-facing label`);
+  }
+  // clampBuild is the gate everything passes through - a hand-edited save, an
+  // older palette, a future re-tune. applyCharacterProportions has no opinion
+  // about what is sane and a torso of 40 is a broken-looking body.
+  assert.deepEqual(clampBuild({ legs: 99, torso: -5 }),
+    { legs: BUILD_RANGE.legs.max, torso: BUILD_RANGE.torso.min });
+  assert.equal(clampBuild(null), null);
+  assert.equal(clampBuild({ nonsense: 3 }), null, 'unknown dials are dropped, not clamped');
+});
+
+test('an untouched draft records NO look, so it keeps tracking its class', () => {
+  // The difference matters: freezing a copy of the class look at creation would
+  // mean a later art change never reaches a character who chose nothing.
+  const draft = createDraft('office-drone');
+  assert.equal(draftLook(draft), null);
+  const sheet = createCharacter(draft);
+  assert.equal(sheet.look, undefined);
+  assert.deepEqual(lookOf(sheet), CLASSES['office-drone'].look ?? null);
+});
+
+test('a chosen rig and tint land on the sheet and win over the class', () => {
+  const draft = createDraft('office-drone');
+  draft.rig = 'executive';
+  draft.tint = TINTS[2].rgb;
+  const sheet = createCharacter(draft);
+  assert.equal(sheet.rig, 'executive');
+  assert.equal(sheet.model, 'executive', 'the body follows the choice');
+  assert.deepEqual(lookOf(sheet).tint, TINTS[2].rgb);
+  assert.equal(draftModel(draft), 'executive');
+});
+
+test('draftModel falls back to the class body when nothing is chosen', () => {
+  assert.equal(draftModel(createDraft('it-support')), CLASSES['it-support'].model);
+  assert.equal(draftModel({ classId: 'it-support', rig: 'not-a-rig' }), CLASSES['it-support'].model,
+    'an unknown rig is ignored rather than rendered');
+});

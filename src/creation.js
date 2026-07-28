@@ -12,6 +12,7 @@
 // very easy to break by touching attributes in the wrong order (see below).
 import { createSheet, spendAttrPoint, ATTR_KEYS } from './stats.js';
 import { CLASSES } from './data/classes.js';
+import { RIGS, TINTS, BUILD_RANGE, clampBuild } from './data/looks.js';
 
 // The house voice is already they/them - combat narrates the party in the third
 // person and one victory line reads "They gather their things and go". A field
@@ -41,14 +42,43 @@ export function cleanName(raw, fallback = '') {
 // untouched draft must reproduce today's character byte for byte, which is what
 // makes "skip the paperwork" a real skip rather than a different character.
 export function createDraft(classId) {
+  const cls = CLASSES[classId];
   return {
     classId,
-    name: CLASSES[classId]?.name || '',
+    name: cls?.name || '',
     pronouns: DEFAULT_PRONOUNS,
+    // Appearance starts as EXACTLY what the class would have given you, so an
+    // untouched draft is not merely similar to today's character but identical.
+    // `rig: null` means "whatever the class wears" rather than naming it - so a
+    // later art change still reaches a character who never chose otherwise.
+    rig: null,
+    tint: cls?.look?.tint || null,
+    build: clampBuild(cls?.look?.build) || null,
     // Attribute keys chosen at the self-assessment, in order. An array rather
     // than a tally so the UI can show and undo them one at a time.
     spends: [],
   };
+}
+
+// The model a draft would wear: its chosen rig, or the class's own.
+export const draftModel = (draft) =>
+  (draft?.rig && RIGS[draft.rig] ? draft.rig : CLASSES[draft?.classId]?.model) || null;
+
+// The look a draft would produce, or null when it has not departed from the
+// class at all. Null matters: it is what lets `lookOf` fall through to the class
+// entry, so a character who chose nothing keeps tracking the class forever
+// rather than freezing a copy of it at creation.
+export function draftLook(draft) {
+  const cls = CLASSES[draft?.classId];
+  const tint = draft?.tint || null;
+  const build = clampBuild(draft?.build);
+  const same = JSON.stringify({ tint, build })
+    === JSON.stringify({ tint: cls?.look?.tint || null, build: clampBuild(cls?.look?.build) });
+  if (same) return null;
+  const look = {};
+  if (tint) look.tint = tint;
+  if (build) look.build = build;
+  return Object.keys(look).length ? look : null;
 }
 
 // How many creation points a draft has left to spend.
@@ -94,6 +124,16 @@ export function createCharacter(draft) {
   const sheet = createSheet(draft.classId);
   sheet.name = cleanName(draft.name, sheet.className);
   sheet.pronouns = PRONOUNS.includes(draft.pronouns) ? draft.pronouns : DEFAULT_PRONOUNS;
+  // Appearance is sheet-owned from here (lookOf resolves sheet -> class ->
+  // companion), so only a DEPARTURE from the class is recorded. A character who
+  // changed nothing carries no look and keeps tracking their class entry, which
+  // is how a later art change still reaches them.
+  const look = draftLook(draft);
+  if (look) sheet.look = look;
+  if (draft.rig && RIGS[draft.rig]) {
+    sheet.rig = draft.rig;
+    sheet.model = draft.rig; // normalizeSheet validates this against RIGS on load
+  }
   // Bank the points, then spend them through the real function. Banking first
   // matters: spendAttrPoint refuses when the pool is empty, which is what stops
   // a malformed draft from handing out free attributes.

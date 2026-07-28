@@ -7,7 +7,8 @@
 // résumé card is replaced by this form. Every control here changes something
 // the player is already looking at, and rebuilding the preview would cost a
 // .glb reload per step (CHARACTER_PLAN #14, the binding constraint).
-import { PRONOUNS, NAME_MAX } from '../creation.js';
+import { PRONOUNS, NAME_MAX, draftModel } from '../creation.js';
+import { RIGS, TINTS, BUILD_RANGE } from '../data/looks.js';
 
 const PRONOUN_LABEL = { she: 'she/her', he: 'he/him', they: 'they/them' };
 
@@ -15,6 +16,11 @@ const CARD = {
   background: '#232334', border: '1px solid #3a3a52', borderRadius: '12px',
   padding: '22px 24px', boxShadow: '0 12px 40px rgba(0,0,0,.6)',
   pointerEvents: 'auto', width: '340px',
+  // Bounded and scrollable, the same way the level-up panel is. The card is
+  // vertically centred, so once the wardrobe row and the dials made it taller
+  // than the viewport it overflowed BOTH edges - and the commit button at the
+  // bottom became genuinely unclickable rather than merely awkward.
+  maxHeight: '88vh', overflowY: 'auto',
 };
 
 const FIELD_LABEL = {
@@ -33,7 +39,11 @@ const CHIP = {
 // `draft` is mutated in place: this screen is an editor for it, and the host
 // owns what happens when the player commits. `onCommit` receives nothing - the
 // caller already holds the draft.
-export function showBadgeStep(draft, { onCommit, onSkip }) {
+export function showBadgeStep(draft, { onCommit, onSkip, onPreview }) {
+  // `onPreview(kind)` asks the host to reflect the draft on the live body.
+  // 'rig' is the one kind that costs a .glb load; 'look' mutates in place, so
+  // a slider can drive it every frame (CHARACTER_PLAN #14).
+  const preview = (kind) => onPreview && onPreview(kind);
   const root = document.createElement('div');
   root.id = 'creation-badge';
   Object.assign(root.style, {
@@ -117,6 +127,112 @@ export function showBadgeStep(draft, { onCommit, onSkip }) {
   };
   card.append(pronounLabel, chips);
 
+  // --- rig ----------------------------------------------------------------
+  // NAMES, not renders. Twelve thumbnails would mean twelve .glb loads, which
+  // is the exact cost this screen is designed around - the preview body on the
+  // spawn tile is the render, and clicking a name is the one place a reload is
+  // legitimate.
+  const rigLabel = document.createElement('div');
+  Object.assign(rigLabel.style, FIELD_LABEL);
+  rigLabel.textContent = 'Wardrobe';
+  const rigRow = document.createElement('div');
+  Object.assign(rigRow.style, {
+    display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '6px',
+  });
+  const rigEls = Object.entries(RIGS).map(([id, def]) => {
+    const b = document.createElement('button');
+    b.id = `creation-rig-${id}`;
+    b.type = 'button';
+    b.textContent = def.name;
+    b.title = def.blurb;
+    Object.assign(b.style, { ...CHIP, fontSize: '11px', padding: '5px 9px' });
+    b.onclick = () => {
+      // Clicking the rig you are already wearing must not pay for a reload.
+      if (draftModel(draft) === id) return;
+      draft.rig = id;
+      paintRigs();
+      preview('rig');
+    };
+    rigRow.appendChild(b);
+    return { id, b };
+  });
+  const rigBlurb = document.createElement('div');
+  Object.assign(rigBlurb.style, { fontSize: '11px', opacity: '.55', marginBottom: '16px', minHeight: '1.4em' });
+  const paintRigs = () => {
+    const worn = draftModel(draft);
+    for (const { id, b } of rigEls) {
+      const on = id === worn;
+      b.style.background = on ? '#2e4a34' : '#2a2a3e';
+      b.style.borderColor = on ? '#8adf76' : '#3a3a52';
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      if (on) rigBlurb.textContent = RIGS[id]?.blurb || '';
+    }
+  };
+  card.append(rigLabel, rigRow, rigBlurb);
+
+  // --- tint ---------------------------------------------------------------
+  const tintLabel = document.createElement('div');
+  Object.assign(tintLabel.style, FIELD_LABEL);
+  tintLabel.textContent = 'Colour';
+  const tintRow = document.createElement('div');
+  Object.assign(tintRow.style, { display: 'flex', gap: '7px', marginBottom: '18px' });
+  const tintEls = TINTS.map((t) => {
+    const b = document.createElement('button');
+    b.id = `creation-tint-${t.id}`;
+    b.type = 'button';
+    b.title = t.name;
+    Object.assign(b.style, {
+      width: '26px', height: '26px', borderRadius: '50%', cursor: 'pointer',
+      border: '2px solid #3a3a52', padding: '0',
+      // The swatch shows the colour it will PRODUCE - the tint multiplies a
+      // light baked diffuse, so showing the raw triple on white is honest.
+      background: `rgb(${t.rgb.map((c) => Math.round(c * 214)).join(',')})`,
+    });
+    b.onclick = () => { draft.tint = t.rgb; paintTints(); preview('look'); };
+    tintRow.appendChild(b);
+    return { t, b };
+  });
+  const sameRgb = (a, b) => !!a && !!b && a.every((v, i) => Math.abs(v - b[i]) < 1e-6);
+  const paintTints = () => {
+    for (const { t, b } of tintEls) {
+      const on = sameRgb(draft.tint, t.rgb);
+      b.style.borderColor = on ? '#8adf76' : '#3a3a52';
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+  };
+  card.append(tintLabel, tintRow);
+
+  // --- build --------------------------------------------------------------
+  // Two named dials over checked ranges, not the four raw proportion keys:
+  // `head` and `arms` are counter-scales that cancel the torso stretch, so
+  // exposing them would let a player undo the correction rather than say
+  // anything about who they are (models.js documents the cautions).
+  const buildEls = Object.entries(BUILD_RANGE).map(([key, range]) => {
+    const label = document.createElement('div');
+    Object.assign(label.style, FIELD_LABEL);
+    label.textContent = range.label;
+    const slider = document.createElement('input');
+    slider.id = `creation-build-${key}`;
+    slider.type = 'range';
+    slider.min = String(range.min);
+    slider.max = String(range.max);
+    slider.step = String(range.step);
+    Object.assign(slider.style, { width: '100%', marginBottom: '14px', accentColor: '#8adf76' });
+    slider.oninput = () => {
+      draft.build = { ...(draft.build || {}), [key]: Number(slider.value) };
+      preview('look'); // mutates the live body in place - no reload
+    };
+    slider.onkeydown = (e) => e.stopPropagation();
+    card.append(label, slider);
+    return { key, slider, range };
+  });
+  const paintBuild = () => {
+    for (const { key, slider, range } of buildEls) {
+      const v = draft.build?.[key];
+      slider.value = String(Number.isFinite(v) ? v : (range.min + range.max) / 2);
+    }
+  };
+
   // --- commit -------------------------------------------------------------
   const commit = document.createElement('button');
   commit.id = 'creation-commit';
@@ -173,6 +289,9 @@ export function showBadgeStep(draft, { onCommit, onSkip }) {
 
   document.body.appendChild(root);
   paintChips();
+  paintRigs();
+  paintTints();
+  paintBuild();
   repaintSummary();
   name.focus();
   name.select();

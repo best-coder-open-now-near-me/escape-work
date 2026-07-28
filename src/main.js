@@ -26,7 +26,7 @@ import {
 } from './party.js';
 import { applyStatus, statusFx, hasStatus, tickStep, statusLeft, statusList } from './statuses.js';
 import { inReach } from './tactics.js';
-import { createDraft, createCharacter } from './creation.js';
+import { createDraft, createCharacter, draftModel } from './creation.js';
 import { aimsAtAlly } from './powers.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
@@ -561,6 +561,24 @@ function startGame(level) {
       },
     });
   }
+  // The same staging as previewClass, reading the DRAFT instead of the class
+  // entry - so the body on the spawn tile is the character being built rather
+  // than the one that was picked. Shares previewClass's token guard, which is
+  // what keeps a fast run along the wardrobe row from landing out of order.
+  function previewDraft(draft) {
+    const token = ++previewToken;
+    if (previewEntity) { previewEntity.destroy(); previewEntity = null; }
+    placeModel(app, `assets/characters/${draftModel(draft)}.glb`, player.x, player.z, {
+      lift, rotY: 45, animate: true,
+      onReady: (e) => {
+        applyCharacterProportions(e, draft.build);
+        e._mats = cloneMaterials(e);
+        tintMaterials(e._mats, draft.tint);
+        if (token !== previewToken) { e.destroy(); return; }
+        previewEntity = e;
+      },
+    });
+  }
   function endClassPreview() {
     previewToken += 1;
     if (previewEntity) { previewEntity.destroy(); previewEntity = null; }
@@ -600,6 +618,16 @@ function startGame(level) {
       // Skipping accepts every default, which is the same thing the `#class=`
       // express lane does - one code path, so the two can never diverge.
       onSkip: () => beginRun(createCharacter(createDraft(classId))),
+      // Reflect the draft on the body already standing on the spawn tile. A rig
+      // change is the ONE thing that costs a .glb load; tint and build mutate
+      // the live entity in place, which is what lets a slider drive them every
+      // frame instead of queueing a reload per tick (CHARACTER_PLAN #14).
+      onPreview: (kind) => {
+        if (kind === 'rig') { previewDraft(draft); return; }
+        if (!previewEntity) return;
+        applyCharacterProportions(previewEntity, draft.build);
+        tintMaterials(previewEntity._mats || [], draft.tint);
+      },
     });
   }
 
