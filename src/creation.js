@@ -23,6 +23,32 @@ import { BACKGROUNDS } from './data/backgrounds.js';
 export const PRONOUNS = ['she', 'he', 'they'];
 export const DEFAULT_PRONOUNS = 'they';
 
+// The words each choice produces. Narration already speaks about the party in
+// the third person, so these are what a line needs to be able to ask for -
+// storing 'they' and leaving every caller to map it would guarantee that some
+// line somewhere hardcodes one.
+// `plural` drives VERB AGREEMENT, which is the part a caller cannot work out
+// for itself: singular they takes a plural verb ("they gather"), so a line that
+// only had the pronoun would still have to special-case it.
+const PRONOUN_WORDS = {
+  she: { subject: 'she', object: 'her', possessive: 'her', reflexive: 'herself', plural: false },
+  he: { subject: 'he', object: 'him', possessive: 'his', reflexive: 'himself', plural: false },
+  they: { subject: 'they', object: 'them', possessive: 'their', reflexive: 'themselves', plural: true },
+};
+
+// A character's pronoun words, defaulting to they/them for anyone who predates
+// the field - which is what the house voice already used.
+export const pronounsOf = (sheet) =>
+  PRONOUN_WORDS[sheet?.pronouns] || PRONOUN_WORDS[DEFAULT_PRONOUNS];
+
+// Capitalise a pronoun for the start of a sentence.
+export const capitalize = (w) => (w ? w[0].toUpperCase() + w.slice(1) : w);
+
+// Agree a verb with a character's pronoun. Pass the bare stem; singular gets
+// the 's'. `es` is for stems that need it ("goes"), which English will not let
+// us infer from the stem alone.
+export const verb = (words, stem, suffix = 's') => (words.plural ? stem : stem + suffix);
+
 // Long enough for a real name, short enough that it cannot break the HUD card,
 // the party bar or a combat line.
 export const NAME_MAX = 24;

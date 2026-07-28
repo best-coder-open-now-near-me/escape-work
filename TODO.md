@@ -375,6 +375,13 @@ is its own PR that keeps unit + e2e green.
 - [ ] **M6 — Polish.** Read-back sentence, `New Character` in the game menu,
       pronouns read by narration lines.
 
+- [ ] *Deferred, with reason:* CHARACTER_PLAN #17 wanted a `New Character` menu
+      item. `Restart run` already does exactly that - the character sheet lives
+      inside the campaign save, so clearing progress drops the character too -
+      and a second item would have been the same action under a different
+      label. The version worth building is "same character, floor one", and
+      that needs run state to separate from character state first.
+
 ## Phase 5 — Architecture / SOC
 
 - [ ] **Unify the per-tile step rules** (gum/slip) into one module consumed by

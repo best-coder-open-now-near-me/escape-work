@@ -371,3 +371,26 @@ test('draftAttr previews the background swap and the points together', () => {
   const built = createCharacter(draft);
   assert.deepEqual(preview, built.attr, 'the preview must match what commit produces');
 });
+
+// --- pronouns as a vocabulary (CHARACTER_PLAN M6) --------------------------
+const { pronounsOf, capitalize, verb } = await import('../../src/creation.js');
+
+test('pronounsOf answers with words, and defaults to they/them', () => {
+  assert.equal(pronounsOf({ pronouns: 'she' }).object, 'her');
+  assert.equal(pronounsOf({ pronouns: 'he' }).possessive, 'his');
+  // Anyone predating the field, or carrying junk, gets the house voice - which
+  // is what every line already said before the field existed.
+  assert.equal(pronounsOf({}).subject, 'they');
+  assert.equal(pronounsOf(null).subject, 'they');
+  assert.equal(pronounsOf({ pronouns: 'xyzzy' }).subject, 'they');
+});
+
+test('verb agreement handles singular they', () => {
+  // The part a caller cannot infer: singular they takes a PLURAL verb, so a
+  // line holding only the pronoun would still have to special-case it.
+  assert.equal(verb(pronounsOf({ pronouns: 'they' }), 'gather'), 'gather');
+  assert.equal(verb(pronounsOf({ pronouns: 'she' }), 'gather'), 'gathers');
+  assert.equal(verb(pronounsOf({ pronouns: 'he' }), 'go', 'es'), 'goes');
+  assert.equal(verb(pronounsOf({ pronouns: 'they' }), 'go', 'es'), 'go');
+  assert.equal(capitalize('they'), 'They');
+});

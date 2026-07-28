@@ -11,6 +11,7 @@
 import { ACTIONS, arrivalLine } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
 import { truncateByBudget, routeToFiringPosition } from './pathfinding.js';
+import { pronounsOf, capitalize, verb } from './creation.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
@@ -2528,7 +2529,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // the enemy list - the engine re-reads the outcome on the next attempt, so
   // this only has to take the body off the board.
   function expireSummon(s) {
-    log(`${slotName(s)}'s assignment ends. They gather their things and go.`);
+    // The house voice was already they/them here; now it ASKS the character
+    // rather than assuming, which is the whole point of storing the field.
+    const w = pronounsOf(s.member?.sheet);
+    log(`${slotName(s)}'s assignment ends. ${capitalize(w.subject)} `
+      + `${verb(w, 'gather')} ${w.possessive} things and ${verb(w, 'go', 'es')}.`);
     dismissSummon(s.member || s.unit);
     refresh();
   }

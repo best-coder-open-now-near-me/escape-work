@@ -2792,12 +2792,18 @@ function startGame(level) {
   // mid-campaign reload skips the picker entirely.
   ui.showGameMenu([
     {
+      // This IS the "new character" escape hatch CHARACTER_PLAN #17 asked for.
+      // A separate menu item was drafted and then dropped: clearing progress
+      // drops the character with it - the sheet lives in the save - so the two
+      // would have been byte-identical actions under different labels, which is
+      // worse than one honest one. A meaningful "same character, floor one"
+      // needs run state to separate from character state first.
       id: 'menu-restart',
       label: 'Restart run',
       action: () => {
         clearProgress();
         localStorage.removeItem(STASH_KEY);
-        location.hash = '';
+        location.hash = ''; // drop any #class= express lane, or it skips the desk
         location.reload();
       },
     },
