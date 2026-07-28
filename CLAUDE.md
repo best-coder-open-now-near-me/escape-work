@@ -53,6 +53,25 @@ The quality bar for a question:
   recommendation first. "What do you want here?" is not a question;
   "A or B — A costs X, B costs Y, I'd pick A because Z" is.
 
+## Inspirations are looked up, not recalled
+
+Plans here lean on reference games — DOS2, BG3, Shadowbane — and "DOS2 does
+X" is a factual claim about a real game, not a vibe. Memory garbles these:
+the model's recall and the designer's both. A misremembered mechanic quietly
+becomes a requirement, then doctrine — exactly like an unasked question.
+
+- Before a referenced mechanic shapes a decision, look up how the game
+  actually does it (wiki, manual, patch notes) and note the source in the
+  doc. `SHADOWBANE_NOTES.md` is the house example: it marks numbers it
+  couldn't verify as "reported", not fact.
+- When the looked-up fact differs from what the designer said, that is a
+  question, not a correction — the misremembered version may be the design
+  they actually want. Surface both: "you described X; DOS2 actually does Y —
+  keep X (yours) or match Y?" The real game is evidence about intent, never
+  authority over it.
+- A claim that can't be verified (source blocked, mechanic obscure) stays in
+  the doc marked as from memory; don't let it wear a checked fact's clothes.
+
 ## Inheriting decisions across documents
 
 When a plan cites a decision from another plan, it inherits the *status*, not
