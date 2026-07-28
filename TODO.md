@@ -127,6 +127,28 @@ line numbers are the review baseline and may be shifted slightly in
       admits a purge whenever the target carries statuses. So decide whether
       Reboot-targets-anyone makes `remote-restart` redundant, or whether the
       two stay split as touch-range vs remote (`range: 5`, rationed).
+- [ ] **Retire `remote-restart`** *(decided — but it cannot be a straight
+      delete).* Blocker: `tests/unit/levels.test.js:134-142` lints that a
+      class's `primary` verb must appear in its kit ("a class whose primary is
+      a verb it cannot perform is a promise on the résumé card and nowhere
+      else"). IT Support declares `primary: 'buff'` and `remote-restart` is its
+      **only** `buff` — `reboot` is `attack`, `energy-drink` is `heal` — so
+      deleting it turns the unit suite red. Sequence it with the reboot rework
+      instead: once Reboot is a pure any-target purge, IT's `primary` becomes
+      whatever type that verb ends up as, and `remote-restart` drops out with
+      the lint still green. Removal also touches `data/classes.js:211-214` (kit
+      + the comment describing the two-verb split), two e2e tests
+      (`powers.spec.js:42` is entirely about it; `:68` merely *uses* it to
+      prove a general rule and can repoint at HR's `performance-review`, the
+      other base-kit buff), and `POWERS_PLAN.md:155,378`. Note it was never
+      invisible — it renders fine, it is just IT Support's kit only.
+- [ ] *Idea, not scheduled:* "remote in and power-cycle a coworker" reads as a
+      **charm/dominate** power, not a cleanse — closer to DOS2's Charmed or
+      BG3's Dominate Person. Worth considering as IT's identity verb if
+      `remote-restart` comes back in some form. Scope honestly: a charm needs
+      the AI to treat a charmed unit as party-side for a duration, which
+      `pickTarget`/`livingMembers` do not currently model — it is a real
+      system, not a data entry.
 - [ ] `paper-storm` needs `leavesTurns` (`data/actions.js:83`) — still a
       separate bug after the harvest rule above, because permanent drifts are a
       *terrain* problem in their own right (every cast repaints ~9 floor tiles
@@ -201,6 +223,33 @@ line numbers are the review baseline and may be shifted slightly in
       (`main.js:2050`), so a door or prop under the cursor gets no glow, no
       focus banner and no cursor change. Pairs with restoring some form of the
       Alt overlay in combat.
+
+- [ ] **Out of combat, only two verb shapes can be aimed at all.** `armedOoc`
+      is consulted in exactly two places: `attackOrConfront` (`main.js:999`),
+      which fires only when `a.type === 'attack' || a.type === 'shove'` and
+      only at an enemy *body*, and the ground-click branch (`:2021`), which
+      intercepts only `type === 'summon'`. Everything else silently falls
+      through to walk/switch. Consequences the player sees:
+      - **Cones draw nothing and can't be aimed** (Bulk Mail). The wedge
+        preview lives in combat's `drawTargets` (`combat.js:975`) and only runs
+        while a fight is live; out of combat nothing draws it. Aiming one at
+        the floor — the natural way to aim a cone — hits the ground branch,
+        which only handles summons, so **you just walk there**. Clicking an
+        enemy body does work (it opens combat with the cone as the opening).
+        Related: `oocTargetOk` prices a cone as *melee*, because `rangeOf` only
+        reads a top-level `range` and a cone's lives at `cone.range`.
+      - **Zones can't be placed** (Paper Storm) — same ground-click gap.
+      - **Friendly powers can't be aimed at a teammate.** `dispatchHit`'s party
+        branch (`main.js:1005`) runs help-up / talk / `switchLeader` with no
+        `armedOoc` awareness at all, so a click on a teammate with a buff armed
+        just switches to them. Combat has the equivalent gate
+        (`combat?.armedIsFriendly`, `main.js:1984`); exploration never got one.
+        This is why an ally's bleed can't be cleansed out of combat — and bleed
+        is a *step*-clock status, so out of combat is exactly when you'd want
+        to.
+      Fix is one shape: give the out-of-combat click the same verb dispatch
+      combat already has, rather than the two hard-coded special cases. Folds
+      naturally into the two-action-bar unification (Phase 5).
 
 ## Phase 3 — Low bugs (batchable by file)
 
