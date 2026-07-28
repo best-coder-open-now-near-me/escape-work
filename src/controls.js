@@ -82,6 +82,17 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   let orbiting = false;
   let leftHeld = false; // for drag-painting in the editor
   let hoveringCanvas = false; // was the last hover over the world, not the UI?
+  // Leaving the WINDOW ends the hover too. The mousemove transition further
+  // down only fires on a move that LANDS off the canvas - so sliding onto DOM
+  // UI was caught, while taking the pointer out of the window produced no move
+  // event at all. The world then kept its last hover indefinitely: the coworker
+  // you left under the cursor stayed highlighted and the focus banner went on
+  // naming them while the pointer sat in another application.
+  canvas.addEventListener('pointerleave', () => {
+    if (!hoveringCanvas) return;
+    hoveringCanvas = false;
+    onHoverLeave && onHoverLeave();
+  });
   // The last RAW pointer position on the canvas. Kept because an impaired aim
   // keeps drifting while the mouse sits still: refreshHover below re-asks the
   // world what is under the swaying crosshair on frames no mouse event arrives.
