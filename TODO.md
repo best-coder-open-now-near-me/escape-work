@@ -469,22 +469,27 @@ is its own PR that keeps unit + e2e green.
 
 ## Phase 6 — Test infrastructure
 
-- [ ] Finish combat's rng seam: route `rand`, `initRng`, and slip checks
-      through the injected rng (`combat.js:23`), then add a seeded full
-      roll→damage→status resolution test.
-- [ ] Give `rollLoot` an rng parameter and port `shop.test.js`'s chance tests;
-      lint the guaranteed-drop invariant (`data/items.js:321`).
-- [ ] Named-error validation for unknown actor ids in `grid.parseLevel`
-      (`grid.js:89`) + CLASSES/ENEMY_TYPES id-uniqueness lint
-      (`main.js:2899`) + unplaced-enemy lint (`data/enemies.js:200`).
-- [ ] Hoist the `window.pc` module-scope reads in `actors.js` (and the
-      `tile-renderer` import chain under `looting.js`) behind injection seams
-      so their pure logic imports under `node --test`; then unit-test the
-      movement state machine and looting rules.
-- [ ] Replace bare sleeps with state polls: `editor.spec.js:52`,
-      `ranged.spec.js:100,119,165`.
-- [ ] Missing coverage: stairwell revive of a downed companion; corrupted-stash
-      boot falling back past a valid campaign save (`main.js:1852`, `:63-78`).
+- [x] Combat's rng seam is closed: `rand` takes its randomness as an argument
+      (it read `Math.random` at module scope, unreachable from the injected
+      `rng`), and initiative and the slip check went the same way. One seed now
+      reproduces a whole fight. Seeded roll→damage→status test in `hit.test.js`.
+- [x] `rollLoot` takes an rng; drop tables are assertable, including the
+      guaranteed-drop invariant several registries lean on.
+- [x] Named-error validation for unknown actor ids in `parseLevel`; class/enemy
+      id-collision lint; unplaced-enemy lint (which found `regional-executive`,
+      exempted by name as authored-ahead-of-its-floor).
+- [x] Bare sleeps replaced with state polls (`editor.spec.js`,
+      `ranged.spec.js` ×3), on a new `__game.playerMoving` accessor.
+- [ ] **Still open:** hoist the `window.pc` module-scope reads in `actors.js`
+      (and the `tile-renderer` chain under `looting.js`) behind injection seams
+      so their pure logic imports under `node --test`, then unit-test the
+      movement state machine and looting rules. This is the largest remaining
+      item and the one that would unlock the most: `actors.js` holds the
+      movement/animation state machine and is currently untestable at all.
+      `creation.test.js` shows the shape (a minimal `window.pc` stub), but doing
+      it properly means an injection seam rather than a global.
+- [ ] **Still open:** missing coverage - stairwell revive of a downed
+      companion; corrupted-stash boot falling back past a valid campaign save.
 
 ## Phase 7 — Docs & dead code
 
