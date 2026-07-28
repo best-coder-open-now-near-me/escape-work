@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { COMPANIONS } from '../../src/data/companions.js';
 import {
-  createSheet, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist, accuracy, dodge, hitChance, rollHit, unitCombat, equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf,
+  createSheet, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist, accuracy, dodge, hitChance, rollHit, unitCombat, equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, stairwellHeal,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
@@ -913,4 +913,28 @@ test('lookOf falls through to the companion entry, then to null', () => {
   assert.deepEqual(lookOf(withCompanion), COMPANIONS[withCompanion.companionId].look ?? null);
   assert.equal(lookOf({}), null, 'a sheet belonging to nothing has no look');
   assert.equal(lookOf(null), null, 'and neither does nothing at all');
+});
+
+// --- the stairwell breather (TODO Phase 6) ---------------------------------
+// Was arithmetic inline in a branch of main.js, so the case that matters most -
+// a DOWNED companion - had no coverage at all.
+test('the stairwell breather carries the downed to the landing', () => {
+  const sheet = createSheet('office-drone');
+  // Down, and at or below zero. Adding to a negative would land them still
+  // down, or up by less than everybody else - they were carried, so they come
+  // to on the same terms.
+  sheet.hp = 0;
+  assert.equal(stairwellHeal(sheet, 6), 6);
+  sheet.hp = -4;
+  assert.equal(stairwellHeal(sheet, 6), 6, 'a deeper knockdown is not a worse recovery');
+});
+
+test('the breather tops up the standing and never overfills', () => {
+  const sheet = createSheet('office-drone');
+  sheet.hp = sheet.maxHp - 2;
+  assert.equal(stairwellHeal(sheet, 6), sheet.maxHp, 'capped at their maximum');
+  sheet.hp = sheet.maxHp;
+  assert.equal(stairwellHeal(sheet, 6), sheet.maxHp, 'and a full character stays full');
+  sheet.hp = 1;
+  assert.equal(stairwellHeal(sheet, 6), 7, 'otherwise it is a flat top-up');
 });

@@ -40,6 +40,14 @@ export const PROGRESSION = {
   XP_GROWTH: 1.5,       // each promotion multiplies the threshold by this
 };
 
+// The breather between floors: everyone comes up by `amount`, capped at their
+// maximum. The `Math.max(hp, 0)` is the load-bearing part - a DOWNED character
+// sits at or below zero, and adding to a negative would land them still down,
+// or up by less than everybody else. They are carried to the landing and come
+// to there, which is the rule this expresses.
+export const stairwellHeal = (sheet, amount) =>
+  Math.min(sheet.maxHp, Math.max(sheet.hp, 0) + amount);
+
 // The xp threshold a character at `level` should be sitting on. Replays the
 // same rounding gainXp applies step by step, so a rebuilt value and a value
 // that got there by levelling are always identical.

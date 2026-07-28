@@ -18,7 +18,7 @@ import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, ro
 import {
   createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
   scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
-  orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, lookOf, REACH,
+  orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, lookOf, stairwellHeal, REACH,
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
@@ -63,21 +63,33 @@ let activeLevelId = FIRST_LEVEL;
 let playtesting = false;
 let restoredProgress = null; // { levelId, sheets, active } - party.js handles old shapes
 try {
+  // Each source gets its OWN guard. Sharing one meant a corrupt playtest stash
+  // threw before the campaign save was ever read, so a bad stash silently
+  // discarded a real run and dropped you on floor one - the stash is scratch
+  // space written by a tool, and it must never be able to cost somebody their
+  // progress. Falling back PAST it to the campaign save is the whole point.
   const stash = localStorage.getItem(STASH_KEY);
-  const progress = localStorage.getItem(PROGRESS_KEY);
   if (stash) {
-    activeLevel = JSON.parse(stash);
-    activeLevelId = null;
-    playtesting = true;
-  } else if (progress) {
-    const p = parseProgress(JSON.parse(progress));
-    if (p && LEVELS[p.levelId]) {
-      activeLevel = LEVELS[p.levelId];
-      activeLevelId = p.levelId;
-      restoredProgress = p;
+    try {
+      activeLevel = JSON.parse(stash);
+      activeLevelId = null;
+      playtesting = true;
+    } catch {
+      localStorage.removeItem(STASH_KEY); // unreadable, and it will stay that way
     }
   }
-} catch { /* corrupted storage - fall back to the shipped level */ }
+  if (!playtesting) {
+    try {
+      const progress = localStorage.getItem(PROGRESS_KEY);
+      const p = progress && parseProgress(JSON.parse(progress));
+      if (p && LEVELS[p.levelId]) {
+        activeLevel = LEVELS[p.levelId];
+        activeLevelId = p.levelId;
+        restoredProgress = p;
+      }
+    } catch { /* corrupt save - the shipped level is the honest fallback */ }
+  }
+} catch { /* localStorage itself is unavailable (private mode, blocked) */ }
 
 const clearProgress = () => localStorage.removeItem(PROGRESS_KEY);
 
@@ -2046,7 +2058,7 @@ function startGame(level) {
           // puddle away from death. The downed get carried and come to on
           // the landing.
           for (const m of party.members) {
-            m.sheet.hp = Math.min(m.sheet.maxHp, Math.max(m.sheet.hp, 0) + STAIRWELL_HEAL);
+            m.sheet.hp = stairwellHeal(m.sheet, STAIRWELL_HEAL);
           }
           localStorage.setItem(PROGRESS_KEY, JSON.stringify(serializeProgress(party, level.next)));
           ui.showFloorClear({ nextName: LEVELS[level.next].name }, () => location.reload());
