@@ -7,16 +7,35 @@
 // procedural layer on the model child adds the attack lunge push, hit
 // flinches and death topples. EnemyActor adds wander AI on top. New actor
 // kinds extend GridActor the same way.
-const pc = window.pc;
 import { rollLoot } from './data/items.js';
 import { unitCombat } from './stats.js';
 import { applyStatus, hasStatus, statusFx } from './statuses.js';
 import { cloneMaterials, tintMaterials } from './models.js';
 
+// The engine handle, resolved LAZILY rather than read at module scope.
+//
+// `const pc = window.pc` ran on import, which meant this module could not be
+// imported at all without a browser - so the movement state machine, the one
+// piece of logic here that is pure arithmetic over a path, had no way to be
+// unit-tested. Nothing about it needs a renderer; it just lived next to code
+// that did. Reading through a function defers the dependency to the first call
+// that genuinely needs the engine, so `node --test` can import this and drive
+// the path logic while the rendering half simply never runs.
+const pcRuntime = () => globalThis.window?.pc;
+
+// Radians to degrees. Spelled out rather than reached for through the engine
+// (`pc.math.RAD_TO_DEG`): it is a mathematical constant, not a renderer
+// service, and reading it off the engine was one of the things keeping the
+// facing arithmetic from being testable without a browser.
+const RAD_TO_DEG = 180 / Math.PI;
+
 const wrapAngle = (a) => (((a + 180) % 360) + 360) % 360 - 180;
 const TURN_RATE = 10; // how quickly facing eases toward the heading
 const FLASH_COLOR = [0.75, 0.09, 0.05];
-const _settleQuat = new pc.Quat(); // scratch for the idle leg-settle slerp
+// Built on first use for the same reason: a module-scope `new pc.Quat()` is an
+// engine call at import time.
+let _settleQuat = null;
+const settleQuat = () => (_settleQuat ||= new (pcRuntime().Quat)());
 
 export class GridActor {
   constructor(x, z, { speed = 2.2 } = {}) {
@@ -80,7 +99,7 @@ export class GridActor {
   }
 
   faceToward(tx, tz) {
-    this.targetYaw = Math.atan2(tx - this.x, tz - this.z) * pc.math.RAD_TO_DEG;
+    this.targetYaw = Math.atan2(tx - this.x, tz - this.z) * RAD_TO_DEG;
   }
 
   // Ease the model's facing toward targetYaw - no more snap turns.
@@ -176,8 +195,8 @@ export class GridActor {
       const s = this.legSettle;
       s.t = Math.min(1, s.t + dt * 5); // ~0.2s to reach stance
       const k = s.t * s.t * (3 - 2 * s.t); // smoothstep - no abrupt start/stop
-      if (this.legL && s.l) this.legL.setLocalRotation(_settleQuat.slerp(s.l, pc.Quat.IDENTITY, k));
-      if (this.legR && s.r) this.legR.setLocalRotation(_settleQuat.slerp(s.r, pc.Quat.IDENTITY, k));
+      if (this.legL && s.l) this.legL.setLocalRotation(settleQuat().slerp(s.l, pcRuntime().Quat.IDENTITY, k));
+      if (this.legR && s.r) this.legR.setLocalRotation(settleQuat().slerp(s.r, pcRuntime().Quat.IDENTITY, k));
     } else {
       this.legSettle = null;
     }
@@ -271,7 +290,7 @@ export class GridActor {
         }
       } else {
         this.entity.setPosition(pos.x + (dx / d) * remaining, pos.y, pos.z + (dz / d) * remaining);
-        this.targetYaw = Math.atan2(dx, dz) * pc.math.RAD_TO_DEG;
+        this.targetYaw = Math.atan2(dx, dz) * RAD_TO_DEG;
         remaining = 0;
       }
     }
@@ -286,7 +305,7 @@ export class GridActor {
         this.slideTo = null;
       } else {
         this.entity.setPosition(pos.x + (dx / d) * remaining, pos.y, pos.z + (dz / d) * remaining);
-        this.targetYaw = Math.atan2(dx, dz) * pc.math.RAD_TO_DEG;
+        this.targetYaw = Math.atan2(dx, dz) * RAD_TO_DEG;
         remaining = 0;
       }
     }

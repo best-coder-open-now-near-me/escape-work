@@ -2973,6 +2973,29 @@ function startGame(level) {
     // a test that hardcodes 6 breaks on every balance pass for no reason.
     get classes() { return CLASSES; },
     get playerTile() { return { x: player.x, z: player.z }; },
+    // Open a fight with the nearest coworker who can take part, without walking
+    // anybody down. The suite's single largest cost: `enterCombat` engages by
+    // clicking a body and waiting out the walk-up, and a class with no attack
+    // of its own (IT Support, HR) can only reach a fight that way - which is
+    // why exactly those specs are the ones that exhaust their budget mid-walk.
+    //
+    // This is a seam, not a cheat: it goes through the same `beginCombat` the
+    // trigger does, with the same engaged rule, so what a spec gets is a real
+    // fight and not a staged one. It just skips the walking.
+    startFightNow: () => {
+      if (!sheet || inCombat || gameOver) return false;
+      const near = enemies
+        .filter((e) => e.alive && canTakePart(player, e))
+        .sort((a, b) => cheb(player, a) - cheb(player, b))[0];
+      if (!near) return false;
+      const engaged = enemies.filter((e) =>
+        e.alive
+        && Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= ENGAGE_RADIUS
+        && canTakePart(player, e));
+      if (!engaged.includes(near)) engaged.push(near);
+      beginCombat({ engaged, primary: near });
+      return true;
+    },
     // Is the leader mid-walk? The suite's honest alternative to sleeping: a
     // spec that wants "and then nothing happens" can poll for stillness rather
     // than guess a duration, which under software GL is reliably either too

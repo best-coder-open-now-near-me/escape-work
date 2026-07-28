@@ -2,7 +2,12 @@
 // characters, and the proportion retune that de-chibis the Kenney rigs.
 import { toonifyEntity, addOutlines } from './shading.js';
 
-const pc = window.pc;
+// Resolved LAZILY, not read at import. `const pc = window.pc` made this module
+// - and everything importing it, which includes actors.js - impossible to load
+// outside a browser, so the pure parts (proportions, material cloning, the tint
+// rule) could not be unit-tested even though none of them touch a renderer.
+// Both uses below are genuine engine calls, so they resolve it at call time.
+const pc = () => window.pc;
 
 // The character .glbs ship with a full baked clip set (idle, walk, attacks,
 // die, sit...). Wire the ones the game drives into an anim component with an
@@ -33,7 +38,7 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
   // and the editor repaints cells constantly).
   let asset = app.assets.find(url);
   if (!asset) {
-    asset = new pc.Asset(url, 'container', { url });
+    asset = new (pc().Asset)(url, 'container', { url });
     // Attach the error handler ONCE, when the asset is first created - it's a
     // persistent listener on a shared asset, so re-adding it per placeModel
     // call (the editor repaints constantly) would leak handlers unbounded.
@@ -41,7 +46,7 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
     app.assets.add(asset);
   }
   asset.ready(() => {
-    const holder = new pc.Entity(url);
+    const holder = new (pc().Entity)(url);
     const inst = asset.resource.instantiateRenderEntity();
     holder.addChild(inst);
     toonifyEntity(holder);

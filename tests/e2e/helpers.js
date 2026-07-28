@@ -198,6 +198,24 @@ function engageBudgetMs() {
 }
 
 export async function enterCombat(page) {
+  // Fast path first. Walking a coworker down is the suite's single largest
+  // cost, and for a class with no attack of its own it is the ONLY way in -
+  // which is why exactly those specs exhaust their budget mid-walk. This goes
+  // through the same beginCombat the trigger does, with the same engaged rule,
+  // so the fight is real; it just skips the walking. Falls through to the
+  // click-and-walk path below when there is nobody in range yet.
+  const opened = await page.evaluate(() => window.__game.startFightNow?.() ?? false);
+  if (opened) {
+    await expect
+      .poll(() => page.evaluate(() => window.__game.inCombat), { timeout: 15_000 })
+      .toBe(true);
+    // Settle on the player's turn exactly as the slow path does - initiative
+    // may hand the enemy the first turns, and returning mid-AI-turn leaves the
+    // caller's next click waiting out its whole timeout against a legitimately
+    // disabled button. Skipping the walk must not mean skipping this.
+    await settleOnPlayerTurn(page, 30_000);
+    return;
+  }
   const started = Date.now();
   const deadline = started + engageBudgetMs();
   const left = () => deadline - Date.now();
@@ -255,12 +273,17 @@ export async function enterCombat(page) {
   // is not enabled", with nothing about the fight that caused it. The floor is
   // 20s now, and the only tolerated failure is the documented one: a fight that
   // ENDED while we waited is not a hang.
-  if (await page.evaluate(() => window.__game.inCombat)) {
-    try {
-      await waitForPlayerTurn(page, Math.max(20_000, left()));
-    } catch (err) {
-      if (await page.evaluate(() => window.__game.inCombat)) throw err;
-    }
+  await settleOnPlayerTurn(page, Math.max(20_000, left()));
+}
+
+// Wait out any AI turns initiative handed out first. The only tolerated failure
+// is the documented one: a fight that ENDED while we waited is not a hang.
+async function settleOnPlayerTurn(page, timeout) {
+  if (!(await page.evaluate(() => window.__game.inCombat))) return;
+  try {
+    await waitForPlayerTurn(page, timeout);
+  } catch (err) {
+    if (await page.evaluate(() => window.__game.inCombat)) throw err;
   }
 }
 
