@@ -70,25 +70,57 @@ line numbers are the review baseline and may be shifted slightly in
 - [ ] Gum double-slow: remove the in-place `this.speed *= GUM.slow` from the
       wander path (`actors.js:453`) — the status already carries the slow.
       *Best done as part of the step-rule unification in Phase 5.*
-- [ ] `paper-storm` needs `leavesTurns` (`data/actions.js:83`) — its drifts are
-      currently permanent terrain. **Also the one leak in the paper economy:**
-      with no `leavesTurns`, `leaveSurface(…, a.leavesTurns || 0)` passes 0 and
-      `main.js:1610` only registers a tile with the ager `if (turns > 0)`, so
-      Paper Storm's drifts are never entered into `tempSurfaces` at all and
-      both expiry clocks skip them. ~9 tiles (radius 1.5) × `uses: 2`, 2 AP,
-      **no `ammoCost`**, harvested at +1 sheet/tile once the fight ends — a
-      free AP→ammo converter, and `PAPER_CAP = Infinity` (`stats.js:12`, dead
-      like `INV_CAP`) means nothing bounds the take. This is precisely the
-      "renewable ammo pile" `main.js:389` and `main.js:2581` were both written
-      to prevent. One line fixes the terrain bug and the economy together —
-      and it is load-bearing for any paper-upgrade system, which only adds a
-      step unless the raw supply is bounded.
+- [ ] **Power-laid paper is never harvestable** *(decided)*. Ammo comes from
+      the world, not from a power — a paper-laying action must never be an
+      AP→ammo converter. Expiry does **not** achieve this on its own:
+      `harvestPaperPatch` only refuses `isInCombat()`, and the litter clock
+      ticks one turn per `OOC_TURN_SECONDS = 1.6` (`main.js:164`), so Bulk
+      Mail's `leavesTurns: 4` drift laid late in a fight is still on the floor
+      for ~6.4s *after* the fight ends — exactly when harvesting becomes legal
+      — and one click takes the whole connected patch at +1 sheet/tile. Paper
+      Storm is the unbounded version (see below). Fix reuses machinery that
+      already exists: `paperHarvestable` is
+      `surfaceAt === 'paper' && !harvestedPaper.has(key)` (`looting.js:58`), so
+      have `leaveSurface` mark each paper tile it paints straight into
+      `harvestedPaper` — "already picked clean" at birth. Composes correctly
+      with `forgetPaper`, which clears the mark when the tile reverts to bare
+      floor, so a *world* drift laid there later is gatherable again. This is
+      the invariant `main.js:389` and `main.js:2581` were both reaching for
+      ("nor leave a renewable ammo pile behind it"), and it is load-bearing for
+      any paper-upgrade system — upgrading only adds a step unless the raw
+      supply is bounded by the world.
+- [ ] `paper-storm` needs `leavesTurns` (`data/actions.js:83`) — still a
+      separate bug after the harvest rule above, because permanent drifts are a
+      *terrain* problem in their own right (every cast repaints ~9 floor tiles
+      with damage + bleed, forever). With no `leavesTurns`,
+      `leaveSurface(…, a.leavesTurns || 0)` passes 0 and `main.js:1610` only
+      registers a tile with the ager `if (turns > 0)`, so these drifts never
+      enter `tempSurfaces` and both expiry clocks skip them entirely. Related
+      dead constant: `PAPER_CAP = Infinity` (`stats.js:12`), like `INV_CAP` —
+      wants a real number if paper becomes a real economy.
 - [ ] `hover.clear()` must reset `hoverTarget` so Ctrl/Alt can't re-light a
       stale body (`hover.js:257`).
 - [ ] Gate the party-bar level-up pip and character-sheet Level Up button on
       `!inCombat` (`main.js:1328`, `ui/hud.js:370`).
-- [ ] Invalidate `surfaces-runtime`'s `burned` set when a burnt cell is
-      repainted, so re-laid drifts work (`surfaces-runtime.js:36`).
+- [ ] **Burnt paper leaves the grid permanently wrong — visual gone, surface
+      still recorded.** Root cause: `ignite` calls `hooks.hideSurfaceVisual`
+      (`surfaces-runtime.js:60`) but never updates the grid, so `runtime`'s
+      `burned` set only *masks* a `grid.typeAt` that still says `'paper'`
+      forever. Verified through a full burn: fresh `paper`/`paper`/shown →
+      ignited `paper`/`fire`/**hidden** → burnt out **`paper`**/`null`/hidden.
+      Two sources of truth for "is there paper here", diverging for good.
+      Consequences on a tile that looks bare: `canTakeSurface`
+      (`typeAt === 'floor'`) is false forever, so no cone or zone can ever lay
+      a surface there again; `flammable` reads the same stale base, so it can
+      never burn again (this is the `burned`-never-invalidated bug, same root);
+      and `scene.refreshTile` re-renders from `grid.typeAt`, so a nearby topple
+      or explosion **redraws the paper visual on ash**. Temp drifts self-heal
+      by luck — `ageTempSurfaces` later forces `setType(x, z, 'floor')` — so
+      this bites *world-placed* drifts, which nothing ever cleans up. Fix: when
+      fire consumes paper, set the tile to `'floor'` and drop the cell from
+      `burned`, exactly as `stickGum` already does for a spent wad
+      (`main.js:323` — `grid.setType(…, 'floor')` *and* `hideSurfaceVisual`
+      together). One truth, and the re-laid-drift bug goes with it.
 - [ ] Ranged-weapon target rings must match the click's new walk-in behavior
       (`combat.js:1035` vs `2020-2056`) — ring green when a walk-in shot is
       affordable, as melee does. *(New in `e8e53de`.)*
