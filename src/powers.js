@@ -240,3 +240,59 @@ export function zoneProblem(a, t = {}) {
   if (!los) return 'No clear line to there.';
   return null;
 }
+
+// --- cones (POWERS_PLAN) -----------------------------------------------------
+
+// The wedge a cone attack covers, aimed from `origin` toward (tx, tz), or null
+// when there is no meaningful aim (the cursor is on top of the caster).
+//
+// Pure, and taking the origin as an argument, because BOTH sides of the game
+// need it: combat draws and fires the wedge, and out of combat the same wedge
+// has to be previewable before a fight exists. It used to be a closure over
+// combat's `active`, which is why aiming a cone outside a fight drew nothing at
+// all - the geometry was simply unreachable from there.
+//
+// The returned function is the tile/body test, carrying `origin` and `angle`
+// so a caller can draw what it is about to resolve.
+export function coneFrom(a, origin, tx, tz) {
+  let dx = tx - origin.x;
+  let dz = tz - origin.z;
+  const len = Math.hypot(dx, dz);
+  if (len < 0.2) return null;
+  dx /= len;
+  dz /= len;
+  const half = (a.cone.halfAngle * Math.PI) / 180;
+  // `r` is the target's radius. A point test (r = 0) is right for carpeting
+  // floor tiles but WRONG for bodies: it demanded the wedge swallow a target's
+  // centre, so the ring only went green once the cone visibly covered the whole
+  // marker. Passing the ring's radius widens the wedge by the angle the body
+  // subtends, so the cone catches anything it clips.
+  const test = (wx, wz, r = 0) => {
+    const vx = wx - origin.x;
+    const vz = wz - origin.z;
+    const d = Math.hypot(vx, vz);
+    if (d < 0.3 || d - r > a.cone.range) return false;
+    const slack = r > 0 ? Math.asin(Math.min(1, r / Math.max(d, 1e-6))) : 0;
+    return (vx * dx + vz * dz) / d >= Math.cos(Math.min(Math.PI, half + slack));
+  };
+  test.origin = origin;
+  test.angle = Math.atan2(dz, dx);
+  return test;
+}
+
+// The wedge's outline as [[x, z], ...] - the two edges and the arc between
+// them, starting and ending at the origin. Shared so the in-combat preview and
+// the out-of-combat one cannot draw different shapes for the same action.
+export function conePolyline(a, test, segments = 14) {
+  const half = (a.cone.halfAngle * Math.PI) / 180;
+  const arc = [];
+  for (let i = 0; i <= segments; i++) {
+    const ang = test.angle - half + (2 * half * i) / segments;
+    arc.push([
+      test.origin.x + Math.cos(ang) * a.cone.range,
+      test.origin.z + Math.sin(ang) * a.cone.range,
+    ]);
+  }
+  const o = [test.origin.x, test.origin.z];
+  return [o, ...arc, o];
+}

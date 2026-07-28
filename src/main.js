@@ -27,7 +27,7 @@ import {
 import { applyStatus, statusFx, hasStatus, tickStep, statusLeft, statusList } from './statuses.js';
 import { inReach } from './tactics.js';
 import { createDraft, createCharacter, draftModel } from './creation.js';
-import { aimsAtAlly } from './powers.js';
+import { aimsAtAlly, coneFrom, conePolyline } from './powers.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel } from './scene.js';
@@ -879,6 +879,17 @@ function startGame(level) {
 
   // Walk to the open tile nearest an enemy; combat starts on arrival via the
   // adjacency check in onMemberStep.
+  // Everyone a wedge would catch right now: inside it, and with a clear line.
+  // One rule, used by the preview and the click, so a ring can never promise
+  // somebody the cone would miss.
+  function coneCatches(test) {
+    return enemies.filter((en) => {
+      if (!en.alive || !en.entity) return false;
+      const bp = en.entity.getPosition();
+      return test(bp.x, bp.z, 0.5) && hasLos(player, en);
+    });
+  }
+
   function confront(en) {
     if (!en || !en.alive || inCombat || gameOver) return;
     pendingAction = null;
@@ -1867,6 +1878,14 @@ function startGame(level) {
         ui.say(a.ammoCost ? 'No line for that throw from here.' : 'No shot at them from here.');
         return;
       }
+    } else if (a.cone) {
+      // A cone fires from where you STAND: its reach is cone.range with a
+      // clear line, not arm's length. Falling through to the melee test below
+      // refused a wedge that plainly covered them, and then walked you in.
+      if (cheb(player, en) > a.cone.range || !hasLos(player, en)) {
+        ui.say(`They are not in the way of that ${a.label.toLowerCase()}.`);
+        return;
+      }
     } else if (a.type === 'shove') {
       if (!playerReaches(en, REACH.SHOVE)) { ui.say('Too far to shove. Walk your feelings over first.'); return; }
     } else if (!playerReaches(en) && !bestApproachPath(en.x, en.z)) {
@@ -2185,6 +2204,25 @@ function startGame(level) {
         if (tile) postSummonAt(armedOoc, tile.x, tile.z);
         return;
       }
+      // A CONE is aimed at a DIRECTION, so the ground is its natural target -
+      // and the ground branch only ever handled summons, so aiming Bulk Mail at
+      // the floor silently walked you there instead. It opens the fight on
+      // whoever the wedge actually catches, which is the same rule the preview
+      // just drew.
+      if (armedOoc && ACTIONS[armedOoc].cone && point) {
+        const a = ACTIONS[armedOoc];
+        const test = coneFrom(a, { x: player.x, z: player.z }, point.x, point.z);
+        const caught = test ? coneCatches(test) : [];
+        if (!caught.length) {
+          ui.say(`Nobody is in the way of that ${a.label.toLowerCase()}.`);
+          return;
+        }
+        // The nearest one is the primary; the rest join through the engage
+        // radius exactly as they would for any other opener.
+        caught.sort((p, q) => cheb(player, p) - cheb(player, q));
+        engageWithAction(caught[0], armedOoc);
+        return;
+      }
       // Out of combat, the interactable ENTITY under the cursor wins over the
       // floor tile behind it - what finally makes a click on the tall door
       // mesh (or a standing enemy) land on the thing you aimed at.
@@ -2415,6 +2453,17 @@ function startGame(level) {
       // its arrivals would fill, and why they couldn't. Null unless a summon is
       // armed with the cursor on the floor - the rings key off this one answer,
       // which is the same one the click runs (summonDropProblem).
+      // The wedge an armed cone would cover right now, or null. Same geometry
+      // combat uses, from the same pure function - only the origin differs.
+      coneAim: () => {
+        if (!armedOoc || inCombat || !oocAim || !sheet) return null;
+        const a = ACTIONS[armedOoc];
+        if (!a.cone) return null;
+        const test = coneFrom(a, { x: player.x, z: player.z }, oocAim.x, oocAim.z);
+        if (!test) return null;
+        const caught = coneCatches(test);
+        return { line: conePolyline(a, test), caught: caught.map((e) => [e.x, e.z]), usable: !!caught.length };
+      },
       summonDrop: () => {
         if (!armedOoc || inCombat || !oocAim) return null;
         const a = ACTIONS[armedOoc];
@@ -2709,6 +2758,7 @@ function startGame(level) {
       // attack, shove and throw) or a spot on the floor (a summon).
       if (show && armedOoc) {
         if (ACTIONS[armedOoc].type === 'summon') hover.drawSummonDrop();
+        else if (ACTIONS[armedOoc].cone) hover.drawConeAim();
         else hover.drawArmedTargets();
       }
     }

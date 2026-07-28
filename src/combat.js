@@ -16,7 +16,7 @@ import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, ac
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
 import {
-  buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, isPurge,
+  buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, isPurge, coneFrom, conePolyline,
 } from './powers.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
@@ -915,34 +915,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     drawRing(ex, ez, 0.32, PREVIEW_OK, y);
   }
 
-  // The wedge a cone attack would cover, aimed from the acting member's body
-  // toward (tx, tz). Returns a tile test, or null when there's no meaningful
-  // aim.
+  // The wedge, aimed from the acting member's body. The geometry itself lives
+  // in powers.js so the out-of-combat preview draws the identical shape; this
+  // only binds the origin.
   function coneTest(a, tx, tz) {
-    const pp = active.actor.entity ? active.actor.entity.getPosition() : { x: active.actor.x, z: active.actor.z };
-    let dx = tx - pp.x;
-    let dz = tz - pp.z;
-    const len = Math.hypot(dx, dz);
-    if (len < 0.2) return null;
-    dx /= len;
-    dz /= len;
-    const half = (a.cone.halfAngle * Math.PI) / 180;
-    // `r` is the target's radius. A point test (r = 0) is right for carpeting
-    // floor tiles, but WRONG for bodies: it demanded the wedge swallow a
-    // target's centre, so the ring only went green once the cone visibly
-    // covered the whole marker. Passing the ring's radius widens the wedge by
-    // the angle the body subtends, so the cone catches anything it clips.
-    const test = (wx, wz, r = 0) => {
-      const vx = wx - pp.x;
-      const vz = wz - pp.z;
-      const d = Math.hypot(vx, vz);
-      if (d < 0.3 || d - r > a.cone.range) return false;
-      const slack = r > 0 ? Math.asin(Math.min(1, r / Math.max(d, 1e-6))) : 0;
-      return (vx * dx + vz * dz) / d >= Math.cos(Math.min(Math.PI, half + slack));
-    };
-    test.origin = pp;
-    test.angle = Math.atan2(dz, dx);
-    return test;
+    const pp = active.actor.entity
+      ? active.actor.entity.getPosition()
+      : { x: active.actor.x, z: active.actor.z };
+    return coneFrom(a, pp, tx, tz);
   }
 
   // While an attack/shove is armed, rings mark the targets: green = usable on
@@ -1010,17 +990,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const test = aimPoint && coneTest(a, aimPoint.x, aimPoint.z);
       if (test) {
         const y = 0.14;
-        const half = (a.cone.halfAngle * Math.PI) / 180;
-        const pts = [];
-        for (let i = 0; i <= 14; i++) {
-          const ang = test.angle - half + (2 * half * i) / 14;
-          pts.push(new pc.Vec3(test.origin.x + Math.cos(ang) * a.cone.range, y,
-            test.origin.z + Math.sin(ang) * a.cone.range));
+        const line = conePolyline(a, test);
+        for (let i = 1; i < line.length; i++) {
+          app.drawLine(new pc.Vec3(line[i - 1][0], y, line[i - 1][1]),
+            new pc.Vec3(line[i][0], y, line[i][1]), PREVIEW_OK);
         }
-        const o = new pc.Vec3(test.origin.x, y, test.origin.z);
-        app.drawLine(o, pts[0], PREVIEW_OK);
-        app.drawLine(o, pts[pts.length - 1], PREVIEW_OK);
-        for (let i = 1; i < pts.length; i++) app.drawLine(pts[i - 1], pts[i], PREVIEW_OK);
       }
       for (const en of world.liveEnemies()) {
         if (!en.entity) continue;
