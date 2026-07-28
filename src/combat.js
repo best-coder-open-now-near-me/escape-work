@@ -98,7 +98,22 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
       const tx = target.actor.x + dx;
       const tz = target.actor.z + dz;
-      if (!world.isWalkable(tx, tz) && !(unit.x === tx && unit.z === tz)) continue;
+      // Already STANDING on a tile this unit could swing from: the cheapest
+      // route is no route, so take it and stop looking. `findEnemyPath` cannot
+      // express that - it rejects a goal failing `isWalkable`, and the unit's
+      // own tile fails it because the unit is standing on it - so the self-path
+      // came back null, the search fell through to a DIFFERENT adjacent tile,
+      // and the unit walked there. Next turn the same logic walked it back.
+      // That is the pacing: a coworker adjacent but a shade out of reach
+      // shuffling between two tiles forever instead of ever attacking. The old
+      // `!(unit.x === tx && unit.z === tz)` exemption below was reaching for
+      // this and could not get there - it only let the tile past `isWalkable`,
+      // leaving the pathfinder to reject it a moment later. Returning the
+      // degenerate path hands aiAdvance its existing in-place shuffle branch,
+      // which closes the last sub-tile gap. Same special case `routeBeside`
+      // carries on the player side, for the same reason.
+      if (unit.x === tx && unit.z === tz) return [[tx, tz], [tx, tz]];
+      if (!world.isWalkable(tx, tz)) continue;
       const p = world.findEnemyPath(unit.x, unit.z, tx, tz);
       if (p && p.length > 1 && (!best || p.length < best.length)) best = p;
     }
@@ -708,6 +723,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function showDashPreview(point, sx, sy) {
     preview = null;
     const a = ACTIONS[armed];
+    // handleHover admits a ground point of null (a pick can land on a body
+    // whose ground ray misses the world entirely - a chest pixel beside a
+    // wall), and a dash is aimed at the FLOOR, so there is nothing to price.
+    if (!point) { hidePreview(); return; }
     const tx = Math.round(point.x);
     const tz = Math.round(point.z);
     const problem = mobilityProblem(a, {
@@ -719,7 +738,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (raw && raw.length >= 2) {
         const s = world.smooth([...raw.slice(0, -1), world.clampPoint(point.x, point.z)], active.actor);
         const { points, done } = truncateByBudget(s, dashDistanceOf(a), () => 1);
-        preview = points; // the trail IS the affordance for a move
+        // The trail IS the affordance for a move - but it has to be stored in
+        // the shape drawPreview reads (`{ reach, tail }`, declared where
+        // `preview` is). A bare array left `preview.reach` undefined, and
+        // drawPreview walks it every frame: `pts.length` on undefined threw
+        // once per frame for as long as a dash was armed over a legal route.
+        // A dash has no `tail` - it stops where the budget stops, and the
+        // "as far as it reaches" wording on the cost tag already says so.
+        preview = { reach: points, tail: null };
         costTag.textContent = done
           ? `${a.label} · ${a.ap} AP · no opportunity attacks`
           : `${a.label} · ${a.ap} AP · as far as it reaches`;
@@ -2952,6 +2978,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // --- per-frame driver -------------------------------------------------------------
   function update(dt) {
     if (phase === 'done') return;
+    // A `moveStart` record means "this unit is mid-deliberate-move, and it
+    // began there". It has to stop meaning that when the move stops. Nothing
+    // ever retired one, and `notifyStep` re-seeds it on every leg, so the
+    // record outlived the walk that made it - which broke the exemption
+    // performDash and performSwap rely on. Both opt out of provoking by NOT
+    // seeding a record (see performDash), so a stale one left over from any
+    // earlier walk meant the next dash provoked after all: the one verb sold
+    // as the answer to a threat ring quietly stopped being it.
+    // Safe to read `moving` here: setPath assigns `path` synchronously, so a
+    // walk seeded by beginMove is already moving before this frame runs.
+    for (const u of [...moveStart.keys()]) {
+      const body = bodyOf(u);
+      if (!body || !body.moving) moveStart.delete(u);
+    }
     drawPreview(); // immediate-mode lines last one frame - redraw while shown
     drawTargets();
     // prune anyone killed externally (printer explosions during combat)
