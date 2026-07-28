@@ -49,28 +49,36 @@ point (`e8e53de`) in a worktree rather than assumed to be regressions.
 
 ## Status
 
-Phases 0-7 are **done and pushed**; Phase 8 is blocked on a real finding (below).
-Unit tests: 435 passing, up from 385 at the branch point. Build clean.
+**Phases 0-5, 7 and 8 are done and pushed. Phase 6 is four-sixths done.**
+Unit tests: 447 passing, up from 385 at the branch point. Build clean.
 
-Every item below the line was completed on `claude/project-code-review-fij900`.
-The four bugs reported from play - AI pacing, the burnt-paper desync, party-bar
-float AP, and backwards portraits - were each fixed at the root rather than the
-symptom, as was the out-of-combat cone.
+The five bugs reported from play - AI pacing, the burnt-paper desync, party-bar
+float AP, backwards portraits, and the out-of-combat cone - were each fixed at
+the root rather than the symptom.
 
-Two things were deliberately NOT done, each recorded where it belongs rather
-than quietly dropped:
+Charm SHIPPED. It was blocked on `turn-order` having no way to change a slot's
+side (`insert` had no inverse), which is now `turns.replace`: swap a slot in
+place, keeping its initiative roll and its position in the round. Charming the
+last hostile deliberately does NOT win the fight - counting a borrowed coworker
+as gone made charm a 3 AP win button, strictly better than killing anyone.
+
+Two things were deliberately NOT built, each recorded where it belongs:
 
 - A `New Character` menu item (CHARACTER_PLAN #17). Declined on PLACEMENT:
   `showGameMenu` is a persistent button available all through a run, so anything
   put in it is offered mid-fight - the wrong moment to hand somebody a button
-  that discards the character they are playing. Making a new character belongs
-  at the start, next to the résumé desk. See Phase 5's note.
-- Charm (Phase 8). Backed out after the blocker was found; what was learned is
-  written up in full below, in the order it has to be built.
+  that discards the character they are playing. It belongs at the start.
+- `Restart run` keeping your character. Needs run state to separate from
+  character state first; today the sheet lives inside the campaign save.
 
-Also recorded: which e2e failures in this environment are pre-existing (verified
-against the branch point in a worktree) and which were caused here. See the
-section above.
+**What is genuinely still open:**
+
+1. Phase 6's last two items - the `window.pc` injection seams (the big one:
+   `actors.js` holds the movement state machine and is untestable today), and
+   two missing coverage cases.
+2. Thirteen e2e failures never compared against the branch point. Four were
+   checked: two pre-existing, one caused-and-fixed, one a budget timeout.
+3. The `enterCombat` speed fix, which is the root cause of the timeouts.
 
 ---
 
