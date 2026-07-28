@@ -81,6 +81,27 @@ line numbers are the review baseline and may be shifted slightly in
 - [ ] Ranged-weapon target rings must match the click's new walk-in behavior
       (`combat.js:1035` vs `2020-2056`) — ring green when a walk-in shot is
       affordable, as melee does. *(New in `e8e53de`.)*
+- [ ] **Let consumables be used in combat** — confirmed intended; the current
+      refusal is a bug, not a design choice. `useItem` refuses outright while
+      `isInCombat()` (`looting.js:200`) and every path routes through it (the
+      pockets panel's `onUse`, and `useItemById` behind a hotbar press), which
+      disables the entire consumable economy in the only place it matters: all
+      eight items are heals (`half-sandwich` 3, `cold-coffee` 2, `energy-drink`
+      4, `candy-bar` 3, `vending-crisps` 2, `stale-danish` 4, `mystery-flavor`
+      6), and healing exists to survive fights. Note the gate carries no
+      comment, unlike its two neighbours which state their reasons — `dropItem`
+      ("a dropped stapler would silently change your damage bonus") and the
+      equip gate — so it reads as copied alongside them rather than decided.
+      Work: drop the `isInCombat()` line from `useItem`, give the use an AP
+      cost (recommend reusing the shove's 2 AP for a first pass — everything
+      else in a turn is billed, and a free full heal every round would be the
+      strongest verb in the game), and surface item slots on the combat action
+      bar so the hotbar's consumables are pressable in a fight. Leave
+      `dropItem` and equipping gated — those two have stated reasons.
+      Independently wrong today: the pockets panel opens in combat (`I` is
+      gated only on `sheet && !gameOver`, `main.js:2292`) and renders a live
+      **Use** button with no combat gate (`ui/panels.js:165`), so the UI offers
+      an action the rules refuse.
 - [ ] **Let doors be used in combat.** Blocked at four independent layers:
       `toggleDoor` early-returns on `inCombat` (`main.js:850`, no comment
       explaining it); the in-combat click path never reaches `dispatchHit`,
@@ -182,9 +203,8 @@ is its own PR that keeps unit + e2e green.
       `!inCombat` (`main.js:2294`), so a fight has no keyboard shortcuts at
       all. `ui.js`'s own header names the seam: "combat.js and the editor
       import the palette too — they build their own DOM but must not look like
-      a different game." *(Items being unusable in combat is deliberate —
-      `looting.js:200` — so a unified bar should still grey item slots, not
-      drop them.)*
+      a different game." Pairs with the Phase 2 consumables fix: the unified
+      bar is where combat's item slots land.
 - [ ] Port `routeBeside`'s "already standing on the goal tile" special case to
       the AI's `standTilePath` — the same fix written twice, once. *(Same code
       as the Phase 1 pacing bug; listed here as the duplication it is.)*
@@ -227,6 +247,11 @@ is its own PR that keeps unit + e2e green.
       boot falling back past a valid campaign save (`main.js:1852`, `:63-78`).
 
 ## Phase 7 — Docs & dead code
+
+> **The docs are not authoritative.** ARCHITECTURE.md and the `*_PLAN.md` files
+> describe what someone believed at the time, and several are provably drifted
+> (see below). Do not read design *intent* out of them or cite them to justify
+> current behavior — ask. They are a rewrite target, not a source of truth.
 
 - [ ] ARCHITECTURE.md: AP cost, melee reach, module map (+`powers`,
       `portraits`, `actor-registries`), data-layer import exceptions, stale
