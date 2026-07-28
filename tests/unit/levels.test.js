@@ -51,13 +51,17 @@ test('every registry cross-reference resolves', () => {
     }
   }
   // ...and must never re-state something the class already says. That
-  // restatement is what let the Mail Room Veteran keep the old rig and the old
+  // restatement is what let the mail room companion keep the old rig and the old
   // kit after the Mail Room class moved on - a silent copy that drifts. An
   // override is for DEPARTING from the class; matching it means delete the line.
   // `maxHp` is exempt: enemies spell it `hp` and fromClass drops the inherited
   // one, so an enemy's own value can legitimately equal the class's.
+  // `name` is NOT exempt any more: it is inherited like everything else, so a
+  // kit that restates the class's own label is the same silent copy as any
+  // other - and the two companions that used to carry invented names are
+  // exactly where that copy was hiding.
   const IDENTITY = new Set([
-    'classId', 'char', 'name', 'examine', 'dialogue', 'recruitedDialogue',
+    'classId', 'char', 'examine', 'dialogue', 'recruitedDialogue',
     'level', 'hp', 'xp', 'loot', 'attacks', 'attackAp', 'aggression', 'summon',
   ]);
   // The check's granularity follows the MERGE's: a field merged per key (attr)

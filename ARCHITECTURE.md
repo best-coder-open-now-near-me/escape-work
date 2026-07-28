@@ -100,7 +100,7 @@ src/
     readouts.js        narrator box, focus banner, loot toast (nothing
                        to click)
     hud.js             profile card + status chips, tactical button,
-                       attack hotbar, party bar, level-up pip
+                       the paged action hotbar, party bar, level-up pip
     menus.js           context menu, Alt loot labels (at the cursor)
     panels.js          pockets, character sheet, dialogue, shop
     screens.js         level-up, win/floor-clear/lose, class picker,
@@ -264,15 +264,34 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   stutter", so examining the same desk twice printed nothing the second time,
   which is exactly the case where the player is deliberately asking again and
   reads silence as a dead button.
-- **Attacks are available outside combat via the persistent hotbar.** The
-  offensive slice of the sheet's actions (attacks, shove, throws) lives on an
-  always-on bar (`ui.createHotbar`, ids `#hotbar-act-<id>` so they never
-  collide with combat's `#act-<id>`; number keys 1-9 arm slots). Arming an
-  action and clicking a coworker opens combat with that move as the opening
-  strike: `main.js` `engageWithAction` -> `beginCombat({opening})` ->
-  `startCombat({opening})`, which reuses combat's own `handleEnemyClick`
-  (melee walks up, a throw checks range/line/ammo). Heal/defend stay
-  combat-only - reactive actions with no meaning when nobody's swinging.
+- **The whole kit is available outside combat via the persistent hotbar.** The
+  sheet's actions live on an always-on bar (`ui.createHotbar`, ids
+  `#hotbar-act-<id>` so they never collide with combat's `#act-<id>`; number
+  keys press the slots of the visible row). Arming an action and clicking a
+  coworker opens combat with that move as the opening strike: `main.js`
+  `engageWithAction` -> `beginCombat({opening})` -> `startCombat({opening})`,
+  which reuses combat's own `handleEnemyClick` (melee walks up, a throw checks
+  range/line/ammo); a summon posts where you click (`postSummonAt`, the same
+  placement rule combat runs). Heal/defend are LISTED but inert out here -
+  reactive actions with no meaning when nobody's swinging - and pressing one
+  says so rather than doing nothing. The bar used to carry the offensive slice
+  only, which hid a summoner's whole identity until a fight was already on.
+- **Both action bars render one order** (`stats.orderedActionIds`): basic swing,
+  shove, throws, class powers, what a talent or a spent class point granted,
+  what is in hand. Provenance is re-derived from the registries, because a perk
+  bakes its granted action into `sheet.actions` with no note of where it came
+  from. Ordering by provenance is what keeps a button still as a kit grows.
+- **The hotbar layout is the player's, and it lives on the sheet.**
+  `sheet.hotbar` is `[{ kind: 'action'|'item', id } | null, ...]`, set by
+  right-clicking a slot (`main.js` `openAssignMenu` -> `assignHotbarSlot`);
+  absent means the default order above. Assigning something already on the bar
+  SWAPS the two slots, so a power is never in two places. Slots hold consumables
+  as well as powers (pressing one drinks it - `loot.useItemById`), rows are
+  `HOTBAR_ROW_SLOTS` wide and page with the pager, `[`/`]` or the wheel, and the
+  layout is padded with a spare empty slot so there is always somewhere to
+  assign to - filling a row is what creates the next one. An assignment whose
+  power or item is currently unreachable dims and says why rather than
+  disappearing: a muscle-memory surface must not rearrange itself.
 - **NPCs are talkable coworkers** (`data/npcs.js`): non-hostile actors
   (`NpcActor`) that stand on the map, block movement like any body, and open a
   small dialogue tree on left-click (`ui.createDialoguePanel`; the tree is
@@ -376,11 +395,13 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - **A character that IS a class inherits it - never copies it.** A companion or
   an enemy who does one of the playable jobs writes `classId: '<class>'` plus
   ONLY what makes them them, and `fromClass` (data/classes.js) merges the rest:
-  rig, build, attributes, kit, talent, track. The Mail Room Veteran and the
-  Security Guard both work this way. This is the "class as shared unit
+  rig, build, attributes, kit, talent, track - and the class's `name`, so a
+  coworker who does the job is called what the job is called unless they
+  deliberately override it (the Security Guard does; the two companions do not,
+  because neither is a named character). This is the "class as shared unit
   archetype" direction made real, and it exists because the copies drifted -
-  reassigning the Mail Room's rig left the veteran wearing the old one while
-  still calling himself mail room. An override means DEPARTING from the class;
+  reassigning the Mail Room's rig left the mail room companion wearing the old
+  one while still calling himself mail room. An override means DEPARTING from the class;
   a lint fails the build if one merely repeats what the class already says.
   Registries export their raw kit tables (`COMPANION_KITS`, `ENEMY_KITS`) for
   it. Enemies drop the inherited `maxHp` - they spell it `hp`, and `unitCombat`

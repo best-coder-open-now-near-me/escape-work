@@ -4,19 +4,29 @@
 // person. Their stat block becomes their character sheet the moment they sign
 // on (party.js createCompanionSheet levels it to match the leader).
 //
-// `classId` is the whole point. A companion USED to restate a class - the Mail
-// Room Veteran carried his own copy of the mail room's actions, talent and
+// `classId` is the whole point. A companion USED to restate a class - the mail
+// room companion carried his own copy of the mail room's actions, talent and
 // attributes, all identical to `mail-room`'s - which is a parallel
 // implementation of a thing we already have, and it drifted the moment the
-// class changed: reassigning the Mail Room's rig left the veteran wearing the
-// old one, still calling himself mail room. Now he names the class and
-// inherits it, so there is one definition of what a mail room person IS and he
-// cannot fall out of step with it.
+// class changed: reassigning the Mail Room's rig left him wearing the old one,
+// still calling himself mail room. Now he names the class and inherits it, so
+// there is one definition of what a mail room person IS and he cannot fall out
+// of step with it.
+//
+// The NAME is inherited for the same reason. Neither of these two is a named
+// character: one is an IT person, the other a mail room person, and they are
+// called what those jobs are called - exactly like the player, whose own
+// character is named for their class. The bespoke names they carried ("Nervous
+// IT Intern", "Mail Room Veteran") were the last of the parallel copy: a
+// characterization stated in a string, describing a state the game never
+// advances, and drifting from the class label beside it. A future entry who
+// really is somebody - a name on a door, a person with a plot - overrides
+// `name` and says so on purpose.
 //
 // An entry therefore carries ONLY what a class cannot say about a person:
-// their char and name, how they look, what they know (dialogue), and any
-// deliberate departure from the class - companions run softer stat lines than
-// the player's, because they're interns and clerks, not protagonists. Anything
+// their char, how they look, what they know (dialogue), and any deliberate
+// departure from the class - companions run softer stat lines than the
+// player's, because they're the junior in the room, not protagonists. Anything
 // you'd otherwise copy from the class, delete: inheriting it is the point.
 //
 // Dialogue is the recruitment surface: `dialogue` runs while they're still a
@@ -32,7 +42,12 @@ const KITS = {
   'it-intern': {
     classId: 'it-support',
     char: 'N',
-    name: 'Nervous IT Intern',
+    // No name of his own: he is an IT person, so he is called what the job is
+    // called (inherited from the class). He was "Nervous IT Intern", which
+    // asserted a state - nervous, junior - that nothing in the game ever
+    // develops or resolves; he levels up and stays nervous in his own name
+    // forever. What makes him the junior is in the numbers and the writing
+    // below, where it can actually change.
     // His own rig, and smaller than IT Support proper - visibly the junior.
     model: 'intern',
     look: { build: { legs: 1.7, head: 0.68 } },
@@ -116,7 +131,10 @@ const KITS = {
     // wherever it goes next.
     classId: 'mail-room',
     char: 'V',
-    name: 'Mail Room Veteran',
+    // Named by the job too (see the intern) - he was the "Mail Room Veteran",
+    // which put his whole characterization in a label the rules never touch.
+    // The eleven years live in his dialogue and his examine line, which is
+    // where a story can be told.
     // Stockier than the rest of the mail room - eleven years of it. The only
     // reason to restate `look`: it is what tells him apart from the clerk
     // wearing the same rig.

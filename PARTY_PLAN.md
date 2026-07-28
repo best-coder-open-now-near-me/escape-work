@@ -4,6 +4,29 @@ Companions who join you, follow you, and fight beside you — Baldur's Gate /
 Divinity style. This document is the implementation plan: the design decisions,
 the module-by-module changes, and the milestone order. No code yet.
 
+## Revision — companions are not named characters
+
+The two shipped companions carried invented display names: the "Nervous IT
+Intern" and the "Mail Room Veteran" (the names appear throughout this document
+and in the milestone notes below). Both have been **removed**. A companion is a
+coworker who does one of the jobs, so they are called what the job is called -
+the class's `name`, inherited through `classId` like everything else about them
+(`fromClass` no longer treats `name` as picker-only, and the inheritance lint
+now flags a kit that restates it).
+
+Two reasons, one practical and one about story. The names were the last piece of
+the parallel copy this system spent a milestone removing: a second string beside
+`className`, free to drift from the class the character actually is. And each
+one asserted a **state** - nervous, veteran - that nothing in the game ever
+advances or resolves; the intern levels to 5 and is still nervous in his own
+name. What makes him the junior lives in his numbers and his dialogue, where it
+can change. The player's own character is named for their class too, so this
+also makes a companion read as the same kind of thing the player is.
+
+A future entry who really is somebody - a name on a door, a person with a plot -
+overrides `name` on purpose. That is now a deliberate line rather than a blank
+the shape demanded be filled.
+
 ## What we're building
 
 - **Recruitable companions**: talkable coworkers (the existing NPC layer) who

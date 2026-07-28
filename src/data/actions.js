@@ -49,12 +49,21 @@
 //   hits every enemy in the wedge (needs line of sight), rolls damage per
 //   target. `leaves: '<tileType>'` carpets the wedge's plain floor with that
 //   surface tile (Bulk Mail leaves paper - fuel, caltrops, and future ammo).
+//
+// `icon` is the face the power wears on the hotbar, which is an icon grid: one
+// emoji, the same way items and loot labels are iconed. It is not decoration.
+// The bar carries a whole kit now, and spelled out in words a full row grew
+// wide enough to sit under the bottom-left HUD rail - which made the leftmost
+// slots literally unclickable - and to slide beneath the narrator box. An icon
+// row fits between them with the label in the tooltip. A new action without one
+// renders as ❔, which is a visible bug rather than a blank button.
 export const ACTIONS = {
   // --- Office Drone -----------------------------------------------------------
   attack: {
     type: 'attack',
     ap: 2,
     label: 'Passive-Aggressive Email',
+    icon: '✉️',
     desc: 'Your basic swing. No frills, no cost beyond the AP.',
     min: 3,
     max: 5,
@@ -69,6 +78,7 @@ export const ACTIONS = {
     type: 'zone',
     ap: 2,
     label: 'Paper Storm',
+    icon: '🗞️',
     desc: 'Empty the recycling over an area. Fuel, caltrops, and ammunition - all at once.',
     leaves: 'paper',
     radius: 1.5,
@@ -80,6 +90,7 @@ export const ACTIONS = {
     type: 'defend',
     ap: 2,
     label: 'Deflect Blame',
+    icon: '🛡️',
     desc: 'Brace for the next hit. Incoming damage is halved until your next turn.',
     log: 'You pre-emptively deflect blame. Incoming damage halved.',
   },
@@ -87,6 +98,7 @@ export const ACTIONS = {
     type: 'heal',
     ap: 2,
     label: 'Coffee Break',
+    icon: '☕',
     desc: 'A cup of the break-room worst. Small heal, always available.',
     amount: 6,
     uses: 3,
@@ -102,6 +114,7 @@ export const ACTIONS = {
     type: 'control',
     ap: 2,
     label: 'Delegate Ruthlessly',
+    icon: '📤',
     desc: 'Make it someone else\'s problem. They spend their next turn on it instead of on you.',
     // `stunned`, not a new status: turn denial is turn denial, and reusing it
     // means Delegate inherits the anti-chain immunity window for free rather
@@ -128,6 +141,7 @@ export const ACTIONS = {
     type: 'defend',
     ap: 2,
     label: 'Decline the Invite',
+    icon: '📅',
     desc: 'Block out the afternoon. Buys you back some action.',
     log: 'You decline their meeting invite. Incoming damage halved.',
   },
@@ -138,6 +152,7 @@ export const ACTIONS = {
     type: 'control',
     ap: 3,
     label: 'All-Hands',
+    icon: '📣',
     desc: 'Call the room into a meeting. Everyone in the wedge is held where they stand.',
     cone: { range: 4, halfAngle: 40 },
     applies: 'detained',
@@ -149,6 +164,7 @@ export const ACTIONS = {
     type: 'heal',
     ap: 2,
     label: 'Executive Espresso',
+    icon: '⚡',
     desc: 'A double shot. Bigger lift than drip coffee.',
     amount: 8,
     uses: 2,
@@ -160,6 +176,7 @@ export const ACTIONS = {
     type: 'attack',
     ap: 2,
     label: 'Turn It Off And On Again',
+    icon: '🔌',
     desc: 'Turn yourself off and on again. Clears EVERY status - your buffs too.',
     min: 4,
     max: 7,
@@ -180,6 +197,7 @@ export const ACTIONS = {
   'remote-restart': {
     type: 'buff',
     ap: 2,
+    icon: '🧱',
     label: 'Remote Restart',
     desc: 'Power-cycle a coworker from here. Clears every status they are carrying - their buffs too.',
     purge: true,
@@ -194,6 +212,7 @@ export const ACTIONS = {
     type: 'control',
     ap: 2,
     label: 'Percussive Maintenance',
+    icon: '🔨',
     desc: 'Hit it until it works. Hit them until they do not. They lose their next turn.',
     applies: 'stunned',
     appliesLog: 'They reboot, briefly and involuntarily.',
@@ -209,6 +228,7 @@ export const ACTIONS = {
     type: 'heal',
     ap: 2,
     label: 'Energy Drink',
+    icon: '🥤',
     desc: 'Warm, neon, and technically legal. Solid self-heal.',
     amount: 4,
     uses: 4,
@@ -226,6 +246,7 @@ export const ACTIONS = {
     // or leave a renewable ammo pile behind it.
     leavesTurns: 4,
     label: 'Bulk Mail',
+    icon: '📬',
     desc: 'Bulk mail in a wide wedge. Carpets the floor with paper behind it.',
     min: 2,
     max: 4,
@@ -240,6 +261,7 @@ export const ACTIONS = {
     type: 'mobility',
     mode: 'dash',
     ap: 2,
+    icon: '↩️',
     label: 'Courier Route',
     distance: 5,
     desc: 'You know a shortcut. Cross the floor for a flat fee, and nobody gets a swing at you on the way.',
@@ -252,6 +274,7 @@ export const ACTIONS = {
     mode: 'swap',
     ap: 2,
     label: 'Hand-Off',
+    icon: '🔄',
     range: 6,
     uses: 2,
     desc: 'Trade places with a teammate anywhere in sight. Pull the wounded out; put yourself in.',
@@ -261,6 +284,7 @@ export const ACTIONS = {
     type: 'heal',
     ap: 2,
     label: 'Snack Cart Raid',
+    icon: '🛒',
     // 5 HP over 3 raids: a shade under the Office Drone's coffee (6), which the
     // registry itself calls a "small heal". It read "Strong heal" while healing
     // less than the heal it was being compared against.
@@ -282,6 +306,7 @@ export const ACTIONS = {
     type: 'control',
     ap: 3,
     label: 'Detain',
+    icon: '🔒',
     desc: 'Ask them to wait right there. They keep their turn - they just cannot leave.',
     uses: 2, // an incident report is a big enough hammer to ration it
     applies: 'detained',
@@ -298,6 +323,7 @@ export const ACTIONS = {
     mode: 'guard',
     ap: 2,
     label: 'Hold the Line',
+    icon: '🛡️',
     desc: 'Plant yourself. Teammates on the far side of you are in cover from anything thrown.',
     log: 'You plant yourself in the lane. Nothing gets a clean shot past.',
   },
@@ -307,6 +333,7 @@ export const ACTIONS = {
     type: 'control',
     ap: 2,
     label: 'Badge Lockdown',
+    icon: '🚫',
     desc: 'Kill their badge from the panel. They are held where they stand - from across the floor.',
     range: 5,
     applies: 'detained',
@@ -327,6 +354,7 @@ export const ACTIONS = {
     ap: 2,
     radius: 4,
     label: 'Stand Post',
+    icon: '🚧',
     desc: 'Cover the room. The first coworker to move within 4 tiles takes a free swing - once.',
     log: 'You plant yourself and watch the room. Nobody is getting past unremarked.',
   },
@@ -334,6 +362,7 @@ export const ACTIONS = {
     type: 'heal',
     ap: 2,
     label: 'Night Thermos',
+    icon: '🍶',
     desc: 'The thermos that has seen every 3am on this floor. Steady heal.',
     amount: 5,
     uses: 3,
@@ -345,6 +374,7 @@ export const ACTIONS = {
     type: 'shove',
     ap: 2,
     label: 'Shove',
+    icon: '👐',
     desc: 'Two-handed push. Into a wall it stuns; into a hazard, it hurts.',
     log: 'You shove them.',
   },
@@ -359,6 +389,7 @@ export const ACTIONS = {
     type: 'attack',
     ap: 2,
     label: 'Throw a Punch',
+    icon: '👊',
     desc: 'Bare hands. Everyone always has this.',
     min: 1,
     max: 2,
@@ -369,6 +400,7 @@ export const ACTIONS = {
     type: 'attack',
     ap: 2,
     label: 'Staple Jab',
+    icon: '📎',
     desc: 'The stapler, used as intended by nobody.',
     min: 2,
     max: 4,
@@ -379,6 +411,7 @@ export const ACTIONS = {
     type: 'attack',
     ap: 2,
     label: 'Grabber Swipe',
+    icon: '🦾',
     desc: 'Swipe at arm\'s length plus a metre. Reaches further than it hurts.',
     min: 1,
     max: 3,
@@ -389,6 +422,7 @@ export const ACTIONS = {
     type: 'attack',
     ap: 2, // no longer the cheap one now every attack is 2 - its edge is accuracy
     label: 'Letter Opener Stab',
+    icon: '🗡️',
     desc: 'Technically for envelopes. Precise, if not heavy.',
     min: 2,
     max: 3,
@@ -404,6 +438,7 @@ export const ACTIONS = {
     type: 'attack',
     ap: 2,
     label: 'Résumé Slap',
+    icon: '📋',
     desc: 'A resume, delivered at speed.',
     min: 1,
     max: 3,
@@ -421,6 +456,7 @@ export const ACTIONS = {
     type: 'buff',
     ap: 2,
     label: 'Performance Review',
+    icon: '⭐',
     desc: 'Tell a coworker in writing that they are doing great. They start connecting.',
     applies: 'commended',
     range: 5,
@@ -431,6 +467,7 @@ export const ACTIONS = {
     type: 'buff',
     ap: 2,
     label: 'Onboarding',
+    icon: '🧭',
     desc: 'Walk a coworker through the fire exits. They take less punishment, and pick up a little.',
     applies: 'onboarded',
     amount: 3,
@@ -448,18 +485,27 @@ export const ACTIONS = {
   // of sight, like a throw). They land on the clicked tile and the free tiles
   // ringing outward from it. An enemy `summon` descriptor carries no `range`
   // and drops its reinforcements beside the summoner instead.
+  //
+  // ONE per post. It shipped at two, and a posting that drops a pair reads as a
+  // batch rather than a hire: you point at a spot and two bodies appear, one of
+  // them on a tile you didn't choose. `count` stays the knob - the placement
+  // path fills a ring outward from the click for any count, so a talent (or a
+  // second-tier req) that posts three is a data change and nothing else. What
+  // is deliberately NOT flexible is the click: one placement resolves one post,
+  // however many report to it.
   'summon-applicants': {
     type: 'summon',
     ap: 4,
     archetype: 'applicant',
-    count: 2,
+    count: 1,
     cap: 3,
     uses: 2,
     range: 5,
     lifetimeTurns: 6,
     label: 'Post the Role',
-    desc: 'Post the req. Click where they should report - applicants fight on your side.',
-    log: 'You open a req. Applicants flood in -',
+    icon: '📢',
+    desc: 'Post the req. Click where they should report - the applicant fights on your side.',
+    log: 'You open a req.',
   },
 
   // --- talent-granted -----------------------------------------------------------
@@ -467,6 +513,7 @@ export const ACTIONS = {
     type: 'attack',
     ap: 2,
     label: 'Steel-Toe Kick',
+    icon: '🥾',
     desc: 'Steel-toe boot. Needs footing - gum on your shoe prevents it.',
     min: 2,
     max: 4,
@@ -478,6 +525,7 @@ export const ACTIONS = {
     type: 'heal',
     ap: 2,
     label: 'Smoke Break',
+    icon: '🚬',
     desc: 'A smoke break steadies the nerves. Heals and calms.',
     amount: 3,
     uses: 2,
@@ -491,6 +539,7 @@ export const ACTIONS = {
     ap: 2,
     ammoCost: 1,
     label: 'Paper Ball',
+    icon: '📄',
     desc: 'A crumpled wad, thrown. Cheap ranged chip damage.',
     min: 2,
     max: 4,
@@ -502,6 +551,7 @@ export const ACTIONS = {
     ap: 2,
     ammoCost: 2,
     label: 'Paper Airplane',
+    icon: '✈️',
     desc: 'A folded dart to the eyes - blinds them. Origami Specialists only.',
     // Gated on a talent effect (combat.throwablesFor): folding a dart that
     // lands in an eye is a craft. The Drone's Origami Specialist talent
@@ -517,3 +567,11 @@ export const ACTIONS = {
     missLog: 'The dart banks left and augers into a monitor.',
   },
 };
+
+// How a posting's arrivals are announced. One line, shared by the in-combat
+// posting (combat.js placeSummon) and the out-of-combat one (main.js
+// postSummonAt): the same event said two ways reads as two different events,
+// and "1 reports for duty" is how you get a number where a person should be.
+export const arrivalLine = (n) => (n === 1
+  ? 'One applicant reports for duty.'
+  : `${n} applicants report for duty.`);
