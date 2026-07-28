@@ -136,6 +136,29 @@ the old reboot. This branch introduces it:
 **42 tests never executed on a real runner**. Fixing the three known failures
 is not the same as knowing main goes green.
 
+**Gap closed.** Run 30385657545 (branch, `c523ad3`) is the first time all 102
+executed on a real runner: **101 passed, 1 failed, 1.3h**. The one failure is
+the `#hotbar-act-defend` assertion above, fixed in `57bf876` which that run
+predates. The three original timeouts are gone - `powers.spec` passes on CI
+hardware with the arena and no extended budget.
+
+- [ ] **Four tests were FLAKY on that run** - they failed once and passed on
+      retry, so `retries: 1` is currently carrying them. Not blockers, but each
+      is a real intermittent and the retry is what hides it:
+      - `statuses.spec.js:156` a weapon on-hit proc - the red stapler flings gum
+      - `tactics.spec.js:33` walking out of an enemy reach provokes a free swing
+      - `tactics.spec.js:118` a partition gives the defender cover
+      - `throwing.spec.js:89` a solid wall refuses the throw
+
+      All four are geometry-and-timing shaped, which is the same family as the
+      `targeting.spec` click that turned out to be landing under the hotbar.
+      Worth checking whether they share that cause: they aim projected clicks
+      and only test `onScreen`, never `onCanvas` (now exported from helpers).
+
+- [ ] **The suite is 1.3h on CI.** The arena idiom is what brought `powers.spec`
+      from 10.5m to 3.2m; the same treatment on the other `bootAndPick` specs is
+      the obvious lever if that hour starts to hurt.
+
 ## Status
 
 **All eight phases are done and pushed.** Unit tests: 455 passing, up from 385
