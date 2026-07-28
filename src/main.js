@@ -1785,7 +1785,15 @@ function startGame(level) {
         },
         // Anyone alive is a legal target - bystanders outside the initial
         // engagement get pulled in when attacked.
-        liveEnemies: () => enemies.filter((e) => e.alive),
+        // A BORROWED coworker is off this list for the duration (TODO Phase 8).
+        // Every AI target picker reads it, so dropping them here is the single
+        // edit that turns their own colleagues against them - no side flag
+        // threaded through the targeting code, because there is no side flag in
+        // this engine to thread.
+        liveEnemies: () => enemies.filter((e) => e.alive && !e.charmed),
+        // Combat owns WHEN a body changes hands; main.js owns the lists, the
+        // same division summons already use.
+        setCharmed: (unit, on) => { unit.charmed = !!on; },
         // The tiles a summon aimed at (tx,tz) would actually land on - the
         // placement preview draws these rings, and spawnSummon fills them, so
         // what you see is where they stand.
@@ -3050,7 +3058,10 @@ function startGame(level) {
         // moving at the top of its beat is what stops its turn from ending
         // (combat.js's driver returns early on it), so it is the one field
         // that separates "the fight is slow" from "the fight is stuck".
+        // `charmed` distinguishes "alive" from "hostile", which is exactly the
+        // distinction a victory test has to make - so the suite can see it.
         return { name: e.def.name, x: e.x, z: e.z, px: p?.x, pz: p?.z, alive: e.alive, reachable,
+          charmed: !!e.charmed,
           moving: !!e.moving, level: e.def.level || 1, hp: e.hp, maxHp: e.maxHp };
       });
     },

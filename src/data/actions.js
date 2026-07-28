@@ -201,6 +201,27 @@ export const ACTIONS = {
     // performOn reads the absence of `min`/`max` as "this is a pure effect".
     // It used to carry 4-7 damage, which contradicted its own description.
   },
+  // IT's track charm (TODO Phase 8). The verb the retired Remote Restart was
+  // always reaching for: "remote in and power-cycle them" reads as taking
+  // control, not as a cleanse. Enemies only - a purge already covers your own
+  // side, and charming a colleague would be a different, darker game.
+  //
+  // A CONTROL, so it rolls to hit and carries no damage dice: three turns of
+  // somebody else's body is the strongest thing in the game, and a guaranteed
+  // one at 2 AP is exactly the degenerate case that rule exists to prevent.
+  'remote-session': {
+    type: 'control',
+    ap: 3,
+    label: 'Remote Session',
+    icon: '🖥️',
+    desc: 'Remote into a coworker and drive them yourself for a few turns. They fight their own side while you do.',
+    applies: 'charmed',
+    appliesLog: 'You are in. {name} is yours for a moment.',
+    range: 4,
+    uses: 1,
+    log: 'You open a remote session.',
+    missLog: 'The connection times out.',
+  },
   // IT's track control (POWERS_PLAN M2), replacing a grant of the Middle
   // Manager's `cigarette` - a track that handed one class another class's
   // talent action was converging the roster, not separating it.

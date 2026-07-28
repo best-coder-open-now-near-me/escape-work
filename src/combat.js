@@ -12,7 +12,7 @@ import { ACTIONS, arrivalLine } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
 import { truncateByBudget, routeToFiringPosition } from './pathfinding.js';
 import { pronounsOf, capitalize, verb } from './creation.js';
-import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH } from './stats.js';
+import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
 import {
@@ -88,6 +88,76 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // roster only - a party WIPE (no real member standing) is the sole game-over;
   // a summon falling never is, and a lone summon can't stave off defeat.
   const livingMembers = () => members.filter((m) => m.sheet.hp > 0 && m.actor);
+  // --- charm (TODO Phase 8) -------------------------------------------------
+  // Borrow a coworker: they leave their own side, take their turns under your
+  // control, and are handed back intact when the session drops.
+  //
+  // There is no allegiance FLAG in this engine - sides are inferred from shape
+  // (`!!x.sheet`), because members and summons carry a sheet and units do not.
+  // That looked like the obstacle and turned out to be the answer: a player-side
+  // summon is not an AI unit with a friendly bit set, it is pushed into
+  // `members` with a sheet, so it already takes a normal player turn with its
+  // own action bar and AP. Charm borrows into machinery that already exists.
+  //
+  // The one thing that genuinely had to be built is `turns.replace`: a slot's
+  // team is fixed at creation and `insert` had no inverse, so the first attempt
+  // left a borrowed coworker being driven by the AI against you while sitting in
+  // your party. `replace` swaps the slot in place, keeping its initiative - the
+  // same body acts at the same moment, only whose it is changes.
+  function charmUnit(unit, turnsLeft) {
+    if (!unit?.alive || unit.charmed) return false;
+    // An enemy def is NOT a class block: it carries `attacks` (inline damage
+    // rolls the AI reads) where a sheet needs `actions` (ids the bar renders).
+    // So a borrowed body gets a synthesized block, and what it can DO is the
+    // universal verbs - which is the honest answer anyway. You are driving
+    // somebody you do not know: you can move them and swing them, not perform
+    // their training.
+    const sheet = createSheetFrom({
+      name: unit.def.name,
+      model: unit.def.model,
+      maxHp: Math.max(1, unit.maxHp ?? unit.hp),
+      ap: unit.def.ap ?? 4,
+      bonusDmg: 0,
+      attr: unit.def.attr,
+      actions: ['punch', 'shove'],
+      talent: null,
+    }, { charmedFrom: unit.archetypeId || null });
+    sheet.hp = unit.hp; // they arrive as hurt as you left them
+    const m = asMember({ sheet, actor: unit }, { isCharmed: true, unit });
+    // The lifetime rides the field a summon's does, so the turn engine ages it
+    // with no second clock to keep in step. The ENDINGS differ, not the clock.
+    unit.summonTurns = turnsLeft;
+    members.push(m);
+    turns.replace((slot) => slot.unit === unit, memberSlot(m));
+    world.setCharmed?.(unit, true); // out of liveEnemies: their side turns on them
+    refresh();
+    return true;
+  }
+
+  // Hand a borrowed coworker back. Reached three ways - the session lapsing,
+  // the fight ending, and them dying mid-session - and all three have to leave
+  // the roster and the order in a state the rest of the engine understands.
+  function releaseCharm(m) {
+    const unit = m.unit;
+    const i = members.indexOf(m);
+    if (i >= 0) members.splice(i, 1);
+    if (unit) {
+      unit.summonTurns = undefined;
+      unit.hp = Math.max(0, m.sheet.hp); // whatever happened to them, happened
+      if (!unit.hp) unit.alive = false;
+      world.setCharmed?.(unit, false);
+      removeStatus(unit, 'charmed');
+      // Back to their own side, in the same place in the round.
+      turns.replace((slot) => slot.member === m, unitSlot(unit));
+    }
+    // The floor cannot be held by somebody who just left it - the same handoff
+    // dismissSummon makes when an assignment lapses mid-turn.
+    if (active === m) makeActive(livingParty()[0] || members[0]);
+    refresh();
+  }
+
+  const charmedMembers = () => members.filter((m) => m.isCharmed);
+
   // Is anyone still FIGHTING you? The victory test, in one place.
   //
   // It was `!engaged.some((e) => e.alive)` written out at seven call sites, and
@@ -97,8 +167,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // charmed must not sit unwinnable - and a fight must not declare victory
   // while one is still borrowed either. One function is where that decision
   // can be made once.
+  // A BORROWED coworker still counts. Charming the last hostile must not win
+  // the fight: they are still your opponent, just not acting against you for a
+  // few turns, and the session drops long before the run does. Counting them as
+  // gone made charm a win button - 3 AP to end an encounter outright - which is
+  // strictly better than killing anybody and would have been the correct play
+  // every time.
   const hostilesRemain = () => engaged.some((e) => e.alive);
-  const livingParty = () => members.filter((m) => m.sheet.hp > 0 && m.actor && !m.isSummon);
+  // The party proper: not summons, and not anyone merely BORROWED. A charmed
+  // coworker standing while your whole roster is face down is not a party that
+  // is still going - the run has ended, you are just driving somebody else for
+  // another turn or two.
+  const livingParty = () =>
+    members.filter((m) => m.sheet.hp > 0 && m.actor && !m.isSummon && !m.isCharmed);
   // The AI enemies hunt the whole player side - members and summons alike, all
   // members now. A target wraps { actor, member }; combat reads `member` to take
   // the hit on its sheet (deflect, gum, the downed rules).
@@ -1278,6 +1359,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   }
 
   function victory() {
+    // Hand every borrowed coworker back BEFORE the fight closes, or one would
+    // be carried into the roster the run is saved from.
+    for (const m of charmedMembers()) releaseCharm(m);
     cleanup();
     callbacks.onWin();
   }
@@ -1743,6 +1827,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (applyStatus(en, plan.applies, {}, 0)) {
         statusFxAt(en, plan.applies);
         line += ` ${appliesLine(a, en.def.name)}`;
+        // `charmed` is the one status that changes which SIDE somebody is on
+        // rather than anything about them, so the roster and turn-order move
+        // happens here rather than in an `effects` block the status system
+        // would have to learn a whole new kind of.
+        if (plan.applies === 'charmed') charmUnit(en, STATUSES.charmed.duration);
       } else if (blocked) line += ` ${immunityLine(blocked, en.def.name)}`;
     }
     if (plan.displace) {
@@ -2513,6 +2602,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // the enemy list - the engine re-reads the outcome on the next attempt, so
   // this only has to take the body off the board.
   function expireSummon(s) {
+    // A BORROWED coworker is RETURNED, not dismissed. They share the lifetime
+    // clock with summons - one clock, nothing to keep in step - but the endings
+    // are opposites: a summon is destroyed, a colleague walks away.
+    if (s.member?.isCharmed) {
+      log(`The session drops. ${s.member.sheet.name} is theirs again.`);
+      releaseCharm(s.member);
+      return;
+    }
     // The house voice was already they/them here; now it ASKS the character
     // rather than assuming, which is the whole point of storing the field.
     const w = pronounsOf(s.member?.sheet);
@@ -3197,6 +3294,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         : active.sheet;
       if (!target) return false;
       const ok = applyStatus(target, id, { duration }, resist);
+      // Charm routes through the real borrow, so a spec that pins it exercises
+      // the same code the action does rather than a parallel imitation.
+      if (ok && id === 'charmed' && target !== active.sheet) {
+        charmUnit(target, duration ?? STATUSES.charmed.duration);
+      }
       refresh();
       return ok;
     },

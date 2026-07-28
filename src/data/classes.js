@@ -207,6 +207,7 @@ export const CLASSES = {
       // Was a grant of the Middle Manager's `cigarette` - one class's track
       // handing out another class's talent action (POWERS_PLAN M2).
       { id: 'it-percussive', name: 'Percussive Maintenance', cost: 1, requires: ['it-root'], effect: { grantsAction: 'percussive-maintenance' } },
+      { id: 'it-remote', name: 'Remote Session', cost: 1, requires: ['it-root'], effect: { grantsAction: 'remote-session' } },
     ],
     // ONE purge, pointed at everybody: Reboot power-cycles a coworker, a
     // colleague or you. It used to need a second action (Remote Restart) purely

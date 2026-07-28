@@ -159,6 +159,25 @@ export function createTurnOrder({ entries, rng = Math.random, host }) {
       return slot;
     },
 
+    // Swap a slot for a different one IN PLACE, keeping its initiative roll and
+    // its position in the round. This is what changing SIDES needs, and it is
+    // deliberately not remove-then-insert: `insert` rerolls initiative, so a
+    // body that changed hands would also change when it acts, and the round
+    // would visibly stutter around it. Here the same body keeps the same
+    // moment - only whose it is changes.
+    //
+    // No pointer arithmetic, because the index does not move. That is the whole
+    // reason this is the right primitive: removal has to reason about whether
+    // the hole was before, at, or after the pointer, and every one of those
+    // cases is a way to silently skip or repeat somebody's turn.
+    replace(match, next) {
+      const i = order.findIndex(match);
+      if (i < 0) return null;
+      next.init = order[i].init; // the same moment in the round, new owner
+      order[i] = next;
+      return next;
+    },
+
     // An AMBUSH: `match` names the slot that caught everyone cold, and it leads
     // off. Moving it to the FRONT is the point - jumping the pointer to its
     // existing position instead would silently cost every slot ahead of it its

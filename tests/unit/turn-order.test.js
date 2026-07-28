@@ -341,3 +341,39 @@ test('the engine works without the optional hooks at all', () => {
   assert.equal(turns.advance(), 'taken');
   assert.equal(turns.advance(), 'taken'); // wraps
 });
+
+// --- replace: changing sides without changing WHEN (TODO Phase 8) ----------
+// Charm needs a body to stop acting as an enemy and start acting on your side.
+// `insert` had no inverse and a slot's team was fixed at creation, which is why
+// the first attempt at charm left a borrowed coworker being driven by the AI
+// against you while it simultaneously sat in your party.
+test('replace swaps a slot in place, keeping its initiative and its turn', () => {
+  const { turns } = harness([slot('a', 30), slot('b', 20), slot('c', 10)]);
+  turns.begin();
+  const before = turns.order.map((s) => s.name);
+  const wasInit = turns.order[1].init;
+
+  const borrowed = { name: 'b', initMod: 0, carrier: {}, alive: true, borrowed: true };
+  const out = turns.replace((s) => s.name === 'b', borrowed);
+
+  assert.equal(out, borrowed);
+  assert.equal(turns.order[1].borrowed, true, 'it changed hands...');
+  assert.equal(turns.order[1].init, wasInit, '...without changing when it acts');
+  assert.deepEqual(turns.order.map((s) => s.name), before, 'and the round order is untouched');
+});
+
+test('replace leaves the pointer alone - nobody is skipped or repeated', () => {
+  const { turns } = harness([slot('a', 30), slot('b', 20), slot('c', 10)]);
+  turns.begin();
+  const at = turns.index;
+  turns.replace((s) => s.name === 'c', { name: 'c', initMod: 0, carrier: {}, alive: true });
+  assert.equal(turns.index, at,
+    'the index cannot move, which is precisely why this is not remove-then-insert');
+});
+
+test('replace reports a miss rather than guessing', () => {
+  const { turns } = harness([slot('a', 30)]);
+  turns.begin();
+  assert.equal(turns.replace((s) => s.name === 'nobody', { name: 'x' }), null);
+  assert.equal(turns.order.length, 1, 'and changes nothing');
+});
