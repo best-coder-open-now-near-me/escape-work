@@ -35,6 +35,61 @@ permanently unkillable.
 
 ---
 
+## Re-verification against main @ `e8e53de` (2026-07-28)
+
+Main gained one feature since the review baseline: fired ranged weapons (PR #39 —
+staple gun, spitball straw, and a `rangeOf()` seam in `stats.js` replacing the
+`ammoCost`-as-range proxy). Ten files changed, ~550 lines. Unit suite is 385/385
+green after merging.
+
+**Every finding in this document is still present.** The feature touched the
+region of the critical NaN bug but not the bug: `handleEnemyClick`'s new
+`rangeOf(armed)` branch returns 0 for buff/mobility actions, so they still fall
+through to the melee path — the fall-through now sits at `combat.js:2060`, the
+NaN damage roll at `combat.js:1318`. Dash preview (`combat.js:722`), `moveStart`
+leak, and all main.js/party.js/etc. findings are byte-identical or line-shifted
+only. Line numbers elsewhere in this document refer to the `d5c96d5` baseline
+and may be shifted a few dozen lines in `combat.js`.
+
+New findings introduced by the fired-weapons feature:
+
+- **`src/combat.js:1035` (medium-low, inconsistency) — ranged-weapon target
+  rings contradict the click.** `drawTargets` rings an out-of-range/no-LOS
+  enemy `PREVIEW_FAR` (red) for a ranged weapon, but the new walk-in path in
+  `handleEnemyClick` (`combat.js:2020-2056`) *accepts* that click: it walks the
+  member until the shot is on and fires. Melee's branch rings green precisely
+  because "clicking a distant target walks you in" — ranged weapons got the
+  walk-in behavior but not the ring update. Same preview≠click contract break
+  as the summon-cap finding.
+- **`tests/e2e/ranged.spec.js:100,119,165` (low, test-gap)** — three bare
+  `waitForTimeout(700/900)` sleeps instead of state polls, the same convention
+  breach flagged for `editor.spec.js` (and the same CI-flake mechanism).
+- **Status of related old findings:** the `ammoCost`-as-range confusion is
+  genuinely fixed by `rangeOf()` (good — one SOC drift removed). But the
+  projectile/impact hardcoding finding *persists in a new shape*: flight choice
+  is still id-keyed (`id === 'paper-airplane' ? 'plane' : …'shot'/'ball'`,
+  `combat.js:1296-1299`), and every ranged hit — staples included — lands with
+  the paper-shred impact (`hitFx(en, rangeOf(id) ? 'paper' : 'melee')`,
+  `combat.js:1323`). The case for a data-side `projectile`/`impact` field on
+  the action entry is now stronger, with three id-special-cases instead of two.
+
+Two **latent rendering bugs** confirmed in current source (surfaced by
+CHARACTER_PLAN.md analysis; harmless today only because every body is dressed
+exactly once, and blocking for any feature that re-dresses a live entity):
+
+- **`src/models.js:95`** — `applyCharacterProportions` adds the hip lift to the
+  *current* local position (`tp.y + hipY * (legs - 1)`); a second application
+  compounds and the body floats.
+- **`src/actors.js:79`** (duplicated inline at **`src/main.js:550`**) —
+  `applyTint` multiplies the *current* diffuse; re-tinting walks the body
+  toward black. The duplicate in `previewClass` is its own SOC smell — two
+  copies of "how to tint a body".
+
+The prioritized fix list now lives in `TODO.md`, which folds in
+CHARACTER_PLAN.md (branch `claude/custom-character-creation-3ga2ni`).
+
+---
+
 ## 1. Confirmed bugs
 
 Every finding in this section survived an adversarial re-trace of the code path.
