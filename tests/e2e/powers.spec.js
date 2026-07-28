@@ -6,19 +6,55 @@
 // that the AP and the use are spent exactly once.
 import { test, expect } from '@playwright/test';
 import {
-  bootAndPick, bootStash, enterCombat, waitForPlayerTurn, refillAp, clickAction,
+  bootStash, enterCombat, waitForPlayerTurn, refillAp, clickAction,
   combatState, onScreen, clickWorld, waitStill,
 } from './helpers.js';
 
-// Every test here boots a class whose kit is verbs rather than a swing - IT
-// Support and HR have no attack of their own - so entering a fight means
-// WALKING a coworker down instead of opening on them. Under CI's software GL
-// that walk-up can eat the default 120s budget before a single engage attempt
-// resolves, which is exactly how these specs failed on main (three timeouts,
-// all inside enterCombat). test.slow() triples the budget, and because
-// engageBudgetMs() is a fraction OF the test timeout, the engage loop gets the
-// extra room too rather than just the wall clock around it.
+// Every test here plays a class whose kit is verbs rather than a swing - IT
+// Support and HR have no attack of their own. That makes the WAY IN to a fight
+// the expensive part: a class with an attack opens combat from range, but for
+// these the same click resolves as "move adjacent", so the entire walk has to
+// finish before the fight can even start.
+//
+// On the shipped level1 that walk is long, across a furnished floor, with the
+// camera re-settling between engage attempts - and under CI's software GL it
+// did not fit in the 120s budget. That is exactly how three of these specs
+// failed on main, all with the same "Test timeout of 120000ms exceeded" inside
+// enterCombat.
+//
+// So none of them boot level1 any more. They engage in a bespoke arena instead
+// (the summons.spec idiom): one coworker, two tiles away, open floor. The
+// walk-up is KEPT - it is what the specs mean, and removing it is what broke
+// Detain when the startFightNow fast path tried it - it is just one step now
+// instead of twenty.
+//
+// test.slow() stays on top of that, as insurance rather than as the fix. It
+// costs nothing on a green run: the budget is a ceiling, and engageBudgetMs()
+// derives the engage loop's DEADLINE from it, so neither one makes a passing
+// test wait a moment longer. It only buys tolerance on a runner having a bad
+// day.
 test.slow();
+
+// Just you and one Manager, two tiles apart, open room: enterCombat walks one
+// step and the fight opens against the Manager alone. Nothing here depends on
+// level1's furniture - these specs are about what a VERB does once a fight is
+// running - and a lone figure on clear floor also projects far more reliably
+// than one in a cluttered office, which is the case enterCombat needs its
+// project3 -> project fallback for.
+const VERB_ARENA = {
+  name: 'Verb Arena',
+  tiles: { '#': 'wall', '.': 'floor' },
+  actors: { '@': 'player', M: 'manager' },
+  map: [
+    '###########',
+    '#.........#',
+    '#.........#',
+    '#...@.M...#',
+    '#.........#',
+    '#.........#',
+    '###########',
+  ],
+};
 
 // A long room, so the Manager has to WALK to reach the guard - overwatch fires
 // on somebody entering covered ground, which needs somebody who moves.
@@ -50,7 +86,7 @@ async function clickSelf(page) {
 }
 
 test('Reboot self-cast clears every status', async ({ page }) => {
-  await bootAndPick(page, 'it-support');
+  await bootStash(page, VERB_ARENA, 'it-support');
   await enterCombat(page);
   await waitForPlayerTurn(page);
   await refillAp(page);
@@ -80,7 +116,7 @@ test('a friendly verb does not arm a swing at a coworker', async ({ page }) => {
   // an ANY-target purge now, so it legitimately DOES promise a swing at a
   // coworker, and can no longer carry a rule about friends-only verbs.
   // Performance Review is the only friends-only verb in any base kit.
-  await bootAndPick(page, 'human-resources');
+  await bootStash(page, VERB_ARENA, 'human-resources');
   await enterCombat(page);
   await waitForPlayerTurn(page);
   await refillAp(page);
@@ -113,7 +149,7 @@ test('a friendly verb does not arm a swing at a coworker', async ({ page }) => {
 });
 
 test('Performance Review is HR\'s, and it lands the Commended status', async ({ page }) => {
-  await bootAndPick(page, 'human-resources');
+  await bootStash(page, VERB_ARENA, 'human-resources');
   await enterCombat(page);
   await waitForPlayerTurn(page);
   await refillAp(page);

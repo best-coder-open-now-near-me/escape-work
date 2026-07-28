@@ -138,8 +138,12 @@ test('Security: Detain roots without damaging, and the guard wears the cop rig',
   await page.evaluate(() => { window.__combat.forceHit = true; });
   const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
   expect(foe).toBeTruthy();
-  const foeNow = () => page.evaluate(([x, z]) =>
-    window.__combat.enemies.find((e) => e.x === x && e.z === z), [foe.x, foe.z]);
+  // Track the foe by IDENTITY, not by the tile it stood on when the fight
+  // opened. GUARD_ARENA holds exactly one coworker, so "the living enemy" is
+  // unambiguous - and a lookup pinned to an opening tile quietly starts
+  // describing the floor the moment they take a step, after which every click
+  // is aimed where they used to be.
+  const foeNow = () => page.evaluate(() => window.__combat.enemies.find((e) => e.alive) ?? null);
 
   for (let i = 0; i < 6; i++) {
     const cur = await foeNow();
@@ -158,12 +162,20 @@ test('Security: Detain roots without damaging, and the guard wears the cop rig',
       if (!(await page.locator('#act-detain').isVisible())) break;
       await page.click('#act-detain');
     }
-    const p = await page.evaluate(([x, z]) => window.__game.project3(x, 0.9, z), [foe.x, foe.z]);
+    // Aim at where they are NOW. Everything above this point is an await - the
+    // settle wait, the phase read, the AP top-up, arming the verb - and a
+    // coworker in an open room can take a step inside any of them. Observed
+    // once as "Invalid target." six times over, the shape a click landing on
+    // empty floor takes.
+    const at = await foeNow();
+    if (!at) break;
+    const p = await page.evaluate(([x, z]) => window.__game.project3(x, 0.9, z), [at.x, at.z]);
     if (!onScreen(p)) continue;
     await page.mouse.click(p.x, p.y);
     await page.waitForTimeout(700);
   }
   const after = await foeNow();
+  expect(after, 'the coworker to still be on the board to have been rooted').toBeTruthy();
   // The root lands...
   expect(after.statuses.some((s) => s.id === 'detained')).toBe(true);
   // ...and it deals NO damage. That is the control verb's design rule
