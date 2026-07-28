@@ -1338,7 +1338,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       active.actor.lunge(en.x, en.z);
     }
     faceTarget(active, en.x, en.z); // you face what you swing at
-    active.ap -= a.ap;
+    active.ap = roundAp(active.ap - a.ap);
     if (a.uses) active.usesLeft[id] -= 1;
     // The attack roll: a miss spends the cost above and does nothing else - no
     // damage, no purge, no rider. Surprise, the attacker's accMod, the
@@ -2043,7 +2043,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (!canReach(active, en, REACH.SHOVE)) { refuse('Too far to shove.'); return; }
       if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
       joinCombat(en); // shoving a bystander is also an opinion they'll return
-      active.ap -= a.ap;
+      active.ap = roundAp(active.ap - a.ap);
       active.actor.lunge(en.x, en.z);
       faceTarget(active, en.x, en.z);
       log(displaceBody(en, Math.sign(en.x - active.actor.x), Math.sign(en.z - active.actor.z)).msg);
@@ -2246,7 +2246,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // paper-cut bleeding stops, but so does your Deflect.
       if (a.purge && tile.x === active.actor.x && tile.z === active.actor.z) {
         if (active.ap < a.ap) { log('Not enough AP.'); return; }
-        active.ap -= a.ap;
+        active.ap = roundAp(active.ap - a.ap);
         const hadBleed = hasStatus(active.sheet, 'bleed');
         clearStatuses(active.sheet);  // reboot wipes every status - Deflect, bleed, gum
         armed = null;
@@ -3106,7 +3106,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     if (canReach(unit, target) && unit.combat.attacks.length && acting.ap >= unit.combat.attackAp) {
       aiAttack(unit, target);
-      acting.ap -= unit.combat.attackAp;
+      acting.ap = roundAp(acting.ap - unit.combat.attackAp);
       acting.wait = 0.85; // outlast the swing animation so hits read one at a time
     } else if (moveBudget(acting) >= MOVE.COST_PER_TILE
       && !canReach(unit, target)) {

@@ -133,7 +133,11 @@ export function createPortraits(app) {
       let settled = false;
       placeModel(app, `assets/characters/${model}.glb`, 0, 0, {
         lift: 0,
-        rotY: 180, // face the camera
+        // faceToward is atan2(dx, dz) (actors.js), so yaw 0 faces +Z - and the
+        // portrait camera is parked at +DIST on Z, already in front of the
+        // model. 180 spun it to face -Z: dead away from the lens, which is why
+        // every portrait was the back of somebody's head.
+        rotY: 0,
         animate: false,
         onReady: (e) => {
           // The timeout below may already have given up on this load - a .glb

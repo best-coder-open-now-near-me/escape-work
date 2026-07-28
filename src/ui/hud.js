@@ -325,6 +325,9 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
 // with name, an HP bar, a DOWN marker, and a highlight on the member being
 // controlled. Clicking a slot asks the host to switch control - the host
 // decides whether that's allowed right now (combat, dialogue, downed).
+// One decimal, and no trailing '.0' - the same shape combat.js prints AP in.
+const fmtAp = (v) => String(Math.round((Number(v) || 0) * 10) / 10).replace(/\.0$/, '');
+
 export function createPartyBar({ onSelect, onLevelUp }) {
   const bar = document.createElement('div');
   bar.id = 'party-bar';
@@ -343,7 +346,11 @@ export function createPartyBar({ onSelect, onLevelUp }) {
     party.members.forEach((m, i) => {
       const s = m.sheet;
       const down = s.hp <= 0;
-      const ap = combatInfo && !down ? ` · ${combatInfo[i]?.ap ?? 0}AP` : '';
+      // Movement bills fractional AP, and float subtraction leaves dust
+      // (2.8 - 2 is 0.7999999999999998). Round at the display as well as at
+      // the spend sites, so no future raw write can leak a tail of nines onto
+      // the party bar.
+      const ap = combatInfo && !down ? ` · ${fmtAp(combatInfo[i]?.ap ?? 0)}AP` : '';
       const slot = document.createElement('div');
       slot.id = 'party-slot-' + i;
       slot.className = 'party-slot';
