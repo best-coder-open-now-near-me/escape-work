@@ -476,51 +476,43 @@ is its own PR that keeps unit + e2e green.
       `fx.FEET_Y`/`HEAD_Y`/`groundDecal`, `hover.HL`, `pathfinding.BODY_RADIUS`,
       `looting.INV_CAP`), `snack-machine` category.
 
-## Phase 8 — Charm / Dominate (new feature)
+## Phase 8 — Charm / Dominate (BLOCKED — real blocker found, see below)
 
-IT Support's identity verb, replacing the retired `remote-restart`: remote into
-a coworker and run them for a few turns. **Enemies only**, and **player-
-controlled** — you drive its turn (BG3's Dominate Person), not the AI.
+Attempted and deliberately backed out rather than shipped half-working. What was
+learned is worth more than the code was, so it is recorded precisely.
 
-**The machinery already exists.** A player-side summon is not an AI unit: it is
-pushed straight into `members` with a sheet (`combat.js:75`,
-`asMember(s, { isSummon: true, … })`), so it already takes a normal player turn
-with its own initiative slot, action bar, AP and `usesLeft`. `combat.js:499`
-states the rule outright — "AI-driven units are always enemy-side; player-side
-summons are members." So charm does **not** need a mutable allegiance flag or a
-`sideOf()` predicate, which is what an earlier draft of this phase assumed.
-Charm = *borrow* a unit into `members` the way a summon is *created* into it,
-then give it back.
+**What turned out to be easy.** Charm needs no allegiance flag. Sides are
+inferred from shape (`!!x.sheet`), and a player-side summon is already pushed
+into `members` with a sheet, so it already takes a normal player turn with its
+own action bar and AP. Borrowing a unit into that machinery worked first time:
+the coworker left `liveEnemies`, their own colleagues began targeting them, and
+the victory test held. `hostilesRemain()` (the seven-site collapse) shipped and
+is worth having on its own.
 
-- [ ] **`charmed` status** (`data/statuses.js`): turn clock, duration, `fx`
-      block, and a Composure `resist` interaction like every other status.
-- [ ] **Borrow**: on landing, build the sheet (`createSheetFrom(def)` —
-      `main.js:501` already does this for summoned units), pull the actor out of
-      `world.liveEnemies()` and `engaged`, and `members.push(asMember({sheet,
-      actor}, { isCharmed: true, … }))`. The summon lifetime fields
-      (`summonTurns`, `lifetimeLeft`/`spendLifetime`, `combat.js:525`) are
-      already a turn-limited controlled unit — reuse them rather than inventing
-      a second clock.
-- [ ] **Return** — the genuinely new code, since summons are destroyed and a
-      charmed unit must be handed back intact: restore it to `liveEnemies()`
-      and `engaged` with hp, statuses and `def` preserved. `dismissSummon`
-      (`combat.js:2511`) is the shape to follow, and it already solves the
-      nastiest edge — `if (active === target) makeActive(…)` covers expiry
-      landing during the unit's own turn.
-- [ ] **Victory while borrowed.** A charmed unit is out of `liveEnemies()`, so
-      `!engaged.some((e) => e.alive)` — **7 sites** (`combat.js:519, 1358, 1723,
-      1928, 2003, 2198, 2942`) — can fire victory *while it is still charmed*,
-      ending the fight with a borrowed enemy standing in your party. Collapse
-      the seven into one `hostilesRemain()` helper first, then decide the rule:
-      does charming the last hostile win, or does the fight wait for expiry?
-- [ ] **Guard the party-only paths.** `livingParty()` (`combat.js:88`) already
-      excludes summons and `combat.js:1122` keeps a summon out of
-      `party.active`; a charmed unit needs the same exclusions, or it can
-      become the party leader or be saved into the roster.
-- [ ] **Reaction sides**: `sameSide = !!watcher.sheet === !!mover.sheet`
-      (`combat.js:2768`) resolves correctly for free once the unit holds a
-      sheet — worth an explicit test rather than trusting it.
-- [ ] **Edges to pin with tests**: charm the last living hostile; charm a unit
-      that is itself an enemy summon (`summonedBy` set); charm a unit holding
-      overwatch; charm expiring while the unit is mid-turn; save/load with a
-      charm active; the unit dying while charmed.
+**The blocker: `turns` has no slot-removal API.** A borrowed unit keeps its
+original `unitSlot` (`team: 'enemy'`) in the initiative order, and nothing can
+take it out — `turns.insert` exists, its inverse does not. So the borrowed body
+either acts as an AI enemy on its own turn while simultaneously sitting in
+`members`, or its lifetime expires down the summon path and `dismissSummon`
+DELETES the coworker instead of handing them back. Both are worse than not
+having the feature.
+
+**What it actually needs, in order:**
+- [ ] `turn-order.js` grows slot removal, or slot re-teaming — moving a slot
+      between `player` and `enemy` while preserving its initiative roll, so a
+      borrowed unit acts once per round on its own roll, on your side.
+- [ ] `expireSummon` splits: a summon is DESTROYED at the end of its lifetime,
+      a borrowed coworker is RETURNED. They share a clock and must not share an
+      ending. (Sharing `summonTurns` is otherwise right — one clock, nothing to
+      keep in step.)
+- [ ] An enemy def is not a class block: it carries `attacks` (inline damage
+      rolls the AI reads) where a sheet needs `actions` (ids the bar renders).
+      A borrowed body was given the universal verbs (`punch`, `shove`), which is
+      defensible — you are driving somebody you do not know — but it is a design
+      decision that should be made deliberately rather than inherited from a
+      shape mismatch.
+- [ ] `livingParty` must exclude the borrowed, or a wiped party stays "alive"
+      while you drive somebody else's body.
+- [ ] Release on all three paths: lapse, victory, and death mid-session.
+- [ ] Edges to pin: charm the last living hostile; charm a unit that is itself
+      a summon; charm a unit holding overwatch; save/load mid-charm.

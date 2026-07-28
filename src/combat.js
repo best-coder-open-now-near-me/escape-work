@@ -88,6 +88,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // roster only - a party WIPE (no real member standing) is the sole game-over;
   // a summon falling never is, and a lone summon can't stave off defeat.
   const livingMembers = () => members.filter((m) => m.sheet.hp > 0 && m.actor);
+  // Is anyone still FIGHTING you? The victory test, in one place.
+  //
+  // It was `!engaged.some((e) => e.alive)` written out at seven call sites, and
+  // seven copies of a rule is seven chances for one of them to fall behind the
+  // others. Charm makes that concrete: a charmed coworker is alive and engaged
+  // but is on YOUR side for the moment, so a fight whose last hostile is
+  // charmed must not sit unwinnable - and a fight must not declare victory
+  // while one is still borrowed either. One function is where that decision
+  // can be made once.
+  const hostilesRemain = () => engaged.some((e) => e.alive);
   const livingParty = () => members.filter((m) => m.sheet.hp > 0 && m.actor && !m.isSummon);
   // The AI enemies hunt the whole player side - members and summons alike, all
   // members now. A target wraps { actor, member }; combat reads `member` to take
@@ -534,7 +544,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       alive: slotAlive,
       carrier: slotCarrier,
       outcome: () => {
-        if (!engaged.some((e) => e.alive)) return 'win';
+        if (!hostilesRemain()) return 'win';
         if (!livingParty().length) return 'lose';
         return null;
       },
@@ -1379,7 +1389,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (died) callbacks.onEnemyKilled(en);
     armed = null; // back to movement mode after the swing
     refresh();
-    if (!engaged.some((e) => e.alive)) victory();
+    if (!hostilesRemain()) victory();
   }
 
   // --- displacement, shared (POWERS_PLAN M2) -------------------------------
@@ -1744,7 +1754,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     log(line);
     armed = null;
     refresh();
-    if (!engaged.some((e) => e.alive)) victory();
+    if (!hostilesRemain()) victory();
   }
 
   // What a landed melee action DOES on arrival. The walk-up path and the
@@ -1949,7 +1959,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     armed = null;
     aimPoint = null;
     refresh();
-    if (!engaged.some((e) => e.alive)) victory();
+    if (!hostilesRemain()) victory();
   }
 
   // Clicking a coworker with nothing armed is an attack - the basic swing from
@@ -2024,7 +2034,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       log(displaceBody(en, Math.sign(en.x - active.actor.x), Math.sign(en.z - active.actor.z)).msg);
       armed = null;
       refresh();
-      if (!engaged.some((e) => e.alive)) victory();
+      if (!hostilesRemain()) victory();
       return;
     }
     const range = rangeOf(armed);
@@ -2249,7 +2259,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           log(topple(active, plan));
           armed = null;
           refresh();
-          if (!engaged.some((e) => e.alive)) victory();
+          if (!hostilesRemain()) victory();
           return;
         }
         // A toppleable prop with nothing behind it just rocks - say so, rather
@@ -3011,7 +3021,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     drawPreview(); // immediate-mode lines last one frame - redraw while shown
     drawTargets();
     // prune anyone killed externally (printer explosions during combat)
-    if (!engaged.some((e) => e.alive)) { victory(); return; }
+    if (!hostilesRemain()) { victory(); return; }
     if (phase === 'player') {
       // finish a queued walk-up strike
       if (pendingMelee && !active.actor.moving) {

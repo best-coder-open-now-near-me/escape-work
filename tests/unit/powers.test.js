@@ -502,3 +502,4 @@ test('conePolyline closes the wedge back to its origin', () => {
     assert.ok(Math.abs(Math.hypot(x, z) - WEDGE.cone.range) < 1e-9);
   }
 });
+
