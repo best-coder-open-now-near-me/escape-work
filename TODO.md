@@ -71,7 +71,18 @@ line numbers are the review baseline and may be shifted slightly in
       wander path (`actors.js:453`) — the status already carries the slow.
       *Best done as part of the step-rule unification in Phase 5.*
 - [ ] `paper-storm` needs `leavesTurns` (`data/actions.js:83`) — its drifts are
-      currently permanent terrain.
+      currently permanent terrain. **Also the one leak in the paper economy:**
+      with no `leavesTurns`, `leaveSurface(…, a.leavesTurns || 0)` passes 0 and
+      `main.js:1610` only registers a tile with the ager `if (turns > 0)`, so
+      Paper Storm's drifts are never entered into `tempSurfaces` at all and
+      both expiry clocks skip them. ~9 tiles (radius 1.5) × `uses: 2`, 2 AP,
+      **no `ammoCost`**, harvested at +1 sheet/tile once the fight ends — a
+      free AP→ammo converter, and `PAPER_CAP = Infinity` (`stats.js:12`, dead
+      like `INV_CAP`) means nothing bounds the take. This is precisely the
+      "renewable ammo pile" `main.js:389` and `main.js:2581` were both written
+      to prevent. One line fixes the terrain bug and the economy together —
+      and it is load-bearing for any paper-upgrade system, which only adds a
+      step unless the raw supply is bounded.
 - [ ] `hover.clear()` must reset `hoverTarget` so Ctrl/Alt can't re-light a
       stale body (`hover.js:257`).
 - [ ] Gate the party-bar level-up pip and character-sheet Level Up button on
