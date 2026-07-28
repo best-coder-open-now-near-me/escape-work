@@ -52,11 +52,29 @@ Of the six that survive, three are provably pre-existing (they appear in the
 baseline's own failure list, one under its old name: `Mail Room: Bulk Mail`,
 `Reboot self-cast` née `Remote Restart self-cast`, and the IT Support kit spec).
 
-- [ ] **Three left worth investigating, and only these:**
-      `classes.spec.js:108` (Security: Detain), `exit.spec.js:130` (walking out
-      of the last floor), `powers.spec.js:123` (Stand Post overwatch). Each
-      needs the same treatment: run it alone against a worktree at `e8e53de`,
-      then alone here, and compare. Do NOT run comparison suites in parallel.
+**The three suspects were investigated. They split three ways:**
+
+- **`exit.spec.js:130` - not a regression, a stale test. FIXED.** It boots a
+  PLAYTEST stash, seeds a campaign save, and asserted that winning wipes it -
+  which is exactly the data-loss bug Phase 0 fixed. A level launched from the
+  editor is standalone, and finishing one is not finishing a campaign run. The
+  assertion is inverted now, with the reasoning in the test.
+- [ ] **`classes.spec.js:108` (Security: Detain) - a REAL regression.** Fails
+      consistently on this branch (three separate runs) and passes at
+      `e8e53de`. The `detained` status is not landing:
+      `expect(after.statuses.some((s) => s.id === 'detained')).toBe(true)` comes
+      back false, with no timeout involved. Not yet diagnosed - the obvious
+      suspects were checked and cleared (`isControl` still admits it through
+      the Phase 0 fall-through guard; `performControl`'s apply site is
+      unchanged apart from the charm branch, which only runs for `charmed`).
+      Next step is to bisect this branch against that one spec.
+- [ ] **`powers.spec.js:123` (Stand Post overwatch) - FLAKY, not broken.**
+      Passed in two runs on this branch and failed in two others, same commit.
+      The failure is the foe's HP never dropping, so the overwatch did not fire
+      on the mover. `beginMove` and `setPath` are in one synchronous block in
+      `aiAdvance`, so the Phase 1 `moveStart` cleanup cannot be racing it -
+      ruled out, but the real cause is unfound. Worth running under `--repeat-
+      each` to characterise before chasing.
 - [ ] The suite needs a longer per-test budget in environments like this one,
       or the timeouts will keep being mistaken for regressions. `test.slow()`
       per spec is the stopgap; a config-level budget keyed off an env var is the
