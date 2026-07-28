@@ -210,3 +210,46 @@ export function smoothPath(isWalkable, path, edgeOpen = null) {
   }
   return out;
 }
+
+// The cheapest route to a tile a RANGED attack could fire at (tx, tz) from, or
+// null when no such tile is reachable.
+//
+// This is deliberately a different question from "route to a tile beside the
+// target". A weapon with reach does not need the target's elbow, only a tile
+// inside its range with a line to them - and asking the melee question refused
+// shots that were plainly available: a coworker ringed by their own colleagues
+// has no free neighbouring tile at all (walkability excludes occupied ones),
+// and one standing the far side of a chest-high partition has neighbours that
+// cannot be walked to, while a dozen firing positions sit a few steps away.
+//
+// Candidates are swept nearest-first and the loop stops as soon as no remaining
+// one could win: a route covering Chebyshev distance h is at least h + 1 tiles
+// long (a path includes its start tile), so once `h + 1` reaches the best
+// length already found, the sorted remainder cannot beat it. That keeps a click
+// to a couple of searches instead of the whole range box.
+//
+// Pure: every world question arrives as a callback, so this is the same
+// function in and out of combat, and a test can drive it with a string map.
+//   isWalkable(x, z)      - can a body stand there
+//   hasLos(x, z, tx, tz)  - is the shot's line clear from there
+//   findPath(x, z)        - route from the shooter to there, or null
+export function routeToFiringPosition({ tx, tz, range, fromX, fromZ, isWalkable, hasLos, findPath }) {
+  const cands = [];
+  for (let dz = -range; dz <= range; dz++) {
+    for (let dx = -range; dx <= range; dx++) {
+      const ax = tx + dx;
+      const az = tz + dz;
+      if (!isWalkable(ax, az)) continue;
+      if (!hasLos(ax, az, tx, tz)) continue;
+      cands.push([ax, az, Math.max(Math.abs(ax - fromX), Math.abs(az - fromZ))]);
+    }
+  }
+  cands.sort((p, q) => p[2] - q[2]);
+  let best = null;
+  for (const [ax, az, h] of cands) {
+    if (best && h + 1 >= best.length) break;
+    const p = findPath(ax, az);
+    if (p && p.length >= 2 && (!best || p.length < best.length)) best = p;
+  }
+  return best;
+}

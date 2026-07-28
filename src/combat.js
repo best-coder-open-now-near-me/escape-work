@@ -10,7 +10,7 @@
 // do. Fire keeps burning throughout.
 import { ACTIONS, arrivalLine } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
-import { truncateByBudget } from './pathfinding.js';
+import { truncateByBudget, routeToFiringPosition } from './pathfinding.js';
 import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
@@ -2059,16 +2059,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // rooms away with a stapler and you walk over; with a staple gun you
       // would have stood still and read a refusal. It walks the same route, it
       // just stops the moment the shot is on rather than at their elbow.
-      const route = routeBeside(en);
+      // Route to a FIRING position, not to their elbow. routeIntoRange already
+      // ends at the nearest tile the shot is legal from, so there is no
+      // walk-further-then-cut-back step: the route costs the steps it needs and
+      // not one more, by construction.
+      const route = routeIntoRange(en, range);
       if (!route || route.length < 2) { refuse('No way to get a shot at them.'); return; }
-      // The first point on that route from which the shot is legal - so a
-      // walk-in costs the steps it needs and not one more.
-      let cut = route.length - 1;
-      for (let i = 0; i < route.length; i++) {
-        const [tx, tz] = route[i];
-        if (cheb(tx, tz, en.x, en.z) <= range && world.hasLos(tx, tz, en.x, en.z)) { cut = i; break; }
-      }
-      const shotWalk = walkActive(route.slice(0, cut + 1), moveBudget(active) - a.ap);
+      const shotWalk = walkActive(route, moveBudget(active) - a.ap);
       if (!shotWalk) { refuse('Not enough AP to get in range.'); return; }
       // Will we be able to fire when the walk finishes? The arrival check
       // (pendingMelee, in the update loop) is authoritative either way - this
@@ -2153,6 +2150,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     return best;
   }
+
+  // The cheapest walkable route to a tile this weapon could FIRE from, or null
+  // if none is reachable. The rule itself is pure and shared with the
+  // out-of-combat twin (pathfinding.js) - only the world bindings differ.
+  const routeIntoRange = (en, range) => routeToFiringPosition({
+    tx: en.x,
+    tz: en.z,
+    range,
+    fromX: active.actor.x,
+    fromZ: active.actor.z,
+    isWalkable: (x, z) => world.isWalkable(x, z),
+    hasLos: (x, z, tx, tz) => world.hasLos(x, z, tx, tz),
+    findPath: (x, z) => world.findPath(active.actor.x, active.actor.z, x, z, active.actor),
+  });
 
   // Smooth a raw tile route and walk the ACTIVE member along it, charging by
   // DISTANCE (stepCost per tile-length) and stopping mid-segment - at any

@@ -2,10 +2,7 @@
 // '#' solid, '.' open. No PlayCanvas, no DOM - plain node --test.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  findPath, segmentClear, clampToClearance, approachPoint,
-  truncateByBudget, smoothPath,
-} from '../../src/pathfinding.js';
+import { findPath, segmentClear, clampToClearance, approachPoint, truncateByBudget, smoothPath, routeToFiringPosition } from '../../src/pathfinding.js';
 
 // Build isWalkable from rows of '.'/'#'; everything off-map is solid.
 const walkableFrom = (rows) => (x, z) =>
@@ -165,4 +162,88 @@ test('smoothPath never straightens through a cell the route avoided', () => {
   const s = smoothPath(w, raw);
   // A straight (0,0)->(2,2) shortcut would clip the solid centre.
   assert.ok(!(s.length === 2), 'must not shortcut through the blocked cell');
+});
+
+// --- routeToFiringPosition (TODO Phase 1) ----------------------------------
+// The ranged walk-in used to ask the MELEE question - "route me to a tile
+// beside them" - which refused shots that were plainly available.
+
+// Build the world callbacks from a string map. '#' is wall, '.' floor, 'o' an
+// occupied tile (walkable terrain, but nobody can stand there - the rule that
+// makes a ringed target have no free neighbour at all).
+const world = (rows) => {
+  const at = (x, z) => (rows[z]?.[x] ?? '#');
+  const isWalkable = (x, z) => at(x, z) === '.' || at(x, z) === 'S';
+  // Sight crosses anything that is not a wall - so an occupied tile does not
+  // block the line, exactly like the game's partitions-vs-bodies split.
+  const sightClear = (x, z) => at(x, z) !== '#';
+  const hasLos = (x, z, tx, tz) => segmentClear(sightClear, x, z, tx, tz);
+  return {
+    isWalkable,
+    hasLos,
+    from: (fx, fz) => ({
+      fromX: fx,
+      fromZ: fz,
+      isWalkable,
+      hasLos,
+      findPath: (x, z) => findPath(isWalkable, fx, fz, x, z),
+    }),
+  };
+};
+
+test('routeToFiringPosition finds a shot at a target ringed by its own allies', () => {
+  // The target (T at 5,3) is boxed in by occupied tiles: NO free neighbour
+  // exists, so a melee-style "tile beside them" search returns null - which is
+  // what produced "No way to get a shot at them" with the shot wide open.
+  const w = world([
+    '##########',
+    '#........#',
+    '#...ooo..#',
+    '#...oTo..#',
+    '#...ooo..#',
+    '#........#',
+    '##########',
+  ]);
+  // No free tile adjacent to the target, confirming the melee question fails.
+  const neighbours = [[4,2],[5,2],[6,2],[4,3],[6,3],[4,4],[5,4],[6,4]];
+  assert.equal(neighbours.some(([x, z]) => w.isWalkable(x, z)), false);
+
+  const route = routeToFiringPosition({ tx: 5, tz: 3, range: 4, ...w.from(1, 1) });
+  assert.ok(route, 'a firing position must be reachable');
+  const [ex, ez] = route[route.length - 1];
+  assert.ok(Math.max(Math.abs(ex - 5), Math.abs(ez - 3)) <= 4, 'route ends inside range');
+  assert.equal(w.hasLos(ex, ez, 5, 3), true, 'route ends with a clear line');
+});
+
+test('routeToFiringPosition stops at the NEAREST firing tile, not the target', () => {
+  const w = world([
+    '##########',
+    '#S.......#',
+    '#........#',
+    '#.......T#',
+    '##########',
+  ]);
+  const route = routeToFiringPosition({ tx: 8, tz: 3, range: 3, ...w.from(1, 1) });
+  assert.ok(route);
+  const [ex, ez] = route[route.length - 1];
+  // Inside range...
+  assert.ok(Math.max(Math.abs(ex - 8), Math.abs(ez - 3)) <= 3);
+  // ...and it did NOT walk all the way to the target's elbow. Anything at
+  // Chebyshev 1 would mean it kept closing after the shot was already on.
+  assert.ok(Math.max(Math.abs(ex - 8), Math.abs(ez - 3)) > 1,
+    `stopped at (${ex},${ez}) - should not have closed to melee range`);
+});
+
+test('routeToFiringPosition returns null when the target is sealed off', () => {
+  // Walled into a closet with no line out: no firing position exists, so the
+  // caller still refuses - the fix must not open unwinnable fights.
+  const w = world([
+    '##########',
+    '#S.......#',
+    '#..#####.#',
+    '#..#T..#.#',
+    '#..#####.#',
+    '##########',
+  ]);
+  assert.equal(routeToFiringPosition({ tx: 4, tz: 3, range: 4, ...w.from(1, 1) }), null);
 });

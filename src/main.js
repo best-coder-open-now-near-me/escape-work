@@ -14,7 +14,7 @@ import { ITEMS } from './data/items.js';
 import { CLASSES } from './data/classes.js';
 import { ACTIONS, arrivalLine } from './data/actions.js';
 import { parseLevel } from './grid.js';
-import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
+import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, routeToFiringPosition, DIRS8 } from './pathfinding.js';
 import {
   createSheet, createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
   scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
@@ -813,6 +813,22 @@ function startGame(level) {
     return best;
   }
 
+  // The ranged twin of bestApproachPath: cheapest walk-up route to any tile a
+  // weapon with `range` could FIRE at (x, z) from. The rule is pure and shared
+  // with combat's routeIntoRange (pathfinding.js); only the bindings differ.
+  function bestFiringPath(x, z, range) {
+    return routeToFiringPosition({
+      tx: x,
+      tz: z,
+      range,
+      fromX: Math.round(player.x),
+      fromZ: Math.round(player.z),
+      isWalkable,
+      hasLos: (ax, az, bx, bz) => hasLos({ x: ax, z: az }, { x: bx, z: bz }),
+      findPath: (ax, az) => findPath(isWalkable, player.x, player.z, ax, az, hazardCost, grid.stepOpen),
+    });
+  }
+
   // Walk to the open tile nearest an enemy; combat starts on arrival via the
   // adjacency check in onMemberStep.
   function confront(en) {
@@ -933,6 +949,18 @@ function startGame(level) {
     approachCache.set(en, { key, ok });
     return ok;
   }
+  // The same question for a weapon with reach: can the leader WALK somewhere the
+  // shot is on? Cached on the same terms, with `range` in the key because two
+  // weapons ask different questions about the same pair of tiles.
+  const firingCache = new Map(); // enemy -> { key, ok }
+  function canWalkIntoRange(en, range) {
+    const key = `${Math.round(player.x)},${Math.round(player.z)},${en.x},${en.z},${range},${approachEpoch}`;
+    const seen = firingCache.get(en);
+    if (seen && seen.key === key) return seen.ok;
+    const ok = !!bestFiringPath(en.x, en.z, range);
+    firingCache.set(en, { key, ok });
+    return ok;
+  }
   // Out of combat there's no AP budget, but the affordances still have to
   // describe the click they precede - THE PREVIEW IS THE RULE (ARCHITECTURE.md
   // on previewAction). These are the same three tests engageWithAction runs
@@ -953,7 +981,11 @@ function startGame(level) {
       // passes on a route it hasn't taken yet - combat's opener walks it in.
       const shot = cheb(player, en) <= range && hasLos(player, en);
       if (a.ammoCost) return shot && (sheet?.paper || 0) >= throwAmmoCost(id);
-      return shot || canApproach(en);
+      // A weapon walks in to a FIRING position, not to their elbow - asking
+      // canApproach here refused shots that were plainly on. This still refuses
+      // a target nobody can close with (main.js's opener guard depends on that),
+      // it just asks the question the weapon actually poses.
+      return shot || canWalkIntoRange(en, range);
     }
     if (a.type === 'shove') return playerReaches(en, REACH.SHOVE);
     return playerReaches(en) || canApproach(en);
