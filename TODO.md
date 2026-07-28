@@ -80,6 +80,62 @@ baseline's own failure list, one under its old name: `Mail Room: Bulk Mail`,
       per spec is the stopgap; a config-level budget keyed off an env var is the
       real fix.
 
+### The red on main, fixed (2026-07-28)
+
+Main's `Full E2E suite` job had been failing since the powers work landed, so
+`deploy.yml` - which chains off the CI run on main - had been skipping. Three
+failures, all in `powers.spec.js`, all the SAME failure:
+
+    Test timeout of 120000ms exceeded.
+       at helpers.js:258   <- settleOnPlayerTurn, inside enterCombat
+
+Not flakes. Those specs boot IT Support and HR, the two classes with no attack
+of their own, so entering a fight means WALKING a coworker down across the
+shipped `level1` rather than opening on one. Under software GL that does not
+fit in 120s: Performance Review measures at 3.1m end to end.
+
+- **FIXED** with one file-level `test.slow()` in `powers.spec.js`. That is the
+  right lever rather than a blunt `setTimeout`, because `engageBudgetMs()`
+  derives the engage loop's budget as a FRACTION of `test.info().timeout` - so
+  tripling the test budget gives the retry loop proportionally more room
+  instead of more wall clock around a loop that already gave up. Stand Post's
+  own `test.setTimeout(300_000)` came out with it: against a 360s file default
+  it would have quietly CUT the budget it was written to raise.
+
+- [ ] **Better fix, not taken yet: put these three on a bespoke arena.**
+      `summons.spec.js` is the model - it boots small purpose-built arenas via
+      `bootStash` ("straight to battle", open room) instead of walking the real
+      office, which is why its HR tests are cheap and reliable. Doing the same
+      to `powers.spec.js` would remove this whole failure class rather than
+      paying for it, and cut ~7m off the suite. Left alone for now because the
+      last change to `enterCombat`'s geometry broke Detain.
+
+**A second defect, found trying to VERIFY that fix before it reached main.**
+The workflow header advertised "put `[e2e]` in the commit message" to run the
+suite on a branch. It could never fire: `push` is scoped to main, so a branch
+push raises no event at all, and the only event a branch does raise -
+`pull_request` - has no `github.event.head_commit`. The failure is silent: not
+a skipped job, NO job. **FIXED** - the branch opt-in is the PR TITLE now, a
+field that exists on the event a branch actually fires. Commit-message form
+stays for main, where `head_commit` is real.
+
+**A third, found by running the full suite locally where nothing caps the
+failure count** - and this one is NOT on main's list, because main still has
+the old reboot. This branch introduces it:
+
+- **`classes.spec.js:8` (IT Support kit) - stale premise. FIXED.** It self-casts
+  reboot on a freshly-booted character and asserts the AP was spent. Reboot is
+  a pure purge now, and a purge aimed at a clean sheet is refused BEFORE the
+  commit rather than billed for nothing (`powers.js` `emptyPayload`). Every
+  click was a correct refusal - "Nothing to clear - they are running clean."
+  (×4) - and the retry loop waited out 300s for AP that was never going to
+  move. The test hands the verb real work first now, and asserts the status is
+  actually gone, which its name always claimed and its assertions never checked.
+
+**Coverage gap worth naming:** CI's `maxFailures: 3` aborted main's run with
+**42 tests never executed on a real runner**. Fixing the three known failures
+is not the same as knowing main goes green.
+
 ## Status
 
 **All eight phases are done and pushed.** Unit tests: 455 passing, up from 385
