@@ -10,6 +10,16 @@ import {
   combatState, onScreen, clickWorld, waitStill,
 } from './helpers.js';
 
+// Every test here boots a class whose kit is verbs rather than a swing - IT
+// Support and HR have no attack of their own - so entering a fight means
+// WALKING a coworker down instead of opening on them. Under CI's software GL
+// that walk-up can eat the default 120s budget before a single engage attempt
+// resolves, which is exactly how these specs failed on main (three timeouts,
+// all inside enterCombat). test.slow() triples the budget, and because
+// engageBudgetMs() is a fraction OF the test timeout, the engage loop gets the
+// extra room too rather than just the wall clock around it.
+test.slow();
+
 // A long room, so the Manager has to WALK to reach the guard - overwatch fires
 // on somebody entering covered ground, which needs somebody who moves.
 const WATCH_HALL = {
@@ -70,12 +80,6 @@ test('a friendly verb does not arm a swing at a coworker', async ({ page }) => {
   // an ANY-target purge now, so it legitimately DOES promise a swing at a
   // coworker, and can no longer carry a rule about friends-only verbs.
   // Performance Review is the only friends-only verb in any base kit.
-  //
-  // Slow because HR is the slow way into a fight: it has no attack of its own,
-  // so entering combat means walking a coworker down rather than opening on
-  // them, and under software GL that walk can eat the default budget before a
-  // single engage attempt completes.
-  test.slow();
   await bootAndPick(page, 'human-resources');
   await enterCombat(page);
   await waitForPlayerTurn(page);
@@ -121,7 +125,9 @@ test('Performance Review is HR\'s, and it lands the Commended status', async ({ 
 });
 
 test('Stand Post holds an overwatch, and it fires once on somebody crossing the line', async ({ page }) => {
-  test.setTimeout(300_000);
+  // (No setTimeout of its own any more: this used to raise 120s to 300s, but
+  // the file-level test.slow() above already grants 360s, so an explicit 300s
+  // would now be a CUT dressed up as a raise.)
   await bootStash(page, WATCH_HALL, 'security');
   await enterCombat(page);
   await waitForPlayerTurn(page);
