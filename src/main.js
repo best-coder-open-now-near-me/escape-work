@@ -26,6 +26,7 @@ import {
 } from './party.js';
 import { applyStatus, statusFx, hasStatus, tickStep, statusLeft, statusList } from './statuses.js';
 import { inReach } from './tactics.js';
+import { aimsAtAlly } from './powers.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel } from './scene.js';
@@ -1047,6 +1048,30 @@ function startGame(level) {
   // Which party member owns this actor, if any.
   const memberOf = (actor) => party?.members.find((m) => m.actor === actor) || null;
 
+  // Land a friendly verb on a colleague OUT of combat. There is no AP out here -
+  // the same reason a pocket item is free between fights - so this spends the
+  // action's `uses` if it rations itself and nothing otherwise. Only the purge
+  // payload is honoured: a heal is already refused out here by
+  // combatOnlyReason ("heal from your pockets"), and keeping this to one
+  // payload means it cannot quietly become a second, cheaper buff path.
+  function oocFriendlyOn(id, m) {
+    const a = ACTIONS[id];
+    const carrying = statusList(m.sheet).length;
+    if (!a.purge) { ui.say(`${a.label} is for a fight.`); return; }
+    if (!carrying) {
+      ui.say(`${m.sheet.name} is running clean. Nothing to clear.`);
+      return;
+    }
+    approachAndDo(m.actor.x, m.actor.z, () => {
+      m.sheet.statuses = {};
+      armedOoc = null;
+      hotbar?.setArmed(null);
+      ui.say(`You power-cycle ${m.sheet.name}. Everything they were carrying clears.`);
+      paintHud(sheet); // the leader's card, for a self-cast
+      partyBarKey = ''; // and the roster bar re-renders next frame
+    });
+  }
+
   // --- left-click verb dispatch (Divinity-style: the target picks the verb) ---
   function attackOrConfront(en) {
     const a = armedOoc && ACTIONS[armedOoc];
@@ -1063,6 +1088,16 @@ function startGame(level) {
     if (kind === 'party') {
       const m = memberOf(ref);
       if (!m) return false;
+      // An ARMED friendly verb owns the click, ahead of every body verb below.
+      // Without this the click fell straight through to "switch to them", so a
+      // power aimed at a colleague out of combat did nothing but hand them the
+      // reins - there was no way to clear a teammate's bleed outside a fight at
+      // all. Combat has had this gate all along (armedIsFriendly); exploration
+      // simply never grew one.
+      if (armedOoc && aimsAtAlly(ACTIONS[armedOoc]) && m.sheet.hp > 0) {
+        oocFriendlyOn(armedOoc, m);
+        return true;
+      }
       if (m.sheet.hp <= 0) { approachAndDo(ref.x, ref.z, () => helpUp(m)); return true; }
       if (m === partyLeader(party)) return false; // your own body: a ground click
       // Talk only to somebody who HAS something to say - a recruited companion
@@ -1223,7 +1258,11 @@ function startGame(level) {
   function combatOnlyReason(id) {
     const a = ACTIONS[id];
     const t = a?.type;
-    if (!a || t === 'attack' || t === 'shove' || t === 'summon') return null;
+    // A purge is at its MOST useful out here: bleed runs on a step clock, so
+    // between fights is exactly when you want it gone. Gating it to combat
+    // would have made IT Support's identity verb unusable in the situation it
+    // most obviously answers.
+    if (!a || t === 'attack' || t === 'shove' || t === 'summon' || t === 'purge') return null;
     if (t === 'heal') return `${a.label} is for a fight - out here, heal from your pockets.`;
     return `${a.label} only means something once someone is swinging at you.`;
   }
