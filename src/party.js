@@ -10,7 +10,7 @@ import { CLASSES } from './data/classes.js';
 import { COMPANIONS } from './data/companions.js';
 
 export const PARTY_CAP = 3; // leader + 2 companions - see PARTY_PLAN.md
-export const SAVE_VERSION = 6; // v6 adds the shared purse (ECONOMY_PLAN.md)
+export const SAVE_VERSION = 7; // v7 adds creation fields (CHARACTER_PLAN.md)
 
 // Petty Cash is PARTY state, not sheet state (ECONOMY_PLAN #2): one purse the
 // whole roster spends from, so buying a sandwich never means switching leaders
@@ -123,6 +123,13 @@ function normalizeSheet(sheet, version = 0) {
       sheet.inventory.splice(sheet.inventory.indexOf(best), 1); // out of the bag, into the slot
     }
   }
+  // v7: creation fields. Purely ADDITIVE - every one of them is new state, not
+  // migrated state, so an older save simply reads the default and behaves
+  // exactly as it does today. That is why none of them needs a version gate:
+  // the hazard a gate protects against is a migration that INVENTS state and
+  // then re-applies itself on every load (the v5 auto-equip), and defaulting an
+  // absent field is not that.
+  sheet.pronouns ??= 'they'; // the house voice, and the safest default
   // v6: xp/xpNext. A save that predates the fields could never level again, and
   // the damage compounded: `gainXp` opens with `sheet.xp += amount`, so an
   // undefined `xp` became NaN on the first scrap of experience, and `NaN >=

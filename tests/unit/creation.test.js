@@ -114,3 +114,84 @@ test('cloneMaterials does not recolour the shared .glb material', () => {
   assert.deepEqual([shared.diffuse.r, shared.diffuse.g, shared.diffuse.b], [0.8, 0.6, 0.4],
     'every other character built from this rig must be untouched');
 });
+
+// --- the draft -> sheet rule (CHARACTER_PLAN M3/M5) ------------------------
+const {
+  createDraft, createCharacter, cleanName, spendDraftPoint, undoDraftPoint,
+  pointsLeft, draftAttr, CREATION_POINTS, DEFAULT_PRONOUNS, NAME_MAX,
+} = await import('../../src/creation.js');
+const { createSheet } = await import('../../src/stats.js');
+const { CLASSES } = await import('../../src/data/classes.js');
+
+test('an untouched draft reproduces today character exactly', () => {
+  // This is what makes "skip the paperwork" a real skip rather than a subtly
+  // different character - and it is the invariant the whole ordering rule in
+  // createCharacter exists to protect.
+  for (const id of Object.keys(CLASSES).filter((k) => CLASSES[k].playable !== false)) {
+    const picked = createSheet(id);
+    const created = createCharacter(createDraft(id));
+    for (const field of ['className', 'maxHp', 'maxAp', 'level', 'bonusDmg']) {
+      assert.deepEqual(created[field], picked[field], `${id}: ${field}`);
+    }
+    assert.deepEqual(created.attr, picked.attr, `${id}: attributes`);
+    assert.deepEqual(created.base, picked.base, `${id}: the solved base residual`);
+  }
+});
+
+test('spent points actually land - the base residual does not cancel them', () => {
+  // The trap: feeding a MODIFIED spread into createSheet re-solves `base`
+  // against the class's headline maxHp/maxAp, so the sheet would read +1 Grit
+  // with unchanged HP. Building pristine and then spending avoids it.
+  const plain = createSheet('office-drone');
+  const draft = createDraft('office-drone');
+  spendDraftPoint(draft, 'grit');
+  spendDraftPoint(draft, 'grit');
+  const built = createCharacter(draft);
+
+  assert.equal(built.attr.grit, plain.attr.grit + 2, 'the attribute rose');
+  assert.ok(built.maxHp > plain.maxHp, 'and the derived HP rose with it');
+  assert.equal(built.attrPoints, 0, 'both points were spent, not banked');
+});
+
+test('a draft spends at most its two points', () => {
+  const draft = createDraft('office-drone');
+  assert.equal(pointsLeft(draft), CREATION_POINTS);
+  for (let i = 0; i < 10; i++) spendDraftPoint(draft, 'savvy');
+  assert.equal(draft.spends.length, CREATION_POINTS, 'the pool is a hard cap');
+  assert.equal(pointsLeft(draft), 0);
+
+  undoDraftPoint(draft);
+  assert.equal(pointsLeft(draft), 1, 'and a point can be taken back');
+  assert.equal(draftAttr(draft).savvy, CLASSES['office-drone'].attr.savvy + 1,
+    'draftAttr previews the spread without minting a sheet');
+});
+
+test('an unknown attribute is not spendable', () => {
+  const draft = createDraft('office-drone');
+  spendDraftPoint(draft, 'charisma'); // not an office attribute
+  assert.equal(draft.spends.length, 0);
+});
+
+test('the name is cleaned, clamped, and falls back to the job', () => {
+  assert.equal(cleanName('  Dana   Scully  '), 'Dana Scully', 'runs of whitespace collapse');
+  assert.equal(cleanName('x'.repeat(200)).length, NAME_MAX, 'and it cannot break the HUD card');
+  assert.equal(cleanName('   ', 'Mail Room'), 'Mail Room', 'clearing the field means "use the job"');
+  assert.equal(cleanName(null, 'Mail Room'), 'Mail Room');
+});
+
+test('pronouns default to they/them and reject anything unknown', () => {
+  const draft = createDraft('office-drone');
+  assert.equal(createCharacter(draft).pronouns, DEFAULT_PRONOUNS);
+  assert.equal(createCharacter({ ...draft, pronouns: 'she' }).pronouns, 'she');
+  assert.equal(createCharacter({ ...draft, pronouns: 'xyzzy' }).pronouns, DEFAULT_PRONOUNS,
+    'a malformed draft falls back rather than storing junk');
+});
+
+test('a typed name survives onto the sheet, and className stays the job', () => {
+  const draft = createDraft('mail-room');
+  draft.name = 'Dana';
+  const sheet = createCharacter(draft);
+  assert.equal(sheet.name, 'Dana');
+  assert.equal(sheet.className, CLASSES['mail-room'].name,
+    'every rule that reads the JOB keeps reading the job');
+});

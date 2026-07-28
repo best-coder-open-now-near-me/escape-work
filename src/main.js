@@ -16,7 +16,7 @@ import { ACTIONS, arrivalLine } from './data/actions.js';
 import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, routeToFiringPosition, DIRS8 } from './pathfinding.js';
 import {
-  createSheet, createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
+  createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
   scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
   orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, lookOf, REACH,
 } from './stats.js';
@@ -26,6 +26,7 @@ import {
 } from './party.js';
 import { applyStatus, statusFx, hasStatus, tickStep, statusLeft, statusList } from './statuses.js';
 import { inReach } from './tactics.js';
+import { createDraft, createCharacter } from './creation.js';
 import { aimsAtAlly } from './powers.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
@@ -575,14 +576,31 @@ function startGame(level) {
     return id && CLASSES[id] && CLASSES[id].playable !== false ? id : null;
   }
 
-  function onClassPicked(classId) {
+  // Hiring, once the paperwork is done. `sheetFor` is whatever the flow built -
+  // an untouched draft produces byte-for-byte what createSheet(classId) always
+  // produced, which is what keeps the express lane and the skip link honest.
+  function beginRun(builtSheet) {
     endClassPreview();
-    sheet = createSheet(classId);
+    sheet = builtSheet;
     party = createParty(sheet, player);
     spawnPlayerModel();
     loot.refreshPanel(sheet);
     buildHotbar();
     ui.say(`${sheet.className}. Now get out of here.`); // hotkeys live in the HUD strip
+  }
+
+  // The picker picked a job; now the badge photo. The candidate stays on the
+  // spawn tile under the same dollied-in camera - the résumé card is what gets
+  // replaced, not the body - so this costs no .glb load at all.
+  function onClassPicked(classId) {
+    const draft = createDraft(classId);
+    draft.className = CLASSES[classId].name; // the read-back line quotes the job
+    ui.showBadgeStep(draft, {
+      onCommit: () => beginRun(createCharacter(draft)),
+      // Skipping accepts every default, which is the same thing the `#class=`
+      // express lane does - one code path, so the two can never diverge.
+      onSkip: () => beginRun(createCharacter(createDraft(classId))),
+    });
   }
 
   // Every way to die funnels through here: freeze the world, drop any active
@@ -2818,7 +2836,12 @@ function startGame(level) {
     // slides, which under CI's software GL costs ~30s PER SLIDE, so a test
     // that wanted the fifth class paid minutes before it began. An unknown or
     // unplayable id falls through to the normal picker.
-    onClassPicked(preselectedClass());
+    //
+    // It skips CREATION too, not just the carousel - straight to beginRun with
+    // an untouched draft. That is byte-for-byte the character this hash always
+    // produced, so the whole existing suite keeps booting exactly as it did,
+    // and the one place that wants to exercise creation asks for it by name.
+    beginRun(createCharacter(createDraft(preselectedClass())));
   } else {
     // The carousel: frame the spawn tile close and head-on (eye-ish level,
     // aimed at the chest) where previewClass parades the browsed candidate;

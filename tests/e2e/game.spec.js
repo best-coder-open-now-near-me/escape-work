@@ -31,6 +31,11 @@ test('the class carousel browses every resume and hires one', async ({ page }) =
   // ...wrapped back around to the drone; the active slide's button hires.
   await expect(page.locator('#pick-office-drone')).toBeVisible();
   await page.click('#pick-office-drone');
+  // Hiring now opens the badge photo before the run starts. Skipping it takes
+  // every default, which is byte-for-byte the character this test always got -
+  // so the HP assertion below is unchanged, and that is the point of it.
+  await expect(page.locator('#creation-badge')).toBeVisible();
+  await page.click('#creation-skip');
   await expect(page.locator('#stats')).toContainText('HP 22/22');
   const tile = await page.evaluate(() => window.__game.playerTile);
   expect(tile).toEqual({ x: 2, z: 2 }); // level1 spawn

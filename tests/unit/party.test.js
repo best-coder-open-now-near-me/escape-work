@@ -7,6 +7,7 @@ import {
 } from '../../src/party.js';
 import { createSheet, spendClassPoint, damageBonus, gainXp, PROGRESSION, EQUIP_SLOTS } from '../../src/stats.js';
 import { COMPANIONS } from '../../src/data/companions.js';
+import { createDraft, createCharacter } from '../../src/creation.js';
 import { CLASSES } from '../../src/data/classes.js';
 
 test('createParty starts with the leader as its only member', () => {
@@ -90,11 +91,14 @@ test('the purse is party state, not sheet state - it survives a leader switch', 
   for (const m of party.members) assert.equal(m.sheet.cash, undefined);
 });
 
-test('v6 round-trips the purse', () => {
+test('a save round-trips the purse', () => {
   const party = createParty(createSheet('office-drone'));
   addCash(party, 34);
   const saved = JSON.parse(JSON.stringify(serializeProgress(party, 'level2')));
-  assert.equal(saved.version, 6);
+  // Against the constant, not a literal: this test is about the PURSE, and
+  // pinning the number here meant every later version bump broke a test that
+  // has nothing to do with versioning.
+  assert.equal(saved.version, SAVE_VERSION);
   assert.equal(saved.cash, 34);
   assert.equal(parseProgress(saved).cash, 34);
 });
@@ -346,4 +350,26 @@ test('a poisoned xp is repaired whether it survived as NaN or as null', () => {
     assert.equal(migrated.xp, 0, `xp repaired from ${String(poison)}`);
     assert.equal(migrated.xpNext, PROGRESSION.XP_BASE, `xpNext repaired from ${String(poison)}`);
   }
+});
+
+// --- creation fields (CHARACTER_PLAN M3, save v7) --------------------------
+test('a v6 save loads with creation defaults and is otherwise untouched', () => {
+  const sheet = createSheet('office-drone');
+  delete sheet.pronouns; // a save written before creation existed
+  const [migrated] = parseProgress(savedAs([sheet], 6)).sheets;
+  assert.equal(migrated.pronouns, 'they', 'the house default, not a guess');
+  // Additive means additive: nothing else moved.
+  assert.equal(migrated.name, sheet.name);
+  assert.equal(migrated.className, sheet.className);
+  assert.deepEqual(migrated.attr, sheet.attr);
+});
+
+test('a chosen name and pronouns survive a save round trip', () => {
+  const draft = createDraft('mail-room');
+  draft.name = 'Dana';
+  draft.pronouns = 'she';
+  const created = createCharacter(draft);
+  const [loaded] = parseProgress(savedAs([created], SAVE_VERSION)).sheets;
+  assert.equal(loaded.name, 'Dana', 'normalizeSheet must not re-derive a typed name');
+  assert.equal(loaded.pronouns, 'she');
 });
