@@ -633,3 +633,30 @@ export const ACTIONS = {
 export const arrivalLine = (n) => (n === 1
   ? 'One applicant reports for duty.'
   : `${n} applicants report for duty.`);
+
+// --- the summon descriptor's one vocabulary -----------------------------------
+// The fields a summon resolver actually reads. Both sides of the fight carry
+// them: the player's half is an ACTION on the bar, the AI's half is a `summon`
+// block on an enemy (data/enemies.js).
+export const SUMMON_CONTRACT = ['archetype', 'count', 'cap', 'lifetimeTurns'];
+
+// An enemy's descriptor may name the ACTION it is the AI-side twin of
+// (`from: 'summon-applicants'`) and inherit that contract, overriding only what
+// the two sides genuinely do differently - what the post costs an AI turn, how
+// long it waits between reqs, the line it prints. The player's own differences
+// are spelled `uses` and `range`: a per-fight budget and a placement click,
+// neither of which an AI has.
+//
+// This exists because HR posted the same req twice. The class action named
+// `applicant` with a count of 1 and a cap of 3; the enemy block named the same
+// archetype with a count of 2 and a cap of 2, and nothing tied them together -
+// so "how many people does posting a role bring" had two answers depending on
+// which side of the fight HR was standing on. Resolving here means combat.js
+// and the lints read one merged shape rather than each doing the merge.
+export function summonSpec(d) {
+  if (!d?.from) return d;
+  const a = ACTIONS[d.from] || {};
+  const out = { ...d };
+  for (const k of SUMMON_CONTRACT) if (out[k] === undefined) out[k] = a[k];
+  return out;
+}

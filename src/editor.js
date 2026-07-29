@@ -8,7 +8,7 @@
 // and the grid can be grown/shrunk from the right/bottom edges.
 import { TILE_TYPES } from './data/tiles.js';
 import { ENEMY_TYPES } from './data/enemies.js';
-import { actorChar, actorLegend } from './data/actor-registries.js';
+import { actorChar, actorLegend, parseActorRef } from './data/actor-registries.js';
 import { LEVELS } from './data/levels.js';
 import { createControls } from './controls.js';
 import { createTileRenderer, computeCarpetZones } from './tile-renderer.js';
@@ -32,6 +32,9 @@ export function startEditor(app, levelData, stashKey) {
   // (effectiveLevel), so dropping it on the load -> export round trip silently
   // demoted a deep floor's coworkers back to level 1.
   let levelDepth;
+  // char -> a `<id>@<level>` legend value, preserved verbatim across the round
+  // trip (see the load path). Empty for a level with no tiered placements.
+  let tierChars = new Map();
   // Edge walls (partitions between tiles) - same Sets grid.js parses.
   let hWalls = new Set();
   let vWalls = new Set();
@@ -267,10 +270,22 @@ export function startEditor(app, levelData, stashKey) {
     // paints and exports canonical registry chars. Remap through the file's
     // OWN legend on the way in, or a hand-authored level using different
     // chars would silently corrupt on the load -> export round trip.
+    // A placement that names its own tier (`"G": "manager@3"`) keeps BOTH its
+    // char and its legend entry through the round trip. It cannot be folded
+    // onto the base actor's canonical char the way everything else is: that
+    // char means "a Manager at this floor's depth", and collapsing a tiered
+    // placement into it silently demotes the enemy - the same bug the `depth`
+    // note above exists for, one level down. So these chars are passed through
+    // untouched and re-emitted verbatim on export.
+    tierChars = new Map();
+    for (const [ch, val] of Object.entries(data.actors || {})) {
+      if (parseActorRef(val).level != null) tierChars.set(ch, val);
+    }
     const canonical = (ch) => {
       if (ch === ' ') return ' ';
       const actor = (data.actors || {})[ch];
       if (actor === 'player') return PLAYER_CHAR;
+      if (tierChars.has(ch)) return ch;
       // Any actor the registries know, not just the ones this editor can PAINT.
       // NPCs and companions were normalised to floor here, and the export
       // legend never named them - so opening a shipped floor and exporting it
@@ -389,7 +404,9 @@ export function startEditor(app, levelData, stashKey) {
     // Every actor registry, so a companion that survived the load also
     // survives the export - a map char with no legend entry parses as floor,
     // which is the same data loss one step later.
-    const actors = { [PLAYER_CHAR]: 'player', ...actorLegend() };
+    // Tiered placements last, so their char keeps its own meaning even if the
+    // base actor's canonical char happens to collide with it.
+    const actors = { [PLAYER_CHAR]: 'player', ...actorLegend(), ...Object.fromEntries(tierChars) };
     // Key order mirrors the hand-authored files in levels/, so a re-export
     // diffs cleanly against the original.
     const out = { name: levelName };

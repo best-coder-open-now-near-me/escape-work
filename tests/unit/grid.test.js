@@ -38,15 +38,15 @@ test('parseLevel finds spawns and treats actor tiles as floor', () => {
 });
 
 test('parseLevel sorts companions and enemies into their own spawn lists', () => {
-  // 'N' is the it-intern COMPANION (data/companions.js), 'M' a manager enemy.
+  // 'N' is the it-support COMPANION (data/companions.js), 'M' a manager enemy.
   const g = parseLevel({
     name: 't', tiles: { '.': 'floor' },
-    actors: { '@': 'player', 'M': 'manager', 'N': 'it-intern' },
+    actors: { '@': 'player', 'M': 'manager', 'N': 'it-support' },
     map: ['@MN'],
   });
   assert.deepEqual(g.enemySpawns, [{ type: 'manager', x: 1, z: 0 }]);
-  assert.deepEqual(g.companionSpawns, [{ type: 'it-intern', x: 2, z: 0 }]);
-  assert.ok(!g.enemySpawns.some((s) => s.type === 'it-intern'), 'companion is not misfiled as an enemy');
+  assert.deepEqual(g.companionSpawns, [{ type: 'it-support', x: 2, z: 0 }]);
+  assert.ok(!g.enemySpawns.some((s) => s.type === 'it-support'), 'companion is not misfiled as an enemy');
 });
 
 test('sightOpen ignores plain partitions - throws sail over cubicle walls', () => {

@@ -8,7 +8,7 @@
 // first), thrown weapons need range and line of sight. Nearby enemies join
 // the fight; enemies have persistent map HP and take surface damage like you
 // do. Fire keeps burning throughout.
-import { ACTIONS, arrivalLine } from './data/actions.js';
+import { ACTIONS, arrivalLine, summonSpec } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
 import { truncateByBudget, routeToFiringPosition } from './pathfinding.js';
 import { pronounsOf, capitalize, verb } from './creation.js';
@@ -3236,7 +3236,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // the post, and under its live cap (resolveSummon returns 0 when full, so a
     // maxed HR just fights). Posting the req is the whole beat. Enemy-side only
     // today - the player summons from the action bar, not on autopilot.
-    const sm = unit.def.summon;
+    const sm = summonSpec(unit.def.summon);
     if (sm && (unit.summonCd || 0) <= 0 && acting.ap >= sm.ap
       && resolveSummon(unit, 'enemy', sm) > 0) {
       unit.summonCd = sm.cooldownRounds || 0;

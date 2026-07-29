@@ -148,7 +148,7 @@ test('the persistent hotbar shows attacks and arming targets a coworker', async 
 const TALK_LEVEL = {
   name: 'talk-test',
   tiles: { '#': 'wall', '.': 'floor', '>': 'exit' },
-  actors: { '@': 'player', 'N': 'it-intern' },
+  actors: { '@': 'player', 'N': 'it-support' },
   map: [
     '########',
     '#@.N..>#',

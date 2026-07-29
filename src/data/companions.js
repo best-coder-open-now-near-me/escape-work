@@ -16,12 +16,15 @@
 // The NAME is inherited for the same reason. Neither of these two is a named
 // character: one is an IT person, the other a mail room person, and they are
 // called what those jobs are called - exactly like the player, whose own
-// character is named for their class. The bespoke names they carried ("Nervous
-// IT Intern", "Mail Room Veteran") were the last of the parallel copy: a
-// characterization stated in a string, describing a state the game never
-// advances, and drifting from the class label beside it. A future entry who
-// really is somebody - a name on a door, a person with a plot - overrides
-// `name` and says so on purpose.
+// character is named for their class. A future entry who really is somebody -
+// a name on a door, a person with a plot - overrides `name` and says so on
+// purpose.
+//
+// The bespoke names went first, then the ids, the rigs and the track overrides
+// that had quietly kept them alive after the names were gone. That is the
+// lesson worth keeping: deleting a persona's LABEL does not delete the persona
+// if its data is still there. Both of these are now a class plus a build plus
+// a voice, and nothing else.
 //
 // An entry therefore carries ONLY what a class cannot say about a person:
 // their char, how they look, what they know (dialogue), and any deliberate
@@ -39,33 +42,38 @@ import { fromClass } from './classes.js';
 
 // id -> the class they are, plus only what makes them them.
 const KITS = {
-  'it-intern': {
+  // Keyed by the class they ARE. There is one companion per class and the id is
+  // how a level's legend names them, so `"N": "it-support"` reads as what it
+  // means: an IT Support person stands here. (COMPANIONS and CLASSES share these
+  // keys deliberately - same job, two registries, one asking "who is this" and
+  // the other "what does that job do". A companion sheet carries `companionId`
+  // and no `classId`, so nothing resolves ambiguously.)
+  'it-support': {
     classId: 'it-support',
     char: 'N',
     // No name of his own: he is an IT person, so he is called what the job is
-    // called (inherited from the class). He was "Nervous IT Intern", which
-    // asserted a state - nervous, junior - that nothing in the game ever
-    // develops or resolves; he levels up and stays nervous in his own name
-    // forever. What makes him the junior is in the numbers and the writing
-    // below, where it can actually change.
-    // His own rig, and smaller than IT Support proper - visibly the junior.
-    model: 'intern',
+    // called (inherited from the class). He was the "Nervous IT Intern", and the
+    // persona outlived its own deletion - the name went, then the rig, the
+    // track and the id kept it alive. He is IT Support, earlier on. That is the
+    // whole character, and the numbers below are where it is said.
     look: { build: { legs: 1.7, head: 0.68 } },
-    examine: 'An intern, hunched behind a monitor. Badge still shrink-wrapped.',
-    // Where the intern departs from IT Support, and nowhere else: softer, a
-    // step slower, and nothing like their savvy yet. Grit, hustle and composure
-    // are the class's - he is the same person earlier on. The kit is inherited
-    // too: he does the same job, badly. Deliberately not listed here - this
-    // comment used to name three actions and two of them (`firewall`, then
-    // `remote-restart`) were retired from the game, so it described a character
-    // who no longer existed. The class entry is the one source for that.
+    examine: 'IT, hunched behind a monitor. Badge still shrink-wrapped.',
+    // Where he departs from IT Support, and NOWHERE else: softer, a step
+    // slower, and nothing like their savvy yet. Grit, hustle and composure are
+    // the class's - he is the same person earlier on. The rig, the kit, the
+    // talent and the PROGRESSION are all inherited.
+    //
+    // The track used to be overridden here with two nodes, and that override
+    // cost more than it said: `intern-fast-learner` was `it-root` renamed (same
+    // +1 savvy, new label), and replacing a four-node track with a two-node one
+    // silently deleted `it-ergonomic`, `it-percussive` and `it-remote` - so an
+    // IT person who joined you could never learn two of IT Support's own
+    // actions. Nobody chose that; it fell out of the override. Inheriting the
+    // class track is the fix, and the lint now compares node effects so the
+    // next renamed copy cannot pass.
     maxHp: 14,
     ap: 6,
-    attr: { savvy: 3 }, // the one dial that makes him the intern
-    track: [
-      { id: 'intern-fast-learner', name: 'Fast Learner', cost: 1, effect: { attrBonus: { savvy: 1 } } },
-      { id: 'intern-nerves', name: 'Steady Nerves', cost: 1, effect: { attrBonus: { composure: 1 } } },
-    ],
+    attr: { savvy: 3 }, // the one dial that makes him the junior
     talent: null, // too new for a talent - fresh eyes, no habits
     dialogue: {
       start: 'hi',
@@ -127,17 +135,17 @@ const KITS = {
       },
     },
   },
-  'mail-veteran': {
+  'mail-room': {
     // He is a mail room person. That is the entire stat block: the rig, the
     // kit (Bulk Mail, Return to Sender, the snack cart), Warehouse Soles and
     // the mail room's own progression all come from the class, and follow it
     // wherever it goes next.
     classId: 'mail-room',
     char: 'V',
-    // Named by the job too (see the intern) - he was the "Mail Room Veteran",
-    // which put his whole characterization in a label the rules never touch.
-    // The eleven years live in his dialogue and his examine line, which is
-    // where a story can be told.
+    // Named by the job too - he was the "Mail Room Veteran", which put his
+    // whole characterization in a label the rules never touch. The eleven years
+    // live in his dialogue and his examine line, which is where a story can be
+    // told and can change.
     // Stockier than the rest of the mail room - eleven years of it. The only
     // reason to restate `look`: it is what tells him apart from the clerk
     // wearing the same rig.

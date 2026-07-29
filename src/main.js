@@ -140,12 +140,17 @@ function startGame(level) {
   let party = null;
   let sheet = null;
   let player = new PlayerActor(grid.playerSpawn.x, grid.playerSpawn.z);
-  // Enemies scale to the floor's depth: a base coworker on a deep floor is
-  // tougher, a seniority variant keeps its tier on a shallow one (stats.js).
+  // Enemies scale to the floor's depth (stats.js) - a base coworker on a deep
+  // floor is tougher. A placement may also name its own tier (`"G":
+  // "manager@3"`), which is how a shallow floor asks for one harder body
+  // without a second registry entry existing to BE the harder one. Either way
+  // it is the same scaleEnemy doing it: there is one curve, and a level picks a
+  // point on it rather than hand-writing a rival to it.
   const floorDepth = level.depth || 1;
   const enemies = grid.enemySpawns.map((s) => {
     const base = ENEMY_TYPES[s.type];
-    return new EnemyActor(s.x, s.z, s.type, scaleEnemy(base, effectiveLevel(base, floorDepth)));
+    const lvl = s.level ?? effectiveLevel(base, floorDepth);
+    return new EnemyActor(s.x, s.z, s.type, scaleEnemy(base, lvl));
   });
   // Player-team summons (SUMMON_PLAN.md): temporary combatants conjured
   // mid-fight by a summon power. You CONTROL them like party members - each is
