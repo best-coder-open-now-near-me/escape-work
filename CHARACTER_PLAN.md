@@ -43,6 +43,20 @@ contradict something this document asserted before the code existed:
 Still open: the Mail Room wears `hr.glb` and no file in the set reads as mail
 room. That needs art, not a rename.
 
+**Verification.** 453 unit tests green. On e2e: `creation.spec` 4/4,
+`summons.spec` + `game.spec` 11/11, `smoke.spec` 6/6, and
+`classes`/`powers`/`ranged` 11/11. Two specs needed real updates and got them —
+the carousel walk now accounts for the seventh card, and the enemy HR summon
+kept its own count and cap (see the note in `actions.js SUMMON_CONTRACT`).
+
+A full parallel run of everything at once was NOT completed: this box runs the
+suite at load ~8 and starves itself, which is the failure `fe2e6ec` already
+diagnosed ("classes.spec was the box, not the code"). Three specs failed that
+way — all three timeout-shaped, one reporting `phase: "player"` in the very
+state it claimed never arrived — and all three pass serially on an idle
+machine. Worth re-running the whole suite on real hardware before merge; it is
+the one check this session could not complete.
+
 ---
 
 ## Questions for the designer
