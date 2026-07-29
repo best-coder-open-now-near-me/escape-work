@@ -18,12 +18,27 @@ test('a borrowed coworker changes sides, keeps its turn, and is returned', async
 
   // Borrow somebody actually IN the fight - the initiative order is the
   // engaged set, and a coworker across the floor is not charmable at range.
+  //
+  // The one we pick has to be UNIQUELY named, because a display name is the only
+  // handle we have: the charm hook resolves `targetName` against the ENGAGED
+  // list, and the readback below resolves it against the INITIATIVE order. Those
+  // are two collections in two different orders, and names are not unique - HR
+  // posts a req on her own turn, so by the time control reaches the player this
+  // arena can hold two slots both called "Applicant". Charming "Applicant" then
+  // marks whichever one `engaged` lists first and asks about whichever one
+  // initiative lists first, so the side-swap check below reads a unit that was
+  // never charmed. That is how it failed on CI while passing locally, where HR
+  // had not got a turn in yet.
   const before = await page.evaluate(() => {
-    const slot = window.__combat.order.find((s) => !s.member && s.alive);
+    const slots = window.__combat.order;
+    const tally = new Map();
+    for (const s of slots) tally.set(s.name, (tally.get(s.name) ?? 0) + 1);
+    const slot = slots.find((s) => !s.member && s.alive && tally.get(s.name) === 1)
+      ?? slots.find((s) => !s.member && s.alive);
     return {
       hostiles: window.__game.enemies.filter((e) => e.alive && !e.charmed).length,
       name: slot?.name ?? null,
-      slots: window.__combat.order.length,
+      slots: slots.length,
     };
   });
   expect(before.name, 'a living coworker in the fight to borrow').not.toBe(null);
@@ -45,7 +60,11 @@ test('a borrowed coworker changes sides, keeps its turn, and is returned', async
       // The slot changed HANDS but not its place: same number of slots, and the
       // one bearing their name is now player-side.
       slots: window.__combat.order.length,
-      isMember: !!window.__combat.order.find((s) => s.name === name)?.member,
+      // `some`, not `find`: where the arena left only duplicate names to borrow,
+      // the slot bearing that name which changed sides IS the one charmed, while
+      // `find` would answer about an arbitrary twin. With a unique name - what
+      // the pick above prefers - the two read the same.
+      isMember: window.__combat.order.some((s) => s.name === name && s.member),
     }), before.name);
 
     expect(borrowed.borrowedCount).toBe(1);

@@ -93,9 +93,28 @@ test('the bar in a fight is the same bar: same slot ids, same number keys', asyn
   expect(dock.clearsNarrator).toBe(true);
 });
 
+// Out of a fight, nothing in the room should be able to START one - so there is
+// nobody in it. This test used to reuse BAR_ARENA, where a Manager stands two
+// tiles away and walks at you as soon as anything moves; on a slow runner the
+// fight opened before the assertion below ran and `#combat-panel` did exist. The
+// test is about the dock wearing no turn strip, and a coworker two tiles off is
+// scenery it cannot afford.
+const EMPTY_ARENA = {
+  name: 'Empty Arena',
+  tiles: { '#': 'wall', '.': 'floor' },
+  actors: { '@': 'player' },
+  map: [
+    '#########',
+    '#.......#',
+    '#..@....#',
+    '#.......#',
+    '#########',
+  ],
+};
+
 test('out of a fight the dock is just the bar, with no empty turn strip', async ({ page }) => {
   test.setTimeout(300_000);
-  await bootStash(page, BAR_ARENA, 'office-drone');
+  await bootStash(page, EMPTY_ARENA, 'office-drone');
   await expect(page.locator('#hotbar')).toBeVisible();
   // The turn readout is created per fight and removed with it, so out here the
   // dock holds one region and is exactly as tall as the slot row.
