@@ -300,9 +300,39 @@ pool. With `intern.glb`, `seniormanager.glb` and `regional.glb` that is **four
 bodies** for the custom character, none of them invented and none of them
 somebody else's.
 
-One lie survives: Mail Room stays on `hr.glb`, because the Kenney swap deleted
-`mailroom.glb` and there is no file for that job. That one needs art or needs
-accepting.
+One lie survives: Mail Room stays on `hr.glb`. **Not because anything was
+lost** — see below.
+
+### The precedent: this was already done once, correctly
+
+`mailroom.glb` was never deleted. Commit `2ae39ef` **renamed it to
+`security.glb`** — git records it as a pure rename, bytes unchanged
+(`assets/characters/{mailroom.glb => security.glb} | Bin`). The file the
+Security class wears today *is* the original mail room rig.
+
+The commit's own reasoning is the rule this plan is arguing for, stated by the
+project two months ago:
+
+> *"The Mail Room class moves onto the veteran rig — the rig it wore always read
+> as a uniform more than a mail cart. That rig becomes the Security Guard …
+> **renamed to `security.glb` since the file is named for the role it plays**."*
+
+So the house already knows files should be named for the role that wears them,
+already renamed one on that basis, and then never did it again — while the Mail
+Room went on to move twice more (`mailroom` → `veteran` → `hr`). That is how the
+scramble accumulated: one principled rename, followed by reassignments that
+skipped the rename step. The M4 un-tangle is not a new policy, it is finishing
+an existing one.
+
+**Nothing is missing.** Verified: twelve `.glb` files, twelve `RIGS` entries,
+zero declared-but-absent, zero present-but-undeclared. There is no asset to
+recover and none to fetch.
+
+What is true is narrower: **no body in the set reads as "mail room"**, because
+the one named for it was judged to look like a uniform and was given to Security
+on purpose. Mail Room on `hr.glb` is therefore an open wardrobe question, not a
+missing file. Answering it means new art or accepting the borrow — but it blocks
+nothing here.
 
 `manager` and `executive` pass. "The Manager" is not the Middle Manager class —
 that class is about `primary: 'control'` and is a different character — and
