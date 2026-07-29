@@ -26,7 +26,7 @@ import {
 } from './party.js';
 import { applyStatus, statusFx, hasStatus, tickStep, statusLeft, statusList } from './statuses.js';
 import { inReach } from './tactics.js';
-import { createDraft, createCharacter, draftModel } from './creation.js';
+import { createDraft, createCharacter, draftModel, draftLook } from './creation.js';
 import { aimsAtAlly, coneFrom, conePolyline } from './powers.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
@@ -459,12 +459,33 @@ function startGame(level) {
     paintHud(hudSheetNow());
     if (inCombat) combat?.refresh?.();
   };
-  // Proportions BEFORE attach (it captures the rig lift); tint AFTER, because
-  // attach is what clones the shared materials per instance.
-  const dressUp = (e, actor, look, model = null) => {
+  // Put a look ON a body. One order, always: proportions BEFORE the materials
+  // are cloned (an actor's attach is what clones them, and it also captures the
+  // rig lift proportions just applied), tint AFTER, because tinting a shared
+  // material recolours every character built from the same .glb.
+  //
+  // The only thing that varies is who OWNS the cloned materials - an actor
+  // keeps them on itself, a preview body has no actor and keeps them on the
+  // entity. That difference used to be the excuse for three copies of this
+  // sequence: this function, plus an inline copy in the class preview, plus a
+  // second inline copy added for the creation preview. REVIEW flagged the first
+  // and TODO M2 promised to fold it in; instead the count went up. It is one
+  // function now, and the actor is just an argument.
+  const dressBody = (e, look, actor = null) => {
     applyCharacterProportions(e, look?.build);
-    actor.attach(e);
-    actor.applyTint(look?.tint);
+    if (actor) {
+      actor.attach(e);
+      actor.applyTint(look?.tint);
+    } else {
+      // Kept on the entity so a LATER re-tint computes from the pristine
+      // colours rather than from the last tint's result - the compounding bug
+      // that walks a body toward black (actors.js applyTint says the same).
+      e._mats = e._mats || cloneMaterials(e);
+      tintMaterials(e._mats, look?.tint);
+    }
+  };
+  const dressUp = (e, actor, look, model = null) => {
+    dressBody(e, look, actor);
     // Kick off this character's portrait from the SAME model + look, so the
     // little picture and the body on the floor can never disagree. It lands
     // asynchronously and refreshes whatever is showing when it does.
@@ -561,46 +582,27 @@ function startGame(level) {
   let previewEntity = null;
   let previewToken = 0;
   const previewSpin = (dt) => { if (previewEntity) previewEntity.rotate(0, 35 * dt, 0); };
-  function previewClass(classId) {
+  // Stand a body on the spawn tile wearing `look`. The picker and the creation
+  // flow both want this and used to have one each; they differed only in where
+  // the model name and the look came from, which is an argument, not a function.
+  // The token guards rapid carousel flips against async .glb loads landing out
+  // of order.
+  function showPreview(model, look) {
     const token = ++previewToken;
     if (previewEntity) { previewEntity.destroy(); previewEntity = null; }
-    placeModel(app, `assets/characters/${CLASSES[classId].model}.glb`, player.x, player.z, {
+    placeModel(app, `assets/characters/${model}.glb`, player.x, player.z, {
       lift, rotY: 45, animate: true, // start facing the head-on camera
       onReady: (e) => {
-        // The picker must show the character you will actually get, tint and
-        // build included. There is no actor on this body, so it clones and
-        // tints through the shared helpers directly - it used to carry its own
-        // inline copy of the maths, which is how the compounding tint bug came
-        // to exist in two places at once. The clones are kept on the entity so
-        // a later re-tint (the creation flow's swatch row) computes from the
-        // pristine colours rather than from the last tint's result.
-        const look = CLASSES[classId].look;
-        applyCharacterProportions(e, look?.build);
-        e._mats = cloneMaterials(e);
-        tintMaterials(e._mats, look?.tint);
+        // The picker must show the character you will actually GET, build
+        // included - so it dresses through the same path every other body on
+        // the floor uses, with no actor to hang the materials on.
+        dressBody(e, look);
         if (token !== previewToken) { e.destroy(); return; }
         previewEntity = e;
       },
     });
   }
-  // The same staging as previewClass, reading the DRAFT instead of the class
-  // entry - so the body on the spawn tile is the character being built rather
-  // than the one that was picked. Shares previewClass's token guard, which is
-  // what keeps a fast run along the wardrobe row from landing out of order.
-  function previewDraft(draft) {
-    const token = ++previewToken;
-    if (previewEntity) { previewEntity.destroy(); previewEntity = null; }
-    placeModel(app, `assets/characters/${draftModel(draft)}.glb`, player.x, player.z, {
-      lift, rotY: 45, animate: true,
-      onReady: (e) => {
-        applyCharacterProportions(e, draft.build);
-        e._mats = cloneMaterials(e);
-        tintMaterials(e._mats, draft.tint);
-        if (token !== previewToken) { e.destroy(); return; }
-        previewEntity = e;
-      },
-    });
-  }
+  const previewClass = (classId) => showPreview(CLASSES[classId].model, CLASSES[classId].look);
   function endClassPreview() {
     previewToken += 1;
     if (previewEntity) { previewEntity.destroy(); previewEntity = null; }
@@ -641,14 +643,14 @@ function startGame(level) {
       // express lane does - one code path, so the two can never diverge.
       onSkip: () => beginRun(createCharacter(createDraft(classId))),
       // Reflect the draft on the body already standing on the spawn tile. A rig
-      // change is the ONE thing that costs a .glb load; tint and build mutate
-      // the live entity in place, which is what lets a slider drive them every
-      // frame instead of queueing a reload per tick (CHARACTER_PLAN #14).
+      // change is the ONE thing that costs a .glb load; anything else re-dresses
+      // the live entity in place, through the same dressBody every other body
+      // on the floor goes through - which is safe to call repeatedly because the
+      // material clones are kept and re-tinted from their pristine colours.
       onPreview: (kind) => {
-        if (kind === 'rig') { previewDraft(draft); return; }
-        if (!previewEntity) return;
-        applyCharacterProportions(previewEntity, draft.build);
-        tintMaterials(previewEntity._mats || [], draft.tint);
+        const look = draftLook(draft) || CLASSES[classId].look;
+        if (kind === 'rig') { showPreview(draftModel(draft), look); return; }
+        if (previewEntity) dressBody(previewEntity, look);
       },
     });
   }
