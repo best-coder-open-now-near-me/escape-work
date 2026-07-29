@@ -149,8 +149,17 @@ is what made these totals stop adding up. Playwright also counts `flaky` as its
 own bucket, so on CI `passed + failed` never totals the suite by itself.)*
 
 *It is **109** now — `combat-bar.spec.js` added three (one bar in a fight, a
-snack for 2 AP, a door for 1 AP). Verified locally at 14/14 on the specs those
-changes touch: `combat-bar`, `throwing`, `movement`, `topple`, plus `hotbar`.*
+snack for 2 AP, a door for 1 AP). Verified locally at **17/17** on every spec
+those changes touch: `combat-bar`, `throwing`, `movement`, `topple`, `hotbar`
+and `classes`.*
+
+*One warning for whoever runs this next, because it cost real time here:
+**a contended box does not fail honestly.** `classes.spec` failed twice with
+`enterCombat` timeouts and looked like a regression; the same tests pass in
+1.4–1.7m on a quiet machine. The tell was elsewhere in the same runs — tests
+taking 2.4m that take 55s idle, and the web server dying mid-run and turning
+five specs into sub-second `ERR_CONNECTION_REFUSED` failures. Before believing
+an `enterCombat` timeout here, check what the passing tests alongside it cost.*
 
 **Main is green, and it ships again.** Run 30410302575 (`1d69e5a`, main):
 **104 passed, 0 failed, 2 flaky, 1.3h**. Deploy run 30414380016 fired 8s behind
