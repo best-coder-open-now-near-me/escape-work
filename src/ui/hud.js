@@ -295,15 +295,25 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
         return;
       }
       face.textContent = slot.icon || '❔';
-      // A throw counts the sheets it has to spend, where an item counts itself.
-      if (slot.ammoCost) countTag.textContent = String(sheet?.paper ?? 0);
+      // What the slot is counting down. A per-fight power counts its remaining
+      // uses (combat supplies them); a throw counts the sheets it has to spend,
+      // where an item counts itself.
+      if (slot.uses != null) countTag.textContent = String(slot.uses);
+      else if (slot.ammoCost) countTag.textContent = String(sheet?.paper ?? 0);
       const fed = !slot.ammoCost || (sheet?.paper ?? 0) >= slot.ammoCost;
-      setInert(b, !fed);
-      b.style.opacity = fed && !slot.unavailable ? '1' : '.4';
-      b.title = slot.unavailable
+      // Armed, or awaiting its confirm click. Either way the slot stays live
+      // however unaffordable it has become - that press is the way to lower it.
+      const live = slot.live || (slot.id === armed ? 'armed' : null);
+      setInert(b, (!fed || !!slot.unavailable) && !live);
+      b.style.opacity = (fed && !slot.unavailable) || live ? '1' : '.4';
+      // In a fight the tip comes from combat (damage, range, uses left against
+      // THIS member's sheet); out of one the bar writes its own.
+      b.title = slot.tip || (slot.unavailable
         ? `${slot.label} · ${slot.ap}AP · ${slot.unavailable}`
-        : `${slot.label} · ${slot.ap}AP · right-click to reassign`;
-      b.style.borderColor = slot.id === armed ? '#8adf76' : '#3a3a52';
+        : `${slot.label} · ${slot.ap}AP · right-click to reassign`);
+      // The live one pulses - a static border was too easy to miss mid-fight.
+      b.style.borderColor = live ? (live === 'confirm' ? '#ffd76b' : '#8adf76') : '#3a3a52';
+      b.style.animation = live ? 'act-pulse 1.1s ease-in-out infinite' : '';
     });
   }
   function flip(step) {

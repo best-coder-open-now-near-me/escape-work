@@ -353,16 +353,22 @@ export async function refillAp(page) {
 // is how a five-minute mystery gets logged instead of a diagnosis.
 export async function clickAction(page, id, timeout = 30_000) {
   await waitForPlayerTurn(page);
-  const btn = page.locator(`#act-${id}`);
+  const btn = page.locator(`#hotbar-act-${id}`);
   try {
-    await expect(btn).toBeEnabled({ timeout });
+    // The shared bar never sets `disabled`: a disabled button dispatches no
+    // mouse events at all, contextmenu included, which would make the slot you
+    // most want to reassign the one slot you cannot (createHotbar's setInert).
+    // Usability is `aria-disabled`, so that is what a test must wait on -
+    // `toBeEnabled` passes instantly against this bar and would click straight
+    // through an action the member cannot afford.
+    await expect(btn).toHaveAttribute('aria-disabled', 'false', { timeout });
   } catch {
     const [state, title] = await Promise.all([
       combatState(page),
       btn.getAttribute('title').catch(() => null),
     ]);
     throw new Error(
-      `#act-${id} never became clickable within ${timeout}ms.\n`
+      `#hotbar-act-${id} never became clickable within ${timeout}ms.\n`
       + `button title: ${title}\n`
       + `combat state: ${JSON.stringify(state, null, 2)}`,
     );

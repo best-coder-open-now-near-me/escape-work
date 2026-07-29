@@ -143,7 +143,7 @@ test('a partition gives the defender cover against a ranged attacker', async ({ 
     let c = null;
     for (let i = 0; i < 8 && c == null; i++) {
       await page.waitForTimeout(400);
-      if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#act-attack');
+      if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#hotbar-act-attack');
       const fp = await page.evaluate(([wx, wz]) => window.__game.project(wx, wz), [x, z]);
       await page.mouse.move(fp.x, fp.y);
       await page.waitForTimeout(150);
@@ -225,7 +225,7 @@ test('striking a foe from behind its committed facing is a backstab', async ({ p
         // NEVER click a disabled button: Playwright waits for it to become
         // enabled, so walking here on low AP would hang to the test timeout
         // instead of reporting the real problem.
-        expect(await page.locator('#act-attack').isEnabled(),
+        expect(await page.locator('#hotbar-act-attack').getAttribute('aria-disabled') !== 'true',
           'attack must be affordable to read a to-hit').toBe(true);
         await clickAction(page, 'attack');
       }
@@ -287,7 +287,7 @@ test('a shove does not provoke - forced movement is the safe disengage', async (
   for (let i = 0; i < 6 && !shoved; i++) {
     await page.waitForTimeout(700);
     const ap0 = await page.evaluate(() => window.__combat.ap);
-    if (await page.evaluate(() => window.__combat.armed) !== 'shove') await page.click('#act-shove');
+    if (await page.evaluate(() => window.__combat.armed) !== 'shove') await page.click('#hotbar-act-shove');
     const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [before.x, before.z]);
     await page.mouse.click(fp.x, fp.y);
     await page.waitForTimeout(400);
@@ -339,7 +339,7 @@ async function swingInPlace(page, actionId) {
   const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
   for (let i = 0; i < 3; i++) {
     if (await page.evaluate(() => window.__combat.armed) !== actionId) {
-      await page.click(`#act-${actionId}`);
+      await page.click(`#hotbar-act-${actionId}`);
     }
     const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
     await page.mouse.click(fp.x, fp.y);
@@ -417,7 +417,7 @@ test('a long weapon strikes from a tile bare hands cannot cross', async ({ page 
   expect(gap).toBeGreaterThan(1.5); // bare hands could not make this swing
   expect(gap).toBeLessThan(2.2);    // ...the extender can
 
-  await expect(page.locator('#act-grabber-swipe')).toBeVisible();
+  await expect(page.locator('#hotbar-act-grabber-swipe')).toBeVisible();
   const res = await swingInPlace(page, 'grabber-swipe');
   expect(res.hit).toBe(true);   // it landed
   expect(res.moved).toBe(false); // ...without closing the distance first

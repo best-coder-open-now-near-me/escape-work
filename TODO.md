@@ -196,6 +196,31 @@ then silently declined to ship.
 **All eight phases are done and pushed.** Unit tests: 455 passing, up from 385
 at the branch point. Build clean.
 
+**...but that line was wrong three times, and here is how.** It was true of the
+work each phase COMMITTED and false of its section. Three items recorded on
+28 Jul between 05:36 and 05:43 — doors in combat (`e0ae451`), the two action
+bars (`aa504a7`) and consumables in combat (`0a4d78d`) — were appended to
+sections whose phases then closed **without them**, 1.5 to 4.2 hours later, and
+the phases were reported complete anyway. They were not lost over weeks; they
+were skipped in the same session that wrote them down.
+
+Three things let that happen, all fixed or flagged now:
+
+- **The tracker was per-PHASE, not per-item.** "Phase 2" was one checkbox over
+  a section that grew to ~10 entries; its commit did four and the phase ticked.
+- **These boxes were never ticked.** 61 `[ ]` against 8 `[x]`, while this header
+  claimed completion — so a delivered item and an unbuilt one looked identical,
+  and the prose won. From here an item is done when its box is `[x]` **and it
+  names what shipped**, as the three above now do.
+- **Nothing tested any of them.** No spec opened a door in a fight or drank
+  anything in one, so the whole CI/deploy effort could go green and say nothing.
+  `combat-bar.spec.js` exists for exactly that reason.
+
+*Caveat, stated rather than papered over:* the ~50 unchecked boxes under Phases
+0–4 are mostly delivered but have **not** been back-filled — ticking them from
+memory would re-introduce the same false confidence. Treat any `- [ ]` in those
+sections as "verify against the source before trusting it either way".
+
 The five bugs reported from play - AI pacing, the burnt-paper desync, party-bar
 float AP, backwards portraits, and the out-of-combat cone - were each fixed at
 the root rather than the symptom.
@@ -414,6 +439,15 @@ killing anyone, and therefore the correct play every time.
 - [ ] Ranged-weapon target rings must match the click's new walk-in behavior
       (`combat.js:1035` vs `2020-2056`) — ring green when a walk-in shot is
       affordable, as melee does. *(New in `e8e53de`.)*
+- [x] **DONE.** `useItem` no longer refuses on `isInCombat()`; a consumable
+      costs **2 AP** out of the acting member's pool (`combat.spendAp`), the
+      full-HP refusal is checked BEFORE the AP so a refused snack is a free one,
+      and `getSheet` now resolves to the ACTING member in a fight - initiative
+      decides who acts, so the snack comes out of their pockets and heals their
+      sheet. Item slots on the combat bar came free with the bar unification
+      below. The pockets panel's live Use button needed no change: the
+      complaint was that the UI offered what the rules refused, and the rules
+      were the wrong half. Covered by `combat-bar.spec.js`.
 - [ ] **Let consumables be used in combat** — confirmed intended; the current
       refusal is a bug, not a design choice. `useItem` refuses outright while
       `isInCombat()` (`looting.js:200`) and every path routes through it (the
@@ -435,6 +469,17 @@ killing anyone, and therefore the correct play every time.
       gated only on `sheet && !gameOver`, `main.js:2292`) and renders a live
       **Use** button with no combat gate (`ui/panels.js:165`), so the UI offers
       an action the rules refuse.
+- [x] **DONE.** `toggleDoor` works in a fight for **1 AP** - cheaper than a
+      verb, because the walk to reach it is already billed as movement and this
+      is the handle, not the journey. The rule is adjacency, not auto-walk
+      (`atDoor`): movement in a fight belongs to combat and is priced per tile,
+      so there is no `approachAndDo` to lean on. The in-combat right-click menu
+      offers the door with its cost on the label, which honours that menu's own
+      stated rule (turn-spending verbs must show their AP) rather than breaking
+      it - doors have no bar slot because they are terrain, not kit. Alt still
+      lights the overlay in a fight, since that is how you SEE a door. New
+      `__game.doorOpen(key)` seam: doors sit on EDGES, so `tileAt` could never
+      answer it. Covered by `combat-bar.spec.js`.
 - [ ] **Let doors be used in combat.** Blocked at four independent layers:
       `toggleDoor` early-returns on `inCombat` (`main.js:850`, no comment
       explaining it); the in-combat click path never reaches `dispatchHit`,
@@ -577,6 +622,19 @@ is its own PR that keeps unit + e2e green.
       step rules (above), debug surface — each on the `shopping.js`
       host-callback pattern. *M1/M3 of the creation plan start this.*
 - [ ] Extract `EnemyActor`'s wander brain to a pure module (`actors.js:412`).
+- [x] **DONE.** One bar. `combat.js` no longer builds anything - it supplies
+      the rules (`actionState` for affordability and the refusal reason,
+      `actionTip` for the tooltip, `scrambleEntries` for the reorg status,
+      `pressAction` for the press) and `main.js` owns the DOM, as it already
+      did out of combat. `#act-<id>` is gone; `#hotbar-act-<id>` names a power
+      in a fight or out of one. `armedOoc` and `armed` stay as two variables
+      but one arming state reaches the bar. In a fight you now get the saved
+      layout, the pager, item slots, right-click reassign and keys `1-9`.
+      **Watch for:** the bar signals usability by `aria-disabled`, never the
+      `disabled` property (a disabled button dispatches no events, so the slot
+      you most want to reassign would be the one you cannot) - `toBeEnabled()`
+      passes instantly against it, so `clickAction` waits on the attribute.
+      Covered by `combat-bar.spec.js`.
 - [ ] **Collapse the two action bars into one.** The combat bar and the
       persistent hotbar are parallel implementations of the same widget,
       swapped by mode (`main.js:2538` hides `#hotbar` while `inCombat`, and

@@ -25,7 +25,7 @@ export const INV_CAP = Infinity;
 // hand-over, pick-up). Anything ELSE on screen that addresses the bag by index
 // - the shop's sell column is the one today - has to hear about it, or it goes
 // on offering a button bound to a pocket that has since moved.
-export function createLooting({ app, grid, runtime, enemies, getActor, getSheet, isInCombat, isGameOver, approachAndDo, extraEntries = null, onGearChange = null, onBagChange = null, recipients = null, addCash = null, getCash = null, openShop = null, shopSoldOut = null }) {
+export function createLooting({ app, grid, runtime, enemies, getActor, getSheet, isInCombat, isGameOver, approachAndDo, extraEntries = null, onGearChange = null, onBagChange = null, recipients = null, addCash = null, getCash = null, openShop = null, shopSoldOut = null, spendCombatAp = null }) {
   const containerLoot = new Map(); // "x,z" -> remaining item ids (rolled on first rummage)
   const looseItems = []; // { x, z, id, entity } - dropped/overflowed floor items
   const harvestedPaper = new Set(); // "x,z" of paper drifts already gathered for ammo
@@ -194,19 +194,40 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     if (lootLabels.visible) showLabels(); // that patch is spent now
   }
 
+  // What a consumable costs when there is a fight on. Everything else in a turn
+  // is billed, so this is too - and 2 AP is the shove's price, the cheapest
+  // real verb in the game.
+  const COMBAT_USE_AP = 2;
+
+  // Using something from your pockets. This used to refuse outright while
+  // `isInCombat()`, which switched off the entire consumable economy in the one
+  // place it means anything: all eight items are heals, and healing exists to
+  // survive fights. The gate carried no comment, unlike its two neighbours
+  // (dropItem and equip) which state their reasons - it read as copied
+  // alongside them rather than decided, and it was.
   function useItem(i) {
     const sheet = getSheet();
     if (!sheet || i >= sheet.inventory.length) return;
-    if (isInCombat()) { ui.say('Not while everyone is watching.'); return; }
     const id = sheet.inventory[i];
     const def = ITEMS[id] || {};
-    if (def.heal) {
-      // Don't burn a consumable that can't help right now.
-      if (sheet.hp >= sheet.maxHp) { ui.say('You are already at full health. Ration the snacks.'); return; }
-      sheet.hp = Math.min(sheet.maxHp, sheet.hp + def.heal);
-    } else if (def.ammo) {
-      sheet.paper = Math.min(PAPER_CAP, sheet.paper + def.ammo);
-    } else { ui.say(def.examine || 'It is what it is.'); return; } // flavor: not consumed
+    // Flavor first: something with no heal and no ammo is not consumed, costs
+    // nothing, and can be read at any time.
+    if (!def.heal && !def.ammo) { ui.say(def.examine || 'It is what it is.'); return; }
+    // Don't burn a consumable that can't help right now - checked BEFORE the
+    // AP, so a refused snack is also a free one.
+    if (def.heal && sheet.hp >= sheet.maxHp) {
+      ui.say('You are already at full health. Ration the snacks.'); return;
+    }
+    // In a fight it costs a turn's worth of AP, and the refusal that follows is
+    // about the AP rather than about the fight existing.
+    if (isInCombat()) {
+      if (!spendCombatAp) { ui.say('Not while everyone is watching.'); return; }
+      if (!spendCombatAp(COMBAT_USE_AP)) {
+        ui.say(`Not enough AP - using something costs ${COMBAT_USE_AP}.`); return;
+      }
+    }
+    if (def.heal) sheet.hp = Math.min(sheet.maxHp, sheet.hp + def.heal);
+    else sheet.paper = Math.min(PAPER_CAP, sheet.paper + def.ammo);
     sheet.inventory.splice(i, 1);
     ui.say(def.useLog || `You use the ${itemName(id)}.`);
     ui.updateStatsHud(sheet);

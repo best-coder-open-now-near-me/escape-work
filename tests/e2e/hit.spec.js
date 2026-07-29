@@ -56,7 +56,7 @@ test('a forced miss deals no damage but still spends the attack AP', async ({ pa
     }, { timeout: 60_000 }).toBe(true);
     const apBefore = await page.evaluate(() => window.__combat.ap);
     if (await page.evaluate(() => window.__combat.armed) !== 'attack') {
-      await page.click('#act-attack');
+      await page.click('#hotbar-act-attack');
     }
     const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
     await page.mouse.click(fp.x, fp.y);
@@ -111,11 +111,11 @@ test('the armed hover shows a to-hit percentage that matches the roll', async ({
     window.__combat.enemies.find((e) => e.x === x && e.z === z)?.hp, [foe.x, foe.z]);
 
   // Arm the attack, then hover the Manager until the to-hit readout appears.
-  if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#act-attack');
+  if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#hotbar-act-attack');
   let chance = null;
   for (let i = 0; i < 8 && chance == null; i++) {
     await page.waitForTimeout(500);
-    if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#act-attack');
+    if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#hotbar-act-attack');
     const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
     await page.mouse.move(fp.x, fp.y);
     await page.waitForTimeout(150);
@@ -133,7 +133,7 @@ test('the armed hover shows a to-hit percentage that matches the roll', async ({
   let landed = false;
   for (let i = 0; i < 6 && !landed; i++) {
     await page.waitForTimeout(600);
-    if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#act-attack');
+    if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#hotbar-act-attack');
     const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
     await page.mouse.click(fp.x, fp.y);
     await page.waitForTimeout(300);

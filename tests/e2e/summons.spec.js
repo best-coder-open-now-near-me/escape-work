@@ -106,7 +106,7 @@ test('a player summon is a controllable member, outlives the fight, then times o
     if (!cur) { await page.waitForTimeout(400); continue; }
     if (cur.phase === 'player' && cur.name === 'Applicant') {
       controlled = true;
-      await expect(page.locator('#act-resume-slap')).toBeVisible(); // the summon's own bar
+      await expect(page.locator('#hotbar-act-resume-slap')).toBeVisible(); // the summon's own bar
     } else if (cur.phase === 'player') {
       await page.click('#combat-end-turn').catch(() => {}); // a real member - pass the turn
       await page.waitForTimeout(400);
@@ -147,7 +147,7 @@ test('the HR class posts the role AT a spot you pick', async ({ page }) => {
   await enterCombat(page);
 
   // Post the Role is on the bar, and no applicants have shown up yet.
-  await expect(page.locator('#act-summon-applicants')).toBeVisible();
+  await expect(page.locator('#hotbar-act-summon-applicants')).toBeVisible();
   expect(await page.evaluate(() => window.__game.summons.length)).toBe(0);
 
   // A full turn: the walk-up into this fight can bleed AP (see refillAp), and
