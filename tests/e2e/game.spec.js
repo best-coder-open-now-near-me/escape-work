@@ -99,7 +99,11 @@ test('confronting a coworker starts combat and an attack lands', async ({ page }
   if (await page.evaluate(() => window.__combat.ap) < 3) {
     await endTurnUntilPlayer(page);
   }
-  await expect(page.locator('#combat-turn')).toHaveText('YOUR TURN');
+  // "YOUR TURN" used to be spelled out here, on top of a log line that said
+  // the same thing again, next to a button that was already lit or was not -
+  // three ways to say one fact. The turn line is blank for a solo party now;
+  // the phase itself is the assertion worth making.
+  expect(await page.evaluate(() => window.__combat.phase)).toBe('player');
   // Find an adjacent target; if nobody is beside us yet (the trigger can
   // fire off an enemy's own step, then they shuffle), cycle turns until the
   // AI closes in.

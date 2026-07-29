@@ -637,24 +637,28 @@ export const arrivalLine = (n) => (n === 1
 // --- the summon descriptor's one vocabulary -----------------------------------
 // What a summon descriptor INHERITS when it names the action it is the twin of.
 //
-// Deliberately only two fields, and the line between them and the rest is the
-// point. WHO shows up and WHAT CONTRACT they serve under are properties of the
-// summon itself: an applicant is an applicant, and the req lapses after the
-// same number of their own turns, whoever posted it. Two answers to either of
-// those is the drift worth preventing.
+// Exactly one field, and the narrowness is the point. WHO shows up when you
+// post a role is a fact about the role: an applicant is an applicant whoever
+// hired them, and two answers to that is the drift worth preventing. It is
+// also the whole of what was actually wrong - a class and an enemy naming the
+// same archetype with nothing tying them together.
 //
-// How MANY arrive and how many may be live are NOT shared, because the two
-// sides place them differently. The player's action posts one because you click
-// the tile they report to, and dropping a pair means one lands somewhere you
-// did not choose (the note on `summon-applicants` says so). An AI has no click
-// - reinforcements arrive beside the summoner - so a small batch on a tight cap
-// is its own pacing, alongside its cooldown and what the post costs its turn.
+// Everything else is per side, because the two sides post differently. The
+// player's action drops ONE because you click the tile they report to, and a
+// pair means one lands somewhere you did not choose (see `summon-applicants`);
+// an AI has no click, so a small batch beside the summoner on a tight cap is
+// its own pacing, next to its cooldown and what the post costs its turn. How
+// long a temp serves belongs there too: it sets how many AI turns a fight
+// carries, which is pacing, not identity.
 //
-// Inheriting those too was tried and was wrong: it made an enemy HR post one
-// applicant on a cap of three, which is not a reinforcement, and the e2e suite
-// caught it. Sharing what must not differ is the goal; flattening what should
-// differ is a different mistake with the same shape.
-export const SUMMON_CONTRACT = ['archetype', 'lifetimeTurns'];
+// This list was drawn twice too wide before it was drawn right. First it took
+// `count` and `cap`, which left an enemy HR posting one applicant on a cap of
+// three - not a reinforcement - and the suite caught it. Then it kept
+// `lifetimeTurns`, which quietly gave the AI's temps a sixth turn where they
+// had served five: not obviously wrong, never asked for, and it widens the
+// window on an AI turn that stalls at zero AP. Neither was a bug in the idea
+// of sharing; both were sharing something that was saying its own thing.
+export const SUMMON_CONTRACT = ['archetype'];
 
 // An enemy's descriptor may name the ACTION it is the AI-side twin of
 // (`from: 'summon-applicants'`) and inherit the contract above.

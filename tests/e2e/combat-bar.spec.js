@@ -55,6 +55,58 @@ test('the bar in a fight is the same bar: same slot ids, same number keys', asyn
     (Number(document.querySelector('#hotbar-act-attack').dataset.slot) % 8) + 1);
   await page.keyboard.press(String(key));
   await expect.poll(() => page.evaluate(() => window.__combat.armed)).toBe('attack');
+
+  // ...and it is one BOX, not two. The bar became shared before the boxes did:
+  // the verbs moved out to the slot row and combat's panel was left floating
+  // above it at bottom:92px, 640px wide, holding a turn line and one End Turn
+  // button. The gap between them was the shape of what had been removed.
+  const dock = await page.evaluate(() => {
+    const turn = document.getElementById('combat-panel');
+    const slots = document.getElementById('hotbar');
+    const d = document.getElementById('action-dock');
+    const dr = d.getBoundingClientRect();
+    const nr = document.getElementById('narration-box').getBoundingClientRect();
+    return {
+      turnParent: turn.parentElement.id,
+      slotsParent: slots.parentElement.id,
+      // Neither region draws a competing BOX - the dock is the only thing on
+      // screen down there with a background and a shadow. The turn region does
+      // keep its own bottom border as a divider from the slot row beneath it;
+      // that is furniture inside one box, not a second box, which is the
+      // distinction actually worth holding the line on.
+      regionChrome: [turn, slots].map((e) => {
+        const s = getComputedStyle(e);
+        return { bg: s.backgroundColor, shadow: s.boxShadow };
+      }),
+      // The dock must not run under the narrator: it is pointer-events:none, so
+      // an End Turn button beneath it still works and just cannot be seen -
+      // which is why this is measured rather than eyeballed.
+      clearsNarrator: dr.right <= nr.left,
+    };
+  });
+  expect(dock.turnParent).toBe('action-dock');
+  expect(dock.slotsParent).toBe('action-dock');
+  for (const c of dock.regionChrome) {
+    expect(c.bg).toBe('rgba(0, 0, 0, 0)');
+    expect(c.shadow).toBe('none');
+  }
+  expect(dock.clearsNarrator).toBe(true);
+});
+
+test('out of a fight the dock is just the bar, with no empty turn strip', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, BAR_ARENA, 'office-drone');
+  await expect(page.locator('#hotbar')).toBeVisible();
+  // The turn readout is created per fight and removed with it, so out here the
+  // dock holds one region and is exactly as tall as the slot row.
+  await expect(page.locator('#combat-panel')).toHaveCount(0);
+  const h = await page.evaluate(() => {
+    const d = document.getElementById('action-dock').getBoundingClientRect();
+    const s = document.getElementById('hotbar').getBoundingClientRect();
+    return { dock: Math.round(d.height), slots: Math.round(s.height) };
+  });
+  // 8px padding either side of the slot row and nothing else in the box.
+  expect(h.dock - h.slots).toBeLessThanOrEqual(20);
 });
 
 // `H 2 2` is the edge between (2,1) and (2,2), so standing at (2,1) is standing

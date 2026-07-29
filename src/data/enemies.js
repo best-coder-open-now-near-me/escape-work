@@ -122,20 +122,22 @@ const KITS = {
     ],
     // HR's power (SUMMON_PLAN.md): posts the role and applicants materialize to
     // fight for it. It is the SAME req the class posts, so it names the class
-    // action and inherits WHO arrives and what contract they serve under
-    // (actions.js SUMMON_CONTRACT) instead of restating them where they could
-    // drift apart unnoticed.
+    // action and inherits WHO arrives from it (actions.js SUMMON_CONTRACT)
+    // rather than restating an archetype that could drift.
     //
-    // The rest is hers, and differs for a reason: she has no placement click,
-    // so reinforcements arrive beside her as a pair on a tight cap rather than
-    // one at a time on a loose one. `cooldownRounds` paces her the way `uses`
-    // paces the player - a wait between reqs instead of a budget per fight.
+    // The numbers are hers, and every one of them says something the player's
+    // half does not: she has no placement click, so reinforcements arrive
+    // beside her as a pair on a tight cap; `cooldownRounds` paces her where
+    // `uses` budgets the player; and five turns of service is five turns of AI
+    // in the initiative order, which is the fight's pacing rather than the
+    // applicant's identity.
     summon: {
       from: 'summon-applicants',
       count: 2,
       cap: 2,
       cooldownRounds: 2,
       ap: 3,
+      lifetimeTurns: 5,
       log: 'HR posts the role internally. Applicants materialize, résumés in hand.',
     },
   },
