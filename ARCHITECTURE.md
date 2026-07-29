@@ -78,6 +78,9 @@ src/
                      the floor, and ink swims across the world. controls.js
                      bends the click and the hover through it; hover.js still
                      owns what the cursor says
+  aim-paint.js       The aim wash (TACTICS_PLAN M7): pooled translucent
+                     quads over every tile an armed verb can legally reach,
+                     line of sight included; combat.js decides the tiles
   combat.js          Tactical on-map combat: per-unit INITIATIVE order, AP
                      turns, movement, ranged/melee, AI-driven units - costs
                      from data
@@ -171,9 +174,11 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   `grid.edgeOpen(x,z,nx,nz)` answers one boundary; `grid.stepOpen` answers a
   full (possibly diagonal) step. Pathfinding, path smoothing, wander AI,
   shoves, conduction pools and fire spread all consult them. Partitions are
-  chest height: combat throws sail OVER them (`hasLos` is terrain +
-  `grid.sightOpen`), and `#` cell walls still exist for solid blocks that
-  also stop throws.
+  chest height: combat throws sail OVER them - and over any solid CELL
+  shorter than `SIGHT_BLOCK_HEIGHT` (data/tiles.js, TACTICS_PLAN M6a): a desk
+  blocks bodies, not shots, and shields whoever stands behind it instead.
+  `hasLos` is cell sight (`grid.sightOpenCell`) + edge sight
+  (`grid.sightOpen`); `#` cell walls are `tall` and still stop throws.
 - **Doors live on edges too** ("doors" runs in the level JSON; a door
   replaces any wall on its edge). Closed doors block movement AND sight
   (they go floor to frame); conduction ignores them - water finds the gap

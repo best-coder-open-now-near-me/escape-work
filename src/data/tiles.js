@@ -2,8 +2,13 @@
 // a character in a level's "tiles" legend. No engine code changes needed.
 //
 // Fields:
-//   solid    - blocks movement and line of sight (drawn tall, fades when it
-//              hides the player)
+//   solid    - blocks movement (drawn tall, fades when it hides the player).
+//              Whether it also blocks LINE OF SIGHT is a height question - see
+//              blocksSight below. Low furniture is shot over, not through.
+//   tall     - this solid blocks sight regardless of its drawn height. The '#'
+//              wall earns it: it is the building's structure, rendered short
+//              only so the camera can see over it (occlusion.js), and the e2e
+//              contract says a cell wall is "solid all the way up".
 //   height   - marker box height in world units (floor tiles are 0.2)
 //   color    - [r, g, b] 0..1 (marker box, and editor fallback for props)
 //   model    - render a .glb (assets/<model>.glb) instead of a marker box;
@@ -61,10 +66,24 @@
 // 'rug-round' for exactly this reason - the machine is painted on two floors
 // and needs a clean character, the round rug is painted nowhere and can live
 // with the escaped one.
+// --- sight (TACTICS_PLAN M6a) ------------------------------------------------
+// A solid cell used to block line of sight at ANY height - a 0.18 microwave
+// stopped a throw as absolutely as a wall, while chest-high edge partitions
+// (0.6-0.72) never blocked sight at all. The height threshold squares the two:
+// a solid shorter than a person is shot OVER (and shields whoever stands
+// behind it - the passive cover the fallen twins already grant), a taller one
+// still blocks the line outright. Ratified by the designer (2026-07-29,
+// "height threshold as you suggest"). Sits just above the partitions' own
+// render height so everything partition-sized reads by the partition rule.
+export const SIGHT_BLOCK_HEIGHT = 0.75;
+export const blocksSight = (def) =>
+  !!def?.solid && (!!def.tall || (def.height ?? 1) >= SIGHT_BLOCK_HEIGHT);
+
 export const TILE_TYPES = {
   wall: {
     char: '#',
     solid: true,
+    tall: true, // the building itself: sight-blocking at full height (see above)
     height: 0.6,
     color: [0.22, 0.22, 0.3],
     label: 'Cubicle Wall',
@@ -538,7 +557,11 @@ export const TILE_TYPES = {
     model: 'furniture/kit/wallWindow', label: 'Window Wall',
   },
   'paneling': {
-    char: '=', category: 'structure', solid: true,
+    char: '=', category: 'structure', solid: true, tall: true,
+    // Structure, not furniture: the kit's wall segment, same family as
+    // 'window-wall' and 'doorway' beside it - drawn short like every wall
+    // here, but a wall. Without `tall` the sight threshold would read its
+    // 0.59 render height as shoot-over furniture.
     height: 0.59, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/paneling', label: 'Paneling',
   },

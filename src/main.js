@@ -1013,10 +1013,12 @@ function startGame(level) {
     const b = posOf(en);
     return inReach(a.x, a.z, b.x, b.z, r ?? (sheet ? reachOf(sheet) : REACH.DEFAULT), grid.stepOpen);
   };
-  // A sight line for throws: open terrain that ISN'T hazed by smoke. Smoke
-  // hangs floor-to-ceiling for a couple of turns and breaks line of sight;
-  // movement ignores it, so this is separate from terrainOpen.
-  const sightClear = (x, z) => grid.terrainOpen(x, z) && !runtime.isSmoke(x, z);
+  // A sight line for throws: cells a sightline passes (grid.sightOpenCell -
+  // short furniture is shot OVER since TACTICS_PLAN M6a, only tall solids
+  // block) that aren't hazed by smoke. Smoke hangs floor-to-ceiling for a
+  // couple of turns and breaks line of sight; movement ignores it, so this is
+  // separate from terrainOpen.
+  const sightClear = (x, z) => grid.sightOpenCell(x, z) && !runtime.isSmoke(x, z);
   // Throws sail over chest-high partitions but not closed doors (grid.sightOpen).
   const hasLos = (a, b) => segmentClear(sightClear, a.x, a.z, b.x, b.z, grid.sightOpen);
   // The same sight line WITHOUT the smoke term. Whether a coworker can take
@@ -1024,7 +1026,7 @@ function startGame(level) {
   // not about a cloud that clears in two turns. Used to pick the engaged set,
   // where being briefly hazed must not decide who is in the fight.
   const canTakePart = (a, b) =>
-    segmentClear(grid.terrainOpen, a.x, a.z, b.x, b.z, grid.sightOpen);
+    segmentClear(grid.sightOpenCell, a.x, a.z, b.x, b.z, grid.sightOpen);
   // The shared rule (stats.js), bound to the leader. A declaration, not a
   // const: the hotbar builder reads it and runs from paths that fire before
   // this point in the closure body.

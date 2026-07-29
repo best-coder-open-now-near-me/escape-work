@@ -16,9 +16,11 @@ import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitCh
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
 import {
-  buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, isPurge, coneFrom, conePolyline,
+  buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, isPurge, coneFrom, conePolyline, aimRangeOf, rangeTiles,
 } from './powers.js';
+import { createAimPaint } from './aim-paint.js';
 import { STATUSES } from './data/statuses.js';
+import { blocksSight } from './data/tiles.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
 
@@ -457,7 +459,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // standing here shield the defender?" answers both without a second
       // mechanism, and it inherits the ranged-only rule and the
       // at-most-once-per-attack rule for free.
-      coverCell: (x, z) => !!world.tileDefAt(x, z)?.cover || guardStandingAt(x, z),
+      // ...and since TACTICS_PLAN M6a, so does any STANDING solid a shot can
+      // pass over: the same height rule that lets the shot sail over a desk
+      // (grid.sightOpenCell) says the desk shields whoever crouches behind it.
+      // One threshold decides both, so a prop can never block the shot AND
+      // grant cover for it.
+      coverCell: (x, z) => {
+        const d = world.tileDefAt(x, z);
+        return !!d && (!!d.cover || (!!d.solid && !blocksSight(d))) || guardStandingAt(x, z);
+      },
       allies,
       facing: facings.get(defender) || null,
     });
@@ -739,6 +749,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // here?" is a question you ask about a target, and burning it into every
   // frame of your turn turned the answer into wallpaper nobody read.
   const REACH_RING = new pc.Color(0.55, 0.62, 0.78);
+  // The ground wash while a ranged verb is armed (TACTICS_PLAN M7): every tile
+  // the aim can legally land on, line of sight included, painted translucent
+  // blue. drawTargets drives it; `paintEpoch` names the world it was computed
+  // against - refresh() bumps it, so anything that reshapes sight mid-turn (a
+  // door opened, smoke landing) repaints on its next frame without this
+  // module knowing why.
+  const aimPaint = createAimPaint(app);
+  let paintEpoch = 0;
   let preview = null; // { reach: [[x,z],...], tail: [[x,z],...] | null }
   let aimPoint = null; // hover point while a cone attack is armed
   // The enemy the cursor is on as of the last hover event - the body pick when
@@ -1039,6 +1057,32 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // clickable bystander deserves the same feedback. A cone draws its aimed
   // wedge instead, ringing whoever it would catch.
   function drawTargets() {
+    // The aim wash first, and unconditionally: it must also KNOW to vanish
+    // when the turn ends, the verb is disarmed, or the aimer is mid-walk (a
+    // wash painted from a tile you are leaving is a promise about ground you
+    // no longer own). The key makes the repaint free while nothing changes.
+    // aimRangeOf covers the shapes powers.js owns; a plain ranged ATTACK's
+    // range is stats.rangeOf's rule (a throw carries no `range` field -
+    // ammoCost implies THROW_RANGE), and the wash must read the same helper
+    // the target rings and the click read or the three can disagree.
+    const attackRange = armed && ACTIONS[armed].type === 'attack' ? rangeOf(armed) : 0;
+    const spec = phase === 'player' && armed && !active.actor.moving
+      ? aimRangeOf(ACTIONS[armed]) || (attackRange ? { r: attackRange } : null)
+      : null;
+    if (!spec) {
+      aimPaint.hide();
+    } else {
+      const ax = active.actor.x;
+      const az = active.actor.z;
+      aimPaint.show(`${armed}:${ax},${az}:${paintEpoch}`, () => rangeTiles(
+        ax, az, spec.r,
+        // Paintable ground: open floor the aimer can SEE. Solid cells stay
+        // unpainted - they read as objects standing in the wash, and the
+        // shadow they cast behind themselves is the whole lesson.
+        (x, z) => world.terrainOpen(x, z) && world.hasLos(ax, az, x, z),
+        spec.euclid,
+      ));
+    }
     if (phase !== 'player') return;
     // A door you are standing at, rung before anything else and regardless of
     // what is armed. It is not an ACTION - it has no bar slot, it lives on the
@@ -1332,6 +1376,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     callbacks.say(text);
   }
   function refresh() {
+    // Anything worth redrawing the HUD for may also have reshaped what the
+    // aim can see (a door toggled, smoke landed, a prop toppled) - stale the
+    // aim wash's key so its next frame recomputes.
+    paintEpoch += 1;
     // Name whose turn it is (initiative interleaves your members with the
     // enemies). "YOUR TURN — Name" on a member you control; "Name's turn" on
     // an AI unit.
@@ -1412,6 +1460,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     for (const e of engaged) e.onTile = null;
     phase = 'done';
     app.off('update', update);
+    aimPaint.destroy();
     panel.remove();
     strip.remove();
     costTag.remove();
@@ -3318,6 +3367,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     get freeAp() { return active.freeAp || 0; },
     set ap(v) { active.ap = Math.max(0, roundAp(Number(v) || 0)); refresh(); },
     get armed() { return armed; },
+    // The aim wash (TACTICS_PLAN M7): which aim is painted and how many tiles
+    // it covers. A test that can't see the wash can only assert the click.
+    get aimPaint() { return aimPaint.debug; },
     get enemies() { return engaged.map((e) => ({ name: e.def.name, x: e.x, z: e.z, hp: e.hp, alive: e.alive, statuses: statusList(e) })); },
     get maxAp() { return active.sheet.maxAp; },
     get defended() { return hasStatus(active.sheet, 'deflecting'); },

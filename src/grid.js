@@ -11,7 +11,7 @@
 //   "H x z len" - horizontal run on the NORTH edge of cells (x..x+len-1, z)
 //   "V x z len" - vertical run on the WEST edge of cells (x, z..z+len-1)
 // (`#` cell walls still exist for solid blocks/pillars; partitions are edges.)
-import { TILE_TYPES } from './data/tiles.js';
+import { TILE_TYPES, blocksSight } from './data/tiles.js';
 import { SURFACES } from './data/surfaces.js';
 import { NPCS } from './data/npcs.js';
 import { ENEMY_TYPES } from './data/enemies.js';
@@ -119,6 +119,11 @@ export function parseLevel(level) {
     const t = typeAt(x, z);
     return t !== null && !TILE_TYPES[t].solid;
   };
+  // Can a SIGHTLINE pass this cell? Open ground, or a solid too short to stop
+  // a shot (TACTICS_PLAN M6a): a desk is shot over, a snack machine is not.
+  // Out-of-bounds and in-map void both resolve to the tall 'wall' def, so they
+  // stay opaque without a bounds check here.
+  const sightOpenCell = (x, z) => !blocksSight(defAt(x, z));
   const surfaceAt = (x, z) => defAt(x, z).surface || null;
 
   // --- edge walls -------------------------------------------------------------
@@ -238,7 +243,7 @@ export function parseLevel(level) {
 
   return {
     name: level.name || '', width, height,
-    typeAt, defAt, terrainOpen, surfaceAt, isElectrified, setType,
+    typeAt, defAt, terrainOpen, sightOpenCell, surfaceAt, isElectrified, setType,
     hWalls, vWalls, edgeOpen, stepOpen, sightOpen,
     doors, doorBetween, setDoorOpen,
     playerSpawn, enemySpawns, npcSpawns, companionSpawns,

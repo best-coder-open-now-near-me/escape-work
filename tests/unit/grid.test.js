@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseLevel, parseWallRuns, compressWallRuns } from '../../src/grid.js';
+import { TILE_TYPES, blocksSight, SIGHT_BLOCK_HEIGHT } from '../../src/data/tiles.js';
 
 const level = (map, extra = {}) => ({
   name: 'test-floor',
@@ -53,6 +54,31 @@ test('sightOpen ignores plain partitions - throws sail over cubicle walls', () =
   const g = parseLevel(level(['..'], { walls: ['V 1 0 1'] }));
   assert.equal(g.edgeOpen(0, 0, 1, 0), false); // the wall blocks movement
   assert.equal(g.sightOpen(0, 0, 1, 0), true); // but a throw clears the chest-high wall
+});
+
+test('blocksSight is a height rule, with tall as the structural override (M6a)', () => {
+  assert.ok(TILE_TYPES.desk.height < SIGHT_BLOCK_HEIGHT);
+  assert.equal(blocksSight(TILE_TYPES.desk), false);            // shot over
+  assert.equal(blocksSight(TILE_TYPES['snack-machine']), true); // head-high
+  assert.equal(blocksSight(TILE_TYPES.wall), true);             // drawn 0.6, but it is the building
+  assert.equal(blocksSight(TILE_TYPES.paneling), true);         // structure, same family
+  assert.equal(blocksSight(TILE_TYPES['cabinet-fallen']), false); // not solid at all
+  assert.equal(blocksSight(null), false);
+});
+
+test('sightOpenCell: short solids are shot over, tall ones and the void are not', () => {
+  const g = parseLevel({
+    name: 't',
+    tiles: { '.': 'floor', 'D': 'desk', 'S': 'snack-machine', '#': 'wall' },
+    actors: {},
+    map: ['.D.S#'],
+  });
+  assert.equal(g.terrainOpen(1, 0), false);   // the desk still blocks bodies
+  assert.equal(g.sightOpenCell(1, 0), true);  // but not shots
+  assert.equal(g.sightOpenCell(0, 0), true);  // floor is floor
+  assert.equal(g.sightOpenCell(3, 0), false); // the snack machine blocks both
+  assert.equal(g.sightOpenCell(4, 0), false); // the '#' wall is tall by fiat
+  assert.equal(g.sightOpenCell(0, -1), false); // out of bounds resolves to wall
 });
 
 test('setType can bring a conduction pool to life, not only kill it', () => {
