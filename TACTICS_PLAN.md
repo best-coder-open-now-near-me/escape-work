@@ -551,8 +551,27 @@ None. See decision #6.
    `POSITION_CAP` and `hitChance`'s `CLAMP_HI` keep the stack honest. A unit
    that has never acted has no facing and cannot be backstabbed — the honest
    resolution of the open question, and one that can't be gamed.
+6. **Take Cover (active crouch).** `[proposed]` A new action where you choose a
+   solid object you have line of sight to and assume a defensive crouch behind it.
+   `[stated]` Immunity applies only to angles the object shields (directional, like
+   M3's edge cover); flanking still breaks it. `[stated]` LOS gates the action:
+   `hasLos(you, object)` must be true to target it. `[stated]` Cost is path distance
+   to the object + 1 AP, paid once; cover persists until you move or act. `[stated]`
+   Shove onto the object breaks cover — target makes a Strength check to resist
+   crushing damage and possible pin. `[stated]` Works on all solid objects (any
+   cell, any height), with UI color-coding to show safe cover vs topplable furniture.
+   Toppled furniture becomes tactically valuable as moveable cover — teammates can
+   push it toward enemies or use it to build defenses. Differentiates melee (you walk
+   around partitions freely) from ranged (you must find cover), justifying why
+   toppling matters and why shoves counter ranged turtling.
 
-Milestones 1 and 2 are independent and may be swapped; 3–5 all depend on 1.
+Milestones 1 and 2 are independent and may be swapped; 3–5 all depend on 1. M6
+depends on 1, 2, and 5 (opportune attacks to punish cover leaving, facing for
+directional shielding).
+
+### Verification — milestones 1–5 as landed
+
+See above section on verification.
 
 ### Verification as landed
 
