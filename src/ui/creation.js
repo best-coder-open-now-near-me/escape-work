@@ -14,7 +14,8 @@
 // character gets is what they always should have got: their job, their body,
 // their name, and two points to say what they are good at.
 import {
-  PRONOUNS, NAME_MAX, draftAttr, draftName, pointsLeft, spendDraftPoint, undoDraftPoint,
+  PRONOUNS, NAME_MAX, draftAttr, draftName, pointsLeft, spendDraftPoint,
+  unspendDraftPoint, spentOn,
 } from '../creation.js';
 import { CUSTOM_RIGS } from '../data/looks.js';
 import { ATTR_KEYS } from '../stats.js';
@@ -52,12 +53,6 @@ const PRIMARY = {
   flex: '1', padding: '10px', borderRadius: '9px', border: '1px solid #3a3a52',
   background: '#2e4a34', color: '#f0f0f5', font: 'inherit', fontWeight: '700',
   letterSpacing: '1px', fontSize: '13px', cursor: 'pointer',
-};
-
-const QUIET = {
-  display: 'block', margin: '10px auto 0', padding: '4px', border: 'none',
-  background: 'none', color: '#8a8aa0', font: 'inherit', fontSize: '11px',
-  textDecoration: 'underline', cursor: 'pointer',
 };
 
 const label = (text) => {
@@ -205,34 +200,46 @@ export function showCreationStep(draft, { onCommit, onBack, onPreview }) {
     blurb.textContent = ATTR_BLURB[key] || '';
     text.append(nameEl, blurb);
     const value = document.createElement('span');
-    Object.assign(value.style, { opacity: '.85', fontWeight: '600' });
-    const plus = document.createElement('button');
-    plus.id = `creation-attr-${key}`;
-    plus.type = 'button';
-    plus.textContent = '+';
-    Object.assign(plus.style, { ...CHIP, padding: '1px 10px', borderRadius: '7px', fontSize: '13px' });
-    plus.onclick = () => { spendDraftPoint(draft, key); paintAttrs(); repaintSummary(); };
-    r.append(text, value, plus);
+    Object.assign(value.style, { opacity: '.85', fontWeight: '600', minWidth: '1.2em', textAlign: 'right' });
+    // A stepper, both halves of it, always present. The minus used to be a
+    // single "Take one back" link under the whole list that appeared only once
+    // you had spent something - so the control that undoes a row was not on the
+    // row, was not there when you were deciding, and moved the four rows down
+    // the card when it turned up. A pair of buttons per row is what the numbers
+    // beside them lead you to expect.
+    const step = (glyph, id, onPress) => {
+      const b = document.createElement('button');
+      b.id = id;
+      b.type = 'button';
+      b.textContent = glyph;
+      Object.assign(b.style, { ...CHIP, padding: '1px 10px', borderRadius: '7px', fontSize: '13px' });
+      b.onclick = () => { onPress(); paintAttrs(); repaintSummary(); };
+      return b;
+    };
+    const minus = step('−', `creation-attr-minus-${key}`, () => unspendDraftPoint(draft, key));
+    const plus = step('+', `creation-attr-${key}`, () => spendDraftPoint(draft, key));
+    r.append(text, minus, value, plus);
     card.appendChild(r);
-    return { key, value, plus };
+    return { key, value, minus, plus };
   });
-  const undo = document.createElement('button');
-  undo.id = 'creation-undo';
-  undo.type = 'button';
-  undo.textContent = 'Take one back';
-  Object.assign(undo.style, { ...QUIET, margin: '4px 0 12px' });
-  undo.onclick = () => { undoDraftPoint(draft); paintAttrs(); repaintSummary(); };
-  card.appendChild(undo);
   const paintAttrs = () => {
     const attr = draftAttr(draft);
     const left = pointsLeft(draft);
     saLabel.textContent = `Self-assessment · ${left} point${left === 1 ? '' : 's'} left`;
-    for (const { key, value, plus } of attrRows) {
+    for (const { key, value, minus, plus } of attrRows) {
       value.textContent = String(attr[key] ?? 0);
-      plus.style.opacity = left > 0 ? '1' : '.35';
-      plus.setAttribute('aria-disabled', left > 0 ? 'false' : 'true');
+      // Dimmed rather than hidden, both directions: a control that vanishes
+      // when it is unusable reflows the card under the cursor, and the reason
+      // it is unusable ("nothing of yours in that row", "no points left") is
+      // legible from the numbers next to it.
+      const canAdd = left > 0;
+      const canTake = spentOn(draft, key) > 0;
+      for (const [b, on] of [[plus, canAdd], [minus, canTake]]) {
+        b.style.opacity = on ? '1' : '.35';
+        b.style.cursor = on ? 'pointer' : 'default';
+        b.setAttribute('aria-disabled', on ? 'false' : 'true');
+      }
     }
-    undo.style.display = draft.spends.length ? 'block' : 'none';
   };
 
   // --- the footer -------------------------------------------------------------

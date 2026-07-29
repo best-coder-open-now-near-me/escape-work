@@ -126,6 +126,26 @@ test('a door can be worked mid-fight, from the tile beside it, for AP', async ({
   await expect.poll(() => page.evaluate(() => window.__game.doorOpen('h:2,2'))).toBe(true);
   // Billed, like everything else in a turn.
   expect(await page.evaluate(() => window.__combat.party[0].ap)).toBe(apBefore - 1);
+
+  // ...and now the LEFT click, on the same edge, which is how anybody actually
+  // reaches for a door. This half was missing entirely: the combat click path
+  // had no door branch, so a left-click on a door fell through to the tile
+  // handler and tried to WALK there, and the hover path never asked about
+  // doors either, so the cursor stayed a plain arrow over it. The right-click
+  // menu above worked the whole time, which is exactly why nobody noticed -
+  // "doors work in a fight" was true and tested, through a route most players
+  // never try first.
+  await refillAp(page);
+  const apBeforeClick = await page.evaluate(() => window.__combat.party[0].ap);
+  await page.mouse.move(p.x, p.y);
+  await expect.poll(() => page.evaluate(() => document.getElementById('app').style.cursor),
+    { timeout: 10_000 }).toBe('pointer');
+
+  await page.mouse.click(p.x, p.y);
+  await expect.poll(() => page.evaluate(() => window.__game.doorOpen('h:2,2'))).toBe(false);
+  expect(await page.evaluate(() => window.__combat.party[0].ap)).toBe(apBeforeClick - 1);
+  // And it worked the handle rather than walking at it.
+  expect(await page.evaluate(() => window.__game.playerTile)).toEqual({ x: 2, z: 1 });
 });
 
 test('a snack comes out of your pockets mid-fight, and costs a turn to eat', async ({ page }) => {

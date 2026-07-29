@@ -122,7 +122,7 @@ test('cloneMaterials does not recolour the shared .glb material', () => {
 // second way to build a sheet: both end at createCharacter.
 const {
   createDraft, createCharacter, draftModel, draftLook, draftName, draftAttr,
-  spendDraftPoint, undoDraftPoint, pointsLeft, cleanName, pronounsOf, verb,
+  spendDraftPoint, unspendDraftPoint, spentOn, pointsLeft, cleanName, pronounsOf, verb,
   CREATION_POINTS, NAME_MAX,
 } = await import('../../src/creation.js');
 const { createSheet } = await import('../../src/stats.js');
@@ -236,8 +236,36 @@ test('a draft spends at most its two points', () => {
   for (let i = 0; i < 10; i++) spendDraftPoint(d, 'savvy');
   assert.equal(d.spends.length, CREATION_POINTS);
   assert.equal(pointsLeft(d), 0);
-  undoDraftPoint(d);
+  unspendDraftPoint(d, 'savvy');
   assert.equal(pointsLeft(d), 1);
+});
+
+// Each row's minus takes back a point from THAT row. A single global undo
+// popped whichever point was spent last, so undoing a row meant remembering
+// what order you had clicked in.
+test('taking a point back is per-attribute, not "whatever was last"', () => {
+  const d = createDraft('office-drone');
+  spendDraftPoint(d, 'grit');
+  spendDraftPoint(d, 'savvy');
+  assert.equal(spentOn(d, 'grit'), 1);
+  assert.equal(spentOn(d, 'savvy'), 1);
+
+  unspendDraftPoint(d, 'grit'); // the one spent FIRST
+  assert.equal(spentOn(d, 'grit'), 0);
+  assert.equal(spentOn(d, 'savvy'), 1, 'the other row is untouched');
+  assert.equal(pointsLeft(d), 1);
+
+  const base = CLASSES['office-drone'].attr;
+  assert.equal(draftAttr(d).grit, base.grit);
+  assert.equal(draftAttr(d).savvy, base.savvy + 1);
+});
+
+test('taking back from an empty row does nothing', () => {
+  const d = createDraft('office-drone');
+  spendDraftPoint(d, 'grit');
+  unspendDraftPoint(d, 'composure'); // nothing of yours in that row
+  assert.equal(pointsLeft(d), 1);
+  assert.equal(spentOn(d, 'grit'), 1);
 });
 
 test('an unknown attribute is not spendable', () => {

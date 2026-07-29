@@ -109,6 +109,10 @@ export const draftName = (draft) => {
 // How many creation points a draft has left to spend.
 export const pointsLeft = (draft) => CREATION_POINTS - (draft?.spends?.length || 0);
 
+// How many of the creation points went into one attribute.
+export const spentOn = (draft, attr) =>
+  (draft?.spends || []).filter((k) => k === attr).length;
+
 // Add a point to `attr` if the draft has one left. Returns the draft.
 export function spendDraftPoint(draft, attr) {
   if (!ATTR_KEYS.includes(attr) || pointsLeft(draft) <= 0) return draft;
@@ -116,9 +120,13 @@ export function spendDraftPoint(draft, attr) {
   return draft;
 }
 
-// Take back the last point spent.
-export function undoDraftPoint(draft) {
-  draft.spends.pop();
+// Take a point back OUT of `attr`. Per-attribute rather than "pop the last
+// one": the screen shows four rows of numbers going up and down, so the way to
+// undo a row is a button on that row. A single global undo made the player
+// remember what order they had clicked in to work out what it would take away.
+export function unspendDraftPoint(draft, attr) {
+  const i = (draft?.spends || []).lastIndexOf(attr);
+  if (i >= 0) draft.spends.splice(i, 1);
   return draft;
 }
 

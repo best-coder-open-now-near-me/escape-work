@@ -976,6 +976,27 @@ function startGame(level) {
   // the rule is the tactical one: you work a door you are standing beside.
   const atDoor = (key, actor) => !!actor
     && doorSides(key).some(([x, z]) => actor.x === x && actor.z === z);
+  // The door a click or a hover means IN COMBAT, or null. One predicate, read
+  // by both the cursor and the click, so the pointer can never promise a swing
+  // of the handle that the click then declines.
+  //
+  // Doors were reachable in a fight only through the right-click menu: the
+  // left-click path had no door branch at all, so clicking one fell through to
+  // handleTileClick and walked you at it, and the hover path never asked, so
+  // the cursor stayed a plain arrow over the one piece of terrain you can
+  // change.
+  //
+  // Hitting the door MESH always counts - you aimed at the door, there is
+  // nothing else you could have meant. A ground point merely NEAR a door edge
+  // only counts when you are already standing beside it, because
+  // `doorNearPoint` claims a wide band either side of the edge and movement is
+  // the expensive thing in a fight: a click on the floor by a doorway has to
+  // stay a step, not become a refusal.
+  function combatDoorAt(hit, point) {
+    if (hit?.kind === 'door') return hit.ref;
+    const key = point ? doorNearPoint(point) : null;
+    return key && atDoor(key, combat?.actingActor) ? key : null;
+  }
   function toggleDoor(key) {
     if (gameOver) return;
     // Doors used to be refused outright while `inCombat`, with no comment - and
@@ -2333,6 +2354,12 @@ function startGame(level) {
         // no on the outer band of a body the cursor said yes to.
         const near = point && combat?.enemyAtPoint(point);
         if (near) { combat?.handleEnemyClick(near); return; }
+        // A door, before the tile fallback - otherwise the click walks you at
+        // the door instead of working it. toggleDoor owns the rules from here:
+        // it refuses with a reason when you are not beside it, and bills the
+        // AP when you are.
+        const dk = combatDoorAt(bodyHit, point);
+        if (dk) { toggleDoor(dk); return; }
         if (!tile) return;
         combat?.handleTileClick(tile, point);
         return;
@@ -2403,7 +2430,10 @@ function startGame(level) {
         // to-hit readout and the click itself refused.
         const picked = hit?.kind === 'enemy' && hit.ref.alive ? hit.ref : null;
         const foe = combat.handleHover(point, sx, sy, picked);
-        hover.setCursor(foe ? 'crosshair' : null);
+        // A coworker wins the cursor; failing that, a door you could work says
+        // so with the same pointer it uses out of combat. The click reads the
+        // very same predicate, so the two cannot disagree.
+        hover.setCursor(foe ? 'crosshair' : (combatDoorAt(hit, point) ? 'pointer' : null));
         // Hovering a character glows their BODY and names them in the banner -
         // the DOS2 read, and the same one you already get out of combat. This
         // used to be held behind Ctrl, which meant the half of the game where
