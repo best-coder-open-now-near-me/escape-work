@@ -248,19 +248,67 @@ cooldownRounds, ap, lifetimeTurns}` — no `range`, and `uses` swapped for
 you may do it. Milder than P1 because the resolver is shared; worth one
 vocabulary rather than two.
 
-### P4 — HR exists twice
+### P4 — HR exists twice, and the file says it doesn't
 
-The Human Resources class (`midmanager.glb`) and the HR Representative enemy
-(`hrrep.glb`) are the same job with two bodies and two stat blocks. Unlike
-Senior Manager this is not a tier variant, so it is a weaker case — but
-`security-guard` shows what the honest version looks like: `classId: 'security'`,
-distinguished by `look.build` alone. **Recommend: fold HR the same way**, which
-also puts the class on the rig named for it and starts unwinding the scramble.
+`enemies.js:18` states the rule and the roster in one breath: *"Everyone else
+here has no class twin — The Manager, the Executive **and the rest** are their
+own archetypes — so they stay written out."*
 
-`manager` and `executive` pass. "The Manager" is not the Middle Manager class
-(that class is about control and wears `veteran.glb`), and nobody plays an
-Executive. They are their own archetypes, which is exactly what the file's
-header comment says to keep: *"Don't invent a class just to inherit from it."*
+`the rest` includes `hr`. The class registry contains `human-resources`. The
+comment is false about its own file.
+
+This is not a loose thematic overlap. It is the same character implemented
+twice, and the *defining verb* is the duplicated part:
+
+| | Class `human-resources` | Enemy `hr` |
+|---|---|---|
+| Name | Human Resources | HR Representative |
+| Rig | `midmanager.glb` | `hrrep.glb` |
+| AP | 6 | 6 |
+| `classId` | — | **none** |
+| Summons applicants | yes, via `actions` | yes, via a `summon` block |
+
+`classes.js:44` defines `primary` as *"the ONE verb a class is for"*, and
+Human Resources declares `primary: 'summon'` — "it staffs the fight". The HR
+enemy's one distinguishing power is a summon block. Two entries, one verb, two
+implementations, no shared ancestor.
+
+And the two summon specs disagree about the same archetype:
+
+| | archetype | count | cap | rate limit | lifetime | AP |
+|---|---|---|---|---|---|---|
+| Class action | `applicant` | 1 | 3 | `uses: 2` | 6 | 4 |
+| Enemy block | `applicant` | 2 | 2 | `cooldownRounds: 2` | 5 | 3 |
+
+Same resolver (`combat.js resolveSummon`), two vocabularies for "how often may
+you" — which is **P3** above, and this is where it came from.
+
+`security-guard` is the same situation handled correctly: `classId: 'security'`,
+rig inherited, told apart by `look.build.torso` alone.
+
+**Recommend: fold `hr` the same way** — and take the rig with it, because that
+unwinds the scramble in a cascade:
+
+| Rig | Today | After |
+|---|---|---|
+| `hrrep.glb` | HR Rep enemy | **Human Resources** class + the enemy, `security`-style |
+| `midmanager.glb` | Human Resources class | **Middle Manager** class |
+| `veteran.glb` | Middle Manager class | **free** |
+
+Each class lands on the file named for it, and `veteran.glb` joins the free
+pool. With `intern.glb`, `seniormanager.glb` and `regional.glb` that is **four
+bodies** for the custom character, none of them invented and none of them
+somebody else's.
+
+One lie survives: Mail Room stays on `hr.glb`, because the Kenney swap deleted
+`mailroom.glb` and there is no file for that job. That one needs art or needs
+accepting.
+
+`manager` and `executive` pass. "The Manager" is not the Middle Manager class —
+that class is about `primary: 'control'` and is a different character — and
+nobody plays an Executive. They are their own archetypes, which is what the
+file's header rule protects: *"Don't invent a class just to inherit from it."*
+The rule is right. It was just applied to five entries and checked on none.
 
 ### Also: the worklist is lying
 
@@ -367,7 +415,7 @@ Tagged per `CLAUDE.md`. Everything inherited from the old plan is demoted to
 | 15 | **A placement may name a level** (`"G": "manager@3"`); Senior Manager and Regional Executive are then deleted | `[proposed]` | follows from #13 + #14. Deleting them without the legend change would lose per-placement difficulty, which is the capability they were written for |
 | 15b | The IT companion drops its `track` and `model` overrides and keeps only `look.build` + its softer stat line | `[proposed]` | follows from #14; it restores two class actions he currently cannot learn |
 | 15c | The override lint grows a node-effect comparison | `[proposed]` | it passed a renamed copy of `it-root`; it will pass the next one |
-| 16 | HR Representative folds into the Human Resources class, `security-guard`-style | `[proposed]` | follows from #13; weaker case than #15 since it is not a tier variant |
+| 16 | HR Representative folds into the Human Resources class, `security-guard`-style, **and the class takes `hrrep.glb` with it** — cascading Middle Manager onto `midmanager.glb` and freeing `veteran.glb` | `[proposed]` | follows from #13. Not the weak case it was first written as: the duplicated part is the class's own `primary: 'summon'` verb, and `enemies.js:18` asserts this entry has no class twin while `human-resources` sits in the registry |
 | 17 | The Manager and The Executive stay as their own archetypes | `[proposed]` | they imitate nobody; `enemies.js:20` already says "Don't invent a class just to inherit from it" |
 
 ### On the reference games
@@ -443,7 +491,7 @@ The résumé desk gains a seventh card: **MAKE YOUR OWN**.
 
 ### M4 — Back actually goes back
 Escape and BACK return to the desk instead of committing (**D1**, **D2**).
-Optionally un-tangle the rig↔role scramble here (decision #12), which is what
+Un-tangle the rig↔role scramble here (decision #12 and the #16 cascade), which
 makes the freed rigs land on sensibly-named files.
 
 ### M5 — Sweep
