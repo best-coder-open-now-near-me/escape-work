@@ -49,7 +49,14 @@ test('loading a shipped level and exporting it keeps its companions', async ({ p
 
   // Level 1 places the IT companion ('N' -> it-intern in its own legend).
   await page.selectOption('#ed-level', 'level1');
-  await page.waitForTimeout(500);
+  // Poll for the LOAD rather than sleeping through it: a fixed wait is either
+  // slower than it needs to be or shorter than the load, and under software GL
+  // it is reliably both on different runs. The level being in the editor's own
+  // output is the actual condition.
+  await expect.poll(
+    () => page.evaluate(() => JSON.parse(window.__editor.toJson())?.name ?? null),
+    { timeout: 20_000 },
+  ).toBeTruthy();
 
   const out = JSON.parse(await page.evaluate(() => window.__editor.toJson()));
 

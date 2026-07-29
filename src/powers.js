@@ -70,6 +70,23 @@ export function buffOutcome(a, t = {}) {
 // swing the click refused (ARCHITECTURE, hover.js note).
 export const isFriendly = (a) => !!a && a.type === 'buff';
 
+// ...and some verbs point at BOTH halves. A purge does not care whose statuses
+// it is clearing - Reboot power-cycles a colleague, a coworker or you - so
+// "which side does this aim at" stopped being a boolean. `aimsAtAlly` still
+// answers "may this be pointed at a friend", `isFriendly` still answers "is
+// this ONLY for friends", and the two differ exactly here: an any-target verb
+// is offered on both sides and refused by neither.
+export const aimsAtAnyone = (a) => !!a && !!a.purge && a.type !== 'buff';
+
+// The purge verb itself (IT Support's primary). Its own type rather than an
+// attack carrying a flag, because it is not a swing: it rolls to hit, deals
+// nothing, and strips state from whoever it lands on - and a class whose
+// identity is "the only one who can take a status OFF anybody" needs a verb to
+// name. Keeping it typed `attack` also meant it competed to BE the class's
+// basic swing (stats.actionBuckets), which IT does not have - it carries a
+// letter opener for that.
+export const isPurge = (a) => !!a && a.type === 'purge';
+
 // --- control (POWERS_PLAN M2) ------------------------------------------------
 
 // A control action carries no damage roll, so it needs its own reach rule. It
@@ -171,7 +188,8 @@ const ALLY_MODES = new Set(['swap', 'pull']);
 // mobility action does when its mode moves somebody else. Keeping this
 // separate from isFriendly (which means "is a buff") is what lets the two
 // verbs share the friendly click path without sharing their payloads.
-export const aimsAtAlly = (a) => isFriendly(a) || (isMobility(a) && ALLY_MODES.has(a.mode));
+export const aimsAtAlly = (a) =>
+  isFriendly(a) || aimsAtAnyone(a) || (isMobility(a) && ALLY_MODES.has(a.mode));
 
 // Why this mobility action cannot be used right now, or null.
 //
@@ -221,4 +239,60 @@ export function zoneProblem(a, t = {}) {
   if (dist > zoneRangeOf(a)) return 'Too far to reach with it.';
   if (!los) return 'No clear line to there.';
   return null;
+}
+
+// --- cones (POWERS_PLAN) -----------------------------------------------------
+
+// The wedge a cone attack covers, aimed from `origin` toward (tx, tz), or null
+// when there is no meaningful aim (the cursor is on top of the caster).
+//
+// Pure, and taking the origin as an argument, because BOTH sides of the game
+// need it: combat draws and fires the wedge, and out of combat the same wedge
+// has to be previewable before a fight exists. It used to be a closure over
+// combat's `active`, which is why aiming a cone outside a fight drew nothing at
+// all - the geometry was simply unreachable from there.
+//
+// The returned function is the tile/body test, carrying `origin` and `angle`
+// so a caller can draw what it is about to resolve.
+export function coneFrom(a, origin, tx, tz) {
+  let dx = tx - origin.x;
+  let dz = tz - origin.z;
+  const len = Math.hypot(dx, dz);
+  if (len < 0.2) return null;
+  dx /= len;
+  dz /= len;
+  const half = (a.cone.halfAngle * Math.PI) / 180;
+  // `r` is the target's radius. A point test (r = 0) is right for carpeting
+  // floor tiles but WRONG for bodies: it demanded the wedge swallow a target's
+  // centre, so the ring only went green once the cone visibly covered the whole
+  // marker. Passing the ring's radius widens the wedge by the angle the body
+  // subtends, so the cone catches anything it clips.
+  const test = (wx, wz, r = 0) => {
+    const vx = wx - origin.x;
+    const vz = wz - origin.z;
+    const d = Math.hypot(vx, vz);
+    if (d < 0.3 || d - r > a.cone.range) return false;
+    const slack = r > 0 ? Math.asin(Math.min(1, r / Math.max(d, 1e-6))) : 0;
+    return (vx * dx + vz * dz) / d >= Math.cos(Math.min(Math.PI, half + slack));
+  };
+  test.origin = origin;
+  test.angle = Math.atan2(dz, dx);
+  return test;
+}
+
+// The wedge's outline as [[x, z], ...] - the two edges and the arc between
+// them, starting and ending at the origin. Shared so the in-combat preview and
+// the out-of-combat one cannot draw different shapes for the same action.
+export function conePolyline(a, test, segments = 14) {
+  const half = (a.cone.halfAngle * Math.PI) / 180;
+  const arc = [];
+  for (let i = 0; i <= segments; i++) {
+    const ang = test.angle - half + (2 * half * i) / segments;
+    arc.push([
+      test.origin.x + Math.cos(ang) * a.cone.range,
+      test.origin.z + Math.sin(ang) * a.cone.range,
+    ]);
+  }
+  const o = [test.origin.x, test.origin.z];
+  return [o, ...arc, o];
 }

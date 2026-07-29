@@ -4,7 +4,7 @@
 // tile behind a tall mesh - the same fix that makes a click on the raised door
 // panel actually open the door.
 import { test, expect } from '@playwright/test';
-import { bootAndPick, bootStash, onScreen, waitStill, combatOrWalkDone, stableProject, enterCombat } from './helpers.js';
+import { bootAndPick, bootStash, onScreen, onCanvas, waitStill, combatOrWalkDone, stableProject, enterCombat } from './helpers.js';
 
 // Hover the on-screen position of a world point (a tall mesh, y > 0). Returns
 // false if it projects off-screen so the caller can bail.
@@ -116,9 +116,18 @@ test('the persistent hotbar shows attacks and arming targets a coworker', async 
     const en = ens[0];
     const pp = await page.evaluate(() => window.__game.playerPos);
     await stableProject(page, pp.x, pp.z).catch(() => {}); // settle the camera
+    // On-screen is not enough: the hotbar this test is DRIVING is fixed to the
+    // bottom-centre, and a coworker projecting behind it takes the click as a
+    // slot press. That reads as the loop mysteriously arming things and never
+    // engaging - "That slot is empty", fourteen times - because the click never
+    // reached the world at all. Same onCanvas guard enterCombat takes, and the
+    // same fallback order: body point first, ground tile second, skip the
+    // attempt only when neither is reachable.
     let p = await page.evaluate(([x, z]) => window.__game.project3(x, 0.9, z), [en.px ?? en.x, en.pz ?? en.z]);
-    if (!onScreen(p)) p = await page.evaluate(([x, z]) => window.__game.project(x, z), [en.x, en.z]);
-    if (!onScreen(p)) continue;
+    if (!onScreen(p) || !(await onCanvas(page, p))) {
+      p = await page.evaluate(([x, z]) => window.__game.project(x, z), [en.x, en.z]);
+    }
+    if (!onScreen(p) || !(await onCanvas(page, p))) continue;
     // combatOrWalkDone can report "walk finished" on the same poll that combat
     // is starting, so re-check before doing anything else - and never click the
     // hotbar once a fight owns the screen. Combat hides the out-of-combat

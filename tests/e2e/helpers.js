@@ -31,6 +31,10 @@ export async function pickClass(page, classId) {
     await page.click('#carousel-next');
   }
   await page.click(`#pick-${classId}`);
+  // The carousel hands off to the badge photo (CHARACTER_PLAN step 2). This
+  // helper's subject is the CAROUSEL, so it takes the defaults and moves on -
+  // the creation spec is where the form itself is exercised.
+  await page.click('#creation-skip');
 }
 
 // Zoom out so the whole floor projects inside the viewport - far enemies would
@@ -152,7 +156,7 @@ export async function combatOrWalkDone(page, capMs) {
 // (the hotbar and combat panel sit bottom-center) swallow clicks aimed at the
 // world behind them - a stray hit can even ARM an attack, and an armed click
 // on the next enemy means an unintended fight.
-const onCanvas = (page, p) => page.evaluate(
+export const onCanvas = (page, p) => page.evaluate(
   ([x, y]) => document.elementFromPoint(x, y)?.id === 'app', [p.x, p.y]);
 
 // Click live enemies until a fight starts. Two things make a naive round-robin
@@ -194,6 +198,13 @@ function engageBudgetMs() {
 }
 
 export async function enterCombat(page) {
+  // NB: an `startFightNow` fast path was tried here and REVERTED. Opening the
+  // fight from where the player stands, rather than walking them to a coworker,
+  // changes the geometry specs are written against: a touch-range verb like
+  // Detain arrives out of reach, and classes.spec's Detain test failed
+  // consistently because of it. It also never delivered - the HR/IT timeouts it
+  // was meant to fix were unchanged, because it only helps when somebody is
+  // already in range at boot. Walking is slow, but it is what the specs mean.
   const started = Date.now();
   const deadline = started + engageBudgetMs();
   const left = () => deadline - Date.now();
@@ -251,12 +262,17 @@ export async function enterCombat(page) {
   // is not enabled", with nothing about the fight that caused it. The floor is
   // 20s now, and the only tolerated failure is the documented one: a fight that
   // ENDED while we waited is not a hang.
-  if (await page.evaluate(() => window.__game.inCombat)) {
-    try {
-      await waitForPlayerTurn(page, Math.max(20_000, left()));
-    } catch (err) {
-      if (await page.evaluate(() => window.__game.inCombat)) throw err;
-    }
+  await settleOnPlayerTurn(page, Math.max(20_000, left()));
+}
+
+// Wait out any AI turns initiative handed out first. The only tolerated failure
+// is the documented one: a fight that ENDED while we waited is not a hang.
+async function settleOnPlayerTurn(page, timeout) {
+  if (!(await page.evaluate(() => window.__game.inCombat))) return;
+  try {
+    await waitForPlayerTurn(page, timeout);
+  } catch (err) {
+    if (await page.evaluate(() => window.__game.inCombat)) throw err;
   }
 }
 

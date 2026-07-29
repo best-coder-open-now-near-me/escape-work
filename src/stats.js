@@ -32,7 +32,32 @@ export const PROGRESSION = {
   // "attributes fast, class points slow".
   ATTR_PER_LEVEL: 1,    // attribute points banked per level-up
   CP_PER_LEVEL: 1,      // class points banked per level-up (spent on the track, M3)
+  // The xp curve, named because THREE places have to agree on it: a new sheet's
+  // first threshold, gainXp's step, and party.js's migration rebuilding the
+  // threshold for a save that predates the fields. Duplicated literals there
+  // would let a migrated veteran promote on their next scrap of xp.
+  XP_BASE: 10,          // xp needed for the first promotion
+  XP_GROWTH: 1.5,       // each promotion multiplies the threshold by this
 };
+
+// The breather between floors: everyone comes up by `amount`, capped at their
+// maximum. The `Math.max(hp, 0)` is the load-bearing part - a DOWNED character
+// sits at or below zero, and adding to a negative would land them still down,
+// or up by less than everybody else. They are carried to the landing and come
+// to there, which is the rule this expresses.
+export const stairwellHeal = (sheet, amount) =>
+  Math.min(sheet.maxHp, Math.max(sheet.hp, 0) + amount);
+
+// The xp threshold a character at `level` should be sitting on. Replays the
+// same rounding gainXp applies step by step, so a rebuilt value and a value
+// that got there by levelling are always identical.
+export function xpNextForLevel(level) {
+  let next = PROGRESSION.XP_BASE;
+  for (let i = 1; i < (Number.isFinite(level) ? level : 1); i++) {
+    next = Math.round(next * PROGRESSION.XP_GROWTH);
+  }
+  return next;
+}
 
 // --- the to-hit / defense model (HIT_PLAN.md) -------------------------------
 // A DOS2-style percentage hit model: hitChance = BASE + accuracy(attacker) -
@@ -199,7 +224,7 @@ export function createSheetFrom(block, extra = {}) {
     perks: [], // class-track node ids taken; each node's effect is baked in place
     level: 1,
     xp: 0,
-    xpNext: 10,
+    xpNext: PROGRESSION.XP_BASE,
     bonusDmg: block.bonusDmg,
     actions,
     talent: block.talent || null,
@@ -561,7 +586,7 @@ export function gainXp(sheet, amount) {
   let promoted = false;
   while (sheet.xp >= sheet.xpNext) {
     sheet.xp -= sheet.xpNext;
-    sheet.xpNext = Math.round(sheet.xpNext * 1.5);
+    sheet.xpNext = Math.round(sheet.xpNext * PROGRESSION.XP_GROWTH);
     sheet.level += 1;
     sheet.attrPoints = (sheet.attrPoints || 0) + PROGRESSION.ATTR_PER_LEVEL;
     sheet.classPoints = (sheet.classPoints || 0) + PROGRESSION.CP_PER_LEVEL;
@@ -643,7 +668,26 @@ export function nodeAvailable(sheet, node) {
   return true;
 }
 
-function bakeNodeEffect(sheet, effect = {}) {
+// Resolve a character's APPEARANCE: the sheet's own look wins, then the class
+// entry's, then the companion entry's. This lived as a closure inside main.js's
+// startGame, which meant nothing outside that one function could ask what a
+// character looks like - portraits.js was handed the answer rather than being
+// able to ask for it. Sheet-first is the seam custom appearance plugs into: a
+// character that has chosen a look keeps it, and everyone who has not falls
+// through to exactly today's answer.
+export function lookOf(sheet) {
+  return sheet?.look
+    || (sheet?.classId && CLASSES[sheet.classId]?.look)
+    || (sheet?.companionId && COMPANIONS[sheet.companionId]?.look)
+    || null;
+}
+
+// Bake an effect into a sheet, in place. Promoted from private so creation
+// (backgrounds) and progression (track nodes) spend ONE vocabulary rather than
+// growing a second. The contract is unchanged for its existing caller: it does
+// NOT recompute derived stats, because spendClassPoint has to sample maxHp
+// either side of the bake to credit new capacity undamaged.
+export function applyEffect(sheet, effect = {}) {
   if (effect.grantsAction && !sheet.actions.includes(effect.grantsAction)) {
     sheet.actions.push(effect.grantsAction);
   }
@@ -666,7 +710,7 @@ export function spendClassPoint(sheet, nodeId) {
   const node = TRACK_NODES[nodeId];
   if (!nodeAvailable(sheet, node)) return false;
   const maxHpBefore = sheet.maxHp;
-  bakeNodeEffect(sheet, node.effect);
+  applyEffect(sheet, node.effect);
   (sheet.perks = sheet.perks || []).push(nodeId);
   sheet.classPoints -= (node.cost || 1);
   recomputeDerived(sheet);

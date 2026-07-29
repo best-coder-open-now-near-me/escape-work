@@ -19,11 +19,17 @@ const OVERLAP = 1;          // smoke begins one turn before the fire dies
 const PRINTER_FUSE_TURNS = 1;
 
 export function createSurfaceRuntime({ grid, hooks, onExplosion }) {
-  // hooks: { addFlame(x,z,lift), hideSurfaceVisual(x,z), addSmoke(x,z), removeSmoke(x,z) }
+  // hooks: { addFlame(x,z,lift), spendFuel(x,z), addSmoke(x,z), removeSmoke(x,z) }
   const key = (x, z) => x + ',' + z;
   const burning = new Map(); // key -> { x, z, fireLeft, spread, prop, flame }
   const smoking = new Map(); // key -> { x, z, smokeLeft }
-  const burned = new Set();  // consumed paper cells - the surface is gone
+  // No `burned` set. Consumed paper is reported to the world through
+  // `hooks.spendFuel`, which clears the tile at its source, so the surface is
+  // gone from every reader at once rather than being masked here. Keeping a
+  // private "actually it's gone" set beside a grid that still said 'paper' was
+  // two truths about one tile: the visual vanished while the grid kept a drift
+  // that could never be re-laid on, never burn again, and would be redrawn by
+  // any repaint of that tile.
   const fuses = new Map();   // key -> { x, z, turnsLeft } - explosives counting down
   const exploded = new Set();
 
@@ -31,13 +37,14 @@ export function createSurfaceRuntime({ grid, hooks, onExplosion }) {
   const isBurning = (x, z) => burning.has(key(x, z));
   const isSmoke = (x, z) => smoking.has(key(x, z));
   const surfaceAt = (x, z) => {
-    const k = key(x, z);
-    if (burning.has(k)) return 'fire';
-    if (burned.has(k)) return null;
+    if (burning.has(key(x, z))) return 'fire';
     return baseSurface(x, z);
   };
+  // Spent fuel needs no bookkeeping here: the tile is bare floor now, and bare
+  // floor is not flammable. A FRESH drift laid on it later is - which is the
+  // point, and was the bug when this consulted a set that was never emptied.
   const flammable = (x, z) =>
-    !burned.has(key(x, z)) && !burning.has(key(x, z)) && !!SURFACES[baseSurface(x, z)]?.flammable;
+    !burning.has(key(x, z)) && !!SURFACES[baseSurface(x, z)]?.flammable;
   const ignitable = (x, z) => grid.defAt(x, z).ignitable && !burning.has(key(x, z));
 
   function startSmoke(x, z) {
@@ -57,7 +64,11 @@ export function createSurfaceRuntime({ grid, hooks, onExplosion }) {
       spread: false, prop: isProp,
       flame: hooks.addFlame(x, z, isProp ? 0.62 : 0.16),
     });
-    if (!isProp) hooks.hideSurfaceVisual(x, z); // the paper is the fuel
+    // The paper IS the fuel: it is consumed the moment it catches, which is why
+    // the visual has always been dropped here. Spend it in the grid at the same
+    // instant, so no reader is left believing there is still a drift on a tile
+    // that visibly has none. A can survives its own fire, so props are exempt.
+    if (!isProp) hooks.spendFuel(x, z);
     return true;
   }
 
@@ -93,7 +104,7 @@ export function createSurfaceRuntime({ grid, hooks, onExplosion }) {
       if (b.fireLeft <= 0) {
         if (b.flame) b.flame.destroy();
         burning.delete(key(b.x, b.z));
-        if (!b.prop) burned.add(key(b.x, b.z)); // paper is spent; the can survives
+        // Paper was already spent at ignition (see ignite); nothing to retire.
       }
     }
     // 3) Age smoke that existed at the start of this turn, clearing it at zero.

@@ -44,9 +44,26 @@ test('walking out of an enemy reach provokes a free swing', async ({ page }) => 
   expect(await reachOf(page)).toBeLessThanOrEqual(1); // it threatens our tile
 
   const hp0 = await page.evaluate(() => window.__god.player.hp);
+  const from = await page.evaluate(() => window.__game.playerTile);
   // Break contact for the far corner. Still our turn - the Manager has not
   // been handed a turn to attack in, so any damage is the reaction.
-  expect(await clickWorld(page, 1, 1)).toBe(true);
+  //
+  // Confirm we actually LEFT before waiting on the reaction. clickWorld only
+  // promises the point was on screen - not that the click reached the world
+  // and started a walk - so when this failed on CI it failed as "hp never
+  // dropped", which cannot tell "the reaction did not fire" apart from "we
+  // never disengaged in the first place". Those are now two distinct
+  // failures, and a click that did not take is simply aimed again.
+  let moved = false;
+  for (let i = 0; i < 4 && !moved; i++) {
+    expect(await clickWorld(page, 1, 1)).toBe(true);
+    try {
+      await expect.poll(() => page.evaluate(() => window.__game.playerTile),
+        { timeout: 8_000 }).not.toEqual(from);
+      moved = true;
+    } catch { /* the click never became a walk - aim again */ }
+  }
+  expect(moved, 'never broke contact, so nothing could have provoked').toBe(true);
   await expect.poll(() => page.evaluate(() => window.__god.player.hp),
     { timeout: 30_000 }).toBeLessThan(hp0);
   expect(await reachOf(page)).toBeGreaterThan(1); // we did get out
@@ -145,8 +162,27 @@ test('a partition gives the defender cover against a ranged attacker', async ({ 
   expect(await page.evaluate(() => window.__game.enemies
     .filter((e) => e.alive && e.x === 8 && (e.z === 1 || e.z === 3)).length)).toBe(2);
 
-  const open = await readAt(8, 1);   // no partition between us
-  const behind = await readAt(8, 3); // partition on its near face
+  // The like-with-like check above runs ONCE, before either read - so it
+  // cannot see the board move BETWEEN them, which is where the two numbers
+  // stop being comparable. COVER_ARENA also seats a third Manager beside the
+  // player (it is the one that opens the fight) and nothing pins where it
+  // wanders: in the line for one read and not the other, it adds a cover term
+  // of its own and the gap is no longer just the partition. That matches the
+  // shape of the CI failure - 0.05, where cover failing to apply at all would
+  // have read 0.00. So hold the invariant ACROSS both reads, and re-take them
+  // if anything shifted underneath.
+  const boardNow = () => page.evaluate(() => ({
+    me: window.__game.playerTile,
+    foes: window.__game.enemies.filter((e) => e.alive).map((e) => `${e.x},${e.z}`).sort(),
+  }));
+  let open = null;
+  let behind = null;
+  for (let i = 0; i < 3; i++) {
+    const before = JSON.stringify(await boardNow());
+    open = await readAt(8, 1);   // no partition between us
+    behind = await readAt(8, 3); // partition on its near face
+    if (JSON.stringify(await boardNow()) === before) break;
+  }
   expect(typeof open.chance).toBe('number');
   expect(typeof behind.chance).toBe('number');
   // Same range, same enemy - the whole gap is the cover term (HIT.COVER_DODGE).

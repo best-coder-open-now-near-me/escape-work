@@ -14,11 +14,11 @@ import { ITEMS } from './data/items.js';
 import { CLASSES } from './data/classes.js';
 import { ACTIONS, arrivalLine } from './data/actions.js';
 import { parseLevel } from './grid.js';
-import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, DIRS8 } from './pathfinding.js';
+import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, routeToFiringPosition, DIRS8 } from './pathfinding.js';
 import {
-  createSheet, createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
+  createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
   scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
-  orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, REACH,
+  orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, lookOf, stairwellHeal, REACH,
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
@@ -26,10 +26,12 @@ import {
 } from './party.js';
 import { applyStatus, statusFx, hasStatus, tickStep, statusLeft, statusList } from './statuses.js';
 import { inReach } from './tactics.js';
+import { createDraft, createCharacter, draftModel } from './creation.js';
+import { aimsAtAlly, coneFrom, conePolyline } from './powers.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel } from './scene.js';
-import { placeModel, applyCharacterProportions } from './models.js';
+import { placeModel, applyCharacterProportions, cloneMaterials, tintMaterials } from './models.js';
 import { createPortraits } from './portraits.js';
 import {
   throwProjectile, spawnDamageText, worldToScreenCss, impact as impactFx, statusBurst,
@@ -61,21 +63,33 @@ let activeLevelId = FIRST_LEVEL;
 let playtesting = false;
 let restoredProgress = null; // { levelId, sheets, active } - party.js handles old shapes
 try {
+  // Each source gets its OWN guard. Sharing one meant a corrupt playtest stash
+  // threw before the campaign save was ever read, so a bad stash silently
+  // discarded a real run and dropped you on floor one - the stash is scratch
+  // space written by a tool, and it must never be able to cost somebody their
+  // progress. Falling back PAST it to the campaign save is the whole point.
   const stash = localStorage.getItem(STASH_KEY);
-  const progress = localStorage.getItem(PROGRESS_KEY);
   if (stash) {
-    activeLevel = JSON.parse(stash);
-    activeLevelId = null;
-    playtesting = true;
-  } else if (progress) {
-    const p = parseProgress(JSON.parse(progress));
-    if (p && LEVELS[p.levelId]) {
-      activeLevel = LEVELS[p.levelId];
-      activeLevelId = p.levelId;
-      restoredProgress = p;
+    try {
+      activeLevel = JSON.parse(stash);
+      activeLevelId = null;
+      playtesting = true;
+    } catch {
+      localStorage.removeItem(STASH_KEY); // unreadable, and it will stay that way
     }
   }
-} catch { /* corrupted storage - fall back to the shipped level */ }
+  if (!playtesting) {
+    try {
+      const progress = localStorage.getItem(PROGRESS_KEY);
+      const p = progress && parseProgress(JSON.parse(progress));
+      if (p && LEVELS[p.levelId]) {
+        activeLevel = LEVELS[p.levelId];
+        activeLevelId = p.levelId;
+        restoredProgress = p;
+      }
+    } catch { /* corrupt save - the shipped level is the honest fallback */ }
+  }
+} catch { /* localStorage itself is unavailable (private mode, blocked) */ }
 
 const clearProgress = () => localStorage.removeItem(PROGRESS_KEY);
 
@@ -101,7 +115,17 @@ function startGame(level) {
     grid,
     hooks: {
       addFlame: scene.addFlame,
-      hideSurfaceVisual: scene.hideSurfaceVisual,
+      // Paper caught fire, so the paper is gone. Retire it everywhere at once -
+      // grid, visual, and the harvested-here mark - exactly as stickGum retires
+      // a wad that is now on somebody's shoe. Doing only the visual left the
+      // grid still holding a drift on a tile that plainly had none: no surface
+      // could ever be laid there again (canTakeSurface wants 'floor'), it could
+      // never burn again, and refreshTile would redraw paper over ash.
+      spendFuel: (x, z) => {
+        grid.setType(x, z, 'floor');
+        scene.hideSurfaceVisual(x, z);
+        loot?.forgetPaper?.(x, z); // a fresh drift here later is gatherable
+      },
       addSmoke: scene.addSmoke,
       removeSmoke: scene.removeSmoke,
     },
@@ -380,12 +404,6 @@ function startGame(level) {
 
   // --- populate the scene -----------------------------------------------------
   const lift = floorHeight / 2;
-  // A character's `look` (data/classes.js, data/enemies.js, data/companions.js)
-  // is what keeps the several entries sharing one .glb from being the same
-  // person: a build nudge plus a colour tint. Sheets carry only `model`, so a
-  // sheet's look resolves back through its class/companion entry.
-  const sheetLook = (sh) => (sh?.classId && CLASSES[sh.classId]?.look)
-    || (sh?.companionId && COMPANIONS[sh.companionId]?.look) || null;
   // Surfaces a power DROPS during a fight are litter, not terrain: Bulk Mail's
   // paper drifts clear a few rounds later, so a cone can't permanently repaint
   // the floor (nor leave a renewable ammo pile behind it). Tracked here rather
@@ -504,7 +522,7 @@ function startGame(level) {
       placeModel(app, `assets/characters/${def.model}.glb`, x, z, {
         lift, rotY: ally ? 90 : -90, animate: true,
         onReady: (e) => {
-          dressUp(e, actor, ally ? sheetLook(rec.sheet) : actor.def?.look, ally ? rec.sheet.model : actor.def?.model);
+          dressUp(e, actor, ally ? lookOf(rec.sheet) : actor.def?.look, ally ? rec.sheet.model : actor.def?.model);
           picking.register(e, ally ? 'summon' : 'enemy', actor);
         },
       });
@@ -521,7 +539,7 @@ function startGame(level) {
     // a target.
     placeModel(app, `assets/characters/${sheet.model}.glb`, player.x, player.z, {
       lift, rotY: 90, animate: true,
-      onReady: (e) => { dressUp(e, player, sheetLook(sheet), sheet.model); picking.register(e, 'party', player); },
+      onReady: (e) => { dressUp(e, player, lookOf(sheet), sheet.model); picking.register(e, 'party', player); },
     });
     paintHud(sheet);
   }
@@ -540,19 +558,34 @@ function startGame(level) {
       lift, rotY: 45, animate: true, // start facing the head-on camera
       onReady: (e) => {
         // The picker must show the character you will actually get, tint and
-        // build included - no actor here, so clone the materials by hand.
+        // build included. There is no actor on this body, so it clones and
+        // tints through the shared helpers directly - it used to carry its own
+        // inline copy of the maths, which is how the compounding tint bug came
+        // to exist in two places at once. The clones are kept on the entity so
+        // a later re-tint (the creation flow's swatch row) computes from the
+        // pristine colours rather than from the last tint's result.
         const look = CLASSES[classId].look;
         applyCharacterProportions(e, look?.build);
-        if (look?.tint) {
-          for (const rc of e.findComponents('render')) {
-            for (const mi of rc.meshInstances) {
-              const c = mi.material.clone();
-              c.diffuse.set(c.diffuse.r * look.tint[0], c.diffuse.g * look.tint[1], c.diffuse.b * look.tint[2]);
-              c.update();
-              mi.material = c;
-            }
-          }
-        }
+        e._mats = cloneMaterials(e);
+        tintMaterials(e._mats, look?.tint);
+        if (token !== previewToken) { e.destroy(); return; }
+        previewEntity = e;
+      },
+    });
+  }
+  // The same staging as previewClass, reading the DRAFT instead of the class
+  // entry - so the body on the spawn tile is the character being built rather
+  // than the one that was picked. Shares previewClass's token guard, which is
+  // what keeps a fast run along the wardrobe row from landing out of order.
+  function previewDraft(draft) {
+    const token = ++previewToken;
+    if (previewEntity) { previewEntity.destroy(); previewEntity = null; }
+    placeModel(app, `assets/characters/${draftModel(draft)}.glb`, player.x, player.z, {
+      lift, rotY: 45, animate: true,
+      onReady: (e) => {
+        applyCharacterProportions(e, draft.build);
+        e._mats = cloneMaterials(e);
+        tintMaterials(e._mats, draft.tint);
         if (token !== previewToken) { e.destroy(); return; }
         previewEntity = e;
       },
@@ -573,9 +606,12 @@ function startGame(level) {
     return id && CLASSES[id] && CLASSES[id].playable !== false ? id : null;
   }
 
-  function onClassPicked(classId) {
+  // Hiring, once the paperwork is done. `sheetFor` is whatever the flow built -
+  // an untouched draft produces byte-for-byte what createSheet(classId) always
+  // produced, which is what keeps the express lane and the skip link honest.
+  function beginRun(builtSheet) {
     endClassPreview();
-    sheet = createSheet(classId);
+    sheet = builtSheet;
     party = createParty(sheet, player);
     spawnPlayerModel();
     loot.refreshPanel(sheet);
@@ -583,13 +619,42 @@ function startGame(level) {
     ui.say(`${sheet.className}. Now get out of here.`); // hotkeys live in the HUD strip
   }
 
+  // The picker picked a job; now the badge photo. The candidate stays on the
+  // spawn tile under the same dollied-in camera - the résumé card is what gets
+  // replaced, not the body - so this costs no .glb load at all.
+  function onClassPicked(classId) {
+    const draft = createDraft(classId);
+    draft.className = CLASSES[classId].name; // the read-back line quotes the job
+    ui.showBadgeStep(draft, {
+      onCommit: () => beginRun(createCharacter(draft)),
+      // Skipping accepts every default, which is the same thing the `#class=`
+      // express lane does - one code path, so the two can never diverge.
+      onSkip: () => beginRun(createCharacter(createDraft(classId))),
+      // Reflect the draft on the body already standing on the spawn tile. A rig
+      // change is the ONE thing that costs a .glb load; tint and build mutate
+      // the live entity in place, which is what lets a slider drive them every
+      // frame instead of queueing a reload per tick (CHARACTER_PLAN #14).
+      onPreview: (kind) => {
+        if (kind === 'rig') { previewDraft(draft); return; }
+        if (!previewEntity) return;
+        applyCharacterProportions(previewEntity, draft.build);
+        tintMaterials(previewEntity._mats || [], draft.tint);
+      },
+    });
+  }
+
   // Every way to die funnels through here: freeze the world, drop any active
-  // combat, wipe the campaign save, roll credits.
+  // combat, end the campaign run, roll credits.
   function loseGame(message) {
     gameOver = true;
     player.clearPath();
     abortCombat();
-    clearProgress();
+    // Only a CAMPAIGN death ends a campaign run. A level launched from the
+    // editor is standalone (STASH_KEY, its own party, no floor chain), so
+    // dying in a playtest must not delete the saved run sitting in the same
+    // browser - that is somebody's progress, wiped by a tool they were using
+    // to check a room.
+    if (!playtesting) clearProgress();
     ui.showLoseScreen(message);
   }
 
@@ -808,8 +873,35 @@ function startGame(level) {
     return best;
   }
 
+  // The ranged twin of bestApproachPath: cheapest walk-up route to any tile a
+  // weapon with `range` could FIRE at (x, z) from. The rule is pure and shared
+  // with combat's routeIntoRange (pathfinding.js); only the bindings differ.
+  function bestFiringPath(x, z, range) {
+    return routeToFiringPosition({
+      tx: x,
+      tz: z,
+      range,
+      fromX: Math.round(player.x),
+      fromZ: Math.round(player.z),
+      isWalkable,
+      hasLos: (ax, az, bx, bz) => hasLos({ x: ax, z: az }, { x: bx, z: bz }),
+      findPath: (ax, az) => findPath(isWalkable, player.x, player.z, ax, az, hazardCost, grid.stepOpen),
+    });
+  }
+
   // Walk to the open tile nearest an enemy; combat starts on arrival via the
   // adjacency check in onMemberStep.
+  // Everyone a wedge would catch right now: inside it, and with a clear line.
+  // One rule, used by the preview and the click, so a ring can never promise
+  // somebody the cone would miss.
+  function coneCatches(test) {
+    return enemies.filter((en) => {
+      if (!en.alive || !en.entity) return false;
+      const bp = en.entity.getPosition();
+      return test(bp.x, bp.z, 0.5) && hasLos(player, en);
+    });
+  }
+
   function confront(en) {
     if (!en || !en.alive || inCombat || gameOver) return;
     pendingAction = null;
@@ -903,6 +995,12 @@ function startGame(level) {
   const sightClear = (x, z) => grid.terrainOpen(x, z) && !runtime.isSmoke(x, z);
   // Throws sail over chest-high partitions but not closed doors (grid.sightOpen).
   const hasLos = (a, b) => segmentClear(sightClear, a.x, a.z, b.x, b.z, grid.sightOpen);
+  // The same sight line WITHOUT the smoke term. Whether a coworker can take
+  // part in a fight is a question about walls and doors - permanent things -
+  // not about a cloud that clears in two turns. Used to pick the engaged set,
+  // where being briefly hazed must not decide who is in the fight.
+  const canTakePart = (a, b) =>
+    segmentClear(grid.terrainOpen, a.x, a.z, b.x, b.z, grid.sightOpen);
   // The shared rule (stats.js), bound to the leader. A declaration, not a
   // const: the hotbar builder reads it and runs from paths that fire before
   // this point in the closure body.
@@ -920,6 +1018,18 @@ function startGame(level) {
     if (seen && seen.key === key) return seen.ok;
     const ok = !!bestApproachPath(en.x, en.z);
     approachCache.set(en, { key, ok });
+    return ok;
+  }
+  // The same question for a weapon with reach: can the leader WALK somewhere the
+  // shot is on? Cached on the same terms, with `range` in the key because two
+  // weapons ask different questions about the same pair of tiles.
+  const firingCache = new Map(); // enemy -> { key, ok }
+  function canWalkIntoRange(en, range) {
+    const key = `${Math.round(player.x)},${Math.round(player.z)},${en.x},${en.z},${range},${approachEpoch}`;
+    const seen = firingCache.get(en);
+    if (seen && seen.key === key) return seen.ok;
+    const ok = !!bestFiringPath(en.x, en.z, range);
+    firingCache.set(en, { key, ok });
     return ok;
   }
   // Out of combat there's no AP budget, but the affordances still have to
@@ -942,7 +1052,11 @@ function startGame(level) {
       // passes on a route it hasn't taken yet - combat's opener walks it in.
       const shot = cheb(player, en) <= range && hasLos(player, en);
       if (a.ammoCost) return shot && (sheet?.paper || 0) >= throwAmmoCost(id);
-      return shot || canApproach(en);
+      // A weapon walks in to a FIRING position, not to their elbow - asking
+      // canApproach here refused shots that were plainly on. This still refuses
+      // a target nobody can close with (main.js's opener guard depends on that),
+      // it just asks the question the weapon actually poses.
+      return shot || canWalkIntoRange(en, range);
     }
     if (a.type === 'shove') return playerReaches(en, REACH.SHOVE);
     return playerReaches(en) || canApproach(en);
@@ -994,10 +1108,36 @@ function startGame(level) {
   // Which party member owns this actor, if any.
   const memberOf = (actor) => party?.members.find((m) => m.actor === actor) || null;
 
+  // Land a friendly verb on a colleague OUT of combat. There is no AP out here -
+  // the same reason a pocket item is free between fights - so this spends the
+  // action's `uses` if it rations itself and nothing otherwise. Only the purge
+  // payload is honoured: a heal is already refused out here by
+  // combatOnlyReason ("heal from your pockets"), and keeping this to one
+  // payload means it cannot quietly become a second, cheaper buff path.
+  function oocFriendlyOn(id, m) {
+    const a = ACTIONS[id];
+    const carrying = statusList(m.sheet).length;
+    if (!a.purge) { ui.say(`${a.label} is for a fight.`); return; }
+    if (!carrying) {
+      ui.say(`${m.sheet.name} is running clean. Nothing to clear.`);
+      return;
+    }
+    approachAndDo(m.actor.x, m.actor.z, () => {
+      m.sheet.statuses = {};
+      armedOoc = null;
+      hotbar?.setArmed(null);
+      ui.say(`You power-cycle ${m.sheet.name}. Everything they were carrying clears.`);
+      paintHud(sheet); // the leader's card, for a self-cast
+      partyBarKey = ''; // and the roster bar re-renders next frame
+    });
+  }
+
   // --- left-click verb dispatch (Divinity-style: the target picks the verb) ---
   function attackOrConfront(en) {
     const a = armedOoc && ACTIONS[armedOoc];
-    if (a && (a.type === 'attack' || a.type === 'shove')) engageWithAction(en, armedOoc);
+    if (a && (a.type === 'attack' || a.type === 'shove' || a.type === 'purge')) {
+      engageWithAction(en, armedOoc);
+    }
     else confront(en);
   }
   // Act on the interactable ENTITY under the cursor. Returns true if handled.
@@ -1008,6 +1148,16 @@ function startGame(level) {
     if (kind === 'party') {
       const m = memberOf(ref);
       if (!m) return false;
+      // An ARMED friendly verb owns the click, ahead of every body verb below.
+      // Without this the click fell straight through to "switch to them", so a
+      // power aimed at a colleague out of combat did nothing but hand them the
+      // reins - there was no way to clear a teammate's bleed outside a fight at
+      // all. Combat has had this gate all along (armedIsFriendly); exploration
+      // simply never grew one.
+      if (armedOoc && aimsAtAlly(ACTIONS[armedOoc]) && m.sheet.hp > 0) {
+        oocFriendlyOn(armedOoc, m);
+        return true;
+      }
       if (m.sheet.hp <= 0) { approachAndDo(ref.x, ref.z, () => helpUp(m)); return true; }
       if (m === partyLeader(party)) return false; // your own body: a ground click
       // Talk only to somebody who HAS something to say - a recruited companion
@@ -1168,7 +1318,11 @@ function startGame(level) {
   function combatOnlyReason(id) {
     const a = ACTIONS[id];
     const t = a?.type;
-    if (!a || t === 'attack' || t === 'shove' || t === 'summon') return null;
+    // A purge is at its MOST useful out here: bleed runs on a step clock, so
+    // between fights is exactly when you want it gone. Gating it to combat
+    // would have made IT Support's identity verb unusable in the situation it
+    // most obviously answers.
+    if (!a || t === 'attack' || t === 'shove' || t === 'summon' || t === 'purge') return null;
     if (t === 'heal') return `${a.label} is for a fight - out here, heal from your pockets.`;
     return `${a.label} only means something once someone is swinging at you.`;
   }
@@ -1499,7 +1653,21 @@ function startGame(level) {
     for (const m of party?.members || []) {
       if (!m.actor?.entity || m.sheet.hp <= 0) continue;
       const en = enemies.find((e) =>
-        e.alive && Math.abs(m.actor.x - e.x) <= 1 && Math.abs(m.actor.z - e.z) <= 1);
+        e.alive && Math.abs(m.actor.x - e.x) <= 1 && Math.abs(m.actor.z - e.z) <= 1
+        // Adjacency THROUGH a sealed doorway is not adjacency. Chebyshev alone
+        // started fights across one - and because doors cannot be opened in
+        // combat and closed doors block sight, the coworker on the far side
+        // could then never be reached, shot or seen, while victory still
+        // required them dead. The fight could not end.
+        //
+        // The test is the SAME one that picks the engaged set, deliberately:
+        // "can these two take part in a fight together" should have one answer,
+        // and using movement's stepOpen here asked a different question. That
+        // rule needs all four edges around a diagonal corner open, which is
+        // right for walking a body through and wrong for two people swinging at
+        // each other past the end of a partition - so it refused fights that
+        // plainly should have started.
+        && canTakePart(m.actor, e));
       if (en) return { en, member: m };
     }
     return null;
@@ -1614,11 +1782,30 @@ function startGame(level) {
           grid.setType(x, z, tileType);
           scene.addSurfaceVisual(x, z, tileType);
           if (turns > 0) tempSurfaces.set(x + ',' + z, { left: turns, type: tileType });
+          // Ammo comes from the WORLD, never from a power. A paper-laying verb
+          // that could be harvested afterwards is an AP-to-ammo converter, and
+          // expiry alone does not prevent it: harvesting is refused in combat
+          // but legal the moment a fight ends, and the litter clock runs at
+          // OOC_TURN_SECONDS, so a cone laid late in a fight is still on the
+          // floor for seconds after it - one click takes the whole patch.
+          // Marking the tile picked-clean at birth closes that without touching
+          // the surface itself: the sheets still burn, still cut, still fuel a
+          // fire. `forgetPaper` drops the mark when the tile reverts to bare
+          // floor, so a WORLD drift laid there later is gatherable again.
+          if (tileType === 'paper') loot.markPaperSpent?.(x, z);
           return true;
         },
         // Anyone alive is a legal target - bystanders outside the initial
         // engagement get pulled in when attacked.
-        liveEnemies: () => enemies.filter((e) => e.alive),
+        // A BORROWED coworker is off this list for the duration (TODO Phase 8).
+        // Every AI target picker reads it, so dropping them here is the single
+        // edit that turns their own colleagues against them - no side flag
+        // threaded through the targeting code, because there is no side flag in
+        // this engine to thread.
+        liveEnemies: () => enemies.filter((e) => e.alive && !e.charmed),
+        // Combat owns WHEN a body changes hands; main.js owns the lists, the
+        // same division summons already use.
+        setCharmed: (unit, on) => { unit.charmed = !!on; },
         // The tiles a summon aimed at (tx,tz) would actually land on - the
         // placement preview draws these rings, and spawnSummon fills them, so
         // what you see is where they stand.
@@ -1688,7 +1875,11 @@ function startGame(level) {
     if (!hit) return;
     const { en, member } = hit;
     const engaged = enemies.filter((e) =>
-      e.alive && Math.max(Math.abs(e.x - member.actor.x), Math.abs(e.z - member.actor.z)) <= ENGAGE_RADIUS);
+      e.alive && Math.max(Math.abs(e.x - member.actor.x), Math.abs(e.z - member.actor.z)) <= ENGAGE_RADIUS
+      // ...and who can actually take part. Somebody inside the radius but
+      // sealed off joins a fight they can never act in, and victory needs
+      // every engaged coworker down - so the fight would never end.
+      && canTakePart(member.actor, e));
     beginCombat({ engaged, primary: en });
   }
 
@@ -1707,6 +1898,14 @@ function startGame(level) {
         ui.say(a.ammoCost ? 'No line for that throw from here.' : 'No shot at them from here.');
         return;
       }
+    } else if (a.cone) {
+      // A cone fires from where you STAND: its reach is cone.range with a
+      // clear line, not arm's length. Falling through to the melee test below
+      // refused a wedge that plainly covered them, and then walked you in.
+      if (cheb(player, en) > a.cone.range || !hasLos(player, en)) {
+        ui.say(`They are not in the way of that ${a.label.toLowerCase()}.`);
+        return;
+      }
     } else if (a.type === 'shove') {
       if (!playerReaches(en, REACH.SHOVE)) { ui.say('Too far to shove. Walk your feelings over first.'); return; }
     } else if (!playerReaches(en) && !bestApproachPath(en.x, en.z)) {
@@ -1714,7 +1913,8 @@ function startGame(level) {
       return;
     }
     const engaged = enemies.filter((e) =>
-      e.alive && Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= ENGAGE_RADIUS);
+      e.alive && Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= ENGAGE_RADIUS
+      && canTakePart(player, e)); // same rule as checkCombatTrigger - see there
     if (!engaged.includes(en)) engaged.push(en);
     beginCombat({ engaged, primary: en, opening: { actionId, target: en } });
   }
@@ -1858,12 +2058,14 @@ function startGame(level) {
           // puddle away from death. The downed get carried and come to on
           // the landing.
           for (const m of party.members) {
-            m.sheet.hp = Math.min(m.sheet.maxHp, Math.max(m.sheet.hp, 0) + STAIRWELL_HEAL);
+            m.sheet.hp = stairwellHeal(m.sheet, STAIRWELL_HEAL);
           }
           localStorage.setItem(PROGRESS_KEY, JSON.stringify(serializeProgress(party, level.next)));
           ui.showFloorClear({ nextName: LEVELS[level.next].name }, () => location.reload());
         } else {
-          clearProgress();
+          // Same rule as loseGame: finishing a PLAYTEST level is not finishing
+          // a campaign run, so it must not clear the campaign save either.
+          if (!playtesting) clearProgress();
           ui.showWinScreen({ level: ms.level, defeated: enemies.filter((e) => !e.alive).length });
         }
         return;
@@ -2020,6 +2222,25 @@ function startGame(level) {
       // a better one.
       if (armedOoc && ACTIONS[armedOoc].type === 'summon') {
         if (tile) postSummonAt(armedOoc, tile.x, tile.z);
+        return;
+      }
+      // A CONE is aimed at a DIRECTION, so the ground is its natural target -
+      // and the ground branch only ever handled summons, so aiming Bulk Mail at
+      // the floor silently walked you there instead. It opens the fight on
+      // whoever the wedge actually catches, which is the same rule the preview
+      // just drew.
+      if (armedOoc && ACTIONS[armedOoc].cone && point) {
+        const a = ACTIONS[armedOoc];
+        const test = coneFrom(a, { x: player.x, z: player.z }, point.x, point.z);
+        const caught = test ? coneCatches(test) : [];
+        if (!caught.length) {
+          ui.say(`Nobody is in the way of that ${a.label.toLowerCase()}.`);
+          return;
+        }
+        // The nearest one is the primary; the rest join through the engage
+        // radius exactly as they would for any other opener.
+        caught.sort((p, q) => cheb(player, p) - cheb(player, q));
+        engageWithAction(caught[0], armedOoc);
         return;
       }
       // Out of combat, the interactable ENTITY under the cursor wins over the
@@ -2252,6 +2473,17 @@ function startGame(level) {
       // its arrivals would fill, and why they couldn't. Null unless a summon is
       // armed with the cursor on the floor - the rings key off this one answer,
       // which is the same one the click runs (summonDropProblem).
+      // The wedge an armed cone would cover right now, or null. Same geometry
+      // combat uses, from the same pure function - only the origin differs.
+      coneAim: () => {
+        if (!armedOoc || inCombat || !oocAim || !sheet) return null;
+        const a = ACTIONS[armedOoc];
+        if (!a.cone) return null;
+        const test = coneFrom(a, { x: player.x, z: player.z }, oocAim.x, oocAim.z);
+        if (!test) return null;
+        const caught = coneCatches(test);
+        return { line: conePolyline(a, test), caught: caught.map((e) => [e.x, e.z]), usable: !!caught.length };
+      },
       summonDrop: () => {
         if (!armedOoc || inCombat || !oocAim) return null;
         const a = ACTIONS[armedOoc];
@@ -2546,6 +2778,7 @@ function startGame(level) {
       // attack, shove and throw) or a spot on the floor (a summon).
       if (show && armedOoc) {
         if (ACTIONS[armedOoc].type === 'summon') hover.drawSummonDrop();
+        else if (ACTIONS[armedOoc].cone) hover.drawConeAim();
         else hover.drawArmedTargets();
       }
     }
@@ -2629,12 +2862,18 @@ function startGame(level) {
   // mid-campaign reload skips the picker entirely.
   ui.showGameMenu([
     {
+      // This IS the "new character" escape hatch CHARACTER_PLAN #17 asked for.
+      // A separate menu item was drafted and then dropped: clearing progress
+      // drops the character with it - the sheet lives in the save - so the two
+      // would have been byte-identical actions under different labels, which is
+      // worse than one honest one. A meaningful "same character, floor one"
+      // needs run state to separate from character state first.
       id: 'menu-restart',
       label: 'Restart run',
       action: () => {
         clearProgress();
         localStorage.removeItem(STASH_KEY);
-        location.hash = '';
+        location.hash = ''; // drop any #class= express lane, or it skips the desk
         location.reload();
       },
     },
@@ -2655,8 +2894,24 @@ function startGame(level) {
     for (const s of restoredProgress.sheets.slice(1)) addMember(party, s);
     party.active = restoredProgress.active;
     party.cash = restoredProgress.cash || 0; // the purse rides the stairwell too
-    partyLeader(party).actor = player;
-    sheet = partyLeader(party).sheet;
+    // The member on point may be a COMPANION - you can take the stairs with one
+    // leading. Handing them the bare PlayerActor dropped their registry `def`,
+    // and with it their dialogue and their examine line; the loss was permanent
+    // rather than cosmetic, because switchLeader reuses whatever actor a member
+    // already carries, so they never got a proper body again for the rest of
+    // the run. Embody the active member as what they actually are, and let
+    // `player` point at that - which is all `player` has ever meant.
+    const onPoint = partyLeader(party);
+    const onPointDef = COMPANIONS[onPoint.sheet.companionId];
+    if (onPointDef) {
+      const body = new CompanionActor(player.x, player.z, onPoint.sheet.companionId, onPointDef);
+      body.recruited = true; // they are already in the party; they walked here
+      onPoint.actor = body;
+      player = body;
+    } else {
+      onPoint.actor = player;
+    }
+    sheet = onPoint.sheet;
     spawnPlayerModel();
     for (const m of party.members) {
       if (m.actor) continue; // the leader, already placed
@@ -2680,7 +2935,7 @@ function startGame(level) {
       m.actor = comp;
       placeModel(app, `assets/characters/${m.sheet.model}.glb`, spot.x, spot.z, {
         lift, rotY: 90, animate: true,
-        onReady: (e) => { dressUp(e, comp, sheetLook(m.sheet), m.sheet.model); picking.register(e, 'party', comp); },
+        onReady: (e) => { dressUp(e, comp, lookOf(m.sheet), m.sheet.model); picking.register(e, 'party', comp); },
       });
     }
     loot.refreshPanel(sheet);
@@ -2693,7 +2948,12 @@ function startGame(level) {
     // slides, which under CI's software GL costs ~30s PER SLIDE, so a test
     // that wanted the fifth class paid minutes before it began. An unknown or
     // unplayable id falls through to the normal picker.
-    onClassPicked(preselectedClass());
+    //
+    // It skips CREATION too, not just the carousel - straight to beginRun with
+    // an untouched draft. That is byte-for-byte the character this hash always
+    // produced, so the whole existing suite keeps booting exactly as it did,
+    // and the one place that wants to exercise creation asks for it by name.
+    beginRun(createCharacter(createDraft(preselectedClass())));
   } else {
     // The carousel: frame the spawn tile close and head-on (eye-ish level,
     // aimed at the chest) where previewClass parades the browsed candidate;
@@ -2720,7 +2980,16 @@ function startGame(level) {
     // re-render - ~45 SECONDS per test under CI's software GL, in every single
     // test. One apply does the same job.
     zoomOut: () => controls.setView({ dist: 1e4 }),
+    // The class registry, read-only. Exposed so a test can assert a created
+    // character AGAINST its class headline rather than restating the numbers -
+    // a test that hardcodes 6 breaks on every balance pass for no reason.
+    get classes() { return CLASSES; },
     get playerTile() { return { x: player.x, z: player.z }; },
+    // Is the leader mid-walk? The suite's honest alternative to sleeping: a
+    // spec that wants "and then nothing happens" can poll for stillness rather
+    // than guess a duration, which under software GL is reliably either too
+    // short or wasteful on different runs.
+    get playerMoving() { return !!player?.moving; },
     get playerPos() {
       const p = player.entity?.getPosition();
       return p ? { x: p.x, z: p.z } : { x: player.x, z: player.z };
@@ -2806,7 +3075,10 @@ function startGame(level) {
         // moving at the top of its beat is what stops its turn from ending
         // (combat.js's driver returns early on it), so it is the one field
         // that separates "the fight is slow" from "the fight is stuck".
+        // `charmed` distinguishes "alive" from "hostile", which is exactly the
+        // distinction a victory test has to make - so the suite can see it.
         return { name: e.def.name, x: e.x, z: e.z, px: p?.x, pz: p?.z, alive: e.alive, reachable,
+          charmed: !!e.charmed,
           moving: !!e.moving, level: e.def.level || 1, hp: e.hp, maxHp: e.maxHp };
       });
     },

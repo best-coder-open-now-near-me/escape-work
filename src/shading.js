@@ -2,7 +2,11 @@
 // material construction, and the camera post stack. Everything that decides
 // how a pixel shades lives here; what gets drawn lives in tile-renderer.js /
 // models.js; where it goes lives in scene.js.
-const pc = window.pc;
+// Resolved LAZILY rather than read at import, so this module - and the chain
+// that imports it, which reaches actors.js - can be loaded outside a browser.
+// Every use below is a genuine engine call, so a getter costs nothing at run
+// time and buys the pure logic downstream a way to be unit-tested at all.
+const pc = new Proxy({}, { get: (_, k) => window.pc[k] });
 
 // Cel shading: replace the lambert term so each light's contribution snaps to
 // a few discrete bands (with a whisker of smoothstep so band edges don't

@@ -14,6 +14,7 @@
 import { TILE_TYPES } from './data/tiles.js';
 import { SURFACES } from './data/surfaces.js';
 import { NPCS } from './data/npcs.js';
+import { ENEMY_TYPES } from './data/enemies.js';
 import { COMPANIONS } from './data/companions.js';
 
 // Old saves/exports may reference renamed tile types. Exported so the editor
@@ -86,7 +87,18 @@ export function parseLevel(level) {
         if (actor === 'player') playerSpawn = { x, z };
         else if (COMPANIONS[actor]) companionSpawns.push({ type: actor, x, z });
         else if (NPCS[actor]) npcSpawns.push({ type: actor, x, z });
-        else enemySpawns.push({ type: actor, x, z });
+        // Anything left MUST be a known enemy archetype. It used to fall
+        // through unchecked, so a typo in a legend produced a spawn for a type
+        // that does not exist - which surfaces much later as an empty tile, or
+        // as a crash deep in actor construction with nothing pointing back at
+        // the level file. Named, like the tile-type error below, because the
+        // useful part is which char in which level.
+        else if (ENEMY_TYPES[actor]) enemySpawns.push({ type: actor, x, z });
+        else {
+          throw new Error(
+            `Level "${level.name}": unknown actor "${actor}" for char "${ch}" - `
+            + 'not "player", a companion, an NPC, or an enemy type');
+        }
         row.push('floor');
         continue;
       }

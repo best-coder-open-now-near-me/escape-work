@@ -282,6 +282,25 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
         ring(pos.x, pos.z, 0.5, queries.armedTargetOk(armed, en) ? RING_OK : RING_FAR);
       }
     },
+    // A CONE armed out of combat aims at the floor too, and until now drew
+    // nothing at all: the geometry lived inside combat's closure, so aiming one
+    // outside a fight showed no wedge and a click just walked you there. The
+    // shape comes from the host (queries.coneAim), which computes it with the
+    // same powers.js function combat draws in a fight - so the two previews
+    // cannot disagree about what a cone covers.
+    drawConeAim() {
+      const aim = queries.coneAim?.();
+      if (!aim) return;
+      const y = 0.14;
+      const color = aim.usable ? RING_OK : RING_FAR;
+      for (let i = 1; i < aim.line.length; i++) {
+        app.drawLine(
+          new pc.Vec3(aim.line[i - 1][0], y, aim.line[i - 1][1]),
+          new pc.Vec3(aim.line[i][0], y, aim.line[i][1]), color);
+      }
+      // ...and ring whoever it would actually catch, the same as in combat.
+      for (const [x, z] of aim.caught) ring(x, z, 0.5, RING_OK);
+    },
     // A SUMMON armed out of combat aims at the floor, so there is no coworker
     // to ring - the spot is the target. Green on the tiles the arrivals would
     // actually stand on, red on the aimed tile alone when the spot is unusable:

@@ -1,6 +1,7 @@
 // Unit tests for the status-effect runtime - pure logic, no PlayCanvas, no DOM.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { STATUSES } from '../../src/data/statuses.js';
 import {
   applyStatus, hasStatus, statusLeft, statusFx,
   tickTurn, tickStep, clearStatuses, removeStatus, statusList,
@@ -276,3 +277,4 @@ test('a status map written before severity existed reads as full strength', () =
   assert.equal(statusSeverity(legacy, 'blinded'), 1);
   assert.equal(statusFx(legacy).accMod, -0.3);
 });
+

@@ -5,8 +5,9 @@ import {
   createParty, leader, addMember, livingMembers, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP, SAVE_VERSION, addCash,
 } from '../../src/party.js';
-import { createSheet, spendClassPoint, damageBonus, PROGRESSION, EQUIP_SLOTS } from '../../src/stats.js';
+import { createSheet, spendClassPoint, damageBonus, gainXp, PROGRESSION, EQUIP_SLOTS } from '../../src/stats.js';
 import { COMPANIONS } from '../../src/data/companions.js';
+import { createDraft, createCharacter } from '../../src/creation.js';
 import { CLASSES } from '../../src/data/classes.js';
 
 test('createParty starts with the leader as its only member', () => {
@@ -90,11 +91,14 @@ test('the purse is party state, not sheet state - it survives a leader switch', 
   for (const m of party.members) assert.equal(m.sheet.cash, undefined);
 });
 
-test('v6 round-trips the purse', () => {
+test('a save round-trips the purse', () => {
   const party = createParty(createSheet('office-drone'));
   addCash(party, 34);
   const saved = JSON.parse(JSON.stringify(serializeProgress(party, 'level2')));
-  assert.equal(saved.version, 6);
+  // Against the constant, not a literal: this test is about the PURSE, and
+  // pinning the number here meant every later version bump broke a test that
+  // has nothing to do with versioning.
+  assert.equal(saved.version, SAVE_VERSION);
   assert.equal(saved.cash, 34);
   assert.equal(parseProgress(saved).cash, 34);
 });
@@ -297,4 +301,101 @@ test('parseProgress rejects records in no known format', () => {
   assert.equal(parseProgress('nope'), null);
   assert.equal(parseProgress({}), null);
   assert.equal(parseProgress({ levelId: 'level1', party: [] }), null);
+});
+
+// --- xp/xpNext migration (TODO Phase 0) ------------------------------------
+// A save from before the xp fields existed could never level again: gainXp
+// opens with `sheet.xp += amount`, so an undefined xp turned NaN on the first
+// point of experience and `NaN >= undefined` stayed false forever after.
+const savedAs = (sheets, version) => ({ version, levelId: 'level1', party: sheets, active: 0 });
+
+test('parseProgress backfills xp/xpNext on a save that predates them', () => {
+  const sheet = createSheet('office-drone');
+  delete sheet.xp;
+  delete sheet.xpNext;
+  const [migrated] = parseProgress(savedAs([sheet], 5)).sheets;
+  assert.equal(migrated.xp, 0);
+  assert.equal(migrated.xpNext, PROGRESSION.XP_BASE);
+  assert.ok(gainXp(migrated, PROGRESSION.XP_BASE), 'a migrated sheet can promote again');
+});
+
+test('a migrated veteran gets the threshold for ITS level, not the level-1 one', () => {
+  // Level a real sheet up so the expectation is whatever the live curve
+  // produces - the test must not restate the arithmetic it is checking.
+  const grown = createSheet('office-drone');
+  while (grown.level < 5) gainXp(grown, grown.xpNext);
+  const expected = grown.xpNext;
+
+  const stale = createSheet('office-drone');
+  stale.level = 5;
+  delete stale.xp;
+  delete stale.xpNext;
+  const [migrated] = parseProgress(savedAs([stale], 5)).sheets;
+
+  assert.equal(migrated.xpNext, expected);
+  // The bug this guards: defaulting to XP_BASE would promote a veteran on
+  // their next scrap of xp, and keep promoting them all the way back up.
+  assert.equal(gainXp(migrated, 1), false, 'one point of xp must not promote a level 5');
+});
+
+test('a poisoned xp is repaired whether it survived as NaN or as null', () => {
+  // NaN is what the old gainXp left in memory; JSON.stringify writes it as
+  // null, so a real reload hands back null. `??=` would cover the null and
+  // leave the NaN - Number.isFinite covers both, which is why it is used.
+  for (const poison of [NaN, null]) {
+    const sheet = createSheet('office-drone');
+    sheet.xp = poison;
+    sheet.xpNext = poison;
+    const [migrated] = parseProgress(savedAs([sheet], SAVE_VERSION)).sheets;
+    assert.equal(migrated.xp, 0, `xp repaired from ${String(poison)}`);
+    assert.equal(migrated.xpNext, PROGRESSION.XP_BASE, `xpNext repaired from ${String(poison)}`);
+  }
+});
+
+// --- creation fields (CHARACTER_PLAN M3, save v7) --------------------------
+test('a v6 save loads with creation defaults and is otherwise untouched', () => {
+  const sheet = createSheet('office-drone');
+  delete sheet.pronouns; // a save written before creation existed
+  const [migrated] = parseProgress(savedAs([sheet], 6)).sheets;
+  assert.equal(migrated.pronouns, 'they', 'the house default, not a guess');
+  // Additive means additive: nothing else moved.
+  assert.equal(migrated.name, sheet.name);
+  assert.equal(migrated.className, sheet.className);
+  assert.deepEqual(migrated.attr, sheet.attr);
+});
+
+test('a chosen name and pronouns survive a save round trip', () => {
+  const draft = createDraft('mail-room');
+  draft.name = 'Dana';
+  draft.pronouns = 'she';
+  const created = createCharacter(draft);
+  const [loaded] = parseProgress(savedAs([created], SAVE_VERSION)).sheets;
+  assert.equal(loaded.name, 'Dana', 'normalizeSheet must not re-derive a typed name');
+  assert.equal(loaded.pronouns, 'she');
+});
+
+test('a chosen rig survives a save; an unknown one degrades to the class body', () => {
+  const draft = createDraft('office-drone');
+  draft.rig = 'executive';
+  const created = createCharacter(draft);
+  const [loaded] = parseProgress(savedAs([created], SAVE_VERSION)).sheets;
+  assert.equal(loaded.rig, 'executive', 'normalizeSheet must not overwrite a deliberate choice');
+  assert.equal(loaded.model, 'executive');
+
+  // A rig retired from the wardrobe must not leave a save naming a missing
+  // .glb - the old re-derive rule guaranteed that, and validate-or-fall-back
+  // keeps the guarantee while no longer clobbering real choices.
+  const stale = createCharacter(createDraft('office-drone'));
+  stale.rig = 'rig-that-was-removed';
+  stale.model = 'rig-that-was-removed';
+  const [repaired] = parseProgress(savedAs([stale], SAVE_VERSION)).sheets;
+  assert.equal(repaired.rig, undefined);
+  assert.equal(repaired.model, CLASSES['office-drone'].model);
+});
+
+test('a hand-edited build is clamped on load rather than handed to the rig', () => {
+  const sheet = createCharacter(createDraft('office-drone'));
+  sheet.look = { build: { legs: 40, torso: 40 } };
+  const [loaded] = parseProgress(savedAs([sheet], SAVE_VERSION)).sheets;
+  assert.ok(loaded.look.build.legs <= 2.05 && loaded.look.build.torso <= 1.4);
 });

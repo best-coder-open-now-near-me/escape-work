@@ -140,3 +140,46 @@ test('setType recomputes conduction pools', () => {
   assert.equal(g.isElectrified(1, 0), false);
   assert.equal(g.isElectrified(2, 0), false);
 });
+
+// The combat trigger leans on this pairing (TODO Phase 0, the door deadlock):
+// Chebyshev adjacency is NOT sufficient to start a fight, because a sealed
+// doorway is adjacent and uncrossable at the same time. Before the fix the
+// trigger tested distance alone, so a coworker behind a closed door joined a
+// fight they could never act in - and victory needs every engaged coworker
+// down, so the fight could not end. Both halves of the fix read these two
+// predicates, so both are pinned here.
+test('a closed door leaves an adjacent pair uncrossable AND blind', () => {
+  const g = parseLevel(level(['..', '..'], { doors: ['V 1 0 1'] }));
+  // Two walkable tiles either side of the door...
+  assert.equal(g.terrainOpen(0, 0), true);
+  assert.equal(g.terrainOpen(1, 0), true);
+  // ...that Chebyshev happily calls adjacent...
+  assert.equal(Math.max(Math.abs(0 - 1), Math.abs(0 - 0)) <= 1, true);
+  // ...but which nothing can cross (the new trigger test)...
+  assert.equal(g.stepOpen(0, 0, 1, 0), false);
+  // ...and which cannot see each other (the new engaged-set filter).
+  assert.equal(g.sightOpen(0, 0, 1, 0), false);
+
+  // Opening it restores both, so the fix cannot wall off a legitimate fight.
+  g.setDoorOpen('v:1,0', true);
+  assert.equal(g.stepOpen(0, 0, 1, 0), true);
+  assert.equal(g.sightOpen(0, 0, 1, 0), true);
+});
+
+// An unknown actor char used to fall through to `enemySpawns` unchecked, so a
+// typo in a legend produced a spawn for a type that does not exist - surfacing
+// much later as an empty tile, or as a crash deep in actor construction with
+// nothing pointing back at the level file (TODO Phase 6).
+test('parseLevel names an unknown actor rather than spawning a ghost', () => {
+  assert.throws(
+    () => parseLevel(level(['@X'], { actors: { '@': 'player', X: 'not-a-real-type' } })),
+    /unknown actor "not-a-real-type" for char "X"/,
+    'the error has to name the id AND the char, or it does not help');
+});
+
+test('parseLevel still accepts every real kind of actor', () => {
+  const g = parseLevel(level(['@M'], { actors: { '@': 'player', M: 'manager' } }));
+  assert.deepEqual(g.playerSpawn, { x: 0, z: 0 });
+  assert.equal(g.enemySpawns.length, 1);
+  assert.equal(g.enemySpawns[0].type, 'manager');
+});

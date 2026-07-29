@@ -21,6 +21,15 @@ function overlay(id, inner) {
   return div;
 }
 
+// Escape a value before it is interpolated into an innerHTML template. Most of
+// what these screens print is authored registry text, but `sheet.name` is not:
+// it is about to become player-typed at character creation, and a name is
+// rendered on the level-up card, the party bar and the résumé. Escaping at the
+// interpolation site means the rule holds wherever the string came from, rather
+// than depending on every future caller having sanitised it first.
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 const button = (id, label) =>
   `<button id="${id}" style="padding:10px 26px; border-radius:8px; border:1px solid #3a3a52;
     background:#2e2e46; color:#f0f0f5; font:inherit; cursor:pointer;">${label}</button>`;
@@ -80,7 +89,7 @@ export function showLevelUpScreen(sheet, { onSpend, onLearn, nodesFor, onDone } 
         padding:22px 26px; min-width:380px; max-width:460px; max-height:86vh; overflow:auto;
         box-shadow:0 12px 40px rgba(0,0,0,.6);">
         <div style="font-weight:700; letter-spacing:1px; color:#8adf76;">LEVEL UP</div>
-        <div style="opacity:.8; margin:2px 0 12px;">${sheet.name} · Level ${sheet.level}</div>
+        <div style="opacity:.8; margin:2px 0 12px;">${esc(sheet.name)} · Level ${esc(sheet.level)}</div>
         <div style="font-size:12px; opacity:.75; margin-bottom:6px;">Attribute points:
           <b id="lvlup-points">${ap}</b></div>
         <div id="lvlup-rows" style="display:flex; flex-direction:column; gap:8px;"></div>
@@ -99,9 +108,9 @@ export function showLevelUpScreen(sheet, { onSpend, onLearn, nodesFor, onDone } 
         padding: '7px 10px', borderRadius: '7px', background: '#2a2a3e',
       });
       row.innerHTML = `<div style="flex:1;">
-        <div style="font-weight:600;">${info.label}
-          <span style="opacity:.85;">${sheet.attr?.[info.key] ?? 0}</span></div>
-        <div style="opacity:.6; font-size:12px;">${info.blurb}</div></div>`;
+        <div style="font-weight:600;">${esc(info.label)}
+          <span style="opacity:.85;">${esc(sheet.attr?.[info.key] ?? 0)}</span></div>
+        <div style="opacity:.6; font-size:12px;">${esc(info.blurb)}</div></div>`;
       const plus = document.createElement('button');
       plus.id = 'lvlup-attr-' + info.key;
       plus.textContent = '+';
@@ -128,8 +137,8 @@ export function showLevelUpScreen(sheet, { onSpend, onLearn, nodesFor, onDone } 
           opacity: n.taken ? '.6' : '1',
         });
         row.innerHTML = `<div style="flex:1;">
-          <div style="font-weight:600;">${n.name}</div>
-          <div style="opacity:.6; font-size:12px;">${n.desc}</div></div>`;
+          <div style="font-weight:600;">${esc(n.name)}</div>
+          <div style="opacity:.6; font-size:12px;">${esc(n.desc)}</div></div>`;
         const btn = document.createElement('button');
         btn.id = 'lvlup-node-' + n.id;
         Object.assign(btn.style, BUTTON_CHROME, { padding: '5px 10px', borderRadius: '7px', fontSize: '12px' });
@@ -215,16 +224,16 @@ export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
   const resumeHtml = (id) => {
     const cls = classes[id];
     return `
-      <div style="font-size:17px; font-weight:700; letter-spacing:.5px;">${cls.name}</div>
+      <div style="font-size:17px; font-weight:700; letter-spacing:.5px;">${esc(cls.name)}</div>
       <div style="font-size:11px; color:#8a8577; margin-top:2px;">Applying for: Former Employee</div>
       ${section('EXPERIENCE')}
-      <div>${cls.experience}</div>
+      <div>${esc(cls.experience)}</div>
       ${section('SKILLS')}
       <div style="line-height:1.55;">
-        ${cls.actions.map((a) => '&bull; ' + actions[a].label).join('<br>')}
+        ${cls.actions.map((a) => '&bull; ' + esc(actions[a].label)).join('<br>')}
       </div>
       ${section('TALENTS')}
-      <div>${cls.talent ? `<b>${cls.talent.name}.</b> ${cls.talent.blurb}` : '&mdash;'}</div>
+      <div>${cls.talent ? `<b>${esc(cls.talent.name)}.</b> ${esc(cls.talent.blurb)}` : '&mdash;'}</div>
       <div style="position:absolute; top:10px; right:12px; font:700 9px system-ui, sans-serif;
         letter-spacing:1px; color:#b0392e; border:1px solid #b0392e; border-radius:2px;
         padding:2px 5px; transform:rotate(6deg); opacity:.85;">CONFIDENTIAL</div>`;

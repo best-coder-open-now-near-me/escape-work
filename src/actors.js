@@ -7,16 +7,35 @@
 // procedural layer on the model child adds the attack lunge push, hit
 // flinches and death topples. EnemyActor adds wander AI on top. New actor
 // kinds extend GridActor the same way.
-const pc = window.pc;
 import { rollLoot } from './data/items.js';
 import { unitCombat } from './stats.js';
-import { GUM } from './data/surfaces.js';
 import { applyStatus, hasStatus, statusFx } from './statuses.js';
+import { cloneMaterials, tintMaterials } from './models.js';
+
+// The engine handle, resolved LAZILY rather than read at module scope.
+//
+// `const pc = window.pc` ran on import, which meant this module could not be
+// imported at all without a browser - so the movement state machine, the one
+// piece of logic here that is pure arithmetic over a path, had no way to be
+// unit-tested. Nothing about it needs a renderer; it just lived next to code
+// that did. Reading through a function defers the dependency to the first call
+// that genuinely needs the engine, so `node --test` can import this and drive
+// the path logic while the rendering half simply never runs.
+const pcRuntime = () => globalThis.window?.pc;
+
+// Radians to degrees. Spelled out rather than reached for through the engine
+// (`pc.math.RAD_TO_DEG`): it is a mathematical constant, not a renderer
+// service, and reading it off the engine was one of the things keeping the
+// facing arithmetic from being testable without a browser.
+const RAD_TO_DEG = 180 / Math.PI;
 
 const wrapAngle = (a) => (((a + 180) % 360) + 360) % 360 - 180;
 const TURN_RATE = 10; // how quickly facing eases toward the heading
 const FLASH_COLOR = [0.75, 0.09, 0.05];
-const _settleQuat = new pc.Quat(); // scratch for the idle leg-settle slerp
+// Built on first use for the same reason: a module-scope `new pc.Quat()` is an
+// engine call at import time.
+let _settleQuat = null;
+const settleQuat = () => (_settleQuat ||= new (pcRuntime().Quat)());
 
 export class GridActor {
   constructor(x, z, { speed = 2.2 } = {}) {
@@ -56,33 +75,31 @@ export class GridActor {
     this.legL = entity.findByName('leg-left');
     this.legR = entity.findByName('leg-right');
     this.yaw = this.targetYaw = entity.getEulerAngles().y;
-    // Clone materials so damage flashes hit THIS character, not every
-    // character instantiated from the same .glb.
-    this.mats = [];
-    for (const rc of entity.findComponents('render')) {
-      for (const mi of rc.meshInstances) {
-        const clone = mi.material.clone();
-        clone.update();
-        mi.material = clone;
-        this.mats.push({ mat: clone, emissive: clone.emissive.clone() });
-      }
-    }
+    // Clone materials so damage flashes and tints hit THIS character, not every
+    // character instantiated from the same .glb. Shared with the picker preview
+    // (models.js), which has no actor but needs the identical rule.
+    this.mats = cloneMaterials(entity);
   }
 
   // Tint this character's own materials. Must run AFTER attach(), which clones
   // the .glb's shared materials per instance - tinting before the clone would
-  // recolour every character built from the same rig. Multiplies the diffuse,
-  // leaving emissive alone so the damage flash still works.
+  // recolour every character built from the same rig. Emissive is left alone so
+  // the damage flash still works.
+  //
+  // The multiply reads the PRISTINE diffuse, not whatever the material is
+  // currently holding. Multiplying the live value compounds: re-tinting an
+  // already-tinted body multiplies again, so clicking along a row of swatches
+  // walks it toward black instead of between colours. `attach` already keeps a
+  // per-instance baseline for this exact reason on the emissive channel; the
+  // diffuse now gets the same treatment, which is what lets a live swatch row
+  // drive this safely. Passing no rgb RESTORES the untinted body rather than
+  // doing nothing, so "none" is a reachable choice rather than a dead end.
   applyTint(rgb) {
-    if (!rgb) return;
-    for (const { mat } of this.mats) {
-      mat.diffuse.set(mat.diffuse.r * rgb[0], mat.diffuse.g * rgb[1], mat.diffuse.b * rgb[2]);
-      mat.update();
-    }
+    tintMaterials(this.mats, rgb);
   }
 
   faceToward(tx, tz) {
-    this.targetYaw = Math.atan2(tx - this.x, tz - this.z) * pc.math.RAD_TO_DEG;
+    this.targetYaw = Math.atan2(tx - this.x, tz - this.z) * RAD_TO_DEG;
   }
 
   // Ease the model's facing toward targetYaw - no more snap turns.
@@ -178,8 +195,8 @@ export class GridActor {
       const s = this.legSettle;
       s.t = Math.min(1, s.t + dt * 5); // ~0.2s to reach stance
       const k = s.t * s.t * (3 - 2 * s.t); // smoothstep - no abrupt start/stop
-      if (this.legL && s.l) this.legL.setLocalRotation(_settleQuat.slerp(s.l, pc.Quat.IDENTITY, k));
-      if (this.legR && s.r) this.legR.setLocalRotation(_settleQuat.slerp(s.r, pc.Quat.IDENTITY, k));
+      if (this.legL && s.l) this.legL.setLocalRotation(settleQuat().slerp(s.l, pcRuntime().Quat.IDENTITY, k));
+      if (this.legR && s.r) this.legR.setLocalRotation(settleQuat().slerp(s.r, pcRuntime().Quat.IDENTITY, k));
     } else {
       this.legSettle = null;
     }
@@ -273,7 +290,7 @@ export class GridActor {
         }
       } else {
         this.entity.setPosition(pos.x + (dx / d) * remaining, pos.y, pos.z + (dz / d) * remaining);
-        this.targetYaw = Math.atan2(dx, dz) * pc.math.RAD_TO_DEG;
+        this.targetYaw = Math.atan2(dx, dz) * RAD_TO_DEG;
         remaining = 0;
       }
     }
@@ -288,7 +305,7 @@ export class GridActor {
         this.slideTo = null;
       } else {
         this.entity.setPosition(pos.x + (dx / d) * remaining, pos.y, pos.z + (dz / d) * remaining);
-        this.targetYaw = Math.atan2(dx, dz) * pc.math.RAD_TO_DEG;
+        this.targetYaw = Math.atan2(dx, dz) * RAD_TO_DEG;
         remaining = 0;
       }
     }
@@ -387,6 +404,13 @@ export class EnemyActor extends GridActor {
   }
 
   takeDamage(amount) {
+    // A non-finite amount is always a bug upstream (an action with no damage
+    // dice reaching a damage roll: `rand(undefined, undefined)` is NaN). Let
+    // it through and `hp` becomes NaN, which is never `<= 0` - the unit can
+    // never die, so a fight that requires it dead can never end. Degrade to a
+    // visible no-op instead: the caller is told nothing died, and the bug
+    // shows up as an attack that does nothing rather than as a soft-lock.
+    if (!Number.isFinite(amount)) return false;
     this.hp = Math.max(0, this.hp - amount);
     if (this.hp <= 0) {
       this.die();
@@ -450,7 +474,14 @@ export class EnemyActor extends GridActor {
         // and granting traction for good.
         if (changed && !hasStatus(this, 'gum') && world.stickGum(x, z)) {
           applyStatus(this, 'gum');
-          this.speed *= GUM.slow;
+          // DERIVE from a captured base, the same way combat's syncUnitSpeed
+          // does, rather than scaling in place. Scaling in place applied the
+          // slow twice on anyone who was gummed before a fight: combat captures
+          // `baseSpeed` lazily on first sync, so it captured an already-slowed
+          // speed and then multiplied the status in on top of it. Deriving is
+          // idempotent, so both sides can run in any order and agree.
+          if (this.baseSpeed === undefined) this.baseSpeed = this.speed;
+          this.speed = this.baseSpeed * (statusFx(this).speedMult ?? 1);
         }
         if (changed && !statusFx(this).slipProof && world.slips(x, z)) {
           this.clearPath();

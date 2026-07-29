@@ -249,6 +249,18 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
     return { b, slot, keyTag, countTag, face };
   });
 
+  // Dim a slot WITHOUT the `disabled` property. A disabled button dispatches no
+  // mouse events at all in any browser, contextmenu included - so the slot you
+  // most want to reassign, the one holding something you have run out of, was
+  // the one slot you could not reassign. That also contradicted the bar's own
+  // rule (see the note above the layout): an unusable slot stays clickable and
+  // ANSWERS, because a power you can ask about beats a power that isn't there.
+  // The press handler already says "none left in your pockets" on its own.
+  const setInert = (b, inert) => {
+    b.disabled = false;
+    b.setAttribute('aria-disabled', inert ? 'true' : 'false');
+  };
+
   let armed = null;
   let sheet = null;
   function render() {
@@ -264,7 +276,7 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
       countTag.textContent = '';
       if (!slot) {
         face.textContent = '—';
-        b.disabled = false;
+        setInert(b, false); // empty, but it is the slot you right-click to fill
         b.style.opacity = '.32';
         b.title = 'Empty slot - right-click to assign a power or an item';
         b.style.borderColor = '#3a3a52';
@@ -274,7 +286,7 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
         const count = slot.count ?? 0;
         face.textContent = slot.icon || '❔';
         countTag.textContent = count > 1 ? `×${count}` : '';
-        b.disabled = count <= 0;
+        setInert(b, count <= 0);
         b.style.opacity = count > 0 ? '1' : '.4';
         b.title = count > 0
           ? `${slot.label} ×${count} · from your pockets · right-click to reassign`
@@ -286,7 +298,7 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
       // A throw counts the sheets it has to spend, where an item counts itself.
       if (slot.ammoCost) countTag.textContent = String(sheet?.paper ?? 0);
       const fed = !slot.ammoCost || (sheet?.paper ?? 0) >= slot.ammoCost;
-      b.disabled = !fed;
+      setInert(b, !fed);
       b.style.opacity = fed && !slot.unavailable ? '1' : '.4';
       b.title = slot.unavailable
         ? `${slot.label} · ${slot.ap}AP · ${slot.unavailable}`
@@ -325,6 +337,9 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
 // with name, an HP bar, a DOWN marker, and a highlight on the member being
 // controlled. Clicking a slot asks the host to switch control - the host
 // decides whether that's allowed right now (combat, dialogue, downed).
+// One decimal, and no trailing '.0' - the same shape combat.js prints AP in.
+const fmtAp = (v) => String(Math.round((Number(v) || 0) * 10) / 10).replace(/\.0$/, '');
+
 export function createPartyBar({ onSelect, onLevelUp }) {
   const bar = document.createElement('div');
   bar.id = 'party-bar';
@@ -343,7 +358,11 @@ export function createPartyBar({ onSelect, onLevelUp }) {
     party.members.forEach((m, i) => {
       const s = m.sheet;
       const down = s.hp <= 0;
-      const ap = combatInfo && !down ? ` · ${combatInfo[i]?.ap ?? 0}AP` : '';
+      // Movement bills fractional AP, and float subtraction leaves dust
+      // (2.8 - 2 is 0.7999999999999998). Round at the display as well as at
+      // the spend sites, so no future raw write can leak a tail of nines onto
+      // the party bar.
+      const ap = combatInfo && !down ? ` · ${fmtAp(combatInfo[i]?.ap ?? 0)}AP` : '';
       const slot = document.createElement('div');
       slot.id = 'party-slot-' + i;
       slot.className = 'party-slot';

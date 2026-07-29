@@ -3,14 +3,7 @@
 // rather than re-derives.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  buffProblem, buffOutcome, buffRangeOf, isFriendly, BUFF_RANGE,
-  controlProblem, controlOutcome, controlIsRanged, isControl,
-  isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf,
-  isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf,
-  isStance, watchRadiusOf, watchTriggers,
-  isToppleable, toppleLanding,
-} from '../../src/powers.js';
+import { buffProblem, buffOutcome, buffRangeOf, isFriendly, BUFF_RANGE, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, coneFrom, conePolyline } from '../../src/powers.js';
 import { TILE_TYPES } from '../../src/data/tiles.js';
 import { ACTIONS } from '../../src/data/actions.js';
 import { STATUSES } from '../../src/data/statuses.js';
@@ -430,3 +423,83 @@ test('the statuses buffs apply are helpful and unresistable', () => {
     assert.equal(def.resistable, false, `${id} is not resistable`);
   }
 });
+
+// --- any-target verbs (TODO Phase 2) ---------------------------------------
+// Reboot power-cycles anyone: yourself, a colleague, or a coworker. "Which side
+// does this verb point at" therefore stopped being a boolean, and the two
+// predicates had to come apart - isFriendly means "friends ONLY", aimsAtAlly
+// means "MAY be pointed at a friend".
+test('a purge that is not a buff aims at anyone, and at allies too', () => {
+  const reboot = ACTIONS.reboot;
+  assert.equal(aimsAtAnyone(reboot), true, 'reboot points at both halves');
+  assert.equal(aimsAtAlly(reboot), true, 'so a click on a colleague must reach it');
+  assert.equal(isFriendly(reboot), false, 'but it is not a friends-only verb');
+});
+
+test('a buff is still friends-only, and an ordinary attack is neither', () => {
+  const buff = ACTIONS['performance-review'];
+  assert.equal(isFriendly(buff), true);
+  assert.equal(aimsAtAlly(buff), true);
+  assert.equal(aimsAtAnyone(buff), false, 'a buff must never be offered on a coworker');
+
+  const swing = ACTIONS.attack;
+  assert.equal(aimsAtAlly(swing), false);
+  assert.equal(aimsAtAnyone(swing), false);
+});
+
+test('reboot carries no damage dice - it is a pure effect', () => {
+  // performOn reads the ABSENCE of min/max as "resolve this as an effect".
+  // It used to carry 4-7 damage, contradicting its own description, and
+  // deleting the dice without that rule would have rolled NaN.
+  assert.equal(ACTIONS.reboot.min, undefined);
+  assert.equal(ACTIONS.reboot.max, undefined);
+  assert.equal(ACTIONS.reboot.purge, true);
+});
+
+// --- cone geometry (TODO Phase 5) ------------------------------------------
+// Extracted from a closure inside combat.js, which is why aiming a cone OUT of
+// combat drew nothing at all: the geometry was unreachable from there. Pure and
+// origin-taking now, so both previews draw the same shape - and so it can be
+// tested without a scene at all, which it never could before.
+const WEDGE = { cone: { range: 4, halfAngle: 35 } };
+const CASTER = { x: 0, z: 0 };
+
+test('coneFrom covers what is in front and not what is behind', () => {
+  const test = coneFrom(WEDGE, CASTER, 1, 0); // aimed along +x
+  assert.ok(test, 'a real aim produces a wedge');
+  assert.equal(test(3, 0), true, 'straight ahead, in range');
+  assert.equal(test(-3, 0), false, 'directly behind');
+  assert.equal(test(9, 0), false, 'ahead but past the range');
+  // Just inside and just outside the half-angle, at a distance where the
+  // arithmetic is unambiguous.
+  const rad = (deg) => (deg * Math.PI) / 180;
+  assert.equal(test(3 * Math.cos(rad(30)), 3 * Math.sin(rad(30))), true, 'inside 35 degrees');
+  assert.equal(test(3 * Math.cos(rad(50)), 3 * Math.sin(rad(50))), false, 'outside 35 degrees');
+});
+
+test('a body RADIUS widens the wedge, so a clipped target counts', () => {
+  const test = coneFrom(WEDGE, CASTER, 1, 0);
+  const rad = (deg) => (deg * Math.PI) / 180;
+  const [x, z] = [3 * Math.cos(rad(40)), 3 * Math.sin(rad(40))];
+  assert.equal(test(x, z), false, 'its centre is outside the wedge...');
+  assert.equal(test(x, z, 0.9), true, '...but the body it stands in is clipped');
+});
+
+test('coneFrom refuses an aim on top of the caster', () => {
+  // No meaningful direction - and the old code returned null here for exactly
+  // this reason, so the wedge never pointed somewhere arbitrary.
+  assert.equal(coneFrom(WEDGE, CASTER, 0.05, 0.05), null);
+});
+
+test('conePolyline closes the wedge back to its origin', () => {
+  const test = coneFrom(WEDGE, CASTER, 1, 0);
+  const line = conePolyline(WEDGE, test);
+  assert.deepEqual(line[0], [CASTER.x, CASTER.z], 'starts at the caster');
+  assert.deepEqual(line[line.length - 1], [CASTER.x, CASTER.z], 'and returns there');
+  // Every arc point sits on the range circle - the outline is the wedge, not
+  // an approximation of it.
+  for (const [x, z] of line.slice(1, -1)) {
+    assert.ok(Math.abs(Math.hypot(x, z) - WEDGE.cone.range) < 1e-9);
+  }
+});
+

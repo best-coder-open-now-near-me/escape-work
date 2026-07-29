@@ -127,16 +127,23 @@ async function walkAcross(page, target, walkables, rounds = 16) {
   return page.evaluate(() => window.__game.gameOver);
 }
 
-test('walking out of the last floor wins the run and clears the campaign save', async ({ page }) => {
+test('walking out of a PLAYTEST level wins it and leaves the campaign save alone', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, EXIT_ROOM);
-  // Something to clear: a stale save from a previous run must not survive a win.
-  await page.evaluate((k) => localStorage.setItem(k, JSON.stringify({ version: 6, levelId: 'level2' })), PROGRESS_KEY);
+  // A campaign save belonging to a real run, sitting in the same browser.
+  const save = { version: 6, levelId: 'level2' };
+  await page.evaluate(([k, v]) => localStorage.setItem(k, JSON.stringify(v)), [PROGRESS_KEY, save]);
 
   expect(await walkOnto(page, 4, 1)).toBe(true);
   await expect(page.locator('#win-screen')).toBeVisible();
   expect(await page.locator('#win-screen').textContent()).toMatch(/YOU ESCAPED WORK/);
-  expect(await progress(page)).toBe(null); // the run is over; nothing to resume
+
+  // This assertion is INVERTED from what it used to be, deliberately. A level
+  // launched from the editor is standalone - its own party, no floor chain -
+  // and finishing one is not finishing a campaign run. The old behaviour let a
+  // playtest delete somebody's progress just by reaching the exit in it, which
+  // is a tool costing a player their save.
+  expect(await progress(page)).toEqual(save);
 });
 
 test('the exit mid-campaign banks the save and carries the party to the next floor', async ({ page }) => {

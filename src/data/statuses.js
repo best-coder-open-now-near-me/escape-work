@@ -68,6 +68,19 @@ export const STATUSES = {
     log: '{name} is still grabbing their lanyard.',
     fx: { color: [1, 0.85, 0.25], burst: 'pop', aura: 'orbit', rate: 0.16 },
   },
+  // Charm (TODO Phase 8). IT Support's identity verb: remote into a coworker and
+  // drive them for a few turns. Player-CONTROLLED and enemies only.
+  //
+  // No `effects`, on purpose: it changes nothing about the unit itself. What it
+  // changes is which SIDE they are on, which is a question about the roster and
+  // the turn order rather than about a stat - so combat.js owns the borrowing
+  // and this entry owns only the clock and the look.
+  charmed: {
+    name: 'Charmed', icon: '🔌', harmful: true, clock: 'turn',
+    duration: 3, resistable: true,
+    log: '{name} accepts the remote session.',
+    fx: { color: [0.72, 0.55, 0.95], burst: 'rise', aura: 'orbit', rate: 0.14 },
+  },
   deflecting: {
     name: 'Deflecting', icon: '🛡️', harmful: false, clock: 'turn',
     duration: 1, resistable: false,

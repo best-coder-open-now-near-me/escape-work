@@ -2,7 +2,12 @@
 // characters, and the proportion retune that de-chibis the Kenney rigs.
 import { toonifyEntity, addOutlines } from './shading.js';
 
-const pc = window.pc;
+// Resolved LAZILY, not read at import. `const pc = window.pc` made this module
+// - and everything importing it, which includes actors.js - impossible to load
+// outside a browser, so the pure parts (proportions, material cloning, the tint
+// rule) could not be unit-tested even though none of them touch a renderer.
+// Both uses below are genuine engine calls, so they resolve it at call time.
+const pc = () => window.pc;
 
 // The character .glbs ship with a full baked clip set (idle, walk, attacks,
 // die, sit...). Wire the ones the game drives into an anim component with an
@@ -33,7 +38,7 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
   // and the editor repaints cells constantly).
   let asset = app.assets.find(url);
   if (!asset) {
-    asset = new pc.Asset(url, 'container', { url });
+    asset = new (pc().Asset)(url, 'container', { url });
     // Attach the error handler ONCE, when the asset is first created - it's a
     // persistent listener on a shared asset, so re-adding it per placeModel
     // call (the editor repaints constantly) would leak handlers unbounded.
@@ -41,7 +46,7 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
     app.assets.add(asset);
   }
   asset.ready(() => {
-    const holder = new pc.Entity(url);
+    const holder = new (pc().Entity)(url);
     const inst = asset.resource.instantiateRenderEntity();
     holder.addChild(inst);
     toonifyEntity(holder);
@@ -92,7 +97,16 @@ export function applyCharacterProportions(holder, build = null) {
   const hipY = legL.getLocalPosition().y;
   const top = root.parent;
   const tp = top.getLocalPosition();
-  top.setLocalPosition(tp.x, tp.y + hipY * (legs - 1), tp.z);
+  // Set the lift from a PRISTINE baseline rather than adding to the current
+  // position. The bone scales around this are setLocalScale - absolute, and so
+  // already idempotent - but the lift read where the body currently was and
+  // added to it, so dressing the same entity twice raised it twice. Harmless
+  // while nothing ever dressed a body more than once; a build slider does it
+  // forty times a second, and by the tenth tick the character is at the
+  // ceiling. The baseline is stashed on the node itself so it survives however
+  // many times we come back.
+  if (top._dressBaseY === undefined) top._dressBaseY = tp.y;
+  top.setLocalPosition(tp.x, top._dressBaseY + hipY * (legs - 1), tp.z);
   torso.setLocalScale(1, torsoS, 1);
   // Torso children inherit its stretch, which would deform them: counter it
   // on the head (shrinking it outright) and on the arms' thickness. Arms
@@ -104,5 +118,41 @@ export function applyCharacterProportions(holder, build = null) {
   for (const name of ['arm-left', 'arm-right']) {
     const arm = holder.findByName(name);
     if (arm) arm.setLocalScale(armsS, 1 / torsoS, 1);
+  }
+}
+
+// --- per-instance materials -------------------------------------------------
+// Two paths dress a body: the live actor (GridActor.attach) and the class
+// picker's preview, which has no actor at all. Both have to do the same two
+// things, and both used to do them separately - the preview with its own inline
+// copy of the tint maths, complete with the same compounding bug.
+//
+// 1. CLONE. A .glb's materials are shared by every character built from that
+//    rig, so recolouring one in place recolours all of them.
+// 2. BASELINE. Keep each clone's pristine colours. The emissive baseline is
+//    what a damage flash returns to; the diffuse baseline is what a tint is
+//    computed FROM - multiply the live value instead and repeated tints
+//    compound, walking a body toward black as you click along a swatch row.
+export function cloneMaterials(entity) {
+  const mats = [];
+  for (const rc of entity.findComponents('render')) {
+    for (const mi of rc.meshInstances) {
+      const clone = mi.material.clone();
+      clone.update();
+      mi.material = clone;
+      mats.push({ mat: clone, emissive: clone.emissive.clone(), diffuse: clone.diffuse.clone() });
+    }
+  }
+  return mats;
+}
+
+// Tint cloned materials from their pristine diffuse. Idempotent by
+// construction, so a live swatch row can drive it. No rgb restores the original
+// colours, which makes "no tint" a reachable choice rather than a dead end.
+export function tintMaterials(mats, rgb) {
+  for (const { mat, diffuse } of mats) {
+    if (rgb) mat.diffuse.set(diffuse.r * rgb[0], diffuse.g * rgb[1], diffuse.b * rgb[2]);
+    else mat.diffuse.copy(diffuse);
+    mat.update();
   }
 }

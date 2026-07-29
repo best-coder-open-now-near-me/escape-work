@@ -10,17 +10,25 @@
 // do. Fire keeps burning throughout.
 import { ACTIONS, arrivalLine } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
-import { truncateByBudget } from './pathfinding.js';
-import { damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH } from './stats.js';
+import { truncateByBudget, routeToFiringPosition } from './pathfinding.js';
+import { pronounsOf, capitalize, verb } from './creation.js';
+import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
-import { buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding } from './powers.js';
+import {
+  buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, isPurge, coneFrom, conePolyline,
+} from './powers.js';
 import { STATUSES } from './data/statuses.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
 
 const pc = window.pc;
-const rand = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
+// Inclusive integer roll. Takes its randomness as an ARGUMENT rather than
+// reading Math.random, because a module-scope read is unreachable from the
+// injected `rng` - which meant damage was the one part of a resolution a seeded
+// test could not pin, and so the whole roll -> damage -> status chain could
+// only ever be tested a piece at a time.
+const randWith = (r, lo, hi) => lo + Math.floor(r() * (hi - lo + 1));
 const cheb = (ax, az, bx, bz) => Math.max(Math.abs(ax - bx), Math.abs(az - bz));
 // Radius of a target's ring marker. Cone tests use it so a body counts when
 // the wedge CLIPS it, matching what the ring shows.
@@ -84,8 +92,101 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // (temporary members, appended by resolveSummon). `livingParty` is the real
   // roster only - a party WIPE (no real member standing) is the sole game-over;
   // a summon falling never is, and a lone summon can't stave off defeat.
+  // Every damage roll in this fight, bound to the injected rng.
+  const rand = (lo, hi) => randWith(rng, lo, hi);
   const livingMembers = () => members.filter((m) => m.sheet.hp > 0 && m.actor);
-  const livingParty = () => members.filter((m) => m.sheet.hp > 0 && m.actor && !m.isSummon);
+  // --- charm (TODO Phase 8) -------------------------------------------------
+  // Borrow a coworker: they leave their own side, take their turns under your
+  // control, and are handed back intact when the session drops.
+  //
+  // There is no allegiance FLAG in this engine - sides are inferred from shape
+  // (`!!x.sheet`), because members and summons carry a sheet and units do not.
+  // That looked like the obstacle and turned out to be the answer: a player-side
+  // summon is not an AI unit with a friendly bit set, it is pushed into
+  // `members` with a sheet, so it already takes a normal player turn with its
+  // own action bar and AP. Charm borrows into machinery that already exists.
+  //
+  // The one thing that genuinely had to be built is `turns.replace`: a slot's
+  // team is fixed at creation and `insert` had no inverse, so the first attempt
+  // left a borrowed coworker being driven by the AI against you while sitting in
+  // your party. `replace` swaps the slot in place, keeping its initiative - the
+  // same body acts at the same moment, only whose it is changes.
+  function charmUnit(unit, turnsLeft) {
+    if (!unit?.alive || unit.charmed) return false;
+    // An enemy def is NOT a class block: it carries `attacks` (inline damage
+    // rolls the AI reads) where a sheet needs `actions` (ids the bar renders).
+    // So a borrowed body gets a synthesized block, and what it can DO is the
+    // universal verbs - which is the honest answer anyway. You are driving
+    // somebody you do not know: you can move them and swing them, not perform
+    // their training.
+    const sheet = createSheetFrom({
+      name: unit.def.name,
+      model: unit.def.model,
+      maxHp: Math.max(1, unit.maxHp ?? unit.hp),
+      ap: unit.def.ap ?? 4,
+      bonusDmg: 0,
+      attr: unit.def.attr,
+      actions: ['punch', 'shove'],
+      talent: null,
+    }, { charmedFrom: unit.archetypeId || null });
+    sheet.hp = unit.hp; // they arrive as hurt as you left them
+    const m = asMember({ sheet, actor: unit }, { isCharmed: true, unit });
+    // The lifetime rides the field a summon's does, so the turn engine ages it
+    // with no second clock to keep in step. The ENDINGS differ, not the clock.
+    unit.summonTurns = turnsLeft;
+    members.push(m);
+    turns.replace((slot) => slot.unit === unit, memberSlot(m));
+    world.setCharmed?.(unit, true); // out of liveEnemies: their side turns on them
+    refresh();
+    return true;
+  }
+
+  // Hand a borrowed coworker back. Reached three ways - the session lapsing,
+  // the fight ending, and them dying mid-session - and all three have to leave
+  // the roster and the order in a state the rest of the engine understands.
+  function releaseCharm(m) {
+    const unit = m.unit;
+    const i = members.indexOf(m);
+    if (i >= 0) members.splice(i, 1);
+    if (unit) {
+      unit.summonTurns = undefined;
+      unit.hp = Math.max(0, m.sheet.hp); // whatever happened to them, happened
+      if (!unit.hp) unit.alive = false;
+      world.setCharmed?.(unit, false);
+      removeStatus(unit, 'charmed');
+      // Back to their own side, in the same place in the round.
+      turns.replace((slot) => slot.member === m, unitSlot(unit));
+    }
+    // The floor cannot be held by somebody who just left it - the same handoff
+    // dismissSummon makes when an assignment lapses mid-turn.
+    if (active === m) makeActive(livingParty()[0] || members[0]);
+    refresh();
+  }
+
+  const charmedMembers = () => members.filter((m) => m.isCharmed);
+
+  // Is anyone still FIGHTING you? The victory test, in one place.
+  //
+  // It was `!engaged.some((e) => e.alive)` written out at seven call sites, and
+  // seven copies of a rule is seven chances for one of them to fall behind the
+  // others. Charm makes that concrete: a charmed coworker is alive and engaged
+  // but is on YOUR side for the moment, so a fight whose last hostile is
+  // charmed must not sit unwinnable - and a fight must not declare victory
+  // while one is still borrowed either. One function is where that decision
+  // can be made once.
+  // A BORROWED coworker still counts. Charming the last hostile must not win
+  // the fight: they are still your opponent, just not acting against you for a
+  // few turns, and the session drops long before the run does. Counting them as
+  // gone made charm a win button - 3 AP to end an encounter outright - which is
+  // strictly better than killing anybody and would have been the correct play
+  // every time.
+  const hostilesRemain = () => engaged.some((e) => e.alive);
+  // The party proper: not summons, and not anyone merely BORROWED. A charmed
+  // coworker standing while your whole roster is face down is not a party that
+  // is still going - the run has ended, you are just driving somebody else for
+  // another turn or two.
+  const livingParty = () =>
+    members.filter((m) => m.sheet.hp > 0 && m.actor && !m.isSummon && !m.isCharmed);
   // The AI enemies hunt the whole player side - members and summons alike, all
   // members now. A target wraps { actor, member }; combat reads `member` to take
   // the hit on its sheet (deflect, gum, the downed rules).
@@ -98,7 +199,22 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
       const tx = target.actor.x + dx;
       const tz = target.actor.z + dz;
-      if (!world.isWalkable(tx, tz) && !(unit.x === tx && unit.z === tz)) continue;
+      // Already STANDING on a tile this unit could swing from: the cheapest
+      // route is no route, so take it and stop looking. `findEnemyPath` cannot
+      // express that - it rejects a goal failing `isWalkable`, and the unit's
+      // own tile fails it because the unit is standing on it - so the self-path
+      // came back null, the search fell through to a DIFFERENT adjacent tile,
+      // and the unit walked there. Next turn the same logic walked it back.
+      // That is the pacing: a coworker adjacent but a shade out of reach
+      // shuffling between two tiles forever instead of ever attacking. The old
+      // `!(unit.x === tx && unit.z === tz)` exemption below was reaching for
+      // this and could not get there - it only let the tile past `isWalkable`,
+      // leaving the pathfinder to reject it a moment later. Returning the
+      // degenerate path hands aiAdvance its existing in-place shuffle branch,
+      // which closes the last sub-tile gap. Same special case `routeBeside`
+      // carries on the player side, for the same reason.
+      if (unit.x === tx && unit.z === tz) return [[tx, tz], [tx, tz]];
+      if (!world.isWalkable(tx, tz)) continue;
       const p = world.findEnemyPath(unit.x, unit.z, tx, tz);
       if (p && p.length > 1 && (!best || p.length < best.length)) best = p;
     }
@@ -489,7 +605,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // A slot wraps one combatant: `{ member }` (player-controlled) or `{ unit }`
   // (an AI actor - enemy or player-team summon). initiative.js rolls d20 +
   // `initMod` and sorts them; turn-order.js walks the result.
-  const initRng = () => Math.random();
+  // Initiative rolls off the SAME injected source as everything else, so one
+  // seed reproduces a whole fight rather than most of one.
+  const initRng = () => rng();
   // Hustle through `effectiveAttr`, like every other attribute-derived number:
   // gear `attrBonus` flows through EVERY derivation (EQUIPMENT_PLAN #3), and
   // reading the raw attr here meant a +1 Hustle lanyard lifted your AP and your
@@ -516,7 +634,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       alive: slotAlive,
       carrier: slotCarrier,
       outcome: () => {
-        if (!engaged.some((e) => e.alive)) return 'win';
+        if (!hostilesRemain()) return 'win';
         if (!livingParty().length) return 'lose';
         return null;
       },
@@ -668,7 +786,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // A control rolls to hit like a swing does, so it earns the same readout -
     // an odds display that vanished the moment you armed Detain would make the
     // one power you most want to know the odds of the one that hides them.
-    if (!a || (a.type !== 'attack' && !isControl(a)) || a.cone || !en) {
+    if (!a || (a.type !== 'attack' && !isControl(a) && !isPurge(a)) || a.cone || !en) {
       costTag.style.display = 'none';
       return;
     }
@@ -708,6 +826,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function showDashPreview(point, sx, sy) {
     preview = null;
     const a = ACTIONS[armed];
+    // handleHover admits a ground point of null (a pick can land on a body
+    // whose ground ray misses the world entirely - a chest pixel beside a
+    // wall), and a dash is aimed at the FLOOR, so there is nothing to price.
+    if (!point) { hidePreview(); return; }
     const tx = Math.round(point.x);
     const tz = Math.round(point.z);
     const problem = mobilityProblem(a, {
@@ -719,7 +841,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (raw && raw.length >= 2) {
         const s = world.smooth([...raw.slice(0, -1), world.clampPoint(point.x, point.z)], active.actor);
         const { points, done } = truncateByBudget(s, dashDistanceOf(a), () => 1);
-        preview = points; // the trail IS the affordance for a move
+        // The trail IS the affordance for a move - but it has to be stored in
+        // the shape drawPreview reads (`{ reach, tail }`, declared where
+        // `preview` is). A bare array left `preview.reach` undefined, and
+        // drawPreview walks it every frame: `pts.length` on undefined threw
+        // once per frame for as long as a dash was armed over a legal route.
+        // A dash has no `tail` - it stops where the budget stops, and the
+        // "as far as it reaches" wording on the cost tag already says so.
+        preview = { reach: points, tail: null };
         costTag.textContent = done
           ? `${a.label} · ${a.ap} AP · no opportunity attacks`
           : `${a.label} · ${a.ap} AP · as far as it reaches`;
@@ -809,7 +938,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // coworker while Performance Review is armed promises a swing the click
       // would refuse - the exact class of lie the one-hover-answer rule
       // exists to prevent (ARCHITECTURE, hover.js).
-      if (aimsAtAlly(ACTIONS[armed])) {
+      // An ANY-target verb belongs to whichever half the cursor is on: over a
+      // coworker it must promise the swing the click will make, over a
+      // colleague the friendly cast. Only a friends-ONLY verb returns null
+      // unconditionally - that is the lie-prevention rule, not a ban on verbs
+      // that legitimately point both ways.
+      if (aimsAtAlly(ACTIONS[armed]) && !(aimsAtAnyone(ACTIONS[armed]) && hoverFoe)) {
         showAllyPreview(point, sx, sy);
         return null;
       }
@@ -881,34 +1015,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     drawRing(ex, ez, 0.32, PREVIEW_OK, y);
   }
 
-  // The wedge a cone attack would cover, aimed from the acting member's body
-  // toward (tx, tz). Returns a tile test, or null when there's no meaningful
-  // aim.
+  // The wedge, aimed from the acting member's body. The geometry itself lives
+  // in powers.js so the out-of-combat preview draws the identical shape; this
+  // only binds the origin.
   function coneTest(a, tx, tz) {
-    const pp = active.actor.entity ? active.actor.entity.getPosition() : { x: active.actor.x, z: active.actor.z };
-    let dx = tx - pp.x;
-    let dz = tz - pp.z;
-    const len = Math.hypot(dx, dz);
-    if (len < 0.2) return null;
-    dx /= len;
-    dz /= len;
-    const half = (a.cone.halfAngle * Math.PI) / 180;
-    // `r` is the target's radius. A point test (r = 0) is right for carpeting
-    // floor tiles, but WRONG for bodies: it demanded the wedge swallow a
-    // target's centre, so the ring only went green once the cone visibly
-    // covered the whole marker. Passing the ring's radius widens the wedge by
-    // the angle the body subtends, so the cone catches anything it clips.
-    const test = (wx, wz, r = 0) => {
-      const vx = wx - pp.x;
-      const vz = wz - pp.z;
-      const d = Math.hypot(vx, vz);
-      if (d < 0.3 || d - r > a.cone.range) return false;
-      const slack = r > 0 ? Math.asin(Math.min(1, r / Math.max(d, 1e-6))) : 0;
-      return (vx * dx + vz * dz) / d >= Math.cos(Math.min(Math.PI, half + slack));
-    };
-    test.origin = pp;
-    test.angle = Math.atan2(dz, dx);
-    return test;
+    const pp = active.actor.entity
+      ? active.actor.entity.getPosition()
+      : { x: active.actor.x, z: active.actor.z };
+    return coneFrom(a, pp, tx, tz);
   }
 
   // While an attack/shove is armed, rings mark the targets: green = usable on
@@ -966,24 +1080,21 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         const pos = m.actor.entity.getPosition();
         drawRing(pos.x, pos.z, TARGET_R, allyProblemFor(id, m) ? PREVIEW_FAR : PREVIEW_OK);
       }
-      return;
+      // An ANY-target verb keeps going and rings the other half too. Returning
+      // here would ring only colleagues while the click still resolved on
+      // coworkers - the affordance describing half the verb.
+      if (!aimsAtAnyone(a)) return;
     }
-    if (a.type !== 'attack' && a.type !== 'shove' && !isControl(a)) return;
+    if (a.type !== 'attack' && a.type !== 'shove' && !isControl(a) && !isPurge(a)) return;
     if (a.cone) {
       const test = aimPoint && coneTest(a, aimPoint.x, aimPoint.z);
       if (test) {
         const y = 0.14;
-        const half = (a.cone.halfAngle * Math.PI) / 180;
-        const pts = [];
-        for (let i = 0; i <= 14; i++) {
-          const ang = test.angle - half + (2 * half * i) / 14;
-          pts.push(new pc.Vec3(test.origin.x + Math.cos(ang) * a.cone.range, y,
-            test.origin.z + Math.sin(ang) * a.cone.range));
+        const line = conePolyline(a, test);
+        for (let i = 1; i < line.length; i++) {
+          app.drawLine(new pc.Vec3(line[i - 1][0], y, line[i - 1][1]),
+            new pc.Vec3(line[i][0], y, line[i][1]), PREVIEW_OK);
         }
-        const o = new pc.Vec3(test.origin.x, y, test.origin.z);
-        app.drawLine(o, pts[0], PREVIEW_OK);
-        app.drawLine(o, pts[pts.length - 1], PREVIEW_OK);
-        for (let i = 1; i < pts.length; i++) app.drawLine(pts[i - 1], pts[i], PREVIEW_OK);
       }
       for (const en of world.liveEnemies()) {
         if (!en.entity) continue;
@@ -1257,6 +1368,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   }
 
   function victory() {
+    // Hand every borrowed coworker back BEFORE the fight closes, or one would
+    // be carried into the roster the run is saved from.
+    for (const m of charmedMembers()) releaseCharm(m);
     cleanup();
     callbacks.onWin();
   }
@@ -1302,7 +1416,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       active.actor.lunge(en.x, en.z);
     }
     faceTarget(active, en.x, en.z); // you face what you swing at
-    active.ap -= a.ap;
+    active.ap = roundAp(active.ap - a.ap);
     if (a.uses) active.usesLeft[id] -= 1;
     // The attack roll: a miss spends the cost above and does nothing else - no
     // damage, no purge, no rider. Surprise, the attacker's accMod, the
@@ -1315,15 +1429,28 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       refresh();
       return;
     }
-    let dmg = rand(a.min, a.max) + damageBonus(active.sheet); // carried staplers count
-    if (a.ammoCost) dmg += talentFxOf(active).paperDamageBonus || 0;
-    const died = en.takeDamage(dmg);
-    // Anything that arrived from over there lands as a projectile hit, not a
-    // punch: light debris thrown away from the shooter.
-    hitFx(en, rangeOf(id) ? 'paper' : 'melee', active);
-    if (died) deathFx(en);
-    fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b', { big: died });
-    let line = `${a.log} ${dmg} damage!`;
+    // AN ACTION WITH NO DICE IS A PURE EFFECT. Reboot is the case that forced
+    // the rule: power-cycling somebody strips their statuses, it does not
+    // bruise them, and the entry used to carry 4-7 damage that contradicted its
+    // own description. Rolling `rand(undefined, undefined)` here produced NaN,
+    // and NaN damage made hp NaN - never `<= 0`, so the target became
+    // unkillable and the fight could not end. Reading the dice as the SIGNAL
+    // means a dice-less verb resolves as what it is, rather than being a
+    // special case bolted on beside a damage step it never wanted.
+    const hasDice = Number.isFinite(a.min) && Number.isFinite(a.max);
+    let dmg = 0;
+    let died = false;
+    if (hasDice) {
+      dmg = rand(a.min, a.max) + damageBonus(active.sheet); // carried staplers count
+      if (a.ammoCost) dmg += talentFxOf(active).paperDamageBonus || 0;
+      died = en.takeDamage(dmg);
+      // Anything that arrived from over there lands as a projectile hit, not a
+      // punch: light debris thrown away from the shooter.
+      hitFx(en, rangeOf(id) ? 'paper' : 'melee', active);
+      if (died) deathFx(en);
+      fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b', { big: died });
+    }
+    let line = hasDice ? `${a.log} ${dmg} damage!` : a.log;
     // A purge (reboot) wipes the target's statuses - good and bad alike.
     if (a.purge && !died) {
       const woke = hasStatus(en, 'surprised');
@@ -1355,7 +1482,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (died) callbacks.onEnemyKilled(en);
     armed = null; // back to movement mode after the swing
     refresh();
-    if (!engaged.some((e) => e.alive)) victory();
+    if (!hostilesRemain()) victory();
   }
 
   // --- displacement, shared (POWERS_PLAN M2) -------------------------------
@@ -1709,6 +1836,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (applyStatus(en, plan.applies, {}, 0)) {
         statusFxAt(en, plan.applies);
         line += ` ${appliesLine(a, en.def.name)}`;
+        // `charmed` is the one status that changes which SIDE somebody is on
+        // rather than anything about them, so the roster and turn-order move
+        // happens here rather than in an `effects` block the status system
+        // would have to learn a whole new kind of.
+        if (plan.applies === 'charmed') charmUnit(en, STATUSES.charmed.duration);
       } else if (blocked) line += ` ${immunityLine(blocked, en.def.name)}`;
     }
     if (plan.displace) {
@@ -1720,7 +1852,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     log(line);
     armed = null;
     refresh();
-    if (!engaged.some((e) => e.alive)) victory();
+    if (!hostilesRemain()) victory();
   }
 
   // What a landed melee action DOES on arrival. The walk-up path and the
@@ -1925,7 +2057,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     armed = null;
     aimPoint = null;
     refresh();
-    if (!engaged.some((e) => e.alive)) victory();
+    if (!hostilesRemain()) victory();
   }
 
   // Clicking a coworker with nothing armed is an attack - the basic swing from
@@ -1994,13 +2126,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (!canReach(active, en, REACH.SHOVE)) { refuse('Too far to shove.'); return; }
       if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
       joinCombat(en); // shoving a bystander is also an opinion they'll return
-      active.ap -= a.ap;
+      active.ap = roundAp(active.ap - a.ap);
       active.actor.lunge(en.x, en.z);
       faceTarget(active, en.x, en.z);
       log(displaceBody(en, Math.sign(en.x - active.actor.x), Math.sign(en.z - active.actor.z)).msg);
       armed = null;
       refresh();
-      if (!engaged.some((e) => e.alive)) victory();
+      if (!hostilesRemain()) victory();
       return;
     }
     const range = rangeOf(armed);
@@ -2033,16 +2165,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // rooms away with a stapler and you walk over; with a staple gun you
       // would have stood still and read a refusal. It walks the same route, it
       // just stops the moment the shot is on rather than at their elbow.
-      const route = routeBeside(en);
+      // Route to a FIRING position, not to their elbow. routeIntoRange already
+      // ends at the nearest tile the shot is legal from, so there is no
+      // walk-further-then-cut-back step: the route costs the steps it needs and
+      // not one more, by construction.
+      const route = routeIntoRange(en, range);
       if (!route || route.length < 2) { refuse('No way to get a shot at them.'); return; }
-      // The first point on that route from which the shot is legal - so a
-      // walk-in costs the steps it needs and not one more.
-      let cut = route.length - 1;
-      for (let i = 0; i < route.length; i++) {
-        const [tx, tz] = route[i];
-        if (cheb(tx, tz, en.x, en.z) <= range && world.hasLos(tx, tz, en.x, en.z)) { cut = i; break; }
-      }
-      const shotWalk = walkActive(route.slice(0, cut + 1), moveBudget(active) - a.ap);
+      const shotWalk = walkActive(route, moveBudget(active) - a.ap);
       if (!shotWalk) { refuse('Not enough AP to get in range.'); return; }
       // Will we be able to fire when the walk finishes? The arrival check
       // (pendingMelee, in the update loop) is authoritative either way - this
@@ -2055,6 +2184,25 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         log('You close the distance.');
         refresh();
       }
+      return;
+    }
+    // Everything above dispatched the verbs that DO resolve on a coworker.
+    // Whatever is still here falls through to the melee walk-up, which ends in
+    // `strike` - and `strike` sends anything that is not a control to
+    // `performOn`, which opens with `rand(a.min, a.max)`. An action carrying no
+    // dice (a buff, a heal, a dash) rolls NaN there, and NaN damage used to
+    // make hp NaN: never `<= 0`, so the target could not die and the fight
+    // could not end. `takeDamage` now refuses non-finite amounts, but arriving
+    // there at all means a verb was pointed at the wrong half of the board -
+    // say so instead of walking them into a swing they never defined.
+    // A dice-less action IS admitted when it carries a payload to deliver -
+    // Reboot strips statuses and deals nothing, and performOn now resolves that
+    // as a pure effect. What stays refused is a verb with neither dice nor
+    // payload, which is a verb pointed at the wrong half of the board.
+    const carries = a.purge || a.applies || Number.isFinite(a.amount);
+    if (!isControl(a) && !carries
+      && !(Number.isFinite(a.min) && Number.isFinite(a.max))) {
+      refuse(`${a.label} is not aimed at them.`);
       return;
     }
     // melee: walk up if needed, then strike
@@ -2112,6 +2260,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return best;
   }
 
+  // The cheapest walkable route to a tile this weapon could FIRE from, or null
+  // if none is reachable. The rule itself is pure and shared with the
+  // out-of-combat twin (pathfinding.js) - only the world bindings differ.
+  const routeIntoRange = (en, range) => routeToFiringPosition({
+    tx: en.x,
+    tz: en.z,
+    range,
+    fromX: active.actor.x,
+    fromZ: active.actor.z,
+    isWalkable: (x, z) => world.isWalkable(x, z),
+    hasLos: (x, z, tx, tz) => world.hasLos(x, z, tx, tz),
+    findPath: (x, z) => world.findPath(active.actor.x, active.actor.z, x, z, active.actor),
+  });
+
   // Smooth a raw tile route and walk the ACTIVE member along it, charging by
   // DISTANCE (stepCost per tile-length) and stopping mid-segment - at any
   // free point - when `budget` runs out. Optionally swap the final waypoint
@@ -2167,7 +2329,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // paper-cut bleeding stops, but so does your Deflect.
       if (a.purge && tile.x === active.actor.x && tile.z === active.actor.z) {
         if (active.ap < a.ap) { log('Not enough AP.'); return; }
-        active.ap -= a.ap;
+        active.ap = roundAp(active.ap - a.ap);
         const hadBleed = hasStatus(active.sheet, 'bleed');
         clearStatuses(active.sheet);  // reboot wipes every status - Deflect, bleed, gum
         armed = null;
@@ -2195,7 +2357,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           log(topple(active, plan));
           armed = null;
           refresh();
-          if (!engaged.some((e) => e.alive)) victory();
+          if (!hostilesRemain()) victory();
           return;
         }
         // A toppleable prop with nothing behind it just rocks - say so, rather
@@ -2289,7 +2451,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const wasPending = pendingConfirm;
     pendingConfirm = null;
     if (a.type === 'attack' || a.type === 'shove' || a.type === 'summon'
-      || isFriendly(a) || isControl(a) || isZone(a) || isMobility(a)) {
+      || isFriendly(a) || isControl(a) || isZone(a) || isMobility(a) || isPurge(a)) {
       armed = id; // arm it; clicking a ringed target (or a spot) fires it
       hidePreview(); // aiming now - the movement trail yields to targets
       log(a.type === 'summon'
@@ -2449,7 +2611,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // the enemy list - the engine re-reads the outcome on the next attempt, so
   // this only has to take the body off the board.
   function expireSummon(s) {
-    log(`${slotName(s)}'s assignment ends. They gather their things and go.`);
+    // A BORROWED coworker is RETURNED, not dismissed. They share the lifetime
+    // clock with summons - one clock, nothing to keep in step - but the endings
+    // are opposites: a summon is destroyed, a colleague walks away.
+    if (s.member?.isCharmed) {
+      log(`The session drops. ${s.member.sheet.name} is theirs again.`);
+      releaseCharm(s.member);
+      return;
+    }
+    // The house voice was already they/them here; now it ASKS the character
+    // rather than assuming, which is the whole point of storing the field.
+    const w = pronounsOf(s.member?.sheet);
+    log(`${slotName(s)}'s assignment ends. ${capitalize(w.subject)} `
+      + `${verb(w, 'gather')} ${w.possessive} things and ${verb(w, 'go', 'es')}.`);
     dismissSummon(s.member || s.unit);
     refresh();
   }
@@ -2909,7 +3083,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         }
         // wet floor: a slip ends their whole turn (they spend it getting up).
         // Gum is traction (slipProof), so a gummed unit can't slip.
-        if (unit.alive && !statusFx(unit).slipProof && Math.random() < (world.slipChanceAt(x, z) || 0)) {
+        // The last direct Math.random in the fight. Through `rng` like the rest,
+        // so a seeded run reproduces the slips too - they end a whole turn, so
+        // an unseeded one is exactly the kind of thing that makes a resolution
+        // test flaky for reasons that have nothing to do with what it asserts.
+        if (unit.alive && !statusFx(unit).slipProof && rng() < (world.slipChanceAt(x, z) || 0)) {
           unit.clearPath();
           unit.flinch();
           unit.slipped = true;
@@ -2936,10 +3114,24 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // --- per-frame driver -------------------------------------------------------------
   function update(dt) {
     if (phase === 'done') return;
+    // A `moveStart` record means "this unit is mid-deliberate-move, and it
+    // began there". It has to stop meaning that when the move stops. Nothing
+    // ever retired one, and `notifyStep` re-seeds it on every leg, so the
+    // record outlived the walk that made it - which broke the exemption
+    // performDash and performSwap rely on. Both opt out of provoking by NOT
+    // seeding a record (see performDash), so a stale one left over from any
+    // earlier walk meant the next dash provoked after all: the one verb sold
+    // as the answer to a threat ring quietly stopped being it.
+    // Safe to read `moving` here: setPath assigns `path` synchronously, so a
+    // walk seeded by beginMove is already moving before this frame runs.
+    for (const u of [...moveStart.keys()]) {
+      const body = bodyOf(u);
+      if (!body || !body.moving) moveStart.delete(u);
+    }
     drawPreview(); // immediate-mode lines last one frame - redraw while shown
     drawTargets();
     // prune anyone killed externally (printer explosions during combat)
-    if (!engaged.some((e) => e.alive)) { victory(); return; }
+    if (!hostilesRemain()) { victory(); return; }
     if (phase === 'player') {
       // finish a queued walk-up strike
       if (pendingMelee && !active.actor.moving) {
@@ -3013,7 +3205,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     if (canReach(unit, target) && unit.combat.attacks.length && acting.ap >= unit.combat.attackAp) {
       aiAttack(unit, target);
-      acting.ap -= unit.combat.attackAp;
+      acting.ap = roundAp(acting.ap - unit.combat.attackAp);
       acting.wait = 0.85; // outlast the swing animation so hits read one at a time
     } else if (moveBudget(acting) >= MOVE.COST_PER_TILE
       && !canReach(unit, target)) {
@@ -3115,9 +3307,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         : active.sheet;
       if (!target) return false;
       const ok = applyStatus(target, id, { duration }, resist);
+      // Charm routes through the real borrow, so a spec that pins it exercises
+      // the same code the action does rather than a parallel imitation.
+      if (ok && id === 'charmed' && target !== active.sheet) {
+        charmUnit(target, duration ?? STATUSES.charmed.duration);
+      }
       refresh();
       return ok;
     },
+    // End the ACTING turn programmatically. The e2e suite needs this: driving
+    // rounds by clicking End Turn costs a DOM round-trip and a settle per turn,
+    // which under software GL is seconds each - a spec that has to advance
+    // three rounds spends its whole budget on the clicking rather than on what
+    // it is testing. Same call the button makes.
+    endTurn: () => { advanceTurn(); refresh(); },
     // The initiative order, top to bottom, with whose turn it is - for the
     // tracker UI and the e2e suite.
     get order() {

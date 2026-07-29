@@ -85,8 +85,14 @@ export const ACTIONS = {
     ap: 2,
     label: 'Paper Storm',
     icon: '🗞️',
-    desc: 'Empty the recycling over an area. Fuel, caltrops, and ammunition - all at once.',
+    desc: 'Empty the recycling over an area. Fuel, caltrops, and a fire waiting to happen.',
     leaves: 'paper',
+    // Litter, not terrain - the same rule Bulk Mail follows. Without this the
+    // drifts were never handed to the ager at all (leaveSurface only registers
+    // a tile when turns > 0), so every cast permanently repainted ~9 tiles of
+    // floor with something that cuts anyone crossing it, for the rest of the
+    // level. Longer than the cone's because a zone is the slower, aimed verb.
+    leavesTurns: 6,
     radius: 1.5,
     range: 5,
     uses: 2,
@@ -179,13 +185,11 @@ export const ACTIONS = {
 
   // --- IT Support ---------------------------------------------------------------
   reboot: {
-    type: 'attack',
+    type: 'purge',
     ap: 2,
     label: 'Turn It Off And On Again',
     icon: '🔌',
-    desc: 'Turn yourself off and on again. Clears EVERY status - your buffs too.',
-    min: 4,
-    max: 7,
+    desc: 'Power-cycle anyone - yourself, a coworker, a colleague. Clears EVERY status they are carrying, the good ones too.',
     // purge: a reboot wipes the target's status effects - helpful AND harmful
     // alike (a surprised enemy wakes up; rebooting YOURSELF clears paper-cut
     // bleeding but also drops your Deflect). Click your own tile while it's
@@ -193,23 +197,30 @@ export const ACTIONS = {
     purge: true,
     log: 'You power-cycle their whole workflow.',
     missLog: 'The reboot hangs on a spinning beach ball. Nothing happens.',
+    // No dice, on purpose: a reboot strips state, it does not bruise anybody.
+    // performOn reads the absence of `min`/`max` as "this is a pure effect".
+    // It used to carry 4-7 damage, which contradicted its own description.
   },
-  // The reboot, aimed at a colleague instead of a target. `purge` on a `buff`
-  // is a CLEANSE - the same one line of runtime, pointed at the other half of
-  // the board - which is what IT Support has always been for and could never
-  // do: the class whose whole identity is "have you tried turning it off and
-  // on again" could power-cycle an enemy and itself, but not the teammate on
-  // fire two tiles away.
-  'remote-restart': {
-    type: 'buff',
-    ap: 2,
-    icon: '🧱',
-    label: 'Remote Restart',
-    desc: 'Power-cycle a coworker from here. Clears every status they are carrying - their buffs too.',
-    purge: true,
-    range: 5,
-    uses: 2,
-    log: 'You remote in and power-cycle them.',
+  // IT's track charm (TODO Phase 8). The verb the retired Remote Restart was
+  // always reaching for: "remote in and power-cycle them" reads as taking
+  // control, not as a cleanse. Enemies only - a purge already covers your own
+  // side, and charming a colleague would be a different, darker game.
+  //
+  // A CONTROL, so it rolls to hit and carries no damage dice: three turns of
+  // somebody else's body is the strongest thing in the game, and a guaranteed
+  // one at 2 AP is exactly the degenerate case that rule exists to prevent.
+  'remote-session': {
+    type: 'control',
+    ap: 3,
+    label: 'Remote Session',
+    icon: '🖥️',
+    desc: 'Remote into a coworker and drive them yourself for a few turns. They fight their own side while you do.',
+    applies: 'charmed',
+    appliesLog: 'You are in. {name} is yours for a moment.',
+    range: 4,
+    uses: 1,
+    log: 'You open a remote session.',
+    missLog: 'The connection times out.',
   },
   // IT's track control (POWERS_PLAN M2), replacing a grant of the Middle
   // Manager's `cigarette` - a track that handed one class another class's

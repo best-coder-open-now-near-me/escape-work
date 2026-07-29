@@ -6,9 +6,58 @@
 // that the AP and the use are spent exactly once.
 import { test, expect } from '@playwright/test';
 import {
-  bootAndPick, bootStash, enterCombat, waitForPlayerTurn, refillAp, clickAction,
+  bootStash, enterCombat, waitForPlayerTurn, refillAp, clickAction,
   combatState, onScreen, clickWorld, waitStill,
 } from './helpers.js';
+
+// Every test here plays a class whose kit is verbs rather than a swing - IT
+// Support and HR have no attack of their own. That makes the WAY IN to a fight
+// the expensive part: a class with an attack opens combat from range, but for
+// these the same click resolves as "move adjacent", so the entire walk has to
+// finish before the fight can even start.
+//
+// On the shipped level1 that walk is long, across a furnished floor, with the
+// camera re-settling between engage attempts - and under CI's software GL it
+// did not fit in the 120s budget. That is exactly how three of these specs
+// failed on main, all with the same "Test timeout of 120000ms exceeded" inside
+// enterCombat.
+//
+// So none of them boot level1 any more. They engage in a bespoke arena instead
+// (the summons.spec idiom): one coworker, two tiles away, open floor. The
+// walk-up is KEPT - it is what the specs mean, and removing it is what broke
+// Detain when the startFightNow fast path tried it - it is just one step now
+// instead of twenty.
+//
+// There is deliberately NO test.slow() here. The arena fix landed alongside
+// one, as insurance, and it is gone because insurance against a fixed problem
+// only buys a slower way to learn about the next one: a genuine hang now fails
+// in 120s instead of grinding for 360s before saying so. Measured on the
+// slowest environment available, the three arena specs come in at 60s, 55s and
+// 49s - half the default budget, not the edge of a tripled one.
+//
+// If one of these ever times out again, that is a real signal. Read it as one
+// rather than reaching for the budget dial.
+
+// Just you and one Manager, two tiles apart, open room: enterCombat walks one
+// step and the fight opens against the Manager alone. Nothing here depends on
+// level1's furniture - these specs are about what a VERB does once a fight is
+// running - and a lone figure on clear floor also projects far more reliably
+// than one in a cluttered office, which is the case enterCombat needs its
+// project3 -> project fallback for.
+const VERB_ARENA = {
+  name: 'Verb Arena',
+  tiles: { '#': 'wall', '.': 'floor' },
+  actors: { '@': 'player', M: 'manager' },
+  map: [
+    '###########',
+    '#.........#',
+    '#.........#',
+    '#...@.M...#',
+    '#.........#',
+    '#.........#',
+    '###########',
+  ],
+};
 
 // A long room, so the Manager has to WALK to reach the guard - overwatch fires
 // on somebody entering covered ground, which needs somebody who moves.
@@ -39,8 +88,8 @@ async function clickSelf(page) {
   await page.mouse.click(p.x, p.y);
 }
 
-test('Remote Restart self-cast clears every status, and spends one use', async ({ page }) => {
-  await bootAndPick(page, 'it-support');
+test('Reboot self-cast clears every status', async ({ page }) => {
+  await bootStash(page, VERB_ARENA, 'it-support');
   await enterCombat(page);
   await waitForPlayerTurn(page);
   await refillAp(page);
@@ -51,8 +100,8 @@ test('Remote Restart self-cast clears every status, and spends one use', async (
   expect(await myStatuses(page)).toContain('bleed');
 
   const apBefore = await page.evaluate(() => window.__combat.ap);
-  await clickAction(page, 'remote-restart');
-  expect(await page.evaluate(() => window.__combat.armed)).toBe('remote-restart');
+  await clickAction(page, 'reboot');
+  expect(await page.evaluate(() => window.__combat.armed)).toBe('reboot');
 
   await clickSelf(page);
 
@@ -66,12 +115,16 @@ test('Remote Restart self-cast clears every status, and spends one use', async (
 });
 
 test('a friendly verb does not arm a swing at a coworker', async ({ page }) => {
-  await bootAndPick(page, 'it-support');
+  // Driven through HR's Performance Review rather than an IT verb: Reboot is
+  // an ANY-target purge now, so it legitimately DOES promise a swing at a
+  // coworker, and can no longer carry a rule about friends-only verbs.
+  // Performance Review is the only friends-only verb in any base kit.
+  await bootStash(page, VERB_ARENA, 'human-resources');
   await enterCombat(page);
   await waitForPlayerTurn(page);
   await refillAp(page);
 
-  await clickAction(page, 'remote-restart');
+  await clickAction(page, 'performance-review');
 
   const en = await page.evaluate(() => {
     const e = window.__game.enemies.find((x) => x.alive);
@@ -99,7 +152,7 @@ test('a friendly verb does not arm a swing at a coworker', async ({ page }) => {
 });
 
 test('Performance Review is HR\'s, and it lands the Commended status', async ({ page }) => {
-  await bootAndPick(page, 'human-resources');
+  await bootStash(page, VERB_ARENA, 'human-resources');
   await enterCombat(page);
   await waitForPlayerTurn(page);
   await refillAp(page);
@@ -111,6 +164,11 @@ test('Performance Review is HR\'s, and it lands the Commended status', async ({ 
 });
 
 test('Stand Post holds an overwatch, and it fires once on somebody crossing the line', async ({ page }) => {
+  // The one test here that keeps an explicit budget, the one it always had.
+  // Unlike the three above it does not just walk in and act: it holds an
+  // overwatch and then needs the Manager to cross the WHOLE hall to trip it, so
+  // its cost is a full walk by somebody else. Measured at ~1.4m, comfortably
+  // over the 120s default.
   test.setTimeout(300_000);
   await bootStash(page, WATCH_HALL, 'security');
   await enterCombat(page);

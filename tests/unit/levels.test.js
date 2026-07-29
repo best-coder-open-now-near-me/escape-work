@@ -470,3 +470,36 @@ test('actor chars are unique across every registry the editor exports', () => {
   // Nothing was lost collapsing them into the legend the editor writes.
   assert.equal(Object.keys(actorLegend()).length, owner.size);
 });
+
+// --- registry id hygiene (TODO Phase 6) ------------------------------------
+test('no id is shared between the class and enemy registries', () => {
+  // They are looked up from the same legends and the same archetype fields
+  // (summons name a CLASS id; level legends name an ENEMY id), so a collision
+  // silently resolves to whichever registry is consulted first.
+  for (const id of Object.keys(CLASSES)) {
+    assert.equal(ENEMY_TYPES[id], undefined,
+      `"${id}" is both a class and an enemy type - one of them will be shadowed`);
+  }
+});
+
+test('every enemy type is placed on some shipped floor, or is explicitly a summon', () => {
+  // An archetype nobody can meet is content that costs a reader's time and
+  // silently rots. Summoned-only types are exempt - they arrive by action, not
+  // by legend.
+  const placed = new Set();
+  for (const level of Object.values(LEVELS)) {
+    for (const id of Object.values(level.actors || {})) placed.add(id);
+  }
+  const summonable = new Set(
+    Object.values(ACTIONS).map((a) => a.archetype).filter(Boolean));
+  // Authored AHEAD of the floor that will use it: a level-4, 30 HP boss with
+  // its own legend char, on a campaign that currently ships two floors. Named
+  // rather than blanket-skipped, so a NEW orphan still fails this - which is
+  // the whole point of the lint.
+  const notYetPlaced = new Set(['regional-executive']);
+  for (const id of Object.keys(ENEMY_TYPES)) {
+    if (notYetPlaced.has(id)) continue;
+    assert.ok(placed.has(id) || summonable.has(id) || ENEMY_TYPES[id].summonOnly,
+      `enemy type "${id}" is never placed on a floor and never summoned`);
+  }
+});

@@ -4,13 +4,14 @@
 // the character the player controls out of combat, and whose turn state is
 // live in combat. Today the roster holds one member; recruitment
 // (data/companions.js) grows it.
-import { gainXp, createSheetFrom, ensureAttributes, EQUIP_SLOTS } from './stats.js';
+import { gainXp, createSheetFrom, ensureAttributes, xpNextForLevel, EQUIP_SLOTS } from './stats.js';
 import { ITEMS } from './data/items.js';
 import { CLASSES } from './data/classes.js';
 import { COMPANIONS } from './data/companions.js';
+import { RIGS, clampBuild } from './data/looks.js';
 
 export const PARTY_CAP = 3; // leader + 2 companions - see PARTY_PLAN.md
-export const SAVE_VERSION = 6; // v6 adds the shared purse (ECONOMY_PLAN.md)
+export const SAVE_VERSION = 7; // v7 adds creation fields (CHARACTER_PLAN.md)
 
 // Petty Cash is PARTY state, not sheet state (ECONOMY_PLAN #2): one purse the
 // whole roster spends from, so buying a sandwich never means switching leaders
@@ -91,15 +92,27 @@ function normalizeSheet(sheet, version = 0) {
   delete sheet.gum;
   delete sheet.bleed;
   sheet.name ??= sheet.className;
-  // A character's MODEL is presentation derived from identity, not player
-  // state, so re-derive it from the class/companion entry on every load rather
-  // than trusting whatever was saved. That way art changes (new rigs landing,
-  // a character reassigned to its own model) reach existing saves instead of
-  // leaving old characters wearing the rig they were created with - and a save
-  // can never point at a .glb that no longer exists.
+  // A character's MODEL is presentation, so it is RE-DERIVED on every load
+  // rather than trusted from the save. That rule had two goals - art changes
+  // reach existing saves, and a save can never name a .glb that no longer
+  // exists - and both survive intact here. What it stops doing is overwriting a
+  // deliberate choice: a chosen `rig` is VALIDATED against the wardrobe and
+  // wins, and anything unknown is dropped so the class model takes over. So an
+  // old save still tracks its class, a retired rig degrades to the class body
+  // instead of a missing asset, and somebody who picked a look keeps it.
   const block = (sheet.classId && CLASSES[sheet.classId])
     || (sheet.companionId && COMPANIONS[sheet.companionId]) || null;
-  if (block?.model) sheet.model = block.model;
+  if (sheet.rig && !RIGS[sheet.rig]) delete sheet.rig;
+  if (sheet.rig) sheet.model = sheet.rig;
+  else if (block?.model) sheet.model = block.model;
+  // A build from a hand-edited save, or from a re-tune of the dials' ranges,
+  // is clamped rather than handed to the rig - applyCharacterProportions has no
+  // opinion about what is sane, and a torso of 40 is a broken-looking body.
+  if (sheet.look?.build) {
+    const build = clampBuild(sheet.look.build);
+    if (build) sheet.look.build = build;
+    else delete sheet.look.build;
+  }
   sheet.attrPoints ??= 0; // pre-M2 saves never banked any
   sheet.classPoints ??= 0;
   sheet.perks ??= []; // taken track nodes; effects are already baked into the sheet
@@ -123,6 +136,25 @@ function normalizeSheet(sheet, version = 0) {
       sheet.inventory.splice(sheet.inventory.indexOf(best), 1); // out of the bag, into the slot
     }
   }
+  // v7: creation fields. Purely ADDITIVE - every one of them is new state, not
+  // migrated state, so an older save simply reads the default and behaves
+  // exactly as it does today. That is why none of them needs a version gate:
+  // the hazard a gate protects against is a migration that INVENTS state and
+  // then re-applies itself on every load (the v5 auto-equip), and defaulting an
+  // absent field is not that.
+  sheet.pronouns ??= 'they'; // the house voice, and the safest default
+  // v6: xp/xpNext. A save that predates the fields could never level again, and
+  // the damage compounded: `gainXp` opens with `sheet.xp += amount`, so an
+  // undefined `xp` became NaN on the first scrap of experience, and `NaN >=
+  // undefined` is false forever after - no promotions, no banked points, and a
+  // permanently poisoned field. Repaired on `Number.isFinite` rather than `??=`
+  // precisely so an already-NaN save is healed too, not just an absent one.
+  if (!Number.isFinite(sheet.level)) sheet.level = 1;
+  if (!Number.isFinite(sheet.xp)) sheet.xp = 0;
+  // The threshold has to be rebuilt from the character's LEVEL, never defaulted
+  // to the level-1 value: hand a veteran `XP_BASE` and they promote on their
+  // next point of xp, then again, and again, all the way back up.
+  if (!Number.isFinite(sheet.xpNext)) sheet.xpNext = xpNextForLevel(sheet.level);
   ensureAttributes(sheet); // pre-attribute saves get their class spread + derive
   return sheet;
 }
