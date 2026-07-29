@@ -148,13 +148,81 @@ adjective on the front — "Senior Manager: *Same energy, more direct reports*",
 "Regional Executive" to "The Executive". That is the imitation test, failed in
 the examine text.
 
-**Recommend: delete both.** `scaleEnemy` covers the job they were written for.
-Consequence to own: `level2.json` places `G` (Senior Manager); it becomes an `M`
-that auto-scales to floor depth 2 rather than a hand-tuned level 3, so that
-floor gets slightly easier and pays less XP. Regional Executive is on no map at
-all and costs nothing to remove. **This frees `seniormanager.glb` and
-`regional.glb`** — which, with `intern.glb` from the companion fix, gives the
-custom character a real wardrobe of three without inventing anybody.
+**The one snippet already exists**, and it is exactly one line deep:
+
+```js
+scaleEnemy(base, effectiveLevel(base, floorDepth))   // main.js:148, main.js:3314
+```
+
+Every enemy on every floor goes through it. A variant entry does not *use* a
+different snippet — it **bypasses this one**, because `effectiveLevel` is
+`max(def.level, depth)`: a Senior Manager with native level 3 standing on floor
+2 computes `d === 0`, `scaleEnemy` returns the def untouched, and the
+hand-written numbers ship verbatim. Whether a Manager gets curve numbers or
+hand numbers depends on which character a level author typed in the legend.
+
+**But deleting the variants outright would lose a real capability**, and the
+first draft of this plan missed that. A level's `actors` legend maps a character
+to a bare type id (`"G": "senior-manager"`), and the only level knob is the
+floor-wide `depth`. So today there is no way to say "a tougher manager *here*"
+except by authoring an entry — which is precisely why these exist.
+
+**Recommend instead: make the variant a level, not an entry.** Let a placement
+name one — `"G": "manager@3"`, or the object form — so a Senior Manager becomes
+`manager` at level 3, produced by the one snippet, with no second stat block
+able to drift from the first. Then delete both entries. That keeps the
+capability, removes the parallel path, and makes the XP disagreement
+structurally impossible rather than merely fixed once.
+
+Consequence to own: `level2.json`'s `G` becomes `manager@3`, which is *not*
+today's Senior Manager — the curve gives 18 HP and 10 XP where the hand-written
+one gives 22 and 15. That floor gets slightly easier and pays less. Pick the
+curve or re-tune the curve; what should not survive is two answers. Regional
+Executive is on no map at all and costs nothing either way. **This frees
+`seniormanager.glb` and `regional.glb`** — which, with `intern.glb` from the
+companion fix, gives the custom character a real wardrobe of three without
+inventing anybody.
+
+### P1b — The IT companion's track is a renamed copy, and the lint can't see it
+
+A lint for exactly this already exists (`tests/unit/levels.test.js:70`): for any
+kit with a `classId`, every field that merely repeats what the class says fails
+the test. Its own comment names the intern as the case it was written for.
+
+It catches **verbatim** restatement. It does not catch a restatement that has
+been renamed, and that is where the intern went. Computed against the class:
+
+| Entry | Track | Rig | Actions |
+|---|---|---|---|
+| `mail-veteran` | inherited | inherited | inherited |
+| `security-guard` | inherited | inherited | inherited |
+| **`it-intern`** | **overridden, 2 nodes vs the class's 4** | **overridden** | inherited |
+
+Both clean entries depart from their class on `look.build` alone. The intern
+does three things none of the others do:
+
+1. **`intern-fast-learner` is `it-root` with a new name.** Identical effect —
+   `{ attrBonus: { savvy: 1 } }` — different id, different label. The lint
+   compares `kit.track` against `base.track` as whole arrays; two arrays of
+   different length are trivially unequal, so it passes. Node effects are never
+   compared.
+2. **The override silently deletes three real class nodes**: `it-ergonomic`
+   (+1 grit), `it-percussive` (grants Percussive Maintenance) and `it-remote`
+   (grants Remote Session). An IT person who joins your party can therefore
+   never learn two of IT Support's own actions. Nobody decided that. It fell
+   out of overriding a four-node track wholesale in order to carry two.
+3. **`intern-nerves` — "Steady Nerves"** — is the last living piece of the
+   retired "Nervous IT Intern". The persona was deleted from the display name
+   and survives as a progression node.
+
+So, to answer it directly: of the three characters who ARE one of our people,
+**two are clean and one is an unnecessary dupe on every axis it touches** — a
+renamed class node, a redundant rig override, and three inherited nodes lost as
+collateral. The fix is deletion, not rewriting: drop `track` and `model`, keep
+`look.build` and the softer stat line, and he is an IT person who is earlier on.
+
+The lint should also grow the node-effect check, or the next renamed copy
+passes too.
 
 ### P2 — Three copies of "dress a body"
 
@@ -296,7 +364,9 @@ Tagged per `CLAUDE.md`. Everything inherited from the old plan is demoted to
 | 12 | The rig↔role scramble gets un-tangled | `[proposed]` | not asked for; see M4. Skippable, but it is the root of D4 |
 | 13 | **Enemies are fine unless they imitate.** Having no `classId` is not the fault; being a variation of somebody we already have is | `[stated]` | "enemies is fine for the most part unless theyre trying to imitate something" |
 | 14 | **No parallel implementations.** A second hand-written way to do a thing the engine already does is the defect, whatever it is dressed as | `[stated]` | "i just dont want to deal with any more parallel imps. im so tired of this repeated code i didnt even want" |
-| 15 | Senior Manager and Regional Executive are deleted; `scaleEnemy` already covers them | `[proposed]` | follows from #13 + #14, but it deletes shipped content and shifts level2's difficulty — say the word |
+| 15 | **A placement may name a level** (`"G": "manager@3"`); Senior Manager and Regional Executive are then deleted | `[proposed]` | follows from #13 + #14. Deleting them without the legend change would lose per-placement difficulty, which is the capability they were written for |
+| 15b | The IT companion drops its `track` and `model` overrides and keeps only `look.build` + its softer stat line | `[proposed]` | follows from #14; it restores two class actions he currently cannot learn |
+| 15c | The override lint grows a node-effect comparison | `[proposed]` | it passed a renamed copy of `it-root`; it will pass the next one |
 | 16 | HR Representative folds into the Human Resources class, `security-guard`-style | `[proposed]` | follows from #13; weaker case than #15 since it is not a tier variant |
 | 17 | The Manager and The Executive stay as their own archetypes | `[proposed]` | they imitate nobody; `enemies.js:20` already says "Don't invent a class just to inherit from it" |
 
@@ -329,14 +399,18 @@ stage everybody walks through. That is the structural fix.
 Commit `CHARACTER_PLAN.md` so the twenty dangling citations resolve. No code.
 
 ### M1 — The cast becomes our people, and the imitations go
-- `it-intern` → drop `model: 'intern'`; he inherits `itsupport.glb` and stays
-  visibly junior on `look.build` alone, exactly like the mail room companion.
-  Rename the entry and its track nodes off "intern".
+- `it-intern` → drop `model: 'intern'` **and the whole `track` override**
+  (**P1b**). He inherits `itsupport.glb` and IT Support's four real nodes, and
+  stays visibly junior on `look.build` and his softer stat line alone — exactly
+  like the mail room companion. Rename the entry off "intern".
 - `mail-veteran` → rename the entry off "veteran".
 - Delete the "Nervous IT Intern" prose from `classes.js:34` and
   `companions.js:46`.
-- Delete `senior-manager` and `regional-executive` (**P1**, decision #15), and
-  the "seniority variants" section header that licenses writing more of them.
+- Teach the legend to name a level, then delete `senior-manager` and
+  `regional-executive` (**P1**, decision #15) and the "seniority variants"
+  section header that licenses writing more of them.
+- Grow the override lint to compare track-node effects (**#15c**), so the fix
+  cannot silently regress.
 - Fold `hr` into the Human Resources class (**P4**, decision #16).
 - Level legends (`levels/level1.json`, `levels/level2.json`) reference these ids
   and get updated with them — `G` on level2 becomes `M`.
