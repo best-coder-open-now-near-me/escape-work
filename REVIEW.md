@@ -86,7 +86,12 @@ exactly once, and blocking for any feature that re-dresses a live entity):
   copies of "how to tint a body".
 
 The prioritized fix list now lives in `TODO.md`, which folds in
-CHARACTER_PLAN.md (branch `claude/custom-character-creation-3ga2ni`).
+`CHARACTER_PLAN.md` (in this repo since the creation rework).
+
+**Both rendering bugs are fixed, and the SOC smell with them.** The inline
+duplicate below was not folded in when it was first flagged - the creation work
+added a SECOND copy instead, so "how to tint a body" briefly existed three
+times. All three are now one `dressBody`, with the actor as an argument.
 
 ---
 

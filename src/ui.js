@@ -39,4 +39,4 @@ export {
   showLevelUpScreen, showWinScreen, showFloorClear, showLoseScreen,
   showClassPicker, showGameMenu, showPlaytestBadge,
 } from './ui/screens.js';
-export { showBadgeStep } from './ui/creation.js';
+export { showCreationStep } from './ui/creation.js';

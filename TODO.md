@@ -2,8 +2,8 @@
 
 The combined worklist: every open finding from `REVIEW.md` (verified still
 present against main @ `e8e53de`) plus the character-creation feature from
-`CHARACTER_PLAN.md` (branch `claude/custom-character-creation-3ga2ni`,
-milestones M1–M6). Items reference REVIEW.md by `file:line` for full detail;
+`CHARACTER_PLAN.md`, which now lives in this repo rather than on an unmerged
+branch. Items reference REVIEW.md by `file:line` for full detail;
 line numbers are the review baseline and may be shifted slightly in
 `combat.js`.
 
@@ -257,7 +257,7 @@ gone on hiding.
 | P3 party-bar float AP | `fmtAp` (`ui/hud.js:351`) |
 | P3 portraits face the lens | `rotY: 0` + why (`portraits.js:136`) |
 | P3 corner repulsion is edge-aware | `pathfinding.js:55-58` |
-| P4 M1–M6 | `creation.js`, `data/looks.js`, `data/backgrounds.js` all exist |
+| P4 creation | shipped, then reworked - see Phase 4 |
 
 **Found genuinely open by this audit — and now FIXED:**
 
@@ -316,7 +316,7 @@ killing anyone, and therefore the correct play every time.
 
 **Two things were deliberately NOT built, each recorded where it belongs:**
 
-- A `New Character` menu item (CHARACTER_PLAN #17). Declined on PLACEMENT:
+- A `New Character` menu item. Declined on PLACEMENT:
   `showGameMenu` is persistent, so anything in it is offered mid-fight - the
   wrong moment to hand somebody a button that discards their character.
 - `Restart run` keeping your character. Needs run state to separate from
@@ -334,8 +334,8 @@ killing anyone, and therefore the correct play every time.
       gate `clearProgress()` on campaign mode in both `loseGame()` and the
       exit handler's non-campaign branch.
 - [ ] **Backfill `xp`/`xpNext` in `normalizeSheet`** (`party.js:83`) so legacy
-      saves can level again. *Do together with CHARACTER_PLAN M3's save v7
-      bump — same function, one migration test pass.*
+      saves can level again. *Same function as the save v8 drop — one
+      migration test pass.*
 - [ ] **Preserve the active companion's `def` across floor transitions**
       (`main.js:2649`): embody the saved-active member from its registry def,
       not the bare `PlayerActor`.
@@ -640,46 +640,51 @@ killing anyone, and therefore the correct play every time.
       `reachOpen` sampling near wall ends (`tactics.js:88`), `sev ?? 0` vs
       `?? 1` on re-apply (`statuses.js:113`).
 
-## Phase 4 — Character creation (CHARACTER_PLAN.md, M1–M6)
+## Phase 4 — Character creation (CHARACTER_PLAN.md)
 
-Feature plan lives on `claude/custom-character-creation-3ga2ni`. Each milestone
-is its own PR that keeps unit + e2e green.
+**Done, and then undone and redone.** The six milestones this section used to
+list were built (five of them; M6's menu item was declined) and this worklist
+never checked a single box — it described the work as pending while the code
+shipped. Worse, the design those milestones implemented was never asked for:
+the plan they came from opened its decisions table with "recommended", meaning
+every row was a proposal, and all eighteen were built as though settled.
 
-- [ ] **M1 — Sheet-owned look, zero behavior change.** `lookOf(sheet)` exported
-      from `stats.js`; delete `main.js`'s `sheetLook` closure and repoint its
-      call sites; promote `bakeNodeEffect` → `applyEffect`. *Also pays down the
-      REVIEW.md SOC debt of look-resolution being trapped in the `startGame`
-      closure.*
-- [ ] **M2 — Idempotent dressing.** Fix the two latent compounding bugs:
-      hip-lift baseline (`models.js:95`) and tint-from-pristine-diffuse
-      (`actors.js:79`), folding `previewClass`'s inline duplicate
-      (`main.js:550`) into the shared path. Unit test: dress one stub entity
-      ten times ≡ once. *Blocking for any UI that re-dresses a live body.*
-- [ ] **M3 — Flow host + identity + save v7.** `creation.js` (pure) +
-      `ui/creation.js` (dumb view), name + pronouns, `#class=` express lane
-      skips creation, `#creation-skip` accepts defaults. Save v7 additive.
-      Suite cost: two edits (`helpers.js pickClass`, `game.spec.js:33`).
-      *Bundle the Phase 0 `xp`/`xpNext` backfill into the same
-      `normalizeSheet` change.*
-- [ ] **M4 — Appearance.** `data/looks.js` (RIGS ×12, TINTS ×8, BUILD_RANGE),
-      rig row + swatches + two dials mutating the live preview entity,
-      `previewLook`, `normalizeSheet` validate-or-fall-back for `rig`,
-      lints 1–4. Budget: one extra `.glb` load in one spec.
-- [ ] **M5 — Backgrounds + self-assessment.** `data/backgrounds.js` (eight
-      zero-sum swaps), step 3, two points through `spendAttrPoint`, background
-      gear into empty slots only, lints 5–8 (zero-sum `attrBonus`, known
-      effect shapes, known talent keys, gear slot match).
-- [ ] **M6 — Polish.** Read-back sentence, `New Character` in the game menu,
-      pronouns read by narration lines.
+What shipped was a single funnel — every start walked into a customization
+screen offering a typed name, a colour palette, two build sliders, an eight-
+entry background axis and a wardrobe of all twelve rigs, including the bosses'.
+`CHARACTER_PLAN.md` now lives in this repo and records both the damage and the
+rework. The rework is complete:
 
-- **Declined:** CHARACTER_PLAN #17's `New Character` menu item. Not built, by
-  decision: making a new character belongs at the START, and `showGameMenu` is a
-  persistent ☰ button available all through a run - so anything placed in it is
-  offered mid-fight, which is the wrong moment to hand somebody a button that
-  discards the character they are playing. (`Restart run` is also the same
-  action today, since the sheet lives inside the campaign save, but that is the
-  lesser reason.) If it ever ships it belongs on the boot screen, alongside the
-  résumé desk.
+- [x] **The cast is our people.** The IT companion's rig and track overrides
+      are gone (the track override was silently costing him two of IT Support's
+      own actions); both companions are keyed by the class they are; the two
+      hand-written "seniority variants" are deleted in favour of a placement
+      naming its tier (`"G": "manager@3"`) through the one scaling curve; the
+      HR enemy names the class it always was.
+- [x] **Rigs match their files.** Human Resources onto `hrrep.glb`, Middle
+      Manager onto `midmanager.glb` — finishing a policy the repo set the day
+      `mailroom.glb` became `security.glb` and then dropped. Four rigs came free
+      and became the custom wardrobe.
+- [x] **One way to dress a body.** `previewClass` and `previewDraft` folded
+      into `dressBody`, which is what M2 below promised and never did.
+- [x] **Two front doors.** Six precut characters played as written, plus a
+      blank card that makes one. Save v8 drops the creation look/background
+      fields rather than migrating them.
+- [x] **Back goes back.** Escape used to commit the character it claimed to
+      cancel.
+
+Still open, and genuinely optional:
+
+- [ ] **A body that reads as mail room.** The Mail Room class wears `hr.glb`
+      because the rig named for that job was deliberately given to Security for
+      reading as a uniform, and no file is left for it. Needs art, not a
+      rename — it is the one remaining place a filename lies.
+
+- **Declined, still:** a `New Character` menu item. Making a new character
+  belongs at the START, and `showGameMenu` is a persistent ☰ available all
+  through a run - so anything placed in it is offered mid-fight, which is the
+  wrong moment to hand somebody a button that discards the character they are
+  playing. If it ever ships it belongs on the boot screen, alongside the desk.
 
 ## Phase 5 — Architecture / SOC
 

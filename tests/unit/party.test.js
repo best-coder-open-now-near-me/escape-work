@@ -9,6 +9,7 @@ import { createSheet, spendClassPoint, damageBonus, gainXp, PROGRESSION, EQUIP_S
 import { COMPANIONS } from '../../src/data/companions.js';
 import { createDraft, createCharacter } from '../../src/creation.js';
 import { CLASSES } from '../../src/data/classes.js';
+import { CUSTOM_RIGS } from '../../src/data/looks.js';
 
 test('createParty starts with the leader as its only member', () => {
   const sheet = createSheet('office-drone');
@@ -352,7 +353,7 @@ test('a poisoned xp is repaired whether it survived as NaN or as null', () => {
   }
 });
 
-// --- creation fields (CHARACTER_PLAN M3, save v7) --------------------------
+// --- creation fields (CHARACTER_PLAN, save v7/v8) --------------------------
 test('a v6 save loads with creation defaults and is otherwise untouched', () => {
   const sheet = createSheet('office-drone');
   delete sheet.pronouns; // a save written before creation existed
@@ -364,8 +365,8 @@ test('a v6 save loads with creation defaults and is otherwise untouched', () => 
   assert.deepEqual(migrated.attr, sheet.attr);
 });
 
-test('a chosen name and pronouns survive a save round trip', () => {
-  const draft = createDraft('mail-room');
+test('a custom name and pronouns survive a save round trip', () => {
+  const draft = createDraft('mail-room', { custom: true });
   draft.name = 'Dana';
   draft.pronouns = 'she';
   const created = createCharacter(draft);
@@ -374,13 +375,13 @@ test('a chosen name and pronouns survive a save round trip', () => {
   assert.equal(loaded.pronouns, 'she');
 });
 
-test('a chosen rig survives a save; an unknown one degrades to the class body', () => {
-  const draft = createDraft('office-drone');
-  draft.rig = 'executive';
+test('a custom rig survives a save; one nobody offers degrades to the class body', () => {
+  const draft = createDraft('office-drone', { custom: true });
+  draft.rig = CUSTOM_RIGS[0];
   const created = createCharacter(draft);
   const [loaded] = parseProgress(savedAs([created], SAVE_VERSION)).sheets;
-  assert.equal(loaded.rig, 'executive', 'normalizeSheet must not overwrite a deliberate choice');
-  assert.equal(loaded.model, 'executive');
+  assert.equal(loaded.rig, CUSTOM_RIGS[0], 'normalizeSheet must not overwrite a deliberate choice');
+  assert.equal(loaded.model, CUSTOM_RIGS[0]);
 
   // A rig retired from the wardrobe must not leave a save naming a missing
   // .glb - the old re-derive rule guaranteed that, and validate-or-fall-back
@@ -393,9 +394,24 @@ test('a chosen rig survives a save; an unknown one degrades to the class body', 
   assert.equal(repaired.model, CLASSES['office-drone'].model);
 });
 
-test('a hand-edited build is clamped on load rather than handed to the rig', () => {
-  const sheet = createCharacter(createDraft('office-drone'));
-  sheet.look = { build: { legs: 40, torso: 40 } };
-  const [loaded] = parseProgress(savedAs([sheet], SAVE_VERSION)).sheets;
-  assert.ok(loaded.look.build.legs <= 2.05 && loaded.look.build.torso <= 1.4);
+// v8 drops creation state rather than migrating it. A v7 save can carry a look
+// the player authored with sliders and a swatch row that no longer exist, and a
+// rig belonging to somebody else in the cast - the Executive, or the IT person
+// who joins your party. Neither is a thing a character can be any more, and
+// inventing a replacement would be worse than falling back to the body the
+// class was always going to give them.
+test('a v7 save drops its authored look and any borrowed body', () => {
+  const sheet = createSheet('office-drone');
+  sheet.look = { tint: [0.6, 0.9, 0.9], build: { legs: 40, torso: 40 } };
+  sheet.rig = 'executive'; // a boss's body, from the twelve-rig wardrobe
+  sheet.model = 'executive';
+  sheet.background = 'night-shift'; // an axis that no longer exists
+  const [loaded] = parseProgress(savedAs([sheet], 7)).sheets;
+  assert.equal(loaded.look, undefined, 'the authored look is discarded, not clamped');
+  assert.equal(loaded.background, undefined);
+  assert.equal(loaded.rig, undefined, 'a body belonging to the cast is not yours');
+  assert.equal(loaded.model, CLASSES['office-drone'].model, 'back to their own class body');
+  // The character otherwise survives intact - this drops appearance, not people.
+  assert.equal(loaded.className, sheet.className);
+  assert.deepEqual(loaded.attr, sheet.attr);
 });

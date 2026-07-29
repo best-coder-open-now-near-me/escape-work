@@ -103,8 +103,12 @@ src/
                        the paged action hotbar, party bar, level-up pip
     menus.js           context menu, Alt loot labels (at the cursor)
     panels.js          pockets, character sheet, dialogue, shop
-    screens.js         level-up, win/floor-clear/lose, class picker,
-                       game menu, playtest badge (they take the frame)
+    screens.js         level-up, win/floor-clear/lose, the desk (six precut
+                       characters + the blank card), game menu, playtest
+                       badge (they take the frame)
+    creation.js        the short form beside the chosen body: pronouns, two
+                       points, and - for a custom character only - a name
+                       and a body from the rigs nobody else wears
   god.js             God-mode tweak panel (` / F8): live-reflects the sheet,
                      enemies, combat + world; edit/pin values, pause, spawn
   editor.js          In-browser level editor (paint/erase, export, playtest)

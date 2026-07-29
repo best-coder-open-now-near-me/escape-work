@@ -9,6 +9,42 @@ account of what the designer wanted.
 
 ---
 
+## Status: built
+
+Everything below the "The plan" heading has shipped. The damage report is kept
+as written, because the point of it is the record — what was assumed, by whom,
+and what it cost. What changed since it was written:
+
+| | |
+|---|---|
+| The IT companion | rig and track overrides deleted; he is IT Support, earlier on, and can now learn the two class actions the override had been withholding |
+| Both companions | keyed by the class they are (`it-support`, `mail-room`) |
+| Seniority variants | deleted; a placement names its tier instead (`"G": "manager@3"`) through the one scaling curve |
+| HR Representative | names the class it always was; its summon inherits the contract from the action it is the AI-side twin of |
+| Rigs | Human Resources → `hrrep.glb`, Middle Manager → `midmanager.glb`; four rigs freed |
+| Dressing a body | three copies → one `dressBody`, actor as an argument |
+| Height, Heft, colour, backgrounds, renaming | gone |
+| The desk | six precut characters + a blank card |
+| Escape / BACK | return to the desk instead of committing |
+| Saves | v8 drops the creation look/background fields rather than migrating them |
+| Lint | compares track-node effects, and holds the custom wardrobe against the cast |
+
+Two things were learned in the building and are worth recording, because both
+contradict something this document asserted before the code existed:
+
+- **Deleting the variants outright would have lost a capability.** A legend
+  could only name a bare type, so authoring an entry was the only way to ask
+  for a tougher body on a shallow floor. The tier syntax exists because of
+  that, not as a flourish.
+- **`nothing was missing.`** `mailroom.glb` was renamed to `security.glb`, not
+  deleted — see "The precedent" below. The first draft of this document said
+  otherwise and was wrong.
+
+Still open: the Mail Room wears `hr.glb` and no file in the set reads as mail
+room. That needs art, not a rename.
+
+---
+
 ## Questions for the designer
 
 **Q1 — the enemy roster — is answered.** "Enemies is fine for the most part

@@ -27,6 +27,7 @@ import {
 import { applyStatus, statusFx, hasStatus, tickStep, statusLeft, statusList } from './statuses.js';
 import { inReach } from './tactics.js';
 import { createDraft, createCharacter, draftModel, draftLook } from './creation.js';
+import { CUSTOM_RIGS } from './data/looks.js';
 import { aimsAtAlly, coneFrom, conePolyline } from './powers.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
@@ -602,7 +603,12 @@ function startGame(level) {
       },
     });
   }
-  const previewClass = (classId) => showPreview(CLASSES[classId].model, CLASSES[classId].look);
+  // Browsing the desk. A null id is the BLANK card, which previews the body a
+  // custom character starts on rather than any class's - you are not going to
+  // be one of these people, so parading one of them would be a lie.
+  const previewClass = (classId) => (classId
+    ? showPreview(CLASSES[classId].model, CLASSES[classId].look)
+    : showPreview(CUSTOM_RIGS[0], null));
   function endClassPreview() {
     previewToken += 1;
     if (previewEntity) { previewEntity.destroy(); previewEntity = null; }
@@ -631,28 +637,39 @@ function startGame(level) {
     ui.say(`${sheet.className}. Now get out of here.`); // hotkeys live in the HUD strip
   }
 
-  // The picker picked a job; now the badge photo. The candidate stays on the
-  // spawn tile under the same dollied-in camera - the résumé card is what gets
-  // replaced, not the body - so this costs no .glb load at all.
-  function onClassPicked(classId) {
-    const draft = createDraft(classId);
+  // A card was chosen at the desk; now the short form beside the body. The
+  // candidate stays on the spawn tile under the same dollied-in camera - the
+  // CARD is what gets replaced, not the body - so this costs no .glb load.
+  //
+  // `custom` is which door was taken. It changes what the form asks, not what
+  // happens afterwards: both end at the same beginRun with a sheet built by the
+  // same createCharacter.
+  function onDeskPick(classId, { custom = false } = {}) {
+    const draft = createDraft(classId, { custom });
     draft.className = CLASSES[classId].name; // the read-back line quotes the job
-    ui.showBadgeStep(draft, {
+    if (custom) showPreview(draftModel(draft), draftLook(draft));
+    ui.showCreationStep(draft, {
       onCommit: () => beginRun(createCharacter(draft)),
-      // Skipping accepts every default, which is the same thing the `#class=`
-      // express lane does - one code path, so the two can never diverge.
-      onSkip: () => beginRun(createCharacter(createDraft(classId))),
-      // Reflect the draft on the body already standing on the spawn tile. A rig
-      // change is the ONE thing that costs a .glb load; anything else re-dresses
-      // the live entity in place, through the same dressBody every other body
-      // on the floor goes through - which is safe to call repeatedly because the
-      // material clones are kept and re-tinted from their pristine colours.
-      onPreview: (kind) => {
-        const look = draftLook(draft) || CLASSES[classId].look;
-        if (kind === 'rig') { showPreview(draftModel(draft), look); return; }
-        if (previewEntity) dressBody(previewEntity, look);
-      },
+      // BACK and Escape return to the DESK. This used to start the run instead:
+      // the handler called a "skip the paperwork" path that committed the
+      // character, so backing out of the form was the one gesture that could
+      // not be undone.
+      onBack: () => openDesk(),
+      // Only a custom character can change body, and it is the one thing that
+      // costs a .glb load - everything else on this card is text.
+      onPreview: () => showPreview(draftModel(draft), draftLook(draft)),
     });
+  }
+
+  // The résumé desk: six people you can be, plus a card for making somebody.
+  function openDesk() {
+    controls.setView({ dist: 3, pitch: 14, focusY: 0.8 });
+    app.off('update', previewSpin); // backing out of the card lands here again
+    app.on('update', previewSpin);
+    ui.showClassPicker(CLASSES, ACTIONS, onDeskPick, () => {
+      location.hash = '#editor';
+      location.reload();
+    }, previewClass);
   }
 
   // Every way to die funnels through here: freeze the world, drop any active
@@ -2997,7 +3014,8 @@ function startGame(level) {
   // mid-campaign reload skips the picker entirely.
   ui.showGameMenu([
     {
-      // This IS the "new character" escape hatch CHARACTER_PLAN #17 asked for.
+      // This IS the "new character" escape hatch, at the only moment it can
+      // safely be offered.
       // A separate menu item was drafted and then dropped: clearing progress
       // drops the character with it - the sheet lives in the save - so the two
       // would have been byte-identical actions under different labels, which is
@@ -3090,15 +3108,11 @@ function startGame(level) {
     // and the one place that wants to exercise creation asks for it by name.
     beginRun(createCharacter(createDraft(preselectedClass())));
   } else {
-    // The carousel: frame the spawn tile close and head-on (eye-ish level,
-    // aimed at the chest) where previewClass parades the browsed candidate;
-    // onClassPicked restores the tactical camera.
-    controls.setView({ dist: 3, pitch: 14, focusY: 0.8 });
-    app.on('update', previewSpin);
-    ui.showClassPicker(CLASSES, ACTIONS, onClassPicked, () => {
-      location.hash = '#editor';
-      location.reload();
-    }, previewClass);
+    // The desk. openDesk frames the spawn tile close and head-on (eye-ish
+    // level, aimed at the chest) and parades the browsed candidate there; it is
+    // its own function because BACK out of the creation card returns here, and
+    // a screen you can only reach once is a screen you cannot back out of.
+    openDesk();
   }
   if (playtesting) {
     ui.showPlaytestBadge(() => {
