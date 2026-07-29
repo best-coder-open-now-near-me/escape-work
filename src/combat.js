@@ -689,8 +689,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // --- UI ---------------------------------------------------------------------
   const panel = document.createElement('div');
   panel.id = 'combat-panel';
+  // Sits ABOVE the shared bar, which owns the bottom of the screen in a fight
+  // exactly as it does out of one. Both used to live at `bottom: 18px` and
+  // never met, because main.js hid the hotbar whenever this panel existed -
+  // that hiding IS what "two bars swapped by mode" meant physically. With one
+  // bar the two are on screen together, and this panel's higher z-index made it
+  // swallow every click aimed at a slot: the bar rendered, and was dead.
+  // 92px clears the bar's 64px box (46px slots + 8px padding either side) and
+  // its own 18px offset, with room to breathe.
   Object.assign(panel.style, PANEL_CHROME, {
-    position: 'fixed', left: '50%', bottom: '18px', transform: 'translateX(-50%)',
+    position: 'fixed', left: '50%', bottom: '92px', transform: 'translateX(-50%)',
     zIndex: '30', width: 'min(640px, 94vw)', borderRadius: '10px',
     padding: '10px 14px', userSelect: 'none',
   });

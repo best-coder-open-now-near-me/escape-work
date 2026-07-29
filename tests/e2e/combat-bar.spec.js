@@ -10,7 +10,7 @@
 // Nothing tested any of that, which is how the duplication survived a review
 // that named it and a phase that closed over it. This file is that test.
 import { test, expect } from '@playwright/test';
-import { bootStash, enterCombat, waitForPlayerTurn, refillAp } from './helpers.js';
+import { bootStash, enterCombat, waitForPlayerTurn, refillAp, clickWorld, waitStill } from './helpers.js';
 
 // You and one Manager, two tiles apart in an open room - enterCombat engages
 // them with nothing in the way.
@@ -57,10 +57,13 @@ test('the bar in a fight is the same bar: same slot ids, same number keys', asyn
   await expect.poll(() => page.evaluate(() => window.__combat.armed)).toBe('attack');
 });
 
-// Player and Manager already adjacent at boot, so the fight opens without
-// anybody walking anywhere - which keeps the player on the exact tile the door
-// edge needs them on. `H 2 2` is the edge between (2,1) and (2,2), so standing
-// at (2,1) is standing at the handle.
+// `H 2 2` is the edge between (2,1) and (2,2), so standing at (2,1) is standing
+// at the handle. The player starts there and the Manager is two tiles east, so
+// the fight opens with a short walk and the player steps back to the door.
+//
+// NB the fight cannot open with both of them simply standing adjacent at boot:
+// `checkCombatTrigger` runs off movement (`if (anyoneMoved)`), so a tableau
+// nobody walks into never triggers. Learned the hard way.
 const DOOR_ARENA = {
   name: 'Door Arena',
   tiles: { '#': 'wall', '.': 'floor' },
@@ -68,7 +71,7 @@ const DOOR_ARENA = {
   doors: ['H 2 2'],
   map: [
     '#######',
-    '#.@M..#',
+    '#.@.M.#',
     '#.....#',
     '#######',
   ],
@@ -77,8 +80,13 @@ const DOOR_ARENA = {
 test('a door can be worked mid-fight, from the tile beside it, for AP', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, DOOR_ARENA, 'office-drone');
-  // Adjacent at boot: the proximity trigger opens the fight on its own.
-  await expect.poll(() => page.evaluate(() => window.__game.inCombat), { timeout: 90_000 }).toBe(true);
+  await enterCombat(page);
+  await waitForPlayerTurn(page);
+
+  // Step back onto the door's own tile: the rule is adjacency, not auto-walk,
+  // because movement in a fight belongs to combat and is priced per tile.
+  await clickWorld(page, 2, 1);
+  await waitStill(page);
   await waitForPlayerTurn(page);
   await refillAp(page);
 

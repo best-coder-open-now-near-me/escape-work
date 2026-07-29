@@ -216,10 +216,57 @@ Three things let that happen, all fixed or flagged now:
   anything in one, so the whole CI/deploy effort could go green and say nothing.
   `combat-bar.spec.js` exists for exactly that reason.
 
-*Caveat, stated rather than papered over:* the ~50 unchecked boxes under Phases
-0–4 are mostly delivered but have **not** been back-filled — ticking them from
-memory would re-introduce the same false confidence. Treat any `- [ ]` in those
-sections as "verify against the source before trusting it either way".
+### Audit of the unchecked boxes, against the source (29 Jul)
+
+Every claim below was checked by reading the code, not by remembering. The
+headline: the prose was broadly right — most of Phases 0–4 really did ship —
+but **four real items were hiding among the unticked boxes**, and would have
+gone on hiding.
+
+**Verified DONE** (evidence in parentheses):
+
+| Item | Evidence |
+|---|---|
+| P0 combat soft-lock | `handleEnemyClick` guards phase/moving/alive (`combat.js:2098`) |
+| P0 playtest stash vs campaign save | separate try/catch per source (`main.js:71-93`) |
+| P0 `xp`/`xpNext` backfill | v6 migration (`party.js:146-157`) |
+| P0 companion `def` across floors | `companionId` + `COMPANIONS[…]` (`party.js:104`) |
+| P0 closed-door deadlock | `canTakePart` LOS rule (`main.js:1002`) |
+| P1 dash preview shape | documented `{ reach, tail }` (`combat.js:742`) |
+| P1 `moveStart` cleared | `moveStart.delete(u)` (`combat.js:3156`) |
+| P1 enemy AI pacing | `standTilePath` carries the `routeBeside` case (`combat.js:197`) |
+| P2 gum double-slow | no `speed *=` anywhere in `src/` |
+| P2 `reboot` purge-only, any target | `type: 'purge'` (`data/actions.js:187`) |
+| P2 `remote-restart` retired | only a historical comment survives |
+| P2 `paper-storm` `leavesTurns` | `6`, with the rationale (`data/actions.js:95`) |
+| P2 friendly verbs reach teammates OOC | `aimsAtAlly` gate (`main.js:1181`) |
+| P3 window-leave ends hover | `pointerleave` listener (`controls.js:91`) |
+| P3 party-bar float AP | `fmtAp` (`ui/hud.js:351`) |
+| P3 portraits face the lens | `rotY: 0` + why (`portraits.js:136`) |
+| P3 corner repulsion is edge-aware | `pathfinding.js:55-58` |
+| P4 M1–M6 | `creation.js`, `data/looks.js`, `data/backgrounds.js` all exist |
+
+**Still genuinely OPEN — found by this audit, not previously known:**
+
+- [ ] **`hover.clear()` never resets `hoverTarget`** (`hover.js`). `clear()` nulls
+      `hoverKind` but leaves `hoverTarget` set, and `refresh()` re-lights from it
+      the moment Ctrl/Alt goes down (`hover.js:127`) — so a body behind a panel,
+      or one left over from before a fight, lights up again. This is the item as
+      originally written; it was never done.
+- [ ] **Floor-clear save write is unguarded** (`main.js:2137`).
+      `localStorage.setItem(PROGRESS_KEY, …)` runs bare inside the floor
+      transition. `god.js:66` wraps the identical call in try/catch for private
+      mode; this one would throw mid-transition instead.
+- [ ] **A failed `.glb` gets no fallback marker** (`models.js:44`). The asset
+      error handler exists and `console.warn`s, but nothing renders in the
+      model's place — the prop is simply invisible, which reads as a level bug.
+- [ ] **`drawTargets` rings no doors or props** (`combat.js:1041`). Checked the
+      whole function: zone cells, summon spots, allies, live enemies and the
+      caster only. Props are shovable and doors are now workable in a fight, so
+      both are targets the player gets no ring for.
+
+*Not re-verified:* the ranged walk-in ring item (P2) and the `god.js` trio (P3)
+were not reached in this pass. They stay unchecked and unclaimed.
 
 The five bugs reported from play - AI pacing, the burnt-paper desync, party-bar
 float AP, backwards portraits, and the out-of-combat cone - were each fixed at
