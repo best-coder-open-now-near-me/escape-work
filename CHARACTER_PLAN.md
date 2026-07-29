@@ -11,43 +11,10 @@ account of what the designer wanted.
 
 ## Questions for the designer
 
-**Q1 — The five invented enemies. Burn them, or are they the opposition and
-therefore exempt?**
-
-Five characters in `data/enemies.js` are not one of our people and never claim
-to be: they carry their own name, their own rig and their own stat block, with
-no `classId` at all.
-
-| Entry | Name | Rig | On a map? |
-|---|---|---|---|
-| `manager` | The Manager | `manager.glb` | level1, level2 |
-| `executive` | The Executive | `executive.glb` | level2 |
-| `hr` | HR Representative | `hrrep.glb` | level1, level2 |
-| `senior-manager` | Senior Manager | `seniormanager.glb` | level2 |
-| `regional-executive` | Regional Executive | `regional.glb` | never placed |
-
-- **A — They are inventions; fold them into our people.** Each becomes a
-  class-backed entry the way `security-guard` already is (`classId: 'security'`,
-  told apart by `look.build` alone). The Manager and Senior Manager become
-  Middle Managers; HR Representative becomes Human Resources. The Executive and
-  Regional Executive have no class to fold into and would need one, or would
-  need to go. **This frees five rigs**, which is the only way the custom
-  character gets a wardrobe bigger than one body.
-- **B — Enemies are THEM, not us; leave them.** "Our people" means the party
-  side, and the antagonists are supposed to be a separate cast. Costs nothing,
-  but the custom character then has exactly one body available (`intern.glb`,
-  once Q-adjacent fix M1 lands) and the wardrobe is a list of one.
-- **C — Split it: the two bosses stay, the three middle ones fold.** The
-  Manager and The Executive are the floor-enders and carry the progression;
-  Senior Manager, HR Representative and Regional Executive are just variations
-  of people we already have. Frees three rigs.
-
-**I'd pick C**, because it draws the line where your objection actually falls:
-"Senior Manager" and "HR Representative" are variations of Middle Manager and
-Human Resources, which is the thing you said you never want to see. A boss with
-a name and a floor to end is a different kind of object. But this is your call
-and the whole enemy roster hangs on it — **nothing in M1 below touches enemies
-until you answer.**
+**Q1 — the enemy roster — is answered.** "Enemies is fine for the most part
+unless theyre trying to imitate something." The test is therefore **imitation
+and parallel implementation**, not whether an entry has a `classId`. Applied
+below in "Parallel implementations"; the verdicts land in decisions #13–#15.
 
 **Q2 — The Applicant.** `classes.js` carries a seventh entry, `applicant`
 (`playable: false`), used as the summon archetype for HR's Post the Role. It
@@ -124,13 +91,114 @@ who wears what, including this one.
 | `mail-veteran` | `companions.js:135` | `mail-room` | Inherits correctly, told apart by `torso: 1.38` — but the **id says "veteran"**, and the comments build a character out of it ("eleven years"). |
 | `it-intern` | `companions.js:43` | `it-support` | **Broken.** Inherits the class, then **overrides the rig** to `intern.glb` (`:52`) and adds `look: { build: { legs: 1.7, head: 0.68 } }`. The build alone already does the "visibly junior" job — exactly as `mail-veteran`'s torso does. The rig override is redundant, and it is the sole thing reserving `intern.glb`. Track nodes are named `intern-fast-learner`, `intern-nerves`. |
 
-### Characters who are NOT our people
+### Characters with no class twin
 
-The five in Q1 above, plus:
+Standalone entries in `data/enemies.js` — own name, own rig, own stat block, no
+`classId`. Under the answered rule these are fine **if they are their own
+archetype** and a problem **if they imitate**. Verdicts in the next section.
+
+| Entry | Name | Rig | On a map? |
+|---|---|---|---|
+| `manager` | The Manager | `manager.glb` | level1, level2 |
+| `executive` | The Executive | `executive.glb` | level2 |
+| `hr` | HR Representative | `hrrep.glb` | level1, level2 |
+| `senior-manager` | Senior Manager | `seniormanager.glb` | level2 |
+| `regional-executive` | Regional Executive | `regional.glb` | **never placed** |
+
+Plus:
 
 | Entry | File | What it is |
 |---|---|---|
 | `applicant` | `classes.js:308` | Summon archetype, `playable: false`, deliberately anonymous. See Q2. |
+
+---
+
+## Parallel implementations
+
+The thing you are actually tired of. Four found, ranked by what they cost.
+
+### P1 — Two ways to make a tougher enemy, and they disagree
+
+`enemies.js:167` opens a section headed **"seniority variants"** and describes
+itself plainly: *"Tougher relatives of the base coworkers: new data entries
+reusing existing rigs, with a higher native `level`."*
+
+The engine already does this. `stats.scaleEnemy` (`stats.js:271`) scales HP, AP,
+XP, every attack's min/max and accuracy by the gap between an enemy's native
+tier and the floor's depth, and `effectiveLevel` (`stats.js:299`) picks the
+level. A tougher Manager on a deeper floor is a thing that happens for free.
+
+So there are two mechanisms, and they produce different characters:
+
+| | HP | XP | Attack lines |
+|---|---|---|---|
+| Manager, auto-scaled to level 3 | 18 | 10 | 5 |
+| **Senior Manager** (hand-written, level 3) | **22** | **15** | 4 |
+| Executive, auto-scaled to level 4 | 23 | 13 | 4 |
+| **Regional Executive** (hand-written, level 4) | **30** | **22** | 3 |
+
+The XP column is the one that bites. A Senior Manager pays **50% more XP** than
+the identical enemy scaled to the identical level, and a Regional Executive
+**69% more**. Which entry a level places therefore silently changes the
+progression curve, and nothing anywhere says which number is the intended one.
+This is the "breaks everything down the road" case, already loaded.
+
+Both entries are also, by the file's own account, base coworkers with an
+adjective on the front — "Senior Manager: *Same energy, more direct reports*",
+"Regional Executive" to "The Executive". That is the imitation test, failed in
+the examine text.
+
+**Recommend: delete both.** `scaleEnemy` covers the job they were written for.
+Consequence to own: `level2.json` places `G` (Senior Manager); it becomes an `M`
+that auto-scales to floor depth 2 rather than a hand-tuned level 3, so that
+floor gets slightly easier and pays less XP. Regional Executive is on no map at
+all and costs nothing to remove. **This frees `seniormanager.glb` and
+`regional.glb`** — which, with `intern.glb` from the companion fix, gives the
+custom character a real wardrobe of three without inventing anybody.
+
+### P2 — Three copies of "dress a body"
+
+`dressUp` (`main.js:459`) is the shared path: proportions, then materials, then
+tint. It is used by enemies, NPCs, the party and companions. Alongside it:
+
+- `previewClass` (`main.js:573-575`) does the same three calls inline.
+- `previewDraft` (`main.js:591-593`) does the same three calls inline again,
+  reading a draft instead of a class.
+
+`REVIEW.md` flagged the first duplicate and `TODO.md`'s Phase 4 **M2 promised to
+fold it in**: *"folding `previewClass`'s inline duplicate (`main.js:550`) into
+the shared path."* That never happened — and the creation work then added a
+third copy. The debt the plan was written to pay went **up**.
+
+### P3 — Two summon vocabularies
+
+One implementation (`combat.js resolveSummon`), two incompatible spec shapes for
+it. The HR class action (`actions.js:554`) carries `{count, cap, uses, range,
+lifetimeTurns, ap}`; the HR enemy (`enemies.js:109`) carries `{count, cap,
+cooldownRounds, ap, lifetimeTurns}` — no `range`, and `uses` swapped for
+`cooldownRounds`. Same archetype, same resolver, two ways to describe how often
+you may do it. Milder than P1 because the resolver is shared; worth one
+vocabulary rather than two.
+
+### P4 — HR exists twice
+
+The Human Resources class (`midmanager.glb`) and the HR Representative enemy
+(`hrrep.glb`) are the same job with two bodies and two stat blocks. Unlike
+Senior Manager this is not a tier variant, so it is a weaker case — but
+`security-guard` shows what the honest version looks like: `classId: 'security'`,
+distinguished by `look.build` alone. **Recommend: fold HR the same way**, which
+also puts the class on the rig named for it and starts unwinding the scramble.
+
+`manager` and `executive` pass. "The Manager" is not the Middle Manager class
+(that class is about control and wears `veteran.glb`), and nobody plays an
+Executive. They are their own archetypes, which is exactly what the file's
+header comment says to keep: *"Don't invent a class just to inherit from it."*
+
+### Also: the worklist is lying
+
+`TODO.md`'s Phase 4 lists M1–M6 as six unchecked boxes. Five of them shipped —
+`sheetLook` is gone, `creation.js` exists, `looks.js` exists, backgrounds
+shipped, pronouns shipped. The worklist says none of it is done.
 
 ### Invented personas that are not characters but read as them
 
@@ -226,6 +294,11 @@ Tagged per `CLAUDE.md`. Everything inherited from the old plan is demoted to
 | 10 | The custom character picks a **class for its kit**, a name, and a body — differing from that class's precut character by name and body only | `[proposed]` | the only coherent reading of #1 + #8; if a custom character should instead have no class, the whole kit/talent/action pipeline needs a second source and M3 changes shape |
 | 11 | Pronouns stay on both paths | `[proposed]` | see Q3 |
 | 12 | The rig↔role scramble gets un-tangled | `[proposed]` | not asked for; see M4. Skippable, but it is the root of D4 |
+| 13 | **Enemies are fine unless they imitate.** Having no `classId` is not the fault; being a variation of somebody we already have is | `[stated]` | "enemies is fine for the most part unless theyre trying to imitate something" |
+| 14 | **No parallel implementations.** A second hand-written way to do a thing the engine already does is the defect, whatever it is dressed as | `[stated]` | "i just dont want to deal with any more parallel imps. im so tired of this repeated code i didnt even want" |
+| 15 | Senior Manager and Regional Executive are deleted; `scaleEnemy` already covers them | `[proposed]` | follows from #13 + #14, but it deletes shipped content and shifts level2's difficulty — say the word |
+| 16 | HR Representative folds into the Human Resources class, `security-guard`-style | `[proposed]` | follows from #13; weaker case than #15 since it is not a tier variant |
+| 17 | The Manager and The Executive stay as their own archetypes | `[proposed]` | they imitate nobody; `enemies.js:20` already says "Don't invent a class just to inherit from it" |
 
 ### On the reference games
 
@@ -255,18 +328,25 @@ stage everybody walks through. That is the structural fix.
 ### M0 — Land this document
 Commit `CHARACTER_PLAN.md` so the twenty dangling citations resolve. No code.
 
-### M1 — The cast becomes our people
-Blocked on **Q1** for enemies. The companion half is not blocked:
-
+### M1 — The cast becomes our people, and the imitations go
 - `it-intern` → drop `model: 'intern'`; he inherits `itsupport.glb` and stays
   visibly junior on `look.build` alone, exactly like the mail room companion.
   Rename the entry and its track nodes off "intern".
 - `mail-veteran` → rename the entry off "veteran".
 - Delete the "Nervous IT Intern" prose from `classes.js:34` and
   `companions.js:46`.
+- Delete `senior-manager` and `regional-executive` (**P1**, decision #15), and
+  the "seniority variants" section header that licenses writing more of them.
+- Fold `hr` into the Human Resources class (**P4**, decision #16).
 - Level legends (`levels/level1.json`, `levels/level2.json`) reference these ids
-  and get updated with them.
-- Enemies: held for your answer.
+  and get updated with them — `G` on level2 becomes `M`.
+- Frees `intern.glb`, `seniormanager.glb`, `regional.glb`: the custom
+  character's wardrobe, with nobody invented to fill it.
+
+### M1b — Kill the duplicate dressing
+Fold `previewClass` and `previewDraft` into `dressUp` (**P2**) — the fold
+`TODO.md` M2 promised and never did. Do it before M2 touches the preview, or
+the strip work edits two copies of the same three lines for the third time.
 
 ### M2 — Strip the customization screen
 - Delete `data/backgrounds.js`; drop `BACKGROUNDS` from `creation.js`,
