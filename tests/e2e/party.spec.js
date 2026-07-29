@@ -136,13 +136,33 @@ test('party combat: initiative interleaves the party and enemies; both members a
   // simply skipped when it comes around).
   // Force enemy hits so the wounded member reliably drops (attacks can miss now).
   await page.evaluate(() => { window.__combat.forceHit = true; });
-  await page.evaluate(() => { window.__god.party.members[0].sheet.hp = 1; window.__combat.refresh(); });
+  // Wound whoever the Manager is actually coming for, not slot 0 on principle.
+  // `pickTarget` (combat.js:256) takes the NEAREST engageable member; HP only
+  // breaks a tie at EQUAL distance. Pinning slot 0 to 1 HP and then waiting on
+  // slot 0 therefore waits on where the two happened to end up standing - with
+  // the Intern closer, the Manager swings at the Intern forever and slot 0
+  // never drops. That is the 120s timeout on run 30410302575, green on retry.
+  // `__game.party`, `__god.party.members` and `__combat.party` all index the
+  // same roster order (combat.js:72), so one index reads across all three.
+  await page.evaluate(() => {
+    const en = window.__game.enemies.find((e) => e.alive);
+    const nearest = window.__game.party
+      .map((m, i) => ({ i, d: Math.max(Math.abs(m.x - en.x), Math.abs(m.z - en.z)) }))
+      .filter(({ i }) => window.__combat.party[i].hp > 0)
+      .sort((a, b) => a.d - b.d)[0].i;
+    window.__god.party.members[nearest].sheet.hp = 1;
+    window.__combat.refresh();
+  });
+  // Any member going down proves the rule this test is named for; which slot it
+  // is decides nothing. Only the wounded one can drop - the other is at full HP.
   await expect.poll(async () => {
     if (await page.evaluate(() => window.__combat?.phase) === 'player') await page.click('#combat-end-turn').catch(() => {});
-    return page.evaluate(() => window.__combat?.party[0].hp === 0 || window.__game.gameOver);
+    return page.evaluate(() => window.__combat?.party.some((m) => m.hp === 0) || window.__game.gameOver);
   }, { timeout: 120_000 }).toBe(true);
   expect(await page.evaluate(() => window.__game.gameOver)).toBe(false); // one down is not a wipe
   expect(await page.evaluate(() => window.__game.inCombat)).toBe(true);
+  // ...and the fight carries on one member lighter, their slot simply skipped.
+  expect(await page.evaluate(() => window.__combat.party.filter((m) => m.hp > 0).length)).toBe(1);
 });
 
 // Both recruitables in one room - the roster fills to its cap of three.

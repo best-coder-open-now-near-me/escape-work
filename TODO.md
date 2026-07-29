@@ -136,24 +136,69 @@ the old reboot. This branch introduces it:
 **42 tests never executed on a real runner**. Fixing the three known failures
 is not the same as knowing main goes green.
 
-**Gap closed.** Run 30385657545 (branch, `c523ad3`) is the first time all 102
-executed on a real runner: **101 passed, 1 failed, 1.3h**. The one failure is
-the `#hotbar-act-defend` assertion above, fixed in `57bf876` which that run
-predates. The three original timeouts are gone - `powers.spec` passes on CI
-hardware with the arena and no extended budget.
+**Gap closed.** Run 30385657545 (branch, `c523ad3`) is the first time the whole
+suite executed on a real runner: **101 passed, 1 failed, 4 flaky, 1.3h**. The
+one failure is the `#hotbar-act-defend` assertion above, fixed in `57bf876`
+which that run predates. The three original timeouts are gone - `powers.spec`
+passes on CI hardware with the arena and no extended budget.
 
-- [ ] **Four tests were FLAKY on that run** - they failed once and passed on
-      retry, so `retries: 1` is currently carrying them. Not blockers, but each
-      is a real intermittent and the retry is what hides it:
+*(The suite is **106** tests - the table above already says so for this branch,
+78 + 28. The "102" recorded here earlier is the **baseline** `e8e53de` count,
+from before this branch added four; quoting the baseline's size for a branch run
+is what made these totals stop adding up. Playwright also counts `flaky` as its
+own bucket, so on CI `passed + failed` never totals the suite by itself.)*
+
+*It is **109** now — `combat-bar.spec.js` added three (one bar in a fight, a
+snack for 2 AP, a door for 1 AP). Verified locally at **17/17** on every spec
+those changes touch: `combat-bar`, `throwing`, `movement`, `topple`, `hotbar`
+and `classes`.*
+
+*One warning for whoever runs this next, because it cost real time here:
+**a contended box does not fail honestly.** `classes.spec` failed twice with
+`enterCombat` timeouts and looked like a regression; the same tests pass in
+1.4–1.7m on a quiet machine. The tell was elsewhere in the same runs — tests
+taking 2.4m that take 55s idle, and the web server dying mid-run and turning
+five specs into sub-second `ERR_CONNECTION_REFUSED` failures. Before believing
+an `enterCombat` timeout here, check what the passing tests alongside it cost.*
+
+**Main is green, and it ships again.** Run 30410302575 (`1d69e5a`, main):
+**104 passed, 0 failed, 2 flaky, 1.3h**. Deploy run 30414380016 fired 8s behind
+it and pushed to itch.io - the first successful deploy since run 115 on
+2026-07-27, because `deploy.yml` chains off CI's conclusion and main's E2E had
+been red since the powers work landed. Every merge in between was built and
+then silently declined to ship.
+
+- [x] **The four flakes from that run are FIXED** (`346eafc`, `44c4c28`) - all
+      four passed clean on 30410302575:
       - `statuses.spec.js:156` a weapon on-hit proc - the red stapler flings gum
       - `tactics.spec.js:33` walking out of an enemy reach provokes a free swing
       - `tactics.spec.js:118` a partition gives the defender cover
       - `throwing.spec.js:89` a solid wall refuses the throw
 
-      All four are geometry-and-timing shaped, which is the same family as the
-      `targeting.spec` click that turned out to be landing under the hotbar.
-      Worth checking whether they share that cause: they aim projected clicks
-      and only test `onScreen`, never `onCanvas` (now exported from helpers).
+- [ ] **Two DIFFERENT tests were flaky on 30410302575**, and `retries: 1` is
+      what turned them green. Both causes are diagnosed and fixed here, but
+      neither is *confirmed* gone - one green run has never been proof about a
+      stochastic failure:
+      - `party.spec.js:93` timed out (120s) waiting for the wounded member to
+        drop. `pickTarget` (`combat.js:256`) attacks the NEAREST engageable
+        member and lets HP break a tie only at EQUAL distance - so pinning slot
+        0 to 1 HP and then waiting on slot 0 waits on where the two members
+        happen to be standing. With the Intern closer, the Manager swings at
+        the Intern forever. Fixed by wounding whoever the Manager is actually
+        coming for, and by asserting the rule the test is named for (a member
+        goes down, the fight continues) rather than a particular slot index.
+      - `topple.spec.js:25` never entered combat - 7 engage attempts over 184s.
+        `enterCombat` clicks the enemy at chest height, and this map exists to
+        stand a TALL cabinet directly between player and Manager, so the engage
+        click lands on the cabinet mesh. Fixed by engaging on ADJACENCY, which
+        is what actually opens a fight (`checkCombatTrigger`, main.js), via a
+        tile click that resolves by tile and so cannot be occluded.
+
+      Both are geometry-and-timing shaped like the four before them, but
+      neither shares the `onCanvas` cause guessed at above - and that guess is
+      worth retiring. `topple` is 3D occlusion: the cabinet is ON the canvas
+      and ON screen, so no screen-space guard can see the problem. `party` is
+      not a click at all - it is an AI targeting rule the test never controlled.
 
 - [ ] **The suite is 1.3h on CI.** The arena idiom is what brought `powers.spec`
       from 10.5m to 3.2m; the same treatment on the other `bootAndPick` specs is
@@ -163,6 +208,92 @@ hardware with the arena and no extended budget.
 
 **All eight phases are done and pushed.** Unit tests: 455 passing, up from 385
 at the branch point. Build clean.
+
+**...but that line was wrong three times, and here is how.** It was true of the
+work each phase COMMITTED and false of its section. Three items recorded on
+28 Jul between 05:36 and 05:43 — doors in combat (`e0ae451`), the two action
+bars (`aa504a7`) and consumables in combat (`0a4d78d`) — were appended to
+sections whose phases then closed **without them**, 1.5 to 4.2 hours later, and
+the phases were reported complete anyway. They were not lost over weeks; they
+were skipped in the same session that wrote them down.
+
+Three things let that happen, all fixed or flagged now:
+
+- **The tracker was per-PHASE, not per-item.** "Phase 2" was one checkbox over
+  a section that grew to ~10 entries; its commit did four and the phase ticked.
+- **These boxes were never ticked.** 61 `[ ]` against 8 `[x]`, while this header
+  claimed completion — so a delivered item and an unbuilt one looked identical,
+  and the prose won. From here an item is done when its box is `[x]` **and it
+  names what shipped**, as the three above now do.
+- **Nothing tested any of them.** No spec opened a door in a fight or drank
+  anything in one, so the whole CI/deploy effort could go green and say nothing.
+  `combat-bar.spec.js` exists for exactly that reason.
+
+### Audit of the unchecked boxes, against the source (29 Jul)
+
+Every claim below was checked by reading the code, not by remembering. The
+headline: the prose was broadly right — most of Phases 0–4 really did ship —
+but **four real items were hiding among the unticked boxes**, and would have
+gone on hiding.
+
+**Verified DONE** (evidence in parentheses):
+
+| Item | Evidence |
+|---|---|
+| P0 combat soft-lock | `handleEnemyClick` guards phase/moving/alive (`combat.js:2098`) |
+| P0 playtest stash vs campaign save | separate try/catch per source (`main.js:71-93`) |
+| P0 `xp`/`xpNext` backfill | v6 migration (`party.js:146-157`) |
+| P0 companion `def` across floors | `companionId` + `COMPANIONS[…]` (`party.js:104`) |
+| P0 closed-door deadlock | `canTakePart` LOS rule (`main.js:1002`) |
+| P1 dash preview shape | documented `{ reach, tail }` (`combat.js:742`) |
+| P1 `moveStart` cleared | `moveStart.delete(u)` (`combat.js:3156`) |
+| P1 enemy AI pacing | `standTilePath` carries the `routeBeside` case (`combat.js:197`) |
+| P2 gum double-slow | no `speed *=` anywhere in `src/` |
+| P2 `reboot` purge-only, any target | `type: 'purge'` (`data/actions.js:187`) |
+| P2 `remote-restart` retired | only a historical comment survives |
+| P2 `paper-storm` `leavesTurns` | `6`, with the rationale (`data/actions.js:95`) |
+| P2 friendly verbs reach teammates OOC | `aimsAtAlly` gate (`main.js:1181`) |
+| P3 window-leave ends hover | `pointerleave` listener (`controls.js:91`) |
+| P3 party-bar float AP | `fmtAp` (`ui/hud.js:351`) |
+| P3 portraits face the lens | `rotY: 0` + why (`portraits.js:136`) |
+| P3 corner repulsion is edge-aware | `pathfinding.js:55-58` |
+| P4 M1–M6 | `creation.js`, `data/looks.js`, `data/backgrounds.js` all exist |
+
+**Found genuinely open by this audit — and now FIXED:**
+
+- [x] **`hover.clear()` never reset `hoverTarget`** (`hover.js`). `clear()` nulled
+      `hoverKind` but left `hoverTarget` set, and `applyGlow()` re-lights from it
+      the moment Ctrl/Alt goes down — so a body behind a panel, or one left over
+      from before a fight, came back glowing. Clearing the *highlight* was never
+      enough, because the next modifier press just drew it again. `clear()` now
+      forgets what was under the cursor, not merely that something was.
+- [x] **Floor-clear save write was unguarded** (`main.js`). Wrapped in try/catch
+      like every other write (`god.js:66`). localStorage throws in private mode
+      and on a full quota, and this one runs *mid floor transition* — a bare
+      throw took the stairwell heal and the floor-clear screen with it, turning
+      "your save did not persist" into "the game stopped".
+- [x] **A failed `.glb` now leaves a marker** (`models.js`). `asset.ready` never
+      fires on an error, so the prop was absent, `onReady` never ran, and the
+      only trace was a console warning nobody reads mid-playtest — a missing
+      asset was indistinguishable from a level that never placed the prop. Now
+      a magenta box stands in, and the callback contract holds: whatever was
+      going to happen to the model happens to the marker. The listener is
+      per-call with a `settled` guard, so a placement can never draw both, and
+      the editor's constant repainting cannot pile handlers on a shared asset.
+- [x] **`drawTargets` rings props and doors** (`combat.js`). Props: the eight
+      neighbours, through `topplePlan` — the same rule the click and the AI run,
+      so a green ring is the same promise it is anywhere else. A shove that puts
+      a cabinet on somebody is strictly the better move where it is available,
+      and the affordance for it used to be "the player happened to try it".
+      Doors: rung at the EDGE midpoint, before anything else and regardless of
+      what is armed, because a door has no bar slot — gating it behind
+      `previewAction` would hide the only affordance for the only terrain a
+      fight can change. The AP cost rides along on the new `world.doorsBeside`
+      seam rather than being re-declared in `combat.js`: one number, owned by
+      the rule that charges it.
+
+*Not re-verified:* the ranged walk-in ring item (P2) and the `god.js` trio (P3)
+were not reached in this pass. They stay unchecked and unclaimed.
 
 The five bugs reported from play - AI pacing, the burnt-paper desync, party-bar
 float AP, backwards portraits, and the out-of-combat cone - were each fixed at
@@ -382,6 +513,15 @@ killing anyone, and therefore the correct play every time.
 - [ ] Ranged-weapon target rings must match the click's new walk-in behavior
       (`combat.js:1035` vs `2020-2056`) — ring green when a walk-in shot is
       affordable, as melee does. *(New in `e8e53de`.)*
+- [x] **DONE.** `useItem` no longer refuses on `isInCombat()`; a consumable
+      costs **2 AP** out of the acting member's pool (`combat.spendAp`), the
+      full-HP refusal is checked BEFORE the AP so a refused snack is a free one,
+      and `getSheet` now resolves to the ACTING member in a fight - initiative
+      decides who acts, so the snack comes out of their pockets and heals their
+      sheet. Item slots on the combat bar came free with the bar unification
+      below. The pockets panel's live Use button needed no change: the
+      complaint was that the UI offered what the rules refused, and the rules
+      were the wrong half. Covered by `combat-bar.spec.js`.
 - [ ] **Let consumables be used in combat** — confirmed intended; the current
       refusal is a bug, not a design choice. `useItem` refuses outright while
       `isInCombat()` (`looting.js:200`) and every path routes through it (the
@@ -403,6 +543,17 @@ killing anyone, and therefore the correct play every time.
       gated only on `sheet && !gameOver`, `main.js:2292`) and renders a live
       **Use** button with no combat gate (`ui/panels.js:165`), so the UI offers
       an action the rules refuse.
+- [x] **DONE.** `toggleDoor` works in a fight for **1 AP** - cheaper than a
+      verb, because the walk to reach it is already billed as movement and this
+      is the handle, not the journey. The rule is adjacency, not auto-walk
+      (`atDoor`): movement in a fight belongs to combat and is priced per tile,
+      so there is no `approachAndDo` to lean on. The in-combat right-click menu
+      offers the door with its cost on the label, which honours that menu's own
+      stated rule (turn-spending verbs must show their AP) rather than breaking
+      it - doors have no bar slot because they are terrain, not kit. Alt still
+      lights the overlay in a fight, since that is how you SEE a door. New
+      `__game.doorOpen(key)` seam: doors sit on EDGES, so `tileAt` could never
+      answer it. Covered by `combat-bar.spec.js`.
 - [ ] **Let doors be used in combat.** Blocked at four independent layers:
       `toggleDoor` early-returns on `inCombat` (`main.js:850`, no comment
       explaining it); the in-combat click path never reaches `dispatchHit`,
@@ -545,6 +696,19 @@ is its own PR that keeps unit + e2e green.
       step rules (above), debug surface — each on the `shopping.js`
       host-callback pattern. *M1/M3 of the creation plan start this.*
 - [ ] Extract `EnemyActor`'s wander brain to a pure module (`actors.js:412`).
+- [x] **DONE.** One bar. `combat.js` no longer builds anything - it supplies
+      the rules (`actionState` for affordability and the refusal reason,
+      `actionTip` for the tooltip, `scrambleEntries` for the reorg status,
+      `pressAction` for the press) and `main.js` owns the DOM, as it already
+      did out of combat. `#act-<id>` is gone; `#hotbar-act-<id>` names a power
+      in a fight or out of one. `armedOoc` and `armed` stay as two variables
+      but one arming state reaches the bar. In a fight you now get the saved
+      layout, the pager, item slots, right-click reassign and keys `1-9`.
+      **Watch for:** the bar signals usability by `aria-disabled`, never the
+      `disabled` property (a disabled button dispatches no events, so the slot
+      you most want to reassign would be the one you cannot) - `toBeEnabled()`
+      passes instantly against it, so `clickAction` waits on the attribute.
+      Covered by `combat-bar.spec.js`.
 - [ ] **Collapse the two action bars into one.** The combat bar and the
       persistent hotbar are parallel implementations of the same widget,
       swapped by mode (`main.js:2538` hides `#hotbar` while `inCombat`, and

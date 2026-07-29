@@ -32,7 +32,7 @@ async function shoveManager(page, foe) {
   for (let i = 0; i < 6; i++) {
     await page.waitForTimeout(700);
     const ap0 = await page.evaluate(() => window.__combat.ap);
-    if (await page.evaluate(() => window.__combat.armed) !== 'shove') await page.click('#act-shove');
+    if (await page.evaluate(() => window.__combat.armed) !== 'shove') await page.click('#hotbar-act-shove');
     const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
     await page.mouse.click(fp.x, fp.y);
     await page.waitForTimeout(300);
@@ -136,7 +136,7 @@ test('blinded drops the attacker to-hit via accMod', async ({ page }) => {
     let c = null;
     for (let i = 0; i < 8 && c == null; i++) {
       await page.waitForTimeout(400);
-      if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#act-attack');
+      if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#hotbar-act-attack');
       const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
       await page.mouse.move(fp.x, fp.y);
       await page.waitForTimeout(150);
@@ -167,7 +167,7 @@ test('a weapon on-hit proc applies its status - the red stapler flings gum', asy
   // Pin the hit and the proc so the swing lands and always gums.
   await page.evaluate(() => { window.__combat.forceHit = true; window.__combat.forceProc = true; });
   // The stapler's swing is on the combat bar (fail fast if the wiring is off).
-  await expect(page.locator('#act-staple-jab')).toBeVisible();
+  await expect(page.locator('#hotbar-act-staple-jab')).toBeVisible();
 
   const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
   // Read through whichever surface is still standing. A forced hit that KILLS
@@ -185,10 +185,10 @@ test('a weapon on-hit proc applies its status - the red stapler flings gum', asy
     await page.waitForTimeout(700);
     // Stop the moment the fight is over. Every read below assumes __combat,
     // and the combat bar this clicks is gone once it ends - waiting on a
-    // vanished #act-staple-jab would hang out the whole timeout. The gum is
+    // vanished #hotbar-act-staple-jab would hang out the whole timeout. The gum is
     // still readable off the body, so take the last look and leave.
     if (!(await page.evaluate(() => !!window.__combat))) { gummed = await foeGummed(); break; }
-    if (await page.evaluate(() => window.__combat.armed) !== 'staple-jab') await page.click('#act-staple-jab');
+    if (await page.evaluate(() => window.__combat.armed) !== 'staple-jab') await page.click('#hotbar-act-staple-jab');
     const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
     await page.mouse.click(fp.x, fp.y);
     await page.waitForTimeout(400);

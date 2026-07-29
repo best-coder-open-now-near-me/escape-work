@@ -78,7 +78,7 @@ const clickManager = async (page) => {
 // cosmetic - the fight resolved before it existed - so a short settle is enough.
 async function throwInCombat(page, actionId) {
   await waitForPlayerTurn(page);
-  await page.click(`#act-${actionId}`);
+  await page.click(`#hotbar-act-${actionId}`);
   expect(await page.evaluate(() => window.__combat.armed)).toBe(actionId);
   await clickManager(page);
   await page.waitForTimeout(700);
@@ -167,9 +167,9 @@ test('an empty pocket disables the throw on the combat bar', async ({ page }) =>
 
   await setPaper(page, 0);
   // The affordance says so before a click has to refuse.
-  await expect(page.locator('#act-paper-ball')).toBeDisabled();
+  await expect(page.locator('#hotbar-act-paper-ball')).toHaveAttribute('data-affordable', 'false');
   await setPaper(page, 1);
-  await expect(page.locator('#act-paper-ball')).toBeEnabled();
+  await expect(page.locator('#hotbar-act-paper-ball')).toHaveAttribute('data-affordable', 'true');
 });
 
 test('the Origami Specialist folds an airplane for one sheet, not two', async ({ page }) => {
@@ -184,7 +184,7 @@ test('the Origami Specialist folds an airplane for one sheet, not two', async ({
   await waitForPlayerTurn(page);
   await setPaper(page, 1); // exactly one sheet: affordable ONLY with the discount
 
-  await expect(page.locator('#act-paper-airplane')).toBeEnabled();
+  await expect(page.locator('#hotbar-act-paper-airplane')).toHaveAttribute('data-affordable', 'true');
   const hp0 = await managerHp(page);
   await throwInCombat(page, 'paper-airplane');
 

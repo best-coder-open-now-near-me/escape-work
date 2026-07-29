@@ -256,6 +256,13 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
     // opened, or the fight started. Leaves nothing glowing behind a panel.
     clear() {
       hoverKind = null;
+      // ...and forget WHAT was under the cursor, not just that something was.
+      // `applyGlow` re-lights from `hoverTarget` the moment Ctrl or Alt goes
+      // down, so leaving it set meant a body could come back glowing after the
+      // hover had been dropped - behind the panel that dropped it, or from
+      // before the fight that did. Clearing the highlight alone was never
+      // enough, because the next modifier press just drew it again.
+      hoverTarget = null;
       clearHighlight();
       setCursor(null);
       ui.setFocusBanner(null);

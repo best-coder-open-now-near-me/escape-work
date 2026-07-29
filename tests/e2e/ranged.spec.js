@@ -170,7 +170,7 @@ test('firing in a fight costs AP and no ammo, and never moves the shooter', asyn
   const ap0 = await page.evaluate(() => window.__combat.ap);
   const where = await playerTile(page);
 
-  await page.click('#act-spitball-shot');
+  await page.click('#hotbar-act-spitball-shot');
   expect(await page.evaluate(() => window.__combat.armed)).toBe('spitball-shot');
   await clickManager(page);
   await page.waitForTimeout(900);

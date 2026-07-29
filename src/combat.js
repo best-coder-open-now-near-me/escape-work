@@ -689,8 +689,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // --- UI ---------------------------------------------------------------------
   const panel = document.createElement('div');
   panel.id = 'combat-panel';
+  // Sits ABOVE the shared bar, which owns the bottom of the screen in a fight
+  // exactly as it does out of one. Both used to live at `bottom: 18px` and
+  // never met, because main.js hid the hotbar whenever this panel existed -
+  // that hiding IS what "two bars swapped by mode" meant physically. With one
+  // bar the two are on screen together, and this panel's higher z-index made it
+  // swallow every click aimed at a slot: the bar rendered, and was dead.
+  // 92px clears the bar's 64px box (46px slots + 8px padding either side) and
+  // its own 18px offset, with room to breathe.
   Object.assign(panel.style, PANEL_CHROME, {
-    position: 'fixed', left: '50%', bottom: '18px', transform: 'translateX(-50%)',
+    position: 'fixed', left: '50%', bottom: '92px', transform: 'translateX(-50%)',
     zIndex: '30', width: 'min(640px, 94vw)', borderRadius: '10px',
     padding: '10px 14px', userSelect: 'none',
   });
@@ -1032,6 +1040,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // wedge instead, ringing whoever it would catch.
   function drawTargets() {
     if (phase !== 'player') return;
+    // A door you are standing at, rung before anything else and regardless of
+    // what is armed. It is not an ACTION - it has no bar slot, it lives on the
+    // right-click menu - so gating it behind `previewAction` would hide the one
+    // affordance for the only terrain a fight can change. Green when the AP is
+    // there for it, red when it is not, same as every other ring here.
+    for (const mid of world.doorsBeside?.(active.actor.x, active.actor.z) || []) {
+      drawRing(mid.x, mid.z, 0.3, active.ap >= mid.ap ? PREVIEW_OK : PREVIEW_FAR);
+    }
     // Not gated on `armed`: with nothing armed a click still swings (the basic
     // attack), and a swing you can't see coming is worse than no swing at all -
     // the rings are how you know which coworker a click would hit and whether
@@ -1125,6 +1141,26 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const me = posOf(active);
       drawRing(me.x, me.z, a.type === 'shove' ? REACH.SHOVE : reachOfUnit(active), REACH_RING);
     }
+    // Props are targets too, and nothing ever said so. A shove that puts a
+    // filing cabinet on somebody is strictly the better move where it is
+    // available - it damages, it stuns, and it leaves cover the other side has
+    // to walk around - so the affordance for it should not be "the player
+    // happened to try it". Eight neighbours, the same scan the AI runs, and
+    // `topplePlan` is the same rule the click runs: a green ring here is the
+    // same promise it is anywhere else on this bar.
+    if (a.type === 'shove') {
+      const b = bodyOf(active);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          if (!dx && !dz) continue;
+          const px = b.x + dx;
+          const pz = b.z + dz;
+          if (!isToppleable(world.tileDefAt(px, pz))) continue;
+          const canDrop = topplePlan(active, px, pz) && active.ap >= a.ap;
+          drawRing(px, pz, 0.42, canDrop ? PREVIEW_OK : PREVIEW_FAR);
+        }
+      }
+    }
     for (const en of world.liveEnemies()) {
       if (!en.entity) continue;
       let ok;
@@ -1171,9 +1207,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     font: 'inherit', cursor: 'pointer',
   });
   // The action bar belongs to the ACTIVE member - rebuilt whenever control
-  // changes hands, because different sheets bring different actions. The
-  // `#act-<id>` DOM ids always mean "the active member's action".
-  let buttons = [];
+  // changes hands, because different sheets bring different actions.
+  //
+  // It is no longer BUILT here. Combat and exploration render one bar - the
+  // persistent hotbar (main.js) - and this module supplies its rules: what the
+  // acting member can afford, what a slot's tooltip says, and what the reorg
+  // status does to the order. Two builders with two id conventions, two
+  // affordability sites, two tooltip builders and two arming states is what
+  // made the bar in a fight a different widget from the bar out of one, with
+  // no layout, no pager, no item slots and no number keys. `#act-<id>` is gone
+  // with them: `#hotbar-act-<id>` names a power now, in a fight or out of it.
   // The reorg (`confused`). Every power still works and still says what it
   // does - it is just not where you left it. Deterministic per turn rather than
   // Math.random, and re-dealt only at turnStart: a bar that reshuffled on every
@@ -1200,25 +1243,52 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     return out;
   }
-  function buildActionBar() {
-    actionsRow.innerHTML = '';
-    buttons = [];
-    const ids = actionIdsOf(active);
-    for (const id of (statusFx(active.sheet).shuffleActions ? scrambled(ids) : ids)) {
-      const b = document.createElement('button');
-      b.id = 'act-' + id;
-      b.dataset.action = id;
-      b.textContent = ACTIONS[id].label;
-      Object.assign(b.style, BUTTON_CHROME, {
-        flex: '1', minWidth: '110px', padding: '8px 6px', borderRadius: '7px',
-      });
-      b.onclick = () => onActionButton(id, b);
-      actionsRow.appendChild(b);
-      buttons.push(b);
-    }
-    actionsRow.appendChild(endBtn);
+  // The panel keeps the End Turn button and nothing else - the verbs live on
+  // the shared bar now.
+  actionsRow.innerHTML = '';
+  actionsRow.appendChild(endBtn);
+
+  // One affordability site for both halves of the game. main.js owns the bar's
+  // DOM and the player's slot layout; this owns "can I press that right now",
+  // because it is a combat question and there must be one answer to it.
+  // Returns null for a power the acting member does not have at all.
+  function actionState(id) {
+    const a = ACTIONS[id];
+    if (!a || !actionIdsOf(active).includes(id)) return null;
+    const affordable = phase === 'player' && active.ap >= a.ap
+      && (!a.uses || active.usesLeft[id] > 0)
+      && (!a.ammoCost || active.sheet.paper >= ammoCostOf(id))
+      && !(a.footwork && statusFx(active.sheet).noFootwork); // no kicking with gum on the shoe
+    return {
+      ap: a.ap,
+      uses: a.uses ? active.usesLeft[id] : null,
+      ammoCost: a.ammoCost ? ammoCostOf(id) : 0,
+      affordable,
+      // WHY it can't be pressed, in the slot's own tooltip. A dimmed button
+      // that doesn't say what it wants teaches nothing, and out of combat the
+      // bar already answered this (combatOnlyReason) - a fight should not be
+      // the half of the game where the bar goes quiet.
+      reason: affordable ? null
+        : phase !== 'player' ? 'Not your turn.'
+          : a.uses && active.usesLeft[id] <= 0 ? `${a.label} is spent for this fight.`
+            : a.ammoCost && active.sheet.paper < ammoCostOf(id)
+              ? `Needs ${ammoCostOf(id)} paper - you have ${active.sheet.paper}.`
+              : a.footwork && statusFx(active.sheet).noFootwork
+                ? 'Gum on your shoe - no footwork.'
+                : `Not enough AP - ${a.label} costs ${a.ap}.`,
+      // An armed action stays pressable even when it has gone unaffordable -
+      // that press is the only way to lower it again (see pressAction).
+      live: id === armed ? 'armed' : id === pendingConfirm ? 'confirm' : null,
+      tip: actionTip(id, a),
+    };
   }
-  buildActionBar();
+  // The reorg (`confused`) used to shuffle a list this module built. The order
+  // is the player's own layout now, so the status shuffles THAT - same
+  // disorientation, same per-turn seed, applied to the bar they arranged.
+  function scrambleEntries(entries) {
+    if (!statusFx(active.sheet).shuffleActions) return entries;
+    return scrambled(entries.map((_, i) => i)).map((i) => entries[i]);
+  }
 
   // Point everything at the member whose initiative turn it now is:
   // party.active moves with it so the portrait bar highlights and the
@@ -1235,7 +1305,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     pendingConfirm = null;
     pendingMelee = null;
     hidePreview();
-    buildActionBar();
+    callbacks.refreshBar?.();
   }
   // A member dropped to 0 HP outside its own turn (fire under a combat walk) -
   // main.js reports it here. Topple them; if it was the acting member, end
@@ -1280,28 +1350,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     el('combat-ap').textContent = 'AP ' + '●'.repeat(full) + (half ? '◐' : '')
       + '○'.repeat(Math.max(0, active.sheet.maxAp - full - half)) + ` ${fmtAp(active.ap)}`
       + freeTag;
-    for (const b of buttons) {
-      const id = b.dataset.action;
-      const a = ACTIONS[id];
-      let label = `${a.label} · ${a.ap}AP`;
-      if (a.uses) label += ` (${active.usesLeft[id]})`;
-      if (a.ammoCost) label += ` (${active.sheet.paper}📄)`;
-      b.textContent = label;
-      const affordable = phase === 'player' && active.ap >= a.ap
-        && (!a.uses || active.usesLeft[id] > 0)
-        && (!a.ammoCost || active.sheet.paper >= ammoCostOf(id))
-        && !(a.footwork && statusFx(active.sheet).noFootwork); // no kicking with gum on the shoe
-      // An armed action stays clickable even when unaffordable - that button is
-      // the way to lower it (see onActionButton).
-      b.disabled = !affordable && id !== armed && id !== pendingConfirm;
-      b.style.opacity = affordable || id === armed || id === pendingConfirm ? '1' : '.4';
-      // The live one pulses: armed (aiming) or awaiting its confirm click. A
-      // static border was too easy to miss mid-fight.
-      const live = id === armed || id === pendingConfirm;
-      b.style.borderColor = live ? (id === pendingConfirm ? '#ffd76b' : '#8adf76') : '#3a3a52';
-      b.style.animation = live ? 'act-pulse 1.1s ease-in-out infinite' : '';
-      b.title = actionTip(id, a);
-    }
+    // The verbs repaint on the shared bar, which main.js owns - affordability,
+    // tooltips and the armed/confirm ring all come from actionState().
+    callbacks.refreshBar?.();
     endBtn.disabled = phase !== 'player';
     endBtn.textContent = 'End Turn'; // your turn ends, initiative moves on
     // The initiative tracker: the turn order top-to-bottom, the current unit
@@ -2432,19 +2483,26 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return out.join('\n');
   }
 
-  function onActionButton(id, b) {
+  function pressAction(id) {
     if (phase !== 'player') return;
     const a = ACTIONS[id];
-    // Lowering an armed action must ALWAYS work, even once its button has gone
+    if (!a) return;
+    // Lowering an armed action must ALWAYS work, even once its slot has gone
     // unaffordable: spending your AP while a cone was armed used to disable the
-    // only control that could unarm it, stranding you (the button is disabled,
-    // and a ground click just re-tried the cone).
+    // only control that could unarm it, stranding you (the slot is inert, and
+    // a ground click just re-tried the cone).
     if (armed === id) {
       cancelArmed();
       refresh();
       return;
     }
-    if (b.disabled) return;
+    const st = actionState(id);
+    // Same rule the bar renders: unaffordable is uncommittable, except for the
+    // one awaiting its confirm click. It still ANSWERS rather than doing
+    // nothing - the slot stays pressable precisely so it can say why, which is
+    // the bar's own rule and used to be lost the moment a button went dead.
+    if (!st) return;
+    if (!st.affordable && id !== pendingConfirm) { log(st.reason); return; }
     // Reaching for ANY other action drops whatever was awaiting confirmation -
     // a pending confirm shouldn't survive in the background while you arm
     // something else and spend the AP it was priced against.
@@ -3384,6 +3442,27 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // which side of the board a click belongs to - it must not consult
     // ACTIONS itself, or there would be two answers to one question.
     get armedIsFriendly() { return aimsAtAlly(ACTIONS[armed]); },
+    // --- the shared action bar -------------------------------------------------
+    // main.js renders one bar for the whole game and asks these three things of
+    // a fight: what does pressing a slot do, can it be pressed, and what has the
+    // reorg done to the order. Combat keeps the rules; main.js keeps the DOM.
+    pressAction,
+    actionState,
+    scrambleEntries,
+    // Bill a verb that is not an ACTION against the acting member's pool - a
+    // consumable, pressed from the bar or from the pockets. Returns false when
+    // they cannot afford it, so the caller refuses without spending anything.
+    // Everything else in a turn is billed; a free full heal every round would
+    // be the strongest move in the game.
+    spendAp: (n) => {
+      if (phase !== 'player' || active.ap < n) return false;
+      active.ap -= n;
+      refresh();
+      return true;
+    },
+    // Which slot is awaiting its second, committing press (an instant
+    // self-action). The bar rings it differently from an armed one.
+    get pendingConfirm() { return pendingConfirm; },
     notifyMemberDown,
     // The body whose turn it is - a party member OR a summon you're driving.
     // main.js needs this because party.active can't point at a summon.

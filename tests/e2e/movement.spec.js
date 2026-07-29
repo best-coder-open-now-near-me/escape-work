@@ -74,7 +74,7 @@ test('repositioning behind a foe still leaves AP to attack with', async ({ page 
   // test quietly assert the wrong thing.
   const attackAp = await page.evaluate(() => window.__god.actionAp('attack'));
   expect(await page.evaluate(() => window.__combat.ap)).toBeGreaterThanOrEqual(attackAp);
-  await expect(page.locator('#act-attack')).toBeEnabled();
+  await expect(page.locator('#hotbar-act-attack')).toHaveAttribute('data-affordable', 'true');
 });
 
 test('the Pawn allowance pays for movement before AP does', async ({ page }) => {

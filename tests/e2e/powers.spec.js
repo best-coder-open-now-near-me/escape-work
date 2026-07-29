@@ -197,7 +197,7 @@ test('Stand Post holds an overwatch, and it fires once on somebody crossing the 
   const apBefore = await page.evaluate(() => window.__combat.ap);
   // A stance is an instant self-action: first press arms, second commits.
   await clickAction(page, 'stand-post');
-  await page.click('#act-stand-post');
+  await page.click('#hotbar-act-stand-post');
 
   // It registers as held, and it cost the AP up front.
   await expect.poll(() => page.evaluate(() => window.__combat.watching), { timeout: 10_000 })

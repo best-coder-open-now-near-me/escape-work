@@ -217,8 +217,13 @@ function startGame(level) {
   const loot = createLooting({
     app, grid, runtime, enemies,
     getActor: () => player, // the leader's actor - re-pointed on leader switch
-    getSheet: () => sheet,
+    // In a fight "you" is whoever's turn it is, not the leader: initiative
+    // decides who acts, so a snack out of the pockets has to come out of THEIR
+    // pockets and heal THEIR sheet.
+    getSheet: () => (inCombat && combat ? combat.actingSheet : sheet),
     isInCombat: () => inCombat,
+    // A consumable is billed against the acting member's pool (looting.js).
+    spendCombatAp: (n) => combat?.spendAp(n) ?? false,
     isGameOver: () => gameOver,
     approachAndDo: (x, z, run) => approachAndDo(x, z, run),
     extraEntries: () => doorEntries(), // doors share the Alt overlay
@@ -938,8 +943,27 @@ function startGame(level) {
     const [x, z] = key.slice(2).split(',').map(Number);
     return key[0] === 'h' ? [[x, z - 1], [x, z]] : [[x - 1, z], [x, z]];
   };
+  // What working a door costs when there is a fight on. Cheaper than a verb:
+  // the walk to reach it has already been billed as movement, and this is the
+  // handle, not the journey.
+  const COMBAT_DOOR_AP = 1;
+  // Can the acting body reach this door's handle? In a fight there is no
+  // walking-to-it - movement belongs to combat and is priced by the tile - so
+  // the rule is the tactical one: you work a door you are standing beside.
+  const atDoor = (key, actor) => !!actor
+    && doorSides(key).some(([x, z]) => actor.x === x && actor.z === z);
   function toggleDoor(key) {
-    if (inCombat || gameOver) return;
+    if (gameOver) return;
+    // Doors used to be refused outright while `inCombat`, with no comment - and
+    // a closed door is the game's ONLY true line-of-sight blocker, so the half
+    // of the game that is about positioning was the half where the one piece of
+    // terrain you can change was untouchable. `examineAt` still described it.
+    if (inCombat) {
+      if (!atDoor(key, combat?.actingActor)) { ui.say('Too far - step up to the door first.'); return; }
+      if (!(combat?.spendAp(COMBAT_DOOR_AP) ?? false)) {
+        ui.say(`Not enough AP - working a door costs ${COMBAT_DOOR_AP}.`); return;
+      }
+    }
     const open = !grid.doors.get(key).open;
     grid.setDoorOpen(key, open);
     scene.refreshDoor(key);
@@ -1289,12 +1313,19 @@ function startGame(level) {
   // the kit reads the same in and out of a fight: the basic swing, shove, the
   // throws, the class powers, what a talent granted, what is in hand. A
   // throwable the character can't fold (needsTalent) is not theirs to list.
+  // Whose bar this is. In a fight, the ACTING member's - initiative decides who
+  // acts, so the slots must show their kit, their pockets and their paper. Out
+  // of one it is the leader's, exactly as before. Without this the layout came
+  // from the leader while combat priced it against whoever was acting, which is
+  // the same two-sources-of-truth drift the bars themselves had.
+  const barSheet = () => ((inCombat && combat) ? combat.actingSheet : sheet);
   function hotbarActionIds() {
+    const s = barSheet();
     const throwables = Object.keys(ACTIONS).filter((id) => {
       const a = ACTIONS[id];
-      return a.ammoCost && (!a.needsTalent || !!(sheet.talent?.effects || {})[a.needsTalent]);
+      return a.ammoCost && (!a.needsTalent || !!(s.talent?.effects || {})[a.needsTalent]);
     });
-    return orderedActionIds(sheet, [...sheet.actions, equippedAction(sheet), 'shove', ...throwables]);
+    return orderedActionIds(s, [...s.actions, equippedAction(s), 'shove', ...throwables]);
   }
   // Consumables in the pockets, deduped, with how many are in there. These are
   // the ITEMS a slot can carry: something with a `heal` or an `ammo` on it does
@@ -1302,7 +1333,7 @@ function startGame(level) {
   // pockets-panel act with a stat fold behind it, not a hotbar press.
   function hotbarItemIds() {
     const counts = new Map();
-    for (const id of sheet.inventory || []) {
+    for (const id of barSheet()?.inventory || []) {
       const it = ITEMS[id];
       if (!it || !(it.heal || it.ammo)) continue;
       counts.set(id, (counts.get(id) || 0) + 1);
@@ -1367,6 +1398,29 @@ function startGame(level) {
     }
     const a = ACTIONS[entry.id];
     if (!a) return null;
+    // In a fight the rules belong to combat.js: what the ACTING member can
+    // afford, out of their own kit, with their own uses and paper. Out of one
+    // they belong here. Same slot, same fields, two rule-owners - which is the
+    // point of the bar being one widget instead of two that drift.
+    if (inCombat && combat) {
+      const st = combat.actionState(entry.id);
+      return {
+        kind: 'action',
+        id: entry.id,
+        label: a.label,
+        icon: a.icon,
+        ap: a.ap,
+        ammoCost: st?.ammoCost || 0,
+        uses: st?.uses ?? null,
+        // Armed (aiming) or awaiting its confirm click - the bar rings them
+        // differently, as combat's own bar used to.
+        live: st?.live || null,
+        tip: st?.tip || null,
+        unavailable: !st
+          ? `${a.label} is not something ${combat.actingSheet.name} can do.`
+          : (st.affordable || st.live) ? null : st.reason,
+      };
+    }
     const available = hotbarActionIds().includes(entry.id);
     return {
       kind: 'action',
@@ -1388,44 +1442,60 @@ function startGame(level) {
   }
   // What the bar's item slots are counting, as one string - the gate that keeps
   // a per-frame DOM repaint off the hot path (like hotbarPaper for ammo).
-  const bagKey = () => (sheet?.inventory || []).join(',');
+  const bagKey = () => (barSheet()?.inventory || []).join(',');
   // Re-read the slots against live pocket contents: an assigned item can run
   // out, refill, or change count, and the count is in the label. The slot
   // view-models carry it, so this is a rebuild - cheap, and it is the same path
   // a gear change or a level-up already takes.
   const refreshHotbarSlots = () => { if (hotbar && sheet) buildHotbar(); };
+  // The slots the bar shows, in the order it shows them. In a fight the reorg
+  // status (`confused`) can shuffle that order - the same disorientation it
+  // always applied, now landing on the player's own arrangement instead of on
+  // a separate list combat kept for itself.
+  const barLayout = () => {
+    const entries = layoutOf(barSheet());
+    return inCombat && combat ? combat.scrambleEntries(entries) : entries;
+  };
   function buildHotbar() {
     hotbarRow = hotbar?.row ?? hotbarRow;
     hotbar?.destroy(); // a leader switch rebuilds it for the new sheet
-    hotbar = ui.createHotbar(layoutOf(sheet).map(slotVm), {
+    hotbar = ui.createHotbar(barLayout().map(slotVm), {
       onPress: pressHotbarSlot,
       onAssign: openAssignMenu,
       startRow: hotbarRow, // the row you were on survives the rebuild
     });
-    hotbar.refresh(sheet);
+    hotbar.refresh(barSheet());
     // A rebuild starts with no slot lit, but `armedOoc` survives it - spending
     // a level-up point mid-aim left the bar looking unarmed while the rings,
     // the crosshair and the next click all still acted on the armed action.
     // The bar shows what is actually armed, or nothing is.
-    hotbar.setArmed(armedOoc);
-    hotbarPaper = sheet.paper;
+    hotbar.setArmed(inCombat && combat ? combat.armed : armedOoc);
+    hotbarPaper = barSheet().paper;
     hotbarBagKey = bagKey();
   }
   // Pressing a slot: arm the power, or use the item. An empty slot says what it
   // is for rather than nothing at all - a dead button teaches nothing.
+  //
+  // In a fight the press goes to combat, which owns arming, AP and the confirm
+  // step. That routing is the only thing that differs - the slot, its icon, its
+  // number key and its position are the player's either way.
   function pressHotbarSlot(i) {
-    const entry = layoutOf(sheet)[i];
+    const entry = barLayout()[i];
     if (!entry) { ui.say('That slot is empty - right-click it to assign a power or an item.'); return; }
     if (entry.kind === 'item') { loot.useItemById(entry.id); return; }
+    if (inCombat && combat) { combat.pressAction(entry.id); return; }
     toggleOocArm(entry.id);
   }
   // Right-click a slot: everything that can go in it, in the bar's own order,
   // with what is already placed marked as such. Assigning something already on
   // the bar SWAPS the two slots - that is how the bar gets rearranged, and it
   // means the same power can never end up in two places.
+  // Rearranging works in a fight too. The layout is the same layout either way,
+  // and "you may not touch your own bar while it matters" was an artefact of
+  // combat owning a different widget, not a rule anybody chose.
   function openAssignMenu(i, x, y) {
-    if (!sheet || inCombat || gameOver || modalOpen()) return;
-    const layout = layoutOf(sheet);
+    if (!sheet || gameOver || modalOpen()) return;
+    const layout = layoutOf(barSheet());
     const here = layout[i];
     const placedAt = (kind, id) => layout.findIndex((s) => s && s.kind === kind && s.id === id);
     const rowOf = (at) => Math.floor(at / ui.HOTBAR_ROW_SLOTS) + 1;
@@ -1460,7 +1530,7 @@ function startGame(level) {
   }
   function assignHotbarSlot(i, entry) {
     if (!sheet) return;
-    const layout = [...layoutOf(sheet)];
+    const layout = [...layoutOf(barSheet())];
     while (layout.length <= i) layout.push(null);
     if (entry) {
       const at = layout.findIndex((s) => s && s.kind === entry.kind && s.id === entry.id);
@@ -1468,7 +1538,7 @@ function startGame(level) {
     }
     layout[i] = entry;
     while (layout.length && !layout[layout.length - 1]) layout.pop(); // no trailing empties
-    sheet.hotbar = layout;
+    barSheet().hotbar = layout;
     buildHotbar();
     ui.say(entry
       ? `${entry.kind === 'item' ? ITEMS[entry.id].name : ACTIONS[entry.id].label} moves to slot ${Math.floor(i / ui.HOTBAR_ROW_SLOTS) + 1}·${(i % ui.HOTBAR_ROW_SLOTS) + 1}.`
@@ -1709,6 +1779,25 @@ function startGame(level) {
       allies: summons.filter((s) => s.sheet.hp > 0),
       world: {
         isWalkable,
+        // Doors the given tile is standing at, as edge midpoints, so combat can
+        // ring them. Doors are the only terrain a fight can change and the only
+        // true line-of-sight blocker, but they sit on EDGES rather than tiles -
+        // so combat cannot find them the way it finds a prop, and until it
+        // could, the one thing worth walking over to use had no affordance at
+        // all. Returns the midpoint because that is where the door IS: 'h:x,z'
+        // divides (x,z-1) from (x,z), so it lives at z - 0.5.
+        doorsBeside: (x, z) => {
+          const out = [];
+          for (const key of grid.doors.keys()) {
+            if (!doorSides(key).some(([sx, sz]) => sx === x && sz === z)) continue;
+            const [dx, dz] = key.slice(2).split(',').map(Number);
+            // The price rides along rather than being re-declared in combat.js:
+            // one number, owned by the rule that charges it (toggleDoor).
+            const mid = key[0] === 'h' ? { x: dx, z: dz - 0.5 } : { x: dx - 0.5, z: dz };
+            out.push({ ...mid, ap: COMBAT_DOOR_AP });
+          }
+          return out;
+        },
         // The acting body's own route: allies BLOCK in combat (no ending a
         // move stacked on a teammate; sequenced moves can afford the detour)
         // and the costs are the walker's own talents, not the leader's.
@@ -1823,6 +1912,10 @@ function startGame(level) {
         // Combat passes the acting member's sheet (initiative controls who you
         // drive); default to the leader for any callless use.
         updateHud: (s = sheet) => paintHud(s || sheet),
+        // Repaint the shared bar. combat.js calls this wherever it used to
+        // rebuild its own: control changing hands, and every refresh() that
+        // moves AP, uses, paper or the armed slot.
+        refreshBar: () => { if (hotbar && sheet) buildHotbar(); },
         // One combat round = one fire/smoke turn (combat.js calls this as it
         // hands the turn back to the player).
         onRound: () => { runtime.advanceTurn(); ageTempSurfaces(); },
@@ -2060,7 +2153,14 @@ function startGame(level) {
           for (const m of party.members) {
             m.sheet.hp = stairwellHeal(m.sheet, STAIRWELL_HEAL);
           }
-          localStorage.setItem(PROGRESS_KEY, JSON.stringify(serializeProgress(party, level.next)));
+          // Guarded like every other write (god.js:66): localStorage throws in
+          // private mode and when the quota is gone, and this one runs in the
+          // middle of a floor transition - an unguarded throw here would take
+          // out the stairwell heal and the floor-clear screen with it, turning
+          // "your save did not persist" into "the game stopped".
+          try {
+            localStorage.setItem(PROGRESS_KEY, JSON.stringify(serializeProgress(party, level.next)));
+          } catch { /* no save is bad; losing the run to an exception is worse */ }
           ui.showFloorClear({ nextName: LEVELS[level.next].name }, () => location.reload());
         } else {
           // Same rule as loseGame: finishing a PLAYTEST level is not finishing
@@ -2326,8 +2426,22 @@ function startGame(level) {
       if (inCombat) {
         if (combat?.cancelArmed()) return;
         const chit = picking.pick(controls.cameraEntity, sx, sy);
+        const items = [];
+        // A door you are standing beside. This is a turn-spending verb, so it
+        // wears its price on the label - which is the same rule that keeps
+        // everything else out of this menu and on the bar, honoured rather
+        // than broken. Doors have no bar slot: they are terrain, not kit.
+        const dk = chit?.kind === 'door' ? chit.ref : (point ? doorNearPoint(point) : null);
+        if (dk && atDoor(dk, combat?.actingActor)) {
+          const isOpen = grid.doors.get(dk)?.open;
+          items.push({
+            label: `${isOpen ? 'Pull the door shut' : 'Open the door'} - ${COMBAT_DOOR_AP} AP`,
+            action: () => toggleDoor(dk),
+          });
+        }
         const text = examineAt(chit, tile, point);
-        if (text) ui.showMenu(sx, sy, [{ label: 'Examine', action: () => ui.say(text) }]);
+        if (text) items.push({ label: 'Examine', action: () => ui.say(text) });
+        if (items.length) ui.showMenu(sx, sy, items);
         return;
       }
       if (modalOpen()) return;
@@ -2518,17 +2632,27 @@ function startGame(level) {
     if (e.key === 'Alt') {
       e.preventDefault(); // keep focus off the browser's menu bar
       hover.setAlt(true); // lights what the cursor is already on, without a re-hover
-      if (!e.repeat && sheet && !inCombat && !gameOver) loot.showLabels();
+      // Held in a fight too: the overlay is how you SEE the doors, and a door
+      // is the one piece of terrain a fight can change. The loot entries it
+      // also carries stay refused with their own message - being able to read
+      // the room beats being able to act on all of it.
+      if (!e.repeat && sheet && !gameOver) loot.showLabels();
     } else if (e.key === 'Control') {
       hover.setCtrl(true); // rings under everyone while held (drawCharacterRings)
     } else if ((e.key === 'i' || e.key === 'I') && sheet && !gameOver) {
       loot.togglePanel(sheet);
-    } else if (/^[1-9]$/.test(e.key) && sheet && !inCombat && !gameOver && !modalOpen()) {
+    } else if (/^[1-9]$/.test(e.key) && sheet && !gameOver && !modalOpen()) {
       // Number keys press the matching slot of the VISIBLE row, so 1 is always
       // the leftmost button on screen however many rows the kit needs.
+      //
+      // These used to be gated `!inCombat`, which meant a FIGHT - the half of
+      // the game that is nothing but pressing verbs under pressure - was the
+      // half with no keyboard shortcuts at all. The row you learn out of combat
+      // is the row you get in one, which was always the stated point of the
+      // layout living on the sheet.
       const i = hotbar?.indexAtKey(Number(e.key)) ?? -1;
       if (i >= 0) pressHotbarSlot(i);
-    } else if ((e.key === '[' || e.key === ']') && sheet && !inCombat && !gameOver && !modalOpen()) {
+    } else if ((e.key === '[' || e.key === ']') && sheet && !gameOver && !modalOpen()) {
       // Page the hotbar rows from the keyboard - the pager buttons and the wheel
       // over the bar do the same thing.
       hotbar?.flip(e.key === ']' ? 1 : -1);
@@ -2767,16 +2891,20 @@ function startGame(level) {
     // when they change (the gate keeps DOM writes off the hot path). Armed
     // out-of-combat target rings redraw each frame, like combat's own.
     if (hotbar) {
-      const show = !!sheet && !inCombat && !gameOver && !modalOpen();
+      // Visible whenever it can act - which now includes a fight. Hiding it in
+      // combat was what forced combat.js to build a second bar, and cost the
+      // fight the layout, the pager, the item slots and the number keys.
+      const show = !!sheet && !gameOver && !modalOpen();
       hotbar.setVisible(show);
-      if (show && sheet.paper !== hotbarPaper) { hotbarPaper = sheet.paper; hotbar.refresh(sheet); }
+      const bs = barSheet();
+      if (show && bs && bs.paper !== hotbarPaper) { hotbarPaper = bs.paper; hotbar.refresh(bs); }
       // Item slots count the pockets, and the pockets change from places that
       // don't route through onBagChange (god mode, a shop, an overflow drop).
       // Same shape as the party bar's key below: compare, repaint on a change.
       if (show && bagKey() !== hotbarBagKey) refreshHotbarSlots();
       // What an armed slot rings depends on what it aims at: a coworker (every
       // attack, shove and throw) or a spot on the floor (a summon).
-      if (show && armedOoc) {
+      if (show && !inCombat && armedOoc) {
         if (ACTIONS[armedOoc].type === 'summon') hover.drawSummonDrop();
         else if (ACTIONS[armedOoc].cone) hover.drawConeAim();
         else hover.drawArmedTargets();
@@ -3050,6 +3178,10 @@ function startGame(level) {
     // prop must remain CROSSABLE (it is cover, not a wall), and asking the
     // full isWalkable would fold in whatever body happens to be standing there.
     walkable: (x, z) => grid.terrainOpen(x, z),
+    // Is that door open? Doors sit on EDGES ('h:x,z' / 'v:x,z'), not tiles, so
+    // `tileAt` can never answer this - and a door is the only piece of terrain
+    // a fight can change, which is exactly what wants asserting.
+    doorOpen: (key) => grid.doors.get(key)?.open ?? null,
     // Put a named coworker on an exact tile. A spec about what happens TO a
     // body standing somewhere (a bookcase landing on it, cover being measured
     // across it) otherwise has to wait for the AI to wander there, which makes

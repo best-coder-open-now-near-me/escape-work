@@ -9,7 +9,7 @@ test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ pa
   test.setTimeout(300_000);
   await bootAndPick(page, 'it-support');
   await enterCombat(page);
-  await expect(page.locator('#act-kick')).toBeVisible(); // talent-granted
+  await expect(page.locator('#hotbar-act-kick')).toBeVisible(); // talent-granted
 
   // A stray projected click during combat entry can have pre-armed (or a
   // first click can toggle OFF) an action - ensure reboot ends up armed.
@@ -46,7 +46,7 @@ test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ pa
     // Re-arm only if reboot is armable (a prior mis-click could have walked
     // and spent AP; never click a disabled button - that would hang).
     if (await page.evaluate(() => window.__combat.armed) !== 'reboot') {
-      if (!(await page.locator('#act-reboot').isEnabled())) break;
+      if (await page.locator('#hotbar-act-reboot').getAttribute('data-affordable') === 'false') break;
       await clickAction(page, 'reboot');
     }
     // Aim at the tile CENTRE (what the purge check compares), and wait for
@@ -72,7 +72,7 @@ test('Mail Room: Bulk Mail cones damage and leave paper drifts', async ({ page }
   test.setTimeout(300_000);
   await bootAndPick(page, 'mail-room');
   await enterCombat(page);
-  await expect(page.locator('#act-mail-cone')).toBeVisible();
+  await expect(page.locator('#hotbar-act-mail-cone')).toBeVisible();
 
   // Count nearby paper BEFORE the cone - a fight near the IT room's painted
   // drifts must not false-positive the aftermath check.
@@ -131,9 +131,9 @@ test('Security: Detain roots without damaging, and the guard wears the cop rig',
   expect(await page.evaluate(() => window.__game.stats.maxHp)).toBe(26);
 
   await enterCombat(page);
-  await expect(page.locator('#act-detain')).toBeVisible();
-  await expect(page.locator('#act-stand-post')).toBeVisible();
-  await expect(page.locator('#act-night-thermos')).toBeVisible();
+  await expect(page.locator('#hotbar-act-detain')).toBeVisible();
+  await expect(page.locator('#hotbar-act-stand-post')).toBeVisible();
+  await expect(page.locator('#hotbar-act-night-thermos')).toBeVisible();
 
   await page.evaluate(() => { window.__combat.forceHit = true; });
   const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
@@ -159,8 +159,8 @@ test('Security: Detain roots without damaging, and the guard wears the cop rig',
       window.__combat.usesLeft.detain = 2;
     });
     if (await page.evaluate(() => window.__combat?.armed) !== 'detain') {
-      if (!(await page.locator('#act-detain').isVisible())) break;
-      await page.click('#act-detain');
+      if (!(await page.locator('#hotbar-act-detain').isVisible())) break;
+      await page.click('#hotbar-act-detain');
     }
     // Aim at where they are NOW. Everything above this point is an await - the
     // settle wait, the phase read, the AP top-up, arming the verb - and a
