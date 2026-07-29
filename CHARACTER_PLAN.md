@@ -40,8 +40,20 @@ contradict something this document asserted before the code existed:
   deleted — see "The precedent" below. The first draft of this document said
   otherwise and was wrong.
 
-Still open: the Mail Room wears `hr.glb` and no file in the set reads as mail
-room. That needs art, not a rename.
+**Nothing is left open.** This document twice claimed the Mail Room was a
+standing exception needing new art. It was wrong both times, and the error is
+worth keeping because of where it came from: commit `2ae39ef` judged that the
+ORIGINAL `mailroom.glb` "read as a uniform more than a mail cart" and gave it to
+Security. That was a true statement about a file that is now `security.glb` —
+and this plan carried it forward as though it described the rig the Mail Room
+actually wears, which is a different body entirely and reads fine. A stale
+judgment about a renamed file, cited as a current constraint: the same failure
+mode as the rest of this report, committed by the report.
+
+The real defect was only ever the filename, and a filename is fixed by renaming
+it. `hr.glb` is worn by the Mail Room class and the mail room companion and by
+nobody else, so it is the mail room's body; it is now `mailroom.glb`. Every rig
+in `assets/characters/` names its wearer, with no exceptions.
 
 **Verification.** 453 unit tests green. On e2e: `creation.spec` 4/4,
 `summons.spec` + `game.spec` 11/11, `smoke.spec` 6/6, and
@@ -344,14 +356,15 @@ unwinds the scramble in a cascade:
 | `hrrep.glb` | HR Rep enemy | **Human Resources** class + the enemy, `security`-style |
 | `midmanager.glb` | Human Resources class | **Middle Manager** class |
 | `veteran.glb` | Middle Manager class | **free** |
+| `hr.glb` | Mail Room class + companion | renamed **`mailroom.glb`** — it was only ever the filename |
 
 Each class lands on the file named for it, and `veteran.glb` joins the free
 pool. With `intern.glb`, `seniormanager.glb` and `regional.glb` that is **four
 bodies** for the custom character, none of them invented and none of them
 somebody else's.
 
-One lie survives: Mail Room stays on `hr.glb`. **Not because anything was
-lost** — see below.
+No lie survives: `hr.glb` was renamed `mailroom.glb`, since the Mail Room and
+its companion are the only wearers. **Nothing was lost, either** — see below.
 
 ### The precedent: this was already done once, correctly
 

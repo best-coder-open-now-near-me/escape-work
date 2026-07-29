@@ -7,10 +7,12 @@
 // day the guard took it over, "since the file is named for the role it plays" -
 // but the rule was applied once and then dropped, and three classes drifted
 // onto files named for somebody else while reassignments skipped the rename.
-// The entries below are back on their own names. One exception survives: the
-// Mail Room wears `hr.glb`, because the rig actually named for that job was
-// given to Security on purpose (it read as a uniform) and no file is left for
-// it. That one needs art, not a rename.
+// The entries below are back on their own names, with no exceptions left. The
+// last one was the Mail Room sitting on `hr.glb` - a file named for a job
+// nobody wearing it does, while Human Resources was two files away on
+// `hrrep.glb`. Nothing about that needed art: the rig is worn by the Mail Room
+// class and the mail room companion and by nobody else, so it is the mail
+// room's body, and it is now called `mailroom.glb`.
 //
 // Where two entries share a rig - a class and the coworker version of it you
 // FIGHT - each carries a `look.build` that makes them read as different people.
@@ -173,7 +175,7 @@ export const CLASSES = {
     // companion, who inherits this rig along with the rest of the class - he
     // reads apart by torso (data/companions.js), so keep the two builds
     // distinct when either one is retuned.
-    model: 'hr',
+    model: 'mailroom',
     look: { build: { legs: 2.0 } },
     tagline: 'Knows every corridor. Slips on nothing. Delivers regardless.',
     experience: 'Mail Room Clerk, 11 yrs. Knows where every body is filed.',
