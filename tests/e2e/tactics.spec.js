@@ -225,7 +225,7 @@ test('striking a foe from behind its committed facing is a backstab', async ({ p
         // NEVER click a disabled button: Playwright waits for it to become
         // enabled, so walking here on low AP would hang to the test timeout
         // instead of reporting the real problem.
-        expect(await page.locator('#hotbar-act-attack').getAttribute('aria-disabled') !== 'true',
+        expect(await page.locator('#hotbar-act-attack').getAttribute('data-affordable') === 'true',
           'attack must be affordable to read a to-hit').toBe(true);
         await clickAction(page, 'attack');
       }

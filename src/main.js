@@ -1779,6 +1779,25 @@ function startGame(level) {
       allies: summons.filter((s) => s.sheet.hp > 0),
       world: {
         isWalkable,
+        // Doors the given tile is standing at, as edge midpoints, so combat can
+        // ring them. Doors are the only terrain a fight can change and the only
+        // true line-of-sight blocker, but they sit on EDGES rather than tiles -
+        // so combat cannot find them the way it finds a prop, and until it
+        // could, the one thing worth walking over to use had no affordance at
+        // all. Returns the midpoint because that is where the door IS: 'h:x,z'
+        // divides (x,z-1) from (x,z), so it lives at z - 0.5.
+        doorsBeside: (x, z) => {
+          const out = [];
+          for (const key of grid.doors.keys()) {
+            if (!doorSides(key).some(([sx, sz]) => sx === x && sz === z)) continue;
+            const [dx, dz] = key.slice(2).split(',').map(Number);
+            // The price rides along rather than being re-declared in combat.js:
+            // one number, owned by the rule that charges it (toggleDoor).
+            const mid = key[0] === 'h' ? { x: dx, z: dz - 0.5 } : { x: dx - 0.5, z: dz };
+            out.push({ ...mid, ap: COMBAT_DOOR_AP });
+          }
+          return out;
+        },
         // The acting body's own route: allies BLOCK in combat (no ending a
         // move stacked on a teammate; sequenced moves can afford the detour)
         // and the costs are the walker's own talents, not the leader's.
@@ -2134,7 +2153,14 @@ function startGame(level) {
           for (const m of party.members) {
             m.sheet.hp = stairwellHeal(m.sheet, STAIRWELL_HEAL);
           }
-          localStorage.setItem(PROGRESS_KEY, JSON.stringify(serializeProgress(party, level.next)));
+          // Guarded like every other write (god.js:66): localStorage throws in
+          // private mode and when the quota is gone, and this one runs in the
+          // middle of a floor transition - an unguarded throw here would take
+          // out the stairwell heal and the floor-clear screen with it, turning
+          // "your save did not persist" into "the game stopped".
+          try {
+            localStorage.setItem(PROGRESS_KEY, JSON.stringify(serializeProgress(party, level.next)));
+          } catch { /* no save is bad; losing the run to an exception is worse */ }
           ui.showFloorClear({ nextName: LEVELS[level.next].name }, () => location.reload());
         } else {
           // Same rule as loseGame: finishing a PLAYTEST level is not finishing

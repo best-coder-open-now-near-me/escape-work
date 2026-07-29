@@ -42,10 +42,43 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
     // Attach the error handler ONCE, when the asset is first created - it's a
     // persistent listener on a shared asset, so re-adding it per placeModel
     // call (the editor repaints constantly) would leak handlers unbounded.
-    asset.on('error', (err) => console.warn('asset load failed:', url, err));
+    asset.on('error', (err) => { asset.loadFailed = true; console.warn('asset load failed:', url, err); });
     app.assets.add(asset);
   }
+  // A failed load has to leave something you can SEE. `asset.ready` simply
+  // never fires on an error, so the prop was absent, `onReady` never ran, and
+  // the only trace was a console warning nobody reads mid-playtest - which
+  // makes a missing .glb indistinguishable from a level that never placed the
+  // prop at all. A magenta box is the oldest marker in the business for
+  // exactly this, and it keeps the callback contract: whatever was going to
+  // happen to the model still happens, to the marker.
+  const placeFallback = () => {
+    const holder = new (pc().Entity)(`missing:${url}`);
+    holder.addComponent('render', { type: 'box' });
+    const mat = new (pc().StandardMaterial)();
+    mat.diffuse = new (pc().Color)(1, 0, 1);
+    mat.update();
+    holder.render.material = mat;
+    holder.setLocalScale(0.5 * scale, 0.5 * scale, 0.5 * scale);
+    holder.setEulerAngles(tiltX, rotY, tiltZ);
+    holder.setPosition(tileX, lift + 0.25, tileZ);
+    app.root.addChild(holder);
+    if (onReady) onReady(holder);
+  };
+  if (asset.loadFailed) { placeFallback(); return; } // already known bad - don't re-wait
+  // Per-CALL listener, so this placement gets its own marker - but removed the
+  // moment either outcome lands, so the editor's constant repainting cannot
+  // pile handlers up on a shared asset (the reason the warning above is
+  // attached once and this is not). `settled` is what guarantees exactly one
+  // of the two runs: `ready` and `error` are independent, and a placement that
+  // drew both a model and a marker would be worse than either.
+  let settled = false;
+  const onLoadError = () => { if (settled) return; settled = true; placeFallback(); };
+  asset.once('error', onLoadError);
   asset.ready(() => {
+    if (settled) return;
+    settled = true;
+    asset.off('error', onLoadError);
     const holder = new (pc().Entity)(url);
     const inst = asset.resource.instantiateRenderEntity();
     holder.addChild(inst);

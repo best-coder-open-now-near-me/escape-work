@@ -246,24 +246,38 @@ gone on hiding.
 | P3 corner repulsion is edge-aware | `pathfinding.js:55-58` |
 | P4 M1–M6 | `creation.js`, `data/looks.js`, `data/backgrounds.js` all exist |
 
-**Still genuinely OPEN — found by this audit, not previously known:**
+**Found genuinely open by this audit — and now FIXED:**
 
-- [ ] **`hover.clear()` never resets `hoverTarget`** (`hover.js`). `clear()` nulls
-      `hoverKind` but leaves `hoverTarget` set, and `refresh()` re-lights from it
-      the moment Ctrl/Alt goes down (`hover.js:127`) — so a body behind a panel,
-      or one left over from before a fight, lights up again. This is the item as
-      originally written; it was never done.
-- [ ] **Floor-clear save write is unguarded** (`main.js:2137`).
-      `localStorage.setItem(PROGRESS_KEY, …)` runs bare inside the floor
-      transition. `god.js:66` wraps the identical call in try/catch for private
-      mode; this one would throw mid-transition instead.
-- [ ] **A failed `.glb` gets no fallback marker** (`models.js:44`). The asset
-      error handler exists and `console.warn`s, but nothing renders in the
-      model's place — the prop is simply invisible, which reads as a level bug.
-- [ ] **`drawTargets` rings no doors or props** (`combat.js:1041`). Checked the
-      whole function: zone cells, summon spots, allies, live enemies and the
-      caster only. Props are shovable and doors are now workable in a fight, so
-      both are targets the player gets no ring for.
+- [x] **`hover.clear()` never reset `hoverTarget`** (`hover.js`). `clear()` nulled
+      `hoverKind` but left `hoverTarget` set, and `applyGlow()` re-lights from it
+      the moment Ctrl/Alt goes down — so a body behind a panel, or one left over
+      from before a fight, came back glowing. Clearing the *highlight* was never
+      enough, because the next modifier press just drew it again. `clear()` now
+      forgets what was under the cursor, not merely that something was.
+- [x] **Floor-clear save write was unguarded** (`main.js`). Wrapped in try/catch
+      like every other write (`god.js:66`). localStorage throws in private mode
+      and on a full quota, and this one runs *mid floor transition* — a bare
+      throw took the stairwell heal and the floor-clear screen with it, turning
+      "your save did not persist" into "the game stopped".
+- [x] **A failed `.glb` now leaves a marker** (`models.js`). `asset.ready` never
+      fires on an error, so the prop was absent, `onReady` never ran, and the
+      only trace was a console warning nobody reads mid-playtest — a missing
+      asset was indistinguishable from a level that never placed the prop. Now
+      a magenta box stands in, and the callback contract holds: whatever was
+      going to happen to the model happens to the marker. The listener is
+      per-call with a `settled` guard, so a placement can never draw both, and
+      the editor's constant repainting cannot pile handlers on a shared asset.
+- [x] **`drawTargets` rings props and doors** (`combat.js`). Props: the eight
+      neighbours, through `topplePlan` — the same rule the click and the AI run,
+      so a green ring is the same promise it is anywhere else. A shove that puts
+      a cabinet on somebody is strictly the better move where it is available,
+      and the affordance for it used to be "the player happened to try it".
+      Doors: rung at the EDGE midpoint, before anything else and regardless of
+      what is armed, because a door has no bar slot — gating it behind
+      `previewAction` would hide the only affordance for the only terrain a
+      fight can change. The AP cost rides along on the new `world.doorsBeside`
+      seam rather than being re-declared in `combat.js`: one number, owned by
+      the rule that charges it.
 
 *Not re-verified:* the ranged walk-in ring item (P2) and the `god.js` trio (P3)
 were not reached in this pass. They stay unchecked and unclaimed.

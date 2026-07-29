@@ -358,10 +358,13 @@ export async function clickAction(page, id, timeout = 30_000) {
     // The shared bar never sets `disabled`: a disabled button dispatches no
     // mouse events at all, contextmenu included, which would make the slot you
     // most want to reassign the one slot you cannot (createHotbar's setInert).
-    // Usability is `aria-disabled`, so that is what a test must wait on -
-    // `toBeEnabled` passes instantly against this bar and would click straight
-    // through an action the member cannot afford.
-    await expect(btn).toHaveAttribute('aria-disabled', 'false', { timeout });
+    // An unusable slot stays pressable ON PURPOSE, so it can say why.
+    //
+    // That leaves nothing for `toBeEnabled()` to see - it passes instantly
+    // here and would click straight through an action the member cannot
+    // afford. `data-affordable` is the bar's own answer to "can this be
+    // pressed right now", so that is what a test waits on.
+    await expect(btn).toHaveAttribute('data-affordable', 'true', { timeout });
   } catch {
     const [state, title] = await Promise.all([
       combatState(page),

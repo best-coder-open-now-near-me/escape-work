@@ -83,11 +83,25 @@ test('a door can be worked mid-fight, from the tile beside it, for AP', async ({
   await enterCombat(page);
   await waitForPlayerTurn(page);
 
-  // Step back onto the door's own tile: the rule is adjacency, not auto-walk,
-  // because movement in a fight belongs to combat and is priced per tile.
-  await clickWorld(page, 2, 1);
-  await waitStill(page);
-  await waitForPlayerTurn(page);
+  // Step back onto the door's own tile. The rule is adjacency, not auto-walk,
+  // because movement in a fight belongs to combat and is priced per tile - so
+  // getting there can take more than one turn's worth of AP, and the test has
+  // to PROVE it arrived rather than assume one click did it. (It did not: the
+  // first version of this test right-clicked from wherever the engage left the
+  // player and got a menu with only Examine on it, which is correct behaviour
+  // and a broken test.)
+  await expect.poll(async () => {
+    const at = await page.evaluate(() => window.__game.playerTile);
+    if (at.x === 2 && at.z === 1) return true;
+    await refillAp(page);
+    await clickWorld(page, 2, 1);
+    await waitStill(page);
+    await waitForPlayerTurn(page).catch(() => {});
+    return page.evaluate(() => {
+      const t = window.__game.playerTile;
+      return t.x === 2 && t.z === 1;
+    });
+  }, { timeout: 120_000, intervals: [400] }).toBe(true);
   await refillAp(page);
 
   expect(await page.evaluate(() => window.__game.doorOpen('h:2,2')), 'the door starts shut').toBe(false);

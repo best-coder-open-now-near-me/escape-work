@@ -1040,6 +1040,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // wedge instead, ringing whoever it would catch.
   function drawTargets() {
     if (phase !== 'player') return;
+    // A door you are standing at, rung before anything else and regardless of
+    // what is armed. It is not an ACTION - it has no bar slot, it lives on the
+    // right-click menu - so gating it behind `previewAction` would hide the one
+    // affordance for the only terrain a fight can change. Green when the AP is
+    // there for it, red when it is not, same as every other ring here.
+    for (const mid of world.doorsBeside?.(active.actor.x, active.actor.z) || []) {
+      drawRing(mid.x, mid.z, 0.3, active.ap >= mid.ap ? PREVIEW_OK : PREVIEW_FAR);
+    }
     // Not gated on `armed`: with nothing armed a click still swings (the basic
     // attack), and a swing you can't see coming is worse than no swing at all -
     // the rings are how you know which coworker a click would hit and whether
@@ -1132,6 +1140,26 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (hoverFoe?.alive && !rangeOf(id)) {
       const me = posOf(active);
       drawRing(me.x, me.z, a.type === 'shove' ? REACH.SHOVE : reachOfUnit(active), REACH_RING);
+    }
+    // Props are targets too, and nothing ever said so. A shove that puts a
+    // filing cabinet on somebody is strictly the better move where it is
+    // available - it damages, it stuns, and it leaves cover the other side has
+    // to walk around - so the affordance for it should not be "the player
+    // happened to try it". Eight neighbours, the same scan the AI runs, and
+    // `topplePlan` is the same rule the click runs: a green ring here is the
+    // same promise it is anywhere else on this bar.
+    if (a.type === 'shove') {
+      const b = bodyOf(active);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          if (!dx && !dz) continue;
+          const px = b.x + dx;
+          const pz = b.z + dz;
+          if (!isToppleable(world.tileDefAt(px, pz))) continue;
+          const canDrop = topplePlan(active, px, pz) && active.ap >= a.ap;
+          drawRing(px, pz, 0.42, canDrop ? PREVIEW_OK : PREVIEW_FAR);
+        }
+      }
     }
     for (const en of world.liveEnemies()) {
       if (!en.entity) continue;
@@ -2469,9 +2497,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return;
     }
     const st = actionState(id);
-    // Same rule the bar renders: unaffordable is unpressable, except for the
-    // one awaiting its confirm click.
-    if (!st || (!st.affordable && id !== pendingConfirm)) return;
+    // Same rule the bar renders: unaffordable is uncommittable, except for the
+    // one awaiting its confirm click. It still ANSWERS rather than doing
+    // nothing - the slot stays pressable precisely so it can say why, which is
+    // the bar's own rule and used to be lost the moment a button went dead.
+    if (!st) return;
+    if (!st.affordable && id !== pendingConfirm) { log(st.reason); return; }
     // Reaching for ANY other action drops whatever was awaiting confirmation -
     // a pending confirm shouldn't survive in the background while you arm
     // something else and spend the AP it was priced against.

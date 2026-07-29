@@ -46,7 +46,7 @@ test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ pa
     // Re-arm only if reboot is armable (a prior mis-click could have walked
     // and spent AP; never click a disabled button - that would hang).
     if (await page.evaluate(() => window.__combat.armed) !== 'reboot') {
-      if (await page.locator('#hotbar-act-reboot').getAttribute('aria-disabled') === 'true') break;
+      if (await page.locator('#hotbar-act-reboot').getAttribute('data-affordable') === 'false') break;
       await clickAction(page, 'reboot');
     }
     // Aim at the tile CENTRE (what the purge check compares), and wait for

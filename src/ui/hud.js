@@ -304,8 +304,18 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
       // Armed, or awaiting its confirm click. Either way the slot stays live
       // however unaffordable it has become - that press is the way to lower it.
       const live = slot.live || (slot.id === armed ? 'armed' : null);
-      setInert(b, (!fed || !!slot.unavailable) && !live);
-      b.style.opacity = (fed && !slot.unavailable) || live ? '1' : '.4';
+      const usable = (fed && !slot.unavailable) || !!live;
+      // `aria-disabled` stays exactly what it always meant: there is nothing
+      // left to spend. It must NOT be made to track affordability, because an
+      // unusable slot deliberately stays PRESSABLE and answers (see setInert),
+      // and drivers treat aria-disabled as not-clickable - which would take
+      // that away silently, including the right-click that reassigns it.
+      setInert(b, !fed);
+      // So "can this be pressed right now" gets its own signal instead: it
+      // dims the slot and tells the suite what to wait on, without ever
+      // blocking the click that would explain the refusal.
+      b.dataset.affordable = usable ? 'true' : 'false';
+      b.style.opacity = usable ? '1' : '.4';
       // In a fight the tip comes from combat (damage, range, uses left against
       // THIS member's sheet); out of one the bar writes its own.
       b.title = slot.tip || (slot.unavailable
