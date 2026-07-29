@@ -136,24 +136,56 @@ the old reboot. This branch introduces it:
 **42 tests never executed on a real runner**. Fixing the three known failures
 is not the same as knowing main goes green.
 
-**Gap closed.** Run 30385657545 (branch, `c523ad3`) is the first time all 102
-executed on a real runner: **101 passed, 1 failed, 1.3h**. The one failure is
-the `#hotbar-act-defend` assertion above, fixed in `57bf876` which that run
-predates. The three original timeouts are gone - `powers.spec` passes on CI
-hardware with the arena and no extended budget.
+**Gap closed.** Run 30385657545 (branch, `c523ad3`) is the first time the whole
+suite executed on a real runner: **101 passed, 1 failed, 4 flaky, 1.3h**. The
+one failure is the `#hotbar-act-defend` assertion above, fixed in `57bf876`
+which that run predates. The three original timeouts are gone - `powers.spec`
+passes on CI hardware with the arena and no extended budget.
 
-- [ ] **Four tests were FLAKY on that run** - they failed once and passed on
-      retry, so `retries: 1` is currently carrying them. Not blockers, but each
-      is a real intermittent and the retry is what hides it:
+*(The suite is **106** tests - the table above already says so for this branch,
+78 + 28. The "102" recorded here earlier is the **baseline** `e8e53de` count,
+from before this branch added four; quoting the baseline's size for a branch run
+is what made these totals stop adding up. Playwright also counts `flaky` as its
+own bucket, so on CI `passed + failed` never totals the suite by itself.)*
+
+**Main is green, and it ships again.** Run 30410302575 (`1d69e5a`, main):
+**104 passed, 0 failed, 2 flaky, 1.3h**. Deploy run 30414380016 fired 8s behind
+it and pushed to itch.io - the first successful deploy since run 115 on
+2026-07-27, because `deploy.yml` chains off CI's conclusion and main's E2E had
+been red since the powers work landed. Every merge in between was built and
+then silently declined to ship.
+
+- [x] **The four flakes from that run are FIXED** (`346eafc`, `44c4c28`) - all
+      four passed clean on 30410302575:
       - `statuses.spec.js:156` a weapon on-hit proc - the red stapler flings gum
       - `tactics.spec.js:33` walking out of an enemy reach provokes a free swing
       - `tactics.spec.js:118` a partition gives the defender cover
       - `throwing.spec.js:89` a solid wall refuses the throw
 
-      All four are geometry-and-timing shaped, which is the same family as the
-      `targeting.spec` click that turned out to be landing under the hotbar.
-      Worth checking whether they share that cause: they aim projected clicks
-      and only test `onScreen`, never `onCanvas` (now exported from helpers).
+- [ ] **Two DIFFERENT tests were flaky on 30410302575**, and `retries: 1` is
+      what turned them green. Both causes are diagnosed and fixed here, but
+      neither is *confirmed* gone - one green run has never been proof about a
+      stochastic failure:
+      - `party.spec.js:93` timed out (120s) waiting for the wounded member to
+        drop. `pickTarget` (`combat.js:256`) attacks the NEAREST engageable
+        member and lets HP break a tie only at EQUAL distance - so pinning slot
+        0 to 1 HP and then waiting on slot 0 waits on where the two members
+        happen to be standing. With the Intern closer, the Manager swings at
+        the Intern forever. Fixed by wounding whoever the Manager is actually
+        coming for, and by asserting the rule the test is named for (a member
+        goes down, the fight continues) rather than a particular slot index.
+      - `topple.spec.js:25` never entered combat - 7 engage attempts over 184s.
+        `enterCombat` clicks the enemy at chest height, and this map exists to
+        stand a TALL cabinet directly between player and Manager, so the engage
+        click lands on the cabinet mesh. Fixed by engaging on ADJACENCY, which
+        is what actually opens a fight (`checkCombatTrigger`, main.js), via a
+        tile click that resolves by tile and so cannot be occluded.
+
+      Both are geometry-and-timing shaped like the four before them, but
+      neither shares the `onCanvas` cause guessed at above - and that guess is
+      worth retiring. `topple` is 3D occlusion: the cabinet is ON the canvas
+      and ON screen, so no screen-space guard can see the problem. `party` is
+      not a click at all - it is an AI targeting rule the test never controlled.
 
 - [ ] **The suite is 1.3h on CI.** The arena idiom is what brought `powers.spec`
       from 10.5m to 3.2m; the same treatment on the other `bootAndPick` specs is
