@@ -148,6 +148,10 @@ from before this branch added four; quoting the baseline's size for a branch run
 is what made these totals stop adding up. Playwright also counts `flaky` as its
 own bucket, so on CI `passed + failed` never totals the suite by itself.)*
 
+*It is **109** now — `combat-bar.spec.js` added three (one bar in a fight, a
+snack for 2 AP, a door for 1 AP). Verified locally at 14/14 on the specs those
+changes touch: `combat-bar`, `throwing`, `movement`, `topple`, plus `hotbar`.*
+
 **Main is green, and it ships again.** Run 30410302575 (`1d69e5a`, main):
 **104 passed, 0 failed, 2 flaky, 1.3h**. Deploy run 30414380016 fired 8s behind
 it and pushed to itch.io - the first successful deploy since run 115 on
