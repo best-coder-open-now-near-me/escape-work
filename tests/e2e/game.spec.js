@@ -20,15 +20,22 @@ test('the class carousel browses every resume and hires one', async ({ page }) =
   // One resume at a time, straight from the class registry; arrows browse.
   await expect(page.locator('#resume-card')).toBeVisible();
   await expect(page.locator('#resume-card')).toContainText('Office Drone');
-  // Registry order (data/classes.js), skipping the non-playable applicant, then
-  // wrapping back to the drone the carousel opened on.
-  const classNames = ['Middle Manager', 'Mail Room', 'IT Support', 'Human Resources', 'Security', 'Office Drone'];
+  // Registry order (data/classes.js), skipping the non-playable applicant.
+  const classNames = ['Middle Manager', 'Mail Room', 'IT Support', 'Human Resources', 'Security'];
   for (const name of classNames) {
     await page.click('#carousel-next');
     await expect(page.locator('#resume-card')).toContainText(name);
     await expect(page.locator('#resume-card')).not.toContainText('Sick days');
   }
-  // ...wrapped back around to the drone; the active slide's button hires.
+  // Then the blank card, which is the LAST one and is not one of the six. It is
+  // checked by its own button rather than by its text: the blank résumé lists
+  // whichever kit it would inherit, so every class name appears on it as a
+  // choosable job and a text assertion here would pass for the wrong reason.
+  await page.click('#carousel-next');
+  await expect(page.locator('#pick-custom')).toBeVisible();
+  await expect(page.locator('#pick-office-drone')).toHaveCount(0);
+  // ...and one more wraps back to the drone; the active slide's button hires.
+  await page.click('#carousel-next');
   await expect(page.locator('#pick-office-drone')).toBeVisible();
   await page.click('#pick-office-drone');
   // Picking one of the six opens the short form beside them: pronouns and two

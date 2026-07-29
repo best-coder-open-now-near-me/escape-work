@@ -635,24 +635,35 @@ export const arrivalLine = (n) => (n === 1
   : `${n} applicants report for duty.`);
 
 // --- the summon descriptor's one vocabulary -----------------------------------
-// The fields a summon resolver actually reads. Both sides of the fight carry
-// them: the player's half is an ACTION on the bar, the AI's half is a `summon`
-// block on an enemy (data/enemies.js).
-export const SUMMON_CONTRACT = ['archetype', 'count', 'cap', 'lifetimeTurns'];
+// What a summon descriptor INHERITS when it names the action it is the twin of.
+//
+// Deliberately only two fields, and the line between them and the rest is the
+// point. WHO shows up and WHAT CONTRACT they serve under are properties of the
+// summon itself: an applicant is an applicant, and the req lapses after the
+// same number of their own turns, whoever posted it. Two answers to either of
+// those is the drift worth preventing.
+//
+// How MANY arrive and how many may be live are NOT shared, because the two
+// sides place them differently. The player's action posts one because you click
+// the tile they report to, and dropping a pair means one lands somewhere you
+// did not choose (the note on `summon-applicants` says so). An AI has no click
+// - reinforcements arrive beside the summoner - so a small batch on a tight cap
+// is its own pacing, alongside its cooldown and what the post costs its turn.
+//
+// Inheriting those too was tried and was wrong: it made an enemy HR post one
+// applicant on a cap of three, which is not a reinforcement, and the e2e suite
+// caught it. Sharing what must not differ is the goal; flattening what should
+// differ is a different mistake with the same shape.
+export const SUMMON_CONTRACT = ['archetype', 'lifetimeTurns'];
 
 // An enemy's descriptor may name the ACTION it is the AI-side twin of
-// (`from: 'summon-applicants'`) and inherit that contract, overriding only what
-// the two sides genuinely do differently - what the post costs an AI turn, how
-// long it waits between reqs, the line it prints. The player's own differences
-// are spelled `uses` and `range`: a per-fight budget and a placement click,
-// neither of which an AI has.
+// (`from: 'summon-applicants'`) and inherit the contract above.
 //
-// This exists because HR posted the same req twice. The class action named
-// `applicant` with a count of 1 and a cap of 3; the enemy block named the same
-// archetype with a count of 2 and a cap of 2, and nothing tied them together -
-// so "how many people does posting a role bring" had two answers depending on
-// which side of the fight HR was standing on. Resolving here means combat.js
-// and the lints read one merged shape rather than each doing the merge.
+// This exists because HR posted the same req twice, from a class action and an
+// enemy block that named the same archetype with nothing tying them together -
+// so the two could drift apart silently and nobody would find out. Resolving
+// here means combat.js and the lints read one merged shape rather than each
+// doing the merge for itself.
 export function summonSpec(d) {
   if (!d?.from) return d;
   const a = ACTIONS[d.from] || {};

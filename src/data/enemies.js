@@ -121,22 +121,22 @@ const KITS = {
       { min: 1, max: 4, log: 'HR reminds you fun is mandatory at the offsite.' },
     ],
     // HR's power (SUMMON_PLAN.md): posts the role and applicants materialize to
-    // fight for it. This is the SAME req the class posts, so it names the class
-    // action and inherits its contract - which archetype, how many per post,
-    // how many live at once, how long each serves. It used to restate all four
-    // with different numbers (two per post against the action's one, a cap of
-    // two against three), so "how many people does posting a role bring" had
-    // two answers depending on which side of the fight HR was standing on.
+    // fight for it. It is the SAME req the class posts, so it names the class
+    // action and inherits WHO arrives and what contract they serve under
+    // (actions.js SUMMON_CONTRACT) instead of restating them where they could
+    // drift apart unnoticed.
     //
-    // What stays here is only what the two sides genuinely do differently: what
-    // the post costs an AI turn, how long she waits between reqs, and the line
-    // it prints. The player's half is spelled `uses` and `range` instead -
-    // a budget and a placement click, neither of which an AI has.
+    // The rest is hers, and differs for a reason: she has no placement click,
+    // so reinforcements arrive beside her as a pair on a tight cap rather than
+    // one at a time on a loose one. `cooldownRounds` paces her the way `uses`
+    // paces the player - a wait between reqs instead of a budget per fight.
     summon: {
       from: 'summon-applicants',
+      count: 2,
+      cap: 2,
       cooldownRounds: 2,
       ap: 3,
-      log: 'HR posts the role internally. An applicant materializes, résumé in hand.',
+      log: 'HR posts the role internally. Applicants materialize, résumés in hand.',
     },
   },
 
