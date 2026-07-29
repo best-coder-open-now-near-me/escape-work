@@ -107,10 +107,18 @@ test('a door can be worked mid-fight, from the tile beside it, for AP', async ({
   expect(await page.evaluate(() => window.__game.doorOpen('h:2,2')), 'the door starts shut').toBe(false);
   const apBefore = await page.evaluate(() => window.__combat.party[0].ap);
 
+  expect(await page.evaluate(() => window.__game.playerTile),
+    'standing at the handle').toEqual({ x: 2, z: 1 });
+
   // Right-click the door: in a fight this menu used to offer Examine and
   // nothing else, so the game's only line-of-sight blocker was untouchable
   // during the half of the game that is about line of sight.
-  const p = await page.evaluate(() => window.__game.project(2, 2));
+  //
+  // Aim at the EDGE (z 1.6), not a tile centre. A door is an edge, and
+  // `doorNearPoint` refuses any point that is not near one - a tile centre is
+  // the furthest a point can BE from every edge, so clicking (2,2) resolved to
+  // no door at all and the menu correctly offered only Examine.
+  const p = await page.evaluate(() => window.__game.project(2, 1.6));
   await page.mouse.click(p.x, p.y, { button: 'right' });
   await expect(page.locator('#context-menu')).toContainText('Open the door');
   await page.click('#context-menu >> text=Open the door');
