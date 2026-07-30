@@ -40,10 +40,11 @@ test('the kit is in canonical order, on one row, with room to grow', async ({ pa
   await bootStash(page, QUIET, 'office-drone');
   await expect(page.locator('#hotbar')).toBeVisible();
 
-  // Basic swing, shove, the throws, then the class powers, then the bare-handed
-  // swing that stands in for a weapon (data/actions.js, stats.orderedActionIds).
-  // The trailing empty slot is deliberate: it is where the coffee goes, and the
-  // reason a player ever right-clicks a slot at all.
+  // Basic swing, shove, the throws, then the class powers, then the universal
+  // Take Cover (TACTICS_PLAN M6) and the bare-handed swing that stands in for
+  // a weapon (data/actions.js, stats.orderedActionIds). The trailing empty
+  // slot is deliberate: it is where the coffee goes, and the reason a player
+  // ever right-clicks a slot at all.
   const all = await slots(page);
   expect(all.map((s) => s.id)).toEqual([
     'hotbar-act-attack',
@@ -52,8 +53,9 @@ test('the kit is in canonical order, on one row, with room to grow', async ({ pa
     'hotbar-act-paper-airplane',
     'hotbar-act-defend',
     'hotbar-act-coffee',
+    'hotbar-act-take-cover',
     'hotbar-act-punch',
-    'hotbar-slot-7',
+    'hotbar-slot-8',
   ]);
 
   // A whole kit fits one row, so there is nothing to page and no pager to see.
@@ -64,13 +66,13 @@ test('the kit is in canonical order, on one row, with room to grow', async ({ pa
   // and the tooltip is where the name lives.
   expect(all[0].text).toMatch(/^1/);
   expect(all[0].title).toMatch(/^Passive-Aggressive Email · 2AP/);
-  expect(all[7].text).toMatch(/^8—$/);
-  expect(all[7].title).toMatch(/Empty slot/);
+  expect(all[8].text).toMatch(/^9—$/);
+  expect(all[8].title).toMatch(/Empty slot/);
 
   await page.keyboard.press('2');
   expect(await page.evaluate(() => window.__game.armed)).toBe('shove');
   // The empty slot answers a press by saying what it is for.
-  await page.keyboard.press('8');
+  await page.keyboard.press('9');
   expect(await page.evaluate(() => window.__game.narration.at(-1))).toMatch(/empty/i);
 });
 
@@ -95,8 +97,9 @@ test('right-click a slot to reassign it; assigning swaps rather than duplicates'
     'hotbar-act-paper-airplane',
     'hotbar-act-defend',
     'hotbar-act-attack',
+    'hotbar-act-take-cover',
     'hotbar-act-punch',
-    'hotbar-slot-7',
+    'hotbar-slot-8',
   ]);
 
   // The layout rides on the SHEET, so pressing key 1 now arms what is in slot 1.
@@ -127,7 +130,7 @@ test('a consumable can live in a slot, and pressing it drinks one', async ({ pag
 
   // Put the coffee in the spare slot at the end of the row: consumables are
   // assignable, gear is not (equipping is a pockets act, not a hotbar press).
-  await page.click('#hotbar-slot-7', { button: 'right' });
+  await page.click('#hotbar-slot-8', { button: 'right' });
   await expect(page.locator('#context-menu')).toContainText('Cold Coffee');
   await page.click('#context-menu >> text=Cold Coffee');
 
@@ -142,7 +145,7 @@ test('a consumable can live in a slot, and pressing it drinks one', async ({ pag
   await slot.click();
   await expect.poll(() => page.evaluate(() => window.__game.stats.hp)).toBe(7);
   await expect.poll(() => page.evaluate(() => window.__game.inventory.length)).toBe(1);
-  await expect(page.locator('#hotbar-item-cold-coffee')).toHaveText(/^8☕$/);
+  await expect(page.locator('#hotbar-item-cold-coffee')).toHaveText(/^9☕$/);
 
   // Filling the row grew the bar: a second row exists now, and it pages. This is
   // the only way rows appear - the game never hides a power you already have
@@ -150,6 +153,6 @@ test('a consumable can live in a slot, and pressing it drinks one', async ({ pag
   await expect(page.locator('#hotbar-page')).toHaveText('1/2');
   await page.keyboard.press(']');
   await expect(page.locator('#hotbar-page')).toHaveText('2/2');
-  await expect(page.locator('#hotbar-slot-8')).toBeVisible();
+  await expect(page.locator('#hotbar-slot-9')).toBeVisible();
   await expect(page.locator('#hotbar-act-attack')).toBeHidden();
 });
