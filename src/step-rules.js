@@ -73,12 +73,20 @@ export function slipChance(floor = {}) {
 // so an unseeded one is exactly the kind of thing that makes a resolution test
 // flaky for reasons unrelated to what it asserts).
 //
+// `roll` is a FUNCTION, not a number, and that is the whole subtlety. The
+// callers short-circuit on immunity - `!slipProof && rng() < chance` - so a
+// slip-proof character never drew at all. Taking the roll as a value would
+// evaluate it eagerly at every call site, burning one draw per tile stepped
+// out of combat's SEEDED stream on exactly the characters that cannot slip;
+// every later roll in that fight would shift, and a seeded run would stop
+// reproducing - which is the one thing the seeding exists for.
+//
 // `slipProof` covers gum's genuine upside and any slip-proof footwear;
 // `slipImmune` is the talent. A gummed shoe grips: that is the trade the wad
 // offers for the slow.
-export function slips({ chance = 0, roll = 1, slipProof = false, slipImmune = false } = {}) {
+export function slips({ chance = 0, roll = () => 1, slipProof = false, slipImmune = false } = {}) {
   if (slipImmune || slipProof) return false;
-  return chance > 0 && roll < chance;
+  return chance > 0 && roll() < chance;
 }
 
 // Is there a wad here to pick up? The tile being SPENT by the pickup (the wad

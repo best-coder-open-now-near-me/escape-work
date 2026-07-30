@@ -502,7 +502,7 @@ export class EnemyActor extends GridActor {
         }
         if (changed && slips({
           chance: world.slipChanceAt(x, z),
-          roll: Math.random(),
+          roll: Math.random,
           slipProof: statusFx(this).slipProof,
         })) {
           this.clearPath();

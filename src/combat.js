@@ -1397,6 +1397,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const range = rangeOf(id);
     for (const en of world.liveEnemies()) {
       if (!en.entity) continue;
+      // ONE shotOutcome per enemy, memoised, because it runs crouchStateOf -
+      // which lazily BREAKS a stale crouch. Idempotent (the second call finds
+      // nothing left to break), but this is a per-frame path and the baseline
+      // asked once.
+      let shot = null;
+      const outcome = () => (shot ??= shotOutcome(active, en));
       const ok = enemyRingOk(a, {
         ap: active.ap,
         ammoOk: !a.ammoCost || active.sheet.paper >= ammoCostOf(id),
@@ -1414,10 +1420,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
             alive: en.alive,
           });
         },
-        get shotBlocked() { return shotOutcome(active, en).blocked; },
+        get shotBlocked() { return !!outcome().blocked; },
         get shotRedirectedToAlly() {
-          const so = shotOutcome(active, en);
-          return so.redirected && !!so.target.sheet;
+          const so = outcome();
+          return !!so.redirected && !!so.target?.sheet;
         },
         get meleeReachable() { return canReach(active, en) || hasSwingSpot(en); },
       });
@@ -3852,7 +3858,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         // test flaky for reasons that have nothing to do with what it asserts.
         if (unit.alive && slips({
           chance: world.slipChanceAt(x, z),
-          roll: rng(),
+          roll: rng,
           slipProof: statusFx(unit).slipProof,
         })) {
           unit.clearPath();

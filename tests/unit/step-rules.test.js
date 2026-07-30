@@ -73,19 +73,45 @@ test('slip chance is the floor\'s alone - talent-free, because enemies read it',
 
 test('slips takes the roll as an argument, so a seeded fight reproduces', () => {
   const chance = SURFACES.water.slippery;
-  assert.equal(slips({ chance, roll: 0 }), true);
-  assert.equal(slips({ chance, roll: 0.99 }), false);
+  assert.equal(slips({ chance, roll: () => 0 }), true);
+  assert.equal(slips({ chance, roll: () => 0.99 }), false);
   // The boundary is strict-less-than, so a roll exactly at the chance stands up.
-  assert.equal(slips({ chance, roll: chance }), false);
-  assert.equal(slips({ chance: 0, roll: 0 }), false);
+  assert.equal(slips({ chance, roll: () => chance }), false);
+  assert.equal(slips({ chance: 0, roll: () => 0 }), false);
   assert.equal(slips({}), false);
 });
 
 test('tread and gum both keep you upright, by either name', () => {
-  const wet = { chance: SURFACES.water.slippery, roll: 0 };
+  const wet = { chance: SURFACES.water.slippery, roll: () => 0 };
   assert.equal(slips(wet), true);
   assert.equal(slips({ ...wet, slipProof: true }), false); // gum, or slip-proof shoes
   assert.equal(slips({ ...wet, slipImmune: true }), false); // the talent
+});
+
+test('an upright character never DRAWS - the seeded stream must not shift', () => {
+  // The callers short-circuit (`!slipProof && rng() < chance`), so a slip-proof
+  // character never consumed a draw. Taking the roll as a value instead of a
+  // thunk burned one per tile stepped out of combat's SEEDED stream, on exactly
+  // the characters that cannot slip - every later roll in the fight shifted and
+  // a seeded run stopped reproducing, which is the one thing the seeding is for.
+  let draws = 0;
+  const roll = () => { draws += 1; return 0; };
+  const chance = SURFACES.water.slippery;
+
+  slips({ chance, roll, slipProof: true });
+  assert.equal(draws, 0, 'a gummed shoe drew from the stream');
+  slips({ chance, roll, slipImmune: true });
+  assert.equal(draws, 0, 'safety tread drew from the stream');
+
+  // ...and a character who CAN slip draws exactly once.
+  slips({ chance, roll });
+  assert.equal(draws, 1);
+});
+
+test('a dry floor costs no draw either', () => {
+  let draws = 0;
+  slips({ chance: 0, roll: () => { draws += 1; return 0; } });
+  assert.equal(draws, 0);
 });
 
 test('hasGum finds a wad and nothing else', () => {

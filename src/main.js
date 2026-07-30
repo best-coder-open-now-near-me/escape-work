@@ -2168,7 +2168,7 @@ function startGame(level) {
     if (gameOver) return;
     if (!slips({
       chance: slipChanceAt(x, z),
-      roll: Math.random(),
+      roll: Math.random,
       slipProof: wasSlipProof || statusFx(ms).slipProof || equippedStats(ms).slipProof,
       slipImmune: ms.talent?.effects?.slipImmune,
     })) return;
