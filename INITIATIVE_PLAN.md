@@ -17,55 +17,35 @@ slot, and the ability to change who you're steering mid-turn.
 
 ## Questions for the designer
 
-Three things this plan had to guess. Each has a default picked and tagged
-`[proposed]` in the decisions table, so nothing is blocked — but if any answer
-differs, the noted rows change.
+Two of the three questions this plan opened have been answered and now live in
+the decisions table as #6 and #7, `[ratified]`. One is open.
 
-**Q1 — Should a shared turn be capped in size?** The party caps at 3, but
-summons are player-team *members* too (`SUMMON_PLAN`, the control revision), so
-a Human Resources fight can field 7+ on your side. With adjacency grouping,
-~100% of those fights put the entire player side in one group — initiative stops
-meaning anything and the fight becomes "your whole side, then their whole side."
+**Q3 — Does the initiative strip still show each member's rolled number inside
+a group?** Every row shows its total today (`Dana · 14/18 (17)`). Under
+adjacency, a group's members have *different* numbers — they share a turn
+because they're neighbours in the order, not because they tied.
 
-- **A (recommended): no cap.** Simplest, and the honest consequence of
-  adjacency. Summon-heavy fights genuinely do play as side-vs-side; that's
-  arguably correct — you paid AP for those bodies.
-- **B: cap the group at 3** (BG3 reportedly caps at 10). Keeps a summon wall
-  from collapsing the order, at the cost of a rule with no fictional reason
-  that players will notice and not understand.
-- **C: break a group at a summon boundary** — real members group with each
-  other, summons don't join. Preserves the order's meaning in exactly the
-  fights that threaten it, but makes summons feel second-class to drive.
+- **A (recommended): keep the numbers, add a bracket** around the group, mark
+  who you're steering, tick the ones already finished. The bracket is what
+  explains the grouping; the numbers stay honest about the roll.
 
-Affects decision #6. I'd ship A and watch a summoner fight; C is the fallback
-if it plays badly.
+  ```
+  INITIATIVE
+  ┌ SHARED TURN ──────────────────
+  │ ▸ Dana      · 14/18  (17)      <- steering
+  │   Marcus    · 12/12  (14)  ✓   <- already ended its turn
+  │   Priya     ·  9/15  (12)
+  └───────────────────────────────
+      Manager   · 20/20  (11)
+      Coworker  ·  8/14  (9)
+  ```
 
-**Q2 — A summon posted *during* an open shared turn: does it act this turn?**
-`turns.insert` splices a joiner in by its own roll, which can land inside the
-group currently holding the floor.
+- **B: hide the individual numbers inside a group** and show one range on the
+  bracket (`SHARED TURN (17–12)`). Removes the "why are 17, 14 and 12 acting
+  together?" question, at the cost of hiding a roll the player may want.
 
-- **A (recommended): no — a joiner never joins an already-open group.** It acts
-  from the next round. Predictable, and it keeps *Post the Role* from being a
-  free extra body-with-full-AP this turn.
-- **B: yes if its roll lands in the group.** More generous, and it makes
-  summoning mid-group feel immediate — but a 3-AP summon that immediately
-  grants a fresh 5-AP body is an AP-multiplier, and the balance question is
-  real.
-
-Affects decision #7.
-
-**Q3 — Does the strip still show each member's initiative number inside a
-group?** Right now every row shows `(17)`. Grouped, those numbers are what
-*justify* the grouping (adjacent, not equal), so hiding them makes the grouping
-look arbitrary — but showing three different numbers under one bracket invites
-"why do these share a turn when the numbers differ?"
-
-- **A (recommended): keep the numbers, add the bracket.** The bracket is the
-  explanation; the numbers stay honest.
-- **B: hide numbers inside a group, show one range.** Cleaner read, less to
-  misinterpret, but hides the roll the player might want to see.
-
-Affects decision #10. Cheap and reversible either way.
+Affects decision #10. A one-line change either way — worth seeing in play
+before settling.
 
 ## Where we are today
 
@@ -158,8 +138,8 @@ Not in this plan: enemy-side grouping. The AI stays one unit at a time.
 | 3 | **Enemies do not group** — the AI drives one unit at a time | `[stated]` (designer, 2026-07-30: "one at a time is fine for ai right now") | The AI driver is a single `acting` state machine with animation waits (`combat.js:3712`); running several units' beats at once is the expensive half and buys the player only a faster enemy round. Decisions #1 and #4 leave the seam open. |
 | 4 | **Grouping lives in `turn-order.js`**, as a span pointer + a `steer`/`finish` API; `combat.js` stays the host that answers about bodies and panels | `[proposed]` | Where the turn walk already lives, and pure — `ARCHITECTURE.md:130` names `turn-order.js` as the pattern for this. Computing the group in `combat.js` was considered: the engine owns `turnPtr`, the ticks and the lifetime spend, so grouping outside it means two things believing they own the pointer. |
 | 5 | **No group-wide "end the rest" button** in v1 | `[proposed]` | It's the exact mechanism behind BG3's accidental-skip complaints, and decision #2's auto-pass already makes the fast path fast. Trivially addable later if a 4-wide group feels clicky. |
-| 6 | **No cap on group size**, and no proximity requirement | `[proposed]` — see **Q1** | BG3 reportedly gates on physical proximity and caps at 10; both are unverified, and a distance rule can silently split a group mid-turn as people move, which is unreadable on screen. Our party caps at 3; the uncapped risk is summon-heavy fights (Q1). |
-| 7 | **A mid-fight joiner never joins an already-open group** — it acts from the next round | `[proposed]` — see **Q2** | `turns.insert` can splice a fresh summon inside the live run. Letting it act immediately turns a 3-AP summon into a fresh 5-AP body this turn. |
+| 6 | **No cap on group size**, and no proximity requirement | `[ratified]` (designer, 2026-07-30: "no cap is fine") | BG3 reportedly gates on physical proximity and caps at 10; both are unverified, and a distance rule can silently split a group mid-turn as people move, which is unreadable on screen. Our party caps at 3, so the uncapped case only bites in summon-heavy fights, where the whole player side acting at once is the honest consequence of adjacency — see the risk below. Capping at 3, or breaking a group at a summon boundary, remain the fallbacks if it plays badly. |
+| 7 | **A mid-fight joiner never joins an already-open group** — it acts from the next round | `[ratified]` (designer, 2026-07-30: "dont let mid-group summons act for now") | `turns.insert` can splice a fresh summon inside the live run. Letting it act immediately turns a 3-AP summon into a fresh 5-AP body this turn. The "for now" is noted: this is the conservative half of a balance question, not a permanent rule. |
 | 8 | **The group is computed when the turn opens and frozen for its duration** | `[proposed]` | `turns.replace` changes a slot's *team* mid-round (a charmed coworker becomes a member, `TODO.md:820`). Recomputing live would grow or split the group under the player's hands mid-turn; freezing means a charm landing during your shared turn takes effect next round. |
 | 9 | **In-combat steering does NOT go through `switchLeader`** | `[proposed]` | `switchLeader` re-keys the *out-of-combat* bindings (`sheet`, `player`, follower set, "You take point as…"). Combat already has the correct primitive in `makeActive`. The four entry points get routed to a new `combat.steer(member)` instead of having their `inCombat` guard loosened. |
 | 10 | **The strip brackets the group, keeps each row's rolled number**, marks the steered member and greys the finished | `[proposed]` — see **Q3** | The numbers are what justify a group of unequal rolls; the bracket is the explanation. |
@@ -268,9 +248,10 @@ members currently holding a shared turn.
   owner or end the fight. Today those are guarded by a single-slot flow with
   comments explaining exactly why each order matters; a loop over slots has to
   preserve every one of those reasons, not just the code.
-- **Initiative stops mattering in summon fights** if Q1's answer is "no cap" —
-  the whole player side acts at once. Watch a Human Resources fight before
-  calling this shipped.
+- **Initiative stops mattering in summon fights.** Decision #6 takes the no-cap
+  route, so a summoner's fight puts the whole player side in one group and plays
+  as side-vs-side. Accepted deliberately; watch a Human Resources fight before
+  calling this shipped, and reach for the #6 fallbacks if it reads as a bug.
 - **Stances still lapse correctly, probably.** `watching`/`guarding` expire in
   `afterTick` because "until your next turn" is a *position*, not a duration
   (the comment in the host block). Per-slot ticks preserve that, but a stance
