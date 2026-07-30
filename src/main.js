@@ -833,6 +833,7 @@ function startGame(level) {
     if (!oocCrouch) return;
     oocCrouch = null;
     removeStatus(sheet, 'covered');
+    if (player) player.crouched = false; // stand the body up (actors.js)
     if (!quiet) ui.say('You come out of cover.');
   }
 
@@ -1121,7 +1122,18 @@ function startGame(level) {
       // it just asks the question the weapon actually poses.
       return shot || canWalkIntoRange(en, range);
     }
-    if (a.type === 'shove') return playerReaches(en, REACH.SHOVE);
+    if (a.type === 'shove') {
+      // Arm's reach - or the office standing in for your arms: the same
+      // partition-between / furniture-onto-them aims the click accepts
+      // (engageWithAction), so the ring keeps the resolver's promise.
+      return playerReaches(en, REACH.SHOVE)
+        || (Math.abs(en.x - player.x) + Math.abs(en.z - player.z) === 1
+          && !!grid.wallEdgeBetween(player.x, player.z, en.x, en.z))
+        || DIRS8.some(([dx, dz]) => {
+          const plan = oocTopplePlanAt(player.x + dx, player.z + dz);
+          return plan && plan.lx === en.x && plan.lz === en.z;
+        });
+    }
     return playerReaches(en) || canApproach(en);
   };
 
@@ -2064,16 +2076,11 @@ function startGame(level) {
         return;
       }
     } else if (a.type === 'shove') {
-      // Arm's reach - or the office standing in for your arms: a partition
-      // between you (the wall IS the shove), or adjacent furniture whose
-      // fall lands exactly on them. Combat resolves either as the opener.
-      const wallBetween = Math.abs(en.x - player.x) + Math.abs(en.z - player.z) === 1
-        && !!grid.wallEdgeBetween(player.x, player.z, en.x, en.z);
-      const propOntoThem = DIRS8.some(([dx, dz]) => {
-        const plan = oocTopplePlanAt(player.x + dx, player.z + dz);
-        return plan && plan.lx === en.x && plan.lz === en.z;
-      });
-      if (!playerReaches(en, REACH.SHOVE) && !wallBetween && !propOntoThem) {
+      // The ring's own test (oocTargetOk): arm's reach, or the office
+      // standing in for your arms - a partition between you, or adjacent
+      // furniture whose fall lands exactly on them. One test, so the ring
+      // and this refusal cannot drift apart.
+      if (!oocTargetOk(actionId, en)) {
         ui.say('Too far to shove. Walk your feelings over first.');
         return;
       }
@@ -2193,6 +2200,7 @@ function startGame(level) {
     const commit = (cx, cz) => {
       oocCrouch = { x: tile.x, z: tile.z, edges: edgeMode, at: { x: cx, z: cz } };
       applyStatus(sheet, 'covered');
+      player.crouched = true; // the held pose (actors.js): torso down onto the legs
       paintHud(sheet);
       ui.say(edgeMode
         ? 'You tuck in against the partition.'
@@ -2841,6 +2849,43 @@ function startGame(level) {
         const z = Math.round(oocAim.z);
         return { x, z, problem: summonDropProblem(a, x, z), spots: summonDropSpots(a, x, z) };
       },
+      // What the hovered SHOVE aim would topple and where it lands, or null
+      // when the cursor isn't on anything toppleable - the same rules
+      // oocShoveAt runs on the click (designer: the out-of-combat aim showed
+      // nothing at all). The landing is computed from where the player
+      // stands NOW; the click's walk-up recomputes at arrival, so a long
+      // approach can land the fall differently - the ring is the aim's
+      // honest current answer, not a promise about the future.
+      shoveAim: () => {
+        if (!armedOoc || inCombat || !oocAim || !sheet) return null;
+        if (ACTIONS[armedOoc].type !== 'shove') return null;
+        const x = Math.round(oocAim.x);
+        const z = Math.round(oocAim.z);
+        if (isToppleable(grid.defAt(x, z))) {
+          const plan = oocTopplePlanAt(x, z);
+          return { x, z, usable: !!plan, landing: plan ? [plan.lx, plan.lz] : null };
+        }
+        // A partition-far tile: the aim IS the landing.
+        if (grid.terrainOpen(x, z)
+          && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => grid.wallEdgeBetween(x + dx, z + dz, x, z))) {
+          return { x, z, usable: true, landing: [x, z] };
+        }
+        return null;
+      },
+      // The hovered TAKE COVER shield, or null over plain floor - only the
+      // hovered object rings (the rings-everywhere-is-noise rule).
+      coverAim: () => {
+        if (!armedOoc || inCombat || !oocAim || !sheet) return null;
+        if (ACTIONS[armedOoc].type !== 'cover') return null;
+        const x = Math.round(oocAim.x);
+        const z = Math.round(oocAim.z);
+        if (enemyAt(x, z) || npcAt(x, z) || partyAt(x, z)) return { x, z, usable: false };
+        const def = grid.defAt(x, z);
+        const cell = !!(def && (def.solid || def.cover));
+        const edge = !cell && grid.terrainOpen(x, z)
+          && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => !grid.stepOpen(x, z, x + dx, z + dz));
+        return cell || edge ? { x, z, usable: true } : null;
+      },
       inCombat: () => inCombat && !!combat,
       doorNear: doorNearPoint,
       doorOpen: (key) => grid.doors.get(key)?.open,
@@ -3139,12 +3184,18 @@ function startGame(level) {
       // don't route through onBagChange (god mode, a shop, an overflow drop).
       // Same shape as the party bar's key below: compare, repaint on a change.
       if (show && bagKey() !== hotbarBagKey) refreshHotbarSlots();
-      // What an armed slot rings depends on what it aims at: a coworker (every
-      // attack, shove and throw) or a spot on the floor (a summon).
+      // What an armed slot rings depends on what it aims at: a coworker
+      // (every attack and throw), a spot on the floor (a summon), the
+      // hovered furniture/partition (shove - which ALSO rings coworkers,
+      // they're targets too), or the hovered shield (take cover).
       if (show && !inCombat && armedOoc) {
         if (ACTIONS[armedOoc].type === 'summon') hover.drawSummonDrop();
         else if (ACTIONS[armedOoc].cone) hover.drawConeAim();
-        else hover.drawArmedTargets();
+        else if (ACTIONS[armedOoc].type === 'cover') hover.drawCoverAim();
+        else if (ACTIONS[armedOoc].type === 'shove') {
+          hover.drawArmedTargets();
+          hover.drawShoveAim();
+        } else hover.drawArmedTargets();
       }
     }
     // Ctrl rings redraw each frame while held (immediate-mode lines last one

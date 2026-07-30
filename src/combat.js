@@ -618,6 +618,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function breakCrouch(unit, quiet = false) {
     if (!crouched.delete(unit)) return;
     removeStatus(carrierOf(unit), 'covered');
+    const b = bodyOf(unit);
+    if (b) b.crouched = false; // stand the body up (actors.js holds the pose)
     if (!quiet) log(`${nameOf(unit)} is out of cover.`);
   }
   // The validated crouch, or null - the ONE owner of "is that cover still
@@ -1338,8 +1340,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           const px = b.x + dx;
           const pz = b.z + dz;
           if (!isToppleable(world.tileDefAt(px, pz))) continue;
-          const canDrop = topplePlan(active, px, pz) && active.ap >= a.ap;
+          const plan = topplePlan(active, px, pz);
+          const canDrop = !!plan && active.ap >= a.ap;
           drawRing(px, pz, 0.42, canDrop ? PREVIEW_OK : PREVIEW_FAR);
+          // ...and WHERE it lands (designer, 2026-07-30): the fall is
+          // sign-derived from where you stand, so the read must be too - a
+          // smaller ring on the landing tile, tied to the prop's by a line.
+          if (plan) {
+            drawRing(plan.lx, plan.lz, 0.28, canDrop ? PREVIEW_OK : PREVIEW_FAR);
+            app.drawLine(new pc.Vec3(px, 0.14, pz),
+              new pc.Vec3(plan.lx, 0.14, plan.lz), canDrop ? PREVIEW_OK : PREVIEW_FAR);
+          }
         }
       }
       // ...and the office's own walls (TACTICS_PLAN M6): an adjacent
@@ -1638,6 +1649,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // removed from the DOM, and called onEnemyKilled - handing XP and a kill
     // line to a party that had just been wiped.
     for (const e of engaged) e.onTile = null;
+    // Stand everyone up and drop the chips: the crouch map dies with this
+    // closure, and without this the pose and the 'covered' status would
+    // outlive the fight that meant them (the status only ticks on the combat
+    // turn clock, so out of a fight it would simply never expire).
+    for (const u of [...crouched.keys()]) breakCrouch(u, true);
     phase = 'done';
     app.off('update', update);
     aimPaint.destroy();
@@ -2018,6 +2034,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     breakCrouch(unit, true);
     const b = bodyOf(unit);
     crouched.set(unit, { x: tx, z: tz, at: { x: b.x, z: b.z }, shield });
+    b.crouched = true; // the held pose (actors.js): torso down onto the legs
     applyStatus(carrierOf(unit), 'covered');
     statusFxAt(unit, 'covered');
     (unit.actor || unit).faceToward?.(tx, tz);
@@ -2034,6 +2051,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     breakCrouch(unit, true);
     const b = bodyOf(unit);
     crouched.set(unit, { edges: true, at: { x: b.x, z: b.z } });
+    b.crouched = true;
     applyStatus(carrierOf(unit), 'covered');
     statusFxAt(unit, 'covered');
     log(`${nameOf(unit)} tucks in against the partition.`);
@@ -3856,6 +3874,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       crouched.set(lead, preCrouch.edges
         ? { edges: true, at: { x: preCrouch.at.x, z: preCrouch.at.z } }
         : { x: preCrouch.x, z: preCrouch.z, at: { x: preCrouch.at.x, z: preCrouch.at.z }, shield: null });
+      bodyOf(lead).crouched = true; // usually already true; seeding must not depend on it
     }
   }
 

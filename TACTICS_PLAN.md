@@ -676,6 +676,22 @@ None. See decision #6.
      partition-between and furniture-onto-them aims, and combat's enemy
      click grew the matching one-gesture fallbacks: click the coworker
      behind the cabinet, they wear the cabinet).
+   - **Second-playtest polish (2026-07-30, `[stated]`):** (1) the
+     out-of-combat aims read like combat's now - a hovered shove target
+     rings with a smaller ring AND a line showing WHERE the fall lands
+     (`hover.drawShoveAim`, fed by main's own click rules so the preview
+     and the topple cannot disagree), a hovered take-cover shield rings in
+     the cover yellow (`drawCoverAim`), and the shove ring on a coworker
+     keeps the click's whole promise (oocTargetOk grew the
+     partition-between / furniture-onto-them arms the resolver accepts).
+     Combat's shove rings gained the same landing read. (2) The crouch is
+     VISIBLE: a held squash pose on the actor ("shift torso down onto the
+     legs") - eased in and out, composed with flinches and lunges so
+     attacking from cover still animates, cleared wherever the crouch
+     breaks, including a sweep at combat teardown that also fixes the
+     'covered' chip outliving a fight (it only ticks on the combat turn
+     clock). (3) Merged the designer's shared-turns branch
+     (claude/initiative-tie-handling-sjfaoh) under all of it.
    - **Partition toppling + solid twins (2026-07-30, ratified):** the shove
      verb aimed across an adjacent partition edge — at the coworker behind
      it, or the bare tile — brings the PANEL down: `grid.removeEdgeBetween`
