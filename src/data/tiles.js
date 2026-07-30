@@ -37,6 +37,9 @@
 //              rather than a new knocked-down, so toppling inherits the
 //              anti-chain immunity window and cannot become a second way to
 //              lock somebody out of a fight. `becomes` names the fallen twin.
+//   onFloor  - draw the marker box ON the floor's top face rather than from
+//              ground level up: a flat remnant (the toppled partition) thinner
+//              than the floor slab would otherwise render inside the carpet
 //   runtimeOnly - this tile is never painted and never exported: it only ever
 //              arrives through grid.setType at runtime (the fallen twins).
 //              Such tiles are EXEMPT from the one-unique-char rule and hidden
@@ -718,12 +721,16 @@ export const TILE_TYPES = {
   },
   // A cubicle panel, flat on the carpet (TACTICS_PLAN M6 partition topple).
   // The OTHER height exception, in the other direction: a partition on its
-  // side is just a board - walkable, no cover, drawn as the thin slab the
-  // marker fallback makes of a low model-less def.
+  // side is just a board - walkable, no cover. `onFloor` because a marker box
+  // is drawn from GROUND level up, and anything thinner than the floor slab
+  // (0.2) tops out inside the carpet - the fallen panel was invisible until
+  // the renderer learned to lay it ON the floor's top face. Thin enough
+  // (0.03) to duck under the aim wash (0.13) and the rings (0.14).
   'partition-fallen': {
     runtimeOnly: true,
     solid: false,
-    height: 0.08,
+    height: 0.03,
+    onFloor: true,
     color: [0.3, 0.3, 0.38],
     label: 'Toppled Partition',
     examine: 'The great divider, floored. The office is open plan now.',
