@@ -431,11 +431,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // preview read it, so the percentage the player sees is always the
   // arithmetic the roll actually uses. `positional` (cover/flank/backstab)
   // plugs in here in later milestones and reaches all four sites at once.
-  const attackMods = (attacker, defender) => {
+  // `plan` (optional) is a continuous point the attacker WOULD act from - the
+  // walk-in preview's planned stand point. The odds it shows must be priced
+  // from where the swing will actually happen: cover, flank and the
+  // melee/ranged split all move with the attacker, and a percentage computed
+  // from the tile being LEFT is a lie about the attack being promised.
+  const attackMods = (attacker, defender, plan = null) => {
     // Position is a per-PAIR term - it depends on where the other one stands,
     // so it is computed at roll time and never cached on a unit.
-    const A = bodyOf(attacker);
+    const A = plan ? { x: Math.round(plan.x), z: Math.round(plan.z) } : bodyOf(attacker);
     const D = bodyOf(defender);
+    const dp = plan ? posOf(defender) : null;
     // The attacker's own side, minus itself: a pincer needs a second body.
     const allies = (attacker.sheet ? members : engaged)
       .filter((u) => u !== attacker && standing(u))
@@ -445,7 +451,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // a pincer are genuinely grid-shaped. Only the melee/ranged SPLIT moves
       // to real distance, and it reads reach without the line test so turning
       // walls on (M3) can't silently change who gets cover.
-      melee: withinReach(attacker, defender),
+      melee: plan
+        ? inReach(plan.x, plan.z, dp.x, dp.z, reachOfUnit(attacker))
+        : withinReach(attacker, defender),
       edgeOpen: world.stepOpen,
       // A toppled prop shields the tile behind it (POWERS_PLAN M7). Note this
       // rides the same `!melee` gate as every other cover: a fallen cabinet
@@ -931,18 +939,43 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return best?.en || null;
   }
 
+  // The walk a click on this target would take, WITHOUT taking it: the same
+  // route, endpoint swap, smoothing and budget arithmetic as walkActive,
+  // stored as the movement trail instead of walked (drawPreview then shows the
+  // affordable stretch green, the rest red, and rings the stop point - the
+  // planned stand position, BG3-style). Returns { end, cost, done } or null
+  // for a degenerate walk.
+  function previewWalk(rawPath, endPoint, a) {
+    if (endPoint) rawPath = [...rawPath.slice(0, -1), endPoint];
+    const s = world.smooth(rawPath, active.actor);
+    const { points, cost, done, tail } = truncateByBudget(
+      s, Math.max(0, moveBudget(active) - a.ap), stepCost);
+    if (points.length < 2) return null;
+    preview = { reach: points, tail };
+    return { end: points[points.length - 1], cost, done };
+  }
+
   // While a single-target attack is armed, the cost tag shows the to-hit chance
   // for the enemy under the cursor - the rings show range/validity, this shows
   // the odds (DOS2's most load-bearing bit of UI). A cone's wedge is its own
   // feedback and a shove auto-hits, so neither shows a percentage.
+  //
+  // A target the verb would WALK to previews the whole commitment before the
+  // click spends it: the route it will take, the stand point it will stop at,
+  // and the total AP - move plus swing. The odds are priced FROM that planned
+  // point (attackMods' `plan`), because cover, flanking and the melee/ranged
+  // split all move with the attacker - a percentage computed from the tile
+  // being LEFT would be a lie about the attack being promised.
   function showHitPreview(en, sx, sy) {
     hoverHitChance = null;
     // The readout REPLACES the movement trail. Clearing it here rather than at
     // the call sites is what makes that true: `preview` is redrawn every frame,
     // so a trail left over from the last patch of floor the cursor crossed kept
     // hanging off the character while they were plainly aiming at someone.
+    // (previewWalk re-fills it when a walk is genuinely part of the click.)
     preview = null;
-    const a = ACTIONS[previewAction()];
+    const id = previewAction();
+    const a = ACTIONS[id];
     // A control rolls to hit like a swing does, so it earns the same readout -
     // an odds display that vanished the moment you armed Detain would make the
     // one power you most want to know the odds of the one that hides them.
@@ -950,39 +983,83 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       costTag.style.display = 'none';
       return;
     }
+    const place = (text) => {
+      costTag.textContent = text;
+      costTag.style.left = `${sx + 14}px`;
+      costTag.style.top = `${sy + 14}px`;
+      costTag.style.display = 'block';
+    };
     // A crouched target reshapes the readout before any odds exist
     // (TACTICS_PLAN M6): no angle means NO number - a percentage over an
     // unhittable target is a lie - and a human shield shows the odds against
     // the body that would actually take it.
     let target = en;
     let shieldNote = '';
-    if (rangeOf(previewAction())) {
+    let plan = null; // planned stand point while the click includes a walk
+    let planCost = 0; // what that walk takes out of this turn's budget
+    const range = rangeOf(id);
+    if (range) {
       const so = shotOutcome(active, en);
       if (so.blocked || (so.redirected && so.target.sheet)) {
-        costTag.textContent = so.blocked
+        place(so.blocked
           ? `No shot - in cover behind the ${crouchLabel(so.blocked)}`
-          : `No shot - you would hit ${nameOf(so.target)}`;
-        costTag.style.left = `${sx + 14}px`;
-        costTag.style.top = `${sy + 14}px`;
-        costTag.style.display = 'block';
+          : `No shot - you would hit ${nameOf(so.target)}`);
         return;
       }
       if (so.redirected) {
         target = so.target;
         shieldNote = ` vs ${nameOf(so.target)} (human shield)`;
       }
+      const far = cheb(active.actor.x, active.actor.z, en.x, en.z) > range;
+      const noLine = !world.hasLos(active.actor.x, active.actor.z, en.x, en.z);
+      if (far || noLine) {
+        // A throw refuses where it stands (the click's own rule) - say so
+        // instead of quoting odds for a throw that will not happen.
+        if (a.ammoCost) { place(far ? 'Too far to throw.' : 'No clear line to throw.'); return; }
+        const route = routeIntoRange(en, range);
+        const w = route && route.length >= 2 ? previewWalk(route, null, a) : null;
+        if (!w) { place('No way to get a shot at them.'); return; }
+        const ex = Math.round(w.end[0]);
+        const ez = Math.round(w.end[1]);
+        if (!w.done || cheb(ex, ez, en.x, en.z) > range || !world.hasLos(ex, ez, en.x, en.z)) {
+          place('Out of range this turn - a click closes the distance.');
+          return; // the trail stays up: green as far as the budget carries
+        }
+        plan = { x: w.end[0], z: w.end[1] };
+        planCost = w.cost;
+      }
+    } else if (!(isControl(a) && controlIsRanged(a)) && !canReach(active, en)) {
+      // The melee walk-in (swings, touch controls, a purge): preview the same
+      // route the click will take, to the same legal stand point.
+      const best = routeBeside(en);
+      if (!best) { place('No way to get a swing at them.'); return; }
+      const w = previewWalk(best.path, best.point, a);
+      if (!w) { place('Already as close as the route gets.'); return; }
+      const endPos = posOf(en);
+      if (!w.done || !inReach(w.end[0], w.end[1], endPos.x, endPos.z, reachOfUnit(active), world.stepOpen)) {
+        place('Out of reach this turn - a click closes the distance.');
+        return;
+      }
+      plan = { x: w.end[0], z: w.end[1] };
+      planCost = w.cost;
     }
     // The same terms the swing will roll - not a second copy of the math. The
     // reason string matters: a positional modifier the player can't see reads
     // as randomness (TACTICS_PLAN, ui.js note).
-    const t = attackMods(active, target);
+    const t = attackMods(active, target, plan);
     hoverHitChance = hitChance(t.acc, t.dodge, t.mods);
     const why = t.covered ? ' - in cover'
       : (t.behind ? ' - from behind' : (t.flanked ? ' - flanked' : ''));
-    costTag.textContent = `${Math.round(hoverHitChance * 100)}% to hit${why}${shieldNote}`;
-    costTag.style.left = `${sx + 14}px`;
-    costTag.style.top = `${sy + 14}px`;
-    costTag.style.display = 'block';
+    let text = `${Math.round(hoverHitChance * 100)}% to hit${why}${shieldNote}`;
+    // Price the whole click while a walk is part of it: what the move takes
+    // out of real AP (the allowance is spent first, exactly as billMove
+    // spends it) plus the swing itself.
+    if (plan && planCost > 0.02) {
+      const free = Math.min(active.freeAp || 0, planCost);
+      const total = roundAp(roundAp(planCost - free) + a.ap);
+      text += ` · ${fmtAp(total)} AP after the walk`;
+    }
+    place(text);
   }
 
   // While a buff is armed, the cursor names WHO it would land on and what they
@@ -1423,7 +1500,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           && !so.blocked && !(so.redirected && so.target.sheet)
           && (!a.ammoCost || active.sheet.paper >= ammoCostOf(id)) && active.ap >= a.ap;
       } else {
-        ok = active.ap >= a.ap; // melee: clicking a distant target walks you in
+        // Melee (and the touch verbs that walk in): green is the promise the
+        // click keeps - a swing can actually land on them, from here or from
+        // some legal stand point beside them (the same rule routeBeside walks
+        // to). Every enemy used to ring green on bare swing-AP, partition-
+        // sealed ones included - the exact green that paired with a refusal.
+        // Distance is deliberately NOT tested: a partial approach is the
+        // click's honest outcome ("close the distance"), and the hover
+        // preview prices the walk exactly. Path existence stays the click's
+        // own test - a Dijkstra fan per enemy per frame is too hot for rings.
+        ok = active.ap >= a.ap && (canReach(active, en) || hasSwingSpot(en));
       }
       const pos = en.entity.getPosition();
       drawRing(pos.x, pos.z, TARGET_R, ok ? PREVIEW_OK : PREVIEW_FAR);
@@ -2154,9 +2240,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return;
     }
     // Reserve the crouch's own AP out of the walk budget, exactly as a
-    // walk-up shot reserves its trigger pull.
-    const walk = walkActive(best.path, moveBudget(active) - a.ap);
-    if (!walk) { log('Not enough AP to reach it.'); return; }
+    // walk-up shot reserves its trigger pull. Same honest split as the
+    // walk-ups: a degenerate route is not an AP problem.
+    const crouchBudget = moveBudget(active) - a.ap;
+    const walk = walkActive(best.path, crouchBudget);
+    if (!walk) {
+      log(crouchBudget > 0.05 ? 'No closer way in.' : 'Not enough AP to reach it.');
+      return;
+    }
     if (walk.done && Math.round(walk.end[0]) === best.sx && Math.round(walk.end[1]) === best.sz) {
       pendingCrouch = { tx, tz, spot: [best.sx, best.sz], edges: edgeMode };
     } else {
@@ -2755,8 +2846,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // not one more, by construction.
       const route = routeIntoRange(en, range);
       if (!route || route.length < 2) { refuse('No way to get a shot at them.'); return; }
-      const shotWalk = walkActive(route, moveBudget(active) - a.ap);
-      if (!shotWalk) { refuse('Not enough AP to get in range.'); return; }
+      const shotBudget = moveBudget(active) - a.ap;
+      const shotWalk = walkActive(route, shotBudget);
+      // Same honest split as the melee walk-up: a degenerate route is not an
+      // AP problem, and must not be narrated as one.
+      if (!shotWalk) {
+        refuse(shotBudget > 0.05 ? 'No better shot to walk to.' : 'Not enough AP to get in range.');
+        return;
+      }
       // Will we be able to fire when the walk finishes? The arrival check
       // (pendingMelee, in the update loop) is authoritative either way - this
       // only decides whether to promise the shot or report the walk.
@@ -2796,24 +2893,35 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       strike(armed, en);
       return;
     }
-    // walk the cheapest route to their side, as far as the budget allows
+    // walk the cheapest route to a tile the swing is legal from
     const best = routeBeside(en);
-    if (!best || best.length < 2) { refuse('No way to reach them.'); return; }
+    // Sealed off, or every stand point beside them is line-blocked (ringed in
+    // partitions): either way there is no swing to walk to, and saying so
+    // beats the AP message this used to wear.
+    if (!best) { refuse('No way to get a swing at them.'); return; }
     // walk up to their body, not the centre of the neighbouring tile.
     // The budget is the SAME one an ordinary move spends - allowance first,
     // then real AP (`moveBudget`) - minus the swing this walk is for. Billing
     // the walk against bare `ap` ignored the free movement allowance entirely,
     // so a character wearing it stopped short of a target they could plainly
     // afford to reach and stood there instead of hitting anyone.
-    const [gx, gz] = best[best.length - 1];
-    const ep = en.entity ? en.entity.getPosition() : { x: en.x, z: en.z };
-    const walk = walkActive(best, moveBudget(active) - a.ap, world.approach(gx, gz, ep.x, ep.z));
-    if (!walk) { refuse('Not enough AP to reach them.'); return; }
+    const budget = moveBudget(active) - a.ap;
+    const walk = walkActive(best.path, budget, best.point);
+    // A null walk has two honest readings, and only one is about AP: with
+    // budget in hand it means the route degenerated to nothing (walkActive's
+    // no-progress guard). Blaming AP for that was this bug's face: "Not
+    // enough AP to reach them" at 5.9 of 6 AP.
+    if (!walk) {
+      refuse(budget > 0.05 ? 'Already as close as the route gets.' : 'Not enough AP to reach them.');
+      return;
+    }
     // The walk's endpoint is already a free point, so this asks the honest
     // question directly instead of rounding it back to a tile first: will we
-    // be standing inside reach when the walk finishes?
+    // be standing inside reach when the walk finishes? Same rule as the
+    // arrival check (canReach), LINE TEST INCLUDED - promising on distance
+    // alone let a partition cancel the strike this walk was for, silently.
     const endPos = posOf(en);
-    if (inReach(walk.end[0], walk.end[1], endPos.x, endPos.z, reachOfUnit(active))) {
+    if (inReach(walk.end[0], walk.end[1], endPos.x, endPos.z, reachOfUnit(active), world.stepOpen)) {
       pendingMelee = { en, action: armed }; // strike on arrival
     } else {
       armed = null;
@@ -2822,24 +2930,51 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
   }
 
-  // The cheapest walkable route to a tile BESIDE `en`, or null if the body is
-  // sealed off entirely. Shared by the two walk-ups: the melee swing follows it
-  // to their elbow, a ranged weapon follows it only until the shot is on.
+  const AROUND = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+
+  // The point a walk into (gx, gz) would stop at - IF a swing on `en` from
+  // there is LEGAL: reach distance and a clear line, the very rule the strike
+  // runs on arrival (canReach). Null when that tile can't deliver the swing.
+  // This is what keeps the walk-up's promise: choosing a stand point by any
+  // weaker test sends the walk somewhere the arrival check then vetoes.
+  function swingPointAt(en, gx, gz) {
+    const own = gx === active.actor.x && gz === active.actor.z;
+    if (!own && !world.isWalkable(gx, gz)) return null;
+    const ep = posOf(en);
+    const p = world.approach(gx, gz, ep.x, ep.z);
+    return inReach(p[0], p[1], ep.x, ep.z, reachOfUnit(active), world.stepOpen) ? p : null;
+  }
+  // Does ANY tile beside them offer a legal swing? The cheap read the target
+  // rings use - pure geometry, no pathfinding, so it can run per frame. A
+  // route to the spot is the click's own (more expensive) test.
+  const hasSwingSpot = (en) => AROUND.some(([dx, dz]) => swingPointAt(en, en.x + dx, en.z + dz));
+
+  // The cheapest walkable route to a tile BESIDE `en` from which the swing
+  // actually LANDS, plus the exact point to stop at: { path, point }, or null
+  // when no adjacent tile offers a legal swing. Choosing by path length alone
+  // used to send the walk to the nearest tile even when a partition blocked
+  // every swing from it - the arrival check then cancelled the strike it had
+  // promised, and every re-click regenerated the same dead-end point: a
+  // zero-length walk, reported (falsely) as an AP shortage.
   function routeBeside(en) {
     let best = null;
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+    for (const [dx, dz] of AROUND) {
       const gx = en.x + dx;
       const gz = en.z + dz;
-      // Already STANDING on a goal tile - out of reach only because the body
-      // rests on its far side - means the "route" is a shuffle inside this
-      // tile; the caller's approach point closes the last half-tile to their
+      const point = swingPointAt(en, gx, gz);
+      if (!point) continue;
+      // Already STANDING on a legal goal tile - out of reach only because the
+      // body rests on its far side - means the "route" is a shuffle inside
+      // this tile; the approach point closes the last half-tile to their
       // body. findPath returns the one-tile path [[gx,gz]] here, and its
       // length of 1 used to win the shortest-path contest and then fail the
       // >= 2 check: the player CLOSEST to the target was the one told there
       // was no way to reach them.
-      if (gx === active.actor.x && gz === active.actor.z) return [[gx, gz], [gx, gz]];
+      if (gx === active.actor.x && gz === active.actor.z) {
+        return { path: [[gx, gz], [gx, gz]], point };
+      }
       const p = world.findPath(active.actor.x, active.actor.z, gx, gz, active.actor);
-      if (p && p.length >= 2 && (!best || p.length < best.length)) best = p;
+      if (p && p.length >= 2 && (!best || p.length < best.path.length)) best = { path: p, point };
     }
     return best;
   }
@@ -3810,7 +3945,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           if (out.redirected) log(`${nameOf(out.target)} takes it instead. That is the job.`);
           strike(action, out.target);
         } else {
+          // A cancelled arrival SAYS why. Standing down silently was half of
+          // the stuck-walk-up bug's confusion: the walk happened, the strike
+          // didn't, and nothing on screen admitted anything had failed.
           if (en.alive && arrived && !fireable) log(`No shot - ${en.def.name} is in cover.`);
+          else if (en.alive && !arrived) log(`${en.def.name} is still out of reach.`);
+          else if (en.alive) log(`Not enough AP left for ${ACTIONS[action].label}.`);
           armed = null;
           refresh();
         }

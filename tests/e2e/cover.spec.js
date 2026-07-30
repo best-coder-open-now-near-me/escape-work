@@ -107,8 +107,16 @@ test('a crouched foe refuses the shot, and flanking wins it back', async ({ page
   await clickManager(page);
   await page.waitForTimeout(700);
   expect(await page.evaluate(() => window.__god.player.paper)).toBe(3);
-  expect(await page.evaluate(() =>
-    window.__combat.enemies.find((e) => e.alive).hp)).toBeLessThan(before);
+  // A high damage roll can end the fight right here: the opener softened the
+  // Manager, victory tears __combat down, and reading hp from it crashed the
+  // spec. The flank landing is what's under test - paper spent above, and
+  // either the fight is over (the wad finished them) or the hp moved.
+  if (await page.evaluate(() => window.__game.inCombat)) {
+    expect(await page.evaluate(() =>
+      window.__combat.enemies.find((e) => e.alive).hp)).toBeLessThan(before);
+  } else {
+    expect(await lastLine(page)).toMatch(/floor is yours/i);
+  }
 });
 
 // The player's side of the verb: aim it at a desk, walk over, tuck in - and

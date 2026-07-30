@@ -246,7 +246,21 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   a body near the ground point (`enemyAtPoint`, measured against continuous
   body positions - the tile is derived), and the crosshair, the readout, the
   reach ring and the click resolve from that single result, behind the click's
-  own gate (your turn, standing still). Each consumer used to compute its own -
+  own gate (your turn, standing still).
+  **A target the click would WALK to previews the whole commitment first**
+  (BG3's move-then-act; `showHitPreview` via `previewWalk`): the route the
+  click will take, a ring on the stand point it stops at, and the odds plus
+  the total AP - move and swing together - priced FROM that planned point
+  (`attackMods` takes it as `plan`), because cover and flanking move with the
+  attacker. The walk itself only ever aims at a stand point the swing is
+  LEGAL from (`routeBeside`/`swingPointAt`: reach distance plus the partition
+  line test - the same `canReach` the strike runs on arrival), the melee
+  target rings read that same rule (`hasSwingSpot`), and every walk refusal
+  names its true cause: a degenerate walk is "as close as the route gets",
+  never "not enough AP", and an arrival that can't fire says so instead of
+  standing down silently. Before this held together, the walk could aim at a
+  line-blocked tile, regenerate the same dead-end point on every click, and
+  narrate the loop as an AP shortage at nearly full AP. Each consumer used to compute its own -
   the cursor an ungated pick, the readout a gated tile-centre distance - so the
   crosshair could promise a swing while the readout blanked and a click walked.
   **Hold Ctrl or Alt to glow what you're hovering** (`shading.addHighlight`) -
