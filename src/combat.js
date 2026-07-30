@@ -841,6 +841,21 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   Object.assign(strip.style, PANEL_CHROME, {
     position: 'fixed', top: '54px', right: '12px', zIndex: '25', minWidth: '170px',
     borderRadius: '9px', padding: '9px 12px', font: '12px system-ui, sans-serif',
+    // Double-click is a verb here; without this it ALSO selects the row's text.
+    userSelect: 'none',
+  });
+  strip.title = 'Double-click a combatant to center the camera on them';
+  // Double-click a row: look at that combatant (BG3's portrait recenter).
+  // Delegated once - refresh() rebuilds the rows wholesale on every repaint,
+  // so a per-row handler would be re-wired dozens of times a fight. The rig
+  // belongs to main.js; the callback only names whose body to find. The
+  // fallen still resolve (their actor lies where it toppled) - "where did
+  // they go down" is a fair question mid-fight.
+  strip.addEventListener('dblclick', (e) => {
+    const row = e.target.closest?.('[data-slot]');
+    if (!row) return;
+    const s = turns.order[Number(row.dataset.slot)];
+    if (s) callbacks.focusCamera?.(s.member ? s.member.actor : s.unit);
   });
   document.body.appendChild(strip);
 
@@ -1638,8 +1653,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           ? `border-left:2px solid #8adf76; padding-left:4px; margin-left:-6px;`
             + `background:rgba(138,223,118,.07);`
           : '';
-        return `<div style="opacity:${dead ? '.4' : finished ? '.55' : '.95'}; color:${col};`
-          + `font-weight:${cur ? '700' : '400'}; display:flex; align-items:center; gap:2px; margin:1px 0; ${brk}">`
+        return `<div data-slot="${i}" style="opacity:${dead ? '.4' : finished ? '.55' : '.95'}; color:${col};`
+          + `font-weight:${cur ? '700' : '400'}; display:flex; align-items:center; gap:2px; margin:1px 0; cursor:pointer; ${brk}">`
           + `<span style="width:11px; flex:none;">${cur ? '▸' : finished ? '✓' : ''}</span>${pic}`
           + `<span>${slotName(s)} &middot; ${dead ? '—' : hp}`
           + (icons ? ` ${icons}` : '') + `</span></div>`;

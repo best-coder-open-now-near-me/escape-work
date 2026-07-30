@@ -211,6 +211,16 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   click lands exactly where it looks like it will. It banks the pitch/dist it
   replaced and restores them on the way out, and any manual pitch drag (or a
   raw `setView`) drops it, so the button's lit state never outlives the view.
+  **WASD/arrows pan the view free** (BG3/DOS2's keys): a pan detaches the rig
+  from its follow target, fenced to the floor's extent, until something
+  recenters it - `Home`, a double-click on the bottom-left profile card, a
+  party-bar card, or a combat-strip row. A recenter aimed at the body the rig
+  FOLLOWS re-attaches the follow (`recenter()`); aimed at anyone else it
+  glides to where they stand and stays detached (`panTo()`), because follow
+  can't honestly attach to a body it doesn't track. Control changes re-attach
+  too (a leader switch, a survivor stepping up, a fight starting) - the view
+  belongs with whoever you're driving. main.js owns WHO (`focusCameraOn`);
+  the rig only owns HOW.
 - **Walls between you and the camera are ghosted**, and the test for "between"
   is 3D (`occlusion.js`, unit tested). It walks the sightline from the camera to
   the character's FEET and ghosts a wall only where that segment is still below

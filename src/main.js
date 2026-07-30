@@ -718,6 +718,7 @@ function startGame(level) {
     party.active = i;
     sheet = m.sheet;
     player = m.actor;
+    controls.recenter(); // the survivor stepping up is who the view should find
     pendingAction = null;
     armedOoc = null;
     buildHotbar();
@@ -735,6 +736,7 @@ function startGame(level) {
     clearOocCrouch(true);
     sheet = lead.sheet;
     player = lead.actor;
+    controls.recenter(); // control settled on them - a panned-away view follows
     pendingAction = null;
     armedOoc = null;
     buildHotbar();
@@ -1657,6 +1659,12 @@ function startGame(level) {
     // the floor, so clicking a member who waits on their own slot does nothing,
     // exactly as before spans existed.
     onSelect: (i) => { if (!inCombat) switchLeader(i); else combat?.steerMember(party.members[i]); },
+    // Double-click points the CAMERA at the member, switch or no switch. The
+    // first click of the pair already ran onSelect, so out of combat the
+    // camera lands on them as the new leader (recenter -> follow); a member
+    // the click could NOT take over (downed, waiting on their initiative
+    // slot) still gets looked at - that is the point of the second verb.
+    onFocus: (i) => focusCameraOn(party.members[i]?.actor),
     onLevelUp: (i) => openLevelUpFor(party.members[i]),
   });
   let partyBarKey = ''; // last rendered roster state (refresh gate)
@@ -1732,6 +1740,7 @@ function startGame(level) {
     party.active = i;
     sheet = m.sheet;
     player = m.actor;
+    controls.recenter(); // control moved - a panned-away view follows it back
     buildHotbar(); // their attacks, their ammo count
     paintHud(sheet);
     loot.refreshPanel(sheet);
@@ -1859,6 +1868,7 @@ function startGame(level) {
     dialogue.close();
     shopping.close(); // the machine can wait; it is not going anywhere
     inCombat = true;
+    controls.recenter(); // a fight starts AT the party - a panned-away view returns
     ui.hideMenu();
     loot.hideLabels(); // no browsing the shelves mid-fight
     hover.clear();
@@ -2024,6 +2034,9 @@ function startGame(level) {
       fx: vfx,
       callbacks: {
         say: ui.say,
+        // Double-click on an initiative row: put the camera on that body.
+        // main.js owns the rig, so combat only names WHO.
+        focusCamera: focusCameraOn,
         // Combat passes the acting member's sheet (initiative controls who you
         // drive); default to the leader for any callless use.
         updateHud: (s = sheet) => paintHud(s || sheet),
@@ -2961,8 +2974,61 @@ function startGame(level) {
     isOn: () => controls.tactical,
   });
 
+  // Keyboard pan may not fly the view off the carpet into the void - fence it
+  // to the floor plus a little slack. Once per boot: a floor change reloads
+  // the page, so the grid the fence was measured against can't go stale.
+  controls.setPanBounds({ minX: -2, maxX: grid.width + 1, minZ: -2, maxZ: grid.height + 1 });
+
+  // Point the camera at a body. The one the rig FOLLOWS gets recenter() -
+  // follow resumes, so the view stays with them as they walk. Anyone else
+  // gets a glide to where they stand right now: follow can't attach to a
+  // body the rig doesn't track, and pretending otherwise would drift the
+  // view back to the followed character a frame later.
+  function focusCameraOn(actor) {
+    if (!actor) return;
+    if (actor === player) { controls.recenter(); return; }
+    const p = actor.entity?.getPosition();
+    if (p) controls.panTo({ x: p.x, z: p.z });
+    else controls.panTo({ x: actor.x, z: actor.z });
+  }
+  // The bottom-left profile card doubles as a recenter button (double-click),
+  // the way the reference games' portraits do. It names the ACTING combatant
+  // in a fight (paintHud follows initiative), so the camera goes to whoever
+  // the card is showing, not blindly to the leader. #hud is pointer-events:
+  // none so the banner stays click-through; the card opts back in - it sits
+  // over the world's corner, and every other HUD surface already swallows
+  // its clicks rather than letting them fall through to the floor.
+  const statsCard = document.getElementById('stats');
+  if (statsCard) {
+    statsCard.style.pointerEvents = 'auto';
+    statsCard.onmousedown = (e) => e.stopPropagation(); // clicks stay off the canvas
+    statsCard.ondblclick = () => {
+      if (!sheet || gameOver) return;
+      focusCameraOn(inCombat && combat ? combat.actingActor : player);
+    };
+  }
+
   // --- keyboard: hold Alt for the loot overlay, I for the pockets ---------------
+  // Camera pan keys (BG3/DOS2: WASD pans, and BG3 takes the arrows too -
+  // dotesports.com/pcgamesn BG3 camera guides; DOS2 fextralife Controls).
+  // Physical codes, not e.key, so WASD stays WASD on a non-QWERTY layout.
+  // keydown/keyup maintain the held set; the update loop drives the rig from
+  // it every frame, because pans are continuous and key-repeat isn't.
+  const PAN_CODES = {
+    KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down',
+    KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
+  };
+  const panHeld = new Set();
   window.addEventListener('keydown', (e) => {
+    // Ctrl/meta chords stay the browser's (Ctrl+A, Cmd+D); a plain pan key is
+    // ours. The typed-text surfaces (god panel, the creation name field)
+    // already stop keydown propagation, so typing "was" never pans.
+    if (PAN_CODES[e.code] && !e.ctrlKey && !e.metaKey) {
+      panHeld.add(PAN_CODES[e.code]);
+      // The arrows scroll the page hosting the game (the itch.io iframe) if
+      // left to default; suppressing it is harmless for the letters.
+      e.preventDefault();
+    }
     if (e.key === 'Alt') {
       e.preventDefault(); // keep focus off the browser's menu bar
       hover.setAlt(true); // lights what the cursor is already on, without a re-hover
@@ -3005,13 +3071,19 @@ function startGame(level) {
       // Overhead tactical view - the same toggle as the rail button.
       controls.toggleTactical();
       tacticalBtn?.refresh();
+    } else if (e.key === 'Home' && sheet && !gameOver) {
+      // BG3's recenter key: put the camera back on whoever you're driving
+      // (the acting combatant in a fight, the leader out of one).
+      focusCameraOn(inCombat && combat ? combat.actingActor : player);
     }
   });
   window.addEventListener('keyup', (e) => {
+    if (PAN_CODES[e.code]) panHeld.delete(PAN_CODES[e.code]);
     if (e.key === 'Alt') { hover.setAlt(false); loot.hideLabels(); }
     if (e.key === 'Control') hover.setCtrl(false);
   });
   window.addEventListener('blur', () => {
+    panHeld.clear(); // a key can't be 'still held' across a focus loss
     loot.hideLabels();
     hover.releaseModifiers(); // a key can't be 'still held' across a focus loss
   });
@@ -3317,6 +3389,19 @@ function startGame(level) {
         return s.behind ? null : s;
       });
     }
+    // Keyboard camera pan (WASD/arrows), gated like the other game keys: it
+    // detaches the rig from the follow target until something recenters it.
+    // Opposed keys cancel per axis rather than fighting.
+    if (panHeld.size && sheet && !gameOver && !modalOpen()) {
+      const rx = (panHeld.has('right') ? 1 : 0) - (panHeld.has('left') ? 1 : 0);
+      const uz = (panHeld.has('up') ? 1 : 0) - (panHeld.has('down') ? 1 : 0);
+      if (rx || uz) {
+        controls.pan(rx, uz, dt);
+        // The world just slid under a stationary cursor - re-ask what the
+        // hover is on, or the glow/banner stay pinned to what WAS there.
+        controls.refreshHover();
+      }
+    }
     // Follow the player, keeping them centred in frame. Track the entity's
     // CONTINUOUS position (player.x/z is the logical tile, which jumps a whole
     // tile at a time and makes the camera step along with the walk).
@@ -3467,6 +3552,11 @@ function startGame(level) {
       const c = controls.cameraEntity.getPosition();
       return { x: c.x, y: c.y, z: c.z };
     },
+    // The point the rig is looking at, and whether a keyboard pan has
+    // detached it from the follow target - the pair the camera specs assert
+    // on (cameraPos moves with pitch/zoom too, which is noise to them).
+    get cameraFocus() { return controls.focus; },
+    get cameraFree() { return controls.panning; },
     // World point -> CSS-pixel screen point, so tests can click precise
     // ground points (mouse events arrive in CSS pixels).
     project(x, z) {

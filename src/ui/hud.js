@@ -372,10 +372,13 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
 // with name, an HP bar, a DOWN marker, and a highlight on the member being
 // controlled. Clicking a slot asks the host to switch control - the host
 // decides whether that's allowed right now (combat, dialogue, downed).
+// Double-clicking asks the host to point the CAMERA at that member - a
+// separate verb, because a member you can't switch to (downed, waiting on
+// their own initiative slot) is still somewhere worth looking.
 // One decimal, and no trailing '.0' - the same shape combat.js prints AP in.
 const fmtAp = (v) => String(Math.round((Number(v) || 0) * 10) / 10).replace(/\.0$/, '');
 
-export function createPartyBar({ onSelect, onLevelUp }) {
+export function createPartyBar({ onSelect, onLevelUp, onFocus }) {
   const bar = document.createElement('div');
   bar.id = 'party-bar';
   Object.assign(bar.style, PANEL_CHROME, {
@@ -417,6 +420,10 @@ export function createPartyBar({ onSelect, onLevelUp }) {
             background:${down ? '#5a2a2a' : s.hp / s.maxHp > 0.4 ? '#6fc86f' : '#e0b23a'}; border-radius:2px;"></div>
         </div>`;
       slot.onclick = () => onSelect(i);
+      if (onFocus) {
+        slot.ondblclick = () => onFocus(i);
+        slot.title = `Double-click to center the camera on ${s.name}`;
+      }
       // Level-up pip: a living member with banked points (of either type) wears
       // a badge; clicking it opens their allocation screen (without switching
       // control to them).
