@@ -24,10 +24,11 @@ import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP, addCash,
 } from './party.js';
-import { applyStatus, statusFx, hasStatus, tickStep, statusLeft, statusList } from './statuses.js';
+import { applyStatus, removeStatus, statusFx, hasStatus, tickStep, statusLeft, statusList } from './statuses.js';
 import { inReach } from './tactics.js';
 import { createDraft, createCharacter, draftModel } from './creation.js';
-import { aimsAtAlly, coneFrom, conePolyline } from './powers.js';
+import { aimsAtAlly, coneFrom, conePolyline, isToppleable, toppleLanding } from './powers.js';
+import { PARTITION_TOPPLE } from './data/tiles.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel } from './scene.js';
@@ -171,6 +172,11 @@ function startGame(level) {
   let lastPath = null; // kept for debugging/tests
   let pendingAction = null; // walk-up interaction, runs on arrival
   let armedOoc = null; // hotbar action armed OUT of combat (a coworker, or a spot)
+  // The leader's out-of-combat crouch (TACTICS_PLAN M6 OOC): { x, z, edges,
+  // at } in the same shape combat stores, so beginCombat can hand it straight
+  // to startCombat's preCrouch and the fight starts with the leader already
+  // tucked in. Any deliberate walk or leader change clears it.
+  let oocCrouch = null;
   let oocAim = null; // last ground point the cursor was over, out of combat
   let hotbar = null; // persistent action bar (built once a class is picked)
   let tacticalBtn = null; // overhead-camera toggle on the HUD rail (built with the HUD)
@@ -684,6 +690,7 @@ function startGame(level) {
     const i = party.members.findIndex((m) => m.sheet.hp > 0 && m.actor);
     if (i < 0 || i === party.active) return;
     const m = party.members[i];
+    clearOocCrouch(true); // the crouch belongs to the sheet that took it
     party.active = i;
     sheet = m.sheet;
     player = m.actor;
@@ -701,6 +708,7 @@ function startGame(level) {
     if (!party) return;
     const lead = partyLeader(party);
     if (sheet === lead.sheet || !lead.actor) return;
+    clearOocCrouch(true);
     sheet = lead.sheet;
     player = lead.actor;
     pendingAction = null;
@@ -817,9 +825,37 @@ function startGame(level) {
   // (gx, gz), instead of the tile's dead centre.
   const approachTo = (gx, gz, tx, tz) => approachPoint(grid.terrainOpen, grid.edgeOpen, gx, gz, tx, tz);
 
+  // The out-of-combat crouch ends the way the in-combat one does: the moment
+  // a deliberate walk begins (moveTo / approachAndDo / walkToExact), or when
+  // the leader changes hands. `quiet` skips the line for handoffs where the
+  // crouch is being consumed rather than abandoned.
+  function clearOocCrouch(quiet = false) {
+    if (!oocCrouch) return;
+    oocCrouch = null;
+    removeStatus(sheet, 'covered');
+    if (!quiet) ui.say('You come out of cover.');
+  }
+
+  // Walk to EXACTLY (x, z), then run - the crouch and the partition shove
+  // need a precise standing spot, where approachAndDo's "within reach" would
+  // settle for a diagonal that shields (or shoves) nothing.
+  function walkToExact(x, z, run) {
+    if (!sheet || inCombat || gameOver) return false;
+    clearOocCrouch();
+    if (player.x === x && player.z === z) { run(); return true; }
+    const p = findPath(isWalkable, player.x, player.z, x, z, hazardCost, grid.stepOpen);
+    if (!p || p.length < 2) return false;
+    pendingAction = { x, z, run, exact: true };
+    const s = smoothFromBody(p);
+    player.setPath(s);
+    lastPath = s;
+    return true;
+  }
+
   // Walk within reach of (x, z), then run the interaction.
   function approachAndDo(x, z, run) {
     if (!sheet || inCombat || gameOver) return;
+    clearOocCrouch();
     if (Math.abs(player.x - x) <= 1 && Math.abs(player.z - z) <= 1) {
       run();
       return;
@@ -846,6 +882,7 @@ function startGame(level) {
   // click point. A click inside the current tile just shuffles over.
   function moveTo(tile, point = null) {
     if (!tile || !sheet || inCombat || gameOver || !isWalkable(tile.x, tile.z)) return;
+    clearOocCrouch(); // a deliberate walk is the one thing a crouch never survives
     pendingAction = null;
     if (point && tile.x === player.x && tile.z === player.z && player.entity) {
       const pos = player.entity.getPosition();
@@ -1355,7 +1392,9 @@ function startGame(level) {
     // between fights is exactly when you want it gone. Gating it to combat
     // would have made IT Support's identity verb unusable in the situation it
     // most obviously answers.
-    if (!a || t === 'attack' || t === 'shove' || t === 'summon' || t === 'purge') return null;
+    // Take Cover works out here too (designer, 2026-07-30): crouch before
+    // anyone has noticed you, and the crouch rides into the fight.
+    if (!a || t === 'attack' || t === 'shove' || t === 'summon' || t === 'purge' || t === 'cover') return null;
     if (t === 'heal') return `${a.label} is for a fight - out here, heal from your pockets.`;
     return `${a.label} only means something once someone is swinging at you.`;
   }
@@ -1776,6 +1815,9 @@ function startGame(level) {
       party,
       engaged,
       opening,
+      // A crouch taken before the fight rides into it (TACTICS_PLAN M6 OOC):
+      // combat owns it from here - the status chip is already on the sheet.
+      preCrouch: (() => { const c = oocCrouch; oocCrouch = null; return c; })(),
       // Summons that outlived the last fight walk into this one - they're still
       // on the floor with turns left on the clock, so they fight.
       allies: summons.filter((s) => s.sheet.hp > 0),
@@ -2018,7 +2060,19 @@ function startGame(level) {
         return;
       }
     } else if (a.type === 'shove') {
-      if (!playerReaches(en, REACH.SHOVE)) { ui.say('Too far to shove. Walk your feelings over first.'); return; }
+      // Arm's reach - or the office standing in for your arms: a partition
+      // between you (the wall IS the shove), or adjacent furniture whose
+      // fall lands exactly on them. Combat resolves either as the opener.
+      const wallBetween = Math.abs(en.x - player.x) + Math.abs(en.z - player.z) === 1
+        && !!grid.wallEdgeBetween(player.x, player.z, en.x, en.z);
+      const propOntoThem = DIRS8.some(([dx, dz]) => {
+        const plan = oocTopplePlanAt(player.x + dx, player.z + dz);
+        return plan && plan.lx === en.x && plan.lz === en.z;
+      });
+      if (!playerReaches(en, REACH.SHOVE) && !wallBetween && !propOntoThem) {
+        ui.say('Too far to shove. Walk your feelings over first.');
+        return;
+      }
     } else if (!playerReaches(en) && !bestApproachPath(en.x, en.z)) {
       ui.say('No way to reach them from here.');
       return;
@@ -2028,6 +2082,137 @@ function startGame(level) {
       && canTakePart(player, e)); // same rule as checkCombatTrigger - see there
     if (!engaged.includes(en)) engaged.push(en);
     beginCombat({ engaged, primary: en, opening: { actionId, target: en } });
+  }
+
+  // --- the office topples out of combat too (TACTICS_PLAN M6 OOC) -------------
+  // The same furniture-topple rule combat runs, evaluated from the leader's
+  // spot: sign-derived landing, open ground, no free demolition into a wall.
+  const ORTHO4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  function oocTopplePlanAt(px, pz) {
+    const def = grid.defAt(px, pz);
+    if (!isToppleable(def)) return null;
+    const landing = toppleLanding(player.x, player.z, px, pz);
+    if (!landing) return null;
+    const [lx, lz] = landing;
+    if (!grid.terrainOpen(lx, lz) || !grid.stepOpen(px, pz, lx, lz)) return null;
+    return { def, x: px, z: pz, lx, lz };
+  }
+
+  // An armed SHOVE aimed at the office with no fight on (designer,
+  // 2026-07-30): furniture and partitions topple out here too. With a
+  // coworker standing where it lands, the topple IS the opener - the fight
+  // starts and combat resolves the fall with its own save and pin. Returns
+  // true when the click was a shove at the office (refusals included).
+  function oocShoveAt(tile) {
+    const def = grid.defAt(tile.x, tile.z);
+    if (isToppleable(def)) {
+      approachAndDo(tile.x, tile.z, () => {
+        const plan = oocTopplePlanAt(tile.x, tile.z);
+        if (!plan) { ui.say('It rocks, and settles. Nothing behind it to fall into.'); return; }
+        const en = enemyAt(plan.lx, plan.lz);
+        if (en?.alive) { engageWithAction(en, 'shove'); return; }
+        if (npcAt(plan.lx, plan.lz) || partyAt(plan.lx, plan.lz)) {
+          ui.say('Somebody is standing there. Not like this.');
+          return;
+        }
+        grid.setType(plan.x, plan.z, 'floor');
+        scene.refreshTile?.(plan.x, plan.z);
+        grid.setType(plan.lx, plan.lz, plan.def.topple.becomes);
+        scene.refreshTile?.(plan.lx, plan.lz);
+        vfx.impact(plan.lx, plan.lz, 'slam', { y: 0.5 });
+        vfx.shake(0.11, 0.28);
+        ui.say(`${plan.def.label || 'It'} goes over.`);
+        armedOoc = null;
+        hotbar?.setArmed(null);
+      });
+      return true;
+    }
+    // A partition: the clicked tile is the side it falls ONTO - walk to the
+    // tile across the edge and put a shoulder into it.
+    if (grid.terrainOpen(tile.x, tile.z)) {
+      let side = null;
+      for (const [dx, dz] of ORTHO4) {
+        const sx = tile.x + dx;
+        const sz = tile.z + dz;
+        if (!grid.wallEdgeBetween(sx, sz, tile.x, tile.z)) continue;
+        if (sx === player.x && sz === player.z) { side = { x: sx, z: sz, here: true }; break; }
+        if (!isWalkable(sx, sz)) continue;
+        const p = findPath(isWalkable, player.x, player.z, sx, sz, hazardCost, grid.stepOpen);
+        if (p && p.length >= 2 && (!side || p.length < side.len)) side = { x: sx, z: sz, len: p.length };
+      }
+      if (!side) return false; // no partition faces that tile - not a shove aim
+      const resolve = () => {
+        // Re-verify on arrival - the world had a whole walk to change.
+        if (!grid.wallEdgeBetween(player.x, player.z, tile.x, tile.z)) {
+          ui.say('The wall is not where you left it.');
+          return;
+        }
+        const en = enemyAt(tile.x, tile.z);
+        if (en?.alive) { engageWithAction(en, 'shove'); return; }
+        if (npcAt(tile.x, tile.z) || partyAt(tile.x, tile.z)) {
+          ui.say('Somebody is standing there. Not like this.');
+          return;
+        }
+        const e = grid.removeEdgeBetween(player.x, player.z, tile.x, tile.z);
+        if (!e) return;
+        scene.removeEdgeWall?.(e.o, e.k);
+        grid.setType(tile.x, tile.z, PARTITION_TOPPLE.becomes);
+        scene.refreshTile?.(tile.x, tile.z);
+        vfx.impact(tile.x, tile.z, 'slam', { y: 0.3 });
+        vfx.shake(0.08, 0.2);
+        ui.say('You put a shoulder into the partition. It goes over flat.');
+        armedOoc = null;
+        hotbar?.setArmed(null);
+      };
+      if (side.here) resolve();
+      else if (!walkToExact(side.x, side.z, resolve)) { ui.say('No way to get at that wall.'); }
+      return true;
+    }
+    return false;
+  }
+
+  // An armed TAKE COVER with no fight on: crouch before anyone has noticed
+  // you. The crouch rides into the fight that starts (beginCombat hands it to
+  // startCombat as preCrouch), which is the whole point of taking it early.
+  // Furniture and partitions only out here - people move (the character
+  // shield is a combat commitment).
+  function oocTakeCoverAt(tile) {
+    if (enemyAt(tile.x, tile.z) || npcAt(tile.x, tile.z) || partyAt(tile.x, tile.z)) {
+      ui.say('Out here, hide behind furniture - people move.');
+      return;
+    }
+    const def = grid.defAt(tile.x, tile.z);
+    const cellMode = !!(def && (def.solid || def.cover));
+    const edgeMode = !cellMode && grid.terrainOpen(tile.x, tile.z)
+      && ORTHO4.some(([dx, dz]) => !grid.stepOpen(tile.x, tile.z, tile.x + dx, tile.z + dz));
+    if (!cellMode && !edgeMode) { ui.say('Nothing there to hide behind.'); return; }
+    const commit = (cx, cz) => {
+      oocCrouch = { x: tile.x, z: tile.z, edges: edgeMode, at: { x: cx, z: cz } };
+      applyStatus(sheet, 'covered');
+      paintHud(sheet);
+      ui.say(edgeMode
+        ? 'You tuck in against the partition.'
+        : `You tuck in behind the ${(def.label || 'cover').toLowerCase()}.`);
+      armedOoc = null;
+      hotbar?.setArmed(null);
+    };
+    if (edgeMode) {
+      if (player.x === tile.x && player.z === tile.z) { commit(tile.x, tile.z); return; }
+      if (!walkToExact(tile.x, tile.z, () => commit(tile.x, tile.z))) ui.say('No way in there.');
+      return;
+    }
+    let spot = null;
+    for (const [dx, dz] of ORTHO4) {
+      const sx = tile.x + dx;
+      const sz = tile.z + dz;
+      if (player.x === sx && player.z === sz) { spot = { x: sx, z: sz, here: true }; break; }
+      if (!isWalkable(sx, sz)) continue;
+      const p = findPath(isWalkable, player.x, player.z, sx, sz, hazardCost, grid.stepOpen);
+      if (p && p.length >= 2 && (!spot || p.length < spot.len)) spot = { x: sx, z: sz, len: p.length };
+    }
+    if (!spot) { ui.say('No clear way in behind it.'); return; }
+    if (spot.here) { commit(spot.x, spot.z); return; }
+    walkToExact(spot.x, spot.z, () => commit(spot.x, spot.z));
   }
 
   // Tile effects (data-driven from TILE_TYPES[..].onEnter) fire per step, for
@@ -2223,8 +2408,13 @@ function startGame(level) {
     // state; this only reports the step and what's underfoot.
     if (changed && !gameOver) leaveFootprint(actor, ms, x, z);
     // Walk-up interactions (lighting trash cans) fire on deliberate arrival.
+    // An `exact` action (a crouch spot, a partition shove side) fires only on
+    // its precise tile - "within reach" would settle for a diagonal that
+    // shields or shoves nothing.
     if (isLeader && pendingAction && pathDone
-      && Math.abs(x - pendingAction.x) <= 1 && Math.abs(z - pendingAction.z) <= 1) {
+      && (pendingAction.exact
+        ? x === pendingAction.x && z === pendingAction.z
+        : Math.abs(x - pendingAction.x) <= 1 && Math.abs(z - pendingAction.z) <= 1)) {
       const act = pendingAction;
       pendingAction = null;
       act.run();
@@ -2359,6 +2549,17 @@ function startGame(level) {
         // radius exactly as they would for any other opener.
         caught.sort((p, q) => cheb(player, p) - cheb(player, q));
         engageWithAction(caught[0], armedOoc);
+        return;
+      }
+      // An armed SHOVE aimed at the office itself works out here too
+      // (designer, 2026-07-30): furniture and partitions topple with no
+      // fight on. Ahead of the entity pick, or the prop mesh under the click
+      // would open its rummage panel instead of taking the shoulder.
+      if (armedOoc && ACTIONS[armedOoc].type === 'shove' && tile && !enemyAt(tile.x, tile.z)
+        && oocShoveAt(tile)) return;
+      // An armed TAKE COVER: crouch before anyone has noticed you.
+      if (armedOoc && ACTIONS[armedOoc].type === 'cover' && tile) {
+        oocTakeCoverAt(tile);
         return;
       }
       // Out of combat, the interactable ENTITY under the cursor wins over the
@@ -3202,6 +3403,9 @@ function startGame(level) {
     // the tile grid alone cannot say whether the wall between two open tiles
     // is still standing.
     stepOpenAt: (x, z, nx, nz) => grid.stepOpen(x, z, nx, nz),
+    // The leader's out-of-combat crouch, for the specs that seed a fight
+    // with one (TACTICS_PLAN M6 OOC).
+    get oocCrouch() { return oocCrouch; },
     // Is that door open? Doors sit on EDGES ('h:x,z' / 'v:x,z'), not tiles, so
     // `tileAt` can never answer this - and a door is the only piece of terrain
     // a fight can change, which is exactly what wants asserting.

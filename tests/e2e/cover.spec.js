@@ -129,11 +129,10 @@ const CROUCH_LAB = {
 test('take cover walks you in behind the desk, and moving breaks it', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, CROUCH_LAB);
-  // Out of a fight the verb is dimmed - and the moment one starts it must
-  // light WITHOUT any other press: the bar rebuild used to wait for the next
-  // button, which read as "take cover never becomes active" (designer,
-  // playtesting 2026-07-30).
-  await expect(page.locator('#hotbar-act-take-cover')).toHaveAttribute('data-affordable', 'false');
+  // Available OUT of a fight too (designer, 2026-07-30), and still lit the
+  // moment one starts with no other press - the bar rebuild used to wait for
+  // the next button, which read as "take cover never becomes active".
+  await expect(page.locator('#hotbar-act-take-cover')).toHaveAttribute('data-affordable', 'true');
   await enterCombat(page); // the adjacent Manager opens the fight
   await waitForPlayerTurn(page);
   await expect(page.locator('#hotbar-act-take-cover')).toHaveAttribute('data-affordable', 'true');
@@ -198,4 +197,71 @@ test('a tile against a partition is a legal crouch', async ({ page }) => {
   expect(crouch.edges, 'an edge-mode crouch, not a cell one').toBe(true);
   const pt = await page.evaluate(() => window.__game.playerTile);
   expect([pt.x, pt.z], 'crouched ON the partition tile itself').toEqual([4, 2]);
+});
+
+// Both verbs work with no fight on (designer, 2026-07-30) - and the whole
+// point of an early crouch is that the fight STARTING does not stand you up:
+// beginCombat hands the crouch to startCombat (preCrouch) and the leader
+// opens the fight already tucked in.
+const OOC_LAB = {
+  name: 'OOC Lab',
+  tiles: { '#': 'wall', '.': 'floor', D: 'desk', B: 'cabinet' },
+  actors: { '@': 'player', M: 'manager' },
+  // The partition stands in the open west corridor - the desk and the
+  // cabinet box wall off the map's east half, so anything the player must
+  // WALK to has to live on their own side.
+  walls: ['V 2 3 1'], // between (1,3) and (2,3)
+  map: [
+    '#########',
+    '#@.D....#',
+    '#..BBB..#',
+    '#..BMB..#',
+    '#..BBB..#',
+    '#########',
+  ],
+};
+
+test('a crouch taken before the fight rides into it', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, OOC_LAB);
+  await setPaper(page, 5);
+
+  // Crouch behind the desk with no fight on.
+  await page.click('#hotbar-act-take-cover');
+  await expect.poll(() => page.evaluate(() => window.__game.armed), { timeout: 10_000 })
+    .toBe('take-cover');
+  await clickWorld(page, 3, 1);
+  await expect.poll(() => page.evaluate(() => !!window.__game.oocCrouch), { timeout: 30_000 })
+    .toBe(true);
+  expect(await page.evaluate(() => window.__game.oocCrouch)).toMatchObject({ x: 3, z: 1, edges: false });
+
+  // Open the fight WITH a throw, from the crouch - attacking never breaks it.
+  await page.click('#hotbar-act-paper-ball');
+  await expect.poll(() => page.evaluate(() => window.__game.armed), { timeout: 10_000 })
+    .toBe('paper-ball');
+  await clickManager(page);
+  await expect.poll(() => page.evaluate(() => window.__game.inCombat), { timeout: 30_000 }).toBe(true);
+  await page.waitForTimeout(500);
+  // The fight starts with the leader already crouched behind the desk cell.
+  const crouch = await page.evaluate(() => window.__combat.crouched);
+  expect(crouch.length, 'the crouch survived the combat handoff').toBe(1);
+  expect([crouch[0].x, crouch[0].z]).toEqual([3, 1]);
+  expect(await page.evaluate(() => window.__game.oocCrouch), 'combat owns it now').toBe(null);
+});
+
+test('a partition topples with no fight on, and no fight starts', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, OOC_LAB);
+
+  await page.click('#hotbar-act-shove');
+  await expect.poll(() => page.evaluate(() => window.__game.armed), { timeout: 10_000 })
+    .toBe('shove');
+  // Click the far side of the partition: the player walks to the near side
+  // and puts a shoulder into it.
+  await clickWorld(page, 2, 3);
+  await expect.poll(() => page.evaluate(() => window.__game.tileAt(2, 3)), { timeout: 30_000 })
+    .toBe('partition-fallen');
+  expect(await page.evaluate(() => window.__game.stepOpenAt(1, 3, 2, 3))).toBe(true);
+  expect(await page.evaluate(() => window.__game.walkable(2, 3)), 'a board, not a wall').toBe(true);
+  expect(await page.evaluate(() => window.__game.inCombat), 'nobody noticed').toBe(false);
 });

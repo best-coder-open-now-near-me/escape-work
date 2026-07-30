@@ -56,7 +56,7 @@ const immunityLine = (id, name) => {
   return def?.log ? def.log.replace('{name}', name) : `${def?.name || 'An immunity'} holds.`;
 };
 
-export function startCombat({ app, party, engaged, world, fx, callbacks, opening = null, allies = [], rng = Math.random }) {
+export function startCombat({ app, party, engaged, world, fx, callbacks, opening = null, allies = [], preCrouch = null, rng = Math.random }) {
   // Per-member turn state: every party member fights with their own AP pool,
   // deflect stance and limited-use counters. `active` is whose action bar,
   // previews and clicks are live - with one member that is simply "you";
@@ -2569,9 +2569,24 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (isControl(a) && controlIsRanged(a)) { performControl(armed, en); return; }
     if (a.type === 'shove') {
       if (!canReach(active, en, REACH.SHOVE)) {
-        // Out of reach - but if only a cubicle wall separates you, the WALL
-        // is the shove: it comes down on them (designer, 2026-07-30).
+        // Out of reach - but the office between you might BE the shove: a
+        // cubicle wall to bring down on them (designer, 2026-07-30)...
         if (performPartitionTopple(en.x, en.z)) return;
+        // ...or furniture beside you whose fall lands exactly on them. One
+        // gesture: click the coworker behind the cabinet, wear the cabinet.
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+          const plan = topplePlan(active, active.actor.x + dx, active.actor.z + dz);
+          if (!plan || plan.lx !== en.x || plan.lz !== en.z) continue;
+          if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
+          active.ap = roundAp(active.ap - a.ap);
+          active.actor.lunge(plan.x, plan.z);
+          faceTarget(active, plan.x, plan.z);
+          log(topple(active, plan));
+          armed = null;
+          refresh();
+          if (!hostilesRemain()) victory();
+          return;
+        }
         refuse('Too far to shove.');
         return;
       }
@@ -3761,6 +3776,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // over (same guards as above: never while someone is in reach).
       if (tryAiCrouch(unit, target)) { acting.wait = 0.5; return; }
       advanceTurn(); // out of AP / nothing to do - next in initiative
+    }
+  }
+
+  // A crouch taken OUT of combat rides into the fight (TACTICS_PLAN M6 OOC):
+  // the leader tucked in before anyone noticed them, and the fight starting
+  // must not stand them up. Seeded in the exact shape the in-fight verb
+  // stores, so every later consult validates it lazily like any other crouch
+  // (the 'covered' chip is already on the sheet; crouchStateOf keeps it).
+  if (preCrouch) {
+    const lead = members.find((m) => m.sheet === party.members[party.active]?.sheet);
+    if (lead && standing(lead)) {
+      crouched.set(lead, preCrouch.edges
+        ? { edges: true, at: { x: preCrouch.at.x, z: preCrouch.at.z } }
+        : { x: preCrouch.x, z: preCrouch.z, at: { x: preCrouch.at.x, z: preCrouch.at.z }, shield: null });
     }
   }
 

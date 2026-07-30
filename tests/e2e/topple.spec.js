@@ -132,7 +132,12 @@ const PARTITION_ROW = {
   name: 'Partition Row',
   tiles: { '#': 'wall', '.': 'floor' },
   actors: { '@': 'player', M: 'manager' },
-  walls: ['V 2 1 1'], // the partition between player (1,1) and Manager (2,1)
+  // The Manager's cell is SEALED - the partition toward the player, wall
+  // edges on its other open faces - so it cannot wander off the landing
+  // tile and the spec never depends on AI pathing. (Waiting on the
+  // proximity trigger was the flake: the trigger needs a STEP, and a free
+  // Manager's first step can as easily be away.)
+  walls: ['V 2 1 1', 'V 3 1 1', 'H 2 2 1'],
   map: [
     '######',
     '#@M..#',
@@ -144,25 +149,26 @@ const PARTITION_ROW = {
 test('a shoved partition falls flat on the coworker behind it', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, PARTITION_ROW);
+  await page.evaluate(() => { window.__god.player.paper = 5; });
 
-  // Adjacent across the partition - sight passes over it, so the fight
-  // triggers on proximity (canTakePart) by itself. No engage click: anything
-  // that walks the player would move them off the shove tile.
+  // Open the fight WITH a throw over the partition - deterministic, and the
+  // player never leaves the tile the shove needs.
+  await page.click('#hotbar-act-paper-ball');
+  await expect.poll(() => page.evaluate(() => window.__game.armed), { timeout: 10_000 })
+    .toBe('paper-ball');
+  const pm = await page.evaluate(() => {
+    const en = window.__game.enemies.find((e) => e.alive);
+    return window.__game.project3(en.px ?? en.x, 0.9, en.pz ?? en.z);
+  });
+  await page.mouse.click(pm.x, pm.y);
   await expect.poll(() => page.evaluate(() => window.__game.inCombat), { timeout: 30_000 })
     .toBe(true);
   await waitForPlayerTurn(page);
   await refillAp(page);
-  // Pin the Grit save to a fail (forceHit true = the drop fully lands), and
-  // hold the Manager where the panel will land.
-  await page.evaluate(() => {
-    window.__combat.forceHit = true;
-    const m = window.__game.enemies.find((e) => e.alive);
-    window.__game.debugPlaceEnemy(m.name, 2, 1);
-    window.__combat.applyStatus('detained', 9, 0, m.name);
-  });
-  await page.waitForTimeout(300);
+  // Pin the Grit save to a fail (forceHit true = the drop fully lands).
+  await page.evaluate(() => { window.__combat.forceHit = true; });
   const before = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
-  expect([before.x, before.z]).toEqual([2, 1]);
+  expect([before.x, before.z], 'the sealed Manager is on the landing tile').toEqual([2, 1]);
 
   await clickAction(page, 'shove');
   // Click the Manager's body: out of shove reach, but only the partition

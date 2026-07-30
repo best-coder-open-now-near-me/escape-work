@@ -662,6 +662,20 @@ None. See decision #6.
      shots are blocked is the M3 edge test (`tactics.hasCover`) read live,
      upgraded from −20% to immunity while the crouch holds. The AI crouches
      in place against a partition that already blocks its target's line.
+   - **Out of combat too (2026-07-30, `[stated]` "taking cover and shoving
+     should be available out of combat as well"):** both verbs work with no
+     fight on. An OOC crouch (furniture and partitions only - people move;
+     the character shield is a combat commitment `[proposed]`) stores on the
+     leader and RIDES INTO the fight: beginCombat hands it to startCombat's
+     `preCrouch`, so the fight opens with the leader already tucked in -
+     the point of taking cover early. It breaks on any deliberate walk or
+     leader change. An OOC shove topples furniture and partitions as pure
+     terrain edits; with a coworker standing where it lands, the topple IS
+     the opener - the fight starts and combat resolves the fall with its
+     own save and pin (engageWithAction's shove gate accepts
+     partition-between and furniture-onto-them aims, and combat's enemy
+     click grew the matching one-gesture fallbacks: click the coworker
+     behind the cabinet, they wear the cabinet).
    - **Partition toppling + solid twins (2026-07-30, ratified):** the shove
      verb aimed across an adjacent partition edge — at the coworker behind
      it, or the bare tile — brings the PANEL down: `grid.removeEdgeBetween`
