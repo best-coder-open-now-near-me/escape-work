@@ -72,7 +72,11 @@ test('a shoved cabinet lands on the coworker behind it, and leaves cover', async
   // is about what the prop does to a body, not about AI pathing. `detained`
   // is the root the control verb applies; the debug setter is the same
   // affordance forceHit is.
+  // forceHit also pins the victim's GRIT SAVE (TACTICS_PLAN M6: true = the
+  // drop fully lands = the save fails), so the damage/status assertions
+  // below stay deterministic now that a body can dive clear.
   await page.evaluate(() => {
+    window.__combat.forceHit = true;
     const m = window.__game.enemies.find((e) => e.alive);
     window.__game.debugPlaceEnemy(m.name, 3, 1);
     window.__combat.applyStatus('detained', 9, 0, m.name);
@@ -105,6 +109,10 @@ test('a shoved cabinet lands on the coworker behind it, and leaves cover', async
   // Toppling reuses the EXISTING stun, so it inherits the anti-chain window
   // rather than becoming a second way to lock somebody out of a fight.
   expect(after.alive ? after.statuses.some((s) => s.id === 'stunned') : true).toBe(true);
+  // ...and a failed Grit save leaves them PINNED under it too (TACTICS_PLAN
+  // M6): rooted, their turn still theirs - detained's semantics, under
+  // furniture.
+  expect(after.alive ? after.statuses.some((s) => s.id === 'pinned') : true).toBe(true);
 
   // Cover, not a wall: the landing tile is still WALKABLE. A shove that could
   // spawn impassable terrain could seal a doorway and strand a fight the enemy

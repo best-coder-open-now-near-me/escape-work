@@ -190,6 +190,32 @@ export const STATUSES = {
     log: '{name} plants themselves in the way.',
     fx: { color: [0.7, 0.75, 0.9], burst: 'rise', aura: 'shield', rate: 0.4 },
   },
+  // The take-cover crouch (TACTICS_PLAN M6). Empty effects for the watching/
+  // guarding reason: the rule - WHICH cell shields, and the immunity it buys -
+  // lives in combat's `crouched` map, keyed to geometry the effect vocabulary
+  // cannot carry. The chip exists so both sides can read the commitment. The
+  // duration is a leak bound, not a clock: combat revalidates the crouch on
+  // every consult and re-applies the chip while it holds, so only an
+  // abandoned fight ever lets it lapse on its own.
+  covered: {
+    name: 'In Cover', icon: '🧎', harmful: false, clock: 'turn',
+    duration: 4, resistable: false,
+    effects: {},
+    log: '{name} tucks in behind cover.',
+    fx: { color: [0.45, 0.62, 0.95], burst: 'rise', aura: 'shield', rate: 0.3 },
+  },
+  // Furniture came down on them and the Grit save failed (TACTICS_PLAN M6).
+  // A ROOT like `detained`, not a stun: their turn is still theirs, they just
+  // cannot crawl out from under the bookcase yet. Not `resistable` - the
+  // Grit save WAS the resistance roll, and Composure blunting it afterwards
+  // would roll the same escape twice.
+  pinned: {
+    name: 'Pinned', icon: '🗃️', harmful: true, clock: 'turn',
+    duration: 2, resistable: false,
+    effects: { rooted: true },
+    log: '{name} is pinned under it.',
+    fx: { color: [0.8, 0.6, 0.3], burst: 'fall', aura: 'cling', rate: 0.3 },
+  },
   // --- what the control verb lands (POWERS_PLAN M2) -------------------------
   // A ROOT, not a stun. The distinction is the whole reason this status exists
   // rather than reusing `stunned`: a detained coworker still gets their turn

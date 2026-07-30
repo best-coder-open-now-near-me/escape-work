@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   toHitTerms, cheb, threatens, provokedBy, hasCover, isFlanked, isBackstab, positionMods,
-  dist, reachOpen, inReach,
+  dist, reachOpen, inReach, crouchShields,
 } from '../../src/tactics.js';
 import { HIT, REACH, hitChance } from '../../src/stats.js';
 
@@ -474,4 +474,27 @@ test('a longer reach does not buy a swing through a wall', () => {
   // Reach and line are independent gates: more reach never becomes x-ray.
   const wall = wallBetween(0, 0, 1, 0);
   assert.equal(inReach(0, 0, 1, 0, 5, wall), false);
+});
+
+// --- take cover (TACTICS_PLAN M6) ---------------------------------------------
+
+test('crouchShields: the shield must sit on a face pointing attackward', () => {
+  // Defender at (5,5), shield cell WEST of them at (4,5).
+  assert.equal(crouchShields(2, 5, 5, 5, 4, 5), true, 'shot from due west is blocked');
+  assert.equal(crouchShields(8, 5, 5, 5, 4, 5), false, 'from due east the shield is behind them');
+  assert.equal(crouchShields(5, 1, 5, 5, 4, 5), false, 'from due north the west shield does nothing');
+});
+
+test('crouchShields: a diagonal attacker is blocked by either pointing face', () => {
+  // Shield west of the defender; attacker to the northwest favours both axes.
+  assert.equal(crouchShields(2, 2, 5, 5, 4, 5), true, 'northwest shot clipped by the west shield');
+  assert.equal(crouchShields(2, 8, 5, 5, 4, 5), true, 'southwest too - either face is enough');
+  assert.equal(crouchShields(8, 2, 5, 5, 4, 5), false, 'northeast never touches the west face');
+});
+
+test('crouchShields: only the committed cell shields - not other adjacency', () => {
+  // A shield DIAGONAL to the defender sits on no face and blocks nothing.
+  assert.equal(crouchShields(2, 2, 5, 5, 4, 4), false);
+  // Standing on top of the defender: no angle at all.
+  assert.equal(crouchShields(5, 5, 5, 5, 4, 5), false);
 });

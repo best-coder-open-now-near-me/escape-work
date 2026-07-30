@@ -214,6 +214,18 @@ test('a desk on the near face gives cover, same as a partition', async ({ page }
   await bootStash(page, DESK_COVER_ARENA, 'office-drone');
   await enterCombat(page); // the adjacent Manager starts the fight; we barely move
 
+  // Shed the joiners' surprise BEFORE reading: `surprised` hands the attacker
+  // +0.15 against that defender, and each far foe sheds it on its own
+  // (skipped) turn - which the initiative dice can place on OPPOSITE sides of
+  // ours, leaving exactly one read 0.15 hot and the measured gap at 0.05.
+  // Two full rounds settle both. (Both test foes are sealed in - walls and
+  // the desk - so the rounds cannot move them.)
+  for (let i = 0; i < 2; i++) {
+    await waitForPlayerTurn(page);
+    await page.click('#combat-end-turn');
+    await page.waitForTimeout(1500);
+  }
+
   // Same honest read the partition test uses: arm, hover, read the number the
   // roll will use plus the tag the player will.
   const readAt = async (x, z) => {

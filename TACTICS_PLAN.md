@@ -9,28 +9,20 @@ This document is the implementation plan for four positional systems —
 opportunity attacks, cover, flanking, backstab — the design decisions, the
 module-by-module changes, and the milestone order. No code yet.
 
-## Questions for the designer (M6 Take Cover, asked 2026-07-29)
+## Questions for the designer (M6 Take Cover)
 
-Three questions still open; M6 builds on the recommended defaults, tagged
-`[proposed]` in the milestone entry, until answered. (Q1 height-threshold LOS
-and Q3 human-shield shape were answered same day — see M6/M6a.)
+All five answered. Q1 (height-threshold LOS) and Q3 (any character as a
+shield) on 2026-07-29; Q2, Q4 and Q5 ratified as the recommended defaults on
+2026-07-30 ("go with your defaults"): attacking does NOT break the crouch
+(moving does), enemies take cover in v1, and a human shield takes the
+redirected hit rather than negating it. The answers live in the M6 milestone
+entry with their tags flipped.
 
-- **Q2 — Does attacking break the crouch?** Gears of War (looked up: the
-  cover wiki confirms blind fire from cover, inaccurate, and pop-out shots,
-  accurate) lets you fight FROM cover. (a) Attacks don't break it —
-  entrenchment is strong, countered by flanking, melee (immunity is
-  ranged-only), and shove/topple; closest to the inspiration. (b) Any action
-  breaks it — turtle-only, much weaker. (c) Attacking downgrades immunity to
-  the passive −20% until your next turn — "you popped out"; middle ground,
-  most rules to explain. **Recommend (a).**
-- **Q4 — Do enemies take cover in v1?** Decision #11 below is "everything is
-  symmetric," and immunity only the player has will read as trivializing.
-  **Recommend yes** — a simple heuristic (a ranged enemy under fire crouches
-  at reachable cover); flank-seeking AI to BREAK your cover can come later.
-- **Q5 — A human shield: does the blocked shot vanish, or hit the shield?**
-  Objects negate shots. Negating on a body makes teammates free walls;
-  redirecting is what "tank" means. **Recommend redirect** — the shield takes
-  the hit.
+Small defaults picked during implementation, tagged `[proposed]` in M6 and
+reversible cheaply if play disagrees: area attacks (cones, zones) and ranged
+CONTROLS ignore the crouch; a failed Grit save deals the damage AND keeps the
+existing stun alongside the new pin; and shooting a target whose human shield
+is one of YOUR OWN refuses rather than rerouting damage into your teammate.
 
 It follows the shape of `PROGRESSION_PLAN.md` / `HIT_PLAN.md`, and honors the
 one rule from `ARCHITECTURE.md`: **content is data, code is systems.** The
@@ -574,10 +566,10 @@ None. See decision #6.
    `POSITION_CAP` and `hitChance`'s `CLAMP_HI` keep the stack honest. A unit
    that has never acted has no facing and cannot be backstabbed — the honest
    resolution of the open question, and one that can't be gamed.
-6. **Take Cover (active crouch, M6)** — the Gears-of-War turn (designer,
-   2026-07-29). Not yet built; its ground rule (M6a) and its UI read (M7),
-   below, are. The decisions, each tagged with what the designer actually
-   said:
+6. **Take Cover (active crouch, M6).** ✅ Landed — the Gears-of-War turn
+   (designer, 2026-07-29; open questions ratified as the recommended defaults
+   2026-07-30, "go with your defaults"). The decisions, each tagged with what
+   the designer actually said:
    - `[stated]` A first-class action: aim it at a solid object — or at a
      character, "use me as a shield" tanking included — and crouch behind it.
      Line of sight gates the aim (`hasLos(you, object)`), "as line of sight
@@ -601,14 +593,54 @@ None. See decision #6.
      "strength or whatever equivalent check", and Grit is the game's tank
      attribute. Note the game already topples props onto shove targets
      (POWERS_PLAN M6); what is NEW here is the save and the pin.
-   - `[proposed]` Attacking does not break the crouch; moving does (Q2 at
-     top). `[proposed]` Enemies use it in v1 (Q4). `[proposed]` A human
-     shield takes the blocked hit rather than negating it (Q5).
+   - `[ratified]` Attacking does not break the crouch; moving does — the
+     Gears rule (2026-07-30, "go with your defaults"). `[ratified]` Enemies
+     use it in v1 (same). `[ratified]` A human shield takes the blocked hit
+     rather than negating it (same).
 
    Why this and not more passive cover: it differentiates melee (walks around
    low cover freely, swings unimpeded by it) from ranged (must break
    entrenchment), and it gives toppling a second job — furniture becomes
    MOVEABLE cover both sides can work with.
+
+   **As landed (2026-07-30):**
+   - The verb: `take-cover` (universal, beside `shove`), `ap: 1` — the "+1";
+     the walk to the shield bills as ordinary movement, and the crouch
+     resolves on arrival (`pendingCrouch`, the pendingMelee pattern), so a
+     walk cut short downs the crouch with it. The crouch SPOT is the nearest
+     visible open 4-neighbour of the shield — orthogonal because the shield
+     must sit on a FACE (`tactics.crouchShields`; a diagonal cell shields
+     nothing).
+   - The rule: combat's `crouched` map + the `covered` status chip
+     (watching/guarding pattern: the chip is visibility, the map is the
+     rule). Validity is LAZY — every consult re-checks that the croucher
+     hasn't moved and the shield still stands (a solid/`cover` def, or a
+     live body on the cell), so topples, shoves, swaps and deaths all break
+     it without bespoke hooks. `shotOutcome()` is the one seam: a
+     single-target ranged attack is untouched, REFUSED (object shield), or
+     REDIRECTED into the human shield; every attack path, the target rings,
+     the hover readout and `routeIntoRange` (which now walks a shooter to a
+     FLANKING angle, not merely into range) read it.
+   - The AI: with nobody in reach and nowhere useful to walk, a unit crouches
+     behind an adjacent low solid or fallen prop that actually stands between
+     it and its target — no shielding neighbour, no crouch.
+   - The shove save: furniture coming down on a body now rolls a Grit save
+     (`stats.gritSaveChance`; `forceHit` pins it for the specs — true means
+     the drop fully lands). Pass: they dive clear, nothing lands. Fail: the
+     damage, the existing stun (anti-chain window intact), and `pinned` —
+     detained's root semantics, under furniture.
+   - `[proposed]` defaults picked in implementation (see Questions section):
+     cones/zones and ranged controls ignore the crouch (area is the flush);
+     member-shields refuse your own shots rather than rerouting them; the
+     failed save keeps the stun alongside the pin.
+   - Honest scope notes: no shipped enemy has a ranged attack, so the
+     PLAYER-side crouch is future-proofing today — the immediate gameplay is
+     enemies turtling against your throws, and human-shield redirects fire
+     player-side only until enemies crouch behind bodies. `hold-the-line`
+     still exists unabsorbed. The "safe cover vs topplable" colour split is
+     partial: the hovered shield rings yellow, but yellow does not yet
+     distinguish topplable from fixed. Combat-only verb: out of a fight the
+     bar says so.
 
 7. **Shots sail over low furniture (M6a).** ✅ Landed.
    `[ratified]` "height threshold as you suggest" (designer, 2026-07-29).

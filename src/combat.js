@@ -12,9 +12,9 @@ import { ACTIONS, arrivalLine } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
 import { truncateByBudget, routeToFiringPosition } from './pathfinding.js';
 import { pronounsOf, capitalize, verb } from './creation.js';
-import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, MOVE, REACH } from './stats.js';
+import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, gritSaveChance, MOVE, REACH } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
-import { toHitTerms, provokedBy, positionMods, inReach, dist, TACTICS } from './tactics.js';
+import { toHitTerms, provokedBy, positionMods, inReach, dist, crouchShields, TACTICS } from './tactics.js';
 import {
   buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, isPurge, coneFrom, conePolyline, aimRangeOf, rangeTiles,
 } from './powers.js';
@@ -332,7 +332,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // different orders is a tax paid mid-fight, when there is least attention to
   // spare for re-reading a row of buttons.
   const actionIdsOf = (m) => orderedActionIds(
-    m.sheet, [...m.sheet.actions, equippedAction(m.sheet), 'shove', ...throwablesFor(m)],
+    m.sheet, [...m.sheet.actions, equippedAction(m.sheet), 'shove', 'take-cover', ...throwablesFor(m)],
   );
   // The acting member's cost for a throw - the shared rule (stats.js), bound to
   // whoever currently has the floor.
@@ -573,6 +573,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   let armed = null;
   let pendingConfirm = null; // an instant self-action awaiting its second click
   let pendingMelee = null; // { en, action } to strike when the walk-up completes
+  let pendingCrouch = null; // { tx, tz, spot } to tuck in when the walk-up completes
   let acting = null; // the AI unit's working turn state: { unit, ap, wait }
   // EVERY instant self-cast takes a confirm click - the stances (Deflect,
   // Return to Sender) and every heal (Coffee, Espresso, Energy Drink, Snack
@@ -599,6 +600,61 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     return false;
   };
+
+  // --- the take-cover crouch (TACTICS_PLAN M6) --------------------------------
+  // Who is crouched, and behind WHAT: unit -> { x, z (the shield cell),
+  //   at (the tile they crouched on), shield (a unit when the cover is a body,
+  //   null when it is furniture) }.
+  // The rule the map buys: a single-target RANGED attack from a direction the
+  // shield cell blocks (tactics.crouchShields) cannot touch the croucher -
+  // refused outright behind an object, REDIRECTED into the shield behind a
+  // body (a tank that deleted shots would make teammates free walls). Melee
+  // never asks - a crouch is no answer to someone at arm's length - and area
+  // attacks (cones, zones) deliberately ignore it: flushing entrenched
+  // targets is their job.
+  const crouched = new Map();
+  const nameOf = (u) => (u.sheet ? u.sheet.name : u.def.name);
+  const carrierOf = (u) => u.sheet || u;
+  function breakCrouch(unit, quiet = false) {
+    if (!crouched.delete(unit)) return;
+    removeStatus(carrierOf(unit), 'covered');
+    if (!quiet) log(`${nameOf(unit)} is out of cover.`);
+  }
+  // The validated crouch, or null - the ONE owner of "is that cover still
+  // real": the croucher still on the tile they tucked in at, the shield still
+  // standing (a solid or `cover` def for furniture, a live body on the cell
+  // for a character). Lazy on purpose: consulted at every read instead of
+  // hooked into every way a fight can move things, so it stays correct when a
+  // new displacement verb arrives. While the crouch holds it re-applies the
+  // status chip, so the chip's nominal duration can never outlive the rule
+  // or lapse under it.
+  function crouchStateOf(unit) {
+    const s = crouched.get(unit);
+    if (!s) return null;
+    const b = bodyOf(unit);
+    let ok = !!b && b.x === s.at.x && b.z === s.at.z && standing(unit);
+    if (ok && s.shield) {
+      const sb = standing(s.shield) ? bodyOf(s.shield) : null;
+      ok = !!sb && sb.x === s.x && sb.z === s.z;
+    } else if (ok) {
+      const d = world.tileDefAt(s.x, s.z);
+      ok = !!d && (d.solid || d.cover); // toppled or destroyed = no shield left
+    }
+    if (!ok) { breakCrouch(unit); return null; }
+    if (!hasStatus(carrierOf(unit), 'covered')) applyStatus(carrierOf(unit), 'covered');
+    return s;
+  }
+  // What a single-target ranged shot at `defender` actually does: passes
+  // untouched, is BLOCKED by a crouch behind furniture, or lands on the
+  // human shield instead.
+  function shotOutcome(attacker, defender) {
+    const s = crouchStateOf(defender);
+    if (!s) return { target: defender };
+    const A = bodyOf(attacker);
+    const D = bodyOf(defender);
+    if (!crouchShields(A.x, A.z, D.x, D.z, s.x, s.z)) return { target: defender };
+    return s.shield ? { target: s.shield, redirected: true } : { target: null, blocked: s };
+  }
   // Back out of whatever is armed or awaiting confirmation. RIGHT-CLICK does
   // this from anywhere; a left click never cancels (it reports an invalid
   // target instead), so aiming can't be lost by a near-miss.
@@ -687,6 +743,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         armed = null;
         pendingConfirm = null;
         pendingMelee = null;
+        pendingCrouch = null;
         hidePreview();
       },
     },
@@ -749,6 +806,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // here?" is a question you ask about a target, and burning it into every
   // frame of your turn turned the answer into wallpaper nobody read.
   const REACH_RING = new pc.Color(0.55, 0.62, 0.78);
+  // Yellow, the reserved cover colour (M7's mapping): the ring on a hovered
+  // take-cover shield. Only ever drawn on the HOVERED object - the designer's
+  // "there would just be rings everywhere if not".
+  const PREVIEW_COVER = new pc.Color(0.95, 0.8, 0.3);
   // The ground wash while a ranged verb is armed (TACTICS_PLAN M7): every tile
   // the aim can legally land on, line of sight included, painted translucent
   // blue. drawTargets drives it; `paintEpoch` names the world it was computed
@@ -816,14 +877,36 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       costTag.style.display = 'none';
       return;
     }
+    // A crouched target reshapes the readout before any odds exist
+    // (TACTICS_PLAN M6): no angle means NO number - a percentage over an
+    // unhittable target is a lie - and a human shield shows the odds against
+    // the body that would actually take it.
+    let target = en;
+    let shieldNote = '';
+    if (rangeOf(previewAction())) {
+      const so = shotOutcome(active, en);
+      if (so.blocked || (so.redirected && so.target.sheet)) {
+        costTag.textContent = so.blocked
+          ? `No shot - in cover behind the ${(world.tileDefAt(so.blocked.x, so.blocked.z)?.label || 'cover').toLowerCase()}`
+          : `No shot - you would hit ${nameOf(so.target)}`;
+        costTag.style.left = `${sx + 14}px`;
+        costTag.style.top = `${sy + 14}px`;
+        costTag.style.display = 'block';
+        return;
+      }
+      if (so.redirected) {
+        target = so.target;
+        shieldNote = ` vs ${nameOf(so.target)} (human shield)`;
+      }
+    }
     // The same terms the swing will roll - not a second copy of the math. The
     // reason string matters: a positional modifier the player can't see reads
     // as randomness (TACTICS_PLAN, ui.js note).
-    const t = attackMods(active, en);
+    const t = attackMods(active, target);
     hoverHitChance = hitChance(t.acc, t.dodge, t.mods);
     const why = t.covered ? ' - in cover'
       : (t.behind ? ' - from behind' : (t.flanked ? ' - flanked' : ''));
-    costTag.textContent = `${Math.round(hoverHitChance * 100)}% to hit${why}`;
+    costTag.textContent = `${Math.round(hoverHitChance * 100)}% to hit${why}${shieldNote}`;
     costTag.style.left = `${sx + 14}px`;
     costTag.style.top = `${sy + 14}px`;
     costTag.style.display = 'block';
@@ -940,7 +1023,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // (or the drop zone) follows it.
     // A zone tracks the cursor the way a cone and a summon placement do - the
     // footprint follows the aim, because where it lands IS the decision.
-    if (armed && (ACTIONS[armed].cone || ACTIONS[armed].type === 'summon' || isZone(ACTIONS[armed]))) aimPoint = point;
+    if (armed && (ACTIONS[armed].cone || ACTIONS[armed].type === 'summon'
+      || ACTIONS[armed].type === 'cover' || isZone(ACTIONS[armed]))) aimPoint = point;
     // Who is the cursor on? The body pick wins - it sees what the pixel shows.
     // The ground point is only a fallback for rays that miss the mesh, and a
     // pick can land on a body whose ground ray misses the world entirely (a
@@ -1129,6 +1213,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       for (const [sx, sz] of spots) drawRing(sx, sz, 0.42, PREVIEW_OK);
       return;
     }
+    // Take Cover rings ONLY the hovered shield, in the cover yellow - valid
+    // shields are most of the furniture in the room, and ringing them all
+    // would be noise (designer). Red on a hover that shields nothing.
+    if (a.type === 'cover') {
+      if (!armed || !aimPoint) return;
+      const tx = Math.round(aimPoint.x);
+      const tz = Math.round(aimPoint.z);
+      const d = world.tileDefAt(tx, tz);
+      const body = unitStandingAt(tx, tz);
+      const ok = body ? body !== active : !!(d && (d.solid || d.cover));
+      drawRing(tx, tz, 0.42, ok ? PREVIEW_COVER : PREVIEW_FAR);
+      return;
+    }
     // A buff rings the FRIENDLY side instead: green on every ally it could
     // land on right now, red on the ones out of range, out of line, or who
     // would get nothing from it. Same rule the click runs (buffProblem), so a
@@ -1225,8 +1322,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       } else if (range) {
         // Ranged: distance, a clear line, AP - and ammo only if this particular
         // shot bills for it (the throws do; a staple gun fires for free).
+        // A crouched target with no angle rings red (TACTICS_PLAN M6) - and so
+        // does one whose human shield is YOURS, because that click refuses.
+        const so = shotOutcome(active, en);
         ok = cheb(active.actor.x, active.actor.z, en.x, en.z) <= range
           && world.hasLos(active.actor.x, active.actor.z, en.x, en.z)
+          && !so.blocked && !(so.redirected && so.target.sheet)
           && (!a.ammoCost || active.sheet.paper >= ammoCostOf(id)) && active.ap >= a.ap;
       } else {
         ok = active.ap >= a.ap; // melee: clicking a distant target walks you in
@@ -1348,6 +1449,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     armed = null;
     pendingConfirm = null;
     pendingMelee = null;
+    pendingCrouch = null;
     hidePreview();
     callbacks.refreshBar?.();
   }
@@ -1380,6 +1482,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // aim can see (a door toggled, smoke landed, a prop toppled) - stale the
     // aim wash's key so its next frame recomputes.
     paintEpoch += 1;
+    // ...and may have invalidated somebody's crouch (a shove glide, a topple
+    // taking the shield, a swap). Revalidating here keeps the status chips
+    // honest without hooking every displacement path (TACTICS_PLAN M6).
+    for (const u of [...crouched.keys()]) crouchStateOf(u);
     // Name whose turn it is (initiative interleaves your members with the
     // enemies). "YOUR TURN — Name" on a member you control; "Name's turn" on
     // an AI unit.
@@ -1725,7 +1831,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const victimMember = members.find((m) => m.sheet.hp > 0 && m.actor
       && m.actor.x === lx && m.actor.z === lz);
     const dmg = rand(t.damage[0], t.damage[1]);
+    // The Grit save (TACTICS_PLAN M6, designer: "a strength or whatever
+    // equivalent check ... crushing damage and maybe pinned too"). Pass and
+    // you throw yourself clear - no crush, no daze, no pin. Fail and you wear
+    // all of it: the damage, the existing stun (with its anti-chain window
+    // intact), and PINNED - rooted under the thing until you work free.
+    // `forceHit` pins the save too (true = the drop fully lands = the save
+    // fails), so the specs stay deterministic.
+    const saved = (grit) => (forceHit !== null ? !forceHit : rollHit(gritSaveChance(grit), rng));
     if (victimUnit) {
+      if (saved(victimUnit.def.grit ?? 2)) {
+        victimUnit.flinch?.();
+        msg += ` ${victimUnit.def.name} dives clear.`;
+        return msg;
+      }
       const died = victimUnit.takeDamage(dmg);
       hitFx(victimUnit, 'slam', by);
       if (died) deathFx(victimUnit);
@@ -1736,16 +1855,23 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         // immunity window rather than becoming a second way to lock somebody
         // out of a fight. Slam a guard into drywall and then drop a cabinet on
         // them and they get the same "they have had their daze" refusal, from
-        // the same code.
+        // the same code. The pin is the failed save's own price and carries
+        // no window - see `pinned` in data/statuses.js.
         const blocked = blockedBy(victimUnit, 'stunned');
         if (applyStatus(victimUnit, 'stunned')) {
           statusFxAt(victimUnit, 'stunned');
           msg += ' They go down under it.';
         } else if (blocked) msg += ` ${immunityLine(blocked, victimUnit.def.name)}`;
+        if (applyStatus(victimUnit, 'pinned')) statusFxAt(victimUnit, 'pinned');
       } else {
         callbacks.onEnemyKilled(victimUnit);
       }
     } else if (victimMember) {
+      if (saved(effectiveAttr(victimMember.sheet).grit)) {
+        victimMember.actor.flinch();
+        msg += ` ${victimMember.sheet.name} dives clear.`;
+        return msg;
+      }
       const dead = applyDamage(victimMember.sheet, dmg);
       hitFx(victimMember, 'slam', by);
       victimMember.actor.flinch();
@@ -1754,11 +1880,118 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (!dead) {
         applyStatus(victimMember.sheet, 'stunned', {}, statusResist(victimMember.sheet));
         statusFxAt(victimMember, 'stunned');
+        if (applyStatus(victimMember.sheet, 'pinned')) statusFxAt(victimMember, 'pinned');
       } else {
         notifyMemberDown();
       }
     }
     return msg;
+  }
+
+  // --- take cover (TACTICS_PLAN M6) -----------------------------------------
+
+  // Whoever is standing on (x, z) - member, summon or coworker. The take-cover
+  // verb treats any body as a shield ("any character as cover", designer).
+  function unitStandingAt(x, z) {
+    const m = members.find((u) => standing(u) && u.actor && u.actor.x === x && u.actor.z === z);
+    if (m) return m;
+    return engaged.find((e) => e.alive && e.x === x && e.z === z) || null;
+  }
+
+  // Tuck `unit` in behind the cell (tx, tz). Shared by the player's verb and
+  // the AI's turtle beat, so both sides crouch by identical rules. Hopping
+  // cover-to-cover replaces the old crouch - the verb has no cooldown and no
+  // need to stand up first (designer).
+  function crouchAt(unit, tx, tz, shield = null) {
+    breakCrouch(unit, true);
+    const b = bodyOf(unit);
+    crouched.set(unit, { x: tx, z: tz, at: { x: b.x, z: b.z }, shield });
+    applyStatus(carrierOf(unit), 'covered');
+    statusFxAt(unit, 'covered');
+    (unit.actor || unit).faceToward?.(tx, tz);
+    const what = shield ? nameOf(shield)
+      : `the ${(world.tileDefAt(tx, tz)?.label || 'cover').toLowerCase()}`;
+    log(`${nameOf(unit)} tucks in behind ${what}.`);
+  }
+
+  // The player's verb: walk to the shield and crouch. Priced as "the walk,
+  // plus 1 AP" (designer: distance cost + 1) - the walk is billed by the same
+  // movement engine as every other step, the +1 is the action's own `ap`, and
+  // the crouch resolves ON ARRIVAL (the pendingMelee pattern), so a walk cut
+  // short by an opportunity attack downs the crouch with it.
+  function performTakeCover(tx, tz) {
+    const a = ACTIONS['take-cover'];
+    const shield = unitStandingAt(tx, tz);
+    const def = world.tileDefAt(tx, tz);
+    if (shield === active) { log('You cannot hide behind yourself.'); return; }
+    if (!shield && !(def && (def.solid || def.cover))) {
+      log('Nothing there to hide behind.');
+      return;
+    }
+    // The crouch SPOT: an open 4-neighbour of the shield - orthogonal because
+    // the shield must sit on a FACE of the crouch tile (tactics.crouchShields;
+    // a cell diagonal to you shields nothing) - that the aimer can SEE
+    // ("as line of sight driven as possible": the sightline gates the aim).
+    // Among the visible ones, nearest by route.
+    const me = { x: active.actor.x, z: active.actor.z };
+    let best = null;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const sx = tx + dx;
+      const sz = tz + dz;
+      const here = sx === me.x && sz === me.z;
+      const occupant = unitStandingAt(sx, sz);
+      if (!here && (!world.isWalkable(sx, sz) || occupant)) continue;
+      if (!world.hasLos(me.x, me.z, sx, sz)) continue;
+      if (here) { best = { sx, sz, path: null, len: 0 }; break; }
+      const p = world.findPath(me.x, me.z, sx, sz, active.actor);
+      if (!p || p.length < 2) continue;
+      if (!best || p.length < best.len) best = { sx, sz, path: p, len: p.length };
+    }
+    if (!best) { log('No clear way in behind it.'); return; }
+    if (active.ap < a.ap) { log('Not enough AP.'); return; }
+    armed = null;
+    if (!best.path) {
+      active.ap = roundAp(active.ap - a.ap);
+      crouchAt(active, tx, tz, shield);
+      refresh();
+      return;
+    }
+    // Reserve the crouch's own AP out of the walk budget, exactly as a
+    // walk-up shot reserves its trigger pull.
+    const walk = walkActive(best.path, moveBudget(active) - a.ap);
+    if (!walk) { log('Not enough AP to reach it.'); return; }
+    if (walk.done && Math.round(walk.end[0]) === best.sx && Math.round(walk.end[1]) === best.sz) {
+      pendingCrouch = { tx, tz, spot: [best.sx, best.sz] };
+    } else {
+      log('You close the distance toward cover.');
+    }
+  }
+
+  // The AI's turtle beat: with nobody in reach and nowhere useful to walk, a
+  // unit tucks in behind an adjacent cell that actually stands between it and
+  // its target - crouching on the WRONG side of the desk is worse than
+  // standing there looking available, so no shielding neighbour means no
+  // crouch. Symmetric by decision #11; ratified for v1 (designer, 2026-07-30).
+  function tryAiCrouch(unit, target) {
+    const coverAp = ACTIONS['take-cover'].ap;
+    if (crouched.has(unit) || acting.ap < coverAp || !target) return false;
+    if (canReach(unit, target)) return false; // melee ignores cover - swing instead
+    const b = bodyOf(unit);
+    const t = bodyOf(target);
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const sx = b.x + dx;
+      const sz = b.z + dz;
+      const d = world.tileDefAt(sx, sz);
+      // Low solids and fallen furniture only: behind a TALL solid nothing can
+      // shoot you anyway, so the beat would read as the AI hiding from air.
+      if (!d || !(d.cover || (d.solid && !blocksSight(d)))) continue;
+      if (!crouchShields(t.x, t.z, b.x, b.z, sx, sz)) continue;
+      acting.ap = roundAp(acting.ap - coverAp);
+      crouchAt(unit, sx, sz);
+      refresh();
+      return true;
+    }
+    return false;
   }
 
   // --- the mobility verb (POWERS_PLAN M4) ----------------------------------
@@ -1822,6 +2055,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // pushTo is the existing "move a body without it counting as a walk" call
     // (the shove's glide). Using it here means the swap cannot provoke and
     // cannot trigger a per-tile hazard hook mid-flight.
+    // Both bodies changed tiles, so neither crouch survives - the swap is
+    // exactly the "pull the wounded out of cover" verb (TACTICS_PLAN M6);
+    // refresh()'s revalidation would catch it, but breaking here logs it in
+    // the same beat as the trade instead of a surprise line later.
+    breakCrouch(active);
+    breakCrouch(m);
     active.actor.pushTo(theirs.x, theirs.z);
     m.actor.pushTo(mine.x, mine.z);
     log(`${a.log} You and ${m.sheet.name} trade places.`);
@@ -2205,6 +2444,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     };
     lastClickOutcome = 'acted'; // overwritten by refuse(); the gate stamped its own
     const a = ACTIONS[armed];
+    // Take Cover clicked on a coworker: they are the shield ("any character
+    // as cover" - crouching behind your enemy is legal, if bold).
+    if (a.type === 'cover') { performTakeCover(en.x, en.z); return; }
     if (a.cone) { fireCone(en.x, en.z); return; }
     // Placing a summon on top of a coworker: the tile is taken, so they report
     // to the free ground ringing outward from it. Aiming at the enemy you want
@@ -2240,6 +2482,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const thrown = !!a.ammoCost; // a wad and a staple miss differently
       const far = cheb(active.actor.x, active.actor.z, en.x, en.z) > range;
       const blocked = !world.hasLos(active.actor.x, active.actor.z, en.x, en.z);
+      // What the shot would ACTUALLY do from here (TACTICS_PLAN M6): a crouch
+      // behind furniture refuses it outright - free, like every other
+      // refusal - and a human shield takes it instead. Shooting THROUGH one
+      // of your own is a decision this game does not take for you, so a
+      // member-shield also refuses rather than quietly rerouting the damage.
+      const out = shotOutcome(active, en);
+      if (out.blocked) {
+        refuse(`No shot - ${en.def.name} is tucked in behind the ${(world.tileDefAt(out.blocked.x, out.blocked.z)?.label || 'cover').toLowerCase()}. Find an angle.`);
+        return;
+      }
+      if (out.redirected && out.target.sheet) {
+        refuse(`No shot - you would hit ${nameOf(out.target)}.`);
+        return;
+      }
       // A THROW refuses where it stands, exactly as it always has: you armed it
       // deliberately, it is billed in paper, and spending your last sheet at the
       // end of a walk you did not ask for is worse than being told no.
@@ -2249,13 +2505,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         if (active.sheet.paper < ammoCostOf(armed)) { refuse('Out of paper.'); return; }
         if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
         active.actor.faceToward(en.x, en.z);
-        strike(armed, en);
+        if (out.redirected) log(`${nameOf(out.target)} takes it instead. That is the job.`);
+        strike(armed, out.target);
         return;
       }
       if (!far && !blocked) {
         if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
         active.actor.faceToward(en.x, en.z);
-        strike(armed, en);
+        if (out.redirected) log(`${nameOf(out.target)} takes it instead. That is the job.`);
+        strike(armed, out.target);
         return;
       }
       // A ranged WEAPON closes until it can fire, the same way the melee swing
@@ -2363,16 +2621,26 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // The cheapest walkable route to a tile this weapon could FIRE from, or null
   // if none is reachable. The rule itself is pure and shared with the
   // out-of-combat twin (pathfinding.js) - only the world bindings differ.
-  const routeIntoRange = (en, range) => routeToFiringPosition({
-    tx: en.x,
-    tz: en.z,
-    range,
-    fromX: active.actor.x,
-    fromZ: active.actor.z,
-    isWalkable: (x, z) => world.isWalkable(x, z),
-    hasLos: (x, z, tx, tz) => world.hasLos(x, z, tx, tz),
-    findPath: (x, z) => world.findPath(active.actor.x, active.actor.z, x, z, active.actor),
-  });
+  //
+  // A target crouched behind furniture (TACTICS_PLAN M6) shrinks the set of
+  // legal firing tiles to the angles its shield does not block - so the
+  // walk-into-range a ranged weapon already does becomes a walk-into-FLANK
+  // for free. A human shield does not shrink it: the shot resolves on the
+  // shield from anywhere (performOn decides whether that is a shot you take).
+  const routeIntoRange = (en, range) => {
+    const s = crouchStateOf(en);
+    const angleClear = (x, z) => !s || !!s.shield || !crouchShields(x, z, en.x, en.z, s.x, s.z);
+    return routeToFiringPosition({
+      tx: en.x,
+      tz: en.z,
+      range,
+      fromX: active.actor.x,
+      fromZ: active.actor.z,
+      isWalkable: (x, z) => world.isWalkable(x, z),
+      hasLos: (x, z, tx, tz) => world.hasLos(x, z, tx, tz) && angleClear(x, z),
+      findPath: (x, z) => world.findPath(active.actor.x, active.actor.z, x, z, active.actor),
+    });
+  };
 
   // Smooth a raw tile route and walk the ACTIVE member along it, charging by
   // DISTANCE (stepCost per tile-length) and stopping mid-segment - at any
@@ -2380,6 +2648,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // for a precise clicked point. Spends their AP. Returns { done, end } or
   // null if nothing was walkable.
   function walkActive(rawPath, budget, endPoint = null) {
+    // Moving is the one thing a crouch does not survive (TACTICS_PLAN M6,
+    // designer default): the commitment ends the moment the walk begins, not
+    // when it lands somewhere else.
+    breakCrouch(active);
     if (endPoint) rawPath = [...rawPath.slice(0, -1), endPoint];
     const s = world.smooth(rawPath, active.actor);
     const { points, cost, done } = truncateByBudget(s, Math.max(0, budget), stepCost);
@@ -2439,6 +2711,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         refresh();
         return;
       }
+      // Take Cover aimed at the ground resolves on whatever the tile holds -
+      // furniture or a body - and performTakeCover says why when it is
+      // neither (TACTICS_PLAN M6).
+      if (a.type === 'cover') { performTakeCover(tile.x, tile.z); return; }
       // Shove a PROP over (POWERS_PLAN M6). The same verb, aimed at furniture
       // instead of a person: walk up, put your shoulder into the bookcase, and
       // it lands on whoever is behind it. It costs the shove's own AP and
@@ -2477,6 +2753,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     if (!world.isWalkable(tile.x, tile.z)) return;
     pendingMelee = null;
+    pendingCrouch = null;
     if (point && tile.x === active.actor.x && tile.z === active.actor.z && active.actor.entity) {
       // shuffling within the current tile is a move too
       const pos = active.actor.entity.getPosition();
@@ -2515,6 +2792,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // thing a player does with an unlabelled armed action is click an enemy.
     if (isFriendly(a)) out.push(`Aim at a teammate or yourself - range ${buffRangeOf(a)}, never misses`);
     if (isControl(a)) out.push('No damage - it takes their turn or their ground, not their HP');
+    if (a.type === 'cover') {
+      out.push('Aim at furniture or a teammate; you walk over and tuck in (the walk bills as movement)');
+      out.push('Ranged attacks from the shielded side cannot touch you - melee and flanking still can');
+      out.push('Moving breaks it; attacking does not');
+    }
     if (isStance(a)) {
       out.push(`Watches ${watchRadiusOf(a)} tiles until your next turn`);
       out.push('Spends your reaction when it fires - one per round, shared with opportunity attacks');
@@ -2557,13 +2839,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // something else and spend the AP it was priced against.
     const wasPending = pendingConfirm;
     pendingConfirm = null;
-    if (a.type === 'attack' || a.type === 'shove' || a.type === 'summon'
+    if (a.type === 'attack' || a.type === 'shove' || a.type === 'summon' || a.type === 'cover'
       || isFriendly(a) || isControl(a) || isZone(a) || isMobility(a) || isPurge(a)) {
       armed = id; // arm it; clicking a ringed target (or a spot) fires it
       hidePreview(); // aiming now - the movement trail yields to targets
       log(a.type === 'summon'
         ? `${a.label} armed. Click where they should report.`
-        : isZone(a)
+        : a.type === 'cover'
+          ? `${a.label} armed. Click something solid - or somebody brave.`
+          : isZone(a)
           ? `${a.label} armed. Click where it should land.`
           : isMobility(a) && !aimsAtAlly(a)
             ? `${a.label} armed. Click where you want to be.`
@@ -3012,6 +3296,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const flier = mover.sheet
       ? mover.sheet.talent?.effects?.noProvoke
       : mover.def?.talent?.effects?.noProvoke;
+    // A step off the crouch tile ends the crouch, whoever took it - the same
+    // lazy validity every consult runs, invoked here so the chip drops the
+    // moment the AI (or a walking member) leaves cover rather than at the
+    // next shot that asks (TACTICS_PLAN M6).
+    if (crouched.has(mover)) crouchStateOf(mover);
     const from = moveStart.get(mover);
     if (!from) return; // not a tracked deliberate move (a shove glide, a spawn)
     if (from.x === x && from.z === z) return;
@@ -3252,12 +3541,34 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           ? cheb(active.actor.x, active.actor.z, en.x, en.z) <= rangeOf(action)
             && world.hasLos(active.actor.x, active.actor.z, en.x, en.z)
           : canReach(active, en);
-        if (en.alive && arrived
+        // The crouch is re-resolved ON ARRIVAL (TACTICS_PLAN M6) - the world
+        // had a whole walk to change. Blocked here quietly stands down; a
+        // human shield takes the arriving shot by the same rule as a
+        // standing one, except one of your own, which stands down too.
+        const out = rangeOf(action) ? shotOutcome(active, en) : { target: en };
+        const fireable = !out.blocked && !(out.redirected && out.target.sheet);
+        if (en.alive && arrived && fireable
           && active.ap >= ACTIONS[action].ap) {
           active.actor.faceToward(en.x, en.z);
-          strike(action, en);
+          if (out.redirected) log(`${nameOf(out.target)} takes it instead. That is the job.`);
+          strike(action, out.target);
         } else {
+          if (en.alive && arrived && !fireable) log(`No shot - ${en.def.name} is in cover.`);
           armed = null;
+          refresh();
+        }
+      }
+      // finish a queued walk-up crouch (TACTICS_PLAN M6)
+      if (pendingCrouch && !active.actor.moving) {
+        const { tx, tz, spot } = pendingCrouch;
+        pendingCrouch = null;
+        const a = ACTIONS['take-cover'];
+        if (active.actor.x === spot[0] && active.actor.z === spot[1] && active.ap >= a.ap) {
+          active.ap = roundAp(active.ap - a.ap);
+          crouchAt(active, tx, tz, unitStandingAt(tx, tz));
+          refresh();
+        } else {
+          log('The moment passes - no cover taken.');
           refresh();
         }
       }
@@ -3317,12 +3628,21 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     } else if (moveBudget(acting) >= MOVE.COST_PER_TILE
       && !canReach(unit, target)) {
       const spent = aiAdvance(unit, moveBudget(acting), target);
-      // Nothing walkable: burn the real AP so the turn can end, but never the
-      // allowance - it cannot buy anything else, so leaving it is harmless.
-      if (spent <= 0) acting.ap = 0;
-      else billMove(acting, spent);
+      if (spent <= 0) {
+        // Nowhere to walk. Before burning the turn, tuck in if the office
+        // allows (TACTICS_PLAN M6) - a boxed-in unit that crouches is a
+        // problem the player has to flank; one that stands there is a target.
+        if (tryAiCrouch(unit, target)) { acting.wait = 0.5; return; }
+        // Nothing walkable: burn the real AP so the turn can end, but never
+        // the allowance - it cannot buy anything else, so leaving it is
+        // harmless.
+        acting.ap = 0;
+      } else billMove(acting, spent);
       acting.wait = 0.15;
     } else {
+      // Out of useful moves. One last look for cover before handing the turn
+      // over (same guards as above: never while someone is in reach).
+      if (tryAiCrouch(unit, target)) { acting.wait = 0.5; return; }
       advanceTurn(); // out of AP / nothing to do - next in initiative
     }
   }
@@ -3361,6 +3681,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // see it can only assert the swing and guess at the cause.
     get watching() {
       return [...watching.keys()].map((u) => (u.sheet ? u.sheet.name : u.def.name));
+    },
+    // Who is crouched, and behind which cell (TACTICS_PLAN M6) - the suite's
+    // window into the take-cover commitment and its lazy breaks.
+    get crouched() {
+      return [...crouched.entries()].map(([u, s]) => ({ name: nameOf(u), x: s.x, z: s.z, human: !!s.shield }));
     },
     // The movement allowance left this turn (MOVEMENT_PLAN M2). 0 for a
     // character without the talent.

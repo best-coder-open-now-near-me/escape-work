@@ -1327,7 +1327,7 @@ function startGame(level) {
       const a = ACTIONS[id];
       return a.ammoCost && (!a.needsTalent || !!(s.talent?.effects || {})[a.needsTalent]);
     });
-    return orderedActionIds(s, [...s.actions, equippedAction(s), 'shove', ...throwables]);
+    return orderedActionIds(s, [...s.actions, equippedAction(s), 'shove', 'take-cover', ...throwables]);
   }
   // Consumables in the pockets, deduped, with how many are in there. These are
   // the ITEMS a slot can carry: something with a `heal` or an `ammo` on it does

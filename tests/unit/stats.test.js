@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { COMPANIONS } from '../../src/data/companions.js';
 import {
-  createSheet, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist, accuracy, dodge, hitChance, rollHit, unitCombat, equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, stairwellHeal,
+  createSheet, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist, accuracy, dodge, hitChance, rollHit, unitCombat, equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, stairwellHeal, gritSaveChance, SAVE,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
@@ -937,4 +937,11 @@ test('the breather tops up the standing and never overfills', () => {
   assert.equal(stairwellHeal(sheet, 6), sheet.maxHp, 'and a full character stays full');
   sheet.hp = 1;
   assert.equal(stairwellHeal(sheet, 6), 7, 'otherwise it is a flat top-up');
+});
+
+test('gritSaveChance scales with Grit and respects its cap (TACTICS_PLAN M6)', () => {
+  assert.equal(gritSaveChance(0), SAVE.BASE);
+  assert.equal(gritSaveChance(null), SAVE.BASE); // enemies without a grit stat
+  assert.ok(gritSaveChance(3) > gritSaveChance(1), 'Grit buys escape odds');
+  assert.equal(gritSaveChance(99), SAVE.CAP, 'nobody shrugs off a bookcase reliably');
 });

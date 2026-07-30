@@ -395,6 +395,18 @@ export const ACTIONS = {
     desc: 'Two-handed push. Into a wall it stuns; into a hazard, it hurts.',
     log: 'You shove them.',
   },
+  // The Gears turn (TACTICS_PLAN M6): aim at something solid - or somebody
+  // brave - and get behind it. The `ap` here is the "+1" of the designer's
+  // "distance cost + 1": the walk to the object is billed as ordinary
+  // movement by the same engine every step uses, and this is the tuck itself.
+  'take-cover': {
+    type: 'cover',
+    ap: 1,
+    label: 'Take Cover',
+    icon: '🧎',
+    desc: 'Get behind something solid - or someone brave. Ranged attacks from the shielded side cannot touch you until you move.',
+    log: 'You tuck in behind cover.',
+  },
 
   // --- basic weapon attack (EQUIPMENT_PLAN) -------------------------------------
   // Everyone always has a basic swing, resolved from the equipped weapon
