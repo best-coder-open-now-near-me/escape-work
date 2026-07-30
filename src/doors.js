@@ -1,0 +1,164 @@
+// Doors: the one piece of terrain a fight can change. Shaped like
+// shopping.js/looting.js - the host supplies live accessors and the things
+// only it can do (walk somebody over, spend AP, refresh the scene), and this
+// module owns the door rules and the narration.
+//
+// A door is an EDGE, not a tile, and that is the whole reason it needed its
+// own file rather than a few helpers in main.js: everything that finds one,
+// stands beside one, or lists one has to convert between edge keys and the two
+// tiles they divide, and those conversions were scattered across five call
+// sites in main.js's closure.
+//
+// The geometry half - `doorKeyNear`, `doorSides`, `doorMidpoint` - is pure and
+// exported on its own, so the edge-key arithmetic is testable without a grid.
+
+import * as ui from './ui.js';
+
+// What working a door costs when there is a fight on. Cheaper than a verb: the
+// walk to reach it has already been billed as movement, and this is the
+// handle, not the journey.
+export const COMBAT_DOOR_AP = 1;
+
+// The two tiles an edge key divides. 'h:x,z' runs along the top of (x, z), so
+// it separates (x, z-1) from (x, z); 'v:x,z' separates (x-1, z) from (x, z).
+export function doorSides(key) {
+  const [x, z] = key.slice(2).split(',').map(Number);
+  return key[0] === 'h' ? [[x, z - 1], [x, z]] : [[x - 1, z], [x, z]];
+}
+
+// Where the door IS in world space - the midpoint of the edge, which is half a
+// tile off the tile the key names. Both the Alt overlay label and combat's door
+// rings hang off this.
+export function doorMidpoint(key) {
+  const [x, z] = key.slice(2).split(',').map(Number);
+  return key[0] === 'h' ? { x, z: z - 0.5 } : { x: x - 0.5, z };
+}
+
+// The edge key nearest a precise ground point, or null when the point is not
+// near any edge. The 0.3 band is deliberately wide - you aim at a doorway, not
+// at a line - which is also why the callers that use it in a fight require the
+// clicker to already be standing beside the door (see `combatDoorAt`).
+export function doorKeyNear(point) {
+  if (!point) return null;
+  const x = Math.round(point.x);
+  const z = Math.round(point.z);
+  const dx = point.x - x;
+  const dz = point.z - z;
+  if (0.5 - Math.max(Math.abs(dx), Math.abs(dz)) > 0.3) return null;
+  return Math.abs(dx) >= Math.abs(dz)
+    ? `v:${dx > 0 ? x + 1 : x},${z}`
+    : `h:${x},${dz > 0 ? z + 1 : z}`;
+}
+
+// Is this body standing beside the door's handle? In a fight there is no
+// walking-to-it - movement belongs to combat and is priced by the tile - so
+// the rule is the tactical one: you work a door you are standing beside.
+export function atDoor(key, actor) {
+  return !!actor && doorSides(key).some(([x, z]) => actor.x === x && actor.z === z);
+}
+
+export function createDoors({
+  grid, scene, loot,
+  isInCombat, isGameOver, getCombat, getPlayer,
+  isWalkable, approachAndDo, onWorldChanged,
+}) {
+  // Only a key the grid actually has is a door. Kept separate from the pure
+  // `doorKeyNear` so the arithmetic stays testable without a grid.
+  const doorNearPoint = (point) => {
+    const key = doorKeyNear(point);
+    return key && grid.doors.has(key) ? key : null;
+  };
+
+  // The door a click or a hover means IN COMBAT, or null. One predicate, read
+  // by both the cursor and the click, so the pointer can never promise a swing
+  // of the handle that the click then declines.
+  //
+  // Doors were reachable in a fight only through the right-click menu: the
+  // left-click path had no door branch at all, so clicking one fell through to
+  // handleTileClick and walked you at it, and the hover path never asked, so
+  // the cursor stayed a plain arrow over the one piece of terrain you can
+  // change.
+  //
+  // Hitting the door MESH always counts - you aimed at the door, there is
+  // nothing else you could have meant. A ground point merely NEAR a door edge
+  // only counts when you are already standing beside it, because
+  // `doorNearPoint` claims a wide band either side of the edge and movement is
+  // the expensive thing in a fight: a click on the floor by a doorway has to
+  // stay a step, not become a refusal.
+  const combatDoorAt = (hit, point) => {
+    if (hit?.kind === 'door') return hit.ref;
+    const key = point ? doorNearPoint(point) : null;
+    return key && atDoor(key, getCombat()?.actingActor) ? key : null;
+  };
+
+  function toggleDoor(key) {
+    if (isGameOver()) return;
+    // Doors used to be refused outright while in combat, with no comment - and
+    // a closed door is the game's ONLY true line-of-sight blocker, so the half
+    // of the game that is about positioning was the half where the one piece of
+    // terrain you can change was untouchable.
+    if (isInCombat()) {
+      const combat = getCombat();
+      if (!atDoor(key, combat?.actingActor)) {
+        ui.say('Too far - step up to the door first.');
+        return;
+      }
+      if (!(combat?.spendAp(COMBAT_DOOR_AP) ?? false)) {
+        ui.say(`Not enough AP - working a door costs ${COMBAT_DOOR_AP}.`);
+        return;
+      }
+    }
+    const open = !grid.doors.get(key).open;
+    grid.setDoorOpen(key, open);
+    scene.refreshDoor(key);
+    // Every route in the level may have just changed - theirs and yours.
+    onWorldChanged();
+    ui.say(open ? 'The door swings open.' : 'You pull the door shut.');
+    if (loot.labelsVisible) loot.showLabels();
+  }
+
+  const approachDoor = (key) => {
+    const sides = doorSides(key);
+    const [ax, az] = isWalkable(sides[0][0], sides[0][1]) ? sides[0] : sides[1];
+    approachAndDo(ax, az, () => toggleDoor(key));
+  };
+
+  // Doors join the Alt overlay through the looting module's extraEntries hook
+  // (doors aren't loot, so the door logic stays here).
+  function overlayEntries() {
+    const out = [];
+    const player = getPlayer();
+    const near = (x, z) => Math.max(Math.abs(x - player.x), Math.abs(z - player.z)) <= 10;
+    for (const [key, d] of grid.doors) {
+      const { x: wx, z: wz } = doorMidpoint(key);
+      if (!near(Math.round(wx), Math.round(wz))) continue;
+      out.push({
+        icon: '🚪',
+        text: d.open ? 'Door (open)' : 'Door',
+        world: { x: wx, y: 0.95, z: wz },
+        onClick: () => approachDoor(key),
+      });
+    }
+    return out;
+  }
+
+  // Doors the given tile is standing at, as edge midpoints, so combat can ring
+  // them. Doors are the only terrain a fight can change and the only true
+  // line-of-sight blocker, but they sit on EDGES rather than tiles - so combat
+  // cannot find them the way it finds a prop, and until it could, the one thing
+  // worth walking over to use had no affordance at all. The price rides along
+  // rather than being re-declared in combat.js: one number, owned by the rule
+  // that charges it.
+  function doorsBeside(x, z) {
+    const out = [];
+    for (const key of grid.doors.keys()) {
+      if (!doorSides(key).some(([sx, sz]) => sx === x && sz === z)) continue;
+      out.push({ ...doorMidpoint(key), ap: COMBAT_DOOR_AP });
+    }
+    return out;
+  }
+
+  return {
+    doorNearPoint, combatDoorAt, toggleDoor, approachDoor, overlayEntries, doorsBeside, atDoor,
+  };
+}

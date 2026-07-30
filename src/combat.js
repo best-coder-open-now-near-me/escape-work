@@ -29,6 +29,10 @@ import {
   pullPlan as pullplanFor, coverSpot, displacePlan,
 } from './combat-plans.js';
 import {
+  standTilePath as standTileRoute, pickTarget as pickBest, advanceRoute,
+  aiCrouchSpot, chooseBeat, afterFailedAdvance,
+} from './combat-ai.js';
+import {
   cheb, TARGET_R, SURPRISE_RADIUS, AROUND, ORTHO, reachOfUnit, posOf, withinReach,
   canReach as canReachAt, reachSpecOf, actRangeOf, verbReaches as verbReachesAt,
   swingPointAt as swingPointFrom, hasSwingSpot as hasSwingSpotFor, zoneCellsFor,
@@ -202,32 +206,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // path to any of the target's eight neighbours, or null if none is reachable.
   // Shared by pickTarget and aiAdvance so the two can never disagree about who
   // is engageable - if the target picker says yes, the mover must find a route.
-  function standTilePath(unit, target) {
-    let best = null;
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-      const tx = target.actor.x + dx;
-      const tz = target.actor.z + dz;
-      // Already STANDING on a tile this unit could swing from: the cheapest
-      // route is no route, so take it and stop looking. `findEnemyPath` cannot
-      // express that - it rejects a goal failing `isWalkable`, and the unit's
-      // own tile fails it because the unit is standing on it - so the self-path
-      // came back null, the search fell through to a DIFFERENT adjacent tile,
-      // and the unit walked there. Next turn the same logic walked it back.
-      // That is the pacing: a coworker adjacent but a shade out of reach
-      // shuffling between two tiles forever instead of ever attacking. The old
-      // `!(unit.x === tx && unit.z === tz)` exemption below was reaching for
-      // this and could not get there - it only let the tile past `isWalkable`,
-      // leaving the pathfinder to reject it a moment later. Returning the
-      // degenerate path hands aiAdvance its existing in-place shuffle branch,
-      // which closes the last sub-tile gap. Same special case `routeBeside`
-      // carries on the player side, for the same reason.
-      if (unit.x === tx && unit.z === tz) return [[tx, tz], [tx, tz]];
-      if (!world.isWalkable(tx, tz)) continue;
-      const p = world.findEnemyPath(unit.x, unit.z, tx, tz);
-      if (p && p.length > 1 && (!best || p.length < best.length)) best = p;
-    }
-    return best;
-  }
+  const standTilePath = (unit, target) =>
+    standTileRoute(unit.x, unit.z, target.actor.x, target.actor.z, world);
 
   // Can this unit actually FIGHT that member - reach it now, or walk to a tile
   // it could swing from?
@@ -261,19 +241,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // sealed. Targeting them means walking to the wall and swinging at nothing,
   // every turn, forever. So a member the unit can actually fight outranks a
   // nearer one it cannot, and distance only breaks ties within each group.
-  function pickTarget(unit) {
-    let best = null;
-    for (const m of livingMembers()) {
-      const d = cheb(unit.x, unit.z, m.actor.x, m.actor.z);
-      const engageable = canEngage(unit, m);
-      const better = !best
-        || (engageable && !best.engageable)
-        || (engageable === best.engageable
-          && (d < best.d || (d === best.d && m.sheet.hp < best.m.sheet.hp)));
-      if (better) best = { m, d, engageable };
-    }
-    return best ? { actor: best.m.actor, member: best.m } : null;
-  }
+  const pickTarget = (unit) =>
+    pickBest(unit.x, unit.z, livingMembers(), (m) => canEngage(unit, m));
+
   // Enemies pulled in from a distance are surprised - they spend their first
   // turn realizing what's happening, so group openings don't alpha-strike you.
   for (const en of engaged) {
@@ -2304,28 +2274,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (canReach(unit, target)) return false; // melee ignores cover - swing instead
     const b = bodyOf(unit);
     const t = bodyOf(target);
-    for (const [dx, dz] of ORTHO) {
-      const sx = b.x + dx;
-      const sz = b.z + dz;
-      const d = world.tileDefAt(sx, sz);
-      // Low solids and fallen furniture only: behind a TALL solid nothing can
-      // shoot you anyway, so the beat would read as the AI hiding from air.
-      if (!d || !(d.cover || (d.solid && !blocksSight(d)))) continue;
-      if (!crouchShields(t.x, t.z, b.x, b.z, sx, sz)) continue;
-      acting.ap = roundAp(acting.ap - coverAp);
-      crouchAt(unit, sx, sz);
-      refresh();
-      return true;
-    }
-    // No shielding furniture beside it - but the tile's own partitions count:
-    // if an edge already blocks the line to its target, crouch in place.
-    if (hasCover(t.x, t.z, b.x, b.z, world.stepOpen)) {
-      acting.ap = roundAp(acting.ap - coverAp);
-      crouchAtEdges(unit);
-      refresh();
-      return true;
-    }
-    return false;
+    const spot = aiCrouchSpot(b.x, b.z, t.x, t.z, world);
+    if (!spot) return false;
+    acting.ap = roundAp(acting.ap - coverAp);
+    if (spot.edges) crouchAtEdges(unit);
+    else crouchAt(unit, spot.x, spot.z);
+    refresh();
+    return true;
   }
 
   // --- Pull Over (TACTICS_PLAN M8) ------------------------------------------
@@ -3956,31 +3911,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // hop-pause-hop. Surface damage lands per tile entered via the actor's
   // onTile hook. Returns the AP actually spent (0 = couldn't move).
   function aiAdvance(unit, budget, target) {
-    let best = standTilePath(unit, target);
-    const pp = posOf(target);
-    // Nowhere better to stand, but the tile is already the right one and only
-    // the sub-tile position is wrong. Now that reach is a DISTANCE, one tile
-    // can hold both a spot inside reach and a spot outside it, so close the
-    // last of the gap in place instead of burning the turn. Without this an AI
-    // hemmed into the single adjacent tile of a corridor can never get in
-    // range, ends every turn having done nothing, and the fight never resolves.
-    if (!best) {
-      if (cheb(unit.x, unit.z, target.actor.x, target.actor.z) > 1) return 0;
-      const here = posOf(unit);
-      const step = world.approach(unit.x, unit.z, pp.x, pp.z);
-      if (dist(here.x, here.z, step[0], step[1]) < 0.05) return 0; // as close as this tile allows
-      // And only if shuffling would actually earn a swing. A partition between
-      // the two bodies isn't a distance problem, so closing the gap can't solve
-      // it - spending AP to end up equally unable to swing is the same stall
-      // wearing a different hat.
-      if (!inReach(step[0], step[1], pp.x, pp.z, reachOfUnit(unit), world.stepOpen)) return 0;
-      best = [[here.x, here.z], step];
-    } else {
-      // Stand at reach of the target's BODY, not the middle of the adjacent
-      // tile (the point stays inside that tile, so adjacency still holds).
-      const [gx, gz] = best[best.length - 1];
-      best[best.length - 1] = world.approach(gx, gz, pp.x, pp.z);
-    }
+    const best = advanceRoute(unit, target, standTilePath(unit, target), world);
+    if (!best) return 0;
     const s = world.smoothEnemy(unit, best);
     // AI units pay the same surface movement tax the player does, plus their
     // own gum surcharge if they've stepped in a wad.
@@ -4147,9 +4079,31 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // the post, and under its live cap (resolveSummon returns 0 when full, so a
     // maxed HR just fights). Posting the req is the whole beat. Enemy-side only
     // today - the player summons from the action bar, not on autopilot.
+    // The ladder itself is combat-ai.chooseBeat; everything here is the DOING.
+    // The summon and the topple both have to be planned before the decision
+    // can be honest about whether they are available - `resolveSummon` is the
+    // only way to know a maxed-out HR has nobody left to post, and the topple
+    // needs its plan anyway to take it.
     const sm = summonSpec(unit.def.summon);
-    if (sm && (unit.summonCd || 0) <= 0 && acting.ap >= sm.ap
-      && resolveSummon(unit, 'enemy', sm) > 0) {
+    const summonReady = !!sm && (unit.summonCd || 0) <= 0 && acting.ap >= sm.ap
+      && resolveSummon(unit, 'enemy', sm) > 0;
+    const toppleAp = ACTIONS.shove.ap;
+    const tp = acting.ap >= toppleAp ? aiTopplePlan(unit) : null;
+    const beatState = {
+      ap: acting.ap,
+      moveBudget: moveBudget(acting),
+      moveCost: MOVE.COST_PER_TILE,
+      inReach: canReach(unit, target),
+      hasAttack: unit.combat.attacks.length > 0,
+      attackAp: unit.combat.attackAp,
+      summon: sm ? { ap: sm.ap, ready: summonReady } : null,
+      toppleAp,
+      canTopple: !!tp,
+      canCrouch: true, // tryAiCrouch runs its own (world-shaped) test
+      coverAp: ACTIONS['take-cover'].ap,
+    };
+    const { beat } = chooseBeat(beatState);
+    if (beat === 'summon') {
       unit.summonCd = sm.cooldownRounds || 0;
       acting.ap = roundAp(acting.ap - sm.ap);
       unit.lunge(target.actor.x, target.actor.z);
@@ -4158,13 +4112,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       refresh();
       return;
     }
-    // Drop the furniture on them if it is there to drop (POWERS_PLAN M7).
-    // Ahead of the swing because it is strictly better when it is available:
-    // it damages, it stuns, and it leaves cover the party then has to walk
-    // around. Priced at the shove's own AP, so both sides push for the same.
-    const toppleAp = ACTIONS.shove.ap;
-    const tp = acting.ap >= toppleAp ? aiTopplePlan(unit) : null;
-    if (tp) {
+    if (beat === 'topple') {
       acting.ap = roundAp(acting.ap - toppleAp);
       unit.lunge(tp.x, tp.z);
       log(`${unit.def.name} puts a shoulder into the ${tp.def.label || 'furniture'}. ${topple(unit, tp)}`);
@@ -4172,30 +4120,27 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       refresh();
       return;
     }
-    if (canReach(unit, target) && unit.combat.attacks.length && acting.ap >= unit.combat.attackAp) {
+    if (beat === 'attack') {
       aiAttack(unit, target);
       acting.ap = roundAp(acting.ap - unit.combat.attackAp);
       acting.wait = 0.85; // outlast the swing animation so hits read one at a time
-    } else if (moveBudget(acting) >= MOVE.COST_PER_TILE
-      && !canReach(unit, target)) {
-      const spent = aiAdvance(unit, moveBudget(acting), target);
-      if (spent <= 0) {
-        // Nowhere to walk. Before burning the turn, tuck in if the office
-        // allows (TACTICS_PLAN M6) - a boxed-in unit that crouches is a
-        // problem the player has to flank; one that stands there is a target.
-        if (tryAiCrouch(unit, target)) { acting.wait = 0.5; return; }
-        // Nothing walkable: burn the real AP so the turn can end, but never
-        // the allowance - it cannot buy anything else, so leaving it is
-        // harmless.
-        acting.ap = 0;
-      } else billMove(acting, spent);
-      acting.wait = 0.15;
-    } else {
-      // Out of useful moves. One last look for cover before handing the turn
-      // over (same guards as above: never while someone is in reach).
-      if (tryAiCrouch(unit, target)) { acting.wait = 0.5; return; }
-      advanceTurn(); // out of AP / nothing to do - next in initiative
+      return;
     }
+    if (beat === 'advance') {
+      const spent = aiAdvance(unit, moveBudget(acting), target);
+      if (spent > 0) { billMove(acting, spent); acting.wait = 0.15; return; }
+      // The advance went nowhere. Same tail the ladder gives a unit that never
+      // had a move to make.
+      if (afterFailedAdvance(beatState).beat === 'crouch' && tryAiCrouch(unit, target)) {
+        acting.wait = 0.5;
+        return;
+      }
+      acting.ap = 0; // burn the real AP so the turn can end; the allowance buys nothing
+      acting.wait = 0.15;
+      return;
+    }
+    if (beat === 'crouch' && tryAiCrouch(unit, target)) { acting.wait = 0.5; return; }
+    advanceTurn(); // out of AP / nothing to do - next in initiative
   }
 
   // A crouch taken OUT of combat rides into the fight (TACTICS_PLAN M6 OOC):
