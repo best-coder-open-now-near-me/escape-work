@@ -16,7 +16,7 @@ import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitCh
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, crouchShields, hasCover, TACTICS } from './tactics.js';
 import {
-  buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, isPurge, coneFrom, conePolyline, aimRangeOf, rangeTiles, isBreakable, aimsAtProps, isPull, pullLanding,
+  buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, aimsAtAnyone, isPurge, coneFrom, conePolyline, aimRangeOf, rangeTiles, isBreakable, aimsAtProps, isPull,
 } from './powers.js';
 import { createAimPaint } from './aim-paint.js';
 import { STATUSES } from './data/statuses.js';
@@ -24,6 +24,10 @@ import { blocksSight, PARTITION_TOPPLE } from './data/tiles.js';
 import { PANEL_CHROME, BUTTON_CHROME, actionDock, refreshDockVisibility } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
 import { slips, speedUnderStatus } from './step-rules.js';
+import {
+  topplePlan as toppleplanAt, aiTopplePlan as aiToppleplanFor, breakPlan,
+  pullPlan as pullplanFor, coverSpot, displacePlan,
+} from './combat-plans.js';
 import {
   cheb, TARGET_R, SURPRISE_RADIUS, AROUND, ORTHO, reachOfUnit, posOf, withinReach,
   canReach as canReachAt, reachSpecOf, actRangeOf, verbReaches as verbReachesAt,
@@ -1933,16 +1937,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Returns { slammed, died, msg }; the caller logs. It does NOT spend AP or
   // clear `armed` - displacement is a consequence, not an action.
   function displaceBody(en, dx, dz, { verb = 'shove', slamDmg = 2 } = {}) {
-    if (!dx && !dz) return { slammed: false, died: false, msg: '' };
-    const tx = en.x + dx;
-    const tz = en.z + dz;
-    // A partition between the tiles counts as "something solid" too - and so
-    // does a body. isWalkable only excludes enemies and NPCs, so without the
-    // occupancy check a shove could glide a coworker onto a teammate's (or a
-    // summon's) tile and leave two combatants permanently stacked.
-    const occupied = members.some((m) =>
-      m.sheet.hp > 0 && m.actor && m.actor.x === tx && m.actor.z === tz);
-    if (occupied || !world.isWalkable(tx, tz) || !world.stepOpen(en.x, en.z, tx, tz)) {
+    const push = displacePlan(en.x, en.z, dx, dz, {
+      isWalkable: world.isWalkable,
+      stepOpen: world.stepOpen,
+      occupied: (x, z) => members.some((m) =>
+        m.sheet.hp > 0 && m.actor && m.actor.x === x && m.actor.z === z),
+    });
+    if (!push) return { slammed: false, died: false, msg: '' };
+    const { tx, tz } = push;
+    if (push.blocked) {
       // The "something solid" they hit might be a bookcase (POWERS_PLAN M6).
       // Slamming somebody into a toppleable prop brings it down on them - the
       // shove already said "into something solid", and this is the rest of
@@ -2009,39 +2012,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Whether the prop at (px, pz) can be knocked over by `from` right now, and
   // where it would land. Returns null when it cannot. Shared by the click, the
   // hover affordance and the AI, so all three agree.
-  function topplePlan(from, px, pz) {
-    const def = world.tileDefAt(px, pz);
-    if (!isToppleable(def)) return null;
+  const topplePlan = (from, px, pz) => {
     const b = bodyOf(from);
-    const landing = toppleLanding(b.x, b.z, px, pz);
-    if (!landing) return null;
-    const [lx, lz] = landing;
-    // Nothing behind it to fall into: it rocks and settles. No free
-    // destruction against a wall - a prop pinned by geometry stays up, which
-    // is also what stops toppling from being a way to demolish a corridor.
-    if (!world.terrainOpen(lx, lz)) return null;
-    if (!world.stepOpen(px, pz, lx, lz)) return null;
-    return { def, x: px, z: pz, lx, lz };
-  }
+    return toppleplanAt(b.x, b.z, px, pz, world);
+  };
 
-  // The AI's version of the same question: is there a prop next to me that
-  // would land on somebody I am trying to hit? Scored like an attack and taken
-  // like one (POWERS_PLAN M7). Without this, toppling is a trick the player
-  // does to a static world - the office falls on coworkers and never on you.
-  //
-  // The scan is eight neighbours and runs only when a beat is actually TAKEN
-  // (the driver returns early while `acting.wait` is counting down), so it
-  // does not join the per-frame work pickTarget had to be memoised out of.
-  function aiTopplePlan(unit) {
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-      const plan = topplePlan(unit, unit.x + dx, unit.z + dz);
-      if (!plan) continue;
-      const victim = members.some((m) => m.sheet.hp > 0 && m.actor
-        && m.actor.x === plan.lx && m.actor.z === plan.lz);
-      if (victim) return plan;
-    }
-    return null;
-  }
+  // The AI's version of the same question - the victim test is combat's,
+  // because only combat knows which side a body is on.
+  const aiTopplePlan = (unit) => aiToppleplanFor(unit.x, unit.z, world,
+    (x, z) => members.some((m) => m.sheet.hp > 0 && m.actor
+      && m.actor.x === x && m.actor.z === z));
 
   // Put it over. `by` is whoever caused it (for the narration and the facing).
   function topple(by, plan) {
@@ -2170,44 +2150,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // or on the clicked tile's face TOWARD the shooter for a shot. Returns
   // { kind } to commit, { refusal } to explain, null to fall through. Melee
   // does not walk in for v1 `[proposed]` - the rings only promise reach.
-  function breakPlanAt(id, tx, tz) {
-    const a = ACTIONS[id];
-    if (!aimsAtProps(a)) return null;
-    const me = posOf(active);
-    const range = rangeOf(id);
-    if (isBreakable(world.tileDefAt(tx, tz))) {
-      if (range) {
-        if (cheb(active.actor.x, active.actor.z, tx, tz) > range) return { refusal: 'Too far.' };
-        if (!world.hasLos(active.actor.x, active.actor.z, tx, tz)) return { refusal: 'No clear line to it.' };
-      } else if (!inReach(me.x, me.z, tx, tz, reachOfUnit(active), world.stepOpen)) {
-        return { refusal: 'Too far to swing at it.' };
-      }
-      return { kind: 'prop', tx, tz };
-    }
-    const ax = active.actor.x;
-    const az = active.actor.z;
-    if (!range) {
-      // Square-on and at arm's reach, exactly as the partition shove aims.
-      if (Math.abs(tx - ax) + Math.abs(tz - az) === 1
-        && world.edgeHpBetween(ax, az, tx, tz) !== null) {
-        return { kind: 'edge', a: [ax, az], b: [tx, tz] };
-      }
-      return null;
-    }
-    // A shot takes the panel on the clicked tile's near face - the edge a
-    // sightline from here would cross first. Partitions never block sight
-    // (M6a), so the line test is about smoke and doors, not the target.
-    const sx = Math.sign(ax - tx);
-    const sz = Math.sign(az - tz);
-    for (const [nx, nz] of [[tx + sx, tz], [tx, tz + sz]]) {
-      if (nx === tx && nz === tz) continue;
-      if (world.edgeHpBetween(tx, tz, nx, nz) === null) continue;
-      if (cheb(ax, az, tx, tz) > range) return { refusal: 'Too far.' };
-      if (!world.hasLos(ax, az, tx, tz)) return { refusal: 'No clear line to it.' };
-      return { kind: 'edge', a: [tx, tz], b: [nx, nz] };
-    }
-    return null;
-  }
+  const breakPlanAt = (id, tx, tz) => breakPlan(id, active, tx, tz, world);
 
   // Put the hit in. One resolver for both shapes: spend, swing or shoot,
   // roll the dice into the pool, and either report the dent (the world
@@ -2318,29 +2261,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // can SEE - "as line of sight driven as possible" - nearest by route;
     // orthogonal because the shield must sit on a FACE, tactics.crouchShields),
     // or ON the edge-shielded tile itself.
-    const me = { x: active.actor.x, z: active.actor.z };
-    let best = null;
-    if (edgeMode) {
-      if (me.x === tx && me.z === tz) best = { sx: tx, sz: tz, path: null };
-      else if (world.hasLos(me.x, me.z, tx, tz)) {
-        const p = world.findPath(me.x, me.z, tx, tz, active.actor);
-        if (p && p.length >= 2) best = { sx: tx, sz: tz, path: p };
-      }
-    } else {
-      for (const [dx, dz] of ORTHO) {
-        const sx = tx + dx;
-        const sz = tz + dz;
-        const here = sx === me.x && sz === me.z;
-        const occupant = unitStandingAt(sx, sz);
-        if (!here && (!world.isWalkable(sx, sz) || occupant)) continue;
-        if (!world.hasLos(me.x, me.z, sx, sz)) continue;
-        if (here) { best = { sx, sz, path: null, len: 0 }; break; }
-        const p = world.findPath(me.x, me.z, sx, sz, active.actor);
-        if (!p || p.length < 2) continue;
-        if (!best || p.length < best.len) best = { sx, sz, path: p, len: p.length };
-      }
-    }
-    if (!best) { log('No clear way in behind it.'); return; }
+    const best = coverSpot(active, tx, tz, edgeMode, {
+      isWalkable: world.isWalkable,
+      hasLos: world.hasLos,
+      findPath: (sx, sz, gx, gz) => world.findPath(sx, sz, gx, gz, active.actor),
+      occupantAt: unitStandingAt,
+    });
+    if (best.refusal) { log(best.refusal); return; }
     if (active.ap < a.ap) { log('Not enough AP.'); return; }
     armed = null;
     const commit = () => (edgeMode ? crouchAtEdges(active) : crouchAt(active, tx, tz, shield));
@@ -2413,45 +2340,18 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Can the pull haul `en` right now, and where do they land? Null when any
   // leg fails. pullRefusal walks the same legs in the same order, so the
   // click's explanation can never disagree with the plan.
-  function pullPlanFor(en) {
-    const s = crouchStateOf(en);
-    if (!s) return null;
-    // A HUMAN shield is not a barrier: you do not haul somebody over a
-    // colleague, you deal with the colleague. Objects and edges only.
-    if (s.shield) return null;
-    const A = bodyOf(active);
-    const D = bodyOf(en);
-    // Their shield must stand BETWEEN you: the verb is a reach OVER cover,
-    // which is also what keeps it from being a generic drag - from their
-    // open side you have swings and shoves already.
-    const shielded = s.edges
-      ? hasCover(A.x, A.z, D.x, D.z, world.stepOpen)
-      : crouchShields(A.x, A.z, D.x, D.z, s.x, s.z);
-    if (!shielded) return null;
-    const me = posOf(active);
-    const dp = posOf(en);
-    if (dist(me.x, me.z, dp.x, dp.z) > REACH.PULL) return null;
-    const landing = pullLanding(A.x, A.z, D.x, D.z,
-      (x, z) => world.isWalkable(x, z) && !unitStandingAt(x, z));
-    return landing ? { s, landing } : null;
-  }
-
-  // WHY the pull refuses, leg by leg - the plan above in message form.
-  function pullRefusal(en) {
-    const s = crouchStateOf(en);
-    if (!s) return `${en.def.name} is not dug in behind anything - nothing to pull them over.`;
-    if (s.shield) return 'Their cover is a person - that is a shove, not a pull.';
-    const A = bodyOf(active);
-    const D = bodyOf(en);
-    const shielded = s.edges
-      ? hasCover(A.x, A.z, D.x, D.z, world.stepOpen)
-      : crouchShields(A.x, A.z, D.x, D.z, s.x, s.z);
-    if (!shielded) return 'Their cover is not between you - get to its far side first.';
-    const me = posOf(active);
-    const dp = posOf(en);
-    if (dist(me.x, me.z, dp.x, dp.z) > REACH.PULL) return 'Too far to reach over.';
-    return 'No room on your side to land them.';
-  }
+  const pullPlanned = (en) => pullplanFor(active, en, crouchStateOf(en), {
+    stepOpen: world.stepOpen,
+    open: (x, z) => world.isWalkable(x, z) && !unitStandingAt(x, z),
+    name: en.def.name,
+  });
+  // The two faces the click wants: the plan when it works, the reason when it
+  // does not. One walk down the legs underneath, so they cannot disagree.
+  const pullPlanFor = (en) => {
+    const r = pullPlanned(en);
+    return r.refusal ? null : { s: r.crouch, landing: r.landing };
+  };
+  const pullRefusal = (en) => pullPlanned(en).refusal;
 
   function performPull(id, en, plan) {
     const a = ACTIONS[id];
