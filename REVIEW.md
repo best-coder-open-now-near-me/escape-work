@@ -509,3 +509,281 @@ Recorded so future reviews don't re-raise them:
    unplaced-enemy detection.
 6. **Sweep the docs** (ARCHITECTURE.md and MOVEMENT_PLAN.md first) — several are now
    actively misleading about shipped mechanics.
+
+---
+
+# Review pass 2 — 2026-07-30
+
+Baseline: `claude/camera-controls-recentering-2aq41a` (`9e30cf2`) merged with `origin/main`
+(`3f304c4`). 485/485 unit tests green, build clean. Every finding below was traced
+through the source at that HEAD by hand; where a claim could be settled mechanically it
+was (a registry cross-reference script, a bundle-content grep), and that is said in place.
+
+## Questions for the designer
+
+**1. In a fight, should the camera follow whoever's turn it is, or stay with the leader?**
+Today it stays with whoever led the party into the fight — see finding A. The fix depends
+entirely on which of these you want, and I am not presuming:
+
+- **A (recommended): the camera follows the acting character.** `makeActive` tells main.js
+  who has the floor, main.js re-points the follow target, and steering a companion in a
+  shared turn brings the view with you. This is what BG3 and DOS2 both do, and it is what
+  the ARCHITECTURE prose added by `bf2cbf3` already claims ("the view belongs with whoever
+  you're driving"). Cost: `player` stops meaning "the leader" and starts meaning "the body
+  the rig follows", which is a rename plus an audit of its ~40 other uses in main.js.
+- **B: leave it, and make the doc honest.** The camera stays on the leader all fight; you
+  press Home to look at anyone else. Cheap (a doc edit), but a companion you steer can walk
+  off the bottom of the screen and the view will not go with them.
+- **C: follow the acting character only when it is one of YOURS.** Enemy turns leave the
+  view where it is. Splits the difference; slightly more code than A, no camera lurching on
+  every hostile turn.
+
+**2. Is god mode ungated on the shipped itch.io build deliberate?** It is in the bundle
+today (finding D), openable with backquote or F8, and it persists across reloads. If it is
+meant to be there for testers, say so and I will note it as intended rather than a leak. If
+not, the gate is small: a `#god` hash or a build-time `define`. TODO Phase 5 has it listed
+as "gate behind a dev flag", which reads as intent, but that box is `[proposed]` at best —
+nobody has ratified it.
+
+## What is in good shape
+
+Worth saying plainly, because the findings below are all defects and that is a biased view
+of a codebase:
+
+- **The data registries are internally consistent.** A cross-reference script over every
+  registry (`ACTIONS`, `STATUSES`, `ITEMS`, `ENEMY_TYPES`, `CLASSES`, `COMPANIONS`, `SHOPS`,
+  `LOOT_TABLES`, `TILE_TYPES`, `SURFACES`) found **zero dangling ids** — no class pointing at
+  a missing action, no action applying a missing status, no loot table or shop stocking a
+  missing item, no summon naming a missing enemy type. For a "content is data" project this
+  is the invariant that matters most, and it holds.
+- **The new walk-up work (`0cd9391`, `9e30cf2`) is well built.** `verbReaches` is genuinely
+  one predicate shared by the route trim, the promise and the arrival check, which is what
+  closes the preview-vs-click gap the earlier review kept finding. `attackMods`' new `plan`
+  argument is correct in a way that is easy to get wrong: it keeps cover/flank/backstab on
+  tile octants and moves only the melee/ranged split to continuous distance, and it omits
+  the line test there — matching `withinReach`'s deliberate rule (`combat.js:405-412`) so
+  turning walls on cannot silently change who gets cover. Backstab reads the *defender's*
+  facing, so the attacker's planned point does not corrupt it.
+- **`tests/e2e/camera.spec.js` asserts the behaviour, not just the absence of a throw** —
+  it checks the detach/re-attach transitions *and* that the focus lands within a unit of the
+  body it claimed to look at (`camera.spec.js:124-128`). That is the standard the rest of
+  the suite should be held to.
+
+## A. In combat the camera follows the leader, not whoever's turn it is
+
+**`src/main.js:3408` · high · bug + doc contradiction**
+
+The rig's follow target is the module-level `player`:
+
+```js
+const pp = player.entity ? player.entity.getPosition() : player;
+controls.follow({ x: pp.x, z: pp.z }, dt);
+```
+
+`player` is reassigned in exactly three places, and none of them fire during a fight:
+`switchLeader` (`main.js:1733`, which returns early on `if (... inCombat ...)`), the
+survivor-steps-up path (`main.js:720`), and `syncLeaderBindings` (`main.js:738`, whose own
+comment says it runs "when the dust settles"). Meanwhile `makeActive` (`combat.js:1624`)
+sets `party.active` and calls `refreshBar`, but has no camera callback — `callbacks.focusCamera`
+is invoked from exactly one site in all of `combat.js`, the initiative-strip double-click
+(`combat.js:866`).
+
+**Failure scenario.** Recruit the intern. Enter a fight. The turn comes to the intern (or
+you Tab into a shared turn, `main.js:3065` → `combat.cycleSteer`). You now steer a body the
+camera is not tracking: walk them four or five tiles and they leave the frame while the view
+sits on the leader. Pressing `Home` does not fix it either — `focusCameraOn` (`main.js:2987`)
+resolves `actor !== player` to `controls.panTo(...)`, a *detached* glide, so the camera
+arrives at where they stood and then stops tracking them for the rest of the walk.
+
+**Doc contradiction.** ARCHITECTURE.md, in the paragraph added by `bf2cbf3`, states:
+"Control changes re-attach too (a leader switch, a survivor stepping up, a fight starting) —
+the view belongs with whoever you're driving." The most frequent control change in the game,
+the turn passing to another member inside a fight, is absent from that list and does not
+re-attach.
+
+**The test encodes the conflation.** `camera.spec.js:130-133` comments "The acting member's
+row re-attaches the follow (it IS the followed body)" — true only because that spec's acting
+member happens to be the leader. Pick a non-leader member's row and the same double-click
+detaches instead. The test passes and the rule it names is not the rule in force.
+
+**Fix** depends on designer question 1. Under option A: give `makeActive` a
+`callbacks.onControlChange?.(m.actor)` and have main.js re-point `player` (or introduce a
+separate `followTarget`) and call `controls.recenter()`.
+
+## B. A seeded fight does not reproduce: member slips roll unseeded
+
+**`src/main.js:2398` · medium · inconsistency**
+
+`combat.js` rolls an AI unit's slip off the seeded stream, and says why:
+
+```js
+// so a seeded run reproduces the slips too - they end a whole turn, so
+if (unit.alive && !statusFx(unit).slipProof && rng() < (world.slipChanceAt(x, z) || 0)) {
+```
+
+The party-member path does not, and it runs *inside combat too* — `maybeSlip` ends with
+`if (inCombat) combat?.notifySlip();` (`main.js:2403`):
+
+```js
+const chance = slipChanceAt(x, z);
+if (!chance || Math.random() >= chance) return;
+```
+
+So within one seeded fight, the hostiles' slips replay and your own do not. The same
+`Math.random()` is used for wandering enemies out of combat (`actors.js:502` via
+`world.slips`, defined at `main.js:3260`). This matters exactly as much as the seeding
+effort elsewhere in `combat.js` is worth — the module went to real trouble (`combat.js:30`,
+`:67`, `:702`, `:1551-1561`) to make a fight replayable, and a wet floor breaks it.
+
+**Fix:** route the member roll through the same injected `rng` the fight already owns,
+via the `world` seam that already carries `slipChanceAt`.
+
+## C. The slip rule exists three times, with three different slip-proof tests
+
+**`src/main.js:2394`, `src/combat.js:3940`, `src/actors.js:502` · medium · SOC**
+
+Three populations, three implementations of one rule:
+
+| Site | Population | Slip-proof test |
+|---|---|---|
+| `main.js:2395-2396` | party members (in and out of combat) | talent `slipImmune`, `wasSlipProof` **sampled before the step clock ticks**, `statusFx().slipProof`, `equippedStats().slipProof` |
+| `combat.js:3940` | AI units in combat | `statusFx().slipProof` only |
+| `actors.js:502` | wandering enemies | `statusFx().slipProof` only |
+
+Some of that divergence is legitimate — units carry no talents or equipment. The
+`wasSlipProof` rule is not: `main.js:2391-2393` spends three comment lines defending it
+("sampled BEFORE the step clock ticks, so the tile a gum wad wears off on still keeps its
+grip"), and neither other site has it. A unit whose gum expires on the step it is taking
+slips on that step; a member in the identical position does not.
+
+This is TODO Phase 5's "unify the per-tile step rules (gum/slip) into one module consumed
+by all three actor populations", still open. The chance function is already unified
+(`slipChanceAt`, passed through `world`) — it is the *reaction* that is triplicated, so the
+extraction is smaller than the TODO entry implies.
+
+## D. God mode ships to players, ungated, and persists across reloads
+
+**`src/main.js:3800` · medium · shipping**
+
+`main.js:51` imports `installGodMode` and `main.js:3800` calls it unconditionally.
+`build.mjs` has no `define`, no `drop`, no conditional entry point. Verified in the built
+artifact rather than inferred — after `npm run build`, `build/web/bundle.js` contains
+`escape-work.god`, `IntlBackslash`, `Backquote` and `showInternals`, one occurrence each.
+
+`god.js:73-76` binds backquote, `IntlBackslash` and F8 on `window`, with `preventDefault`.
+The panel reflects over live state: current hp, AP left this turn, statuses, enemy spawning
+(`god.js` header comment describes exactly this). `god.js:79-83` writes `escape-work.god` to
+localStorage and re-opens the panel on the next boot — so a player who hits backquote once
+by accident has it open for every session after, and the pins it can set are described in
+the file's own comment as "hp held at max is invulnerability, AP held at max is infinite
+actions".
+
+For a shipped single-player game this is not a security hole, and some projects ship cheats
+on purpose — hence designer question 2. What makes it worth listing is the *stickiness*: a
+stray keypress silently and permanently changes how the game plays for that player, and
+nothing on screen says so once the panel is closed.
+
+## E. `waitForTimeout` is the suite's dominant wait idiom, not a three-case exception
+
+**`tests/e2e/` · medium · test-gap**
+
+REVIEW.md (pass 1) flags this as a convention breach at three sites in `ranged.spec.js` and
+one in `editor.spec.js`. The real count at HEAD is **78 occurrences across 20 of the 30
+e2e specs** — including three inside `helpers.js` (`:52`, `:146`, `:223`), which every spec
+that boots the game runs through. The heaviest users are `tactics.spec.js` (13),
+`summons.spec.js` (6) and `surfaces.spec.js` (7).
+
+This is the mechanism behind the CI flakes TODO.md logs at length (`## E2e status`,
+`### The red on main`), and it is still spreading: the two specs added on this branch use it
+six more times (`camera.spec.js:61,74,102`, `melee-reach.spec.js:77,92,183`). The repo
+already has the right idiom — `expect.poll` on `window.__game` state, used well in
+`camera.spec.js:124-128` — so this is a mechanical sweep, not a design problem. Worth doing
+before the next "two DIFFERENT tests were flaky" entry gets written.
+
+## F. The ARCHITECTURE module map is missing four real modules
+
+**`ARCHITECTURE.md` · low · docs**
+
+The map that ARCHITECTURE.md calls the map of the code omits:
+
+| Module | Lines | Note |
+|---|---|---|
+| `src/powers.js` | 337 | has its own unit suite (`tests/unit/powers.test.js`) |
+| `src/portraits.js` | 211 | has its own e2e spec |
+| `src/data/actor-registries.js` | 65 | the shared actor-legend seam |
+| `src/data/looks.js` | 21 | `CUSTOM_RIGS` |
+
+TODO.md:790 already lists `powers` under a docs sweep; the other three are not recorded
+anywhere. Checked mechanically against the file tree, not by eye.
+
+## G. TODO.md still lists a fixed critical as the top open item
+
+**`TODO.md:329` · low · process**
+
+Phase 0's first unchecked box is "Fix the combat soft-lock (`combat.js:2060`): guard
+`handleEnemyClick`'s melee fall-through so armed buff/mobility actions never resolve as
+strikes; clamp `takeDamage` against non-finite amounts". **Both halves are done.**
+`combat.js:2891` now reads:
+
+```js
+const carries = a.purge || a.applies || Number.isFinite(a.amount);
+if (!isControl(a) && !carries
+  && !(Number.isFinite(a.min) && Number.isFinite(a.max))) {
+  refuse(`${a.label} is not aimed at them.`);
+  return;
+}
+```
+
+and `takeDamage` refuses non-finite amounts, as the surrounding comment states. The guard is
+also *better* than the one specified — it admits a dice-less action that carries a payload
+(Reboot's purge) instead of blanket-refusing by action type.
+
+This is the failure mode TODO.md's own 29-Jul audit named ("a delivered item and an unbuilt
+one looked identical, and the prose won"), recurring on the single highest-severity entry in
+the file. Anyone triaging by opening TODO.md and reading the first open box is pointed at
+work that no longer exists.
+
+## H. The two god closures, and where they actually split
+
+**`src/combat.js` (4,179 lines) · `src/main.js` (3,711 lines) · medium · god-file**
+
+Unchanged in character since pass 1, and both grew (combat.js was 3,136; main.js 2,947).
+Both are still a single top-level closure, so nothing inside either is unit-testable. The
+seams are visible in the source's own section comments, which is the useful part — these are
+not hypothetical carve lines, they are already marked:
+
+**`combat.js`**, cheapest first:
+
+- **The FX vocabulary** (`:510-570` — `hitFx`, `statusFxAt`, `deathFx`, `hazardKind`,
+  `surfaceStepCost`, `stepCost`). Needs `fx`, `world` and the surface registry; no combat
+  state. Pure lift.
+- **Pure geometry** (`coneTest` `:1283`, `zoneCells` `:2379`, `topplePlan` `:1997`,
+  `swingPointAt`/`hasSwingSpot` `:new`). Need `world` and a position; all currently
+  untestable and all rule-bearing.
+- **The DOM panel and initiative strip** (`:806-870`, `:1660-1790`). Roughly 200 lines of
+  view that reads `turns`, `active` and `members`. This is the biggest single block that is
+  not combat *rules*.
+- **The verb families** (`:2294-2560`: dash/swap, zone, control, friendly) — each already
+  has its own `POWERS_PLAN` section comment, each needs `active`, `world`, `log` and the
+  billing helpers. This is where the file's mass is, and the hardest to move.
+
+**`main.js`**: the per-tile step hooks (`:2288-2510`) — which is also where finding C's
+duplication lives, so the extraction pays twice — and the keyboard block (`:3011-3084`),
+which now dispatches eleven distinct bindings inline inside one `keydown` listener.
+
+I am not proposing this as scheduled work; TODO Phase 5 already carries it and the designer
+has consistently prioritised play over refactors. It is recorded here so the seams stay
+named as the files grow.
+
+## Priorities
+
+1. **Answer designer question 1**, then fix the combat camera (A). It is the only finding
+   here that a player feels every fight.
+2. **Seed the member slip roll** (B) — one line, and it restores a property `combat.js`
+   spent real effort on.
+3. **Unify the slip reaction** (C) while in there; B and C touch the same three sites.
+4. **Decide on god mode** (question 2), gate or document.
+5. **Sweep `waitForTimeout` → `expect.poll`** (E), starting with `helpers.js` since every
+   spec inherits it.
+6. **Correct TODO.md Phase 0 and the ARCHITECTURE map** (F, G) — both are cheap, and both
+   are actively misdirecting whoever reads them next.
