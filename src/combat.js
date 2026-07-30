@@ -23,6 +23,7 @@ import { STATUSES } from './data/statuses.js';
 import { blocksSight, PARTITION_TOPPLE } from './data/tiles.js';
 import { PANEL_CHROME, BUTTON_CHROME, actionDock, refreshDockVisibility } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
+import { slips, speedUnderStatus } from './step-rules.js';
 import {
   cheb, TARGET_R, SURPRISE_RADIUS, AROUND, ORTHO, reachOfUnit, posOf, withinReach,
   canReach as canReachAt, reachSpecOf, actRangeOf, verbReaches as verbReachesAt,
@@ -349,7 +350,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const syncUnitSpeed = (u) => {
     if (!u) return;
     if (u.baseSpeed === undefined) u.baseSpeed = u.speed;
-    u.speed = u.baseSpeed * (statusFx(u).speedMult ?? 1);
+    u.speed = speedUnderStatus(u.baseSpeed, statusFx(u));
   };
   // A debug/test pin (exposed as window.__combat.forceHit): true forces every
   // roll to hit, false forces a miss, null (the default) rolls honestly. It
@@ -4124,7 +4125,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         // so a seeded run reproduces the slips too - they end a whole turn, so
         // an unseeded one is exactly the kind of thing that makes a resolution
         // test flaky for reasons that have nothing to do with what it asserts.
-        if (unit.alive && !statusFx(unit).slipProof && rng() < (world.slipChanceAt(x, z) || 0)) {
+        if (unit.alive && slips({
+          chance: world.slipChanceAt(x, z),
+          roll: rng(),
+          slipProof: statusFx(unit).slipProof,
+        })) {
           unit.clearPath();
           unit.flinch();
           unit.slipped = true;

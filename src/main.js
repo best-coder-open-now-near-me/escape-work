@@ -44,6 +44,10 @@ import { createHoverLayer } from './hover.js';
 import { createVisionLayer } from './vision.js';
 import { createLooting } from './looting.js';
 import { createShopping } from './shopping.js';
+import {
+  surfaceEffect, rawSurfaceDamage, effectiveSurfaceDamage, slipChance, slips,
+  hasGum, surfacePathCost,
+} from './step-rules.js';
 import { startCombat } from './combat.js';
 import { cheb as chebOf, canReach as canReachAt } from './combat-geometry.js';
 import { startEditor } from './editor.js';
@@ -327,42 +331,34 @@ function startGame(level) {
   // NPCs stand on their tile and block movement like any body.
   const isWalkable = (x, z) => grid.terrainOpen(x, z) && !enemyAt(x, z) && !npcAt(x, z);
   // Surface queries, consulting the runtime (fire) before static state.
-  const surfEffect = (x, z) => {
-    if (runtime.isBurning(x, z)) return FIRE.onEnter;
-    if (grid.isElectrified(x, z)) return ELECTRIFIED.onEnter;
-    return SURFACES[runtime.surfaceAt(x, z)]?.onEnter || null;
-  };
+  // The floor's raw facts at a tile, as step-rules.js wants them. Reading the
+  // dynamic layer (fire) here and the rules THERE is what stops the surface
+  // rules from being re-derived per caller: everything below is the same
+  // question asked of the same fact sheet.
+  const floorAt = (x, z) => ({
+    burning: runtime.isBurning(x, z),
+    electrified: grid.isElectrified(x, z),
+    surfaceId: runtime.surfaceAt(x, z),
+  });
+  const surfEffect = (x, z) => surfaceEffect(floorAt(x, z));
   // Raw surface damage on a cell, before anyone's talents. ENEMY decisions
   // (pathing, wander avoidance) run on this: what hurts a coworker has
   // nothing to do with the player's shoes.
-  const rawSurfDamage = (x, z) => surfEffect(x, z)?.amount || 0;
+  const rawSurfDamage = (x, z) => rawSurfaceDamage(floorAt(x, z));
   // What a step actually costs a party member, after their talents (Origami
   // Specialist, ESD Steel-Toes). Defaults to the leader - the one whose
   // pathing decisions this shapes.
-  const effectiveSurfDamage = (x, z, s = sheet) => {
-    const fx = surfEffect(x, z);
-    if (!fx || !fx.amount) return 0;
-    const t = s?.talent?.effects || {};
-    if (t.shockImmune && grid.isElectrified(x, z) && !runtime.isBurning(x, z)) return 0;
-    if (t.paperCutImmune && runtime.surfaceAt(x, z) === 'paper' && !runtime.isBurning(x, z)) return 0;
-    // surfaceDamageResist is a RESERVED talent effect - the handler is live but
-    // no class/companion sets it yet (a future flat surface-armor perk plugs in
-    // here with zero systems change). See ARCHITECTURE.md talents.
-    return Math.max(0, fx.amount - (t.surfaceDamageResist || 0));
-  };
+  const effectiveSurfDamage = (x, z, s = sheet) =>
+    effectiveSurfaceDamage(floorAt(x, z), s?.talent?.effects);
   const isHazard = (x, z) => effectiveSurfDamage(x, z) > 0;
   const enemyIsHazard = (x, z) => rawSurfDamage(x, z) > 0;
-  // Wet floors are SLIPPERY - unless electrified or burning, which are
-  // different problems. Chance per tile entered; safety tread ignores it.
-  // Talent-free by design: enemies consult it too.
-  const slipChanceAt = (x, z) => {
-    if (grid.isElectrified(x, z) || runtime.isBurning(x, z)) return 0;
-    return SURFACES[runtime.surfaceAt(x, z)]?.slippery || 0;
-  };
+  const slipChanceAt = (x, z) => slipChance(floorAt(x, z));
   // A gum wad sticks to whoever steps on it - the tile is spent (the wad is
-  // on their shoe now). Returns true if there was gum to collect.
+  // on their shoe now). Returns true if there was gum to collect. The rule is
+  // step-rules.hasGum; retiring the wad is this file's, because it touches the
+  // grid and the scene.
   const stickGum = (x, z) => {
-    if (runtime.surfaceAt(x, z) !== 'gum') return false;
+    if (!hasGum(floorAt(x, z))) return false;
     grid.setType(x, z, 'floor');
     scene.hideSurfaceVisual(x, z);
     return true;
@@ -372,19 +368,12 @@ function startGame(level) {
   // way; smoothing must never straighten a route through a damaging cell the
   // route avoided. The player and enemies get separate cost models - talents
   // discount only the player's.
-  const hazardCostFor = (ms) => (x, z) => {
-    if (runtime.isBurning(x, z)) return FIRE.pathCost;
-    if (grid.isElectrified(x, z)) {
-      return ms?.talent?.effects?.shockImmune ? 1 : ELECTRIFIED.pathCost;
-    }
-    return SURFACES[runtime.surfaceAt(x, z)]?.pathCost || 0;
-  };
+  const hazardCostFor = (ms) => (x, z) => surfacePathCost(floorAt(x, z), ms?.talent?.effects);
   const hazardCost = (x, z) => hazardCostFor(sheet)(x, z); // the leader's cost model
-  const enemyHazardCost = (x, z) => {
-    if (runtime.isBurning(x, z)) return FIRE.pathCost;
-    if (grid.isElectrified(x, z)) return ELECTRIFIED.pathCost;
-    return SURFACES[runtime.surfaceAt(x, z)]?.pathCost || 0;
-  };
+  // The enemy model is the same rule with NO talents - your shoes are not
+  // their problem, and passing the leader's would have them fearing exactly
+  // the tiles you are immune to.
+  const enemyHazardCost = (x, z) => surfacePathCost(floorAt(x, z));
   const clearOfHazards = (x, z) => isWalkable(x, z) && !isHazard(x, z);
   const enemyClearOfHazards = (x, z) => isWalkable(x, z) && !enemyIsHazard(x, z);
 
@@ -2419,10 +2408,13 @@ function startGame(level) {
   // is traction. `wasSlipProof` is sampled BEFORE the step clock ticks, so the
   // tile a gum wad wears off on still keeps its grip.
   function maybeSlip(ms, actor, x, z, wasSlipProof, say) {
-    if (gameOver || ms.talent?.effects?.slipImmune) return;
-    if (wasSlipProof || statusFx(ms).slipProof || equippedStats(ms).slipProof) return;
-    const chance = slipChanceAt(x, z);
-    if (!chance || Math.random() >= chance) return;
+    if (gameOver) return;
+    if (!slips({
+      chance: slipChanceAt(x, z),
+      roll: Math.random(),
+      slipProof: wasSlipProof || statusFx(ms).slipProof || equippedStats(ms).slipProof,
+      slipImmune: ms.talent?.effects?.slipImmune,
+    })) return;
     actor.clearPath();
     actor.flinch();
     vfx.impact(x, z, 'slip', { y: 0.12 });
@@ -3285,7 +3277,10 @@ function startGame(level) {
         partyAt(x, z)
         || summonAt(x, z)
         || enemies.some((e) => e.alive && e !== self && e.x === x && e.z === z),
-      slips: (x, z) => Math.random() < slipChanceAt(x, z),
+      // The CHANCE, not a pre-rolled verdict: actors.js runs the same
+      // step-rules.slips predicate combat and the party do, so the tread that
+      // saves a wanderer is checked by the same rule that saves you.
+      slipChanceAt,
       stickGum,
       // A wander route never crosses hazards, other actors, or a party
       // member's tile; the enemy's own start tile counts as open. Returns it
