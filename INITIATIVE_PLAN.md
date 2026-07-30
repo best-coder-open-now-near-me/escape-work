@@ -17,35 +17,9 @@ slot, and the ability to change who you're steering mid-turn.
 
 ## Questions for the designer
 
-Two of the three questions this plan opened have been answered and now live in
-the decisions table as #6 and #7, `[ratified]`. One is open.
-
-**Q3 — Does the initiative strip still show each member's rolled number inside
-a group?** Every row shows its total today (`Dana · 14/18 (17)`). Under
-adjacency, a group's members have *different* numbers — they share a turn
-because they're neighbours in the order, not because they tied.
-
-- **A (recommended): keep the numbers, add a bracket** around the group, mark
-  who you're steering, tick the ones already finished. The bracket is what
-  explains the grouping; the numbers stay honest about the roll.
-
-  ```
-  INITIATIVE
-  ┌ SHARED TURN ──────────────────
-  │ ▸ Dana      · 14/18  (17)      <- steering
-  │   Marcus    · 12/12  (14)  ✓   <- already ended its turn
-  │   Priya     ·  9/15  (12)
-  └───────────────────────────────
-      Manager   · 20/20  (11)
-      Coworker  ·  8/14  (9)
-  ```
-
-- **B: hide the individual numbers inside a group** and show one range on the
-  bracket (`SHARED TURN (17–12)`). Removes the "why are 17, 14 and 12 acting
-  together?" question, at the cost of hiding a roll the player may want.
-
-Affects decision #10. A one-line change either way — worth seeing in play
-before settling.
+None open. All three questions this plan raised have been answered and now live
+in the decisions table wearing `[ratified]` — the group cap (#6), the mid-group
+joiner (#7), and what the strip shows (#10).
 
 ## Where we are today
 
@@ -125,7 +99,9 @@ turns](https://forums.larian.com/ubbthreads.php?ubb=showflat&Number=747065),
   next un-acted member of the group. The group's turn ends — and initiative
   moves on — when every held member is done or unable to act.
 - **A strip that shows it.** The initiative tracker brackets the group, marks
-  who you're steering, and greys the ones already finished.
+  who you're steering, and greys the ones already finished — and loses the
+  rolled number it prints on every row today, which was only ever debug output
+  in a player-facing panel.
 
 Not in this plan: enemy-side grouping. The AI stays one unit at a time.
 
@@ -142,7 +118,7 @@ Not in this plan: enemy-side grouping. The AI stays one unit at a time.
 | 7 | **A mid-fight joiner never joins an already-open group** — it acts from the next round | `[ratified]` (designer, 2026-07-30: "dont let mid-group summons act for now") | `turns.insert` can splice a fresh summon inside the live run. Letting it act immediately turns a 3-AP summon into a fresh 5-AP body this turn. The "for now" is noted: this is the conservative half of a balance question, not a permanent rule. |
 | 8 | **The group is computed when the turn opens and frozen for its duration** | `[proposed]` | `turns.replace` changes a slot's *team* mid-round (a charmed coworker becomes a member, `TODO.md:820`). Recomputing live would grow or split the group under the player's hands mid-turn; freezing means a charm landing during your shared turn takes effect next round. |
 | 9 | **In-combat steering does NOT go through `switchLeader`** | `[proposed]` | `switchLeader` re-keys the *out-of-combat* bindings (`sheet`, `player`, follower set, "You take point as…"). Combat already has the correct primitive in `makeActive`. The four entry points get routed to a new `combat.steer(member)` instead of having their `inCombat` guard loosened. |
-| 10 | **The strip brackets the group, keeps each row's rolled number**, marks the steered member and greys the finished | `[proposed]` — see **Q3** | The numbers are what justify a group of unequal rolls; the bracket is the explanation. |
+| 10 | **The strip brackets the group**, marks the steered member and greys the finished — and **drops the rolled number from every row**, grouped or not | `[ratified]` (designer, 2026-07-30: "why would we even have numbers? itll be nothing but noise to the player") | The number reads as debug output left in: the ORDER already says who acts when, and a raw `(17)` teaches nothing about why. This plan had proposed keeping it to justify a group of unequal rolls — the bracket does that job without a number to interpret. Nothing testable depends on it: `party.spec.js:108` asserts `init` off the debug API (`__combat.order`), not the DOM, so the roll stays available for tests and the debug surface while leaving the player's view. Deletes the `(${s.init})` span at `combat.js:1567`. |
 | 11 | **A member who can't act is finished individually**, not by ending the group's turn | `[proposed]` | `skipTurnFor` currently returns `'advance'` for a member (`combat.js:3119`), which under grouping would hand the whole group's turn away because one member is stunned. |
 | 12 | **If the steered member drops, steering passes to another un-acted member** of the group; the group's turn continues | `[proposed]` | `notifyMemberDown` (`combat.js:1487`) currently ends the acting turn outright. Losing one member to a dot shouldn't cost the other two their turn. |
 
@@ -217,8 +193,19 @@ members currently holding a shared turn.
    act in the engine's order, and End Turn walks the group.
 3. **Steering.** `combat.steer` + the four `main.js` entry points. This is the
    milestone that makes the feature feel like BG3.
-4. **The strip.** Bracket, steered marker, greyed-out finished rows, per-member
-   AP read (decision #10 / Q3).
+4. **The strip.** Bracket, steered marker, finished rows greyed, and the rolled
+   number gone from every row (decision #10):
+
+   ```
+   INITIATIVE
+   ┌ SHARED TURN ─────────────
+   │ ▸ Dana      · 14/18       <- steering
+   │   Marcus    · 12/12   ✓   <- already ended its turn
+   │   Priya     ·  9/15
+   └──────────────────────────
+       Manager   · 20/20
+       Coworker  ·  8/14
+   ```
 5. **The edges.** Decisions #7, #8, #11, #12 — joiner into an open group, frozen
    membership across a charm, a stunned member inside a group, the steered
    member dropping. Each gets a test.
