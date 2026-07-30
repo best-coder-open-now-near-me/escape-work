@@ -25,7 +25,10 @@
 // Where a new thing goes: by what it IS on screen. A panel joins panels.js
 // beside the others and inherits their shape - a dumb view over a host-supplied
 // view-model, rendering and reporting clicks, knowing no rules.
-export { PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, addVignette } from './ui/chrome.js';
+export {
+  PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, addVignette,
+  actionDock, refreshDockVisibility,
+} from './ui/chrome.js';
 export { say, setNarrationGate, narrationLog, narrationEntries, setFocusBanner, toast } from './ui/readouts.js';
 export {
   updateStatsHud, createTacticalButton, createHotbar, HOTBAR_ROW_SLOTS,
@@ -39,4 +42,4 @@ export {
   showLevelUpScreen, showWinScreen, showFloorClear, showLoseScreen,
   showClassPicker, showGameMenu, showPlaytestBadge,
 } from './ui/screens.js';
-export { showBadgeStep } from './ui/creation.js';
+export { showCreationStep } from './ui/creation.js';

@@ -9,10 +9,11 @@ import { findPath } from '../../src/pathfinding.js';
 import { existsSync } from 'node:fs';
 import { TILE_TYPES, blocksSight } from '../../src/data/tiles.js';
 import { ENEMY_TYPES, ENEMY_KITS } from '../../src/data/enemies.js';
+import { parseActorRef } from '../../src/data/actor-registries.js';
 import { NPCS } from '../../src/data/npcs.js';
 import { COMPANIONS, COMPANION_KITS } from '../../src/data/companions.js';
 import { CLASSES, MERGED_PER_KEY } from '../../src/data/classes.js';
-import { ACTIONS } from '../../src/data/actions.js';
+import { ACTIONS, summonSpec } from '../../src/data/actions.js';
 import { ITEMS, LOOT_TABLES } from '../../src/data/items.js';
 import { SHOPS } from '../../src/data/shops.js';
 import { LEVELS, FIRST_LEVEL } from '../../src/data/levels.js';
@@ -83,6 +84,31 @@ test('every registry cross-reference resolves', () => {
         }
         assert.notDeepEqual(val, base[key],
           `${regName}.${id}.${key} just repeats ${kit.classId}.${key} - delete it and inherit`);
+      }
+    }
+  }
+
+  // The check above compares a `track` override against the class's AS A WHOLE
+  // ARRAY, and two arrays of different length are trivially unequal - so it
+  // passes any override that renames a node, which is exactly how the IT
+  // companion's `intern-fast-learner` (a relabelled `it-root`, same +1 savvy)
+  // survived the lint that was written to catch it. Compare EFFECTS, which is
+  // the part the rules actually read: an id and a name are free to differ, a
+  // duplicated effect is a second copy of a class node under a new label.
+  //
+  // Overriding a track at all is also worth a hard look - it REPLACES rather
+  // than merges, so a shorter override silently deletes the class nodes it
+  // omits. That is how an IT person who joined the party lost the ability to
+  // ever learn two of IT Support's own actions.
+  for (const [regName, kits] of ARCHETYPE_KITS) {
+    for (const [id, kit] of Object.entries(kits)) {
+      if (!kit.classId || !kit.track) continue;
+      const classTrack = CLASSES[kit.classId].track || [];
+      for (const node of kit.track) {
+        const twin = classTrack.find((b) => JSON.stringify(b.effect) === JSON.stringify(node.effect));
+        assert.ok(!twin,
+          `${regName}.${id}.track "${node.id}" has the same effect as ${kit.classId}'s `
+          + `"${twin?.id}" - it is that node renamed, so delete it and inherit the track`);
       }
     }
   }
@@ -174,7 +200,10 @@ test('every registry cross-reference resolves', () => {
       `action "${id}" leaves "${a.leaves}", which must carry a surface to be worth painting`);
   }
   for (const [id, def] of Object.entries(ENEMY_TYPES)) {
-    if (def.summon) assert.ok(CLASSES[def.summon.archetype] || ENEMY_TYPES[def.summon.archetype], `enemy "${id}" summons a real archetype`);
+    // summonSpec, because a descriptor may inherit its archetype from the
+    // ACTION it is the AI-side twin of rather than restating it.
+    const arch = summonSpec(def.summon)?.archetype;
+    if (def.summon) assert.ok(CLASSES[arch] || ENEMY_TYPES[arch], `enemy "${id}" summons a real archetype`);
   }
   // Tile loot tables exist, and every table entry names a real item.
   for (const [id, def] of Object.entries(TILE_TYPES)) {
@@ -374,11 +403,23 @@ for (const f of files) {
       assert.equal(TILE_TYPES[type].char, ch,
         `char "${ch}" is canonical for "${type}" (the editor round-trips on canonical chars)`);
     }
-    for (const [ch, actor] of Object.entries(data.actors)) {
-      if (actor === 'player') continue;
+    for (const [ch, ref] of Object.entries(data.actors)) {
+      if (ref === 'player') continue;
+      const { id: actor, level: tier } = parseActorRef(ref);
       const reg = ENEMY_TYPES[actor] || NPCS[actor] || COMPANIONS[actor]; // enemies, NPCs, or recruits
       assert.ok(reg, `actor type "${actor}" exists`);
-      assert.equal(reg.char, ch, `char "${ch}" is canonical for "${actor}"`);
+      if (tier == null) {
+        assert.equal(reg.char, ch, `char "${ch}" is canonical for "${actor}"`);
+        continue;
+      }
+      // A TIERED placement must NOT use the canonical char: that char already
+      // means "this actor at the floor's depth", so sharing it would make the
+      // two indistinguishable on the map and collapse them on an editor round
+      // trip. It just has to be a char nothing else in this level has claimed.
+      assert.notEqual(reg.char, ch,
+        `char "${ch}" is canonical for "${actor}" - a tiered placement needs its own`);
+      assert.ok(!data.tiles[ch], `char "${ch}" is already a tile in ${f}`);
+      assert.equal(Object.keys(data.actors).filter((c) => c === ch).length, 1);
     }
   });
 
@@ -491,17 +532,18 @@ test('every enemy type is placed on some shipped floor, or is explicitly a summo
   // by legend.
   const placed = new Set();
   for (const level of Object.values(LEVELS)) {
-    for (const id of Object.values(level.actors || {})) placed.add(id);
+    // Through parseActorRef, so a tiered placement ("manager@3") counts as
+    // placing the Manager - it is the same enemy at a point on the curve.
+    for (const v of Object.values(level.actors || {})) placed.add(parseActorRef(v).id);
   }
   const summonable = new Set(
     Object.values(ACTIONS).map((a) => a.archetype).filter(Boolean));
-  // Authored AHEAD of the floor that will use it: a level-4, 30 HP boss with
-  // its own legend char, on a campaign that currently ships two floors. Named
-  // rather than blanket-skipped, so a NEW orphan still fails this - which is
-  // the whole point of the lint.
-  const notYetPlaced = new Set(['regional-executive']);
+  // No standing exemptions. There used to be one - a level-4 boss authored
+  // ahead of the floor that would use it - and it was a hand-written tier
+  // variant of the Executive, so it went when the curve learned to be asked
+  // for a tier directly. If a new orphan needs an exemption, ask whether it is
+  // a real enemy or another variant first.
   for (const id of Object.keys(ENEMY_TYPES)) {
-    if (notYetPlaced.has(id)) continue;
     assert.ok(placed.has(id) || summonable.has(id) || ENEMY_TYPES[id].summonOnly,
       `enemy type "${id}" is never placed on a floor and never summoned`);
   }

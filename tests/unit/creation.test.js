@@ -115,282 +115,211 @@ test('cloneMaterials does not recolour the shared .glb material', () => {
     'every other character built from this rig must be untouched');
 });
 
-// --- the draft -> sheet rule (CHARACTER_PLAN M3/M5) ------------------------
+
+// --- the two doors ----------------------------------------------------------
+// A precut character is one of the six, played as written. A custom one is
+// somebody you make. The rule that matters most is that neither door invents a
+// second way to build a sheet: both end at createCharacter.
 const {
-  createDraft, createCharacter, cleanName, spendDraftPoint, undoDraftPoint,
-  pointsLeft, draftAttr, CREATION_POINTS, DEFAULT_PRONOUNS, NAME_MAX,
+  createDraft, createCharacter, draftModel, draftLook, draftName, draftAttr,
+  spendDraftPoint, unspendDraftPoint, spentOn, pointsLeft, cleanName, pronounsOf, verb,
+  CREATION_POINTS, NAME_MAX,
 } = await import('../../src/creation.js');
 const { createSheet } = await import('../../src/stats.js');
 const { CLASSES } = await import('../../src/data/classes.js');
+const { CUSTOM_RIGS } = await import('../../src/data/looks.js');
+const { COMPANIONS } = await import('../../src/data/companions.js');
+const { ENEMY_TYPES } = await import('../../src/data/enemies.js');
 
-test('an untouched draft reproduces today character exactly', () => {
-  // This is what makes "skip the paperwork" a real skip rather than a subtly
-  // different character - and it is the invariant the whole ordering rule in
-  // createCharacter exists to protect.
-  for (const id of Object.keys(CLASSES).filter((k) => CLASSES[k].playable !== false)) {
-    const picked = createSheet(id);
-    const created = createCharacter(createDraft(id));
-    for (const field of ['className', 'maxHp', 'maxAp', 'level', 'bonusDmg']) {
-      assert.deepEqual(created[field], picked[field], `${id}: ${field}`);
-    }
-    assert.deepEqual(created.attr, picked.attr, `${id}: attributes`);
-    assert.deepEqual(created.base, picked.base, `${id}: the solved base residual`);
+test('an untouched precut draft reproduces the class character exactly', () => {
+  for (const id of Object.keys(CLASSES).filter((c) => CLASSES[c].playable !== false)) {
+    const made = createCharacter(createDraft(id));
+    const plain = createSheet(id);
+    // Pronouns are the one field creation adds to a precut character.
+    delete made.pronouns;
+    assert.deepEqual(made, plain, `${id} built from an untouched draft is the class character`);
   }
 });
 
-test('spent points actually land - the base residual does not cancel them', () => {
-  // The trap: feeding a MODIFIED spread into createSheet re-solves `base`
-  // against the class's headline maxHp/maxAp, so the sheet would read +1 Grit
-  // with unchanged HP. Building pristine and then spending avoids it.
-  const plain = createSheet('office-drone');
-  const draft = createDraft('office-drone');
-  spendDraftPoint(draft, 'grit');
-  spendDraftPoint(draft, 'grit');
-  const built = createCharacter(draft);
-
-  assert.equal(built.attr.grit, plain.attr.grit + 2, 'the attribute rose');
-  assert.ok(built.maxHp > plain.maxHp, 'and the derived HP rose with it');
-  assert.equal(built.attrPoints, 0, 'both points were spent, not banked');
+test('a precut character is named for the job and carries no rig of its own', () => {
+  const sheet = createCharacter(createDraft('security'));
+  assert.equal(sheet.name, CLASSES.security.name);
+  assert.equal(sheet.className, CLASSES.security.name);
+  // No `rig` means it keeps tracking the class entry, so a later art change
+  // still reaches a character who never chose otherwise.
+  assert.equal(sheet.rig, undefined);
+  assert.equal(sheet.model, CLASSES.security.model);
+  assert.equal(draftLook(createDraft('security')), CLASSES.security.look);
 });
 
-test('a draft spends at most its two points', () => {
-  const draft = createDraft('office-drone');
-  assert.equal(pointsLeft(draft), CREATION_POINTS);
-  for (let i = 0; i < 10; i++) spendDraftPoint(draft, 'savvy');
-  assert.equal(draft.spends.length, CREATION_POINTS, 'the pool is a hard cap');
-  assert.equal(pointsLeft(draft), 0);
-
-  undoDraftPoint(draft);
-  assert.equal(pointsLeft(draft), 1, 'and a point can be taken back');
-  assert.equal(draftAttr(draft).savvy, CLASSES['office-drone'].attr.savvy + 1,
-    'draftAttr previews the spread without minting a sheet');
+test('a precut draft has no name or rig to edit in the first place', () => {
+  const d = createDraft('office-drone');
+  assert.equal(d.custom, undefined);
+  assert.equal(d.name, undefined);
+  assert.equal(d.rig, undefined);
+  assert.equal(draftName(d), 'Office Drone');
 });
 
-test('an unknown attribute is not spendable', () => {
-  const draft = createDraft('office-drone');
-  spendDraftPoint(draft, 'charisma'); // not an office attribute
-  assert.equal(draft.spends.length, 0);
+test('a custom character types a name and takes a body nobody else wears', () => {
+  const d = createDraft('it-support', { custom: true });
+  assert.equal(d.custom, true);
+  assert.ok(CUSTOM_RIGS.includes(d.rig), 'starts on a real custom rig');
+  d.name = '  Dana   Wu  ';
+  d.rig = CUSTOM_RIGS[1];
+  const sheet = createCharacter(d);
+  assert.equal(sheet.name, 'Dana Wu', 'collapsed and trimmed');
+  assert.equal(sheet.className, CLASSES['it-support'].name, 'the JOB is still the job');
+  assert.equal(sheet.rig, CUSTOM_RIGS[1]);
+  assert.equal(sheet.model, CUSTOM_RIGS[1], 'the chosen body wins over the class body');
+  assert.equal(draftLook(d), null, 'a borrowed rig carries no class look');
 });
 
-test('the name is cleaned, clamped, and falls back to the job', () => {
-  assert.equal(cleanName('  Dana   Scully  '), 'Dana Scully', 'runs of whitespace collapse');
-  assert.equal(cleanName('x'.repeat(200)).length, NAME_MAX, 'and it cannot break the HUD card');
-  assert.equal(cleanName('   ', 'Mail Room'), 'Mail Room', 'clearing the field means "use the job"');
-  assert.equal(cleanName(null, 'Mail Room'), 'Mail Room');
+test('a custom character with a blank name falls back to the job', () => {
+  const d = createDraft('mail-room', { custom: true });
+  d.name = '   ';
+  assert.equal(createCharacter(d).name, CLASSES['mail-room'].name);
 });
 
-test('pronouns default to they/them and reject anything unknown', () => {
-  const draft = createDraft('office-drone');
-  assert.equal(createCharacter(draft).pronouns, DEFAULT_PRONOUNS);
-  assert.equal(createCharacter({ ...draft, pronouns: 'she' }).pronouns, 'she');
-  assert.equal(createCharacter({ ...draft, pronouns: 'xyzzy' }).pronouns, DEFAULT_PRONOUNS,
-    'a malformed draft falls back rather than storing junk');
-});
-
-test('a typed name survives onto the sheet, and className stays the job', () => {
-  const draft = createDraft('mail-room');
-  draft.name = 'Dana';
-  const sheet = createCharacter(draft);
-  assert.equal(sheet.name, 'Dana');
-  assert.equal(sheet.className, CLASSES['mail-room'].name,
-    'every rule that reads the JOB keeps reading the job');
-});
-
-// --- the wardrobe (CHARACTER_PLAN M4) --------------------------------------
-const { RIGS, TINTS, BUILD_RANGE, clampBuild } = await import('../../src/data/looks.js');
-const { draftModel, draftLook } = await import('../../src/creation.js');
-const { lookOf } = await import('../../src/stats.js');
-const fs = await import('node:fs');
-
-test('every rig in the wardrobe is a .glb that actually ships', () => {
-  // A rig naming a missing asset is a character who cannot be rendered - the
-  // failure arrives as a blank spawn tile, which reads as an engine bug.
-  const shipped = new Set(fs.readdirSync('assets/characters')
-    .filter((f) => f.endsWith('.glb')).map((f) => f.replace(/\.glb$/, '')));
-  for (const id of Object.keys(RIGS)) {
-    assert.ok(shipped.has(id), `RIGS.${id} has no assets/characters/${id}.glb`);
-  }
-});
-
-test('every class model is offerable as a rig', () => {
-  // Otherwise a class could wear a body the player is not allowed to choose,
-  // which makes the wardrobe read as arbitrary rather than complete.
-  for (const [id, cls] of Object.entries(CLASSES)) {
-    if (cls.playable === false || !cls.model) continue;
-    assert.ok(RIGS[cls.model], `${id} wears "${cls.model}", which is not in RIGS`);
-  }
-});
-
-test('every tint darkens or shifts - none of them brighten', () => {
-  // Tints multiply the rig's baked diffuse, so a channel above 1 would blow the
-  // colour out rather than tint it.
-  for (const t of TINTS) {
-    assert.equal(t.rgb.length, 3, `${t.id} needs three channels`);
-    for (const c of t.rgb) {
-      assert.ok(c > 0 && c <= 1, `${t.id} channel ${c} must be within (0, 1]`);
-    }
-  }
-  assert.equal(new Set(TINTS.map((t) => t.id)).size, TINTS.length, 'tint ids are unique');
-});
-
-test('the build dials stay inside the range the shipped art already uses', () => {
-  for (const [key, r] of Object.entries(BUILD_RANGE)) {
-    assert.ok(r.min < r.max, `${key} range is inverted`);
-    assert.ok(r.step > 0, `${key} needs a step`);
-    assert.ok(r.label, `${key} needs a player-facing label`);
-  }
-  // clampBuild is the gate everything passes through - a hand-edited save, an
-  // older palette, a future re-tune. applyCharacterProportions has no opinion
-  // about what is sane and a torso of 40 is a broken-looking body.
-  assert.deepEqual(clampBuild({ legs: 99, torso: -5 }),
-    { legs: BUILD_RANGE.legs.max, torso: BUILD_RANGE.torso.min });
-  assert.equal(clampBuild(null), null);
-  assert.equal(clampBuild({ nonsense: 3 }), null, 'unknown dials are dropped, not clamped');
-});
-
-test('an untouched draft records NO look, so it keeps tracking its class', () => {
-  // The difference matters: freezing a copy of the class look at creation would
-  // mean a later art change never reaches a character who chose nothing.
-  const draft = createDraft('office-drone');
-  assert.equal(draftLook(draft), null);
-  const sheet = createCharacter(draft);
-  assert.equal(sheet.look, undefined);
-  assert.deepEqual(lookOf(sheet), CLASSES['office-drone'].look ?? null);
-});
-
-test('a chosen rig and tint land on the sheet and win over the class', () => {
-  const draft = createDraft('office-drone');
-  draft.rig = 'executive';
-  draft.tint = TINTS[2].rgb;
-  const sheet = createCharacter(draft);
-  assert.equal(sheet.rig, 'executive');
-  assert.equal(sheet.model, 'executive', 'the body follows the choice');
-  assert.deepEqual(lookOf(sheet).tint, TINTS[2].rgb);
-  assert.equal(draftModel(draft), 'executive');
+test('a rig nobody offers is refused, and the class body takes over', () => {
+  const d = createDraft('security', { custom: true });
+  d.rig = 'executive'; // a boss's body - not in the custom wardrobe
+  assert.equal(draftModel(d), CLASSES.security.model);
+  assert.equal(createCharacter(d).rig, undefined);
 });
 
 test('draftModel falls back to the class body when nothing is chosen', () => {
-  assert.equal(draftModel(createDraft('it-support')), CLASSES['it-support'].model);
-  assert.equal(draftModel({ classId: 'it-support', rig: 'not-a-rig' }), CLASSES['it-support'].model,
-    'an unknown rig is ignored rather than rendered');
+  assert.equal(draftModel(createDraft('human-resources')), CLASSES['human-resources'].model);
 });
 
-// --- backgrounds (CHARACTER_PLAN M5) ---------------------------------------
-const { BACKGROUNDS } = await import('../../src/data/backgrounds.js');
-const { ITEMS } = await import('../../src/data/items.js');
-const { ACTIONS } = await import('../../src/data/actions.js');
-const { EQUIP_SLOTS, ATTR_KEYS } = await import('../../src/stats.js');
-
-test('every background is a SWAP - its attrBonus sums to zero', () => {
-  // The load-bearing lint. Eight free stat lifts at creation would blow through
-  // the curve-neutrality rule startGear was introduced under, and would make
-  // exactly one background correct for every class. A swap costs something.
-  for (const [id, bg] of Object.entries(BACKGROUNDS)) {
-    const bonus = bg.effect?.attrBonus || {};
-    const sum = Object.values(bonus).reduce((a, b) => a + b, 0);
-    assert.equal(sum, 0, `${id} sums to ${sum} - a background must give and take`);
-    assert.ok(Object.keys(bonus).length >= 2, `${id} must move at least two attributes`);
-    for (const k of Object.keys(bonus)) {
-      assert.ok(ATTR_KEYS.includes(k), `${id} moves "${k}", which is not an attribute`);
-    }
+// --- the wardrobe -----------------------------------------------------------
+test('every custom rig is a .glb that actually ships', async () => {
+  const { existsSync } = await import('node:fs');
+  for (const rig of CUSTOM_RIGS) {
+    assert.ok(existsSync(`assets/characters/${rig}.glb`), `assets/characters/${rig}.glb exists`);
   }
 });
 
-test('every background is presentable and its content resolves', () => {
-  for (const [id, bg] of Object.entries(BACKGROUNDS)) {
-    assert.ok(bg.name && bg.blurb && bg.line, `${id} needs name, blurb and read-back line`);
-    for (const [slot, itemId] of Object.entries(bg.gear || {})) {
-      assert.ok(EQUIP_SLOTS.includes(slot), `${id} names slot "${slot}"`);
-      assert.ok(ITEMS[itemId], `${id} grants "${itemId}", which is not an item`);
-      assert.equal(ITEMS[itemId].slot, slot, `${id}: ${itemId} does not go in ${slot}`);
-    }
-    if (bg.effect?.grantsAction) {
-      assert.ok(ACTIONS[bg.effect.grantsAction], `${id} grants a missing action`);
-    }
+// The rule the old wardrobe broke. It offered all twelve rigs, so you could
+// start the game wearing the Executive you fight on the last floor, or the IT
+// person who later joins your party. A body belongs to whoever the game says it
+// belongs to, and the custom wardrobe is only what is left over.
+test('no custom rig is worn by anybody in the cast', () => {
+  const taken = new Map();
+  for (const [id, c] of Object.entries(CLASSES)) if (c.model) taken.set(c.model, `class "${id}"`);
+  for (const [id, c] of Object.entries(COMPANIONS)) if (c.model) taken.set(c.model, `companion "${id}"`);
+  for (const [id, c] of Object.entries(ENEMY_TYPES)) if (c.model) taken.set(c.model, `enemy "${id}"`);
+  for (const rig of CUSTOM_RIGS) {
+    assert.ok(!taken.has(rig),
+      `custom rig "${rig}" is worn by ${taken.get(rig)} - take it out of CUSTOM_RIGS or give them another body`);
   }
 });
 
-test('a background swap lands on the sheet and moves the derived numbers', () => {
-  const plain = createCharacter(createDraft('office-drone'));
-  const draft = createDraft('office-drone');
-  draft.background = 'night-shift'; // +1 grit, -1 hustle
-  const built = createCharacter(draft);
-
-  assert.equal(built.background, 'night-shift', 'recorded as what happened');
-  assert.equal(built.attr.grit, plain.attr.grit + 1);
-  assert.equal(built.attr.hustle, plain.attr.hustle - 1);
-  assert.ok(built.maxHp > plain.maxHp, 'and Grit really did buy HP');
-  assert.equal(built.hp, built.maxHp, 'a fresh character starts whole');
+test('the custom wardrobe is not empty', () => {
+  assert.ok(CUSTOM_RIGS.length > 0, 'a custom character needs somewhere to start');
+  assert.equal(new Set(CUSTOM_RIGS).size, CUSTOM_RIGS.length, 'no duplicates');
 });
 
-test('a background fills only an EMPTY slot - the class keeps its signature piece', () => {
-  // Expensed It grants a stress ball, which is also the Drone's own startGear.
-  const drone = createDraft('office-drone');
-  drone.background = 'expensed-it';
-  const droneSheet = createCharacter(drone);
-  const plainDrone = createCharacter(createDraft('office-drone'));
-  assert.equal(droneSheet.equipped.trinket, plainDrone.equipped.trinket,
-    'the Drone keeps the class trinket - nothing was overwritten');
-
-  // Any other class arrives carrying one.
-  const other = createDraft('it-support');
-  other.background = 'expensed-it';
-  const otherSheet = createCharacter(other);
-  assert.equal(otherSheet.equipped.trinket, 'stress-ball');
-  assert.equal(otherSheet.equipped.weapon, createCharacter(createDraft('it-support')).equipped.weapon,
-    'and its own weapon is untouched');
+// --- the self-assessment ----------------------------------------------------
+test('spent points actually land - the base residual does not cancel them', () => {
+  const d = createDraft('office-drone');
+  spendDraftPoint(d, 'grit');
+  spendDraftPoint(d, 'grit');
+  const sheet = createCharacter(d);
+  const plain = createSheet('office-drone');
+  assert.equal(sheet.attr.grit, plain.attr.grit + 2);
+  assert.ok(sheet.maxHp > plain.maxHp, 'Grit moved the DERIVED number too');
+  assert.equal(sheet.attrPoints, 0, 'both points are spent, none banked');
 });
 
-test('a background talent merges rather than replacing the class talent', () => {
-  const draft = createDraft('office-drone');
-  draft.background = 'former-smoker';
-  const sheet = createCharacter(draft);
-  assert.equal(sheet.talent.effects.hasLighter, true, 'the background verb arrived');
-  // The class's own talent effects must survive the merge.
-  const plain = createCharacter(createDraft('office-drone'));
-  for (const [k, v] of Object.entries(plain.talent?.effects || {})) {
-    assert.deepEqual(sheet.talent.effects[k], v, `class talent effect "${k}" survived`);
+test('a draft spends at most its two points', () => {
+  const d = createDraft('office-drone');
+  for (let i = 0; i < 10; i++) spendDraftPoint(d, 'savvy');
+  assert.equal(d.spends.length, CREATION_POINTS);
+  assert.equal(pointsLeft(d), 0);
+  unspendDraftPoint(d, 'savvy');
+  assert.equal(pointsLeft(d), 1);
+});
+
+// Each row's minus takes back a point from THAT row. A single global undo
+// popped whichever point was spent last, so undoing a row meant remembering
+// what order you had clicked in.
+test('taking a point back is per-attribute, not "whatever was last"', () => {
+  const d = createDraft('office-drone');
+  spendDraftPoint(d, 'grit');
+  spendDraftPoint(d, 'savvy');
+  assert.equal(spentOn(d, 'grit'), 1);
+  assert.equal(spentOn(d, 'savvy'), 1);
+
+  unspendDraftPoint(d, 'grit'); // the one spent FIRST
+  assert.equal(spentOn(d, 'grit'), 0);
+  assert.equal(spentOn(d, 'savvy'), 1, 'the other row is untouched');
+  assert.equal(pointsLeft(d), 1);
+
+  const base = CLASSES['office-drone'].attr;
+  assert.equal(draftAttr(d).grit, base.grit);
+  assert.equal(draftAttr(d).savvy, base.savvy + 1);
+});
+
+test('taking back from an empty row does nothing', () => {
+  const d = createDraft('office-drone');
+  spendDraftPoint(d, 'grit');
+  unspendDraftPoint(d, 'composure'); // nothing of yours in that row
+  assert.equal(pointsLeft(d), 1);
+  assert.equal(spentOn(d, 'grit'), 1);
+});
+
+test('an unknown attribute is not spendable', () => {
+  const d = createDraft('office-drone');
+  spendDraftPoint(d, 'charisma');
+  assert.equal(d.spends.length, 0);
+});
+
+test('both doors spend the same two points', () => {
+  for (const custom of [false, true]) {
+    const d = createDraft('security', { custom });
+    assert.equal(pointsLeft(d), CREATION_POINTS);
+    spendDraftPoint(d, 'composure');
+    assert.equal(draftAttr(d).composure, CLASSES.security.attr.composure + 1);
   }
+});
+
+test('draftAttr previews the spend without minting a sheet', () => {
+  const d = createDraft('middle-manager');
+  assert.deepEqual(draftAttr(d), CLASSES['middle-manager'].attr);
+  spendDraftPoint(d, 'hustle');
+  assert.equal(draftAttr(d).hustle, CLASSES['middle-manager'].attr.hustle + 1);
 });
 
 test('a zero-allocation character still equals the class headline exactly', () => {
-  // The invariant, restated with backgrounds in the picture: choosing NO
-  // background and spending NO points must reproduce the class byte for byte.
-  for (const id of Object.keys(CLASSES).filter((k) => CLASSES[k].playable !== false)) {
-    const created = createCharacter(createDraft(id));
-    assert.equal(created.maxHp, CLASSES[id].maxHp, `${id} maxHp`);
-    assert.equal(created.maxAp, CLASSES[id].ap, `${id} maxAp`);
+  for (const id of Object.keys(CLASSES).filter((c) => CLASSES[c].playable !== false)) {
+    const sheet = createCharacter(createDraft(id));
+    assert.equal(sheet.maxHp, CLASSES[id].maxHp, `${id} keeps its headline HP`);
+    assert.equal(sheet.maxAp, CLASSES[id].ap, `${id} keeps its headline AP`);
   }
 });
 
-test('draftAttr previews the background swap and the points together', () => {
-  const draft = createDraft('office-drone');
-  draft.background = 'night-shift';
-  spendDraftPoint(draft, 'grit');
-  const preview = draftAttr(draft);
-  const built = createCharacter(draft);
-  assert.deepEqual(preview, built.attr, 'the preview must match what commit produces');
+// --- names and pronouns -----------------------------------------------------
+test('the name is cleaned, clamped, and falls back', () => {
+  assert.equal(cleanName('  a   b  '), 'a b');
+  assert.equal(cleanName('', 'Mail Room'), 'Mail Room');
+  assert.equal(cleanName('x'.repeat(100)).length, NAME_MAX);
 });
 
-// --- pronouns as a vocabulary (CHARACTER_PLAN M6) --------------------------
-const { pronounsOf, capitalize, verb } = await import('../../src/creation.js');
+test('pronouns default to they/them and reject anything unknown', () => {
+  const d = createDraft('office-drone');
+  assert.equal(d.pronouns, 'they');
+  d.pronouns = 'xyzzy';
+  assert.equal(createCharacter(d).pronouns, 'they');
+});
 
 test('pronounsOf answers with words, and defaults to they/them', () => {
   assert.equal(pronounsOf({ pronouns: 'she' }).object, 'her');
-  assert.equal(pronounsOf({ pronouns: 'he' }).possessive, 'his');
-  // Anyone predating the field, or carrying junk, gets the house voice - which
-  // is what every line already said before the field existed.
   assert.equal(pronounsOf({}).subject, 'they');
-  assert.equal(pronounsOf(null).subject, 'they');
-  assert.equal(pronounsOf({ pronouns: 'xyzzy' }).subject, 'they');
+  assert.equal(pronounsOf(null).possessive, 'their');
 });
 
 test('verb agreement handles singular they', () => {
-  // The part a caller cannot infer: singular they takes a PLURAL verb, so a
-  // line holding only the pronoun would still have to special-case it.
   assert.equal(verb(pronounsOf({ pronouns: 'they' }), 'gather'), 'gather');
-  assert.equal(verb(pronounsOf({ pronouns: 'she' }), 'gather'), 'gathers');
-  assert.equal(verb(pronounsOf({ pronouns: 'he' }), 'go', 'es'), 'goes');
-  assert.equal(verb(pronounsOf({ pronouns: 'they' }), 'go', 'es'), 'go');
-  assert.equal(capitalize('they'), 'They');
+  assert.equal(verb(pronounsOf({ pronouns: 'he' }), 'gather'), 'gathers');
+  assert.equal(verb(pronounsOf({ pronouns: 'she' }), 'go', 'es'), 'goes');
 });

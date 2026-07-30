@@ -696,9 +696,10 @@ export function lookOf(sheet) {
     || null;
 }
 
-// Bake an effect into a sheet, in place. Promoted from private so creation
-// (backgrounds) and progression (track nodes) spend ONE vocabulary rather than
-// growing a second. The contract is unchanged for its existing caller: it does
+// Bake an effect into a sheet, in place. Promoted from private so anything that
+// grants something at a moment in time spends ONE vocabulary rather than
+// growing a second. Its caller today is progression (track nodes); creation
+// used to be the other, through a background axis that has since been cut. The contract is unchanged for its existing caller: it does
 // NOT recompute derived stats, because spendClassPoint has to sample maxHp
 // either side of the bake to credit new capacity undamaged.
 export function applyEffect(sheet, effect = {}) {

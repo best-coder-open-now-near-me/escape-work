@@ -31,10 +31,10 @@ export async function pickClass(page, classId) {
     await page.click('#carousel-next');
   }
   await page.click(`#pick-${classId}`);
-  // The carousel hands off to the badge photo (CHARACTER_PLAN step 2). This
-  // helper's subject is the CAROUSEL, so it takes the defaults and moves on -
-  // the creation spec is where the form itself is exercised.
-  await page.click('#creation-skip');
+  // The desk hands off to the short form beside the body. This helper's subject
+  // is the DESK, so it commits one of the six as written and moves on - the
+  // creation spec is where the form itself is exercised.
+  await page.click('#creation-commit');
 }
 
 // Zoom out so the whole floor projects inside the viewport - far enemies would

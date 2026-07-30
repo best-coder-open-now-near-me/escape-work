@@ -55,6 +55,77 @@ test('the bar in a fight is the same bar: same slot ids, same number keys', asyn
     (Number(document.querySelector('#hotbar-act-attack').dataset.slot) % 8) + 1);
   await page.keyboard.press(String(key));
   await expect.poll(() => page.evaluate(() => window.__combat.armed)).toBe('attack');
+
+  // ...and it is one BOX, not two. The bar became shared before the boxes did:
+  // the verbs moved out to the slot row and combat's panel was left floating
+  // above it at bottom:92px, 640px wide, holding a turn line and one End Turn
+  // button. The gap between them was the shape of what had been removed.
+  const dock = await page.evaluate(() => {
+    const turn = document.getElementById('combat-panel');
+    const slots = document.getElementById('hotbar');
+    const d = document.getElementById('action-dock');
+    const dr = d.getBoundingClientRect();
+    const nr = document.getElementById('narration-box').getBoundingClientRect();
+    return {
+      turnParent: turn.parentElement.id,
+      slotsParent: slots.parentElement.id,
+      // Neither region draws a competing BOX - the dock is the only thing on
+      // screen down there with a background and a shadow. The turn region does
+      // keep its own bottom border as a divider from the slot row beneath it;
+      // that is furniture inside one box, not a second box, which is the
+      // distinction actually worth holding the line on.
+      regionChrome: [turn, slots].map((e) => {
+        const s = getComputedStyle(e);
+        return { bg: s.backgroundColor, shadow: s.boxShadow };
+      }),
+      // The dock must not run under the narrator: it is pointer-events:none, so
+      // an End Turn button beneath it still works and just cannot be seen -
+      // which is why this is measured rather than eyeballed.
+      clearsNarrator: dr.right <= nr.left,
+    };
+  });
+  expect(dock.turnParent).toBe('action-dock');
+  expect(dock.slotsParent).toBe('action-dock');
+  for (const c of dock.regionChrome) {
+    expect(c.bg).toBe('rgba(0, 0, 0, 0)');
+    expect(c.shadow).toBe('none');
+  }
+  expect(dock.clearsNarrator).toBe(true);
+});
+
+// Out of a fight, nothing in the room should be able to START one - so there is
+// nobody in it. This test used to reuse BAR_ARENA, where a Manager stands two
+// tiles away and walks at you as soon as anything moves; on a slow runner the
+// fight opened before the assertion below ran and `#combat-panel` did exist. The
+// test is about the dock wearing no turn strip, and a coworker two tiles off is
+// scenery it cannot afford.
+const EMPTY_ARENA = {
+  name: 'Empty Arena',
+  tiles: { '#': 'wall', '.': 'floor' },
+  actors: { '@': 'player' },
+  map: [
+    '#########',
+    '#.......#',
+    '#..@....#',
+    '#.......#',
+    '#########',
+  ],
+};
+
+test('out of a fight the dock is just the bar, with no empty turn strip', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, EMPTY_ARENA, 'office-drone');
+  await expect(page.locator('#hotbar')).toBeVisible();
+  // The turn readout is created per fight and removed with it, so out here the
+  // dock holds one region and is exactly as tall as the slot row.
+  await expect(page.locator('#combat-panel')).toHaveCount(0);
+  const h = await page.evaluate(() => {
+    const d = document.getElementById('action-dock').getBoundingClientRect();
+    const s = document.getElementById('hotbar').getBoundingClientRect();
+    return { dock: Math.round(d.height), slots: Math.round(s.height) };
+  });
+  // 8px padding either side of the slot row and nothing else in the box.
+  expect(h.dock - h.slots).toBeLessThanOrEqual(20);
 });
 
 // `H 2 2` is the edge between (2,1) and (2,2), so standing at (2,1) is standing
@@ -126,6 +197,26 @@ test('a door can be worked mid-fight, from the tile beside it, for AP', async ({
   await expect.poll(() => page.evaluate(() => window.__game.doorOpen('h:2,2'))).toBe(true);
   // Billed, like everything else in a turn.
   expect(await page.evaluate(() => window.__combat.party[0].ap)).toBe(apBefore - 1);
+
+  // ...and now the LEFT click, on the same edge, which is how anybody actually
+  // reaches for a door. This half was missing entirely: the combat click path
+  // had no door branch, so a left-click on a door fell through to the tile
+  // handler and tried to WALK there, and the hover path never asked about
+  // doors either, so the cursor stayed a plain arrow over it. The right-click
+  // menu above worked the whole time, which is exactly why nobody noticed -
+  // "doors work in a fight" was true and tested, through a route most players
+  // never try first.
+  await refillAp(page);
+  const apBeforeClick = await page.evaluate(() => window.__combat.party[0].ap);
+  await page.mouse.move(p.x, p.y);
+  await expect.poll(() => page.evaluate(() => document.getElementById('app').style.cursor),
+    { timeout: 10_000 }).toBe('pointer');
+
+  await page.mouse.click(p.x, p.y);
+  await expect.poll(() => page.evaluate(() => window.__game.doorOpen('h:2,2'))).toBe(false);
+  expect(await page.evaluate(() => window.__combat.party[0].ap)).toBe(apBeforeClick - 1);
+  // And it worked the handle rather than walking at it.
+  expect(await page.evaluate(() => window.__game.playerTile)).toEqual({ x: 2, z: 1 });
 });
 
 test('a snack comes out of your pockets mid-fight, and costs a turn to eat', async ({ page }) => {

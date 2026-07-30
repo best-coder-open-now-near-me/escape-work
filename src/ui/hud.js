@@ -4,7 +4,10 @@
 // button, the always-on attack hotbar, the party bar and the level-up pip.
 import { statusList } from '../statuses.js';
 import { pendingPoints } from '../stats.js';
-import { PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, registerHudButton, layoutHudRail } from './chrome.js';
+import {
+  PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, registerHudButton, layoutHudRail,
+  actionDock, refreshDockVisibility,
+} from './chrome.js';
 
 // --- player status effects ----------------------------------------------------
 // Transient effects stacked just above the bottom-left stats - gum, bleeding,
@@ -176,14 +179,16 @@ export const HOTBAR_ROW_SLOTS = 8;
 // host decides what pressing one means - arm a power, drink the coffee),
 // onAssign(i, x, y) a right click on it, at the cursor.
 export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
+  // A REGION of the dock, not a panel of its own: the dock owns the chrome, the
+  // position and the bottom of the screen (ui/chrome.js actionDock). This is
+  // just the row of slots and its pager.
   const bar = document.createElement('div');
   bar.id = 'hotbar';
-  Object.assign(bar.style, PANEL_CHROME, {
-    position: 'fixed', left: '50%', bottom: '18px', transform: 'translateX(-50%)',
-    zIndex: '22', display: 'none', gap: '7px', padding: '8px 10px', borderRadius: '10px',
-    userSelect: 'none', alignItems: 'center',
+  Object.assign(bar.style, {
+    display: 'none', gap: '7px', userSelect: 'none', alignItems: 'center',
+    justifyContent: 'center',
   });
-  document.body.appendChild(bar);
+  actionDock().appendChild(bar);
 
   const rowCount = Math.max(1, Math.ceil(slots.length / HOTBAR_ROW_SLOTS));
   let row = Math.min(Math.max(0, startRow), rowCount - 1);
@@ -334,7 +339,15 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
   render();
 
   return {
-    setVisible: (v) => { bar.style.display = v ? 'flex' : 'none'; },
+    // Called every frame from the update loop, so it only touches the DOM when
+    // the answer actually changed - the dock's visibility walks its children,
+    // and that is not something to do sixty times a second to learn nothing.
+    setVisible: (v) => {
+      const want = v ? 'flex' : 'none';
+      if (bar.style.display === want) return;
+      bar.style.display = want;
+      refreshDockVisibility();
+    },
     setArmed: (id) => { armed = id; render(); },
     refresh: (s) => { sheet = s; render(); },
     flip,
@@ -348,7 +361,9 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
       return n >= 1 && n <= HOTBAR_ROW_SLOTS && i < slots.length ? i : -1;
     },
     get visible() { return bar.style.display !== 'none'; },
-    destroy: () => bar.remove(), // leader switches rebuild the bar wholesale
+    // Leader switches rebuild the bar wholesale. Only this REGION goes - the
+    // dock (and combat's readout in it) is not ours to take down.
+    destroy: () => { bar.remove(); refreshDockVisibility(); },
   };
 }
 

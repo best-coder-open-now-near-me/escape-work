@@ -2,15 +2,22 @@
 // (assets/characters/<model>.glb), and the combat actions it brings (ids into
 // data/actions.js). Weapons/perks later modify or extend the same action list.
 //
-// `model` names a RIG FILE, not a role. The rigs get passed around as the cast
-// changes - hr.glb is the Mail Room clerk's (and the mail room COMPANION's, who
-// INHERITS it with the class), midmanager.glb is HR's, and veteran.glb is the
-// Middle Manager's - so read the entry, never the filename,
-// to know who wears what. (Renaming them to chase the current owner just moves
-// the confusion into git history.) Where two entries share a rig, each carries
-// a `look.build` that makes them read as different people; keep that up when
-// you hand a rig to someone new - and remember that an INHERITED rig makes a
-// second wearer without either entry naming it.
+// `model` names a RIG FILE, and the file is named for the role that wears it.
+// That was already the house rule - `mailroom.glb` became `security.glb` the
+// day the guard took it over, "since the file is named for the role it plays" -
+// but the rule was applied once and then dropped, and three classes drifted
+// onto files named for somebody else while reassignments skipped the rename.
+// The entries below are back on their own names, with no exceptions left. The
+// last one was the Mail Room sitting on `hr.glb` - a file named for a job
+// nobody wearing it does, while Human Resources was two files away on
+// `hrrep.glb`. Nothing about that needed art: the rig is worn by the Mail Room
+// class and the mail room companion and by nobody else, so it is the mail
+// room's body, and it is now called `mailroom.glb`.
+//
+// Where two entries share a rig - a class and the coworker version of it you
+// FIGHT - each carries a `look.build` that makes them read as different people.
+// Keep that up when you hand a rig to someone new, and remember that an
+// INHERITED rig makes a second wearer without either entry naming it.
 //
 // A class is becoming the shared unit archetype - not just what you pick, but
 // what companions and (increasingly) enemies are (see SUMMON_PLAN.md). Two
@@ -31,14 +38,18 @@
 //
 // `name` is NOT one of them, and used to be. Dropping it forced every
 // class-backed character to invent a display name, and what got invented were
-// personas the game has no story for - a "Nervous IT Intern" who is never
-// written to stop being nervous, a "Mail Room Veteran" whose veterancy is a
-// word in a name and nothing in the rules. The player's own character is named
-// for the job (you are "Mail Room"), so a coworker doing that job inherits the
-// same label and reads as the same kind of thing. An entry that genuinely IS a
-// distinct person - the Security Guard you fight - still says so by overriding
-// `name`; the point is that it has to be a deliberate line, not a blank the
-// shape demands be filled.
+// adjectives - a state asserted in a label that no rule ever touches and no
+// scene ever resolves. The player's own character is named for the job (you are
+// "Mail Room"), so a coworker doing that job inherits the same label and reads
+// as the same kind of thing. An entry that genuinely IS a distinct person - the
+// Security Guard you fight - still says so by overriding `name`; the point is
+// that it has to be a deliberate line, not a blank the shape demands be filled.
+//
+// The same rule governs every other field. An adjective strapped onto one of
+// our people - a different rig, a renamed track node, a hand-tuned tier - is
+// the same failure wearing data instead of a string, and it is worse, because
+// it drifts silently. If an entry IS one of the classes, it names the class and
+// inherits; what is left is only what genuinely departs.
 const PICKER_ONLY = ['tagline', 'experience', 'startGear', 'playable'];
 
 // `primary` (POWERS_PLAN M8): the ONE verb a class is for. Six playable classes
@@ -125,9 +136,9 @@ export const CLASSES = {
   'middle-manager': {
     name: 'Middle Manager',
     primary: 'control', // he does not out-hit you, he takes your turn
-    // Sole wearer of the veteran rig. Short and settled from six years in the
+    // The rig named for the job. Short and settled from six years in the
     // chair - the build is character here, not a way to tell two people apart.
-    model: 'veteran',
+    model: 'midmanager',
     look: { build: { legs: 1.68 } },
     tagline: 'Absorbs blame like a sponge. Tough, but hits like a memo.',
     experience: 'VP of Alignment (self-described), 6 yrs. Survived 4 reorgs.',
@@ -164,7 +175,7 @@ export const CLASSES = {
     // companion, who inherits this rig along with the rest of the class - he
     // reads apart by torso (data/companions.js), so keep the two builds
     // distinct when either one is retuned.
-    model: 'hr',
+    model: 'mailroom',
     look: { build: { legs: 2.0 } },
     tagline: 'Knows every corridor. Slips on nothing. Delivers regardless.',
     experience: 'Mail Room Clerk, 11 yrs. Knows where every body is filed.',
@@ -230,7 +241,9 @@ export const CLASSES = {
   'human-resources': {
     name: 'Human Resources',
     primary: 'summon', // it staffs the fight; the buffs are the other half
-    model: 'midmanager',
+    // The rig named for the job. Shared with the HR Representative you FIGHT
+    // (data/enemies.js), who inherits this class and reads apart by build.
+    model: 'hrrep',
     tagline: 'Doesn\'t fight so much as staff. Brings friends to your review.',
     experience: 'People Ops "Business Partner". Owns the offsite. Tenure: undisclosed.',
     maxHp: 20,

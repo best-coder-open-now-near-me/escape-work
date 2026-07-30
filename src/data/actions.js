@@ -645,3 +645,45 @@ export const ACTIONS = {
 export const arrivalLine = (n) => (n === 1
   ? 'One applicant reports for duty.'
   : `${n} applicants report for duty.`);
+
+// --- the summon descriptor's one vocabulary -----------------------------------
+// What a summon descriptor INHERITS when it names the action it is the twin of.
+//
+// Exactly one field, and the narrowness is the point. WHO shows up when you
+// post a role is a fact about the role: an applicant is an applicant whoever
+// hired them, and two answers to that is the drift worth preventing. It is
+// also the whole of what was actually wrong - a class and an enemy naming the
+// same archetype with nothing tying them together.
+//
+// Everything else is per side, because the two sides post differently. The
+// player's action drops ONE because you click the tile they report to, and a
+// pair means one lands somewhere you did not choose (see `summon-applicants`);
+// an AI has no click, so a small batch beside the summoner on a tight cap is
+// its own pacing, next to its cooldown and what the post costs its turn. How
+// long a temp serves belongs there too: it sets how many AI turns a fight
+// carries, which is pacing, not identity.
+//
+// This list was drawn twice too wide before it was drawn right. First it took
+// `count` and `cap`, which left an enemy HR posting one applicant on a cap of
+// three - not a reinforcement - and the suite caught it. Then it kept
+// `lifetimeTurns`, which quietly gave the AI's temps a sixth turn where they
+// had served five: not obviously wrong, never asked for, and it widens the
+// window on an AI turn that stalls at zero AP. Neither was a bug in the idea
+// of sharing; both were sharing something that was saying its own thing.
+export const SUMMON_CONTRACT = ['archetype'];
+
+// An enemy's descriptor may name the ACTION it is the AI-side twin of
+// (`from: 'summon-applicants'`) and inherit the contract above.
+//
+// This exists because HR posted the same req twice, from a class action and an
+// enemy block that named the same archetype with nothing tying them together -
+// so the two could drift apart silently and nobody would find out. Resolving
+// here means combat.js and the lints read one merged shape rather than each
+// doing the merge for itself.
+export function summonSpec(d) {
+  if (!d?.from) return d;
+  const a = ACTIONS[d.from] || {};
+  const out = { ...d };
+  for (const k of SUMMON_CONTRACT) if (out[k] === undefined) out[k] = a[k];
+  return out;
+}

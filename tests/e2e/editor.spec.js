@@ -47,7 +47,7 @@ test('loading a shipped level and exporting it keeps its companions', async ({ p
   await page.waitForFunction(() => window.__editor, null, { timeout: 90_000 });
   await waitForSmoothFrames(page);
 
-  // Level 1 places the IT companion ('N' -> it-intern in its own legend).
+  // Level 1 places the IT companion ('N' -> it-support in its own legend).
   await page.selectOption('#ed-level', 'level1');
   // Poll for the LOAD rather than sleeping through it: a fixed wait is either
   // slower than it needs to be or shorter than the load, and under software GL
@@ -61,7 +61,7 @@ test('loading a shipped level and exporting it keeps its companions', async ({ p
   const out = JSON.parse(await page.evaluate(() => window.__editor.toJson()));
 
   // The legend can NAME him...
-  const named = Object.entries(out.actors).find(([, id]) => id === 'it-intern');
+  const named = Object.entries(out.actors).find(([, id]) => id === 'it-support');
   expect(named, 'the exported legend names the intern').toBeTruthy();
   // ...and he is still standing somewhere on the map under that char.
   const [char] = named;

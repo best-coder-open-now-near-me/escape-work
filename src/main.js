@@ -26,7 +26,8 @@ import {
 } from './party.js';
 import { applyStatus, removeStatus, statusFx, hasStatus, tickStep, statusLeft, statusList } from './statuses.js';
 import { inReach } from './tactics.js';
-import { createDraft, createCharacter, draftModel } from './creation.js';
+import { createDraft, createCharacter, draftModel, draftLook } from './creation.js';
+import { CUSTOM_RIGS } from './data/looks.js';
 import { aimsAtAlly, coneFrom, conePolyline, isToppleable, toppleLanding } from './powers.js';
 import { PARTITION_TOPPLE } from './data/tiles.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
@@ -141,12 +142,17 @@ function startGame(level) {
   let party = null;
   let sheet = null;
   let player = new PlayerActor(grid.playerSpawn.x, grid.playerSpawn.z);
-  // Enemies scale to the floor's depth: a base coworker on a deep floor is
-  // tougher, a seniority variant keeps its tier on a shallow one (stats.js).
+  // Enemies scale to the floor's depth (stats.js) - a base coworker on a deep
+  // floor is tougher. A placement may also name its own tier (`"G":
+  // "manager@3"`), which is how a shallow floor asks for one harder body
+  // without a second registry entry existing to BE the harder one. Either way
+  // it is the same scaleEnemy doing it: there is one curve, and a level picks a
+  // point on it rather than hand-writing a rival to it.
   const floorDepth = level.depth || 1;
   const enemies = grid.enemySpawns.map((s) => {
     const base = ENEMY_TYPES[s.type];
-    return new EnemyActor(s.x, s.z, s.type, scaleEnemy(base, effectiveLevel(base, floorDepth)));
+    const lvl = s.level ?? effectiveLevel(base, floorDepth);
+    return new EnemyActor(s.x, s.z, s.type, scaleEnemy(base, lvl));
   });
   // Player-team summons (SUMMON_PLAN.md): temporary combatants conjured
   // mid-fight by a summon power. You CONTROL them like party members - each is
@@ -460,12 +466,33 @@ function startGame(level) {
     paintHud(hudSheetNow());
     if (inCombat) combat?.refresh?.();
   };
-  // Proportions BEFORE attach (it captures the rig lift); tint AFTER, because
-  // attach is what clones the shared materials per instance.
-  const dressUp = (e, actor, look, model = null) => {
+  // Put a look ON a body. One order, always: proportions BEFORE the materials
+  // are cloned (an actor's attach is what clones them, and it also captures the
+  // rig lift proportions just applied), tint AFTER, because tinting a shared
+  // material recolours every character built from the same .glb.
+  //
+  // The only thing that varies is who OWNS the cloned materials - an actor
+  // keeps them on itself, a preview body has no actor and keeps them on the
+  // entity. That difference used to be the excuse for three copies of this
+  // sequence: this function, plus an inline copy in the class preview, plus a
+  // second inline copy added for the creation preview. REVIEW flagged the first
+  // and TODO M2 promised to fold it in; instead the count went up. It is one
+  // function now, and the actor is just an argument.
+  const dressBody = (e, look, actor = null) => {
     applyCharacterProportions(e, look?.build);
-    actor.attach(e);
-    actor.applyTint(look?.tint);
+    if (actor) {
+      actor.attach(e);
+      actor.applyTint(look?.tint);
+    } else {
+      // Kept on the entity so a LATER re-tint computes from the pristine
+      // colours rather than from the last tint's result - the compounding bug
+      // that walks a body toward black (actors.js applyTint says the same).
+      e._mats = e._mats || cloneMaterials(e);
+      tintMaterials(e._mats, look?.tint);
+    }
+  };
+  const dressUp = (e, actor, look, model = null) => {
+    dressBody(e, look, actor);
     // Kick off this character's portrait from the SAME model + look, so the
     // little picture and the body on the floor can never disagree. It lands
     // asynchronously and refreshes whatever is showing when it does.
@@ -562,46 +589,32 @@ function startGame(level) {
   let previewEntity = null;
   let previewToken = 0;
   const previewSpin = (dt) => { if (previewEntity) previewEntity.rotate(0, 35 * dt, 0); };
-  function previewClass(classId) {
+  // Stand a body on the spawn tile wearing `look`. The picker and the creation
+  // flow both want this and used to have one each; they differed only in where
+  // the model name and the look came from, which is an argument, not a function.
+  // The token guards rapid carousel flips against async .glb loads landing out
+  // of order.
+  function showPreview(model, look) {
     const token = ++previewToken;
     if (previewEntity) { previewEntity.destroy(); previewEntity = null; }
-    placeModel(app, `assets/characters/${CLASSES[classId].model}.glb`, player.x, player.z, {
+    placeModel(app, `assets/characters/${model}.glb`, player.x, player.z, {
       lift, rotY: 45, animate: true, // start facing the head-on camera
       onReady: (e) => {
-        // The picker must show the character you will actually get, tint and
-        // build included. There is no actor on this body, so it clones and
-        // tints through the shared helpers directly - it used to carry its own
-        // inline copy of the maths, which is how the compounding tint bug came
-        // to exist in two places at once. The clones are kept on the entity so
-        // a later re-tint (the creation flow's swatch row) computes from the
-        // pristine colours rather than from the last tint's result.
-        const look = CLASSES[classId].look;
-        applyCharacterProportions(e, look?.build);
-        e._mats = cloneMaterials(e);
-        tintMaterials(e._mats, look?.tint);
+        // The picker must show the character you will actually GET, build
+        // included - so it dresses through the same path every other body on
+        // the floor uses, with no actor to hang the materials on.
+        dressBody(e, look);
         if (token !== previewToken) { e.destroy(); return; }
         previewEntity = e;
       },
     });
   }
-  // The same staging as previewClass, reading the DRAFT instead of the class
-  // entry - so the body on the spawn tile is the character being built rather
-  // than the one that was picked. Shares previewClass's token guard, which is
-  // what keeps a fast run along the wardrobe row from landing out of order.
-  function previewDraft(draft) {
-    const token = ++previewToken;
-    if (previewEntity) { previewEntity.destroy(); previewEntity = null; }
-    placeModel(app, `assets/characters/${draftModel(draft)}.glb`, player.x, player.z, {
-      lift, rotY: 45, animate: true,
-      onReady: (e) => {
-        applyCharacterProportions(e, draft.build);
-        e._mats = cloneMaterials(e);
-        tintMaterials(e._mats, draft.tint);
-        if (token !== previewToken) { e.destroy(); return; }
-        previewEntity = e;
-      },
-    });
-  }
+  // Browsing the desk. A null id is the BLANK card, which previews the body a
+  // custom character starts on rather than any class's - you are not going to
+  // be one of these people, so parading one of them would be a lie.
+  const previewClass = (classId) => (classId
+    ? showPreview(CLASSES[classId].model, CLASSES[classId].look)
+    : showPreview(CUSTOM_RIGS[0], null));
   function endClassPreview() {
     previewToken += 1;
     if (previewEntity) { previewEntity.destroy(); previewEntity = null; }
@@ -630,28 +643,39 @@ function startGame(level) {
     ui.say(`${sheet.className}. Now get out of here.`); // hotkeys live in the HUD strip
   }
 
-  // The picker picked a job; now the badge photo. The candidate stays on the
-  // spawn tile under the same dollied-in camera - the résumé card is what gets
-  // replaced, not the body - so this costs no .glb load at all.
-  function onClassPicked(classId) {
-    const draft = createDraft(classId);
+  // A card was chosen at the desk; now the short form beside the body. The
+  // candidate stays on the spawn tile under the same dollied-in camera - the
+  // CARD is what gets replaced, not the body - so this costs no .glb load.
+  //
+  // `custom` is which door was taken. It changes what the form asks, not what
+  // happens afterwards: both end at the same beginRun with a sheet built by the
+  // same createCharacter.
+  function onDeskPick(classId, { custom = false } = {}) {
+    const draft = createDraft(classId, { custom });
     draft.className = CLASSES[classId].name; // the read-back line quotes the job
-    ui.showBadgeStep(draft, {
+    if (custom) showPreview(draftModel(draft), draftLook(draft));
+    ui.showCreationStep(draft, {
       onCommit: () => beginRun(createCharacter(draft)),
-      // Skipping accepts every default, which is the same thing the `#class=`
-      // express lane does - one code path, so the two can never diverge.
-      onSkip: () => beginRun(createCharacter(createDraft(classId))),
-      // Reflect the draft on the body already standing on the spawn tile. A rig
-      // change is the ONE thing that costs a .glb load; tint and build mutate
-      // the live entity in place, which is what lets a slider drive them every
-      // frame instead of queueing a reload per tick (CHARACTER_PLAN #14).
-      onPreview: (kind) => {
-        if (kind === 'rig') { previewDraft(draft); return; }
-        if (!previewEntity) return;
-        applyCharacterProportions(previewEntity, draft.build);
-        tintMaterials(previewEntity._mats || [], draft.tint);
-      },
+      // BACK and Escape return to the DESK. This used to start the run instead:
+      // the handler called a "skip the paperwork" path that committed the
+      // character, so backing out of the form was the one gesture that could
+      // not be undone.
+      onBack: () => openDesk(),
+      // Only a custom character can change body, and it is the one thing that
+      // costs a .glb load - everything else on this card is text.
+      onPreview: () => showPreview(draftModel(draft), draftLook(draft)),
     });
+  }
+
+  // The résumé desk: six people you can be, plus a card for making somebody.
+  function openDesk() {
+    controls.setView({ dist: 3, pitch: 14, focusY: 0.8 });
+    app.off('update', previewSpin); // backing out of the card lands here again
+    app.on('update', previewSpin);
+    ui.showClassPicker(CLASSES, ACTIONS, onDeskPick, () => {
+      location.hash = '#editor';
+      location.reload();
+    }, previewClass);
   }
 
   // Every way to die funnels through here: freeze the world, drop any active
@@ -990,6 +1014,27 @@ function startGame(level) {
   // the rule is the tactical one: you work a door you are standing beside.
   const atDoor = (key, actor) => !!actor
     && doorSides(key).some(([x, z]) => actor.x === x && actor.z === z);
+  // The door a click or a hover means IN COMBAT, or null. One predicate, read
+  // by both the cursor and the click, so the pointer can never promise a swing
+  // of the handle that the click then declines.
+  //
+  // Doors were reachable in a fight only through the right-click menu: the
+  // left-click path had no door branch at all, so clicking one fell through to
+  // handleTileClick and walked you at it, and the hover path never asked, so
+  // the cursor stayed a plain arrow over the one piece of terrain you can
+  // change.
+  //
+  // Hitting the door MESH always counts - you aimed at the door, there is
+  // nothing else you could have meant. A ground point merely NEAR a door edge
+  // only counts when you are already standing beside it, because
+  // `doorNearPoint` claims a wide band either side of the edge and movement is
+  // the expensive thing in a fight: a click on the floor by a doorway has to
+  // stay a step, not become a refusal.
+  function combatDoorAt(hit, point) {
+    if (hit?.kind === 'door') return hit.ref;
+    const key = point ? doorNearPoint(point) : null;
+    return key && atDoor(key, combat?.actingActor) ? key : null;
+  }
   function toggleDoor(key) {
     if (gameOver) return;
     // Doors used to be refused outright while `inCombat`, with no comment - and
@@ -2536,6 +2581,12 @@ function startGame(level) {
         // no on the outer band of a body the cursor said yes to.
         const near = point && combat?.enemyAtPoint(point);
         if (near) { combat?.handleEnemyClick(near); return; }
+        // A door, before the tile fallback - otherwise the click walks you at
+        // the door instead of working it. toggleDoor owns the rules from here:
+        // it refuses with a reason when you are not beside it, and bills the
+        // AP when you are.
+        const dk = combatDoorAt(bodyHit, point);
+        if (dk) { toggleDoor(dk); return; }
         if (!tile) return;
         combat?.handleTileClick(tile, point);
         return;
@@ -2617,7 +2668,10 @@ function startGame(level) {
         // to-hit readout and the click itself refused.
         const picked = hit?.kind === 'enemy' && hit.ref.alive ? hit.ref : null;
         const foe = combat.handleHover(point, sx, sy, picked);
-        hover.setCursor(foe ? 'crosshair' : null);
+        // A coworker wins the cursor; failing that, a door you could work says
+        // so with the same pointer it uses out of combat. The click reads the
+        // very same predicate, so the two cannot disagree.
+        hover.setCursor(foe ? 'crosshair' : (combatDoorAt(hit, point) ? 'pointer' : null));
         // Hovering a character glows their BODY and names them in the banner -
         // the DOS2 read, and the same one you already get out of combat. This
         // used to be held behind Ctrl, which meant the half of the game where
@@ -3278,7 +3332,8 @@ function startGame(level) {
   // mid-campaign reload skips the picker entirely.
   ui.showGameMenu([
     {
-      // This IS the "new character" escape hatch CHARACTER_PLAN #17 asked for.
+      // This IS the "new character" escape hatch, at the only moment it can
+      // safely be offered.
       // A separate menu item was drafted and then dropped: clearing progress
       // drops the character with it - the sheet lives in the save - so the two
       // would have been byte-identical actions under different labels, which is
@@ -3371,15 +3426,11 @@ function startGame(level) {
     // and the one place that wants to exercise creation asks for it by name.
     beginRun(createCharacter(createDraft(preselectedClass())));
   } else {
-    // The carousel: frame the spawn tile close and head-on (eye-ish level,
-    // aimed at the chest) where previewClass parades the browsed candidate;
-    // onClassPicked restores the tactical camera.
-    controls.setView({ dist: 3, pitch: 14, focusY: 0.8 });
-    app.on('update', previewSpin);
-    ui.showClassPicker(CLASSES, ACTIONS, onClassPicked, () => {
-      location.hash = '#editor';
-      location.reload();
-    }, previewClass);
+    // The desk. openDesk frames the spawn tile close and head-on (eye-ish
+    // level, aimed at the chest) and parades the browsed candidate there; it is
+    // its own function because BACK out of the creation card returns here, and
+    // a screen you can only reach once is a screen you cannot back out of.
+    openDesk();
   }
   if (playtesting) {
     ui.showPlaytestBadge(() => {

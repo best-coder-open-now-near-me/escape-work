@@ -8,7 +8,7 @@
 // first), thrown weapons need range and line of sight. Nearby enemies join
 // the fight; enemies have persistent map HP and take surface damage like you
 // do. Fire keeps burning throughout.
-import { ACTIONS, arrivalLine } from './data/actions.js';
+import { ACTIONS, arrivalLine, summonSpec } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
 import { truncateByBudget, routeToFiringPosition } from './pathfinding.js';
 import { pronounsOf, capitalize, verb } from './creation.js';
@@ -21,7 +21,7 @@ import {
 import { createAimPaint } from './aim-paint.js';
 import { STATUSES } from './data/statuses.js';
 import { blocksSight, PARTITION_TOPPLE } from './data/tiles.js';
-import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
+import { PANEL_CHROME, BUTTON_CHROME, actionDock, refreshDockVisibility } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
 
 const pc = window.pc;
@@ -798,27 +798,43 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // --- UI ---------------------------------------------------------------------
   const panel = document.createElement('div');
   panel.id = 'combat-panel';
-  // Sits ABOVE the shared bar, which owns the bottom of the screen in a fight
-  // exactly as it does out of one. Both used to live at `bottom: 18px` and
-  // never met, because main.js hid the hotbar whenever this panel existed -
-  // that hiding IS what "two bars swapped by mode" meant physically. With one
-  // bar the two are on screen together, and this panel's higher z-index made it
-  // swallow every click aimed at a slot: the bar rendered, and was dead.
-  // 92px clears the bar's 64px box (46px slots + 8px padding either side) and
-  // its own 18px offset, with room to breathe.
-  Object.assign(panel.style, PANEL_CHROME, {
-    position: 'fixed', left: '50%', bottom: '92px', transform: 'translateX(-50%)',
-    zIndex: '30', width: 'min(640px, 94vw)', borderRadius: '10px',
-    padding: '10px 14px', userSelect: 'none',
+  // The dock's UPPER REGION, above the slot row - not a panel of its own. It
+  // carries no chrome and no position: ui/chrome.js actionDock owns the box.
+  //
+  // It was a second floating box at `bottom: 92px`, and the seam showed once
+  // the bar became shared. The verbs moved out to the bar and what was left
+  // here was a turn line, a log line, and a row holding one End Turn button in
+  // a 640px-wide panel - so the gap between the two boxes was exactly the
+  // shape of what had been removed from this one.
+  //
+  // Everything below still writes to #combat-turn / #combat-ap / #combat-log /
+  // #combat-actions by id, and #combat-panel still names the combat readout.
+  // Moving a region is not a reason to rename what is in it.
+  // No width of its own - it stretches to the dock, which is sized by the slot
+  // row. Giving this region a 620px width made the dock wider than its contents
+  // needed and pushed its right edge under the narrator box (fixed, right: 14px,
+  // 360px wide), which is precisely where End Turn sits. The narrator is
+  // pointer-events:none so the button still WORKED, which is the sort of bug
+  // that survives a test suite and not a glance. `minWidth` is for the other
+  // end: a one-slot bar must not squash the turn line into the AP pips.
+  Object.assign(panel.style, {
+    display: 'flex', flexDirection: 'column', gap: '6px',
+    minWidth: '360px', padding: '2px 4px 8px',
+    borderBottom: '1px solid #3a3a52',
   });
   panel.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
       <div id="combat-turn" style="font-weight:700;"></div>
-      <div id="combat-ap" style="letter-spacing:2px;"></div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div id="combat-ap" style="letter-spacing:2px;"></div>
+        <div id="combat-actions" style="display:flex; gap:7px;"></div>
+      </div>
     </div>
-    <div id="combat-log" style="min-height:32px; opacity:.9; margin-bottom:8px;"></div>
-    <div id="combat-actions" style="display:flex; gap:7px; flex-wrap:wrap;"></div>`;
-  document.body.appendChild(panel);
+    <div id="combat-log" style="opacity:.9; min-height:18px;"></div>`;
+  // First child, so the readout sits above the slots however they were built.
+  const dock = actionDock();
+  dock.insertBefore(panel, dock.firstChild);
+  refreshDockVisibility();
 
   const strip = document.createElement('div');
   strip.id = 'combat-strip';
@@ -1553,12 +1569,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // taking the shield, a swap). Revalidating here keeps the status chips
     // honest without hooking every displacement path (TACTICS_PLAN M6).
     for (const u of [...crouched.keys()]) crouchStateOf(u);
-    // Name whose turn it is (initiative interleaves your members with the
-    // enemies). "YOUR TURN — Name" on a member you control; "Name's turn" on
-    // an AI unit.
+    // Name whose turn it is - only when that is actually a question. With one
+    // party member, End Turn being lit already says it is your turn ("YOUR
+    // TURN" here and "Your turn." in the log were the same fact said three
+    // times over, next to a button that is either pressable or is not). A
+    // multi-member party still needs the name, because the button alone
+    // cannot say WHICH of your people is up; an AI turn still needs the
+    // enemy's name, because nothing else on screen carries it.
     const solo = members.length === 1;
     el('combat-turn').textContent = phase === 'player'
-      ? (solo ? 'YOUR TURN' : `YOUR TURN — ${active.sheet.name}`)
+      ? (solo ? '' : active.sheet.name)
       : phase === 'ai' && acting ? `${acting.unit.def.name}'s turn` : '';
     // Distance-priced movement leaves fractional AP - show it as a half pip.
     const full = Math.floor(active.ap + 1e-6);
@@ -1657,7 +1677,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     phase = 'done';
     app.off('update', update);
     aimPaint.destroy();
+    // Only this REGION leaves - the dock and the slot row in it belong to the
+    // half of the game that is still running.
     panel.remove();
+    refreshDockVisibility();
     strip.remove();
     costTag.remove();
     delete window.__combat;
@@ -3175,10 +3198,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
       makeActive(s.member);
       phase = 'player';
-      const solo = members.length === 1;
-      log(held.length > 1
-        ? `Shared turn — ${held.map((h) => h.member.sheet.name).join(', ')}.`
-        : solo ? 'Your turn.' : `${s.member.sheet.name}'s turn.`);
+      // The turn is not SAID any more - the strip and the lit End Turn carry
+      // it (character-start branch's de-duplication). The one exception is a
+      // SHARED turn: the strip brackets the span visually, but this line is
+      // the only TEXT naming the whole span at once, and the shared-turns
+      // branch landed it without knowing the announcements were going.
+      if (held.length > 1) {
+        log(`Shared turn — ${held.map((h) => h.member.sheet.name).join(', ')}.`);
+      }
       refresh();
       return;
     }
@@ -3812,7 +3839,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // the post, and under its live cap (resolveSummon returns 0 when full, so a
     // maxed HR just fights). Posting the req is the whole beat. Enemy-side only
     // today - the player summons from the action bar, not on autopilot.
-    const sm = unit.def.summon;
+    const sm = summonSpec(unit.def.summon);
     if (sm && (unit.summonCd || 0) <= 0 && acting.ap >= sm.ap
       && resolveSummon(unit, 'enemy', sm) > 0) {
       unit.summonCd = sm.cooldownRounds || 0;

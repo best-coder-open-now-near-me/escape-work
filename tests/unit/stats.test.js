@@ -241,10 +241,27 @@ test('scaleEnemy grows hp, xp, and damage with level, leaving the base def intac
 });
 
 test('effectiveLevel never drops below the native tier', () => {
-  const senior = ENEMY_TYPES['senior-manager']; // level 3
-  assert.equal(effectiveLevel(senior, 2), 3); // shallow floor keeps its tier
-  assert.equal(effectiveLevel(senior, 5), 5); // deep floor scales up
+  const exec = ENEMY_TYPES.executive; // level 2
+  assert.equal(effectiveLevel(exec, 1), 2); // shallow floor keeps its tier
+  assert.equal(effectiveLevel(exec, 5), 5); // deep floor scales up
   assert.equal(effectiveLevel(ENEMY_TYPES.manager, 4), 4);
+});
+
+// A placement may name its own tier (`"G": "manager@3"`), which is how a floor
+// asks for a tougher body without a second registry entry existing to BE the
+// tougher one. Two hand-written "seniority variants" used to do that job and
+// disagreed with this curve - the hand-written Senior Manager paid 50% more XP
+// than a Manager scaled to the same level - so which one a floor got depended
+// on which id somebody typed. There is one curve now; a level picks a point.
+test('a tiered placement reproduces the curve, not a second stat block', () => {
+  const m = ENEMY_TYPES.manager; // native 1
+  const at3 = scaleEnemy(m, 3);
+  assert.equal(at3.level, 3);
+  assert.ok(at3.hp > m.hp, 'tougher than the base tier');
+  assert.ok(at3.xp > m.xp, 'and worth more');
+  // The SAME def a floor of depth 3 would produce - one mechanism, two ways of
+  // asking for it.
+  assert.deepEqual(at3, scaleEnemy(m, effectiveLevel(m, 3)));
 });
 
 test('scaleEnemy grows AP once the gap reaches AP_PER levels', () => {
@@ -254,10 +271,11 @@ test('scaleEnemy grows AP once the gap reaches AP_PER levels', () => {
   assert.equal(m.ap, 5); // base def untouched
 });
 
-test('variant enemies carry innate accuracy/dodge through unitCombat', () => {
-  const x = unitCombat(ENEMY_TYPES['regional-executive']);
-  assert.ok(x.accuracy > 0, 'regional exec is accurate');
-  assert.ok(x.dodge > 0, 'regional exec is evasive');
+test('innate accuracy/dodge survive unitCombat', () => {
+  // Two enemies, because the two dials are authored on different people: the
+  // Executive aims better, the Security Guard is harder to pin down.
+  assert.ok(unitCombat(ENEMY_TYPES.executive).accuracy > 0, 'the Executive is accurate');
+  assert.ok(unitCombat(ENEMY_TYPES['security-guard']).dodge > 0, 'the guard is evasive');
   assert.equal(unitCombat(ENEMY_TYPES.manager).accuracy, 0); // the base tier stays plain
   assert.equal(unitCombat(ENEMY_TYPES.manager).dodge, 0);
 });
@@ -274,10 +292,12 @@ test('scaleEnemy nudges accuracy up on deep floors, capped', () => {
 });
 
 test('scaleEnemy adds the depth nudge on top of innate accuracy', () => {
-  const x = ENEMY_TYPES['regional-executive']; // native 4, innate accuracy 0.10
+  const x = ENEMY_TYPES.executive; // native 2, innate accuracy 0.05
   const scaled = scaleEnemy(x, x.level + ENEMY_SCALING.ACC_PER); // +1 step
   assert.ok(Math.abs(scaled.accuracy - (x.accuracy + HIT.STEP)) < 1e-9);
-  assert.ok(Math.abs(scaled.dodge - x.dodge) < 1e-9); // dodge is identity, unscaled
+  // Dodge is identity, unscaled - checked on the one who has any.
+  const g = ENEMY_TYPES['security-guard'];
+  assert.ok(Math.abs(scaleEnemy(g, g.level + ENEMY_SCALING.ACC_PER).dodge - g.dodge) < 1e-9);
 });
 
 test('scaleEnemy scales the maxHp field for a class-backed AI unit', () => {

@@ -16,6 +16,7 @@ import { SURFACES } from './data/surfaces.js';
 import { NPCS } from './data/npcs.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { COMPANIONS } from './data/companions.js';
+import { parseActorRef } from './data/actor-registries.js';
 
 // Old saves/exports may reference renamed tile types. Exported so the editor
 // can upgrade them when loading a level for editing.
@@ -82,8 +83,19 @@ export function parseLevel(level) {
         row.push(null);
         continue;
       }
-      const actor = actorsLegend[ch];
-      if (actor !== undefined) {
+      const actorRef = actorsLegend[ch];
+      if (actorRef !== undefined) {
+        // `<id>@<level>` asks for that actor at a specific tier on this tile
+        // (actor-registries.parseActorRef). Only enemies scale, so a tier on
+        // anything else is a typo worth naming rather than ignoring.
+        const { id: actor, level: tier } = parseActorRef(actorRef);
+        // Only an enemy sits on the scaling curve, so a tier anywhere else is a
+        // typo. Checked before the dispatch: after it, an unknown actor has
+        // already thrown and a companion has already been filed.
+        if (tier != null && !ENEMY_TYPES[actor]) {
+          throw new Error(
+            `Level "${level.name}": "${actorRef}" for char "${ch}" - only enemies take a @level`);
+        }
         if (actor === 'player') playerSpawn = { x, z };
         else if (COMPANIONS[actor]) companionSpawns.push({ type: actor, x, z });
         else if (NPCS[actor]) npcSpawns.push({ type: actor, x, z });
@@ -93,8 +105,11 @@ export function parseLevel(level) {
         // as a crash deep in actor construction with nothing pointing back at
         // the level file. Named, like the tile-type error below, because the
         // useful part is which char in which level.
-        else if (ENEMY_TYPES[actor]) enemySpawns.push({ type: actor, x, z });
-        else {
+        // `level` only appears when the placement asked for a tier, so an
+        // ordinary spawn keeps the shape it has always had.
+        else if (ENEMY_TYPES[actor]) {
+          enemySpawns.push(tier == null ? { type: actor, x, z } : { type: actor, x, z, level: tier });
+        } else {
           throw new Error(
             `Level "${level.name}": unknown actor "${actor}" for char "${ch}" - `
             + 'not "player", a companion, an NPC, or an enemy type');

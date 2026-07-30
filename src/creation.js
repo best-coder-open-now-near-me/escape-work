@@ -1,19 +1,32 @@
 // Character creation (CHARACTER_PLAN.md). Pure logic - no PlayCanvas, no DOM.
 //
-// Today you do not create a character, you pick one: `createSheet(classId)`
-// mints a sheet in which every field - name, body, colour, numbers - is a copy
-// of the class, so two players who both hire the Mail Room get byte-identical
-// characters called the same thing. This module owns the part of that which is
-// a rule rather than a screen.
+// There are two ways in, and they are different doors rather than one door with
+// a corridor behind it:
+//
+//   PRECUT - you pick one of the six people this game is about. They are their
+//     job: named for it, wearing its rig, carrying its kit. Nothing about them
+//     is a blank for you to fill in, because they are somebody already.
+//   CUSTOM - you make one. You choose a name, whose job you do (for the kit),
+//     and a body from the rigs nobody else wears.
+//
+// Both then spend two points at the self-assessment, and that is the whole of
+// creation.
+//
+// It used to be one funnel: every start walked into a customization screen that
+// offered a typed name, a colour palette, two build sliders and a "so why are
+// you still here" background axis, on top of a wardrobe of all twelve rigs -
+// including the ones worn by the bosses. None of that was asked for. What it
+// cost was the precut characters: you could not play one AS WRITTEN without
+// declining a form, and the form's own defaults did not match the bodies it was
+// previewing.
 //
 // A DRAFT is what the creation UI edits; `createCharacter` turns one into a
 // real sheet. Keeping them apart is deliberate: a draft is plain data a test
 // builds in one line, and the sheet-building step carries an invariant that is
 // very easy to break by touching attributes in the wrong order (see below).
-import { createSheet, spendAttrPoint, applyEffect, recomputeDerived, ATTR_KEYS } from './stats.js';
+import { createSheet, spendAttrPoint, ATTR_KEYS } from './stats.js';
 import { CLASSES } from './data/classes.js';
-import { RIGS, TINTS, BUILD_RANGE, clampBuild } from './data/looks.js';
-import { BACKGROUNDS } from './data/backgrounds.js';
+import { CUSTOM_RIGS } from './data/looks.js';
 
 // The house voice is already they/them - combat narrates the party in the third
 // person and one victory line reads "They gather their things and go". A field
@@ -58,59 +71,47 @@ export const NAME_MAX = 24;
 export const CREATION_POINTS = 2;
 
 // Tidy a typed name: collapse runs of whitespace, trim, clamp. An empty result
-// falls back rather than producing a nameless character - the field is
-// prefilled with the class label, and clearing it means "use that".
+// falls back rather than producing a nameless character.
 export function cleanName(raw, fallback = '') {
   const cleaned = String(raw ?? '').replace(/\s+/g, ' ').trim().slice(0, NAME_MAX);
   return cleaned || fallback;
 }
 
-// A fresh draft for a class, holding exactly today's defaults. Creating from an
-// untouched draft must reproduce today's character byte for byte, which is what
-// makes "skip the paperwork" a real skip rather than a different character.
-export function createDraft(classId) {
-  const cls = CLASSES[classId];
-  return {
-    classId,
-    name: cls?.name || '',
-    pronouns: DEFAULT_PRONOUNS,
-    // Appearance starts as EXACTLY what the class would have given you, so an
-    // untouched draft is not merely similar to today's character but identical.
-    // `rig: null` means "whatever the class wears" rather than naming it - so a
-    // later art change still reaches a character who never chose otherwise.
-    rig: null,
-    background: null, // the axis that is not your job; absent = none
-    tint: cls?.look?.tint || null,
-    build: clampBuild(cls?.look?.build) || null,
-    // Attribute keys chosen at the self-assessment, in order. An array rather
-    // than a tally so the UI can show and undo them one at a time.
-    spends: [],
-  };
+// A fresh draft. `custom` is what makes the two doors different: a precut
+// character is named for the job and wears its rig, and neither is editable, so
+// the draft simply does not carry the fields that would edit them.
+export function createDraft(classId, { custom = false } = {}) {
+  const draft = { classId, pronouns: DEFAULT_PRONOUNS, spends: [] };
+  if (custom) {
+    draft.custom = true;
+    draft.name = '';
+    draft.rig = CUSTOM_RIGS[0];
+  }
+  return draft;
 }
 
-// The model a draft would wear: its chosen rig, or the class's own.
+// The model a draft would wear: a custom character's chosen rig, or - for one
+// of the six - the class's own, which is not up for discussion.
 export const draftModel = (draft) =>
-  (draft?.rig && RIGS[draft.rig] ? draft.rig : CLASSES[draft?.classId]?.model) || null;
+  (draft?.custom && CUSTOM_RIGS.includes(draft.rig) ? draft.rig : CLASSES[draft?.classId]?.model) || null;
 
-// The look a draft would produce, or null when it has not departed from the
-// class at all. Null matters: it is what lets `lookOf` fall through to the class
-// entry, so a character who chose nothing keeps tracking the class forever
-// rather than freezing a copy of it at creation.
-export function draftLook(draft) {
-  const cls = CLASSES[draft?.classId];
-  const tint = draft?.tint || null;
-  const build = clampBuild(draft?.build);
-  const same = JSON.stringify({ tint, build })
-    === JSON.stringify({ tint: cls?.look?.tint || null, build: clampBuild(cls?.look?.build) });
-  if (same) return null;
-  const look = {};
-  if (tint) look.tint = tint;
-  if (build) look.build = build;
-  return Object.keys(look).length ? look : null;
-}
+// The look a draft would produce. A custom character on a borrowed rig gets no
+// look of its own; a precut one keeps tracking its class entry forever, which
+// is what lets a later art change still reach it.
+export const draftLook = (draft) => (draft?.custom ? null : CLASSES[draft?.classId]?.look || null);
+
+// The name a draft would produce: what a custom character typed, or the job.
+export const draftName = (draft) => {
+  const job = CLASSES[draft?.classId]?.name || '';
+  return draft?.custom ? cleanName(draft.name, job) : job;
+};
 
 // How many creation points a draft has left to spend.
 export const pointsLeft = (draft) => CREATION_POINTS - (draft?.spends?.length || 0);
+
+// How many of the creation points went into one attribute.
+export const spentOn = (draft, attr) =>
+  (draft?.spends || []).filter((k) => k === attr).length;
 
 // Add a point to `attr` if the draft has one left. Returns the draft.
 export function spendDraftPoint(draft, attr) {
@@ -119,9 +120,13 @@ export function spendDraftPoint(draft, attr) {
   return draft;
 }
 
-// Take back the last point spent.
-export function undoDraftPoint(draft) {
-  draft.spends.pop();
+// Take a point back OUT of `attr`. Per-attribute rather than "pop the last
+// one": the screen shows four rows of numbers going up and down, so the way to
+// undo a row is a button on that row. A single global undo made the player
+// remember what order they had clicked in to work out what it would take away.
+export function unspendDraftPoint(draft, attr) {
+  const i = (draft?.spends || []).lastIndexOf(attr);
+  if (i >= 0) draft.spends.splice(i, 1);
   return draft;
 }
 
@@ -131,8 +136,6 @@ export function undoDraftPoint(draft) {
 // makes a screen feel slow.
 export function draftAttr(draft) {
   const base = { ...(CLASSES[draft?.classId]?.attr || {}) };
-  const bonus = BACKGROUNDS[draft?.background]?.effect?.attrBonus || {};
-  for (const k of ATTR_KEYS) base[k] = (base[k] || 0) + (bonus[k] || 0);
   for (const k of draft?.spends || []) base[k] = (base[k] || 0) + 1;
   return base;
 }
@@ -152,37 +155,14 @@ export function draftAttr(draft) {
 // the sheet `createSheet(classId)` produces today.
 export function createCharacter(draft) {
   const sheet = createSheet(draft.classId);
-  sheet.name = cleanName(draft.name, sheet.className);
+  sheet.name = draftName(draft);
   sheet.pronouns = PRONOUNS.includes(draft.pronouns) ? draft.pronouns : DEFAULT_PRONOUNS;
-  // Appearance is sheet-owned from here (lookOf resolves sheet -> class ->
-  // companion), so only a DEPARTURE from the class is recorded. A character who
-  // changed nothing carries no look and keeps tracking their class entry, which
-  // is how a later art change still reaches them.
-  const look = draftLook(draft);
-  if (look) sheet.look = look;
-  if (draft.rig && RIGS[draft.rig]) {
+  // Only a custom character owns a body. One of the six wears their class's
+  // rig and carries no `rig` at all, so they keep tracking the class entry
+  // rather than freezing a copy of it at creation.
+  if (draft.custom && CUSTOM_RIGS.includes(draft.rig)) {
     sheet.rig = draft.rig;
-    sheet.model = draft.rig; // normalizeSheet validates this against RIGS on load
-  }
-  // A background BAKES, exactly as a class-track node does: its effect lands in
-  // attr/actions/talent.effects and the id is kept only as a record of what
-  // happened. Nothing re-applies it on load, which is the same rule the perks
-  // list follows. It runs before the points so the self-assessment is spent on
-  // top of the character you actually chose.
-  const bg = BACKGROUNDS[draft.background];
-  if (bg) {
-    sheet.background = draft.background;
-    applyEffect(sheet, bg.effect);
-    // Gear fills only a slot the class left EMPTY - the class's own startGear
-    // is its signature piece, and replacing it would delete the more specific
-    // statement. An Expensed It Drone keeps the class stress ball.
-    for (const [slot, itemId] of Object.entries(bg.gear || {})) {
-      if (sheet.equipped[slot] == null) sheet.equipped[slot] = itemId;
-    }
-    // applyEffect deliberately does not recompute (spendClassPoint samples
-    // maxHp either side of it), so the caller owns it - here, that is us.
-    recomputeDerived(sheet);
-    sheet.hp = sheet.maxHp; // a fresh character starts whole
+    sheet.model = draft.rig; // normalizeSheet validates this against CUSTOM_RIGS on load
   }
   // Bank the points, then spend them through the real function. Banking first
   // matters: spendAttrPoint refuses when the pool is empty, which is what stops
