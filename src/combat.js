@@ -14,7 +14,7 @@ import { truncateByBudget, routeToFiringPosition } from './pathfinding.js';
 import { pronounsOf, capitalize, verb } from './creation.js';
 import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, gritSaveChance, MOVE, REACH } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
-import { toHitTerms, provokedBy, positionMods, inReach, dist, crouchShields, TACTICS } from './tactics.js';
+import { toHitTerms, provokedBy, positionMods, inReach, dist, crouchShields, hasCover, TACTICS } from './tactics.js';
 import {
   buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, isPurge, coneFrom, conePolyline, aimRangeOf, rangeTiles,
 } from './powers.js';
@@ -636,25 +636,38 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (ok && s.shield) {
       const sb = standing(s.shield) ? bodyOf(s.shield) : null;
       ok = !!sb && sb.x === s.x && sb.z === s.z;
-    } else if (ok) {
+    } else if (ok && !s.edges) {
       const d = world.tileDefAt(s.x, s.z);
       ok = !!d && (d.solid || d.cover); // toppled or destroyed = no shield left
     }
+    // s.edges needs no shield check: the partitions are the map's own
+    // geometry, and whether they block a given shot is read live per shot.
     if (!ok) { breakCrouch(unit); return null; }
     if (!hasStatus(carrierOf(unit), 'covered')) applyStatus(carrierOf(unit), 'covered');
     return s;
   }
   // What a single-target ranged shot at `defender` actually does: passes
-  // untouched, is BLOCKED by a crouch behind furniture, or lands on the
-  // human shield instead.
+  // untouched, is BLOCKED by a crouch behind furniture or against a
+  // partition, or lands on the human shield instead.
   function shotOutcome(attacker, defender) {
     const s = crouchStateOf(defender);
     if (!s) return { target: defender };
     const A = bodyOf(attacker);
     const D = bodyOf(defender);
+    // Edge mode: the crouch is against the tile's own partitions, and which
+    // shots they block is the M3 cover test (tactics.hasCover) read LIVE off
+    // the edges - a door swinging open just stops blocking - upgraded from
+    // -20% to immunity while the crouch holds.
+    if (s.edges) {
+      return hasCover(A.x, A.z, D.x, D.z, world.stepOpen)
+        ? { target: null, blocked: s } : { target: defender };
+    }
     if (!crouchShields(A.x, A.z, D.x, D.z, s.x, s.z)) return { target: defender };
     return s.shield ? { target: s.shield, redirected: true } : { target: null, blocked: s };
   }
+  // What the refusal calls the thing doing the blocking.
+  const crouchLabel = (s) => (s.edges ? 'partition'
+    : (world.tileDefAt(s.x, s.z)?.label || 'cover').toLowerCase());
   // Back out of whatever is armed or awaiting confirmation. RIGHT-CLICK does
   // this from anywhere; a left click never cancels (it reports an invalid
   // target instead), so aiming can't be lost by a near-miss.
@@ -887,7 +900,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const so = shotOutcome(active, en);
       if (so.blocked || (so.redirected && so.target.sheet)) {
         costTag.textContent = so.blocked
-          ? `No shot - in cover behind the ${(world.tileDefAt(so.blocked.x, so.blocked.z)?.label || 'cover').toLowerCase()}`
+          ? `No shot - in cover behind the ${crouchLabel(so.blocked)}`
           : `No shot - you would hit ${nameOf(so.target)}`;
         costTag.style.left = `${sx + 14}px`;
         costTag.style.top = `${sy + 14}px`;
@@ -1222,7 +1235,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const tz = Math.round(aimPoint.z);
       const d = world.tileDefAt(tx, tz);
       const body = unitStandingAt(tx, tz);
-      const ok = body ? body !== active : !!(d && (d.solid || d.cover));
+      const ok = body ? body !== active
+        : (!!(d && (d.solid || d.cover)) || edgeShieldedTile(tx, tz));
       drawRing(tx, tz, 0.42, ok ? PREVIEW_COVER : PREVIEW_FAR);
       return;
     }
@@ -1914,6 +1928,25 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     log(`${nameOf(unit)} tucks in behind ${what}.`);
   }
 
+  // Tuck in against the tile's OWN partitions (edge mode): cubicle walls are
+  // edges, not cells, so the crouch happens on the tile and shotOutcome reads
+  // which faces block live off the edges. The other half of "doesn't
+  // recognise cubicle walls as cover" (designer, playtesting 2026-07-30).
+  function crouchAtEdges(unit) {
+    breakCrouch(unit, true);
+    const b = bodyOf(unit);
+    crouched.set(unit, { edges: true, at: { x: b.x, z: b.z } });
+    applyStatus(carrierOf(unit), 'covered');
+    statusFxAt(unit, 'covered');
+    log(`${nameOf(unit)} tucks in against the partition.`);
+  }
+
+  // A walkable tile with a partition (or closed door) on any face - the other
+  // thing this office calls cover, and a legal take-cover aim.
+  const ORTHO = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  const edgeShieldedTile = (tx, tz) => world.isWalkable(tx, tz)
+    && ORTHO.some(([dx, dz]) => !world.stepOpen(tx, tz, tx + dx, tz + dz));
+
   // The player's verb: walk to the shield and crouch. Priced as "the walk,
   // plus 1 AP" (designer: distance cost + 1) - the walk is billed by the same
   // movement engine as every other step, the +1 is the action's own `ap`, and
@@ -1924,35 +1957,45 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const shield = unitStandingAt(tx, tz);
     const def = world.tileDefAt(tx, tz);
     if (shield === active) { log('You cannot hide behind yourself.'); return; }
-    if (!shield && !(def && (def.solid || def.cover))) {
-      log('Nothing there to hide behind.');
-      return;
-    }
-    // The crouch SPOT: an open 4-neighbour of the shield - orthogonal because
-    // the shield must sit on a FACE of the crouch tile (tactics.crouchShields;
-    // a cell diagonal to you shields nothing) - that the aimer can SEE
-    // ("as line of sight driven as possible": the sightline gates the aim).
-    // Among the visible ones, nearest by route.
+    const cellMode = !!shield || !!(def && (def.solid || def.cover));
+    // A tile with a partition on a face is ALSO a legal aim (edge mode): the
+    // office's cubicle walls are edges, not cells, and they are the cover
+    // the designer reached for first.
+    const edgeMode = !cellMode && edgeShieldedTile(tx, tz);
+    if (!cellMode && !edgeMode) { log('Nothing there to hide behind.'); return; }
+    // The crouch SPOT: beside a cell shield (an open 4-neighbour the aimer
+    // can SEE - "as line of sight driven as possible" - nearest by route;
+    // orthogonal because the shield must sit on a FACE, tactics.crouchShields),
+    // or ON the edge-shielded tile itself.
     const me = { x: active.actor.x, z: active.actor.z };
     let best = null;
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const sx = tx + dx;
-      const sz = tz + dz;
-      const here = sx === me.x && sz === me.z;
-      const occupant = unitStandingAt(sx, sz);
-      if (!here && (!world.isWalkable(sx, sz) || occupant)) continue;
-      if (!world.hasLos(me.x, me.z, sx, sz)) continue;
-      if (here) { best = { sx, sz, path: null, len: 0 }; break; }
-      const p = world.findPath(me.x, me.z, sx, sz, active.actor);
-      if (!p || p.length < 2) continue;
-      if (!best || p.length < best.len) best = { sx, sz, path: p, len: p.length };
+    if (edgeMode) {
+      if (me.x === tx && me.z === tz) best = { sx: tx, sz: tz, path: null };
+      else if (world.hasLos(me.x, me.z, tx, tz)) {
+        const p = world.findPath(me.x, me.z, tx, tz, active.actor);
+        if (p && p.length >= 2) best = { sx: tx, sz: tz, path: p };
+      }
+    } else {
+      for (const [dx, dz] of ORTHO) {
+        const sx = tx + dx;
+        const sz = tz + dz;
+        const here = sx === me.x && sz === me.z;
+        const occupant = unitStandingAt(sx, sz);
+        if (!here && (!world.isWalkable(sx, sz) || occupant)) continue;
+        if (!world.hasLos(me.x, me.z, sx, sz)) continue;
+        if (here) { best = { sx, sz, path: null, len: 0 }; break; }
+        const p = world.findPath(me.x, me.z, sx, sz, active.actor);
+        if (!p || p.length < 2) continue;
+        if (!best || p.length < best.len) best = { sx, sz, path: p, len: p.length };
+      }
     }
     if (!best) { log('No clear way in behind it.'); return; }
     if (active.ap < a.ap) { log('Not enough AP.'); return; }
     armed = null;
+    const commit = () => (edgeMode ? crouchAtEdges(active) : crouchAt(active, tx, tz, shield));
     if (!best.path) {
       active.ap = roundAp(active.ap - a.ap);
-      crouchAt(active, tx, tz, shield);
+      commit();
       refresh();
       return;
     }
@@ -1961,7 +2004,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const walk = walkActive(best.path, moveBudget(active) - a.ap);
     if (!walk) { log('Not enough AP to reach it.'); return; }
     if (walk.done && Math.round(walk.end[0]) === best.sx && Math.round(walk.end[1]) === best.sz) {
-      pendingCrouch = { tx, tz, spot: [best.sx, best.sz] };
+      pendingCrouch = { tx, tz, spot: [best.sx, best.sz], edges: edgeMode };
     } else {
       log('You close the distance toward cover.');
     }
@@ -1978,7 +2021,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (canReach(unit, target)) return false; // melee ignores cover - swing instead
     const b = bodyOf(unit);
     const t = bodyOf(target);
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    for (const [dx, dz] of ORTHO) {
       const sx = b.x + dx;
       const sz = b.z + dz;
       const d = world.tileDefAt(sx, sz);
@@ -1988,6 +2031,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (!crouchShields(t.x, t.z, b.x, b.z, sx, sz)) continue;
       acting.ap = roundAp(acting.ap - coverAp);
       crouchAt(unit, sx, sz);
+      refresh();
+      return true;
+    }
+    // No shielding furniture beside it - but the tile's own partitions count:
+    // if an edge already blocks the line to its target, crouch in place.
+    if (hasCover(t.x, t.z, b.x, b.z, world.stepOpen)) {
+      acting.ap = roundAp(acting.ap - coverAp);
+      crouchAtEdges(unit);
       refresh();
       return true;
     }
@@ -2489,7 +2540,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // member-shield also refuses rather than quietly rerouting the damage.
       const out = shotOutcome(active, en);
       if (out.blocked) {
-        refuse(`No shot - ${en.def.name} is tucked in behind the ${(world.tileDefAt(out.blocked.x, out.blocked.z)?.label || 'cover').toLowerCase()}. Find an angle.`);
+        refuse(`No shot - ${en.def.name} is tucked in behind the ${crouchLabel(out.blocked)}. Find an angle.`);
         return;
       }
       if (out.redirected && out.target.sheet) {
@@ -2629,7 +2680,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // shield from anywhere (performOn decides whether that is a shot you take).
   const routeIntoRange = (en, range) => {
     const s = crouchStateOf(en);
-    const angleClear = (x, z) => !s || !!s.shield || !crouchShields(x, z, en.x, en.z, s.x, s.z);
+    const angleClear = (x, z) => {
+      if (!s || s.shield) return true;
+      return s.edges ? !hasCover(x, z, en.x, en.z, world.stepOpen)
+        : !crouchShields(x, z, en.x, en.z, s.x, s.z);
+    };
     return routeToFiringPosition({
       tx: en.x,
       tz: en.z,
@@ -2793,7 +2848,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (isFriendly(a)) out.push(`Aim at a teammate or yourself - range ${buffRangeOf(a)}, never misses`);
     if (isControl(a)) out.push('No damage - it takes their turn or their ground, not their HP');
     if (a.type === 'cover') {
-      out.push('Aim at furniture or a teammate; you walk over and tuck in (the walk bills as movement)');
+      out.push('Aim at furniture, a tile against a partition, or a teammate; you walk over and tuck in (the walk bills as movement)');
       out.push('Ranged attacks from the shielded side cannot touch you - melee and flanking still can');
       out.push('Moving breaks it; attacking does not');
     }
@@ -3560,12 +3615,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
       // finish a queued walk-up crouch (TACTICS_PLAN M6)
       if (pendingCrouch && !active.actor.moving) {
-        const { tx, tz, spot } = pendingCrouch;
+        const { tx, tz, spot, edges } = pendingCrouch;
         pendingCrouch = null;
         const a = ACTIONS['take-cover'];
         if (active.actor.x === spot[0] && active.actor.z === spot[1] && active.ap >= a.ap) {
           active.ap = roundAp(active.ap - a.ap);
-          crouchAt(active, tx, tz, unitStandingAt(tx, tz));
+          if (edges) crouchAtEdges(active);
+          else crouchAt(active, tx, tz, unitStandingAt(tx, tz));
           refresh();
         } else {
           log('The moment passes - no cover taken.');
@@ -3683,9 +3739,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return [...watching.keys()].map((u) => (u.sheet ? u.sheet.name : u.def.name));
     },
     // Who is crouched, and behind which cell (TACTICS_PLAN M6) - the suite's
-    // window into the take-cover commitment and its lazy breaks.
+    // window into the take-cover commitment and its lazy breaks. Edge-mode
+    // crouches (against a partition) carry `edges` and no cell.
     get crouched() {
-      return [...crouched.entries()].map(([u, s]) => ({ name: nameOf(u), x: s.x, z: s.z, human: !!s.shield }));
+      return [...crouched.entries()].map(([u, s]) => ({
+        name: nameOf(u), x: s.x ?? null, z: s.z ?? null, human: !!s.shield, edges: !!s.edges,
+      }));
     },
     // The movement allowance left this turn (MOVEMENT_PLAN M2). 0 for a
     // character without the talent.

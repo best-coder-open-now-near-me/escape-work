@@ -24,6 +24,20 @@ CONTROLS ignore the crouch; a failed Grit save deals the damage AND keeps the
 existing stun alongside the new pin; and shooting a target whose human shield
 is one of YOUR OWN refuses rather than rerouting damage into your teammate.
 
+One NEW question from the first playtest (2026-07-30):
+
+- **Partition toppling.** The designer expects cubicle walls to be shovable
+  over like furniture ("doesnt recognize cubicle walls ... could be
+  toppled"). Partitions are EDGES, not cells, so this is new machinery: a
+  grid edge-removal API, the wall entity retired from the render/fade list,
+  conduction pools recomputed (edges dam spills), and a fallen strip. Shape
+  questions before building: does one shove drop one edge segment or the
+  whole run; which side does it fall to (away from the shover, presumably
+  onto whoever stands beyond); does it deal the topple damage + Grit save +
+  pin like furniture; does it leave `cover` debris. **Recommendation:** one
+  segment per shove, falls away from the shover, same save/damage/pin as
+  furniture, leaves a debris strip on the far tile.
+
 It follows the shape of `PROGRESSION_PLAN.md` / `HIT_PLAN.md`, and honors the
 one rule from `ARCHITECTURE.md`: **content is data, code is systems.** The
 positional rules are pure geometry over coordinates the engine already tracks;
@@ -641,6 +655,16 @@ None. See decision #6.
      partial: the hovered shield rings yellow, but yellow does not yet
      distinguish topplable from fixed. Combat-only verb: out of a fight the
      bar says so.
+   - **First-playtest fixes (2026-07-30):** (1) the hotbar now rebuilds the
+     moment a fight starts and ends, so combat-only verbs light up on their
+     own — the bar used to keep its out-of-combat state until the next press,
+     which read as "take cover never becomes active." (2) EDGE MODE: cubicle
+     walls are edges, not cells, and the verb now speaks them — aim at a tile
+     with a partition (or closed door) on a face, crouch ON it, and which
+     shots are blocked is the M3 edge test (`tactics.hasCover`) read live,
+     upgraded from −20% to immunity while the crouch holds. The AI crouches
+     in place against a partition that already blocks its target's line.
+     Partition TOPPLING is not built — see Questions at top.
 
 7. **Shots sail over low furniture (M6a).** ✅ Landed.
    `[ratified]` "height threshold as you suggest" (designer, 2026-07-29).

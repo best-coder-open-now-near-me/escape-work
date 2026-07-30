@@ -1944,6 +1944,7 @@ function startGame(level) {
           }
           ui.say(`The floor is yours. You catch your breath. (+${VICTORY_HEAL} HP)`);
           paintHud(sheet);
+          refreshHotbarSlots(); // the combat-only verbs dim again with the fight over
           openLevelUps(); // spend the fight's promotions now that it's safe
         },
         onLose: () => {
@@ -1959,6 +1960,11 @@ function startGame(level) {
     // so binding the returned controller here would resurrect a dead one (and
     // a later abort would run its cleanup a second time).
     if (inCombat) combat = controller;
+    // Rebuild the bar NOW that combat's rules own it: the combat-only verbs
+    // (Take Cover, Deflect, the heals) light up the moment a fight starts,
+    // not at whatever next press happened to rebuild the slots - which is
+    // exactly how it used to read: "disabled until I pushed something".
+    refreshHotbarSlots();
   }
 
   // Proximity trigger: a coworker adjacent to any party member starts the

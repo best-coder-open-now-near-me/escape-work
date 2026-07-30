@@ -129,8 +129,14 @@ const CROUCH_LAB = {
 test('take cover walks you in behind the desk, and moving breaks it', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, CROUCH_LAB);
+  // Out of a fight the verb is dimmed - and the moment one starts it must
+  // light WITHOUT any other press: the bar rebuild used to wait for the next
+  // button, which read as "take cover never becomes active" (designer,
+  // playtesting 2026-07-30).
+  await expect(page.locator('#hotbar-act-take-cover')).toHaveAttribute('data-affordable', 'false');
   await enterCombat(page); // the adjacent Manager opens the fight
   await waitForPlayerTurn(page);
+  await expect(page.locator('#hotbar-act-take-cover')).toHaveAttribute('data-affordable', 'true');
   await refillAp(page);
 
   await page.click('#hotbar-act-take-cover');
@@ -155,4 +161,41 @@ test('take cover walks you in behind the desk, and moving breaks it', async ({ p
   await clickWorld(page, 1, 3);
   await expect.poll(() => page.evaluate(() => window.__combat.crouched.length),
     { timeout: 20_000 }).toBe(0);
+});
+
+// The office's first cover is its cubicle walls - EDGES, not cells - and the
+// verb has to speak them too (designer, playtesting 2026-07-30): aim at the
+// tile against the partition, crouch ON it, and the edges decide which shots
+// are blocked, live.
+const PARTITION_LAB = {
+  name: 'Partition Lab',
+  tiles: { '#': 'wall', '.': 'floor' },
+  actors: { '@': 'player', M: 'manager' },
+  walls: ['V 4 2 1'], // a partition on the west face of (4,2)
+  map: [
+    '########',
+    '#@M....#',
+    '#......#',
+    '#......#',
+    '########',
+  ],
+};
+
+test('a tile against a partition is a legal crouch', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, PARTITION_LAB);
+  await enterCombat(page);
+  await waitForPlayerTurn(page);
+  await refillAp(page);
+
+  await page.click('#hotbar-act-take-cover');
+  await expect.poll(() => page.evaluate(() => window.__combat.armed), { timeout: 10_000 })
+    .toBe('take-cover');
+  await clickWorld(page, 4, 2);
+  await expect.poll(() => page.evaluate(() => window.__combat.crouched.length),
+    { timeout: 30_000 }).toBe(1);
+  const crouch = await page.evaluate(() => window.__combat.crouched[0]);
+  expect(crouch.edges, 'an edge-mode crouch, not a cell one').toBe(true);
+  const pt = await page.evaluate(() => window.__game.playerTile);
+  expect([pt.x, pt.z], 'crouched ON the partition tile itself').toEqual([4, 2]);
 });
