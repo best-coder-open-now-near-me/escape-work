@@ -252,7 +252,18 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   click will take, a ring on the stand point it stops at, and the odds plus
   the total AP - move and swing together - priced FROM that planned point
   (`attackMods` takes it as `plan`), because cover and flanking move with the
-  attacker. The walk itself only ever aims at a stand point the swing is
+  attacker. **A walk-up stops the moment ITS OWN verb is live**, not at the
+  target's elbow: `verbReaches` asks "could this power act from this point?"
+  through `actRangeOf` - the CLICK's own branching (a ranged attack's
+  `stats.rangeOf`, a ranged control's `range`, melee reach for everything
+  walked into), deliberately NOT the aim wash's wider `aimRangeOf`, which
+  covers verbs the click never walks in at all - and `pathfinding.trimToFirst`
+  cuts the SMOOTHED route at the first point where it holds. Trimming after
+  smoothing is what puts the stop point on the line actually walked; the fixed
+  0.85 approach point it replaced stopped half a tile closer than any swing
+  needed and sat offset on the target -> goal-tile line. One predicate serves
+  the trim, the pre-walk promise and the arrival check, so the three cannot
+  disagree. The walk only ever aims at a stand point the swing is
   LEGAL from (`routeBeside`/`swingPointAt`: reach distance plus the partition
   line test - the same `canReach` the strike runs on arrival), the melee
   target rings read that same rule (`hasSwingSpot`), and every walk refusal

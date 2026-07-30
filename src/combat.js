@@ -10,7 +10,7 @@
 // do. Fire keeps burning throughout.
 import { ACTIONS, arrivalLine, summonSpec } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
-import { truncateByBudget, routeToFiringPosition } from './pathfinding.js';
+import { truncateByBudget, routeToFiringPosition, trimToFirst } from './pathfinding.js';
 import { pronounsOf, capitalize, verb } from './creation.js';
 import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, gritSaveChance, MOVE, REACH } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
@@ -945,9 +945,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // affordable stretch green, the rest red, and rings the stop point - the
   // planned stand position, BG3-style). Returns { end, cost, done } or null
   // for a degenerate walk.
-  function previewWalk(rawPath, endPoint, a) {
+  function previewWalk(rawPath, endPoint, a, stopWhen = null) {
     if (endPoint) rawPath = [...rawPath.slice(0, -1), endPoint];
-    const s = world.smooth(rawPath, active.actor);
+    let s = world.smooth(rawPath, active.actor);
+    // The identical trim the walk will apply - the ring has to sit where the
+    // feet will stop, or the preview is describing a different walk.
+    if (stopWhen) s = trimToFirst(s, stopWhen) || s;
     const { points, cost, done, tail } = truncateByBudget(
       s, Math.max(0, moveBudget(active) - a.ap), stepCost);
     if (points.length < 2) return null;
@@ -1016,12 +1019,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         // A throw refuses where it stands (the click's own rule) - say so
         // instead of quoting odds for a throw that will not happen.
         if (a.ammoCost) { place(far ? 'Too far to throw.' : 'No clear line to throw.'); return; }
+        const stop = (px, pz) => verbReaches(id, en, px, pz);
         const route = routeIntoRange(en, range);
-        const w = route && route.length >= 2 ? previewWalk(route, null, a) : null;
+        const w = route && route.length >= 2 ? previewWalk(route, null, a, stop) : null;
         if (!w) { place('No way to get a shot at them.'); return; }
-        const ex = Math.round(w.end[0]);
-        const ez = Math.round(w.end[1]);
-        if (!w.done || cheb(ex, ez, en.x, en.z) > range || !world.hasLos(ex, ez, en.x, en.z)) {
+        if (!w.done || !stop(w.end[0], w.end[1])) {
           place('Out of range this turn - a click closes the distance.');
           return; // the trail stays up: green as far as the budget carries
         }
@@ -1031,12 +1033,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     } else if (!(isControl(a) && controlIsRanged(a)) && !canReach(active, en)) {
       // The melee walk-in (swings, touch controls, a purge): preview the same
       // route the click will take, to the same legal stand point.
+      const stop = (px, pz) => verbReaches(id, en, px, pz);
       const best = routeBeside(en);
       if (!best) { place('No way to get a swing at them.'); return; }
-      const w = previewWalk(best.path, best.point, a);
+      const w = previewWalk(best.path, best.point, a, stop);
       if (!w) { place('Already as close as the route gets.'); return; }
-      const endPos = posOf(en);
-      if (!w.done || !inReach(w.end[0], w.end[1], endPos.x, endPos.z, reachOfUnit(active), world.stepOpen)) {
+      if (!w.done || !stop(w.end[0], w.end[1])) {
         place('Out of reach this turn - a click closes the distance.');
         return;
       }
@@ -1295,13 +1297,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // when the turn ends, the verb is disarmed, or the aimer is mid-walk (a
     // wash painted from a tile you are leaving is a promise about ground you
     // no longer own). The key makes the repaint free while nothing changes.
-    // aimRangeOf covers the shapes powers.js owns; a plain ranged ATTACK's
-    // range is stats.rangeOf's rule (a throw carries no `range` field -
-    // ammoCost implies THROW_RANGE), and the wash must read the same helper
-    // the target rings and the click read or the three can disagree.
-    const attackRange = armed && ACTIONS[armed].type === 'attack' ? rangeOf(armed) : 0;
+    // reachSpecOf is the ONE answer to "how far does this verb reach": the
+    // shapes powers.js owns plus a plain ranged ATTACK's (stats.rangeOf, where
+    // a throw's undeclared THROW_RANGE lives). The wash, the target rings and
+    // every walk-up read it, so the three cannot disagree.
     const spec = phase === 'player' && armed && !active.actor.moving
-      ? aimRangeOf(ACTIONS[armed]) || (attackRange ? { r: attackRange } : null)
+      ? reachSpecOf(armed)
       : null;
     if (!spec) {
       aimPaint.hide();
@@ -2847,7 +2848,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const route = routeIntoRange(en, range);
       if (!route || route.length < 2) { refuse('No way to get a shot at them.'); return; }
       const shotBudget = moveBudget(active) - a.ap;
-      const shotWalk = walkActive(route, shotBudget);
+      // Stop at the first point THIS weapon can fire from, not at the firing
+      // tile's centre: routeIntoRange picks the nearest legal tile, but the
+      // route often crosses into range a step before reaching it - and a
+      // 6-tile straw that walks to a tile it could have fired at from six
+      // tiles back is the "much closer than needed" complaint in its ranged
+      // form.
+      const shotWalk = walkActive(route, shotBudget, null,
+        (px, pz) => verbReaches(armed, en, px, pz));
       // Same honest split as the melee walk-up: a degenerate route is not an
       // AP problem, and must not be narrated as one.
       if (!shotWalk) {
@@ -2856,9 +2864,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
       // Will we be able to fire when the walk finishes? The arrival check
       // (pendingMelee, in the update loop) is authoritative either way - this
-      // only decides whether to promise the shot or report the walk.
-      if (cheb(shotWalk.end[0], shotWalk.end[1], en.x, en.z) <= range
-        && world.hasLos(shotWalk.end[0], shotWalk.end[1], en.x, en.z)) {
+      // only decides whether to promise the shot or report the walk. Same
+      // predicate the trim above stopped on, so the two cannot disagree.
+      if (shotWalk.done && verbReaches(armed, en, shotWalk.end[0], shotWalk.end[1])) {
         pendingMelee = { en, action: armed }; // fire on arrival
       } else {
         armed = null;
@@ -2906,7 +2914,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // so a character wearing it stopped short of a target they could plainly
     // afford to reach and stood there instead of hitting anyone.
     const budget = moveBudget(active) - a.ap;
-    const walk = walkActive(best.path, budget, best.point);
+    const walk = walkActive(best.path, budget, best.point,
+      (px, pz) => verbReaches(armed, en, px, pz));
     // A null walk has two honest readings, and only one is about AP: with
     // budget in hand it means the route degenerated to nothing (walkActive's
     // no-progress guard). Blaming AP for that was this bug's face: "Not
@@ -2917,11 +2926,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     // The walk's endpoint is already a free point, so this asks the honest
     // question directly instead of rounding it back to a tile first: will we
-    // be standing inside reach when the walk finishes? Same rule as the
-    // arrival check (canReach), LINE TEST INCLUDED - promising on distance
-    // alone let a partition cancel the strike this walk was for, silently.
-    const endPos = posOf(en);
-    if (inReach(walk.end[0], walk.end[1], endPos.x, endPos.z, reachOfUnit(active), world.stepOpen)) {
+    // be standing inside reach when the walk finishes? Same predicate the trim
+    // stopped on and the arrival check re-runs, LINE TEST INCLUDED - promising
+    // on distance alone let a partition cancel the strike this walk was for,
+    // silently.
+    if (walk.done && verbReaches(armed, en, walk.end[0], walk.end[1])) {
       pendingMelee = { en, action: armed }; // strike on arrival
     } else {
       armed = null;
@@ -2932,11 +2941,58 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
 
   const AROUND = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 
+  // THE verb's own reach, as one spec: a declared `range` (aimRangeOf - the
+  // shapes powers.js owns) or a plain ranged attack's (stats.rangeOf, which is
+  // where a throw's undeclared THROW_RANGE lives), and null for a touch verb
+  // that walks into melee reach. The aim wash, the target rings and every
+  // walk-up read it, so a power's range means one thing everywhere.
+  function reachSpecOf(id) {
+    const a = ACTIONS[id];
+    if (!a) return null;
+    return aimRangeOf(a) || (a.type === 'attack' && rangeOf(id) ? { r: rangeOf(id) } : null);
+  }
+  // How far the verb ACTS from, exactly as handleEnemyClick resolves it: a
+  // ranged attack's firing range (stats.rangeOf, where a throw's undeclared
+  // THROW_RANGE lives), a ranged control's declared range, and 0 for
+  // everything the click walks into melee reach for.
+  //
+  // Deliberately the CLICK's branching rather than the aim wash's
+  // (reachSpecOf/aimRangeOf), which is a wider question - it covers verbs the
+  // click never walks in at all, and a purge's wash reaches further than the
+  // purge's own click does. A walk-up that stopped at the WASH's distance
+  // would stop where its verb cannot act.
+  function actRangeOf(id) {
+    const a = ACTIONS[id];
+    if (!a) return 0;
+    if (isControl(a)) return controlIsRanged(a) ? (a.range ?? 0) : 0;
+    return rangeOf(id);
+  }
+  // Could `id` be used on `en` from the point (px, pz)? THE question a walk-up
+  // stops on, asked with the armed power's OWN range rather than a distance
+  // borrowed from another verb: a 6-tile straw stops six tiles out, a swing
+  // walks to arm's length, and each stops the moment IT is live.
+  function verbReaches(id, en, px, pz) {
+    const r = actRangeOf(id);
+    const ep = posOf(en);
+    if (r) {
+      // A declared range is a Chebyshev TILE range, and it always needs a
+      // line - the same pair every ranged gate in this module tests.
+      const tx = Math.round(px);
+      const tz = Math.round(pz);
+      return cheb(tx, tz, en.x, en.z) <= r && world.hasLos(tx, tz, en.x, en.z);
+    }
+    return inReach(px, pz, ep.x, ep.z, reachOfUnit(active), world.stepOpen);
+  }
+
   // The point a walk into (gx, gz) would stop at - IF a swing on `en` from
   // there is LEGAL: reach distance and a clear line, the very rule the strike
   // runs on arrival (canReach). Null when that tile can't deliver the swing.
   // This is what keeps the walk-up's promise: choosing a stand point by any
   // weaker test sends the walk somewhere the arrival check then vetoes.
+  //
+  // It is the FURTHEST the walk can go, not where it stops: the route is
+  // trimmed to the first point the verb reaches from (trimToFirst), so this
+  // only has to prove the goal tile is worth walking to at all.
   function swingPointAt(en, gx, gz) {
     const own = gx === active.actor.x && gz === active.actor.z;
     if (!own && !world.isWalkable(gx, gz)) return null;
@@ -3012,13 +3068,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // free point - when `budget` runs out. Optionally swap the final waypoint
   // for a precise clicked point. Spends their AP. Returns { done, end } or
   // null if nothing was walkable.
-  function walkActive(rawPath, budget, endPoint = null) {
+  // `stopWhen` (optional) ends the walk at the first point along the SMOOTHED
+  // route where it holds - a walk-up stops the moment its verb is live rather
+  // than continuing to the tile beside the target. Trimming after smoothing is
+  // what puts the stop point on the line actually being walked; trimming the
+  // raw tile route would put it back on the grid.
+  function walkActive(rawPath, budget, endPoint = null, stopWhen = null) {
     // Moving is the one thing a crouch does not survive (TACTICS_PLAN M6,
     // designer default): the commitment ends the moment the walk begins, not
     // when it lands somewhere else.
     breakCrouch(active);
     if (endPoint) rawPath = [...rawPath.slice(0, -1), endPoint];
-    const s = world.smooth(rawPath, active.actor);
+    let s = world.smooth(rawPath, active.actor);
+    if (stopWhen) s = trimToFirst(s, stopWhen) || s;
     const { points, cost, done } = truncateByBudget(s, Math.max(0, budget), stepCost);
     if (points.length < 2 || cost < 0.05) return null;
     hidePreview();
@@ -3925,14 +3987,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (pendingMelee && !active.actor.moving) {
         const { en, action } = pendingMelee;
         pendingMelee = null;
-        // A queued swing lands if the walk ended in reach; a queued SHOT lands
-        // if it ended in range with a line. Same queue, two arrival rules -
-        // reading reach for a staple gun would cancel every walk-in that
-        // stopped at exactly the distance it was walking to.
-        const arrived = rangeOf(action)
-          ? cheb(active.actor.x, active.actor.z, en.x, en.z) <= rangeOf(action)
-            && world.hasLos(active.actor.x, active.actor.z, en.x, en.z)
-          : canReach(active, en);
+        // Did we arrive somewhere this verb can act from? One predicate for
+        // both shapes (verbReaches reads the power's own range, or the melee
+        // reach a touch verb walks into), measured from the BODY - which is
+        // where the trim stopped it, so the walk's promise and the arrival
+        // check are the same question asked twice.
+        const bp = posOf(active);
+        const arrived = verbReaches(action, en, bp.x, bp.z);
         // The crouch is re-resolved ON ARRIVAL (TACTICS_PLAN M6) - the world
         // had a whole walk to change. Blocked here quietly stands down; a
         // human shield takes the arriving shot by the same rule as a

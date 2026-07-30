@@ -158,6 +158,44 @@ export function approachPoint(isOpen, edgeOpen, gx, gz, tx, tz, reach = 0.85) {
   return clampToClearance(isOpen, edgeOpen, px, pz);
 }
 
+// Cut a (smoothed) polyline at the FIRST point along it where `ok(x, z)` holds
+// - the walk-up's "stop the moment the verb is live" rule. Returns that prefix,
+// or null if the predicate never holds along the whole path.
+//
+// This is what keeps an approach from overshooting: routing to a tile BESIDE
+// the target and walking the whole way there stops at a distance borrowed from
+// the goal tile rather than from the verb being used - much closer than a long
+// weapon (or a 6-tile straw) ever needed to be, and offset onto the
+// target -> goal-tile line instead of the line actually being walked. Trimming
+// the walked polyline answers both: the stop point is ON the player's own
+// approach, at the first spot the verb reaches from.
+//
+// Sampled at the same resolution truncateByBudget uses, so the two agree about
+// where a point on a segment is. Sampling only ever stops INSIDE the legal
+// zone (the first sample past the boundary), never short of it.
+export function trimToFirst(path, ok, slice = 0.25) {
+  if (!path || path.length < 2) return null;
+  const out = [path[0]];
+  for (let i = 1; i < path.length; i++) {
+    const [ax, az] = path[i - 1];
+    const [bx, bz] = path[i];
+    const len = Math.hypot(bx - ax, bz - az);
+    if (len < 1e-9) continue;
+    const n = Math.max(1, Math.ceil(len / slice));
+    for (let s = 1; s <= n; s++) {
+      const t = s / n;
+      const px = ax + (bx - ax) * t;
+      const pz = az + (bz - az) * t;
+      if (ok(px, pz)) {
+        out.push([px, pz]);
+        return out;
+      }
+    }
+    out.push([bx, bz]);
+  }
+  return null;
+}
+
 // Walk a (smoothed) polyline charging `rate(x, z)` per unit of DISTANCE,
 // sampled from the cell under each slice. Returns the affordable prefix -
 // which may end mid-segment, so a move can stop at any point when the budget

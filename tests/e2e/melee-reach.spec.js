@@ -5,7 +5,7 @@
 // Manager across a chest-high partition - the exact geometry that used to
 // wedge the fight into "Not enough AP to reach them" at nearly full AP.
 import { test, expect } from '@playwright/test';
-import { bootStash, clickWorld, waitForPlayerTurn } from './helpers.js';
+import { bootStash, clickWorld, waitForPlayerTurn, enterCombat, refillAp } from './helpers.js';
 
 // The Manager boxed in by partitions on all four edges: no stand point offers
 // a legal swing, so the click must refuse with the truth (not an AP excuse).
@@ -21,6 +21,24 @@ const SEALED = {
     '#........#',
     '#.......>#',
     '##########',
+  ],
+};
+
+// Open floor, the Manager across the room: a clean read on WHERE a walk-up
+// stops. It must stop at the verb's own reach - not march to the target's
+// elbow - and on the line it actually walked, not offset onto the
+// target -> goal-tile line.
+const APPROACH_LAB = {
+  name: 'Approach Lab',
+  tiles: { '#': 'wall', '.': 'floor', '>': 'exit' },
+  actors: { '@': 'player', M: 'manager' },
+  map: [
+    '############',
+    '#..........#',
+    '#.@......M.#',
+    '#..........#',
+    '#.........>#',
+    '############',
   ],
 };
 
@@ -134,4 +152,64 @@ test('a swing blocked from here walks around the partition and lands', async ({ 
     await waitForPlayerTurn(page);
   }
   expect(hp).toBeLessThan(hp0);
+});
+
+test('a walk-up stops at reach, on the line it walked', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, APPROACH_LAB);
+  await enterCombat(page);
+  await waitForPlayerTurn(page);
+
+  // Stage the geometry rather than hoping for it: both bodies on row z=2 with
+  // a five-tile gap, so the approach line is unambiguous and the walk is long
+  // enough that overshooting would be obvious. (enterCombat necessarily walks
+  // the player up; this puts them back.)
+  const setup = await page.evaluate(() => {
+    const place = (a, x, z) => {
+      const y = a.entity.getPosition().y;
+      a.path = null;
+      a.slideTo = null;
+      a.entity.setPosition(x, y, z);
+      a.x = Math.round(x);
+      a.z = Math.round(z);
+    };
+    const foe = window.__god.enemies.find((e) => e.alive);
+    place(foe, 9, 2);
+    place(window.__god.playerActor, 4, 2);
+    window.__combat.refresh();
+    return { from: { x: 4, z: 2 }, foe: { x: 9, z: 2 } };
+  });
+  await refillAp(page);
+  await page.waitForTimeout(400);
+  await settled(page);
+
+  const { from, foe } = setup;
+  await clickFoe(page);
+  await settled(page, 45_000);
+  const at = await page.evaluate(() => window.__game.playerPos);
+  const foeNow = await page.evaluate(() => {
+    const e = window.__game.enemies.find((f) => f.alive);
+    return e ? { x: e.px ?? e.x, z: e.pz ?? e.z } : null;
+  });
+  // The fight can end on arrival (the strike lands) - the stop point is still
+  // what's under test, so read the body's last known spot either way.
+  const target = foeNow || foe;
+  const gap = Math.hypot(at.x - target.x, at.z - target.z);
+
+  // Stopped INSIDE bare-hands reach (stats REACH.DEFAULT is 1.5)...
+  expect(gap).toBeLessThanOrEqual(1.5 + 0.05);
+  // ...and did not keep closing after the swing was already on. The old
+  // approach point walked to 0.85 of the body - a half-tile past the point the
+  // verb was live, which is what "much closer than needed" was.
+  expect(gap, 'kept closing past the reach the swing needed').toBeGreaterThan(1.0);
+
+  // ON the line it walked: the stop point sits near the segment from where the
+  // walk started to the target, rather than offset around the target onto a
+  // goal tile's own approach line.
+  const vx = target.x - from.x;
+  const vz = target.z - from.z;
+  const len2 = vx * vx + vz * vz;
+  const t = ((at.x - from.x) * vx + (at.z - from.z) * vz) / len2;
+  const offLine = Math.hypot(at.x - (from.x + vx * t), at.z - (from.z + vz * t));
+  expect(offLine, 'stopped off to the side of the approach line').toBeLessThan(0.5);
 });
