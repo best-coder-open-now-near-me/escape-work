@@ -32,6 +32,7 @@ import {
   standTilePath as standTileRoute, pickTarget as pickBest, advanceRoute,
   aiCrouchSpot, chooseBeat, afterFailedAdvance,
 } from './combat-ai.js';
+import { summonSpotProblem as spotProblem } from './summon-rules.js';
 import {
   cheb, TARGET_R, SURPRISE_RADIUS, AROUND, ORTHO, reachOfUnit, posOf, withinReach,
   canReach as canReachAt, reachSpecOf, actRangeOf, verbReaches as verbReachesAt,
@@ -3396,17 +3397,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // within `range` with a clear line to it. The applicants take that tile and
   // the free tiles ringing outward from it, so a click into open floor puts
   // them exactly where you wanted them - flanking, or screening a corridor.
-  const summonRange = (a) => a.range ?? 5;
   // Why a spot is unusable, or null when it's good. Shared by the click and the
   // hover preview so the ring you see is the rule that runs.
-  function summonSpotProblem(a, tx, tz) {
-    if (active.ap < a.ap) return 'Not enough AP.';
-    if (a.uses && active.usesLeft[armed] <= 0) return 'No postings left this fight.';
-    if (cheb(active.actor.x, active.actor.z, tx, tz) > summonRange(a)) return 'Too far - post it closer.';
-    if (!world.hasLos(active.actor.x, active.actor.z, tx, tz)) return 'No clear line to that spot.';
-    if (!world.summonSpots(tx, tz, 1).length) return 'No room for anyone to stand there.';
-    return null;
-  }
+  // The same ladder main.js runs out of combat - with the two legs a FIGHT owns
+  // (the AP pool, the per-fight ration) supplied here and simply absent there.
+  const summonSpotProblem = (a, tx, tz) => spotProblem(a, {
+    ap: active.ap,
+    usesLeft: active.usesLeft[armed],
+    dist: cheb(active.actor.x, active.actor.z, tx, tz),
+    los: world.hasLos(active.actor.x, active.actor.z, tx, tz),
+    hasRoomToStand: world.summonSpots(tx, tz, 1).length > 0,
+  });
   function placeSummon(tx, tz) {
     const a = ACTIONS[armed];
     const problem = summonSpotProblem(a, tx, tz);

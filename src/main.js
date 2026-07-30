@@ -49,6 +49,8 @@ import {
   hasGum, surfacePathCost,
 } from './step-rules.js';
 import { createDoors, atDoor, COMBAT_DOOR_AP } from './doors.js';
+import { createDialogue, shopKeyForNpc, sayRecruited } from './dialogue.js';
+import { summonRange, summonRoom, dropCount, summonSpotProblem } from './summon-rules.js';
 import {
   actionIdsFor, itemCountsFor, layoutFor, assignInto, slotViewModel, combatSlotViewModel,
   combatOnlyReason,
@@ -1237,61 +1239,25 @@ function startGame(level) {
   // the tree they started in - the recruit option's own `next` node lives
   // there); the next open reads `recruitedDialogue` instead.
   const dialoguePanel = ui.createDialoguePanel();
-  let dialogueNpc = null;
-  let dialogueTree = null;
-  const canRecruit = (npc) =>
-    npc instanceof CompanionActor && !npc.recruited && !!party && party.members.length < PARTY_CAP;
-  const dialogue = {
-    open(npc) {
-      if (inCombat || gameOver || !npc) return;
-      const tree = (npc.recruited && npc.def.recruitedDialogue) || npc.def.dialogue;
-      if (!tree) return; // nothing to say (a restored companion without lines)
-      dialogueNpc = npc;
-      dialogueTree = tree;
-      npc.faceToward(player.x, player.z);
-      loot.hideLabels();
-      hover.clear();
-      renderDialogueNode(dialogueTree.start);
-    },
-    close() { dialogueNpc = null; dialogueTree = null; dialoguePanel.hide(); },
-    get visible() { return dialoguePanel.visible; },
-  };
+  const dialogue = createDialogue({
+    panel: dialoguePanel,
+    getParty: () => party,
+    getPlayer: () => player,
+    partyCap: PARTY_CAP,
+    isRecruitable: (npc) => npc instanceof CompanionActor,
+    isInCombat: () => inCombat,
+    isGameOver: () => gameOver,
+    onRecruit: (npc) => recruitCompanion(npc),
+    onShop: (npc) => shopping.open(shopKeyForNpc(npc), npc.def.shop),
+    onOpen: () => { loot.hideLabels(); hover.clear(); },
+  });
+  const canRecruit = (npc) => dialogue.canRecruit(npc);
 
   // Anything that owns the screen and the clicks while it is up. The dialogue
   // panel and the shop panel are both modal in exactly the same way, and every
   // gate below cares about "is a panel talking to me", not which one - so they
   // ask this rather than naming one and quietly forgetting the other.
   const modalOpen = () => dialogue.visible || shopping.visible;
-  function renderDialogueNode(nodeId) {
-    const node = dialogueTree?.nodes[nodeId];
-    if (!node) { dialogue.close(); return; }
-    const speaker = dialogueNpc;
-    const options = (node.options || [{ label: 'Leave', next: null }])
-      // A recruit offer only shows while it can be accepted (not already
-      // aboard, roster not full).
-      .filter((o) => !o.effect?.recruit || canRecruit(dialogueNpc))
-      // ...and a trade offer only from someone who actually has a cart.
-      .filter((o) => !o.effect?.shop || !!dialogueNpc.def?.shop)
-      .map((o) => ({
-        label: o.label,
-        action: () => {
-          if (o.effect?.recruit) recruitCompanion(dialogueNpc);
-          // Trading REPLACES the conversation rather than layering on it: the
-          // shop is its own modal, and two panels stacked over each other is
-          // how you get a click that lands on neither (ECONOMY_PLAN #5).
-          if (o.effect?.shop && speaker.def?.shop) {
-            dialogue.close();
-            // Keyed by WHO, not where: a person carries their stock around
-            // (and a recruited one literally walks off with it), so their
-            // instance key must survive them moving.
-            shopping.open(`npc:${speaker.typeId || speaker.def.name}`, speaker.def.shop);
-            return;
-          }
-          if (o.next) renderDialogueNode(o.next); else dialogue.close();
-        },
-      }));
-    dialoguePanel.show({ name: dialogueNpc.def.name, text: node.text, options });
-  }
 
   // Sign a bystander onto the party: out of the `npcs` roster (they stop
   // blocking as an NPC - partyAt covers them now), sheet minted at the
@@ -1308,7 +1274,7 @@ function startGame(level) {
       picking.unregister(npc.entity);
       picking.register(npc.entity, 'party', npc);
     }
-    ui.toast(`${npc.def.name} joins the party.`);
+    sayRecruited(npc.def.name);
   }
 
   // --- persistent hotbar --------------------------------------------------------
@@ -1584,34 +1550,29 @@ function startGame(level) {
   // world clock out of combat (ageSummons), so a temp posted between fights
   // sees itself out on its own, and one posted just before a fight walks into
   // it (startCombat's `allies`) with whatever assignment is left.
-  const summonRange = (a) => a.range ?? 5;
   const liveSummonsOf = (summoner) => summons.filter((s) =>
     s.sheet.hp > 0 && s.actor && s.summonedBy === summoner).length;
-  const summonRoom = (a) => Math.max(0, (a.cap ?? a.count) - liveSummonsOf(player));
-  // Why a spot is unusable, or null when it's good - shared by the click and
-  // the hover rings, so what you see is the rule that runs (ARCHITECTURE.md on
-  // previewAction). Deliberately the same four questions combat's
-  // summonSpotProblem asks, less the AP and uses it can answer and we can't.
-  function summonDropProblem(a, tx, tz) {
-    const spot = { x: tx, z: tz };
-    if (cheb(player, spot) > summonRange(a)) return 'Too far - post it closer.';
-    if (!hasLos(player, spot)) return 'No clear line to that spot.';
-    if (!freeTilesNear(tx, tz, 1, 0).length) return 'No room for anyone to stand there.';
-    if (summonRoom(a) <= 0) return 'Your req is full - that is all the headcount you have.';
-    return null;
-  }
+  const roomFor = (a) => summonRoom(a, liveSummonsOf(player));
+  // The same ladder combat runs, minus the two legs a FIGHT owns - there is no
+  // AP pool to spend out here and no per-fight `uses` to ration, so those
+  // fields simply are not supplied.
+  const summonDropProblem = (a, tx, tz) => summonSpotProblem(a, {
+    dist: cheb(player, { x: tx, z: tz }),
+    los: hasLos(player, { x: tx, z: tz }),
+    hasRoomToStand: freeTilesNear(tx, tz, 1, 0).length > 0,
+    room: roomFor(a),
+  });
   // The tiles the arrivals would land on: the clicked tile first, then the free
   // ground ringing outward, bounded by `count` and by what the cap has left.
-  function summonDropSpots(a, tx, tz) {
-    if (summonDropProblem(a, tx, tz)) return [];
-    return freeTilesNear(tx, tz, Math.min(a.count, summonRoom(a)), 0);
-  }
+  const summonDropSpots = (a, tx, tz) => (summonDropProblem(a, tx, tz)
+    ? []
+    : freeTilesNear(tx, tz, dropCount(a, roomFor(a)), 0));
   function postSummonAt(id, tx, tz) {
     const a = ACTIONS[id];
     const problem = summonDropProblem(a, tx, tz);
     if (problem) { ui.say(problem); return; }
     const spawned = spawnSummonUnits(
-      a.archetype, 'player', player, Math.min(a.count, summonRoom(a)), { x: tx, z: tz },
+      a.archetype, 'player', player, dropCount(a, roomFor(a)), { x: tx, z: tz },
     );
     if (!spawned.length) { ui.say('No room - nobody can find a free desk there.'); return; }
     for (const rec of spawned) {
