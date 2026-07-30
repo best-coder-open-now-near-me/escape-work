@@ -42,7 +42,7 @@ export default defineConfig({
       : {},
   },
   webServer: {
-    command: 'npm run build && python3 -m http.server 8173 --directory build/web',
+    command: 'npm run build && node serve.mjs --port 8173',
     url: 'http://127.0.0.1:8173',
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
