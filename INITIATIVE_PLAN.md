@@ -21,6 +21,36 @@ None open. All three questions this plan raised have been answered and now live
 in the decisions table wearing `[ratified]` — the group cap (#6), the mid-group
 joiner (#7), and what the strip shows (#10).
 
+## As landed (2026-07-30)
+
+All five milestones shipped, in order, each keeping `npm test` green:
+
+1. **The span pointer** — `turn-order.js` tracks the open turn as a span:
+   `held`, `steer(slot)`, `finish(slot)`, `isDone(slot)`; per-slot open
+   sequence with the fight re-settled between slots; span state by identity,
+   so `insert`/`replace` under an open span behave per decisions #7/#8. The 27
+   pre-span tests pass through the same code paths unchanged (a hookless host
+   gets spans of one); 13 new tests drive the span cases, including the edges
+   (#7 joiner, #11 stunned member, #12 fallen holder, the fight-deciding dot
+   mid-span).
+2. **Combat holds the span** — `controlled`/`steer` host hooks; `takeTurn`
+   grants every holder a full AP pool; End Turn is finish-the-steered and
+   names whose turn it ends; `notifyMemberDown` passes the floor instead of
+   ending the group's turn.
+3. **Steering** — `combat.steerMember`/`cycleSteer`/`canSteer`; routed from
+   the party bar, Tab, teammate body clicks and a right-click "Steer" item.
+   Refusal is the compatibility story: outside a shared turn every route does
+   what it always did.
+4. **The strip** — bracket wash + ▸ steered + ✓ finished; the rolled number
+   gone from every row (#10). Debug `order` keeps `init` and gains
+   `held`/`done`; `current` stays single (the steered slot).
+5. **Decision #13** — the dice line in the chat log, typed metadata on every
+   narration entry, `narrationEntries()` for future filtering.
+
+Still worth watching in play (the risks below stand): a summoner fight puts
+the whole player side in one span (#6, accepted), and hustle's effect on turn
+order is now shown nowhere but the order itself and the log line.
+
 ## Where we are today
 
 `initiative.js` rolls **d20 + speed** once per combatant — `hustle` via
@@ -121,6 +151,7 @@ Not in this plan: enemy-side grouping. The AI stays one unit at a time.
 | 10 | **The strip brackets the group**, marks the steered member and greys the finished — and **drops the rolled number from every row**, grouped or not | `[ratified]` (designer, 2026-07-30: "why would we even have numbers? itll be nothing but noise to the player") | The number reads as debug output left in: the ORDER already says who acts when, and a raw `(17)` teaches nothing about why. This plan had proposed keeping it to justify a group of unequal rolls — the bracket does that job without a number to interpret. Nothing testable depends on it: `party.spec.js:108` asserts `init` off the debug API (`__combat.order`), not the DOM, so the roll stays available for tests and the debug surface while leaving the player's view. Deletes the `(${s.init})` span at `combat.js:1567`. |
 | 11 | **A member who can't act is finished individually**, not by ending the group's turn | `[proposed]` | `skipTurnFor` currently returns `'advance'` for a member (`combat.js:3119`), which under grouping would hand the whole group's turn away because one member is stunned. |
 | 12 | **If the steered member drops, steering passes to another un-acted member** of the group; the group's turn continues | `[proposed]` | `notifyMemberDown` (`combat.js:1487`) currently ends the acting turn outright. Losing one member to a dot shouldn't cost the other two their turn. |
+| 13 | **Initiative rolls print to the chat log as ONE typed line** (`'initiative'` in the entry's metadata; joiners get their own line), and every narration entry now carries a `type` so categories can be filtered later | `[stated]` (designer, 2026-07-30: "lets have the initiative rolls go into the chat/log output... make sure theres a log type wrapped into the objects metadata so we can filter log output later") | Pairs with #10: the strip stopped printing numbers, so the log line is where the record lives. One line, not one per combatant - the narrator box keeps only 8 lines, and a 7-body fight would flush its whole history at every combat start. |
 
 ## Architecture: where it lands
 
