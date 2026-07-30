@@ -171,16 +171,30 @@ export function showLevelUpScreen(sheet, { onSpend, onLearn, nodesFor, onDone } 
 // (it owns the derived math); a "Spend points" button routes back to the
 // level-up screen when points are banked.
 
-// --- class picker -------------------------------------------------------------
-// A hiring-desk carousel: one resume at a time on the right, and the
-// candidate themselves idling on the office floor to the left (main.js drives
-// the 3D preview via onPreview). Arrows, dots, and arrow keys browse; the
-// ACTIVE slide's hire button is #pick-<classId>, so muscle memory and tests
-// address classes directly.
+// --- the desk -----------------------------------------------------------------
+// A hiring-desk carousel: one resume at a time on the right, and the candidate
+// themselves idling on the office floor to the left (main.js drives the 3D
+// preview via onPreview). Arrows, dots, and arrow keys browse; the ACTIVE
+// slide's button is #pick-<classId>, so muscle memory and tests address
+// characters directly.
+//
+// The last card is not one of them. It is the CUSTOM door - a blank résumé for
+// somebody who does not work here yet - and it sits alongside the six rather
+// than behind them, because that is the actual choice: be one of these people,
+// or be your own. It used to be neither: every card led into the same
+// customization form, so the six could not be played as written and the seventh
+// did not exist.
+export const CUSTOM_ID = '__custom__';
+
 export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
   // Only playable careers reach the desk - archetypes like the summoned
   // applicant (playable: false) are units, not résumés (SUMMON_PLAN.md).
-  const ids = Object.keys(classes).filter((id) => classes[id].playable !== false);
+  const classIds = Object.keys(classes).filter((id) => classes[id].playable !== false);
+  const ids = [...classIds, CUSTOM_ID];
+  // Whose kit a custom character does. Starts on the first job and is changed
+  // from the blank card itself, so the one thing a custom character MUST decide
+  // is decided where it is asked.
+  let customClass = classIds[0];
   let index = 0;
 
   const root = document.createElement('div');
@@ -206,7 +220,7 @@ export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
   Object.assign(title.style, { position: 'absolute', top: '26px', left: '0', right: '0', textAlign: 'center' });
   title.innerHTML = `
     <div style="font-size:22px; font-weight:800; letter-spacing:2px;">CHOOSE YOUR CAREER MISTAKE</div>
-    <div style="opacity:.8; margin-top:4px;">${ids.length} r&eacute;sum&eacute;s on the desk. You will be living one of them.</div>`;
+    <div style="opacity:.8; margin-top:4px;">${classIds.length} r&eacute;sum&eacute;s on the desk, and one blank one.</div>`;
   root.appendChild(title);
 
   // Bottom-anchored so the nav and hire buttons never move between slides -
@@ -221,19 +235,39 @@ export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
   const section = (t) =>
     `<div style="font:700 10px system-ui, sans-serif; letter-spacing:2px; color:#8a8577;
       border-bottom:1px solid #d8d2c2; padding-bottom:2px; margin:10px 0 5px;">${t}</div>`;
+  const kitHtml = (cls) => `
+      ${section('SKILLS')}
+      <div style="line-height:1.55;">
+        ${cls.actions.map((a) => '&bull; ' + esc(actions[a].label)).join('<br>')}
+      </div>
+      ${section('TALENTS')}
+      <div>${cls.talent ? `<b>${esc(cls.talent.name)}.</b> ${esc(cls.talent.blurb)}` : '&mdash;'}</div>`;
+
   const resumeHtml = (id) => {
+    if (id === CUSTOM_ID) {
+      const cls = classes[customClass];
+      // The blank one. It shows the KIT it would inherit, because that is the
+      // only decision this card actually makes - the name and the body are
+      // asked for on the next screen, where the 3D preview can answer back.
+      return `
+        <div style="font-size:17px; font-weight:700; letter-spacing:.5px;">&mdash;</div>
+        <div style="font-size:11px; color:#8a8577; margin-top:2px;">Applying for: Former Employee</div>
+        ${section('EXPERIENCE')}
+        <div style="opacity:.75; font-style:italic;">Blank. You have not worked here.</div>
+        ${section('DOING THE JOB OF')}
+        <div id="custom-jobs" style="display:flex; flex-wrap:wrap; gap:4px; margin-bottom:2px;"></div>
+        ${kitHtml(cls)}
+        <div style="position:absolute; top:10px; right:12px; font:700 9px system-ui, sans-serif;
+          letter-spacing:1px; color:#8a8577; border:1px solid #8a8577; border-radius:2px;
+          padding:2px 5px; transform:rotate(6deg); opacity:.85;">BLANK</div>`;
+    }
     const cls = classes[id];
     return `
       <div style="font-size:17px; font-weight:700; letter-spacing:.5px;">${esc(cls.name)}</div>
       <div style="font-size:11px; color:#8a8577; margin-top:2px;">Applying for: Former Employee</div>
       ${section('EXPERIENCE')}
       <div>${esc(cls.experience)}</div>
-      ${section('SKILLS')}
-      <div style="line-height:1.55;">
-        ${cls.actions.map((a) => '&bull; ' + esc(actions[a].label)).join('<br>')}
-      </div>
-      ${section('TALENTS')}
-      <div>${cls.talent ? `<b>${esc(cls.talent.name)}.</b> ${esc(cls.talent.blurb)}` : '&mdash;'}</div>
+      ${kitHtml(cls)}
       <div style="position:absolute; top:10px; right:12px; font:700 9px system-ui, sans-serif;
         letter-spacing:1px; color:#b0392e; border:1px solid #b0392e; border-radius:2px;
         padding:2px 5px; transform:rotate(6deg); opacity:.85;">CONFIDENTIAL</div>`;
@@ -292,26 +326,56 @@ export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
 
   function render() {
     const id = ids[index];
+    const isCustom = id === CUSTOM_ID;
     card.innerHTML = resumeHtml(id);
+    // The job chips on the blank card. Wired after innerHTML, which is what
+    // replaced them.
+    const jobs = card.querySelector('#custom-jobs');
+    if (jobs) {
+      for (const cid of classIds) {
+        const b = document.createElement('button');
+        b.id = `custom-job-${cid}`;
+        b.type = 'button';
+        b.textContent = classes[cid].name;
+        const on = cid === customClass;
+        Object.assign(b.style, {
+          font: "10px Georgia, 'Times New Roman', serif", padding: '2px 6px', borderRadius: '3px',
+          cursor: 'pointer', background: on ? '#2b2a26' : 'transparent',
+          color: on ? '#f6f3ea' : '#2b2a26', border: '1px solid #8a8577',
+        });
+        b.onclick = () => { customClass = cid; render(); };
+        jobs.appendChild(b);
+      }
+    }
     dots.innerHTML = '';
-    ids.forEach((_, i) => {
+    ids.forEach((slideId, i) => {
       const d = document.createElement('button');
       Object.assign(d.style, {
-        width: '9px', height: '9px', borderRadius: '50%', border: 'none', padding: '0',
-        cursor: 'pointer', background: i === index ? '#8adf76' : '#4a4a66',
+        width: '9px', height: '9px', borderRadius: '50%', padding: '0', cursor: 'pointer',
+        // The blank card's dot is outlined rather than filled - it is a
+        // different KIND of card, not a seventh person.
+        border: slideId === CUSTOM_ID ? '1px solid #8adf76' : 'none',
+        background: i === index ? '#8adf76' : (slideId === CUSTOM_ID ? 'transparent' : '#4a4a66'),
       });
       d.onclick = () => { index = i; render(); };
       dots.appendChild(d);
     });
-    hire.id = `pick-${id}`;
-    hire.dataset.class = id;
-    hire.textContent = `START AS ${classes[id].name.toUpperCase()}`;
-    onPreview && onPreview(id);
+    hire.id = isCustom ? 'pick-custom' : `pick-${id}`;
+    hire.dataset.class = isCustom ? customClass : id;
+    hire.textContent = isCustom ? 'MAKE YOUR OWN' : `START AS ${classes[id].name.toUpperCase()}`;
+    // The blank card previews the body a custom character starts on, not the
+    // class's - you are not going to be that person.
+    onPreview && onPreview(isCustom ? null : id);
   }
   const step = (d) => { index = (index + d + ids.length) % ids.length; render(); };
   prev.onclick = () => step(-1);
   next.onclick = () => step(1);
-  hire.onclick = () => { cleanup(); onPick(ids[index]); };
+  hire.onclick = () => {
+    const id = ids[index];
+    cleanup();
+    if (id === CUSTOM_ID) onPick(customClass, { custom: true });
+    else onPick(id);
+  };
   const onKey = (e) => {
     if (e.key === 'ArrowLeft') step(-1);
     else if (e.key === 'ArrowRight') step(1);

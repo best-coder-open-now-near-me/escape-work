@@ -13,6 +13,44 @@ export const BUTTON_CHROME = {
   font: 'inherit', cursor: 'pointer',
 };
 
+// The dock at the bottom of the screen: ONE panel, holding the action bar and -
+// while a fight is on - the turn readout above it.
+//
+// They used to be two floating boxes, and the seam showed. The bar became
+// shared across both halves of the game (combat stopped building its own), but
+// the box combat had been drawing was left behind at `bottom: 92px` with its
+// contents gutted: a 640px-wide panel whose bottom row held one 90px End Turn
+// button, hovering over a second panel that held everything else. The dead
+// space was the shape of the verbs that had moved out of it.
+//
+// So there is one box now, and the two things inside it are REGIONS rather than
+// panels - they carry no chrome of their own. That also fixes the lifecycle
+// hazard the two-box version had: the slot row is destroyed and rebuilt often
+// (a leader switch, a learned power, an ammo count), and combat's readout is
+// created and removed per fight, so neither can be a child of the other. The
+// dock outlives both and is created on demand by whichever arrives first.
+let dockEl = null;
+export function actionDock() {
+  if (dockEl && dockEl.isConnected) return dockEl;
+  dockEl = document.createElement('div');
+  dockEl.id = 'action-dock';
+  Object.assign(dockEl.style, PANEL_CHROME, {
+    position: 'fixed', left: '50%', bottom: '18px', transform: 'translateX(-50%)',
+    zIndex: '22', display: 'none', flexDirection: 'column', alignItems: 'stretch',
+    gap: '8px', padding: '8px 10px', borderRadius: '10px', userSelect: 'none',
+  });
+  document.body.appendChild(dockEl);
+  return dockEl;
+}
+// Shown only when it has something to show. Both regions call this after they
+// appear or leave, so an empty dock never sits on screen as a bare rectangle -
+// which is what it would do at boot, where the bar is hidden until a run starts.
+export function refreshDockVisibility() {
+  if (!dockEl) return;
+  const showing = [...dockEl.children].some((c) => c.style.display !== 'none');
+  dockEl.style.display = showing ? 'flex' : 'none';
+}
+
 // --- the HUD rail -------------------------------------------------------------
 // The row of square buttons that sits immediately right of the bottom-left
 // profile card: the pockets bag, the tactical camera, whatever comes next. They

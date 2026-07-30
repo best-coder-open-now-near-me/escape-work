@@ -20,22 +20,30 @@ test('the class carousel browses every resume and hires one', async ({ page }) =
   // One resume at a time, straight from the class registry; arrows browse.
   await expect(page.locator('#resume-card')).toBeVisible();
   await expect(page.locator('#resume-card')).toContainText('Office Drone');
-  // Registry order (data/classes.js), skipping the non-playable applicant, then
-  // wrapping back to the drone the carousel opened on.
-  const classNames = ['Middle Manager', 'Mail Room', 'IT Support', 'Human Resources', 'Security', 'Office Drone'];
+  // Registry order (data/classes.js), skipping the non-playable applicant.
+  const classNames = ['Middle Manager', 'Mail Room', 'IT Support', 'Human Resources', 'Security'];
   for (const name of classNames) {
     await page.click('#carousel-next');
     await expect(page.locator('#resume-card')).toContainText(name);
     await expect(page.locator('#resume-card')).not.toContainText('Sick days');
   }
-  // ...wrapped back around to the drone; the active slide's button hires.
+  // Then the blank card, which is the LAST one and is not one of the six. It is
+  // checked by its own button rather than by its text: the blank résumé lists
+  // whichever kit it would inherit, so every class name appears on it as a
+  // choosable job and a text assertion here would pass for the wrong reason.
+  await page.click('#carousel-next');
+  await expect(page.locator('#pick-custom')).toBeVisible();
+  await expect(page.locator('#pick-office-drone')).toHaveCount(0);
+  // ...and one more wraps back to the drone; the active slide's button hires.
+  await page.click('#carousel-next');
   await expect(page.locator('#pick-office-drone')).toBeVisible();
   await page.click('#pick-office-drone');
-  // Hiring now opens the badge photo before the run starts. Skipping it takes
-  // every default, which is byte-for-byte the character this test always got -
-  // so the HP assertion below is unchanged, and that is the point of it.
+  // Picking one of the six opens the short form beside them: pronouns and two
+  // points, nothing that could change who they are. Committing without
+  // spending gives byte-for-byte the character this test always got - so the
+  // HP assertion below is unchanged, and that is the point of it.
   await expect(page.locator('#creation-badge')).toBeVisible();
-  await page.click('#creation-skip');
+  await page.click('#creation-commit');
   await expect(page.locator('#stats')).toContainText('HP 22/22');
   const tile = await page.evaluate(() => window.__game.playerTile);
   expect(tile).toEqual({ x: 2, z: 2 }); // level1 spawn
@@ -91,7 +99,11 @@ test('confronting a coworker starts combat and an attack lands', async ({ page }
   if (await page.evaluate(() => window.__combat.ap) < 3) {
     await endTurnUntilPlayer(page);
   }
-  await expect(page.locator('#combat-turn')).toHaveText('YOUR TURN');
+  // "YOUR TURN" used to be spelled out here, on top of a log line that said
+  // the same thing again, next to a button that was already lit or was not -
+  // three ways to say one fact. The turn line is blank for a solo party now;
+  // the phase itself is the assertion worth making.
+  expect(await page.evaluate(() => window.__combat.phase)).toBe('player');
   // Find an adjacent target; if nobody is beside us yet (the trigger can
   // fire off an enemy's own step, then they shuffle), cycle turns until the
   // AI closes in.

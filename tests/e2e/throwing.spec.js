@@ -28,9 +28,10 @@ const RANGE_ARENA = {
 };
 
 // The same fight with a partition between thrower and target. Throws SAIL OVER
-// chest-high partitions (ARCHITECTURE.md: hasLos is terrain + grid.sightOpen),
-// so this proves the line test lets them through - the opposite of what a naive
-// "is anything between us" test would do.
+// chest-high partitions (hasLos is cell-sight + grid.sightOpen: only TALL
+// solids and closed doors block, TACTICS_PLAN M6a), so this proves the line
+// test lets them through - the opposite of what a naive "is anything between
+// us" test would do.
 const PARTITION_ARENA = {
   name: 'Throwing Over Cubicles',
   tiles: { '#': 'wall', '.': 'floor' },
@@ -39,6 +40,21 @@ const PARTITION_ARENA = {
   map: [
     '########',
     '#.@..M.#',
+    '########',
+  ],
+};
+
+// And with a DESK in the line instead: a solid cell, but a short one. Before
+// TACTICS_PLAN M6a every solid cell blocked sight at any height - a desk
+// stopped a throw as absolutely as a wall - so this is the arena that pins the
+// height rule: furniture below SIGHT_BLOCK_HEIGHT is shot over, not through.
+const DESK_ARENA = {
+  name: 'Throwing Over Desks',
+  tiles: { '#': 'wall', '.': 'floor', 'D': 'desk' },
+  actors: { '@': 'player', M: 'manager' },
+  map: [
+    '########',
+    '#.@.DM.#',
     '########',
   ],
 };
@@ -126,6 +142,22 @@ test('a chest-high partition does NOT stop a throw', async ({ page }) => {
   expect(await paper(page)).toBe(4);
 });
 
+test('a desk does not stop a throw either - short solids are shot over (M6a)', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, DESK_ARENA);
+  await setPaper(page, 5);
+  // The line crosses the desk's own cell and clears it: the desk blocks
+  // bodies, not sight. Before the height rule this exact read was false.
+  expect(await page.evaluate(() => window.__game.losClear(2, 1, 5, 1))).toBe(true);
+
+  await page.click('#hotbar-act-paper-ball');
+  await clickManager(page);
+  // Same promise the partition test makes: the opener IS the throw.
+  await expect.poll(() => page.evaluate(() => window.__game.inCombat), { timeout: 30_000 }).toBe(true);
+  await page.waitForTimeout(700);
+  expect(await paper(page)).toBe(4);
+});
+
 // --- the ammo rules, in a fight ---------------------------------------------
 
 test('a throw costs its paper and lands from range', async ({ page }) => {
@@ -140,6 +172,28 @@ test('a throw costs its paper and lands from range', async ({ page }) => {
 
   expect(await paper(page)).toBe(4); // a paper ball is one sheet
   expect(await managerHp(page)).toBeLessThan(hp0);
+});
+
+test('arming a throw paints the aimable ground (TACTICS_PLAN M7)', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, RANGE_ARENA);
+  await enterCombat(page);
+  await waitForPlayerTurn(page);
+  await setPaper(page, 5);
+
+  // Nothing armed: no wash.
+  expect(await page.evaluate(() => window.__combat.aimPaint.count)).toBe(0);
+  await page.click('#hotbar-act-paper-ball');
+  await expect.poll(() => page.evaluate(() => window.__combat.armed), { timeout: 10_000 }).toBe('paper-ball');
+  // Armed: the wash covers the corridor's open floor - the paint runs on the
+  // next frame after arming, so poll rather than read once. The geometry
+  // itself (range square, line-of-sight shadows) is unit-tested; what only a
+  // browser can prove is that arming SHOWS it and the key names the verb.
+  await expect.poll(() => page.evaluate(() => window.__combat.aimPaint.count), { timeout: 10_000 }).toBeGreaterThan(0);
+  expect((await page.evaluate(() => window.__combat.aimPaint.key))).toContain('paper-ball');
+  // Disarm (right-click backs out of an armed verb): the wash goes with it.
+  await page.mouse.click(640, 400, { button: 'right' });
+  await expect.poll(() => page.evaluate(() => window.__combat.aimPaint.count), { timeout: 10_000 }).toBe(0);
 });
 
 test('a MISS still spends the paper (HIT_PLAN #4)', async ({ page }) => {

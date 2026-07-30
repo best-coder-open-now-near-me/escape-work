@@ -268,6 +268,14 @@ would rewrite every floor's tactical read on contact.
 
 ### Why cover and not a wall
 
+> **Superseded in part (TACTICS_PLAN M6, designer 2026-07-30).** The chunky
+> fallen twins are SOLID now — "an object on its side, not a walkable mess" —
+> because the M6a sight rule dissolved this section's stalemate argument: a
+> low solid no longer blocks sight, so a sealed pocket can still be thrown
+> at and a fight can still resolve. The flat twins (coat rack, partition
+> panel) keep the walkable shape below. The reasoning below stands as the
+> record of why the walkable rule was right for the world it shipped into.
+
 A player who can spawn impassable terrain can seal a doorway and break every
 guarantee pathfinding makes (including the enemy's ability to reach them at
 all, which turns a fight into a stalemate the game cannot resolve). Cover

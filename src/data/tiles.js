@@ -2,8 +2,13 @@
 // a character in a level's "tiles" legend. No engine code changes needed.
 //
 // Fields:
-//   solid    - blocks movement and line of sight (drawn tall, fades when it
-//              hides the player)
+//   solid    - blocks movement (drawn tall, fades when it hides the player).
+//              Whether it also blocks LINE OF SIGHT is a height question - see
+//              blocksSight below. Low furniture is shot over, not through.
+//   tall     - this solid blocks sight regardless of its drawn height. The '#'
+//              wall earns it: it is the building's structure, rendered short
+//              only so the camera can see over it (occlusion.js), and the e2e
+//              contract says a cell wall is "solid all the way up".
 //   height   - marker box height in world units (floor tiles are 0.2)
 //   color    - [r, g, b] 0..1 (marker box, and editor fallback for props)
 //   model    - render a .glb (assets/<model>.glb) instead of a marker box;
@@ -32,6 +37,9 @@
 //              rather than a new knocked-down, so toppling inherits the
 //              anti-chain immunity window and cannot become a second way to
 //              lock somebody out of a fight. `becomes` names the fallen twin.
+//   onFloor  - draw the marker box ON the floor's top face rather than from
+//              ground level up: a flat remnant (the toppled partition) thinner
+//              than the floor slab would otherwise render inside the carpet
 //   runtimeOnly - this tile is never painted and never exported: it only ever
 //              arrives through grid.setType at runtime (the fallen twins).
 //              Such tiles are EXEMPT from the one-unique-char rule and hidden
@@ -61,10 +69,24 @@
 // 'rug-round' for exactly this reason - the machine is painted on two floors
 // and needs a clean character, the round rug is painted nowhere and can live
 // with the escaped one.
+// --- sight (TACTICS_PLAN M6a) ------------------------------------------------
+// A solid cell used to block line of sight at ANY height - a 0.18 microwave
+// stopped a throw as absolutely as a wall, while chest-high edge partitions
+// (0.6-0.72) never blocked sight at all. The height threshold squares the two:
+// a solid shorter than a person is shot OVER (and shields whoever stands
+// behind it - the passive cover the fallen twins already grant), a taller one
+// still blocks the line outright. Ratified by the designer (2026-07-29,
+// "height threshold as you suggest"). Sits just above the partitions' own
+// render height so everything partition-sized reads by the partition rule.
+export const SIGHT_BLOCK_HEIGHT = 0.75;
+export const blocksSight = (def) =>
+  !!def?.solid && (!!def.tall || (def.height ?? 1) >= SIGHT_BLOCK_HEIGHT);
+
 export const TILE_TYPES = {
   wall: {
     char: '#',
     solid: true,
+    tall: true, // the building itself: sight-blocking at full height (see above)
     height: 0.6,
     color: [0.22, 0.22, 0.3],
     label: 'Cubicle Wall',
@@ -538,7 +560,11 @@ export const TILE_TYPES = {
     model: 'furniture/kit/wallWindow', label: 'Window Wall',
   },
   'paneling': {
-    char: '=', category: 'structure', solid: true,
+    char: '=', category: 'structure', solid: true, tall: true,
+    // Structure, not furniture: the kit's wall segment, same family as
+    // 'window-wall' and 'doorway' beside it - drawn short like every wall
+    // here, but a wall. Without `tall` the sight threshold would read its
+    // 0.59 render height as shoot-over furniture.
     height: 0.59, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/paneling', label: 'Paneling',
   },
@@ -612,26 +638,34 @@ export const TILE_TYPES = {
     model: 'office/shredder', label: 'Shredder',
   },
 
-  // --- fallen twins (POWERS_PLAN M6) ----------------------------------------
+  // --- fallen twins (POWERS_PLAN M6, revised TACTICS_PLAN M6) ---------------
   // Every one of these is `runtimeOnly`: nobody paints them, nobody exports
   // them, they only ever arrive through grid.setType when something goes over.
   // That is what makes them AFFORDABLE - the character ceiling above is
   // reached (92 of 94 spoken for), and six fallen twins would have needed six
   // characters that do not exist.
   //
-  // They are deliberately NOT solid. A player who can spawn impassable terrain
-  // can seal a doorway and break every guarantee pathfinding makes, including
-  // the enemy's ability to reach them at all - which turns a fight into a
-  // stalemate the game has no way to resolve. `cover: true` is the barrier
-  // instead: it changes the to-hit maths (tactics.js), which is what "barrier"
-  // should mean in a tactics game. The `debris` surface carries the clamber
-  // cost, because movement cost is the surface layer's job.
+  // The chunky ones ARE solid now: an object on its side, not a walkable mess
+  // (designer, 2026-07-30 - "it def depends on the object's height after
+  // falling, but i prefer in most cases just having an object on its side").
+  // They shipped walkable out of a stalemate fear - spawn-solid-on-demand
+  // could seal a doorway and strand a fight the enemy can never reach - but
+  // the M6a sight rule defused it: a low solid no longer blocks sight, so a
+  // sealed pocket is a shooting gallery, not a stalemate. Being low solids,
+  // they block bodies, are shot over, and grant cover all from the ONE height
+  // rule (blocksSight above) - the special `cover` flag they used to need is
+  // gone with the walkability. A body the furniture lands on stands IN the
+  // cell until the pin lifts; pathfinding never tests a walk's starting tile,
+  // so they always climb out.
+  //
+  // The coat rack is the height exception the designer named: a pole and a
+  // coat at 0.2 is a flat tangle you step over - it keeps the walkable-debris
+  // shape, the explicit `cover` flag (the M6a rule cannot derive cover for a
+  // NON-solid), and the `debris` clamber cost.
   'cabinet-fallen': {
     runtimeOnly: true,
-    solid: false,
+    solid: true,
     height: 0.3,
-    cover: true,
-    surface: 'debris',
     color: [0.55, 0.38, 0.24],
     model: 'furniture/cabinet',
     scale: 0.5,
@@ -641,10 +675,8 @@ export const TILE_TYPES = {
   },
   'bookcase-fallen': {
     runtimeOnly: true,
-    solid: false,
+    solid: true,
     height: 0.3,
-    cover: true,
-    surface: 'debris',
     color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/bookcaseClosed',
     scale: 1.0,
@@ -654,10 +686,8 @@ export const TILE_TYPES = {
   },
   'bookcase-wide-fallen': {
     runtimeOnly: true,
-    solid: false,
+    solid: true,
     height: 0.3,
-    cover: true,
-    surface: 'debris',
     color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/bookcaseClosedWide',
     scale: 1.0,
@@ -667,10 +697,8 @@ export const TILE_TYPES = {
   },
   'bookshelf-fallen': {
     runtimeOnly: true,
-    solid: false,
+    solid: true,
     height: 0.3,
-    cover: true,
-    surface: 'debris',
     color: [0.5, 0.36, 0.22],
     model: 'furniture/bookshelf',
     scale: 0.5,
@@ -691,4 +719,27 @@ export const TILE_TYPES = {
     label: 'Fallen Coat Rack',
     examine: 'Somebody\'s good coat is under there.',
   },
+  // A cubicle panel, flat on the carpet (TACTICS_PLAN M6 partition topple).
+  // The OTHER height exception, in the other direction: a partition on its
+  // side is just a board - walkable, no cover. `onFloor` because a marker box
+  // is drawn from GROUND level up, and anything thinner than the floor slab
+  // (0.2) tops out inside the carpet - the fallen panel was invisible until
+  // the renderer learned to lay it ON the floor's top face. Thin enough
+  // (0.03) to duck under the aim wash (0.13) and the rings (0.14).
+  'partition-fallen': {
+    runtimeOnly: true,
+    solid: false,
+    height: 0.03,
+    onFloor: true,
+    color: [0.3, 0.3, 0.38],
+    label: 'Toppled Partition',
+    examine: 'The great divider, floored. The office is open plan now.',
+  },
 };
+
+// What knocking a PARTITION over does (TACTICS_PLAN M6). Partitions are
+// edges, not cells, so they cannot carry a `topple` block the way furniture
+// does - this is that block, for every plain wall edge. Light chip damage: a
+// hollow panel, not a loaded bookcase. Doors are NOT toppleable - they go
+// floor to frame.
+export const PARTITION_TOPPLE = { damage: [1, 3], becomes: 'partition-fallen' };

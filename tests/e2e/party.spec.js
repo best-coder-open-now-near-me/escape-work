@@ -8,7 +8,7 @@ import { bootStash, clickWorld, waitStill, enterCombat, waitForPlayerTurn } from
 const LEVEL = {
   name: 'Party Test Floor',
   tiles: { '#': 'wall', '.': 'floor', '>': 'exit' },
-  actors: { '@': 'player', N: 'it-intern' },
+  actors: { '@': 'player', N: 'it-support' },
   map: [
     '##########',
     '#........#',
@@ -28,7 +28,7 @@ const LEVEL = {
 const COMBAT_LEVEL = {
   name: 'Party Combat Floor',
   tiles: { '#': 'wall', '.': 'floor', '>': 'exit' },
-  actors: { '@': 'player', N: 'it-intern', M: 'manager' },
+  actors: { '@': 'player', N: 'it-support', M: 'manager' },
   map: [
     '################',
     '#..............#',
@@ -169,7 +169,7 @@ test('party combat: initiative interleaves the party and enemies; both members a
 const TRIO_LEVEL = {
   name: 'Full Roster Floor',
   tiles: { '#': 'wall', '.': 'floor', '>': 'exit' },
-  actors: { '@': 'player', N: 'it-intern', V: 'mail-veteran' },
+  actors: { '@': 'player', N: 'it-support', V: 'mail-room' },
   map: [
     '##########',
     '#........#',

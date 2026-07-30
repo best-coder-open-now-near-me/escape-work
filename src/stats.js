@@ -88,6 +88,20 @@ export const HIT = {
   POSITION_CAP: 0.35,    // ceiling on the summed POSITIVE positional terms
 };
 
+// --- saves (TACTICS_PLAN M6) -------------------------------------------------
+// A Grit save: the roll a body makes to get itself OUT from under something.
+// Today's one customer is furniture coming down on it (the shove's topple):
+// pass and you throw yourself clear - no crush damage, no pin - fail and you
+// wear all of it. First-draft numbers, deferred to playtest like every other
+// magnitude in this file.
+export const SAVE = {
+  BASE: 0.25,     // untrained odds of diving clear
+  PER_GRIT: 0.06, // each point of Grit
+  CAP: 0.75,      // nobody shrugs off a bookcase reliably
+};
+export const gritSaveChance = (grit) =>
+  Math.min(SAVE.CAP, SAVE.BASE + (grit || 0) * SAVE.PER_GRIT);
+
 // --- the movement economy (MOVEMENT_PLAN.md) --------------------------------
 // Movement and actions share ONE pool (the DOS2 branch of the genre), so the
 // price of a step is the price of part of a swing. At 1 AP per tile against
@@ -682,9 +696,10 @@ export function lookOf(sheet) {
     || null;
 }
 
-// Bake an effect into a sheet, in place. Promoted from private so creation
-// (backgrounds) and progression (track nodes) spend ONE vocabulary rather than
-// growing a second. The contract is unchanged for its existing caller: it does
+// Bake an effect into a sheet, in place. Promoted from private so anything that
+// grants something at a moment in time spends ONE vocabulary rather than
+// growing a second. Its caller today is progression (track nodes); creation
+// used to be the other, through a background axis that has since been cut. The contract is unchanged for its existing caller: it does
 // NOT recompute derived stats, because spendClassPoint has to sample maxHp
 // either side of the bake to credit new capacity undamaged.
 export function applyEffect(sheet, effect = {}) {

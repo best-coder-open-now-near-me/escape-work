@@ -11,11 +11,12 @@
 //   "H x z len" - horizontal run on the NORTH edge of cells (x..x+len-1, z)
 //   "V x z len" - vertical run on the WEST edge of cells (x, z..z+len-1)
 // (`#` cell walls still exist for solid blocks/pillars; partitions are edges.)
-import { TILE_TYPES } from './data/tiles.js';
+import { TILE_TYPES, blocksSight } from './data/tiles.js';
 import { SURFACES } from './data/surfaces.js';
 import { NPCS } from './data/npcs.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { COMPANIONS } from './data/companions.js';
+import { parseActorRef } from './data/actor-registries.js';
 
 // Old saves/exports may reference renamed tile types. Exported so the editor
 // can upgrade them when loading a level for editing.
@@ -82,8 +83,19 @@ export function parseLevel(level) {
         row.push(null);
         continue;
       }
-      const actor = actorsLegend[ch];
-      if (actor !== undefined) {
+      const actorRef = actorsLegend[ch];
+      if (actorRef !== undefined) {
+        // `<id>@<level>` asks for that actor at a specific tier on this tile
+        // (actor-registries.parseActorRef). Only enemies scale, so a tier on
+        // anything else is a typo worth naming rather than ignoring.
+        const { id: actor, level: tier } = parseActorRef(actorRef);
+        // Only an enemy sits on the scaling curve, so a tier anywhere else is a
+        // typo. Checked before the dispatch: after it, an unknown actor has
+        // already thrown and a companion has already been filed.
+        if (tier != null && !ENEMY_TYPES[actor]) {
+          throw new Error(
+            `Level "${level.name}": "${actorRef}" for char "${ch}" - only enemies take a @level`);
+        }
         if (actor === 'player') playerSpawn = { x, z };
         else if (COMPANIONS[actor]) companionSpawns.push({ type: actor, x, z });
         else if (NPCS[actor]) npcSpawns.push({ type: actor, x, z });
@@ -93,8 +105,11 @@ export function parseLevel(level) {
         // as a crash deep in actor construction with nothing pointing back at
         // the level file. Named, like the tile-type error below, because the
         // useful part is which char in which level.
-        else if (ENEMY_TYPES[actor]) enemySpawns.push({ type: actor, x, z });
-        else {
+        // `level` only appears when the placement asked for a tier, so an
+        // ordinary spawn keeps the shape it has always had.
+        else if (ENEMY_TYPES[actor]) {
+          enemySpawns.push(tier == null ? { type: actor, x, z } : { type: actor, x, z, level: tier });
+        } else {
           throw new Error(
             `Level "${level.name}": unknown actor "${actor}" for char "${ch}" - `
             + 'not "player", a companion, an NPC, or an enemy type');
@@ -119,6 +134,11 @@ export function parseLevel(level) {
     const t = typeAt(x, z);
     return t !== null && !TILE_TYPES[t].solid;
   };
+  // Can a SIGHTLINE pass this cell? Open ground, or a solid too short to stop
+  // a shot (TACTICS_PLAN M6a): a desk is shot over, a snack machine is not.
+  // Out-of-bounds and in-map void both resolve to the tall 'wall' def, so they
+  // stay opaque without a bounds check here.
+  const sightOpenCell = (x, z) => !blocksSight(defAt(x, z));
   const surfaceAt = (x, z) => defAt(x, z).surface || null;
 
   // --- edge walls -------------------------------------------------------------
@@ -161,6 +181,28 @@ export function parseLevel(level) {
     if (nz > z) return !hWalls.has(x + ',' + nz);
     if (nz < z) return !hWalls.has(x + ',' + z);
     return true;
+  };
+  // The wall edge between two 4-adjacent cells as { o: 'h'|'v', k: 'x,z' },
+  // or null. A PLAIN wall only: doors replaced their wall at parse time, so a
+  // doored edge never appears in these sets - which is exactly what makes
+  // partitions toppleable (TACTICS_PLAN M6) and doors not.
+  const wallEdgeBetween = (x, z, nx, nz) => {
+    let o = null;
+    let k = null;
+    if (nx > x) { o = 'v'; k = nx + ',' + z; } else if (nx < x) { o = 'v'; k = x + ',' + z; } else if (nz > z) { o = 'h'; k = x + ',' + nz; } else if (nz < z) { o = 'h'; k = x + ',' + z; } else return null;
+    const set = o === 'h' ? hWalls : vWalls;
+    return set.has(k) ? { o, k } : null;
+  };
+  // Knock the wall edge between two cells out of the world (TACTICS_PLAN M6:
+  // partitions topple). Returns the removed { o, k } for the renderer, or
+  // null if no plain wall stands there. Conduction recomputes - a partition
+  // dams spills, and this dam just broke.
+  const removeEdgeBetween = (x, z, nx, nz) => {
+    const e = wallEdgeBetween(x, z, nx, nz);
+    if (!e) return null;
+    (e.o === 'h' ? hWalls : vWalls).delete(e.k);
+    electrified = computeElectrified();
+    return e;
   };
   // The live version movement consults: walls, plus any CLOSED door.
   const edgeOpen = (x, z, nx, nz) => {
@@ -238,8 +280,8 @@ export function parseLevel(level) {
 
   return {
     name: level.name || '', width, height,
-    typeAt, defAt, terrainOpen, surfaceAt, isElectrified, setType,
-    hWalls, vWalls, edgeOpen, stepOpen, sightOpen,
+    typeAt, defAt, terrainOpen, sightOpenCell, surfaceAt, isElectrified, setType,
+    hWalls, vWalls, edgeOpen, stepOpen, sightOpen, wallEdgeBetween, removeEdgeBetween,
     doors, doorBetween, setDoorOpen,
     playerSpawn, enemySpawns, npcSpawns, companionSpawns,
   };

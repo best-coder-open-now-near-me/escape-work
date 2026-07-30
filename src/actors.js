@@ -56,6 +56,8 @@ export class GridActor {
     this.clip = null; // current clip state name
     this.legSettle = null; // { t, l, r } ease from the stop pose into stance
     this.fx = null; // { kind: 'lunge'|'flinch'|'death', t }
+    this.crouched = false; // held take-cover pose (TACTICS_PLAN M6) - combat/main set it
+    this.crouchK = 0; // eased 0..1 toward `crouched`, so the tuck reads as motion
     this.flashT = 0;
     this.mats = []; // per-instance cloned materials (for damage flashes)
   }
@@ -234,6 +236,20 @@ export class GridActor {
         pitch = -88;
         bobY = -0.15;
       }
+    }
+    // The take-cover crouch (TACTICS_PLAN M6): a HELD squash, not a timed fx
+    // - the torso drops onto the legs and stays there until the crouch
+    // breaks. Eased on its own clock so tucking in and standing up read as
+    // motion, and composed multiplicatively AFTER the fx block so a flinch
+    // or a lunge still lands while crouched (attacking from cover is legal).
+    // The dead are exempt: their pose is the topple's.
+    this.crouchK += ((this.crouched ? 1 : 0) - this.crouchK) * Math.min(1, dt * 7);
+    if (this.crouchK < 1e-3) this.crouchK = this.crouched ? this.crouchK : 0;
+    if (this.crouchK > 0 && this.fx?.kind !== 'death' && this.fx?.kind !== 'corpse') {
+      const k = this.crouchK;
+      sy *= 1 - 0.38 * k; // the torso comes down onto the legs...
+      sx *= 1 + 0.08 * k; // ...and the silhouette widens into the huddle
+      bobY -= 0.03 * k;
     }
     this.visual.setLocalPosition(0, this.visualLift + bobY, forward);
     this.visual.setLocalEulerAngles(pitch, 0, 0);

@@ -31,9 +31,9 @@
     "@": "player",
     "M": "manager",
     "H": "hr",
-    "V": "mail-veteran",
+    "V": "mail-room",
     "E": "executive",
-    "G": "senior-manager",
+    "G": "manager@3",
     "s": "security-guard"
   },
   "map": [

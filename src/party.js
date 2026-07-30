@@ -8,10 +8,10 @@ import { gainXp, createSheetFrom, ensureAttributes, xpNextForLevel, EQUIP_SLOTS 
 import { ITEMS } from './data/items.js';
 import { CLASSES } from './data/classes.js';
 import { COMPANIONS } from './data/companions.js';
-import { RIGS, clampBuild } from './data/looks.js';
+import { CUSTOM_RIGS } from './data/looks.js';
 
 export const PARTY_CAP = 3; // leader + 2 companions - see PARTY_PLAN.md
-export const SAVE_VERSION = 7; // v7 adds creation fields (CHARACTER_PLAN.md)
+export const SAVE_VERSION = 8; // v8 drops the creation look/background fields (CHARACTER_PLAN.md)
 
 // Petty Cash is PARTY state, not sheet state (ECONOMY_PLAN #2): one purse the
 // whole roster spends from, so buying a sandwich never means switching leaders
@@ -102,17 +102,23 @@ function normalizeSheet(sheet, version = 0) {
   // instead of a missing asset, and somebody who picked a look keeps it.
   const block = (sheet.classId && CLASSES[sheet.classId])
     || (sheet.companionId && COMPANIONS[sheet.companionId]) || null;
-  if (sheet.rig && !RIGS[sheet.rig]) delete sheet.rig;
+  if (sheet.rig && !CUSTOM_RIGS.includes(sheet.rig)) delete sheet.rig;
   if (sheet.rig) sheet.model = sheet.rig;
   else if (block?.model) sheet.model = block.model;
-  // A build from a hand-edited save, or from a re-tune of the dials' ranges,
-  // is clamped rather than handed to the rig - applyCharacterProportions has no
-  // opinion about what is sane, and a torso of 40 is a broken-looking body.
-  if (sheet.look?.build) {
-    const build = clampBuild(sheet.look.build);
-    if (build) sheet.look.build = build;
-    else delete sheet.look.build;
-  }
+  // v8 DROPS creation state rather than migrating it. A save from the version
+  // that let every character edit its own colour, height and heft carries a
+  // `look` the player authored, and one that offered all twelve rigs carries a
+  // `rig` belonging to somebody else in the cast - the Executive, or the IT
+  // person who joins your party. Neither is a thing a character can be any
+  // more, so both are read and discarded: the rig check above drops any that is
+  // not in the custom wardrobe, and the look goes here.
+  //
+  // Discarding is the honest migration. Keeping them would leave characters
+  // wearing options the game no longer offers and cannot show you how to
+  // change; INVENTING replacements would be worse. What a loaded character
+  // falls back to is their class's own body, which is who they were for.
+  delete sheet.look;
+  delete sheet.background;
   sheet.attrPoints ??= 0; // pre-M2 saves never banked any
   sheet.classPoints ??= 0;
   sheet.perks ??= []; // taken track nodes; effects are already baked into the sheet
@@ -136,12 +142,11 @@ function normalizeSheet(sheet, version = 0) {
       sheet.inventory.splice(sheet.inventory.indexOf(best), 1); // out of the bag, into the slot
     }
   }
-  // v7: creation fields. Purely ADDITIVE - every one of them is new state, not
-  // migrated state, so an older save simply reads the default and behaves
-  // exactly as it does today. That is why none of them needs a version gate:
-  // the hazard a gate protects against is a migration that INVENTS state and
-  // then re-applies itself on every load (the v5 auto-equip), and defaulting an
-  // absent field is not that.
+  // v7: pronouns - the one creation field that survived v8. Purely ADDITIVE, so
+  // an older save simply reads the default and behaves exactly as it does
+  // today. That is why it needs no version gate: the hazard a gate protects
+  // against is a migration that INVENTS state and then re-applies itself on
+  // every load (the v5 auto-equip), and defaulting an absent field is not that.
   sheet.pronouns ??= 'they'; // the house voice, and the safest default
   // v6: xp/xpNext. A save that predates the fields could never level again, and
   // the damage compounded: `gainXp` opens with `sheet.xp += amount`, so an

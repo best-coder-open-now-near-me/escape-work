@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseLevel, parseWallRuns, compressWallRuns } from '../../src/grid.js';
+import { TILE_TYPES, blocksSight, SIGHT_BLOCK_HEIGHT } from '../../src/data/tiles.js';
 
 const level = (map, extra = {}) => ({
   name: 'test-floor',
@@ -38,21 +39,71 @@ test('parseLevel finds spawns and treats actor tiles as floor', () => {
 });
 
 test('parseLevel sorts companions and enemies into their own spawn lists', () => {
-  // 'N' is the it-intern COMPANION (data/companions.js), 'M' a manager enemy.
+  // 'N' is the it-support COMPANION (data/companions.js), 'M' a manager enemy.
   const g = parseLevel({
     name: 't', tiles: { '.': 'floor' },
-    actors: { '@': 'player', 'M': 'manager', 'N': 'it-intern' },
+    actors: { '@': 'player', 'M': 'manager', 'N': 'it-support' },
     map: ['@MN'],
   });
   assert.deepEqual(g.enemySpawns, [{ type: 'manager', x: 1, z: 0 }]);
-  assert.deepEqual(g.companionSpawns, [{ type: 'it-intern', x: 2, z: 0 }]);
-  assert.ok(!g.enemySpawns.some((s) => s.type === 'it-intern'), 'companion is not misfiled as an enemy');
+  assert.deepEqual(g.companionSpawns, [{ type: 'it-support', x: 2, z: 0 }]);
+  assert.ok(!g.enemySpawns.some((s) => s.type === 'it-support'), 'companion is not misfiled as an enemy');
 });
 
 test('sightOpen ignores plain partitions - throws sail over cubicle walls', () => {
   const g = parseLevel(level(['..'], { walls: ['V 1 0 1'] }));
   assert.equal(g.edgeOpen(0, 0, 1, 0), false); // the wall blocks movement
   assert.equal(g.sightOpen(0, 0, 1, 0), true); // but a throw clears the chest-high wall
+});
+
+test('blocksSight is a height rule, with tall as the structural override (M6a)', () => {
+  assert.ok(TILE_TYPES.desk.height < SIGHT_BLOCK_HEIGHT);
+  assert.equal(blocksSight(TILE_TYPES.desk), false);            // shot over
+  assert.equal(blocksSight(TILE_TYPES['snack-machine']), true); // head-high
+  assert.equal(blocksSight(TILE_TYPES.wall), true);             // drawn 0.6, but it is the building
+  assert.equal(blocksSight(TILE_TYPES.paneling), true);         // structure, same family
+  assert.equal(blocksSight(TILE_TYPES['cabinet-fallen']), false); // solid on its side, but LOW
+  assert.equal(blocksSight(null), false);
+});
+
+test('sightOpenCell: short solids are shot over, tall ones and the void are not', () => {
+  const g = parseLevel({
+    name: 't',
+    tiles: { '.': 'floor', 'D': 'desk', 'S': 'snack-machine', '#': 'wall' },
+    actors: {},
+    map: ['.D.S#'],
+  });
+  assert.equal(g.terrainOpen(1, 0), false);   // the desk still blocks bodies
+  assert.equal(g.sightOpenCell(1, 0), true);  // but not shots
+  assert.equal(g.sightOpenCell(0, 0), true);  // floor is floor
+  assert.equal(g.sightOpenCell(3, 0), false); // the snack machine blocks both
+  assert.equal(g.sightOpenCell(4, 0), false); // the '#' wall is tall by fiat
+  assert.equal(g.sightOpenCell(0, -1), false); // out of bounds resolves to wall
+});
+
+test('removeEdgeBetween topples a partition out of the world (TACTICS_PLAN M6)', () => {
+  const g = parseLevel(level(['..'], { walls: ['V 1 0 1'] }));
+  assert.ok(g.wallEdgeBetween(0, 0, 1, 0), 'the partition is there to ask about');
+  assert.equal(g.edgeOpen(0, 0, 1, 0), false);
+  const e = g.removeEdgeBetween(0, 0, 1, 0);
+  assert.deepEqual(e, { o: 'v', k: '1,0' }, 'reports what fell, for the renderer');
+  assert.equal(g.edgeOpen(0, 0, 1, 0), true, 'bodies walk through where it stood');
+  assert.equal(g.removeEdgeBetween(0, 0, 1, 0), null, 'a second shove finds nothing');
+});
+
+test('doors are not toppleable - they never enter the wall sets', () => {
+  const g = parseLevel(level(['..'], { doors: ['V 1 0 1'] }));
+  assert.equal(g.wallEdgeBetween(0, 0, 1, 0), null, 'a doored edge is not a wall edge');
+  assert.equal(g.removeEdgeBetween(0, 0, 1, 0), null);
+});
+
+test('toppling a partition breaks the dam - conduction pools merge live', () => {
+  // Cable, then water, with a partition damming the pair from a second pool.
+  const g = parseLevel(level(['*~~'], { walls: ['V 2 0 1'] }));
+  assert.equal(g.isElectrified(1, 0), true, 'the near pool is live');
+  assert.equal(g.isElectrified(2, 0), false, 'the far pool sits behind the dam');
+  g.removeEdgeBetween(1, 0, 2, 0);
+  assert.equal(g.isElectrified(2, 0), true, 'the dam broke and the pools merged');
 });
 
 test('setType can bring a conduction pool to life, not only kill it', () => {

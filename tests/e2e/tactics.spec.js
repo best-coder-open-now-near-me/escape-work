@@ -191,6 +191,85 @@ test('a partition gives the defender cover against a ranged attacker', async ({ 
   expect(open.tag).not.toContain('in cover');
 });
 
+// The same lab with the partition swapped for a DESK CELL (TACTICS_PLAN M6a):
+// a short solid on the defender's near face. The height rule that lets the
+// shot sail over the desk (grid.sightOpenCell) is the same rule that says the
+// desk shields whoever stands behind it - one threshold, both effects, and the
+// gap must read exactly like the partition's.
+const DESK_COVER_ARENA = {
+  name: 'Desk Cover Lab',
+  tiles: { '#': 'wall', '.': 'floor', 'D': 'desk' },
+  actors: { '@': 'player', M: 'manager' },
+  map: [
+    '############',
+    '#.@M...#M#.#',
+    '#.......#..#',
+    '#......DM#.#',
+    '############',
+  ],
+};
+
+test('a desk on the near face gives cover, same as a partition', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, DESK_COVER_ARENA, 'office-drone');
+  await enterCombat(page); // the adjacent Manager starts the fight; we barely move
+
+  // Shed the joiners' surprise BEFORE reading: `surprised` hands the attacker
+  // +0.15 against that defender, and each far foe sheds it on its own
+  // (skipped) turn - which the initiative dice can place on OPPOSITE sides of
+  // ours, leaving exactly one read 0.15 hot and the measured gap at 0.05.
+  // Two full rounds settle both. (Both test foes are sealed in - walls and
+  // the desk - so the rounds cannot move them.)
+  for (let i = 0; i < 2; i++) {
+    await waitForPlayerTurn(page);
+    await page.click('#combat-end-turn');
+    await page.waitForTimeout(1500);
+  }
+
+  // Same honest read the partition test uses: arm, hover, read the number the
+  // roll will use plus the tag the player will.
+  const readAt = async (x, z) => {
+    let c = null;
+    for (let i = 0; i < 8 && c == null; i++) {
+      await page.waitForTimeout(400);
+      if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#hotbar-act-attack');
+      const fp = await page.evaluate(([wx, wz]) => window.__game.project(wx, wz), [x, z]);
+      await page.mouse.move(fp.x, fp.y);
+      await page.waitForTimeout(150);
+      c = await page.evaluate(() => window.__combat.hoverHitChance);
+    }
+    return { chance: c, tag: (await page.locator('#combat-move-cost').textContent()) || '' };
+  };
+
+  // Both foes must still be at range for cover to be in play at all.
+  const pt = await page.evaluate(() => window.__game.playerTile);
+  expect(pt.x).toBeLessThan(8);
+  expect(Math.max(Math.abs(8 - pt.x), Math.abs(1 - pt.z))).toBeGreaterThan(1);
+  expect(Math.max(Math.abs(8 - pt.x), Math.abs(3 - pt.z))).toBeGreaterThan(1);
+  expect(await page.evaluate(() => window.__game.enemies
+    .filter((e) => e.alive && e.x === 8 && (e.z === 1 || e.z === 3)).length)).toBe(2);
+
+  // Hold the board-invariant ACROSS both reads, exactly as the partition test
+  // learned to (the third Manager wanders; see the note there).
+  const boardNow = () => page.evaluate(() => ({
+    me: window.__game.playerTile,
+    foes: window.__game.enemies.filter((e) => e.alive).map((e) => `${e.x},${e.z}`).sort(),
+  }));
+  let open = null;
+  let behind = null;
+  for (let i = 0; i < 3; i++) {
+    const before = JSON.stringify(await boardNow());
+    open = await readAt(8, 1);   // wall cell beside it is TALL: no cover from it
+    behind = await readAt(8, 3); // desk on its near face: shot over, shielded behind
+    if (JSON.stringify(await boardNow()) === before) break;
+  }
+  expect(typeof open.chance).toBe('number');
+  expect(typeof behind.chance).toBe('number');
+  expect(open.chance - behind.chance).toBeCloseTo(0.20, 5);
+  expect(behind.tag).toContain('in cover');
+  expect(open.tag).not.toContain('in cover');
+});
+
 test('striking a foe from behind its committed facing is a backstab', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, DISENGAGE_ARENA, 'office-drone');

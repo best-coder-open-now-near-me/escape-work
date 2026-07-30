@@ -3,8 +3,8 @@
 // rather than re-derives.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buffProblem, buffOutcome, buffRangeOf, isFriendly, BUFF_RANGE, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, coneFrom, conePolyline } from '../../src/powers.js';
-import { TILE_TYPES } from '../../src/data/tiles.js';
+import { buffProblem, buffOutcome, buffRangeOf, isFriendly, BUFF_RANGE, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, coneFrom, conePolyline, aimRangeOf, rangeTiles } from '../../src/powers.js';
+import { TILE_TYPES, blocksSight } from '../../src/data/tiles.js';
 import { ACTIONS } from '../../src/data/actions.js';
 import { STATUSES } from '../../src/data/statuses.js';
 
@@ -384,18 +384,27 @@ test('the landing is one tile, however far away the pusher is', () => {
   assert.deepEqual(toppleLanding(0, 5, 6, 5), [7, 5]);
 });
 
-test('every toppleable prop names a fallen twin that is cover, not a wall', () => {
+test('every fallen twin still shields, whichever shape it fell into', () => {
+  // Revised with TACTICS_PLAN M6 (designer, 2026-07-30): a chunky twin is an
+  // object on its side - SOLID, low, shot over, granting cover through the
+  // M6a height rule - while a flat one (the coat rack) stays walkable debris
+  // with the explicit `cover` flag the height rule cannot derive for a
+  // non-solid. Either way, the tile a topple leaves must shield whoever
+  // stands behind it, and must never block sight: the sealed-pocket
+  // stalemate the old non-solid rule guarded against stays impossible
+  // because everything fallen can be thrown over.
   for (const [id, def] of Object.entries(TILE_TYPES)) {
     if (!def.topple) continue;
     const twin = TILE_TYPES[def.topple.becomes];
     assert.ok(twin, `${id} topples into a real tile`);
-    // The barrier is a TACTICAL barrier. A solid twin would let a shove spawn
-    // impassable terrain, seal a doorway, and strand a fight the enemy can no
-    // longer reach - the wall the design explicitly refused.
-    assert.notEqual(twin.solid, true, `${def.topple.becomes} is not solid`);
-    assert.equal(twin.cover, true, `${def.topple.becomes} grants cover`);
     assert.equal(twin.runtimeOnly, true, `${def.topple.becomes} costs no map character`);
-    assert.equal(twin.surface, 'debris', `${def.topple.becomes} carries the clamber cost as a surface`);
+    assert.equal(blocksSight(twin), false, `${def.topple.becomes} is shot over`);
+    const shields = twin.cover === true || twin.solid === true;
+    assert.equal(shields, true, `${def.topple.becomes} shields whoever crouches behind it`);
+    if (!twin.solid) {
+      assert.equal(twin.surface, 'debris',
+        `${def.topple.becomes} is walkable, so it carries the clamber cost as a surface`);
+    }
   }
 });
 
@@ -503,3 +512,34 @@ test('conePolyline closes the wedge back to its origin', () => {
   }
 });
 
+
+// --- aiming (TACTICS_PLAN M7) --------------------------------------------------
+
+test('aimRangeOf mirrors each verb\'s own range rule', () => {
+  assert.equal(aimRangeOf(null), null);
+  assert.equal(aimRangeOf({ type: 'attack', ap: 1 }), null); // melee: the reach ring is the affordance
+  assert.deepEqual(aimRangeOf({ type: 'attack', range: 5 }), { r: 5 });
+  assert.deepEqual(aimRangeOf({ type: 'attack', cone: { range: 4, halfAngle: 30 } }),
+    { r: 4, euclid: true });
+  assert.deepEqual(aimRangeOf({ type: 'zone' }), { r: zoneRangeOf({ type: 'zone' }) });
+  assert.equal(aimRangeOf({ type: 'mobility', mode: 'dash', distance: 5 }), null); // trail previews a dash
+  assert.deepEqual(aimRangeOf({ type: 'mobility', mode: 'swap', range: 6 }), { r: 6 });
+  assert.deepEqual(aimRangeOf({ type: 'buff' }), { r: BUFF_RANGE }); // the buff default, not a guess
+  assert.deepEqual(aimRangeOf({ type: 'control', range: 5 }), { r: 5 });
+  assert.equal(aimRangeOf({ type: 'control' }), null); // touch control walks you in
+});
+
+test('rangeTiles paints the Chebyshev square, minus what canSee refuses', () => {
+  const all = rangeTiles(0, 0, 2, () => true);
+  assert.equal(all.length, 25); // 5x5, origin included - the ground under your feet is yours
+  const seen = rangeTiles(0, 0, 2, (x) => x >= 0);
+  assert.equal(seen.length, 15);
+  assert.ok(seen.every(([x]) => x >= 0), 'a refused tile never paints');
+});
+
+test('rangeTiles euclid trims the corners a true radius cannot reach', () => {
+  const disc = rangeTiles(0, 0, 2, () => true, true);
+  assert.equal(disc.length, 13); // r=2 disc on tile centres
+  assert.ok(disc.some(([x, z]) => x === 2 && z === 0));
+  assert.ok(!disc.some(([x, z]) => x === 2 && z === 2), 'hypot(2,2) is out of a cone\'s range');
+});

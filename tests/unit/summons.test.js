@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { unitCombat } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
-import { ACTIONS, arrivalLine } from '../../src/data/actions.js';
+import { ACTIONS, arrivalLine, summonSpec } from '../../src/data/actions.js';
 
 // Resolve a summon descriptor's archetype id the way world.spawnSummon does.
 const archetypeOf = (id) => CLASSES[id] || ENEMY_TYPES[id];
@@ -69,7 +69,9 @@ test('applicant is the only non-playable class today', () => {
 test('enemy summon descriptors reference a valid, combat-ready archetype', () => {
   for (const [id, def] of Object.entries(ENEMY_TYPES)) {
     if (!def.summon) continue;
-    const s = def.summon;
+    // Through summonSpec, the same merge combat.js reads: a descriptor may
+    // inherit the contract from the ACTION it is the AI-side twin of.
+    const s = summonSpec(def.summon);
     const arch = archetypeOf(s.archetype);
     assert.ok(arch, `${id}.summon.archetype "${s.archetype}" resolves`);
     const c = unitCombat(arch);
@@ -88,7 +90,7 @@ test('enemy summon descriptors reference a valid, combat-ready archetype', () =>
 // an unbounded one would follow you across the floor forever.
 test('every summon descriptor spends a bounded number of turns', () => {
   const descriptors = [
-    ...Object.entries(ENEMY_TYPES).filter(([, d]) => d.summon).map(([id, d]) => [`ENEMY_TYPES.${id}`, d.summon]),
+    ...Object.entries(ENEMY_TYPES).filter(([, d]) => d.summon).map(([id, d]) => [`ENEMY_TYPES.${id}`, summonSpec(d.summon)]),
     ...Object.entries(ACTIONS).filter(([, a]) => a.type === 'summon').map(([id, a]) => [`ACTIONS.${id}`, a]),
   ];
   assert.ok(descriptors.length >= 2, 'both sides of the ledger are covered');
@@ -103,7 +105,7 @@ test('every summon descriptor spends a bounded number of turns', () => {
 
 test('HR is a summoner; its applicants are worth no XP (spawner, not farm)', () => {
   assert.ok(ENEMY_TYPES.hr.summon, 'HR has a summon power');
-  assert.equal(unitCombat(archetypeOf(ENEMY_TYPES.hr.summon.archetype)).xp, 0);
+  assert.equal(unitCombat(archetypeOf(summonSpec(ENEMY_TYPES.hr.summon).archetype)).xp, 0);
 });
 
 // Every summon ACTION (the player-facing power) must reference a real,

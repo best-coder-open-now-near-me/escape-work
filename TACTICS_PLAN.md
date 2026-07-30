@@ -9,6 +9,33 @@ This document is the implementation plan for four positional systems —
 opportunity attacks, cover, flanking, backstab — the design decisions, the
 module-by-module changes, and the milestone order. No code yet.
 
+## Questions for the designer (M6 Take Cover)
+
+All five answered. Q1 (height-threshold LOS) and Q3 (any character as a
+shield) on 2026-07-29; Q2, Q4 and Q5 ratified as the recommended defaults on
+2026-07-30 ("go with your defaults"): attacking does NOT break the crouch
+(moving does), enemies take cover in v1, and a human shield takes the
+redirected hit rather than negating it. The answers live in the M6 milestone
+entry with their tags flipped.
+
+Small defaults picked during implementation, tagged `[proposed]` in M6 and
+reversible cheaply if play disagrees: area attacks (cones, zones) and ranged
+CONTROLS ignore the crouch; a failed Grit save deals the damage AND keeps the
+existing stun alongside the new pin; and shooting a target whose human shield
+is one of YOUR OWN refuses rather than rerouting damage into your teammate.
+
+The playtest question is answered too — **partition toppling** `[ratified]`
+(2026-07-30, "your defaults seem fine" + the fallen-shape refinement): one
+edge segment per shove, falling away from the shover, same Grit
+save/damage/pin as furniture. On what a fall LEAVES, the designer set the
+rule by height: "i prefer in most cases just having an object on its side vs
+a walkable messy space", flat things excepted ("yeah walkable with flat
+objects like cubicle wall seems good"). So the chunky fallen twins became
+SOLID low objects — reversing POWERS_PLAN's walkable-twin rule, which the
+M6a sight change had already hollowed out (a sealed pocket is a shooting
+gallery now, not a stalemate) — while the coat rack and the partition panel
+stay flat and walkable. See M6's landed notes.
+
 It follows the shape of `PROGRESSION_PLAN.md` / `HIT_PLAN.md`, and honors the
 one rule from `ARCHITECTURE.md`: **content is data, code is systems.** The
 positional rules are pure geometry over coordinates the engine already tracks;
@@ -551,8 +578,179 @@ None. See decision #6.
    `POSITION_CAP` and `hitChance`'s `CLAMP_HI` keep the stack honest. A unit
    that has never acted has no facing and cannot be backstabbed — the honest
    resolution of the open question, and one that can't be gamed.
+6. **Take Cover (active crouch, M6).** ✅ Landed — the Gears-of-War turn
+   (designer, 2026-07-29; open questions ratified as the recommended defaults
+   2026-07-30, "go with your defaults"). The decisions, each tagged with what
+   the designer actually said:
+   - `[stated]` A first-class action: aim it at a solid object — or at a
+     character, "use me as a shield" tanking included — and crouch behind it.
+     Line of sight gates the aim (`hasLos(you, object)`), "as line of sight
+     driven as possible." No cooldown and no need to leave cover first: you
+     can hop cover-to-cover.
+   - `[stated]` It grants IMMUNITY to ranged attacks — not a modifier — but
+     only from the directions the object shields. Flanking still works.
+   - `[stated]` Cost: the path distance to the object + 1 AP.
+   - `[stated]` Works on all solid objects, with UI color-coding for safe
+     cover vs topplable furniture; take-cover rings draw only on the hovered
+     object ("there would just be rings everywhere if not").
+   - `[ratified]` Any character can be crouched behind, no stance required
+     ("using any character as cover is the right shape id like for now",
+     2026-07-29). The existing `hold-the-line` guard stance "wasnt ever a
+     requested feature" — slated to be absorbed by this mechanic rather than
+     kept as a parallel system. Not removed yet; that is its own change.
+   - `[ratified]` Tracked as a STATUS on the crouching unit ("id think yes a
+     status just in case", answering the implementation question directly).
+   - `[stated]` Shoving an object onto someone: they roll a save against
+     crushing damage and a possible pin. The stat is Grit — the designer said
+     "strength or whatever equivalent check", and Grit is the game's tank
+     attribute. Note the game already topples props onto shove targets
+     (POWERS_PLAN M6); what is NEW here is the save and the pin.
+   - `[ratified]` Attacking does not break the crouch; moving does — the
+     Gears rule (2026-07-30, "go with your defaults"). `[ratified]` Enemies
+     use it in v1 (same). `[ratified]` A human shield takes the blocked hit
+     rather than negating it (same).
+
+   Why this and not more passive cover: it differentiates melee (walks around
+   low cover freely, swings unimpeded by it) from ranged (must break
+   entrenchment), and it gives toppling a second job — furniture becomes
+   MOVEABLE cover both sides can work with.
+
+   **As landed (2026-07-30):**
+   - The verb: `take-cover` (universal, beside `shove`), `ap: 1` — the "+1";
+     the walk to the shield bills as ordinary movement, and the crouch
+     resolves on arrival (`pendingCrouch`, the pendingMelee pattern), so a
+     walk cut short downs the crouch with it. The crouch SPOT is the nearest
+     visible open 4-neighbour of the shield — orthogonal because the shield
+     must sit on a FACE (`tactics.crouchShields`; a diagonal cell shields
+     nothing).
+   - The rule: combat's `crouched` map + the `covered` status chip
+     (watching/guarding pattern: the chip is visibility, the map is the
+     rule). Validity is LAZY — every consult re-checks that the croucher
+     hasn't moved and the shield still stands (a solid/`cover` def, or a
+     live body on the cell), so topples, shoves, swaps and deaths all break
+     it without bespoke hooks. `shotOutcome()` is the one seam: a
+     single-target ranged attack is untouched, REFUSED (object shield), or
+     REDIRECTED into the human shield; every attack path, the target rings,
+     the hover readout and `routeIntoRange` (which now walks a shooter to a
+     FLANKING angle, not merely into range) read it.
+   - The AI: with nobody in reach and nowhere useful to walk, a unit crouches
+     behind an adjacent low solid or fallen prop that actually stands between
+     it and its target — no shielding neighbour, no crouch.
+   - The shove save: furniture coming down on a body now rolls a Grit save
+     (`stats.gritSaveChance`; `forceHit` pins it for the specs — true means
+     the drop fully lands). Pass: they dive clear, nothing lands. Fail: the
+     damage, the existing stun (anti-chain window intact), and `pinned` —
+     detained's root semantics, under furniture.
+   - `[proposed]` defaults picked in implementation (see Questions section):
+     cones/zones and ranged controls ignore the crouch (area is the flush);
+     member-shields refuse your own shots rather than rerouting them; the
+     failed save keeps the stun alongside the pin.
+   - Honest scope notes: no shipped enemy has a ranged attack, so the
+     PLAYER-side crouch is future-proofing today — the immediate gameplay is
+     enemies turtling against your throws, and human-shield redirects fire
+     player-side only until enemies crouch behind bodies. `hold-the-line`
+     still exists unabsorbed. The "safe cover vs topplable" colour split is
+     partial: the hovered shield rings yellow, but yellow does not yet
+     distinguish topplable from fixed. Combat-only verb: out of a fight the
+     bar says so.
+   - **First-playtest fixes (2026-07-30):** (1) the hotbar now rebuilds the
+     moment a fight starts and ends, so combat-only verbs light up on their
+     own — the bar used to keep its out-of-combat state until the next press,
+     which read as "take cover never becomes active." (2) EDGE MODE: cubicle
+     walls are edges, not cells, and the verb now speaks them — aim at a tile
+     with a partition (or closed door) on a face, crouch ON it, and which
+     shots are blocked is the M3 edge test (`tactics.hasCover`) read live,
+     upgraded from −20% to immunity while the crouch holds. The AI crouches
+     in place against a partition that already blocks its target's line.
+   - **Out of combat too (2026-07-30, `[stated]` "taking cover and shoving
+     should be available out of combat as well"):** both verbs work with no
+     fight on. An OOC crouch (furniture and partitions only - people move;
+     the character shield is a combat commitment `[proposed]`) stores on the
+     leader and RIDES INTO the fight: beginCombat hands it to startCombat's
+     `preCrouch`, so the fight opens with the leader already tucked in -
+     the point of taking cover early. It breaks on any deliberate walk or
+     leader change. An OOC shove topples furniture and partitions as pure
+     terrain edits; with a coworker standing where it lands, the topple IS
+     the opener - the fight starts and combat resolves the fall with its
+     own save and pin (engageWithAction's shove gate accepts
+     partition-between and furniture-onto-them aims, and combat's enemy
+     click grew the matching one-gesture fallbacks: click the coworker
+     behind the cabinet, they wear the cabinet).
+   - **Second-playtest polish (2026-07-30, `[stated]`):** (1) the
+     out-of-combat aims read like combat's now - a hovered shove target
+     rings with a smaller ring AND a line showing WHERE the fall lands
+     (`hover.drawShoveAim`, fed by main's own click rules so the preview
+     and the topple cannot disagree), a hovered take-cover shield rings in
+     the cover yellow (`drawCoverAim`), and the shove ring on a coworker
+     keeps the click's whole promise (oocTargetOk grew the
+     partition-between / furniture-onto-them arms the resolver accepts).
+     Combat's shove rings gained the same landing read. (2) The crouch is
+     VISIBLE: a held squash pose on the actor ("shift torso down onto the
+     legs") - eased in and out, composed with flinches and lunges so
+     attacking from cover still animates, cleared wherever the crouch
+     breaks, including a sweep at combat teardown that also fixes the
+     'covered' chip outliving a fight (it only ticks on the combat turn
+     clock). (3) Merged the designer's shared-turns branch
+     (claude/initiative-tie-handling-sjfaoh) under all of it.
+   - **Partition toppling + solid twins (2026-07-30, ratified):** the shove
+     verb aimed across an adjacent partition edge — at the coworker behind
+     it, or the bare tile — brings the PANEL down: `grid.removeEdgeBetween`
+     retires the edge (conduction pools merge live; the dam broke),
+     `scene.removeEdgeWall` retires the mesh, and `partition-fallen` lies
+     flat on the far tile — walkable, no cover, a board. Whoever stands
+     there rolls the same Grit save everything falling rolls (`dropOnto`,
+     the resolution shared with furniture). Doors never topple: they are
+     not in the wall sets, by construction. And per the fallen-shape rule,
+     the chunky fallen twins are SOLID now — an object on its side that
+     blocks bodies, is shot over, and grants cover through the M6a height
+     rule alone (their special `cover` flag retired with the walkability);
+     a body it lands on stands IN the cell until the pin lifts, and walks
+     out because pathfinding never tests a walk's starting tile. The AI
+     does not yet topple partitions (furniture only) — a follow-up.
+
+7. **Shots sail over low furniture (M6a).** ✅ Landed.
+   `[ratified]` "height threshold as you suggest" (designer, 2026-07-29).
+   Before: EVERY solid cell blocked sight at any height — a 0.18-high
+   microwave stopped a throw as absolutely as a wall, while the chest-high
+   edge partitions (0.6–0.72) never blocked sight at all, and "crouch behind
+   the desk" would have granted an immunity the desk already gave for free.
+   The rule now: `blocksSight(def)` = solid AND (`tall` or `height >=
+   SIGHT_BLOCK_HEIGHT` (0.75)), in data/tiles.js beside the data it reads.
+   `grid.sightOpenCell` carries it; `hasLos` (throws, zones, every aimed
+   verb) and `canTakePart` (who is in the fight) both trace it. A low solid
+   that no longer blocks the shot instead GRANTS the passive cover
+   (`COVER_DODGE`, −20%) through the same coverCell predicate the fallen
+   twins and the guard stance use — one threshold decides both, so a prop
+   can never block a shot AND grant cover against it. `wall` ('#') and
+   `paneling` carry `tall: true`: they are structure drawn short so the
+   camera can see over them, and the e2e contract says a cell wall is "solid
+   all the way up." Symmetric by construction — enemies also shoot over
+   desks now, and bystanders behind low furniture can join a fight.
+
+8. **The aim wash (M7).** ✅ Landed (in combat; out-of-combat parity is a
+   follow-up). `[stated]` The designer asked for DOS2-style ground feedback
+   while aiming: "an outline on the ground of where your effective range is
+   with los factored in," then sharpened to "a color painted over the area
+   thats within range like is done in dos2," for ALL aimed powers and all
+   their target types. Looked up (2026-07-29): DOS2 actually greys the
+   out-of-range ground and draws an aim line that reports "Path is
+   Interrupted" — it does not shadow the range region by sight. The designer's
+   version is stronger and is what shipped: while a verb is armed, every tile
+   the aim can legally land on — range AND line of sight — is painted
+   translucent blue (`aim-paint.js`, pooled quads keyed so an unchanged aim
+   costs nothing per frame; `powers.aimRangeOf`/`rangeTiles` are the pure
+   geometry, each branch reading the same `*Of` helper its problem-function
+   reads so the paint and the refusal can never disagree). Blockers visibly
+   bite shadows out of the wash, which is the whole lesson. Colors
+   `[stated]`: "green red blue yellow should cover everything" — mapping
+   `[proposed]`: green = a click that works now, red = a visible but refused
+   target (both pre-existing), blue = the wash, yellow reserved for the
+   hovered take-cover object (M6).
 
 Milestones 1 and 2 are independent and may be swapped; 3–5 all depend on 1.
+M6 depends on 1, 2 and 5 (opportunity attacks and facing already exist for
+it to lean on) plus M6a and M7 above; its immunity slots into `positionMods`
+where the passive cover already lives.
 
 ### Verification as landed
 
@@ -573,6 +771,14 @@ Milestones 1 and 2 are independent and may be swapped; 3–5 all depend on 1.
   leader rather than taking orders, so a browser test would be flaky for
   little gain — the geometry has direct unit coverage and rides the same
   `attackMods` wiring cover already proves in-browser.
+- **M6a/M7 (2026-07-29):** unit — `blocksSight`/`sightOpenCell`
+  (grid.test.js), `aimRangeOf`/`rangeTiles` (powers.test.js); suite at 460.
+  e2e — a throw sails over a desk where it used to read "no clear line"
+  (throwing.spec), a desk on the defender's near face costs exactly
+  `COVER_DODGE` with the tag reading "in cover" (tactics.spec, the partition
+  test's twin), and arming a throw paints the wash / disarming clears it
+  (throwing.spec, via the `__combat.aimPaint` debug handle). The throwing,
+  tactics and topple specs re-ran green locally alongside the new tests.
 
 ## Testing
 

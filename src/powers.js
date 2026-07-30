@@ -296,3 +296,42 @@ export function conePolyline(a, test, segments = 14) {
   const o = [test.origin.x, test.origin.z];
   return [o, ...arc, o];
 }
+
+// --- aiming (TACTICS_PLAN M7) --------------------------------------------------
+
+// How far the armed verb can be AIMED, for the ground paint - the DOS2-style
+// read of "this is the floor your shot owns right now". Returns { r, euclid }
+// or null for verbs with no aim range to paint: melee and touch verbs walk you
+// in (the reach ring is their affordance), a dash previews its own trail.
+//
+// Each branch reads the SAME *Of helper its problem-function reads, so the
+// painted area and the refusal can never disagree about a default: a swap
+// painted to mobilityRangeOf is exactly the swap mobilityProblem allows.
+export function aimRangeOf(a) {
+  if (!a) return null;
+  if (a.cone) return { r: a.cone.range, euclid: true }; // the wedge rule is a true radius
+  if (isZone(a)) return { r: zoneRangeOf(a) };
+  if (isMobility(a)) return a.mode === 'dash' ? null : { r: mobilityRangeOf(a) };
+  if (aimsAtAlly(a)) return { r: buffRangeOf(a) };
+  if (isControl(a)) return controlIsRanged(a) ? { r: a.range } : null;
+  return a.range ? { r: a.range } : null;
+}
+
+// The tiles that aim can legally land on right now, as [x, z] pairs: within
+// `range` of the aimer's tile and passing `canSee(x, z)` - the caller bundles
+// its own ground and line-of-sight rules there, so this stays pure geometry.
+// `euclid` picks the distance rule: throws and zones measure Chebyshev (their
+// problem functions do), cones measure a true radius.
+export function rangeTiles(cx, cz, range, canSee, euclid = false) {
+  const out = [];
+  const lim = Math.ceil(range);
+  for (let z = cz - lim; z <= cz + lim; z++) {
+    for (let x = cx - lim; x <= cx + lim; x++) {
+      const d = euclid ? Math.hypot(x - cx, z - cz) : Math.max(Math.abs(x - cx), Math.abs(z - cz));
+      if (d > range + 1e-9) continue;
+      if (!canSee(x, z)) continue;
+      out.push([x, z]);
+    }
+  }
+  return out;
+}

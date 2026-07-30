@@ -78,6 +78,9 @@ src/
                      the floor, and ink swims across the world. controls.js
                      bends the click and the hover through it; hover.js still
                      owns what the cursor says
+  aim-paint.js       The aim wash (TACTICS_PLAN M7): pooled translucent
+                     quads over every tile an armed verb can legally reach,
+                     line of sight included; combat.js decides the tiles
   combat.js          Tactical on-map combat: per-unit INITIATIVE order, AP
                      turns, movement, ranged/melee, AI-driven units - costs
                      from data
@@ -85,9 +88,11 @@ src/
                      insertion                                (pure logic)
   turn-order.js      The turn ENGINE over that order: advance, the round
                      wrap, skipping who can't act, a temp's contract,
-                     the turn-start tick. Drives a host interface, so
-                     combat.js keeps only what needs a panel or a body
-                     (see Layering)                            (pure logic)
+                     the turn-start tick - and SHARED turns: consecutive
+                     member slots hold the floor together, steered and
+                     finished one at a time (INITIATIVE_PLAN). Drives a
+                     host interface, so combat.js keeps only what needs
+                     a panel or a body (see Layering)          (pure logic)
   shop.js            Merchant arithmetic: price, sell yield, the stock roll,
                      and the atomic buy/sell                  (pure logic)
   looting.js         Containers, bodies, loose items, pockets, Alt overlay
@@ -103,8 +108,12 @@ src/
                        the paged action hotbar, party bar, level-up pip
     menus.js           context menu, Alt loot labels (at the cursor)
     panels.js          pockets, character sheet, dialogue, shop
-    screens.js         level-up, win/floor-clear/lose, class picker,
-                       game menu, playtest badge (they take the frame)
+    screens.js         level-up, win/floor-clear/lose, the desk (six precut
+                       characters + the blank card), game menu, playtest
+                       badge (they take the frame)
+    creation.js        the short form beside the chosen body: pronouns, two
+                       points, and - for a custom character only - a name
+                       and a body from the rigs nobody else wears
   god.js             God-mode tweak panel (` / F8): live-reflects the sheet,
                      enemies, combat + world; edit/pin values, pause, spawn
   editor.js          In-browser level editor (paint/erase, export, playtest)
@@ -171,9 +180,11 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   `grid.edgeOpen(x,z,nx,nz)` answers one boundary; `grid.stepOpen` answers a
   full (possibly diagonal) step. Pathfinding, path smoothing, wander AI,
   shoves, conduction pools and fire spread all consult them. Partitions are
-  chest height: combat throws sail OVER them (`hasLos` is terrain +
-  `grid.sightOpen`), and `#` cell walls still exist for solid blocks that
-  also stop throws.
+  chest height: combat throws sail OVER them - and over any solid CELL
+  shorter than `SIGHT_BLOCK_HEIGHT` (data/tiles.js, TACTICS_PLAN M6a): a desk
+  blocks bodies, not shots, and shields whoever stands behind it instead.
+  `hasLos` is cell sight (`grid.sightOpenCell`) + edge sight
+  (`grid.sightOpen`); `#` cell walls are `tall` and still stop throws.
 - **Doors live on edges too** ("doors" runs in the level JSON; a door
   replaces any wall on its edge). Closed doors block movement AND sight
   (they go floor to frame); conduction ignores them - water finds the gap
@@ -330,12 +341,18 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   (`ui.createPartyBar`, `#party-slot-<i>`), pressing Tab, or clicking a
   member's body switches who you control - re-keying the `sheet`/`player`
   bindings (camera, hotbar, HUD, pockets, menu verbs, follower set). IN
-  combat there is no switching: proper per-unit initiative means you control
-  each member only when their own turn comes up (`beginTurn` -> `makeActive`),
-  and when the fight ends the out-of-combat bindings follow whoever had the
-  floor (`syncLeaderBindings`). **End Turn** ends the acting member's turn and
-  initiative moves on - the next slot may be a teammate, a summon you're
-  driving, or an enemy. In-combat clicks check the pick ray for a coworker's
+  combat, switching exists only within a SHARED turn (INITIATIVE_PLAN):
+  consecutive member slots in the initiative order hold the floor together -
+  BG3's rule, adjacency not equal rolls - and the party bar, Tab, a body
+  click or the right-click "Steer" item move steering among the holders
+  (`combat.steerMember` -> `makeActive`; never `switchLeader`, which re-keys
+  the out-of-combat world). Members outside the open turn still wait for
+  their own slot, and when the fight ends the out-of-combat bindings follow
+  whoever had the floor (`syncLeaderBindings`). **End Turn** ends the STEERED
+  member's turn - each holder presses their own; only when all have does
+  initiative move on - and the next slot may be a teammate, a summon you're
+  driving, or an enemy. Initiative rolls print to the chat log as a typed
+  line ('initiative'), not on the strip. In-combat clicks check the pick ray for a coworker's
   BODY first (the rings mark bodies, and the ground tile behind a tall mesh is
   a mis-walk); ground clicks stay tile-based for movement, and a member's
   combat route treats allies AND summons as blockers so a move never ends

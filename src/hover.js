@@ -45,6 +45,9 @@ const AGGRO = {
 // these has to be reissued on every frame it is meant to be visible.
 const RING_OK = new pc.Color(0.42, 0.78, 0.35);
 const RING_FAR = new pc.Color(0.85, 0.28, 0.24);
+// Yellow, the cover colour (TACTICS_PLAN M7's mapping) - the ring on a
+// hovered take-cover shield, in a fight or out of one.
+const RING_COVER = new pc.Color(0.95, 0.8, 0.3);
 const REACH_RING = new pc.Color(0.55, 0.62, 0.78);
 const RING_PARTY = new pc.Color(0.45, 0.9, 0.8);
 const RING_DOWN = new pc.Color(1.0, 0.82, 0.4);
@@ -307,6 +310,30 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
       }
       // ...and ring whoever it would actually catch, the same as in combat.
       for (const [x, z] of aim.caught) ring(x, z, 0.5, RING_OK);
+    },
+    // A SHOVE armed out of combat: ring what the hovered aim would topple,
+    // and WHERE it lands - the fall is sign-derived from where you stand, so
+    // the landing has to be readable before the shoulder goes in. The data is
+    // the host's own click rules (queries.shoveAim), so the preview and the
+    // topple cannot disagree.
+    drawShoveAim() {
+      const aim = queries.shoveAim?.();
+      if (!aim) return;
+      const color = aim.usable ? RING_OK : RING_FAR;
+      ring(aim.x, aim.z, 0.42, color);
+      if (aim.landing && (aim.landing[0] !== aim.x || aim.landing[1] !== aim.z)) {
+        ring(aim.landing[0], aim.landing[1], 0.28, color);
+        app.drawLine(new pc.Vec3(aim.x, 0.14, aim.z),
+          new pc.Vec3(aim.landing[0], 0.14, aim.landing[1]), color);
+      }
+    },
+    // TAKE COVER armed out of combat: the hovered shield rings in the cover
+    // yellow - and ONLY the hovered one (the designer's rings-everywhere-is-
+    // noise rule, same as combat's read).
+    drawCoverAim() {
+      const aim = queries.coverAim?.();
+      if (!aim) return;
+      ring(aim.x, aim.z, 0.42, aim.usable ? RING_COVER : RING_FAR);
     },
     // A SUMMON armed out of combat aims at the floor, so there is no coworker
     // to ring - the spot is the target. Green on the tiles the arrivals would

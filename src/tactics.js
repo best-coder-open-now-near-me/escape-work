@@ -192,6 +192,29 @@ export function hasCover(ax, az, dx, dz, edgeOpen, coverCell = null) {
   return false;
 }
 
+// --- take cover (TACTICS_PLAN M6) ---------------------------------------------
+
+// Does a crouch behind the shield CELL (sx, sz) protect the defender at
+// (dx, dz) from a shot fired from (ax, az)?
+//
+// The same octant question hasCover asks of a face, asked of the ONE cell the
+// defender committed to: the shield must sit on an orthogonal face of the
+// defender's tile pointing attackward. Deliberately not "any adjacent cover"
+// - crouching is a commitment to one object, and which sides that object
+// covers is what makes flanking the counter (designer: "only the direction
+// it blocks, flanking still works").
+//
+// Like hasCover's diagonal rule, a diagonal attacker is shielded if the cell
+// sits on EITHER of the two faces pointing their way - the shot has to clear
+// the object's corner no matter which axis it favours.
+export function crouchShields(ax, az, dx, dz, sx, sz) {
+  const ox = Math.sign(ax - dx);
+  const oz = Math.sign(az - dz);
+  if (ox === 0 && oz === 0) return false; // standing on them - no angle at all
+  return (ox !== 0 && sx === dx + ox && sz === dz)
+    || (oz !== 0 && sx === dx && sz === dz + oz);
+}
+
 // --- flanking (TACTICS_PLAN M4) ---------------------------------------------
 
 // Is the defender at (dx, dz) caught in a pincer - the attacker on one side

@@ -395,6 +395,16 @@ export function createTileRenderer(app) {
       // Full-size so adjacent walls merge into continuous surfaces.
       return { kind: 'wall', entities: [addBox(tileMats[type], x, def.height / 2, z, 1, def.height, 1)] };
     }
+    // A flat runtime remnant (the toppled partition): a thin slab laid ON the
+    // floor's top face. The plain marker box below draws from GROUND level
+    // up, so anything thinner than the floor slab would top out inside the
+    // carpet and render invisible.
+    if (def.onFloor) {
+      return {
+        kind: 'marker',
+        entities: [addBox(tileMats[type], x, floorDef.height / 2 + def.height / 2, z, 0.94, def.height, 0.94)],
+      };
+    }
     return { kind: 'marker', entities: [addBox(tileMats[type], x, def.height / 2, z, 1, def.height, 1)] };
   }
 
