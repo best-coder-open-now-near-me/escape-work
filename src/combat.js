@@ -32,6 +32,9 @@ import {
   standTilePath as standTileRoute, pickTarget as pickBest, advanceRoute,
   aiCrouchSpot, chooseBeat, afterFailedAdvance,
 } from './combat-ai.js';
+import {
+  enemyRingOk, ringsAtBodies, verbKind, toppleRings, partitionRings, breakRings,
+} from './combat-targeting.js';
 import { summonSpotProblem as spotProblem } from './summon-rules.js';
 import {
   cheb, TARGET_R, SURPRISE_RADIUS, AROUND, ORTHO, reachOfUnit, posOf, withinReach,
@@ -1298,7 +1301,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // coworkers - the affordance describing half the verb.
       if (!aimsAtAnyone(a)) return;
     }
-    if (a.type !== 'attack' && a.type !== 'shove' && !isControl(a) && !isPurge(a)) return;
+    if (!ringsAtBodies(a)) return;
     if (a.cone) {
       const test = aimPoint && coneTest(a, aimPoint.x, aimPoint.z);
       if (test) {
@@ -1348,34 +1351,24 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // same promise it is anywhere else on this bar.
     if (a.type === 'shove') {
       const b = bodyOf(active);
-      for (let dx = -1; dx <= 1; dx++) {
-        for (let dz = -1; dz <= 1; dz++) {
-          if (!dx && !dz) continue;
-          const px = b.x + dx;
-          const pz = b.z + dz;
-          if (!isToppleable(world.tileDefAt(px, pz))) continue;
-          const plan = topplePlan(active, px, pz);
-          const canDrop = !!plan && active.ap >= a.ap;
-          drawRing(px, pz, 0.42, canDrop ? PREVIEW_OK : PREVIEW_FAR);
-          // ...and WHERE it lands (designer, 2026-07-30): the fall is
-          // sign-derived from where you stand, so the read must be too - a
-          // smaller ring on the landing tile, tied to the prop's by a line.
-          if (plan) {
-            drawRing(plan.lx, plan.lz, 0.28, canDrop ? PREVIEW_OK : PREVIEW_FAR);
-            app.drawLine(new pc.Vec3(px, 0.14, pz),
-              new pc.Vec3(plan.lx, 0.14, plan.lz), canDrop ? PREVIEW_OK : PREVIEW_FAR);
-          }
+      const afford = active.ap >= a.ap;
+      for (const { x, z, plan } of toppleRings(b.x, b.z, {
+        isToppleableAt: (px, pz) => isToppleable(world.tileDefAt(px, pz)),
+        planAt: (px, pz) => topplePlan(active, px, pz),
+      })) {
+        const canDrop = !!plan && afford;
+        drawRing(x, z, 0.42, canDrop ? PREVIEW_OK : PREVIEW_FAR);
+        // ...and WHERE it lands (designer, 2026-07-30): the fall is
+        // sign-derived from where you stand, so the read must be too - a
+        // smaller ring on the landing tile, tied to the prop's by a line.
+        if (plan) {
+          drawRing(plan.lx, plan.lz, 0.28, canDrop ? PREVIEW_OK : PREVIEW_FAR);
+          app.drawLine(new pc.Vec3(x, 0.14, z),
+            new pc.Vec3(plan.lx, 0.14, plan.lz), canDrop ? PREVIEW_OK : PREVIEW_FAR);
         }
       }
-      // ...and the office's own walls (TACTICS_PLAN M6): an adjacent
-      // partition rings the tile it would fall ONTO. Same promise as every
-      // ring on this bar - green means the click brings it down.
-      for (const [dx, dz] of ORTHO) {
-        const px = b.x + dx;
-        const pz = b.z + dz;
-        if (!world.wallEdgeBetween(b.x, b.z, px, pz)) continue;
-        drawRing(px, pz, 0.42,
-          world.terrainOpen(px, pz) && active.ap >= a.ap ? PREVIEW_OK : PREVIEW_FAR);
+      for (const { x, z, clear } of partitionRings(b.x, b.z, world)) {
+        drawRing(x, z, 0.42, clear && afford ? PREVIEW_OK : PREVIEW_FAR);
       }
     }
     // Breakable cover rings under an ARMED attack (TACTICS_PLAN M8) - the
@@ -1384,73 +1377,50 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // everything it could hit; adjacent partitions ring like the shove's do
     // (a DISTANT partition stays un-rung - the shove's own partial-affordance
     // precedent `[proposed]` - though the ranged click still resolves).
-    if (aimsAtProps(a)) {
+    {
       const b = bodyOf(active);
-      const lim = rangeOf(id) || 1;
-      for (let dx = -lim; dx <= lim; dx++) {
-        for (let dz = -lim; dz <= lim; dz++) {
-          if (!dx && !dz) continue;
-          const px = b.x + dx;
-          const pz = b.z + dz;
-          if (!isBreakable(world.tileDefAt(px, pz))) continue;
-          const plan = breakPlanAt(id, px, pz);
-          const ok = !!plan && !plan.refusal
-            && (!a.ammoCost || active.sheet.paper >= ammoCostOf(id)) && active.ap >= a.ap;
-          drawRing(px, pz, 0.42, ok ? PREVIEW_OK : PREVIEW_FAR);
-        }
+      const paid = (!a.ammoCost || active.sheet.paper >= ammoCostOf(id)) && active.ap >= a.ap;
+      const { props, edges } = breakRings(a, b.x, b.z, rangeOf(id), {
+        tileDefAt: world.tileDefAt,
+        planAt: (px, pz) => breakPlanAt(id, px, pz),
+        edgeHpBetween: world.edgeHpBetween,
+      });
+      for (const { x, z, landable } of props) {
+        drawRing(x, z, 0.42, landable && paid ? PREVIEW_OK : PREVIEW_FAR);
       }
-      for (const [dx, dz] of ORTHO) {
-        const px = b.x + dx;
-        const pz = b.z + dz;
-        if (world.edgeHpBetween(b.x, b.z, px, pz) === null) continue;
-        drawRing(px, pz, 0.42,
-          (!a.ammoCost || active.sheet.paper >= ammoCostOf(id)) && active.ap >= a.ap
-            ? PREVIEW_OK : PREVIEW_FAR);
-      }
+      for (const { x, z } of edges) drawRing(x, z, 0.42, paid ? PREVIEW_OK : PREVIEW_FAR);
     }
+    // The verdict ladder is combat-targeting.enemyRingOk; everything gathered
+    // here is a leaf fact only this file can answer. The lazy getters matter:
+    // shotOutcome and pullPlanFor are not free, and only one branch of the
+    // ladder ever reads them.
+    const range = rangeOf(id);
     for (const en of world.liveEnemies()) {
       if (!en.entity) continue;
-      let ok;
-      const range = rangeOf(id);
-      if (a.type === 'shove') {
-        ok = canReach(active, en, REACH.SHOVE) && active.ap >= a.ap;
-      } else if (isPull(a)) {
-        // Green is the pull's whole promise: crouched, their shield between
-        // you, in reach over it, room on your side (TACTICS_PLAN M8).
-        ok = !!pullPlanFor(en) && active.ap >= a.ap;
-      } else if (isControl(a) && controlIsRanged(a)) {
-        // A thrown control needs the range and the line, same as a throw. A
-        // touch-range one falls to the melee case below: clicking a distant
-        // target walks you in, so every reachable body rings green.
-        ok = !controlProblem(a, {
-          dist: cheb(active.actor.x, active.actor.z, en.x, en.z),
-          los: world.hasLos(active.actor.x, active.actor.z, en.x, en.z),
-          ap: active.ap,
-          usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
-          alive: en.alive,
-        });
-      } else if (range) {
-        // Ranged: distance, a clear line, AP - and ammo only if this particular
-        // shot bills for it (the throws do; a staple gun fires for free).
-        // A crouched target with no angle rings red (TACTICS_PLAN M6) - and so
-        // does one whose human shield is YOURS, because that click refuses.
-        const so = shotOutcome(active, en);
-        ok = cheb(active.actor.x, active.actor.z, en.x, en.z) <= range
-          && world.hasLos(active.actor.x, active.actor.z, en.x, en.z)
-          && !so.blocked && !(so.redirected && so.target.sheet)
-          && (!a.ammoCost || active.sheet.paper >= ammoCostOf(id)) && active.ap >= a.ap;
-      } else {
-        // Melee (and the touch verbs that walk in): green is the promise the
-        // click keeps - a swing can actually land on them, from here or from
-        // some legal stand point beside them (the same rule routeBeside walks
-        // to). Every enemy used to ring green on bare swing-AP, partition-
-        // sealed ones included - the exact green that paired with a refusal.
-        // Distance is deliberately NOT tested: a partial approach is the
-        // click's honest outcome ("close the distance"), and the hover
-        // preview prices the walk exactly. Path existence stays the click's
-        // own test - a Dijkstra fan per enemy per frame is too hot for rings.
-        ok = active.ap >= a.ap && (canReach(active, en) || hasSwingSpot(en));
-      }
+      const ok = enemyRingOk(a, {
+        ap: active.ap,
+        ammoOk: !a.ammoCost || active.sheet.paper >= ammoCostOf(id),
+        range,
+        dist: cheb(active.actor.x, active.actor.z, en.x, en.z),
+        los: world.hasLos(active.actor.x, active.actor.z, en.x, en.z),
+        get shoveReach() { return canReach(active, en, REACH.SHOVE); },
+        get pullOk() { return !!pullPlanFor(en); },
+        get controlRefused() {
+          return controlProblem(a, {
+            dist: cheb(active.actor.x, active.actor.z, en.x, en.z),
+            los: world.hasLos(active.actor.x, active.actor.z, en.x, en.z),
+            ap: active.ap,
+            usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
+            alive: en.alive,
+          });
+        },
+        get shotBlocked() { return shotOutcome(active, en).blocked; },
+        get shotRedirectedToAlly() {
+          const so = shotOutcome(active, en);
+          return so.redirected && !!so.target.sheet;
+        },
+        get meleeReachable() { return canReach(active, en) || hasSwingSpot(en); },
+      });
       const pos = en.entity.getPosition();
       drawRing(pos.x, pos.z, TARGET_R, ok ? PREVIEW_OK : PREVIEW_FAR);
     }
@@ -1461,7 +1431,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
   }
 
-  // The action bar belongs to the ACTIVE member  // The reorg (`confused`). Every power still works and still says what it
+  // The reorg (`confused`). Every power still works and still says what it
   // does - it is just not where you left it. Deterministic per turn rather than
   // Math.random, and re-dealt only at turnStart: a bar that reshuffled on every
   // incidental repaint would move the button out from under a click in flight,
@@ -2721,34 +2691,38 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     };
     lastClickOutcome = 'acted'; // overwritten by refuse(); the gate stamped its own
     const a = ACTIONS[armed];
+    // WHICH verb this click is, from the same classifier the target rings
+    // dispatch on (combat-targeting.verbKind). Two hand-written ladders of
+    // `a.type` tests in slightly different orders is exactly how the rings came
+    // to contradict the click; there is one ladder now, and the arms below are
+    // what each branch DOES.
+    const kind = verbKind(a, rangeOf(armed));
     // Take Cover clicked on a coworker: they are the shield ("any character
     // as cover" - crouching behind your enemy is legal, if bold).
-    if (a.type === 'cover') { performTakeCover(en.x, en.z); return; }
-    if (a.cone) { fireCone(en.x, en.z); return; }
+    if (kind === 'cover') { performTakeCover(en.x, en.z); return; }
+    if (kind === 'cone') { fireCone(en.x, en.z); return; }
     // Placing a summon on top of a coworker: the tile is taken, so they report
     // to the free ground ringing outward from it. Aiming at the enemy you want
     // them to swarm is a reasonable thing to click.
-    if (a.type === 'summon') { placeSummon(en.x, en.z); return; }
+    if (kind === 'summon') { placeSummon(en.x, en.z); return; }
     // Aiming a zone at a coworker is a reasonable thing to click - you want it
     // under THEM - so it resolves on their tile rather than refusing. Their own
     // tile is excluded from the footprint (zoneCells), so what lands is the
     // ring around their feet.
-    if (isZone(a)) { performZone(armed, en.x, en.z); return; }
+    if (kind === 'zone') { performZone(armed, en.x, en.z); return; }
     // A RANGED control (a cone, or one carrying `range`) resolves from where
-    // you stand. A touch-range one deliberately falls through to the melee
-    // walk-up below rather than getting its own copy of it - Detain refusing
-    // "too far" would make it the one arm's-length action in the game that
-    // will not approach, and `strike` is what makes the arrival resolve as a
-    // control instead of a swing.
-    if (isControl(a) && controlIsRanged(a)) { performControl(armed, en); return; }
-    if (a.type === 'shove') {
+    // you stand. A touch-range one classifies as 'melee' and falls through to
+    // the walk-up below rather than getting its own copy of it - and `strike`
+    // is what makes the arrival resolve as a control instead of a swing.
+    if (kind === 'control') { performControl(armed, en); return; }
+    if (kind === 'shove') {
       if (!canReach(active, en, REACH.SHOVE)) {
         // Out of reach - but the office between you might BE the shove: a
         // cubicle wall to bring down on them (designer, 2026-07-30)...
         if (performPartitionTopple(en.x, en.z)) return;
         // ...or furniture beside you whose fall lands exactly on them. One
         // gesture: click the coworker behind the cabinet, wear the cabinet.
-        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        for (const [dx, dz] of AROUND) {
           const plan = topplePlan(active, active.actor.x + dx, active.actor.z + dz);
           if (!plan || plan.lx !== en.x || plan.lz !== en.z) continue;
           if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
@@ -2775,7 +2749,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (!hostilesRemain()) victory();
       return;
     }
-    if (isPull(a)) {
+    if (kind === 'pull') {
       const plan = pullPlanFor(en);
       if (!plan) { refuse(pullRefusal(en)); return; }
       if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
@@ -2785,7 +2759,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return;
     }
     const range = rangeOf(armed);
-    if (range) {
+    if (kind === 'ranged') {
       const thrown = !!a.ammoCost; // a wad and a staple miss differently
       const far = cheb(active.actor.x, active.actor.z, en.x, en.z) > range;
       const blocked = !world.hasLos(active.actor.x, active.actor.z, en.x, en.z);
