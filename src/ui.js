@@ -43,3 +43,4 @@ export {
   showClassPicker, showGameMenu, showPlaytestBadge,
 } from './ui/screens.js';
 export { showCreationStep } from './ui/creation.js';
+export { createCombatReadout, apPips } from './ui/combat.js';

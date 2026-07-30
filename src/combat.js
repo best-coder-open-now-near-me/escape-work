@@ -21,7 +21,7 @@ import {
 import { createAimPaint } from './aim-paint.js';
 import { STATUSES } from './data/statuses.js';
 import { blocksSight, PARTITION_TOPPLE } from './data/tiles.js';
-import { PANEL_CHROME, BUTTON_CHROME, actionDock, refreshDockVisibility } from './ui.js';
+import { PANEL_CHROME, createCombatReadout, apPips } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
 import { slips, speedUnderStatus } from './step-rules.js';
 import {
@@ -744,68 +744,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     'initiative');
 
   // --- UI ---------------------------------------------------------------------
-  const panel = document.createElement('div');
-  panel.id = 'combat-panel';
-  // The dock's UPPER REGION, above the slot row - not a panel of its own. It
-  // carries no chrome and no position: ui/chrome.js actionDock owns the box.
-  //
-  // It was a second floating box at `bottom: 92px`, and the seam showed once
-  // the bar became shared. The verbs moved out to the bar and what was left
-  // here was a turn line, a log line, and a row holding one End Turn button in
-  // a 640px-wide panel - so the gap between the two boxes was exactly the
-  // shape of what had been removed from this one.
-  //
-  // Everything below still writes to #combat-turn / #combat-ap / #combat-log /
-  // #combat-actions by id, and #combat-panel still names the combat readout.
-  // Moving a region is not a reason to rename what is in it.
-  // No width of its own - it stretches to the dock, which is sized by the slot
-  // row. Giving this region a 620px width made the dock wider than its contents
-  // needed and pushed its right edge under the narrator box (fixed, right: 14px,
-  // 360px wide), which is precisely where End Turn sits. The narrator is
-  // pointer-events:none so the button still WORKED, which is the sort of bug
-  // that survives a test suite and not a glance. `minWidth` is for the other
-  // end: a one-slot bar must not squash the turn line into the AP pips.
-  Object.assign(panel.style, {
-    display: 'flex', flexDirection: 'column', gap: '6px',
-    minWidth: '360px', padding: '2px 4px 8px',
-    borderBottom: '1px solid #3a3a52',
+  // The readout is a dumb view in ui/combat.js now. What stays here is the
+  // view-MODEL: this file knows whose turn it is, what a pip is worth and what
+  // End Turn costs, and hands the panel a decided picture rather than the state
+  // to decide from.
+  const readout = createCombatReadout({
+    onEndTurn: () => endTurnPressed(),
+    onFocusSlot: (i) => {
+      const s = turns.order[i];
+      if (s) callbacks.focusCamera?.(s.member ? s.member.actor : s.unit);
+    },
   });
-  panel.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
-      <div id="combat-turn" style="font-weight:700;"></div>
-      <div style="display:flex; align-items:center; gap:10px;">
-        <div id="combat-ap" style="letter-spacing:2px;"></div>
-        <div id="combat-actions" style="display:flex; gap:7px;"></div>
-      </div>
-    </div>
-    <div id="combat-log" style="opacity:.9; min-height:18px;"></div>`;
-  // First child, so the readout sits above the slots however they were built.
-  const dock = actionDock();
-  dock.insertBefore(panel, dock.firstChild);
-  refreshDockVisibility();
-
-  const strip = document.createElement('div');
-  strip.id = 'combat-strip';
-  Object.assign(strip.style, PANEL_CHROME, {
-    position: 'fixed', top: '54px', right: '12px', zIndex: '25', minWidth: '170px',
-    borderRadius: '9px', padding: '9px 12px', font: '12px system-ui, sans-serif',
-    // Double-click is a verb here; without this it ALSO selects the row's text.
-    userSelect: 'none',
-  });
-  strip.title = 'Double-click a combatant to center the camera on them';
-  // Double-click a row: look at that combatant (BG3's portrait recenter).
-  // Delegated once - refresh() rebuilds the rows wholesale on every repaint,
-  // so a per-row handler would be re-wired dozens of times a fight. The rig
-  // belongs to main.js; the callback only names whose body to find. The
-  // fallen still resolve (their actor lies where it toppled) - "where did
-  // they go down" is a fair question mid-fight.
-  strip.addEventListener('dblclick', (e) => {
-    const row = e.target.closest?.('[data-slot]');
-    if (!row) return;
-    const s = turns.order[Number(row.dataset.slot)];
-    if (s) callbacks.focusCamera?.(s.member ? s.member.actor : s.unit);
-  });
-  document.body.appendChild(strip);
 
   // --- movement preview -------------------------------------------------------
   // Hovering open floor shows the smoothed route, where this turn's AP runs
@@ -1512,27 +1461,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
   }
 
-  const actionsRow = panel.querySelector('#combat-actions');
-  const endBtn = document.createElement('button');
-  endBtn.id = 'combat-end-turn';
-  endBtn.textContent = 'End Turn';
-  Object.assign(endBtn.style, {
-    minWidth: '90px', padding: '8px 10px', borderRadius: '7px',
-    border: '1px solid #6a5a30', background: '#3d3524', color: '#f5e8c8',
-    font: 'inherit', cursor: 'pointer',
-  });
-  // The action bar belongs to the ACTIVE member - rebuilt whenever control
-  // changes hands, because different sheets bring different actions.
-  //
-  // It is no longer BUILT here. Combat and exploration render one bar - the
-  // persistent hotbar (main.js) - and this module supplies its rules: what the
-  // acting member can afford, what a slot's tooltip says, and what the reorg
-  // status does to the order. Two builders with two id conventions, two
-  // affordability sites, two tooltip builders and two arming states is what
-  // made the bar in a fight a different widget from the bar out of one, with
-  // no layout, no pager, no item slots and no number keys. `#act-<id>` is gone
-  // with them: `#hotbar-act-<id>` names a power now, in a fight or out of it.
-  // The reorg (`confused`). Every power still works and still says what it
+  // The action bar belongs to the ACTIVE member  // The reorg (`confused`). Every power still works and still says what it
   // does - it is just not where you left it. Deterministic per turn rather than
   // Math.random, and re-dealt only at turnStart: a bar that reshuffled on every
   // incidental repaint would move the button out from under a click in flight,
@@ -1558,11 +1487,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     return out;
   }
-  // The panel keeps the End Turn button and nothing else - the verbs live on
-  // the shared bar now.
-  actionsRow.innerHTML = '';
-  actionsRow.appendChild(endBtn);
-
   // One affordability site for both halves of the game. main.js owns the bar's
   // DOM and the player's slot layout; this owns "can I press that right now",
   // because it is a combat question and there must be one answer to it.
@@ -1647,9 +1571,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
   }
 
-  const el = (id) => panel.querySelector('#' + id);
   function log(text) {
-    el('combat-log').textContent = text;
+    readout.say(text);
     callbacks.say(text);
   }
   function refresh() {
@@ -1669,28 +1592,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // cannot say WHICH of your people is up; an AI turn still needs the
     // enemy's name, because nothing else on screen carries it.
     const solo = members.length === 1;
-    el('combat-turn').textContent = phase === 'player'
-      ? (solo ? '' : active.sheet.name)
-      : phase === 'ai' && acting ? `${acting.unit.def.name}'s turn` : '';
-    // Distance-priced movement leaves fractional AP - show it as a half pip.
-    const full = Math.floor(active.ap + 1e-6);
-    const half = active.ap - full >= 0.05 ? 1 : 0;
     // The movement allowance rides beside the AP pips as its own boot glyph,
     // and only for characters that have one - never advertise a resource a
-    // character does not own.
-    const freeLeft = active.freeAp || 0;
-    const freeTag = freeMoveOf(active) > 0 ? `  🥾 ${fmtAp(freeLeft)} move` : '';
-    el('combat-ap').textContent = 'AP ' + '●'.repeat(full) + (half ? '◐' : '')
-      + '○'.repeat(Math.max(0, active.sheet.maxAp - full - half)) + ` ${fmtAp(active.ap)}`
-      + freeTag;
+    // character does not own. Distance-priced movement leaves fractional AP,
+    // which apPips renders as a half pip.
+    const freeTag = freeMoveOf(active) > 0 ? `  🥾 ${fmtAp(active.freeAp || 0)} move` : '';
     // The verbs repaint on the shared bar, which main.js owns - affordability,
     // tooltips and the armed/confirm ring all come from actionState().
     callbacks.refreshBar?.();
-    endBtn.disabled = phase !== 'player';
-    // Under a shared turn the button names whose turn it ends - each member
-    // retires their own (INITIATIVE_PLAN #2), so the label has to say which
-    // one a press costs. Alone, it stays the plain verb it always was.
-    endBtn.textContent = turns.held.length > 1 ? `End Turn — ${active.sheet.name}` : 'End Turn';
     // The initiative tracker: the turn order top-to-bottom, the current unit
     // marked, your side tinted friendly and the enemies warm. HP rides along;
     // the downed/dead show a dash. The rolled NUMBER is gone from every row
@@ -1701,41 +1610,52 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // ones whose End Turn is already pressed.
     const heldSet = new Set(turns.held);
     const bracket = heldSet.size > 1;
-    strip.innerHTML = `<div style="font-weight:700; margin-bottom:5px;">INITIATIVE</div>` +
-      turns.order.map((s, i) => {
-        const cur = i === turns.index;
+    readout.render({
+      // Name whose turn it is - only when that is actually a question. With one
+      // party member, End Turn being lit already says it is your turn ("YOUR
+      // TURN" here and "Your turn." in the log were the same fact said three
+      // times over, next to a button that is either pressable or is not). A
+      // multi-member party still needs the name, because the button alone
+      // cannot say WHICH of your people is up; an AI turn still needs the
+      // enemy's name, because nothing else on screen carries it.
+      turnLabel: phase === 'player'
+        ? (solo ? '' : active.sheet.name)
+        : phase === 'ai' && acting ? `${acting.unit.def.name}'s turn` : '',
+      apText: apPips({
+        ap: active.ap, maxAp: active.sheet.maxAp, text: fmtAp(active.ap), freeText: freeTag,
+      }),
+      endEnabled: phase === 'player',
+      // Under a shared turn the button names whose turn it ends - each member
+      // retires their own (INITIATIVE_PLAN #2), so the label has to say which
+      // one a press costs. Alone, it stays the plain verb it always was.
+      endLabel: turns.held.length > 1 ? `End Turn — ${active.sheet.name}` : 'End Turn',
+      // The turn order top-to-bottom, the current unit marked, your side tinted
+      // friendly and the enemies warm. HP rides along; the downed/dead show a
+      // dash. The rolled NUMBER is gone from every row (INITIATIVE_PLAN #10
+      // [ratified]: "itll be nothing but noise to the player" - the order
+      // already says who acts when, and the dice line in the chat log keeps the
+      // record). A shared turn wears a bracket.
+      order: turns.order.map((s, i) => {
         const holds = bracket && heldSet.has(s);
-        const finished = holds && turns.isDone(s);
-        const carrier = s.member ? s.member.sheet : s.unit;
-        const hp = s.member
-          ? `${Math.max(0, s.member.sheet.hp)}/${s.member.sheet.maxHp}`
-          : `${Math.max(0, s.unit.hp)}/${s.unit.maxHp}`;
         const dead = !slotAlive(s);
-        const col = s.team === 'player' ? '#8adf76' : '#ffb3a0';
-        // Live status icons trail the row - the at-a-glance read of who's
-        // stunned, burning, deflecting, gummed.
-        const icons = dead ? '' : statusList(carrier).map((st) => st.icon).join('');
-        // Each row leads with the combatant's own rendered face (portraits.js).
-        // It rides the ACTOR, so it is there for members, summons and enemies
-        // alike, and simply absent until the render lands.
-        const face = (s.member ? s.member.actor : s.unit)?.portraitUrl;
-        const pic = face
-          ? `<img src="${face}" alt="" style="width:22px; height:22px; border-radius:4px;`
-            + `border:1px solid ${col}; vertical-align:middle; margin-right:5px; flex:none;">`
-          : '';
-        // The bracket is a left edge + a faint wash, so the group reads as one
-        // block without a box fighting the panel chrome; a finished holder
-        // dims toward the dead but keeps its wash - done, not gone.
-        const brk = holds
-          ? `border-left:2px solid #8adf76; padding-left:4px; margin-left:-6px;`
-            + `background:rgba(138,223,118,.07);`
-          : '';
-        return `<div data-slot="${i}" style="opacity:${dead ? '.4' : finished ? '.55' : '.95'}; color:${col};`
-          + `font-weight:${cur ? '700' : '400'}; display:flex; align-items:center; gap:2px; margin:1px 0; cursor:pointer; ${brk}">`
-          + `<span style="width:11px; flex:none;">${cur ? '▸' : finished ? '✓' : ''}</span>${pic}`
-          + `<span>${slotName(s)} &middot; ${dead ? '—' : hp}`
-          + (icons ? ` ${icons}` : '') + `</span></div>`;
-      }).join('');
+        const carrier = s.member ? s.member.sheet : s.unit;
+        return {
+          name: slotName(s),
+          hp: s.member
+            ? `${Math.max(0, s.member.sheet.hp)}/${s.member.sheet.maxHp}`
+            : `${Math.max(0, s.unit.hp)}/${s.unit.maxHp}`,
+          dead,
+          current: i === turns.index,
+          holds,
+          finished: holds && turns.isDone(s),
+          team: s.team,
+          // Live status icons trail the row - the at-a-glance read of who's
+          // stunned, burning, deflecting, gummed.
+          icons: dead ? '' : statusList(carrier).map((st) => st.icon).join(''),
+          portrait: (s.member ? s.member.actor : s.unit)?.portraitUrl || null,
+        };
+      }),
+    });
     // Reflect the ACTING member on the persistent HUD, not the leader - in a
     // multi-member fight you control whoever's turn it is (their HP, their gum/
     // bleed chips). Out of combat, main.js's callback falls back to the leader.
@@ -1771,9 +1691,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     aimPaint.destroy();
     // Only this REGION leaves - the dock and the slot row in it belong to the
     // half of the game that is still running.
-    panel.remove();
-    refreshDockVisibility();
-    strip.remove();
+    readout.destroy();
     costTag.remove();
     delete window.__combat;
   }
@@ -3429,10 +3347,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // member ends their own; one press must never skip a teammate who hasn't
   // acted - the accidental group-skip BG3 was criticised for). With a single
   // holder this is exactly the advance it always was.
-  endBtn.onclick = () => {
+  function endTurnPressed() {
     if (phase !== 'player') return;
     advanceTurn();
-  };
+  }
 
   // --- what the turn engine asks this file ------------------------------------
   // turn-order.js owns the walk: advance, wrap into a round, skip anyone who
