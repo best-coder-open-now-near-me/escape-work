@@ -763,12 +763,35 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         pendingCrouch = null;
         hidePreview();
       },
+      // SHARED TURNS (INITIATIVE_PLAN #1): consecutive member slots hold the
+      // floor together. Every member slot is controlled - your roster, your
+      // summons, a borrowed coworker alike - and AI units never are, so an
+      // enemy between two members in the order is exactly what breaks a span.
+      controlled: (s) => !!s.member,
+      // The engine moved the floor within an open span - `finish` passing it
+      // on, or a steer the player asked for. Re-key the bindings to the new
+      // member; makeActive already knows the whole dance.
+      steer: (s) => steerTo(s),
     },
   });
   // Thin readers, so the rest of the file reads the way it did.
   const advanceTurn = () => turns.advance();
   const beginTurn = () => turns.begin();
-  const insertSlot = (slot) => turns.insert(slot);
+  // A joiner's roll goes to the chat log like everyone else's - typed, so a
+  // later filter can drop the dice as a category (see logInitiative).
+  const insertSlot = (slot) => {
+    const s = turns.insert(slot);
+    callbacks.say(`${slotName(s)} rolls ${s.init} for initiative.`, 'initiative');
+    return s;
+  };
+  // The rolled order, one line into the bottom-right chat log at the fight's
+  // open. The initiative strip stopped printing numbers (INITIATIVE_PLAN #10 -
+  // noise in a player-facing panel), so this line is where the rolls live:
+  // a record you can scroll past, not a label on every row. Typed
+  // 'initiative' so the log can filter the whole category out later.
+  const logInitiative = () => callbacks.say(
+    `Initiative — ${turns.order.map((s) => `${slotName(s)} ${s.init}`).join(', ')}.`,
+    'initiative');
 
   // --- UI ---------------------------------------------------------------------
   const panel = document.createElement('div');
@@ -1466,8 +1489,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Point everything at the member whose initiative turn it now is:
   // party.active moves with it so the portrait bar highlights and the
   // out-of-combat leader bindings follow whoever last held the floor (main.js
-  // syncLeaderBindings). No free switching - proper initiative means you
-  // control each member only when its own turn comes up.
+  // syncLeaderBindings). Switching exists only WITHIN an open shared turn
+  // (INITIATIVE_PLAN): steering moves among the members holding the floor,
+  // and everyone else still waits for their own slot to come up.
   function makeActive(m) {
     active = m;
     // A summon lives outside party.members, so it can't be party.active - leave
@@ -1482,8 +1506,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     callbacks.refreshBar?.();
   }
   // A member dropped to 0 HP outside its own turn (fire under a combat walk) -
-  // main.js reports it here. Topple them; if it was the acting member, end
-  // their turn; defeat only on a party wipe.
+  // main.js reports it here. Topple them; if it was the STEERED member, retire
+  // their turn - under a shared turn `advanceTurn` is finish-the-steered, so
+  // the floor passes to a teammate still holding it rather than costing the
+  // whole group the turn (INITIATIVE_PLAN #12); a held member downed while
+  // somebody else was steering needs nothing here - steering already flows
+  // past the fallen. Defeat only on a party wipe.
   function notifyMemberDown() {
     for (const m of members) {
       if (m.sheet.hp > 0 || m.toppled) continue;
@@ -1536,13 +1564,25 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // tooltips and the armed/confirm ring all come from actionState().
     callbacks.refreshBar?.();
     endBtn.disabled = phase !== 'player';
-    endBtn.textContent = 'End Turn'; // your turn ends, initiative moves on
+    // Under a shared turn the button names whose turn it ends - each member
+    // retires their own (INITIATIVE_PLAN #2), so the label has to say which
+    // one a press costs. Alone, it stays the plain verb it always was.
+    endBtn.textContent = turns.held.length > 1 ? `End Turn — ${active.sheet.name}` : 'End Turn';
     // The initiative tracker: the turn order top-to-bottom, the current unit
     // marked, your side tinted friendly and the enemies warm. HP rides along;
-    // the downed/dead show a dash.
+    // the downed/dead show a dash. The rolled NUMBER is gone from every row
+    // (INITIATIVE_PLAN #10 [ratified]: "itll be nothing but noise to the
+    // player" - the order already says who acts when, and the dice line in
+    // the chat log keeps the record). A shared turn wears a bracket: every
+    // holder gets the tinted left edge, ▸ marks the one being steered, ✓ the
+    // ones whose End Turn is already pressed.
+    const heldSet = new Set(turns.held);
+    const bracket = heldSet.size > 1;
     strip.innerHTML = `<div style="font-weight:700; margin-bottom:5px;">INITIATIVE</div>` +
       turns.order.map((s, i) => {
         const cur = i === turns.index;
+        const holds = bracket && heldSet.has(s);
+        const finished = holds && turns.isDone(s);
         const carrier = s.member ? s.member.sheet : s.unit;
         const hp = s.member
           ? `${Math.max(0, s.member.sheet.hp)}/${s.member.sheet.maxHp}`
@@ -1560,11 +1600,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           ? `<img src="${face}" alt="" style="width:22px; height:22px; border-radius:4px;`
             + `border:1px solid ${col}; vertical-align:middle; margin-right:5px; flex:none;">`
           : '';
-        return `<div style="opacity:${dead ? '.4' : '.95'}; color:${col};`
-          + `font-weight:${cur ? '700' : '400'}; display:flex; align-items:center; gap:2px; margin:1px 0;">`
-          + `<span style="width:11px; flex:none;">${cur ? '▸' : ''}</span>${pic}`
+        // The bracket is a left edge + a faint wash, so the group reads as one
+        // block without a box fighting the panel chrome; a finished holder
+        // dims toward the dead but keeps its wash - done, not gone.
+        const brk = holds
+          ? `border-left:2px solid #8adf76; padding-left:4px; margin-left:-6px;`
+            + `background:rgba(138,223,118,.07);`
+          : '';
+        return `<div style="opacity:${dead ? '.4' : finished ? '.55' : '.95'}; color:${col};`
+          + `font-weight:${cur ? '700' : '400'}; display:flex; align-items:center; gap:2px; margin:1px 0; ${brk}">`
+          + `<span style="width:11px; flex:none;">${cur ? '▸' : finished ? '✓' : ''}</span>${pic}`
           + `<span>${slotName(s)} &middot; ${dead ? '—' : hp}`
-          + ` <span style="opacity:.6">(${s.init})</span>`
           + (icons ? ` ${icons}` : '') + `</span></div>`;
       }).join('');
     // Reflect the ACTING member on the persistent HUD, not the leader - in a
@@ -3080,10 +3126,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     aimPoint = null;
     refresh();
   }
-  // End Turn ends the ACTING unit's turn and initiative moves on - the next
-  // slot may be a teammate, a summon you're driving, or an enemy. (It used to
-  // queue through the party side before per-unit initiative replaced the
-  // two-phase spine.)
+  // End Turn ends the STEERED member's turn - under a shared turn the floor
+  // passes to the next member still holding it, and only when every holder
+  // has pressed theirs does initiative move on (INITIATIVE_PLAN #2: each
+  // member ends their own; one press must never skip a teammate who hasn't
+  // acted - the accidental group-skip BG3 was criticised for). With a single
+  // holder this is exactly the advance it always was.
   endBtn.onclick = () => {
     if (phase !== 'player') return;
     advanceTurn();
@@ -3096,20 +3144,38 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // or the app, and so could never live in a pure module.
 
   // Somebody's turn opens for real: hand a member control (full AP and their
-  // movement allowance), or arm the AI's working state for a unit.
-  function takeTurn(s) {
+  // movement allowance), or arm the AI's working state for a unit. Under a
+  // shared turn `held` is every member holding the floor - EACH gets a full
+  // budget at the top (per-member AP predates spans; several members having
+  // independent pools at once is why this line is a loop and nothing else
+  // changed), and the first is steered.
+  function takeTurn(s, held = [s]) {
     if (s.member) {
+      for (const h of held) {
+        h.member.ap = h.member.sheet.maxAp; // full AP at the top of your turn
+        h.member.freeAp = freeMoveOf(h.member); // and the movement allowance, if any
+      }
       makeActive(s.member);
-      s.member.ap = s.member.sheet.maxAp; // full AP at the top of your turn
-      s.member.freeAp = freeMoveOf(s.member); // and the movement allowance, if any
       phase = 'player';
       const solo = members.length === 1;
-      log(solo ? 'Your turn.' : `${s.member.sheet.name}'s turn.`);
+      log(held.length > 1
+        ? `Shared turn — ${held.map((h) => h.member.sheet.name).join(', ')}.`
+        : solo ? 'Your turn.' : `${s.member.sheet.name}'s turn.`);
       refresh();
       return;
     }
     phase = 'ai';
     acting = { unit: s.unit, ap: s.unit.combat.ap, freeAp: freeMoveOf(s.unit), wait: 0.5 };
+    refresh();
+  }
+
+  // The floor moved to another member of the open span - `finish` passing it
+  // on when one member's turn ends, or a steer the player asked for (the party
+  // bar, Tab, a body click - main.js routes them here in combat).
+  function steerTo(s) {
+    if (!s?.member) return;
+    makeActive(s.member);
+    log(`${s.member.sheet.name} has the floor.`);
     refresh();
   }
 
@@ -3907,10 +3973,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     endTurn: () => { advanceTurn(); refresh(); },
     // The initiative order, top to bottom, with whose turn it is - for the
     // tracker UI and the e2e suite.
+    // `current` stays SINGLE under a shared turn - it is the steered slot -
+    // while `held`/`done` say who else is holding the open turn and who has
+    // already ended theirs. `init` stays here for the tests even though the
+    // strip no longer prints it.
     get order() {
+      const heldSet = new Set(turns.held);
       return turns.order.map((s, i) => ({
         name: slotName(s), team: s.team, init: s.init,
         member: !!s.member, current: i === turns.index, alive: slotAlive(s),
+        held: heldSet.has(s), done: turns.isDone(s),
       }));
     },
     get turn() { return turns.current ? slotName(turns.current) : null; },
@@ -3940,6 +4012,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // on window while __game.inCombat said the fight was over.
   if (opening && ACTIONS[opening.actionId] && opening.target?.alive) {
     turns.lead((s) => s.member === members[party.active]);
+    logInitiative(); // after lead - the ambusher's raised roll is the real order
     beginTurn();
     if (phase === 'player') {
       armed = opening.actionId;
@@ -3947,6 +4020,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       handleEnemyClick(opening.target);
     }
   } else {
+    logInitiative();
     beginTurn();
   }
 
@@ -3990,6 +4064,43 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // self-action). The bar rings it differently from an armed one.
     get pendingConfirm() { return pendingConfirm; },
     notifyMemberDown,
+    // --- steering the shared turn ----------------------------------------------
+    // The party bar, Tab, body clicks and the debug switchTo all route here IN
+    // combat instead of switchLeader (INITIATIVE_PLAN #9): steering re-keys the
+    // combat bindings only - makeActive, via the engine's steer hook - and
+    // never touches the out-of-combat leader. `ref` is whatever the caller
+    // holds: a party record, a combat member, or a body's actor.
+    //
+    // Refusal is the common case and it is load-bearing: only a member holding
+    // the OPEN turn, not yet done, not the one already steered, is accepted -
+    // so out of a shared turn every route falls through to what it always did
+    // (a bar click highlights nobody new, a body click stays a mis-walk).
+    steerMember(ref) {
+      if (phase !== 'player' || !ref) return false;
+      const slot = turns.held.find((s) => s.member
+        && (s.member === ref || s.member.sheet === ref.sheet || s.member.actor === ref));
+      if (!slot || slot.member === active || turns.isDone(slot)) return false;
+      return turns.steer(slot);
+    },
+    // Is this body a member you could grab the wheel of right now? The
+    // right-click menu asks before offering the item; returns the name to put
+    // on it, or null.
+    canSteer(ref) {
+      if (phase !== 'player' || !ref) return null;
+      const slot = turns.held.find((s) => s.member
+        && (s.member === ref || s.member.sheet === ref.sheet || s.member.actor === ref));
+      if (!slot || slot.member === active || turns.isDone(slot) || slot.member.sheet.hp <= 0) return null;
+      return slot.member.sheet.name;
+    },
+    // Tab in combat: cycle the floor through the un-done members of the open
+    // shared turn, the same loop the key walks through the roster out of one.
+    cycleSteer() {
+      if (phase !== 'player') return false;
+      const holders = turns.held.filter((s) => s.member && !turns.isDone(s) && s.member.sheet.hp > 0);
+      if (holders.length < 2) return false;
+      const i = holders.findIndex((s) => s.member === active);
+      return turns.steer(holders[(i + 1) % holders.length]);
+    },
     // The body whose turn it is - a party member OR a summon you're driving.
     // main.js needs this because party.active can't point at a summon.
     get actingActor() { return active.actor; },

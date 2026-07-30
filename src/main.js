@@ -1595,7 +1595,11 @@ function startGame(level) {
   // In combat the portraits switch the ACTIVE combatant; out of it, the
   // leader. Same bar, same click, right verb for the moment.
   const partyBar = ui.createPartyBar({
-    onSelect: (i) => { if (!inCombat) switchLeader(i); }, // no switching mid-fight - you act on initiative
+    // Out of combat a portrait click switches the leader; in one it steers the
+    // open SHARED turn (INITIATIVE_PLAN) - combat refuses anyone not holding
+    // the floor, so clicking a member who waits on their own slot does nothing,
+    // exactly as before spans existed.
+    onSelect: (i) => { if (!inCombat) switchLeader(i); else combat?.steerMember(party.members[i]); },
     onLevelUp: (i) => openLevelUpFor(party.members[i]),
   });
   let partyBarKey = ''; // last rendered roster state (refresh gate)
@@ -2506,6 +2510,13 @@ function startGame(level) {
             || (bodyHit.ref && combat.allyAtPoint({ x: bodyHit.ref.x, z: bodyHit.ref.z }));
           if (ally && combat.handleAllyClick(ally)) return;
         }
+        // A teammate's body with NO friendly verb armed: under a shared turn
+        // this grabs the wheel (INITIATIVE_PLAN) - the same body click that
+        // switches the leader out of combat. Steering only ever succeeds on a
+        // member holding the open turn, so outside one the click falls
+        // through to the mis-walk it always was.
+        if ((bodyHit?.kind === 'party' || bodyHit?.kind === 'summon')
+          && combat?.steerMember(bodyHit.ref)) return;
         if (bodyHit?.kind === 'enemy' && bodyHit.ref.alive) {
           combat?.handleEnemyClick(bodyHit.ref);
           return;
@@ -2658,6 +2669,11 @@ function startGame(level) {
             action: () => toggleDoor(dk),
           });
         }
+        // A teammate holding the open shared turn gets a steering item - the
+        // in-combat sibling of the out-of-combat "Switch to" below.
+        const wheel = (chit?.kind === 'party' || chit?.kind === 'summon')
+          ? combat?.canSteer(chit.ref) : null;
+        if (wheel) items.push({ label: `Steer ${wheel}`, action: () => combat.steerMember(chit.ref) });
         const text = examineAt(chit, tile, point);
         if (text) items.push({ label: 'Examine', action: () => ui.say(text) });
         if (items.length) ui.showMenu(sx, sy, items);
@@ -2875,12 +2891,14 @@ function startGame(level) {
       // Page the hotbar rows from the keyboard - the pager buttons and the wheel
       // over the bar do the same thing.
       hotbar?.flip(e.key === ']' ? 1 : -1);
-    } else if (e.key === 'Tab' && sheet && !inCombat && !gameOver && !modalOpen()) {
-      // Tab cycles which member you lead OUT of combat. In a fight there's no
-      // switching - initiative decides who acts, and you control each on their
-      // own turn.
+    } else if (e.key === 'Tab' && sheet && !gameOver && !modalOpen()) {
+      // Tab cycles which member you lead out of combat - and, in one, which
+      // member of an open SHARED turn you're steering (INITIATIVE_PLAN). With
+      // no shared turn open the combat cycle refuses, so the key stays inert
+      // on a solo turn rather than falling back to a leader switch.
       e.preventDefault();
-      cycleLeader();
+      if (inCombat) combat?.cycleSteer();
+      else cycleLeader();
     } else if ((e.key === 'c' || e.key === 'C') && sheet && !gameOver && !modalOpen()) {
       // The read-only character sheet for whoever you're controlling.
       charSheet.toggle(charSheetVm(sheet));
@@ -3497,7 +3515,10 @@ function startGame(level) {
       return party.cash;
     },
     switchTo(i) {
-      if (!inCombat) switchLeader(i); // in combat, initiative controls the turn - no manual switch
+      // In combat this steers the open shared turn instead - refused unless
+      // party.members[i] is holding the floor (INITIATIVE_PLAN).
+      if (!inCombat) switchLeader(i);
+      else combat?.steerMember(party?.members[i]);
     },
     reviveMember(i) {
       const m = party?.members[i];

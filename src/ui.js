@@ -26,7 +26,7 @@
 // beside the others and inherits their shape - a dumb view over a host-supplied
 // view-model, rendering and reporting clicks, knowing no rules.
 export { PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, addVignette } from './ui/chrome.js';
-export { say, setNarrationGate, narrationLog, setFocusBanner, toast } from './ui/readouts.js';
+export { say, setNarrationGate, narrationLog, narrationEntries, setFocusBanner, toast } from './ui/readouts.js';
 export {
   updateStatsHud, createTacticalButton, createHotbar, HOTBAR_ROW_SLOTS,
   createPartyBar, createLevelUpPip,

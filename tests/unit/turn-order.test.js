@@ -377,3 +377,227 @@ test('replace reports a miss rather than guessing', () => {
   assert.equal(turns.replace((s) => s.name === 'nobody', { name: 'x' }), null);
   assert.equal(turns.order.length, 1, 'and changes nothing');
 });
+
+// --- shared turns (INITIATIVE_PLAN) ---------------------------------------
+// A span: consecutive slots the host calls `controlled` hold the floor
+// together. The harness marks controlled slots with `ctl` and threads the
+// hook through; every test above runs WITHOUT the hook, which is the standing
+// proof that a hookless host gets the engine exactly as it was.
+
+// Overrides every recorder these tests assert on, so one log carries the
+// whole story - the harness's own internal log only serves the hookless tests
+// above.
+const ctlHost = (log) => ({
+  controlled: (s) => !!s.ctl,
+  take: (s, held) => log.push(`take:${s.name}:[${held.map((h) => h.name).join()}]`),
+  steer: (s) => log.push(`steer:${s.name}`),
+  spendLifetime: (s) => { s.turnsLeft -= 1; log.push(`spend:${s.name}`); },
+  expire: (s) => { s.alive = false; log.push(`expire:${s.name}`); },
+  win: () => log.push('win'),
+  lose: () => log.push('lose'),
+  roundStart: () => log.push('round'),
+});
+
+test('consecutive controlled slots open as one span and hold together', () => {
+  const e = slot('e', 9);
+  const a = slot('a', 7, { ctl: true });
+  const b = slot('b', 5, { ctl: true });
+  const f = slot('f', 1);
+  const { turns, log } = harness([e, a, b, f], ctlHost([]));
+  turns.begin(); // e leads - uncontrolled, a span of one
+  assert.equal(turns.current, e);
+  assert.deepEqual(turns.held, [e]);
+  turns.advance();
+  // a and b are neighbours and controlled: one take, both held, a steered.
+  assert.deepEqual(turns.held, [a, b]);
+  assert.equal(turns.current, a);
+  assert.equal(turns.index, 1, 'the marker sits on the steered slot');
+});
+
+test('take reports the whole span; an uncontrolled neighbour run never groups', () => {
+  const log = [];
+  const a = slot('a', 9, { ctl: true });
+  const b = slot('b', 7, { ctl: true });
+  const e1 = slot('e1', 5);
+  const e2 = slot('e2', 3);
+  const { turns } = harness([a, b, e1, e2], ctlHost(log));
+  turns.begin();
+  assert.deepEqual(log, ['take:a:[a,b]']);
+  turns.finish(a);
+  turns.finish(b);
+  // Two uncontrolled slots side by side: two separate takes, one each.
+  assert.deepEqual(log.slice(1), ['steer:b', 'take:e1:[e1]']);
+  turns.advance();
+  assert.deepEqual(log.at(-1), 'take:e2:[e2]');
+});
+
+test('finish retires one member, steers the next, and only then advances', () => {
+  const log = [];
+  const a = slot('a', 9, { ctl: true });
+  const b = slot('b', 7, { ctl: true });
+  const e = slot('e', 1);
+  const { turns } = harness([a, b, e], ctlHost(log));
+  turns.begin();
+  assert.equal(turns.finish(a), 'taken'); // b still holds the floor
+  assert.equal(turns.current, b);
+  assert.equal(turns.isDone(a), true);
+  assert.equal(turns.isDone(b), false);
+  assert.equal(turns.finish(b), 'taken'); // span done - e's turn opens
+  assert.equal(turns.current, e);
+  assert.deepEqual(turns.held, [e]);
+});
+
+test('advance under a span is finish-the-steered, not end-the-group', () => {
+  // The End Turn button calls advance(); with two members holding the floor
+  // it must retire only the one being driven - the accidental group-skip is
+  // the exact failure the per-member rule exists to prevent.
+  const a = slot('a', 9, { ctl: true });
+  const b = slot('b', 7, { ctl: true });
+  const { turns } = harness([a, b, slot('e', 1)], ctlHost([]));
+  turns.begin();
+  turns.advance();
+  assert.equal(turns.current, b, 'b keeps the floor after a advances');
+  assert.deepEqual(turns.held, [a, b], 'the span is still open');
+});
+
+test('steer switches freely among the un-done, and refuses everything else', () => {
+  const log = [];
+  const a = slot('a', 9, { ctl: true });
+  const b = slot('b', 7, { ctl: true });
+  const c = slot('c', 5, { ctl: true });
+  const e = slot('e', 1);
+  const { turns } = harness([a, b, c, e], ctlHost(log));
+  turns.begin();
+  assert.equal(turns.steer(c), true);
+  assert.equal(turns.current, c);
+  assert.equal(turns.steer(a), true, 'back and forth is the point');
+  assert.equal(turns.steer(e), false, 'not holding the floor');
+  turns.finish(a);
+  assert.equal(turns.steer(a), false, 'finished is finished');
+  assert.equal(turns.current, b, 'finish handed the floor to the next un-done');
+});
+
+test('each span member opens its own turn: temps spend, stuns cost, others act', () => {
+  // The per-slot sequence runs once per member AT OPEN - so a temp pays for
+  // this turn, a stunned member loses it individually (the span survives),
+  // and the rest simply hold.
+  const a = slot('a', 9, { ctl: true, turnsLeft: 2 });
+  const b = slot('b', 7, { ctl: true });
+  const c = slot('c', 5, { ctl: true });
+  applyStatus(b.carrier, 'stunned');
+  const log = [];
+  const { turns } = harness([a, b, c, slot('e', 1)], {
+    ...ctlHost(log),
+    skip: (s) => { log.push(`skip:${s.name}`); return 'advance'; },
+  });
+  turns.begin();
+  assert.deepEqual(log, ['spend:a', 'skip:b', 'take:a:[a,c]']);
+  assert.deepEqual(turns.held, [a, c], 'the stunned member never held the floor');
+});
+
+test('a temp whose contract lapsed drops out of the span, the rest still hold', () => {
+  const a = slot('a', 9, { ctl: true, turnsLeft: 0 });
+  const b = slot('b', 7, { ctl: true });
+  const log = [];
+  const { turns } = harness([a, b, slot('e', 1)], ctlHost(log));
+  turns.begin();
+  assert.deepEqual(log, ['expire:a', 'take:b:[b]']);
+});
+
+test('a dot that fells a span member drops it from the span, not the turn', () => {
+  const a = slot('a', 9, { ctl: true });
+  const b = slot('b', 7, { ctl: true });
+  applyStatus(a.carrier, 'burning');
+  const log = [];
+  const { turns } = harness([a, b, slot('e', 1)], {
+    ...ctlHost(log),
+    dot: (s) => { s.alive = false; return 'fell'; },
+  });
+  turns.begin();
+  assert.deepEqual(log, ['take:b:[b]']);
+});
+
+test('a dot that decides the fight stops the span from opening any further', () => {
+  // The first member's fire ends the fight; the second member's turn must not
+  // open on a fight that is already lost - no take, no tick for b.
+  const a = slot('a', 9, { ctl: true });
+  const b = slot('b', 7, { ctl: true });
+  applyStatus(a.carrier, 'burning');
+  let outcome = null;
+  const ticked = [];
+  const log = [];
+  const { turns } = harness([a, b, slot('e', 1)], {
+    ...ctlHost(log),
+    dot: (s) => { s.alive = false; outcome = 'lose'; return 'fell'; },
+    outcome: () => outcome,
+    afterTick: (s) => ticked.push(s.name),
+  });
+  assert.equal(turns.begin(), 'over');
+  assert.deepEqual(ticked, ['a'], 'b was never opened');
+  assert.ok(!log.some((l) => l.startsWith('take')));
+  assert.ok(log.includes('lose'));
+});
+
+test('a finished span advances past ALL of it, wrapping into one round', () => {
+  const a = slot('a', 9, { ctl: true });
+  const b = slot('b', 7, { ctl: true });
+  const log = [];
+  const { turns } = harness([a, b], ctlHost(log));
+  turns.begin();
+  turns.finish(a);
+  turns.finish(b); // span done, order exhausted - wrap
+  assert.equal(log.filter((l) => l === 'round').length, 1);
+  assert.deepEqual(turns.held, [a, b], 'the new round reopens the same span');
+});
+
+test('a joiner spliced inside an open span does not join it', () => {
+  // INITIATIVE_PLAN #7: the span froze at open. The joiner lands between the
+  // held members by roll, is not held, and the span-end walk steps PAST it -
+  // it acts when the order next comes around.
+  const a = slot('a', 8, { ctl: true });
+  const b = slot('b', 2, { ctl: true });
+  const e = slot('e', 0);
+  const log = [];
+  const { turns } = harness([a, b, e], ctlHost(log));
+  turns.begin();
+  assert.deepEqual(turns.held, [a, b]);
+  const j = slot('j', 4, { ctl: true }); // rolls between a and b - inside the open span
+  turns.insert(j);
+  assert.equal(turns.order[1], j, 'the joiner landed inside the span');
+  assert.deepEqual(turns.held, [a, b], 'membership froze at open');
+  turns.finish(a);
+  turns.finish(b);
+  assert.equal(turns.current, e, 'the pointer stepped PAST the joiner to the slot after the span');
+  turns.advance(); // e done - wrap; the joiner is a neighbour now and shares the fresh span
+  assert.deepEqual(turns.held, [a, j, b], 'next round the joiner acts with its neighbours');
+});
+
+test('a held member that falls mid-turn is flowed past, not resurrected', () => {
+  // INITIATIVE_PLAN #12 at engine level: the steered member drops to an
+  // off-turn hit; finishing them hands the floor to the next member still
+  // standing, and steering back to the fallen is refused.
+  const a = slot('a', 9, { ctl: true });
+  const b = slot('b', 7, { ctl: true });
+  const c = slot('c', 5, { ctl: true });
+  const { turns } = harness([a, b, c, slot('e', 1)], ctlHost([]));
+  turns.begin();
+  b.alive = false; // an opportunity attack got them between beats
+  turns.finish(a);
+  assert.equal(turns.current, c, 'the floor skipped the fallen member');
+  assert.equal(turns.steer(b), false, 'no steering onto a body');
+});
+
+test('beforeAdvance fires once per finished member of a span', () => {
+  const a = slot('a', 9, { ctl: true });
+  const b = slot('b', 7, { ctl: true });
+  let gives = 0;
+  const { turns } = harness([a, b, slot('e', 1)], {
+    ...ctlHost([]),
+    beforeAdvance: () => { gives += 1; },
+  });
+  turns.begin();
+  turns.finish(a);
+  assert.equal(gives, 1, 'a gave up a turn');
+  turns.finish(b);
+  assert.equal(gives, 2, 'so did b - each member owns one');
+});
