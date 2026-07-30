@@ -763,6 +763,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         pendingCrouch = null;
         hidePreview();
       },
+      // SHARED TURNS (INITIATIVE_PLAN #1): consecutive member slots hold the
+      // floor together. Every member slot is controlled - your roster, your
+      // summons, a borrowed coworker alike - and AI units never are, so an
+      // enemy between two members in the order is exactly what breaks a span.
+      controlled: (s) => !!s.member,
+      // The engine moved the floor within an open span - `finish` passing it
+      // on, or a steer the player asked for. Re-key the bindings to the new
+      // member; makeActive already knows the whole dance.
+      steer: (s) => steerTo(s),
     },
   });
   // Thin readers, so the rest of the file reads the way it did.
@@ -1466,8 +1475,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Point everything at the member whose initiative turn it now is:
   // party.active moves with it so the portrait bar highlights and the
   // out-of-combat leader bindings follow whoever last held the floor (main.js
-  // syncLeaderBindings). No free switching - proper initiative means you
-  // control each member only when its own turn comes up.
+  // syncLeaderBindings). Switching exists only WITHIN an open shared turn
+  // (INITIATIVE_PLAN): steering moves among the members holding the floor,
+  // and everyone else still waits for their own slot to come up.
   function makeActive(m) {
     active = m;
     // A summon lives outside party.members, so it can't be party.active - leave
@@ -1482,8 +1492,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     callbacks.refreshBar?.();
   }
   // A member dropped to 0 HP outside its own turn (fire under a combat walk) -
-  // main.js reports it here. Topple them; if it was the acting member, end
-  // their turn; defeat only on a party wipe.
+  // main.js reports it here. Topple them; if it was the STEERED member, retire
+  // their turn - under a shared turn `advanceTurn` is finish-the-steered, so
+  // the floor passes to a teammate still holding it rather than costing the
+  // whole group the turn (INITIATIVE_PLAN #12); a held member downed while
+  // somebody else was steering needs nothing here - steering already flows
+  // past the fallen. Defeat only on a party wipe.
   function notifyMemberDown() {
     for (const m of members) {
       if (m.sheet.hp > 0 || m.toppled) continue;
@@ -1536,7 +1550,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // tooltips and the armed/confirm ring all come from actionState().
     callbacks.refreshBar?.();
     endBtn.disabled = phase !== 'player';
-    endBtn.textContent = 'End Turn'; // your turn ends, initiative moves on
+    // Under a shared turn the button names whose turn it ends - each member
+    // retires their own (INITIATIVE_PLAN #2), so the label has to say which
+    // one a press costs. Alone, it stays the plain verb it always was.
+    endBtn.textContent = turns.held.length > 1 ? `End Turn — ${active.sheet.name}` : 'End Turn';
     // The initiative tracker: the turn order top-to-bottom, the current unit
     // marked, your side tinted friendly and the enemies warm. HP rides along;
     // the downed/dead show a dash.
@@ -3080,10 +3097,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     aimPoint = null;
     refresh();
   }
-  // End Turn ends the ACTING unit's turn and initiative moves on - the next
-  // slot may be a teammate, a summon you're driving, or an enemy. (It used to
-  // queue through the party side before per-unit initiative replaced the
-  // two-phase spine.)
+  // End Turn ends the STEERED member's turn - under a shared turn the floor
+  // passes to the next member still holding it, and only when every holder
+  // has pressed theirs does initiative move on (INITIATIVE_PLAN #2: each
+  // member ends their own; one press must never skip a teammate who hasn't
+  // acted - the accidental group-skip BG3 was criticised for). With a single
+  // holder this is exactly the advance it always was.
   endBtn.onclick = () => {
     if (phase !== 'player') return;
     advanceTurn();
@@ -3096,20 +3115,38 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // or the app, and so could never live in a pure module.
 
   // Somebody's turn opens for real: hand a member control (full AP and their
-  // movement allowance), or arm the AI's working state for a unit.
-  function takeTurn(s) {
+  // movement allowance), or arm the AI's working state for a unit. Under a
+  // shared turn `held` is every member holding the floor - EACH gets a full
+  // budget at the top (per-member AP predates spans; several members having
+  // independent pools at once is why this line is a loop and nothing else
+  // changed), and the first is steered.
+  function takeTurn(s, held = [s]) {
     if (s.member) {
+      for (const h of held) {
+        h.member.ap = h.member.sheet.maxAp; // full AP at the top of your turn
+        h.member.freeAp = freeMoveOf(h.member); // and the movement allowance, if any
+      }
       makeActive(s.member);
-      s.member.ap = s.member.sheet.maxAp; // full AP at the top of your turn
-      s.member.freeAp = freeMoveOf(s.member); // and the movement allowance, if any
       phase = 'player';
       const solo = members.length === 1;
-      log(solo ? 'Your turn.' : `${s.member.sheet.name}'s turn.`);
+      log(held.length > 1
+        ? `Shared turn — ${held.map((h) => h.member.sheet.name).join(', ')}.`
+        : solo ? 'Your turn.' : `${s.member.sheet.name}'s turn.`);
       refresh();
       return;
     }
     phase = 'ai';
     acting = { unit: s.unit, ap: s.unit.combat.ap, freeAp: freeMoveOf(s.unit), wait: 0.5 };
+    refresh();
+  }
+
+  // The floor moved to another member of the open span - `finish` passing it
+  // on when one member's turn ends, or a steer the player asked for (the party
+  // bar, Tab, a body click - main.js routes them here in combat).
+  function steerTo(s) {
+    if (!s?.member) return;
+    makeActive(s.member);
+    log(`${s.member.sheet.name} has the floor.`);
     refresh();
   }
 
