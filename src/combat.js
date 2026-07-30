@@ -1570,10 +1570,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     endBtn.textContent = turns.held.length > 1 ? `End Turn — ${active.sheet.name}` : 'End Turn';
     // The initiative tracker: the turn order top-to-bottom, the current unit
     // marked, your side tinted friendly and the enemies warm. HP rides along;
-    // the downed/dead show a dash.
+    // the downed/dead show a dash. The rolled NUMBER is gone from every row
+    // (INITIATIVE_PLAN #10 [ratified]: "itll be nothing but noise to the
+    // player" - the order already says who acts when, and the dice line in
+    // the chat log keeps the record). A shared turn wears a bracket: every
+    // holder gets the tinted left edge, ▸ marks the one being steered, ✓ the
+    // ones whose End Turn is already pressed.
+    const heldSet = new Set(turns.held);
+    const bracket = heldSet.size > 1;
     strip.innerHTML = `<div style="font-weight:700; margin-bottom:5px;">INITIATIVE</div>` +
       turns.order.map((s, i) => {
         const cur = i === turns.index;
+        const holds = bracket && heldSet.has(s);
+        const finished = holds && turns.isDone(s);
         const carrier = s.member ? s.member.sheet : s.unit;
         const hp = s.member
           ? `${Math.max(0, s.member.sheet.hp)}/${s.member.sheet.maxHp}`
@@ -1591,11 +1600,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           ? `<img src="${face}" alt="" style="width:22px; height:22px; border-radius:4px;`
             + `border:1px solid ${col}; vertical-align:middle; margin-right:5px; flex:none;">`
           : '';
-        return `<div style="opacity:${dead ? '.4' : '.95'}; color:${col};`
-          + `font-weight:${cur ? '700' : '400'}; display:flex; align-items:center; gap:2px; margin:1px 0;">`
-          + `<span style="width:11px; flex:none;">${cur ? '▸' : ''}</span>${pic}`
+        // The bracket is a left edge + a faint wash, so the group reads as one
+        // block without a box fighting the panel chrome; a finished holder
+        // dims toward the dead but keeps its wash - done, not gone.
+        const brk = holds
+          ? `border-left:2px solid #8adf76; padding-left:4px; margin-left:-6px;`
+            + `background:rgba(138,223,118,.07);`
+          : '';
+        return `<div style="opacity:${dead ? '.4' : finished ? '.55' : '.95'}; color:${col};`
+          + `font-weight:${cur ? '700' : '400'}; display:flex; align-items:center; gap:2px; margin:1px 0; ${brk}">`
+          + `<span style="width:11px; flex:none;">${cur ? '▸' : finished ? '✓' : ''}</span>${pic}`
           + `<span>${slotName(s)} &middot; ${dead ? '—' : hp}`
-          + ` <span style="opacity:.6">(${s.init})</span>`
           + (icons ? ` ${icons}` : '') + `</span></div>`;
       }).join('');
     // Reflect the ACTING member on the persistent HUD, not the leader - in a
@@ -3958,10 +3973,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     endTurn: () => { advanceTurn(); refresh(); },
     // The initiative order, top to bottom, with whose turn it is - for the
     // tracker UI and the e2e suite.
+    // `current` stays SINGLE under a shared turn - it is the steered slot -
+    // while `held`/`done` say who else is holding the open turn and who has
+    // already ended theirs. `init` stays here for the tests even though the
+    // strip no longer prints it.
     get order() {
+      const heldSet = new Set(turns.held);
       return turns.order.map((s, i) => ({
         name: slotName(s), team: s.team, init: s.init,
         member: !!s.member, current: i === turns.index, alive: slotAlive(s),
+        held: heldSet.has(s), done: turns.isDone(s),
       }));
     },
     get turn() { return turns.current ? slotName(turns.current) : null; },
