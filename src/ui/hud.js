@@ -214,7 +214,10 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
   const prev = pagerBtn('‹', -1, 'hotbar-prev');
   const next = pagerBtn('›', 1, 'hotbar-next');
   const slotsRow = document.createElement('div');
-  Object.assign(slotsRow.style, { display: 'flex', gap: '7px' });
+  // 6px, not 7: the row of ten (TACTICS_PLAN M8) has to clear the narrator
+  // box on a 1280 viewport - the dock is centred, the narrator right-anchored,
+  // and the combat-bar spec MEASURES the gap. Slot size below shrank with it.
+  Object.assign(slotsRow.style, { display: 'flex', gap: '6px' });
   const pageTag = document.createElement('div');
   pageTag.id = 'hotbar-page';
   Object.assign(pageTag.style, { font: '11px system-ui, sans-serif', opacity: '.6', minWidth: '26px', textAlign: 'center' });
@@ -233,7 +236,9 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
     if (slot) b.dataset.action = slot.id;
     b.dataset.slot = String(i);
     Object.assign(b.style, BUTTON_CHROME, {
-      position: 'relative', width: '46px', height: '46px', padding: '0',
+      // 44px squares: ten of them plus gaps must not run under the narrator
+      // box (see the slot-row gap note above).
+      position: 'relative', width: '44px', height: '44px', padding: '0',
       borderRadius: '8px', font: '20px system-ui, sans-serif', lineHeight: '1',
       display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none',
     });

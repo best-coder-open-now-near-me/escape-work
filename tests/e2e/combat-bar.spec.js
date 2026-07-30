@@ -52,7 +52,7 @@ test('the bar in a fight is the same bar: same slot ids, same number keys', asyn
   // Number keys are live in a fight. They were gated `!inCombat`, so the row
   // you learned out of combat was the row you could not use in one.
   const key = await page.evaluate(() =>
-    (Number(document.querySelector('#hotbar-act-attack').dataset.slot) % 9) + 1);
+    ((Number(document.querySelector('#hotbar-act-attack').dataset.slot) % 10) + 1) % 10);
   await page.keyboard.press(String(key));
   await expect.poll(() => page.evaluate(() => window.__combat.armed)).toBe('attack');
 
