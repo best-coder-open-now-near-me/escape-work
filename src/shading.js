@@ -249,9 +249,10 @@ export function applyCameraPostFx(app, cameraEntity) {
   return frame;
 }
 
-export function makeMaterial(rgb, { opacity = 1, gloss = null, emissive = null } = {}) {
+export function makeMaterial(rgb, { opacity = 1, gloss = null, emissive = null, diffuseMap = null } = {}) {
   const m = new pc.StandardMaterial();
   m.diffuse = new pc.Color(rgb[0], rgb[1], rgb[2]);
+  if (diffuseMap) m.diffuseMap = diffuseMap;
   if (gloss !== null) m.gloss = gloss;
   if (opacity < 1) {
     m.opacity = opacity;

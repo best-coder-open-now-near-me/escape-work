@@ -11,6 +11,39 @@ import { burst } from './fx.js';
 
 const pc = window.pc;
 
+// The carpet's fine grain lives in a TEXTURE, not in geometry or extra tints:
+// detail that exists only as color steps across tile edges can't be filtered,
+// so it aliases - the shimmer you see whenever the camera pans. Detail in a
+// mipmapped, anisotropically filtered texture is prefiltered by the GPU and
+// fades to smooth color with distance instead of crawling. Drawn once into a
+// canvas at boot (like fx.js's decals): dark flecks on white, so it multiplies
+// under any carpet color's diffuse tint. Deterministic - no Math.random.
+let grainTex = null;
+function carpetGrain(app) {
+  if (grainTex) return grainTex;
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, size, size);
+  const h = (i, salt) => {
+    const n = Math.sin(i * 127.1 + salt * 311.7) * 43758.5453;
+    return n - Math.floor(n);
+  };
+  for (let i = 0; i < 1400; i++) {
+    ctx.fillStyle = `rgba(0,0,0,${(0.05 + 0.07 * h(i, 3)).toFixed(3)})`;
+    ctx.fillRect(h(i, 1) * size, h(i, 2) * size, 1 + h(i, 4) * 1.5, 1 + h(i, 5) * 1.5);
+  }
+  grainTex = new pc.Texture(app.graphicsDevice, {
+    width: size, height: size, format: pc.PIXELFORMAT_RGBA8, mipmaps: true,
+    addressU: pc.ADDRESS_REPEAT, addressV: pc.ADDRESS_REPEAT,
+    anisotropy: Math.min(8, app.graphicsDevice.maxAnisotropy || 1),
+  });
+  grainTex.setSource(canvas);
+  return grainTex;
+}
+
 export function createTileRenderer(app) {
   const floorDef = TILE_TYPES.floor;
   const surfaceTop = floorDef.height / 2 + 0.02;
@@ -24,15 +57,18 @@ export function createTileRenderer(app) {
   // Full-size slabs with a few near-identical tints: surfaces read as
   // continuous carpet with subtle variation instead of a grid of tiles.
   // One set of tints per carpet color - tiles with a `carpet` field get
-  // their own set, everything else shares the base floor's.
+  // their own set, everything else shares the base floor's. The steps are
+  // gentle on purpose: each tint boundary is a hard geometric edge the GPU
+  // can't filter, so contrast there is shimmer when the camera moves - the
+  // grain texture carries the close-up detail instead.
   const carpetMats = new Map();
   function floorMatsFor(type) {
     const def = TILE_TYPES[type];
     const key = def?.carpet ? type : 'floor';
     if (!carpetMats.has(key)) {
       const base = def?.carpet || TILE_TYPES.floor.color;
-      carpetMats.set(key, [-1, 0, 1].map((i) =>
-        makeMaterial(base.map((v) => Math.min(1, v + i * 0.018)))));
+      carpetMats.set(key, [-1.5, -0.5, 0.5, 1.5].map((i) =>
+        makeMaterial(base.map((v) => Math.min(1, v + i * 0.012)), { diffuseMap: carpetGrain(app) })));
     }
     return carpetMats.get(key);
   }
@@ -305,8 +341,15 @@ export function createTileRenderer(app) {
     return holder;
   }
 
+  // Tint picked by HASH, not by the old (x * 31 + z * 17) % 3: 31 and 17
+  // reduce mod 3 to 1 and 2, so that formula is (x - z) % 3 - a periodic
+  // lattice where every orthogonal neighbour differs, i.e. a hard contrast
+  // line on EVERY tile edge, marching in diagonal stripes across the whole
+  // floor. A hash gives patchy, non-repeating variation: same-tint neighbours
+  // merge into larger calm areas, so far fewer edges carry contrast at all.
   function renderFloor(x, z, type = 'floor') {
-    return addBox(floorMatsFor(type)[(x * 31 + z * 17) % 3], x, 0, z, 1, floorDef.height, 1);
+    const mats = floorMatsFor(type);
+    return addBox(mats[Math.floor(hash01(x, z, 41) * mats.length)], x, 0, z, 1, floorDef.height, 1);
   }
 
   // Edge walls: thin partitions BETWEEN tiles (see grid.js). 'h' sits on the

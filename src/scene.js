@@ -14,6 +14,12 @@ export function createApp(canvas) {
     keyboard: new pc.Keyboard(window),
     graphicsDeviceOptions: { antialias: true, alpha: false },
   });
+  // Render at the display's real resolution, capped at 2x: the engine defaults
+  // maxPixelRatio to 1, so on a hi-DPI screen every thin edge - and on this
+  // floor every carpet-tile seam is one - lands on upscaled pixels and crawls
+  // whenever the camera moves. Overlays and picking are unaffected: both the
+  // engine's screen<->world math and worldToScreenCss (fx.js) speak CSS space.
+  app.graphicsDevice.maxPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
   app.setCanvasFillMode(pc.FILLMODE_FILL_WINDOW);
   app.setCanvasResolution(pc.RESOLUTION_AUTO);
   window.addEventListener('resize', () => app.resizeCanvas());
