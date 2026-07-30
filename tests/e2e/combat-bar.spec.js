@@ -52,7 +52,7 @@ test('the bar in a fight is the same bar: same slot ids, same number keys', asyn
   // Number keys are live in a fight. They were gated `!inCombat`, so the row
   // you learned out of combat was the row you could not use in one.
   const key = await page.evaluate(() =>
-    (Number(document.querySelector('#hotbar-act-attack').dataset.slot) % 8) + 1);
+    (Number(document.querySelector('#hotbar-act-attack').dataset.slot) % 9) + 1);
   await page.keyboard.press(String(key));
   await expect.poll(() => page.evaluate(() => window.__combat.armed)).toBe('attack');
 
@@ -228,7 +228,7 @@ test('a snack comes out of your pockets mid-fight, and costs a turn to eat', asy
   });
   // Park it on the bar out of combat, so what gets pressed in the fight is the
   // player's own arrangement - the layout is supposed to survive the mode.
-  await page.click('#hotbar-slot-7', { button: 'right' });
+  await page.click('#hotbar-slot-8', { button: 'right' });
   await page.click('#context-menu >> text=Cold Coffee');
   await expect(page.locator('#hotbar-item-cold-coffee')).toBeVisible();
 
