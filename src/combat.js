@@ -23,6 +23,12 @@ import { STATUSES } from './data/statuses.js';
 import { blocksSight, PARTITION_TOPPLE } from './data/tiles.js';
 import { PANEL_CHROME, BUTTON_CHROME, actionDock, refreshDockVisibility } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
+import {
+  cheb, TARGET_R, SURPRISE_RADIUS, AROUND, ORTHO, reachOfUnit, posOf, withinReach,
+  canReach as canReachAt, reachSpecOf, actRangeOf, verbReaches as verbReachesAt,
+  swingPointAt as swingPointFrom, hasSwingSpot as hasSwingSpotFor, zoneCellsFor,
+  edgeShieldedTile as edgeShieldedTileIn,
+} from './combat-geometry.js';
 
 const pc = window.pc;
 // Inclusive integer roll. Takes its randomness as an ARGUMENT rather than
@@ -31,11 +37,6 @@ const pc = window.pc;
 // test could not pin, and so the whole roll -> damage -> status chain could
 // only ever be tested a piece at a time.
 const randWith = (r, lo, hi) => lo + Math.floor(r() * (hi - lo + 1));
-const cheb = (ax, az, bx, bz) => Math.max(Math.abs(ax - bx), Math.abs(az - bz));
-// Radius of a target's ring marker. Cone tests use it so a body counts when
-// the wedge CLIPS it, matching what the ring shows.
-const TARGET_R = 0.5;
-const SURPRISE_RADIUS = 2; // engaged from beyond this = loses the first turn
 
 // The narration when a landed hit applies a status: an explicit per-attack/
 // action line if given, else the status's own {name}-templated log, else a
@@ -381,49 +382,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // and throw ReferenceError mid-setup, starting a fight whose panel never
   // gets built. Functions hoist, so call order stops mattering.
 
-  // A member's reach comes from their weapon, an AI unit's from its def (like
-  // attackAp). REACH.DEFAULT is the floor for both.
-  function reachOfUnit(u) {
-    return u.sheet ? reachOf(u.sheet) : (u.combat?.reach ?? REACH.DEFAULT);
-  }
-
-  // The CONTINUOUS position reach measures against. `actor.x/.z` are only
-  // Math.round of this, which is why the old tile test let two units at
-  // opposite far corners of diagonally adjacent tiles (2.83 apart) trade
-  // swings while a deliberate walk-up stops at 0.85 (TACTICS_PLAN revision).
-  // Falls back to the logical tile for a unit with no body in the scene yet.
-  function posOf(u) {
-    const a = u.actor || u;
-    if (a.entity) {
-      const p = a.entity.getPosition();
-      return { x: p.x, z: p.z };
-    }
-    return { x: a.x, z: a.z };
-  }
-
-  // Is the defender within the attacker's reach DISTANCE? Ignores anything
-  // solid in between on purpose: this is the melee/ranged split positionMods
-  // needs, and whether a cubicle wall spoils a shot is a question about
-  // proximity, not about whether the swing is legal.
-  function withinReach(attacker, defender, r = null) {
-    const a = posOf(attacker);
-    const d = posOf(defender);
-    return inReach(a.x, a.z, d.x, d.z, r ?? reachOfUnit(attacker));
-  }
-
-  // Can the attacker actually TOUCH the defender - reach distance, and nothing
-  // solid in the way? THE melee predicate: swings, shoves and opportunity
-  // attacks all read it, so reach means one thing everywhere. `r` overrides the
-  // attacker's own reach, which the shove needs - a shove is arms-length
-  // whatever you happen to be holding.
-  //
-  // The line test is what makes a partition terrain rather than decoration:
-  // before it, cover was ranged-only AND melee ignored edges, so a cubicle wall
-  // cost a melee attacker nothing - not even a step around it.
+  // Reach, position and the melee predicate all live in combat-geometry.js
+  // now; this binds the world's edge test so every call site keeps asking the
+  // one-argument question it always asked. Still a hoisted `function` for the
+  // reason above - the surprise sweep reaches it before this line runs.
   function canReach(attacker, defender, r = null) {
-    const a = posOf(attacker);
-    const d = posOf(defender);
-    return inReach(a.x, a.z, d.x, d.z, r ?? reachOfUnit(attacker), world.stepOpen);
+    return canReachAt(attacker, defender, r, world.stepOpen);
   }
 
   // The to-hit terms for one attacker/defender pair (TACTICS_PLAN #1). THE
@@ -1280,12 +1244,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // The wedge, aimed from the acting member's body. The geometry itself lives
   // in powers.js so the out-of-combat preview draws the identical shape; this
   // only binds the origin.
-  function coneTest(a, tx, tz) {
-    const pp = active.actor.entity
-      ? active.actor.entity.getPosition()
-      : { x: active.actor.x, z: active.actor.z };
-    return coneFrom(a, pp, tx, tz);
-  }
+  const coneTest = (a, tx, tz) => coneFrom(a, posOf(active), tx, tz);
 
   // While an attack/shove is armed, rings mark the targets: green = usable on
   // them right now (melee walks you in), red = out of range / no line / short
@@ -2336,9 +2295,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
 
   // A walkable tile with a partition (or closed door) on any face - the other
   // thing this office calls cover, and a legal take-cover aim.
-  const ORTHO = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  const edgeShieldedTile = (tx, tz) => world.isWalkable(tx, tz)
-    && ORTHO.some(([dx, dz]) => !world.stepOpen(tx, tz, tx + dx, tz + dz));
+  const edgeShieldedTile = (tx, tz) => edgeShieldedTileIn(tx, tz, world);
 
   // The player's verb: walk to the shield and crouch. Priced as "the walk,
   // plus 1 AP" (designer: distance cost + 1) - the walk is billed by the same
@@ -2634,25 +2591,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Which tiles a zone may actually take, given the grid: plain floor only
   // (leaveSurface's own rule), never under a living body. Shared by the click
   // and the preview so the tiles you saw are the tiles you get.
-  function zoneCells(a, tx, tz) {
-    const out = [];
-    for (const [x, z] of zoneTiles(tx, tz, zoneRadiusOf(a))) {
-      // The same question leaveSurface asks itself, asked without painting -
-      // so the rings, the cursor's count and the click all agree about which
-      // tiles will take it.
-      if (!world.canTakeSurface(x, z)) continue;
-      if (!world.hasLos(active.actor.x, active.actor.z, x, z)) continue;
-      // Nobody gets a surface dropped on their feet - not a coworker, not a
-      // teammate, not you. The cone already refused to carpet a member's tile;
-      // this extends the same courtesy to everyone, because a zone is aimed
-      // deliberately and "I did not mean to stand in that" is the cone's
-      // problem, not this verb's.
-      if (members.some((m) => m.sheet.hp > 0 && m.actor?.x === x && m.actor?.z === z)) continue;
-      if (world.liveEnemies().some((e) => e.x === x && e.z === z)) continue;
-      out.push([x, z]);
-    }
-    return out;
-  }
+  // The zone's covered tiles - the geometry in combat-geometry.js, the
+  // occupancy question answered here because only combat knows who is standing
+  // where.
+  const zoneCells = (a, tx, tz) => zoneCellsFor(a, active.actor, tx, tz, {
+    canTakeSurface: world.canTakeSurface,
+    hasLos: world.hasLos,
+    occupied: (x, z) => members.some((m) => m.sheet.hp > 0 && m.actor?.x === x && m.actor?.z === z)
+      || world.liveEnemies().some((e) => e.x === x && e.z === z),
+  });
 
   function performZone(id, tx, tz) {
     const a = ACTIONS[id];
@@ -3206,71 +3153,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
   }
 
-  const AROUND = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 
   // THE verb's own reach, as one spec: a declared `range` (aimRangeOf - the
   // shapes powers.js owns) or a plain ranged attack's (stats.rangeOf, which is
   // where a throw's undeclared THROW_RANGE lives), and null for a touch verb
   // that walks into melee reach. The aim wash, the target rings and every
   // walk-up read it, so a power's range means one thing everywhere.
-  function reachSpecOf(id) {
-    const a = ACTIONS[id];
-    if (!a) return null;
-    return aimRangeOf(a) || (a.type === 'attack' && rangeOf(id) ? { r: rangeOf(id) } : null);
-  }
-  // How far the verb ACTS from, exactly as handleEnemyClick resolves it: a
-  // ranged attack's firing range (stats.rangeOf, where a throw's undeclared
-  // THROW_RANGE lives), a ranged control's declared range, and 0 for
-  // everything the click walks into melee reach for.
-  //
-  // Deliberately the CLICK's branching rather than the aim wash's
-  // (reachSpecOf/aimRangeOf), which is a wider question - it covers verbs the
-  // click never walks in at all, and a purge's wash reaches further than the
-  // purge's own click does. A walk-up that stopped at the WASH's distance
-  // would stop where its verb cannot act.
-  function actRangeOf(id) {
-    const a = ACTIONS[id];
-    if (!a) return 0;
-    if (isControl(a)) return controlIsRanged(a) ? (a.range ?? 0) : 0;
-    return rangeOf(id);
-  }
-  // Could `id` be used on `en` from the point (px, pz)? THE question a walk-up
-  // stops on, asked with the armed power's OWN range rather than a distance
-  // borrowed from another verb: a 6-tile straw stops six tiles out, a swing
-  // walks to arm's length, and each stops the moment IT is live.
-  function verbReaches(id, en, px, pz) {
-    const r = actRangeOf(id);
-    const ep = posOf(en);
-    if (r) {
-      // A declared range is a Chebyshev TILE range, and it always needs a
-      // line - the same pair every ranged gate in this module tests.
-      const tx = Math.round(px);
-      const tz = Math.round(pz);
-      return cheb(tx, tz, en.x, en.z) <= r && world.hasLos(tx, tz, en.x, en.z);
-    }
-    return inReach(px, pz, ep.x, ep.z, reachOfUnit(active), world.stepOpen);
-  }
-
-  // The point a walk into (gx, gz) would stop at - IF a swing on `en` from
-  // there is LEGAL: reach distance and a clear line, the very rule the strike
-  // runs on arrival (canReach). Null when that tile can't deliver the swing.
-  // This is what keeps the walk-up's promise: choosing a stand point by any
-  // weaker test sends the walk somewhere the arrival check then vetoes.
-  //
-  // It is the FURTHEST the walk can go, not where it stops: the route is
-  // trimmed to the first point the verb reaches from (trimToFirst), so this
-  // only has to prove the goal tile is worth walking to at all.
-  function swingPointAt(en, gx, gz) {
-    const own = gx === active.actor.x && gz === active.actor.z;
-    if (!own && !world.isWalkable(gx, gz)) return null;
-    const ep = posOf(en);
-    const p = world.approach(gx, gz, ep.x, ep.z);
-    return inReach(p[0], p[1], ep.x, ep.z, reachOfUnit(active), world.stepOpen) ? p : null;
-  }
-  // Does ANY tile beside them offer a legal swing? The cheap read the target
-  // rings use - pure geometry, no pathfinding, so it can run per frame. A
-  // route to the spot is the click's own (more expensive) test.
-  const hasSwingSpot = (en) => AROUND.some(([dx, dz]) => swingPointAt(en, en.x + dx, en.z + dz));
+  // The reach vocabulary - all four now live in combat-geometry.js, bound
+  // here to the world and to whoever is acting. `reachSpecOf`/`actRangeOf` need
+  // neither, so they are re-exported straight through.
+  const verbReaches = (id, en, px, pz) =>
+    verbReachesAt(id, active, en, px, pz, world);
+  const swingPointAt = (en, gx, gz) => swingPointFrom(active, en, gx, gz, world);
+  const hasSwingSpot = (en) => hasSwingSpotFor(active, en, world);
 
   // The cheapest walkable route to a tile BESIDE `en` from which the swing
   // actually LANDS, plus the exact point to stop at: { path, point }, or null

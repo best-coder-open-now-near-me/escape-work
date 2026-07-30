@@ -25,7 +25,6 @@ import {
   serializeProgress, parseProgress, PARTY_CAP, addCash,
 } from './party.js';
 import { applyStatus, removeStatus, statusFx, hasStatus, tickStep, statusLeft, statusList } from './statuses.js';
-import { inReach } from './tactics.js';
 import { createDraft, createCharacter, draftModel, draftLook } from './creation.js';
 import { CUSTOM_RIGS } from './data/looks.js';
 import { aimsAtAlly, coneFrom, conePolyline, isToppleable, toppleLanding } from './powers.js';
@@ -46,6 +45,7 @@ import { createVisionLayer } from './vision.js';
 import { createLooting } from './looting.js';
 import { createShopping } from './shopping.js';
 import { startCombat } from './combat.js';
+import { cheb as chebOf, canReach as canReachAt } from './combat-geometry.js';
 import { startEditor } from './editor.js';
 import { NPCS } from './data/npcs.js';
 import { installGodMode } from './god.js';
@@ -1083,21 +1083,16 @@ function startGame(level) {
   }
 
   // --- targeting, hover highlight, cursor --------------------------------------
-  const cheb = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.z - b.z));
+  const cheb = (a, b) => chebOf(a.x, a.z, b.x, b.z);
   // Melee reach out of combat, measured the same way combat measures it: real
   // distance between continuous positions against the leader's weapon reach
   // (TACTICS_PLAN revision). These pre-flight an opener before a fight starts,
   // so they must agree with combat's own predicate or a click could open a
   // fight the attacker can't actually swing in.
-  const posOf = (a) => {
-    if (a?.entity) { const p = a.entity.getPosition(); return { x: p.x, z: p.z }; }
-    return { x: a?.x ?? 0, z: a?.z ?? 0 };
-  };
-  const playerReaches = (en, r = null) => {
-    const a = posOf(player);
-    const b = posOf(en);
-    return inReach(a.x, a.z, b.x, b.z, r ?? (sheet ? reachOf(sheet) : REACH.DEFAULT), grid.stepOpen);
-  };
+  // combat-geometry.js owns both; out of combat the "unit" is the leader's
+  // body plus the leader's sheet, so reach reads the weapon they are holding.
+  const playerReaches = (en, r = null) =>
+    canReachAt({ actor: player, sheet }, en, r, grid.stepOpen);
   // A sight line for throws: cells a sightline passes (grid.sightOpenCell -
   // short furniture is shot OVER since TACTICS_PLAN M6a, only tall solids
   // block) that aren't hazed by smoke. Smoke hangs floor-to-ceiling for a
