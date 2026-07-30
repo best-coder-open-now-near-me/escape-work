@@ -777,7 +777,21 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Thin readers, so the rest of the file reads the way it did.
   const advanceTurn = () => turns.advance();
   const beginTurn = () => turns.begin();
-  const insertSlot = (slot) => turns.insert(slot);
+  // A joiner's roll goes to the chat log like everyone else's - typed, so a
+  // later filter can drop the dice as a category (see logInitiative).
+  const insertSlot = (slot) => {
+    const s = turns.insert(slot);
+    callbacks.say(`${slotName(s)} rolls ${s.init} for initiative.`, 'initiative');
+    return s;
+  };
+  // The rolled order, one line into the bottom-right chat log at the fight's
+  // open. The initiative strip stopped printing numbers (INITIATIVE_PLAN #10 -
+  // noise in a player-facing panel), so this line is where the rolls live:
+  // a record you can scroll past, not a label on every row. Typed
+  // 'initiative' so the log can filter the whole category out later.
+  const logInitiative = () => callbacks.say(
+    `Initiative — ${turns.order.map((s) => `${slotName(s)} ${s.init}`).join(', ')}.`,
+    'initiative');
 
   // --- UI ---------------------------------------------------------------------
   const panel = document.createElement('div');
@@ -3977,6 +3991,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // on window while __game.inCombat said the fight was over.
   if (opening && ACTIONS[opening.actionId] && opening.target?.alive) {
     turns.lead((s) => s.member === members[party.active]);
+    logInitiative(); // after lead - the ambusher's raised roll is the real order
     beginTurn();
     if (phase === 'player') {
       armed = opening.actionId;
@@ -3984,6 +3999,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       handleEnemyClick(opening.target);
     }
   } else {
+    logInitiative();
     beginTurn();
   }
 
@@ -4027,6 +4043,43 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // self-action). The bar rings it differently from an armed one.
     get pendingConfirm() { return pendingConfirm; },
     notifyMemberDown,
+    // --- steering the shared turn ----------------------------------------------
+    // The party bar, Tab, body clicks and the debug switchTo all route here IN
+    // combat instead of switchLeader (INITIATIVE_PLAN #9): steering re-keys the
+    // combat bindings only - makeActive, via the engine's steer hook - and
+    // never touches the out-of-combat leader. `ref` is whatever the caller
+    // holds: a party record, a combat member, or a body's actor.
+    //
+    // Refusal is the common case and it is load-bearing: only a member holding
+    // the OPEN turn, not yet done, not the one already steered, is accepted -
+    // so out of a shared turn every route falls through to what it always did
+    // (a bar click highlights nobody new, a body click stays a mis-walk).
+    steerMember(ref) {
+      if (phase !== 'player' || !ref) return false;
+      const slot = turns.held.find((s) => s.member
+        && (s.member === ref || s.member.sheet === ref.sheet || s.member.actor === ref));
+      if (!slot || slot.member === active || turns.isDone(slot)) return false;
+      return turns.steer(slot);
+    },
+    // Is this body a member you could grab the wheel of right now? The
+    // right-click menu asks before offering the item; returns the name to put
+    // on it, or null.
+    canSteer(ref) {
+      if (phase !== 'player' || !ref) return null;
+      const slot = turns.held.find((s) => s.member
+        && (s.member === ref || s.member.sheet === ref.sheet || s.member.actor === ref));
+      if (!slot || slot.member === active || turns.isDone(slot) || slot.member.sheet.hp <= 0) return null;
+      return slot.member.sheet.name;
+    },
+    // Tab in combat: cycle the floor through the un-done members of the open
+    // shared turn, the same loop the key walks through the roster out of one.
+    cycleSteer() {
+      if (phase !== 'player') return false;
+      const holders = turns.held.filter((s) => s.member && !turns.isDone(s) && s.member.sheet.hp > 0);
+      if (holders.length < 2) return false;
+      const i = holders.findIndex((s) => s.member === active);
+      return turns.steer(holders[(i + 1) % holders.length]);
+    },
     // The body whose turn it is - a party member OR a summon you're driving.
     // main.js needs this because party.active can't point at a summon.
     get actingActor() { return active.actor; },

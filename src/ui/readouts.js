@@ -2,10 +2,14 @@
 // narrator box, the focus banner naming whatever the cursor is over, and the
 // loot toast. All of them are pointer-events:none by design - narration must
 // never be able to swallow a click meant for the world.
-export function say(text) {
+// `type` is the line's METADATA, not its look: every entry carries one
+// ('narration' unless the caller says otherwise - combat's initiative rolls
+// say 'initiative'), so a later filter can drop a whole category of line
+// without string-matching its content.
+export function say(text, type = 'narration') {
   const el = document.getElementById('subtitle');
   if (el) el.textContent = text;
-  narrate(text);
+  narrate(text, type);
 }
 
 // --- narrator box (Divinity / BG3 style general narration) --------------------
@@ -62,13 +66,15 @@ export function setNarrationGate(ok) {
 // the one case where the player is deliberately asking again. Instead the
 // repeat stays a single row carrying a count, and the row flashes, so asking
 // twice looks like asking twice rather than like nothing happening.
-function narrate(text) {
+function narrate(text, type = 'narration') {
   if (!text) return;
   const line = String(text);
   const last = narrationLines[narrationLines.length - 1];
-  if (last && last.text === line) last.count += 1;
+  // A repeat only collapses into the row above when it is the same KIND of
+  // line - two categories sharing words is coincidence, not a stutter.
+  if (last && last.text === line && last.type === type) last.count += 1;
   else {
-    narrationLines.push({ text: line, count: 1 });
+    narrationLines.push({ text: line, count: 1, type });
     while (narrationLines.length > NARRATION_KEEP) narrationLines.shift();
   }
   const el = ensureNarrator();
@@ -86,6 +92,11 @@ function narrate(text) {
 
 // The narration box's current lines, newest last - for the e2e suite.
 export const narrationLog = () => narrationLines.map((t) => (t.count > 1 ? `${t.text} (×${t.count})` : t.text));
+
+// The same lines WITH their metadata ({ text, count, type }), for whatever
+// wants to filter by category - a "hide the dice" toggle reads `type`, never
+// the words.
+export const narrationEntries = () => narrationLines.map((t) => ({ ...t }));
 
 // --- focused-object banner (Divinity/BG3 examine-on-hover) --------------------
 // Naming whatever the cursor is over, up top, before you click it. Cosmetic +
