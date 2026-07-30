@@ -691,18 +691,29 @@ Still open, and genuinely optional:
 
 ## Phase 5 — Architecture / SOC
 
-- [ ] **Unify the per-tile step rules** (gum/slip) into one module consumed by
-      main.js members, combat.js AI units, and actors.js wanderers
-      (`main.js:1777` / `combat.js:2834` / `actors.js:446`) — closes the
-      Phase 2 gum bug's whole class.
-- [ ] **Carve `combat.js`** at the documented seams, highest value first:
-      enemy AI (already world-injected), pure geometry helpers (`coneTest`,
-      `zoneCells`, `topplePlan`, slam damage, `opportunityStrike`), then verb
-      resolvers, DOM panel, previews. Follow the `powers.js`/`tactics.js`
-      precedent.
-- [ ] **Carve `main.js`**: summons, hotbar view-model, dialogue/recruitment,
-      step rules (above), debug surface — each on the `shopping.js`
-      host-callback pattern. *M1/M3 of the creation plan start this.*
+- [x] **DONE.** Per-tile step rules unified in `step-rules.js` — the floor
+      arrives as a fact sheet (`{ burning, electrified, surfaceId }`) and the
+      slip roll arrives as an argument, so combat runs it through its seeded
+      rng. main.js, combat.js and actors.js all call it; the wander facade
+      hands out the CHANCE now, not a pre-rolled verdict.
+- [x] **DONE.** `combat.js` carved at the documented seams:
+      `combat-geometry.js` (reach, the two range vocabularies, stand points,
+      zone cells), `combat-plans.js` (the plan half of every plan/perform
+      pair), `combat-ai.js` (target choice, routing, and `chooseBeat` — the
+      turn's ladder of beats, lifted out of the frame driver),
+      `combat-targeting.js` (what the rings promise, plus `verbKind`),
+      `ui/combat.js` (the readout, as a dumb view).
+      **Watch for:** `verbKind` is now the ONE answer to "which branch does
+      this verb take". A new verb adds an arm there, and the rings and the
+      click both get it; adding an `a.type` test to either one alone is how
+      the drift it fixed started.
+- [x] **DONE.** `main.js` carved: `doors.js` + `door-edges.js`,
+      `hotbar-model.js`, `dialogue.js`, `summon-rules.js` — each on the
+      `shopping.js` host-callback pattern, each with its rules split out pure.
+      Still in the closure and still worth a look later: the input block
+      (~585 lines) and the follower/step driver.
+- [ ] **Carve the debug surface** (`window.__combat`, `window.__game`) out of
+      both closures — the last of the original main.js carve list.
 - [ ] Extract `EnemyActor`'s wander brain to a pure module (`actors.js:412`).
 - [x] **DONE.** One bar. `combat.js` no longer builds anything - it supplies
       the rules (`actionState` for affordability and the refusal reason,
@@ -736,9 +747,11 @@ Still open, and genuinely optional:
       import the palette too — they build their own DOM but must not look like
       a different game." Pairs with the Phase 2 consumables fix: the unified
       bar is where combat's item slots land.
-- [ ] Port `routeBeside`'s "already standing on the goal tile" special case to
-      the AI's `standTilePath` — the same fix written twice, once. *(Same code
-      as the Phase 1 pacing bug; listed here as the duplication it is.)*
+- [x] **DONE, and it was already done in the code** — `standTilePath` had
+      grown its own copy of the special case. Both now live in
+      `combat-ai.standTilePath` with the reasoning attached, and a unit test
+      pins the degenerate self-path that stops adjacent units shuffling
+      between two tiles forever.
 - [ ] *Checked, genuinely not duplication — leave alone:* `initiative.js` vs
       `turn-order.js` (the latter imports the former; "what is the order?" vs
       "whose turn is it?"), `shop.js` vs `shopping.js` (the pure/runtime split
@@ -748,7 +761,8 @@ Still open, and genuinely optional:
       (`main.js:715`); projectile/impact → action data fields
       (`combat.js:1296`, `:1323` — three id-special-cases since `e8e53de`);
       surface `impact` field to delete `hazardKind`/`surfaceImpactKind`
-      (`combat.js:412`/`main.js:2368`); `paperCutImmune` →
+      (`combat.js`/`main.js` — both now read `step-rules.js`, so this is one
+      field on the surface def away); `paperCutImmune` →
       `statusImmune: ['bleed']` (`statuses.js:64`); exit beacon keyed on
       `onEnter.effect` (`scene.js:65`); harvest/icon/footprint fields on data
       entries (`looting.js:59`, `:309`, `fx.js:634`); item verbs from data,

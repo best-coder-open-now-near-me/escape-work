@@ -85,7 +85,31 @@ src/
                      combat.js decides the tiles
   combat.js          Tactical on-map combat: per-unit INITIATIVE order, AP
                      turns, movement, ranged/melee, AI-driven units - costs
-                     from data
+                     from data. Owns the BODIES, the AP ledger, the FX and
+                     the frame clock; the rules below are what it asks
+  combat-geometry.js Reach, the two range vocabularies (what a verb's WASH
+                     covers vs what its CLICK acts from), the walk-up's
+                     stand point, a zone's covered tiles     (pure logic)
+  combat-plans.js    Where a verb LANDS: the plan half of every plan/perform
+                     pair - topple, break, pull, take cover, displace. A
+                     plan returns the shape the perform half needs or the
+                     reason it refuses, never both                (pure)
+  combat-ai.js       What an AI unit DECIDES: who to fight, where to stand,
+                     and `chooseBeat` - the ladder of beats a turn walks
+                     (reinforce, topple, swing, close, tuck in, pass)
+                     (pure logic)
+  combat-targeting.js What the target rings PROMISE, and `verbKind` - the
+                     ONE classifier saying which branch a body-aimed verb
+                     takes. The rings and the click both dispatch on it, so
+                     they cannot pick different branches       (pure logic)
+  step-rules.js      What the floor does to whoever stands on it: the
+                     surface, the damage after talents, the wad, the slip,
+                     the speed under a status. One module for members,
+                     summons, AI units in a fight and wanderers out of one
+                     (pure logic)
+  summon-rules.js    Where a summon may be posted and how many arrive - one
+                     ladder, with the two legs a FIGHT owns (AP, the ration)
+                     supplied in combat and absent outside it  (pure logic)
   initiative.js      Combat turn order: d20 + speed roll, sort, joiner
                      insertion                                (pure logic)
   turn-order.js      The turn ENGINE over that order: advance, the round
@@ -98,6 +122,16 @@ src/
   shop.js            Merchant arithmetic: price, sell yield, the stock roll,
                      and the atomic buy/sell                  (pure logic)
   looting.js         Containers, bodies, loose items, pockets, Alt overlay
+  doors.js           The one piece of terrain a fight can change: reaching a
+                     handle, spending the AP, the Alt-overlay entry
+  door-edges.js      The edge arithmetic under it - a door is an EDGE, so
+                     every conversion between a key and the two tiles it
+                     divides lives here                        (pure logic)
+  dialogue.js        Talking to people and signing them on; `nodeOptions`
+                     is the pure half (which options a node can offer)
+  hotbar-model.js    The bar's VIEW-MODEL: what belongs on it, in what
+                     order, in which slot, and what each slot says about
+                     itself. ui/hud.js renders it             (pure logic)
   shopping.js        The merchant runtime: per-instance stock, the shop panel,
                      the buy/sell verbs (ECONOMY_PLAN.md)
   ui.js              All DOM. The FRONT DOOR only - it re-exports ui/,
@@ -116,6 +150,9 @@ src/
     creation.js        the short form beside the chosen body: pronouns, two
                        points, and - for a custom character only - a name
                        and a body from the rigs nobody else wears
+    combat.js          the combat readout: whose turn it is, the AP pips,
+                       End Turn and the initiative strip. A dumb view like
+                       the rest - combat.js hands it a decided picture
   god.js             God-mode tweak panel (` / F8): live-reflects the sheet,
                      enemies, combat + world; edit/pin values, pause, spawn
   editor.js          In-browser level editor (paint/erase, export, playtest)
@@ -132,7 +169,9 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - `data/*` imports nothing (`data/levels.js` is the one exception - it imports
   the level JSON files, which are themselves data).
 - `grid`, `pathfinding`, `stats`, `party`, `surfaces-runtime`, `initiative`,
-  `turn-order`, `statuses`, `tactics`, `occlusion`, `shop` are pure JS (no
+  `turn-order`, `statuses`, `tactics`, `occlusion`, `shop`, `powers`,
+  `combat-geometry`, `combat-plans`, `combat-ai`, `combat-targeting`,
+  `step-rules`, `summon-rules`, `hotbar-model`, `door-edges` are pure JS (no
   PlayCanvas, no DOM) - unit tested in isolation (tests/unit).
 - **A rules module that needs the world takes a HOST, not the world.**
   `turn-order.js` is the pattern: it owns the turn walk and asks an injected
@@ -144,9 +183,11 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   testing is trapped inside something that has to touch the engine.
 - `scene`, `shading`, `tile-renderer`, `models`, `controls`, `picking`,
   `actors` touch PlayCanvas; `ui` touches the DOM; `fx`, `combat`, `hover` and
-  `looting` touch both (combat draws its own previews/rings and builds its own
-  panel; hover writes the canvas cursor and draws rings; looting spawns
-  dropped-item entities).
+  `looting` touch both (combat draws its own previews/rings; hover writes the
+  canvas cursor and draws rings; looting spawns dropped-item entities).
+  `combat.js` no longer BUILDS a panel - the readout is `ui/combat.js` and the
+  bar is main.js's hotbar - so what it still owns of the DOM is the movement
+  cost tag and nothing else.
 - **A panel is a dumb VIEW.** Everything in `ui/` takes a host-supplied
   view-model plus callbacks, renders it, and reports clicks - it never reads a
   rule. Where a rule leaked in it drifted: the hotbar carried its own ammo-cost
@@ -163,6 +204,16 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   `dispatchHit`. A new affordance goes here, against the same `queries`, and
   the rules it consults are passed IN (`armedTargetOk` is the click resolver's
   own test, not a second copy of it).
+- **A rule read by two surfaces gets ONE owner, and both surfaces dispatch on
+  it.** The rings and the click each grew their own ladder of `a.type` tests
+  for "which verb is this?", in slightly different orders, and a ranged weapon
+  fell out of one and not the other: an out-of-range coworker rang red while
+  the click walked the member in and fired. `combat-targeting.verbKind` is that
+  ladder now, and both read it. The same shape closed three other drifts - the
+  per-tile step rules (three copies, one already compounding a slow), the
+  summon spot rules (two, one of them documented as a copy of the other), and
+  the pull's plan-vs-refusal (two hand-parallel walks down five legs). When you
+  find yourself writing "the same questions X asks, less Y", that is the seam.
 - Only `main.js` sees everything. It owns game state (`inCombat`, `gameOver`)
   and game flow (what a click means, when combat starts, tile effects).
 - Enemy AI decisions (pathing costs, wander avoidance) use a talent-free
