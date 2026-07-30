@@ -167,6 +167,28 @@ export function parseLevel(level) {
     if (nz < z) return !hWalls.has(x + ',' + z);
     return true;
   };
+  // The wall edge between two 4-adjacent cells as { o: 'h'|'v', k: 'x,z' },
+  // or null. A PLAIN wall only: doors replaced their wall at parse time, so a
+  // doored edge never appears in these sets - which is exactly what makes
+  // partitions toppleable (TACTICS_PLAN M6) and doors not.
+  const wallEdgeBetween = (x, z, nx, nz) => {
+    let o = null;
+    let k = null;
+    if (nx > x) { o = 'v'; k = nx + ',' + z; } else if (nx < x) { o = 'v'; k = x + ',' + z; } else if (nz > z) { o = 'h'; k = x + ',' + nz; } else if (nz < z) { o = 'h'; k = x + ',' + z; } else return null;
+    const set = o === 'h' ? hWalls : vWalls;
+    return set.has(k) ? { o, k } : null;
+  };
+  // Knock the wall edge between two cells out of the world (TACTICS_PLAN M6:
+  // partitions topple). Returns the removed { o, k } for the renderer, or
+  // null if no plain wall stands there. Conduction recomputes - a partition
+  // dams spills, and this dam just broke.
+  const removeEdgeBetween = (x, z, nx, nz) => {
+    const e = wallEdgeBetween(x, z, nx, nz);
+    if (!e) return null;
+    (e.o === 'h' ? hWalls : vWalls).delete(e.k);
+    electrified = computeElectrified();
+    return e;
+  };
   // The live version movement consults: walls, plus any CLOSED door.
   const edgeOpen = (x, z, nx, nz) => {
     if (!wallEdgeOpen(x, z, nx, nz)) return false;
@@ -244,7 +266,7 @@ export function parseLevel(level) {
   return {
     name: level.name || '', width, height,
     typeAt, defAt, terrainOpen, sightOpenCell, surfaceAt, isElectrified, setType,
-    hWalls, vWalls, edgeOpen, stepOpen, sightOpen,
+    hWalls, vWalls, edgeOpen, stepOpen, sightOpen, wallEdgeBetween, removeEdgeBetween,
     doors, doorBetween, setDoorOpen,
     playerSpawn, enemySpawns, npcSpawns, companionSpawns,
   };

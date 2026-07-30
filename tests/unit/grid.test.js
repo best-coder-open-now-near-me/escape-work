@@ -62,7 +62,7 @@ test('blocksSight is a height rule, with tall as the structural override (M6a)',
   assert.equal(blocksSight(TILE_TYPES['snack-machine']), true); // head-high
   assert.equal(blocksSight(TILE_TYPES.wall), true);             // drawn 0.6, but it is the building
   assert.equal(blocksSight(TILE_TYPES.paneling), true);         // structure, same family
-  assert.equal(blocksSight(TILE_TYPES['cabinet-fallen']), false); // not solid at all
+  assert.equal(blocksSight(TILE_TYPES['cabinet-fallen']), false); // solid on its side, but LOW
   assert.equal(blocksSight(null), false);
 });
 
@@ -79,6 +79,31 @@ test('sightOpenCell: short solids are shot over, tall ones and the void are not'
   assert.equal(g.sightOpenCell(3, 0), false); // the snack machine blocks both
   assert.equal(g.sightOpenCell(4, 0), false); // the '#' wall is tall by fiat
   assert.equal(g.sightOpenCell(0, -1), false); // out of bounds resolves to wall
+});
+
+test('removeEdgeBetween topples a partition out of the world (TACTICS_PLAN M6)', () => {
+  const g = parseLevel(level(['..'], { walls: ['V 1 0 1'] }));
+  assert.ok(g.wallEdgeBetween(0, 0, 1, 0), 'the partition is there to ask about');
+  assert.equal(g.edgeOpen(0, 0, 1, 0), false);
+  const e = g.removeEdgeBetween(0, 0, 1, 0);
+  assert.deepEqual(e, { o: 'v', k: '1,0' }, 'reports what fell, for the renderer');
+  assert.equal(g.edgeOpen(0, 0, 1, 0), true, 'bodies walk through where it stood');
+  assert.equal(g.removeEdgeBetween(0, 0, 1, 0), null, 'a second shove finds nothing');
+});
+
+test('doors are not toppleable - they never enter the wall sets', () => {
+  const g = parseLevel(level(['..'], { doors: ['V 1 0 1'] }));
+  assert.equal(g.wallEdgeBetween(0, 0, 1, 0), null, 'a doored edge is not a wall edge');
+  assert.equal(g.removeEdgeBetween(0, 0, 1, 0), null);
+});
+
+test('toppling a partition breaks the dam - conduction pools merge live', () => {
+  // Cable, then water, with a partition damming the pair from a second pool.
+  const g = parseLevel(level(['*~~'], { walls: ['V 2 0 1'] }));
+  assert.equal(g.isElectrified(1, 0), true, 'the near pool is live');
+  assert.equal(g.isElectrified(2, 0), false, 'the far pool sits behind the dam');
+  g.removeEdgeBetween(1, 0, 2, 0);
+  assert.equal(g.isElectrified(2, 0), true, 'the dam broke and the pools merged');
 });
 
 test('setType can bring a conduction pool to life, not only kill it', () => {

@@ -1868,6 +1868,16 @@ function startGame(level) {
           grid.setType(x, z, type);
           scene.refreshTile?.(x, z);
         },
+        // Partition toppling (TACTICS_PLAN M6): is a plain wall edge standing
+        // between these cells, and knock it out of the world - grid rule and
+        // mesh together, the same pairing setType already is. Doors never
+        // appear in the wall sets, so they are untoppleable by construction.
+        wallEdgeBetween: (x, z, nx, nz) => !!grid.wallEdgeBetween(x, z, nx, nz),
+        toppleEdge: (x, z, nx, nz) => {
+          const e = grid.removeEdgeBetween(x, z, nx, nz);
+          if (e) scene.removeEdgeWall?.(e.o, e.k);
+          return !!e;
+        },
         leaveSurface: (x, z, tileType, turns = 0) => {
           if (grid.typeAt(x, z) !== 'floor') return false;
           grid.setType(x, z, tileType);
@@ -3182,10 +3192,16 @@ function startGame(level) {
     // that burns out is spent - and a spec has no other way to see that the
     // world actually changed rather than merely stopped burning.
     tileAt: (x, z) => grid.typeAt(x, z),
-    // Terrain-only walkability. The distinction a topple spec needs: a fallen
-    // prop must remain CROSSABLE (it is cover, not a wall), and asking the
-    // full isWalkable would fold in whatever body happens to be standing there.
+    // Terrain-only walkability - the full isWalkable would fold in whatever
+    // body happens to be standing there. (The chunky fallen twins are SOLID
+    // now - an object on its side, designer 2026-07-30 - so a topple spec
+    // asserts the landing tile is NOT walkable; the flat ones, a downed
+    // coat rack or partition, still are.)
     walkable: (x, z) => grid.terrainOpen(x, z),
+    // The edge rule between two cells, for specs about partitions falling:
+    // the tile grid alone cannot say whether the wall between two open tiles
+    // is still standing.
+    stepOpenAt: (x, z, nx, nz) => grid.stepOpen(x, z, nx, nz),
     // Is that door open? Doors sit on EDGES ('h:x,z' / 'v:x,z'), not tiles, so
     // `tileAt` can never answer this - and a door is the only piece of terrain
     // a fight can change, which is exactly what wants asserting.

@@ -114,9 +114,76 @@ test('a shoved cabinet lands on the coworker behind it, and leaves cover', async
   // furniture.
   expect(after.alive ? after.statuses.some((s) => s.id === 'pinned') : true).toBe(true);
 
-  // Cover, not a wall: the landing tile is still WALKABLE. A shove that could
-  // spawn impassable terrain could seal a doorway and strand a fight the enemy
-  // can no longer reach - which is the failure the design refused, and the one
-  // a `solid: true` twin would have reintroduced silently.
-  expect(await page.evaluate(() => window.__game.walkable(3, 1))).toBe(true);
+  // An object on its side, not a walkable mess (designer, 2026-07-30): the
+  // landing tile is SOLID now. The old walkable rule guarded against sealed
+  // pockets stranding a fight - but since TACTICS_PLAN M6a a low solid no
+  // longer blocks sight, so anything sealed behind fallen furniture can
+  // still be thrown at, and the stalemate that rule feared cannot form.
+  expect(await page.evaluate(() => window.__game.walkable(3, 1))).toBe(false);
+  // ...and still LOW: the line to a body beyond it stays open.
+  expect(await page.evaluate(() => window.__game.losClear(1, 1, 4, 1))).toBe(true);
+});
+
+// A cubicle wall comes down the same way (TACTICS_PLAN M6, designer
+// 2026-07-30): the shove verb aimed at the coworker across an adjacent
+// partition edge drops the PANEL on them - flat, walkable, no cover - and
+// the edge itself leaves the world, movement and all.
+const PARTITION_ROW = {
+  name: 'Partition Row',
+  tiles: { '#': 'wall', '.': 'floor' },
+  actors: { '@': 'player', M: 'manager' },
+  walls: ['V 2 1 1'], // the partition between player (1,1) and Manager (2,1)
+  map: [
+    '######',
+    '#@M..#',
+    '#....#',
+    '######',
+  ],
+};
+
+test('a shoved partition falls flat on the coworker behind it', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, PARTITION_ROW);
+
+  // Adjacent across the partition - sight passes over it, so the fight
+  // triggers on proximity (canTakePart) by itself. No engage click: anything
+  // that walks the player would move them off the shove tile.
+  await expect.poll(() => page.evaluate(() => window.__game.inCombat), { timeout: 30_000 })
+    .toBe(true);
+  await waitForPlayerTurn(page);
+  await refillAp(page);
+  // Pin the Grit save to a fail (forceHit true = the drop fully lands), and
+  // hold the Manager where the panel will land.
+  await page.evaluate(() => {
+    window.__combat.forceHit = true;
+    const m = window.__game.enemies.find((e) => e.alive);
+    window.__game.debugPlaceEnemy(m.name, 2, 1);
+    window.__combat.applyStatus('detained', 9, 0, m.name);
+  });
+  await page.waitForTimeout(300);
+  const before = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
+  expect([before.x, before.z]).toEqual([2, 1]);
+
+  await clickAction(page, 'shove');
+  // Click the Manager's body: out of shove reach, but only the partition
+  // separates you - the wall IS the shove.
+  const p = await page.evaluate(() => {
+    const en = window.__game.enemies.find((e) => e.alive);
+    return window.__game.project3(en.px ?? en.x, 0.9, en.pz ?? en.z);
+  });
+  expect(onScreen(p)).toBe(true);
+  await page.mouse.click(p.x, p.y);
+
+  // The panel lies flat on their tile...
+  await expect.poll(() => page.evaluate(() => window.__game.tileAt(2, 1)), { timeout: 20_000 })
+    .toBe('partition-fallen');
+  // ...still walkable (a board, not a bookcase)...
+  expect(await page.evaluate(() => window.__game.walkable(2, 1))).toBe(true);
+  // ...the Manager wore it, pinned and dazed...
+  const after = await page.evaluate(() =>
+    window.__combat.enemies.find((e) => e.name === 'The Manager'));
+  expect(after.hp).toBeLessThan(before.hp);
+  expect(after.alive ? after.statuses.some((s) => s.id === 'pinned') : true).toBe(true);
+  // ...and the EDGE left the world: the step between the two tiles is open.
+  expect(await page.evaluate(() => window.__game.stepOpenAt(1, 1, 2, 1))).toBe(true);
 });

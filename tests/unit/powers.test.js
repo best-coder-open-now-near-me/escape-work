@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buffProblem, buffOutcome, buffRangeOf, isFriendly, BUFF_RANGE, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, coneFrom, conePolyline, aimRangeOf, rangeTiles } from '../../src/powers.js';
-import { TILE_TYPES } from '../../src/data/tiles.js';
+import { TILE_TYPES, blocksSight } from '../../src/data/tiles.js';
 import { ACTIONS } from '../../src/data/actions.js';
 import { STATUSES } from '../../src/data/statuses.js';
 
@@ -384,18 +384,27 @@ test('the landing is one tile, however far away the pusher is', () => {
   assert.deepEqual(toppleLanding(0, 5, 6, 5), [7, 5]);
 });
 
-test('every toppleable prop names a fallen twin that is cover, not a wall', () => {
+test('every fallen twin still shields, whichever shape it fell into', () => {
+  // Revised with TACTICS_PLAN M6 (designer, 2026-07-30): a chunky twin is an
+  // object on its side - SOLID, low, shot over, granting cover through the
+  // M6a height rule - while a flat one (the coat rack) stays walkable debris
+  // with the explicit `cover` flag the height rule cannot derive for a
+  // non-solid. Either way, the tile a topple leaves must shield whoever
+  // stands behind it, and must never block sight: the sealed-pocket
+  // stalemate the old non-solid rule guarded against stays impossible
+  // because everything fallen can be thrown over.
   for (const [id, def] of Object.entries(TILE_TYPES)) {
     if (!def.topple) continue;
     const twin = TILE_TYPES[def.topple.becomes];
     assert.ok(twin, `${id} topples into a real tile`);
-    // The barrier is a TACTICAL barrier. A solid twin would let a shove spawn
-    // impassable terrain, seal a doorway, and strand a fight the enemy can no
-    // longer reach - the wall the design explicitly refused.
-    assert.notEqual(twin.solid, true, `${def.topple.becomes} is not solid`);
-    assert.equal(twin.cover, true, `${def.topple.becomes} grants cover`);
     assert.equal(twin.runtimeOnly, true, `${def.topple.becomes} costs no map character`);
-    assert.equal(twin.surface, 'debris', `${def.topple.becomes} carries the clamber cost as a surface`);
+    assert.equal(blocksSight(twin), false, `${def.topple.becomes} is shot over`);
+    const shields = twin.cover === true || twin.solid === true;
+    assert.equal(shields, true, `${def.topple.becomes} shields whoever crouches behind it`);
+    if (!twin.solid) {
+      assert.equal(twin.surface, 'debris',
+        `${def.topple.becomes} is walkable, so it carries the clamber cost as a surface`);
+    }
   }
 });
 

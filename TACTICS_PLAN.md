@@ -24,19 +24,17 @@ CONTROLS ignore the crouch; a failed Grit save deals the damage AND keeps the
 existing stun alongside the new pin; and shooting a target whose human shield
 is one of YOUR OWN refuses rather than rerouting damage into your teammate.
 
-One NEW question from the first playtest (2026-07-30):
-
-- **Partition toppling.** The designer expects cubicle walls to be shovable
-  over like furniture ("doesnt recognize cubicle walls ... could be
-  toppled"). Partitions are EDGES, not cells, so this is new machinery: a
-  grid edge-removal API, the wall entity retired from the render/fade list,
-  conduction pools recomputed (edges dam spills), and a fallen strip. Shape
-  questions before building: does one shove drop one edge segment or the
-  whole run; which side does it fall to (away from the shover, presumably
-  onto whoever stands beyond); does it deal the topple damage + Grit save +
-  pin like furniture; does it leave `cover` debris. **Recommendation:** one
-  segment per shove, falls away from the shover, same save/damage/pin as
-  furniture, leaves a debris strip on the far tile.
+The playtest question is answered too — **partition toppling** `[ratified]`
+(2026-07-30, "your defaults seem fine" + the fallen-shape refinement): one
+edge segment per shove, falling away from the shover, same Grit
+save/damage/pin as furniture. On what a fall LEAVES, the designer set the
+rule by height: "i prefer in most cases just having an object on its side vs
+a walkable messy space", flat things excepted ("yeah walkable with flat
+objects like cubicle wall seems good"). So the chunky fallen twins became
+SOLID low objects — reversing POWERS_PLAN's walkable-twin rule, which the
+M6a sight change had already hollowed out (a sealed pocket is a shooting
+gallery now, not a stalemate) — while the coat rack and the partition panel
+stay flat and walkable. See M6's landed notes.
 
 It follows the shape of `PROGRESSION_PLAN.md` / `HIT_PLAN.md`, and honors the
 one rule from `ARCHITECTURE.md`: **content is data, code is systems.** The
@@ -664,7 +662,21 @@ None. See decision #6.
      shots are blocked is the M3 edge test (`tactics.hasCover`) read live,
      upgraded from −20% to immunity while the crouch holds. The AI crouches
      in place against a partition that already blocks its target's line.
-     Partition TOPPLING is not built — see Questions at top.
+   - **Partition toppling + solid twins (2026-07-30, ratified):** the shove
+     verb aimed across an adjacent partition edge — at the coworker behind
+     it, or the bare tile — brings the PANEL down: `grid.removeEdgeBetween`
+     retires the edge (conduction pools merge live; the dam broke),
+     `scene.removeEdgeWall` retires the mesh, and `partition-fallen` lies
+     flat on the far tile — walkable, no cover, a board. Whoever stands
+     there rolls the same Grit save everything falling rolls (`dropOnto`,
+     the resolution shared with furniture). Doors never topple: they are
+     not in the wall sets, by construction. And per the fallen-shape rule,
+     the chunky fallen twins are SOLID now — an object on its side that
+     blocks bodies, is shot over, and grants cover through the M6a height
+     rule alone (their special `cover` flag retired with the walkability);
+     a body it lands on stands IN the cell until the pin lifts, and walks
+     out because pathfinding never tests a walk's starting tile. The AI
+     does not yet topple partitions (furniture only) — a follow-up.
 
 7. **Shots sail over low furniture (M6a).** ✅ Landed.
    `[ratified]` "height threshold as you suggest" (designer, 2026-07-29).

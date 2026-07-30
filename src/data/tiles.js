@@ -635,26 +635,34 @@ export const TILE_TYPES = {
     model: 'office/shredder', label: 'Shredder',
   },
 
-  // --- fallen twins (POWERS_PLAN M6) ----------------------------------------
+  // --- fallen twins (POWERS_PLAN M6, revised TACTICS_PLAN M6) ---------------
   // Every one of these is `runtimeOnly`: nobody paints them, nobody exports
   // them, they only ever arrive through grid.setType when something goes over.
   // That is what makes them AFFORDABLE - the character ceiling above is
   // reached (92 of 94 spoken for), and six fallen twins would have needed six
   // characters that do not exist.
   //
-  // They are deliberately NOT solid. A player who can spawn impassable terrain
-  // can seal a doorway and break every guarantee pathfinding makes, including
-  // the enemy's ability to reach them at all - which turns a fight into a
-  // stalemate the game has no way to resolve. `cover: true` is the barrier
-  // instead: it changes the to-hit maths (tactics.js), which is what "barrier"
-  // should mean in a tactics game. The `debris` surface carries the clamber
-  // cost, because movement cost is the surface layer's job.
+  // The chunky ones ARE solid now: an object on its side, not a walkable mess
+  // (designer, 2026-07-30 - "it def depends on the object's height after
+  // falling, but i prefer in most cases just having an object on its side").
+  // They shipped walkable out of a stalemate fear - spawn-solid-on-demand
+  // could seal a doorway and strand a fight the enemy can never reach - but
+  // the M6a sight rule defused it: a low solid no longer blocks sight, so a
+  // sealed pocket is a shooting gallery, not a stalemate. Being low solids,
+  // they block bodies, are shot over, and grant cover all from the ONE height
+  // rule (blocksSight above) - the special `cover` flag they used to need is
+  // gone with the walkability. A body the furniture lands on stands IN the
+  // cell until the pin lifts; pathfinding never tests a walk's starting tile,
+  // so they always climb out.
+  //
+  // The coat rack is the height exception the designer named: a pole and a
+  // coat at 0.2 is a flat tangle you step over - it keeps the walkable-debris
+  // shape, the explicit `cover` flag (the M6a rule cannot derive cover for a
+  // NON-solid), and the `debris` clamber cost.
   'cabinet-fallen': {
     runtimeOnly: true,
-    solid: false,
+    solid: true,
     height: 0.3,
-    cover: true,
-    surface: 'debris',
     color: [0.55, 0.38, 0.24],
     model: 'furniture/cabinet',
     scale: 0.5,
@@ -664,10 +672,8 @@ export const TILE_TYPES = {
   },
   'bookcase-fallen': {
     runtimeOnly: true,
-    solid: false,
+    solid: true,
     height: 0.3,
-    cover: true,
-    surface: 'debris',
     color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/bookcaseClosed',
     scale: 1.0,
@@ -677,10 +683,8 @@ export const TILE_TYPES = {
   },
   'bookcase-wide-fallen': {
     runtimeOnly: true,
-    solid: false,
+    solid: true,
     height: 0.3,
-    cover: true,
-    surface: 'debris',
     color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/bookcaseClosedWide',
     scale: 1.0,
@@ -690,10 +694,8 @@ export const TILE_TYPES = {
   },
   'bookshelf-fallen': {
     runtimeOnly: true,
-    solid: false,
+    solid: true,
     height: 0.3,
-    cover: true,
-    surface: 'debris',
     color: [0.5, 0.36, 0.22],
     model: 'furniture/bookshelf',
     scale: 0.5,
@@ -714,4 +716,23 @@ export const TILE_TYPES = {
     label: 'Fallen Coat Rack',
     examine: 'Somebody\'s good coat is under there.',
   },
+  // A cubicle panel, flat on the carpet (TACTICS_PLAN M6 partition topple).
+  // The OTHER height exception, in the other direction: a partition on its
+  // side is just a board - walkable, no cover, drawn as the thin slab the
+  // marker fallback makes of a low model-less def.
+  'partition-fallen': {
+    runtimeOnly: true,
+    solid: false,
+    height: 0.08,
+    color: [0.3, 0.3, 0.38],
+    label: 'Toppled Partition',
+    examine: 'The great divider, floored. The office is open plan now.',
+  },
 };
+
+// What knocking a PARTITION over does (TACTICS_PLAN M6). Partitions are
+// edges, not cells, so they cannot carry a `topple` block the way furniture
+// does - this is that block, for every plain wall edge. Light chip damage: a
+// hollow panel, not a loaded bookcase. Doors are NOT toppleable - they go
+// floor to frame.
+export const PARTITION_TOPPLE = { damage: [1, 3], becomes: 'partition-fallen' };

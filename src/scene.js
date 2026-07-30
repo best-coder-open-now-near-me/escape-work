@@ -95,14 +95,28 @@ export function buildLevel(app, grid, { picking = null } = {}) {
     }
   }
   // Edge walls (partitions between tiles) join the same fade list, keyed by
-  // their world-space centre.
-  for (const k of grid.hWalls) {
+  // their world-space centre - and by their grid key, so a toppled partition
+  // (TACTICS_PLAN M6) can find its own mesh to retire.
+  const edgeWallVisuals = new Map(); // 'h:x,z' | 'v:x,z' -> wallEntry
+  const addEdgeWall = (k, orient) => {
     const [x, z] = k.split(',').map(Number);
-    walls.push({ entity: r.renderEdgeWall(x, z, 'h'), x, z: z - 0.5, top: r.edgeWallTop, faded: false });
-  }
-  for (const k of grid.vWalls) {
-    const [x, z] = k.split(',').map(Number);
-    walls.push({ entity: r.renderEdgeWall(x, z, 'v'), x: x - 0.5, z, top: r.edgeWallTop, faded: false });
+    const entry = orient === 'h'
+      ? { entity: r.renderEdgeWall(x, z, 'h'), x, z: z - 0.5, top: r.edgeWallTop, faded: false }
+      : { entity: r.renderEdgeWall(x, z, 'v'), x: x - 0.5, z, top: r.edgeWallTop, faded: false };
+    walls.push(entry);
+    edgeWallVisuals.set(orient + ':' + k, entry);
+  };
+  for (const k of grid.hWalls) addEdgeWall(k, 'h');
+  for (const k of grid.vWalls) addEdgeWall(k, 'v');
+  // A partition went over: its mesh leaves the world and the fade list, the
+  // same retirement a re-rendered door already performs.
+  function removeEdgeWall(orient, k) {
+    const entry = edgeWallVisuals.get(orient + ':' + k);
+    if (!entry) return;
+    edgeWallVisuals.delete(orient + ':' + k);
+    entry.entity.destroy();
+    const i = walls.indexOf(entry);
+    if (i >= 0) walls.splice(i, 1);
   }
 
   // Doors: rendered from grid state and re-rendered whenever one toggles.
@@ -215,7 +229,7 @@ export function buildLevel(app, grid, { picking = null } = {}) {
     addFlame: r.addFlame, explosionFlash: r.explosionFlash,
     addSmoke: r.addSmoke, removeSmoke: r.removeSmoke,
     hideSurfaceVisual, addSurfaceVisual, removePropVisual, refreshTile,
-    refreshDoor: renderDoorAt,
+    refreshDoor: renderDoorAt, removeEdgeWall,
     floorHeight: r.floorHeight,
   };
 }

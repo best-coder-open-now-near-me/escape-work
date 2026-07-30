@@ -7,7 +7,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { parseLevel } from '../../src/grid.js';
 import { findPath } from '../../src/pathfinding.js';
 import { existsSync } from 'node:fs';
-import { TILE_TYPES } from '../../src/data/tiles.js';
+import { TILE_TYPES, blocksSight } from '../../src/data/tiles.js';
 import { ENEMY_TYPES, ENEMY_KITS } from '../../src/data/enemies.js';
 import { NPCS } from '../../src/data/npcs.js';
 import { COMPANIONS, COMPANION_KITS } from '../../src/data/companions.js';
@@ -259,18 +259,21 @@ test('every registry cross-reference resolves', () => {
       `tile char "${def.char}" is unique (${id} collides with ${byChar.get(def.char)})`);
     byChar.set(def.char, id);
   }
-  // Toppling (POWERS_PLAN M6): a prop that goes over must name a fallen twin
-  // that exists, and that twin must be runtimeOnly - a paintable one would be
-  // spending a character nobody asked it to spend. The twin must not itself be
-  // solid, or the "cover, not a wall" rule is broken by data alone: a shove
-  // could spawn impassable terrain, seal a doorway, and strand a fight the
-  // enemy can no longer reach.
+  // Toppling (POWERS_PLAN M6, revised TACTICS_PLAN M6): a prop that goes over
+  // must name a fallen twin that exists, and that twin must be runtimeOnly -
+  // a paintable one would be spending a character nobody asked it to spend.
+  // A twin may be SOLID now (an object on its side - designer, 2026-07-30),
+  // but a solid twin must stay LOW: the M6a sight rule is what keeps a sealed
+  // pocket a shooting gallery instead of the stalemate the original
+  // non-solid rule guarded against, so a twin that blocked sight would
+  // reintroduce that failure by data alone.
   for (const [id, def] of Object.entries(TILE_TYPES)) {
     if (!def.topple) continue;
     const twin = TILE_TYPES[def.topple.becomes];
     assert.ok(twin, `tile "${id}" topples into a real tile ("${def.topple.becomes}")`);
     assert.equal(twin.runtimeOnly, true, `"${def.topple.becomes}" is runtimeOnly`);
-    assert.notEqual(twin.solid, true, `"${def.topple.becomes}" is cover, not a wall`);
+    assert.equal(blocksSight(twin), false,
+      `"${def.topple.becomes}" is shot over, whatever it blocks on foot`);
     const [lo, hi] = def.topple.damage || [];
     assert.ok(lo > 0 && hi >= lo, `tile "${id}" topple damage is a sane range`);
   }

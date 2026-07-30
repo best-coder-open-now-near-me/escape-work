@@ -20,7 +20,7 @@ import {
 } from './powers.js';
 import { createAimPaint } from './aim-paint.js';
 import { STATUSES } from './data/statuses.js';
-import { blocksSight } from './data/tiles.js';
+import { blocksSight, PARTITION_TOPPLE } from './data/tiles.js';
 import { PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
 
@@ -639,9 +639,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     } else if (ok && !s.edges) {
       const d = world.tileDefAt(s.x, s.z);
       ok = !!d && (d.solid || d.cover); // toppled or destroyed = no shield left
+    } else if (ok && s.edges) {
+      // The partitions themselves can fall now (partition topple): a crouch
+      // whose every face has opened is a crouch behind nothing - break it,
+      // or the chip lies. WHICH shots a surviving face blocks stays a live
+      // per-shot question (shotOutcome).
+      ok = ORTHO.some(([dx, dz]) => !world.stepOpen(s.at.x, s.at.z, s.at.x + dx, s.at.z + dz));
     }
-    // s.edges needs no shield check: the partitions are the map's own
-    // geometry, and whether they block a given shot is read live per shot.
     if (!ok) { breakCrouch(unit); return null; }
     if (!hasStatus(carrierOf(unit), 'covered')) applyStatus(carrierOf(unit), 'covered');
     return s;
@@ -1315,6 +1319,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           drawRing(px, pz, 0.42, canDrop ? PREVIEW_OK : PREVIEW_FAR);
         }
       }
+      // ...and the office's own walls (TACTICS_PLAN M6): an adjacent
+      // partition rings the tile it would fall ONTO. Same promise as every
+      // ring on this bar - green means the click brings it down.
+      for (const [dx, dz] of ORTHO) {
+        const px = b.x + dx;
+        const pz = b.z + dz;
+        if (!world.wallEdgeBetween(b.x, b.z, px, pz)) continue;
+        drawRing(px, pz, 0.42,
+          world.terrainOpen(px, pz) && active.ap >= a.ap ? PREVIEW_OK : PREVIEW_FAR);
+      }
     }
     for (const en of world.liveEnemies()) {
       if (!en.entity) continue;
@@ -1841,23 +1855,31 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     let msg = `${def.label || 'It'} goes over.`;
     // Whoever is standing in the landing tile wears it - coworker, teammate or
     // you. A bookcase does not check your badge.
+    msg += dropOnto(by, lx, lz, t.damage);
+    return msg;
+  }
+
+  // Whatever just came down lands on (lx, lz): whoever stands there rolls the
+  // Grit save (TACTICS_PLAN M6, designer: "a strength or whatever equivalent
+  // check ... crushing damage and maybe pinned too"). Pass and they throw
+  // themselves clear - no crush, no daze, no pin. Fail and they wear all of
+  // it: the damage, the existing stun (anti-chain window intact), and PINNED
+  // - rooted under the thing until they work free. Shared by the furniture
+  // topple and the partition topple, so one save rule covers everything that
+  // falls. `forceHit` pins the save too (true = the drop fully lands = the
+  // save fails), so the specs stay deterministic. Returns the narration
+  // fragment, leading space included, or '' for empty carpet.
+  function dropOnto(by, lx, lz, range) {
     const victimUnit = world.liveEnemies().find((e) => e.x === lx && e.z === lz);
     const victimMember = members.find((m) => m.sheet.hp > 0 && m.actor
       && m.actor.x === lx && m.actor.z === lz);
-    const dmg = rand(t.damage[0], t.damage[1]);
-    // The Grit save (TACTICS_PLAN M6, designer: "a strength or whatever
-    // equivalent check ... crushing damage and maybe pinned too"). Pass and
-    // you throw yourself clear - no crush, no daze, no pin. Fail and you wear
-    // all of it: the damage, the existing stun (with its anti-chain window
-    // intact), and PINNED - rooted under the thing until you work free.
-    // `forceHit` pins the save too (true = the drop fully lands = the save
-    // fails), so the specs stay deterministic.
+    const dmg = rand(range[0], range[1]);
     const saved = (grit) => (forceHit !== null ? !forceHit : rollHit(gritSaveChance(grit), rng));
+    let msg = '';
     if (victimUnit) {
       if (saved(victimUnit.def.grit ?? 2)) {
         victimUnit.flinch?.();
-        msg += ` ${victimUnit.def.name} dives clear.`;
-        return msg;
+        return ` ${victimUnit.def.name} dives clear.`;
       }
       const died = victimUnit.takeDamage(dmg);
       hitFx(victimUnit, 'slam', by);
@@ -1883,8 +1905,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     } else if (victimMember) {
       if (saved(effectiveAttr(victimMember.sheet).grit)) {
         victimMember.actor.flinch();
-        msg += ` ${victimMember.sheet.name} dives clear.`;
-        return msg;
+        return ` ${victimMember.sheet.name} dives clear.`;
       }
       const dead = applyDamage(victimMember.sheet, dmg);
       hitFx(victimMember, 'slam', by);
@@ -1900,6 +1921,37 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
     }
     return msg;
+  }
+
+  // Put a shoulder into the cubicle wall itself (TACTICS_PLAN M6, designer
+  // 2026-07-30): the shove verb aimed across an adjacent partition edge. The
+  // panel comes off its feet and lands FLAT on the far tile - walkable, no
+  // cover: a board, not a bookcase - and whoever stands there rolls the same
+  // Grit save everything falling already demands. Doors never topple; they
+  // are not in the wall sets (grid.wallEdgeBetween). Returns true when the
+  // click was a partition shove (refusals included), false to fall through.
+  function performPartitionTopple(tx, tz) {
+    const a = ACTIONS.shove;
+    const me = { x: active.actor.x, z: active.actor.z };
+    if (Math.abs(tx - me.x) + Math.abs(tz - me.z) !== 1) return false; // square-on, arm's reach
+    if (!world.wallEdgeBetween(me.x, me.z, tx, tz)) return false;
+    if (!world.terrainOpen(tx, tz)) {
+      log('The partition rocks against whatever is behind it, and stays up.');
+      return true;
+    }
+    if (active.ap < a.ap) { log('Not enough AP.'); return true; }
+    active.ap = roundAp(active.ap - a.ap);
+    active.actor.lunge(tx, tz);
+    faceTarget(active, tx, tz);
+    world.toppleEdge(me.x, me.z, tx, tz);
+    world.setType(tx, tz, PARTITION_TOPPLE.becomes);
+    fx.impact(tx, tz, 'slam', { y: 0.3 });
+    fx.shake(0.08, 0.2);
+    log(`You put a shoulder into the partition. It goes over flat.${dropOnto(active, tx, tz, PARTITION_TOPPLE.damage)}`);
+    armed = null;
+    refresh();
+    if (!hostilesRemain()) victory();
+    return true;
   }
 
   // --- take cover (TACTICS_PLAN M6) -----------------------------------------
@@ -2516,7 +2568,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // control instead of a swing.
     if (isControl(a) && controlIsRanged(a)) { performControl(armed, en); return; }
     if (a.type === 'shove') {
-      if (!canReach(active, en, REACH.SHOVE)) { refuse('Too far to shove.'); return; }
+      if (!canReach(active, en, REACH.SHOVE)) {
+        // Out of reach - but if only a cubicle wall separates you, the WALL
+        // is the shove: it comes down on them (designer, 2026-07-30).
+        if (performPartitionTopple(en.x, en.z)) return;
+        refuse('Too far to shove.');
+        return;
+      }
       if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
       joinCombat(en); // shoving a bystander is also an opinion they'll return
       active.ap = roundAp(active.ap - a.ap);
@@ -2799,6 +2857,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           log('It rocks, and settles. Nothing behind it to fall into.');
           return;
         }
+        // A cubicle wall between you and the clicked tile: the shove knocks
+        // the PARTITION over onto it (designer, 2026-07-30).
+        if (performPartitionTopple(tile.x, tile.z)) return;
       }
       // Aiming: a left click NEVER cancels. Missing the target used to lower
       // the action (and, with a cone out of AP, could strand you unable to do
