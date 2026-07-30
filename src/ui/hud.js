@@ -163,12 +163,16 @@ export function createTacticalButton({ onToggle, isOn }) {
 // player assigns - without the row growing until it spans the screen and the
 // number keys stop lining up with it.
 //
-// Eight, because every class's whole kit fits in eight today: a row that pages
-// what a character ALREADY HAS would hide the weapon swing behind a pager on a
-// fresh Office Drone, which is a worse trade than an unused pager. Rows arrive
-// when the player builds past one (the host pads the layout with an empty slot
-// so there is always somewhere to assign to - see main.js layoutOf).
-export const HOTBAR_ROW_SLOTS = 8;
+// Nine, because every class's whole kit fits in nine today - eight actions
+// since Take Cover joined the universal pair beside Shove (TACTICS_PLAN M6),
+// plus the deliberate empty slot: a row that pages what a character ALREADY
+// HAS would hide the weapon swing behind a pager on a fresh Office Drone,
+// which is a worse trade than an unused pager. Rows arrive when the player
+// builds past one (the host pads the layout with an empty slot so there is
+// always somewhere to assign to - see main.js layoutOf). Nine is also the
+// ceiling the NUMBER KEYS can address (1-9), so the next universal verb has
+// to earn its slot by retiring one - it cannot just widen the row again.
+export const HOTBAR_ROW_SLOTS = 9;
 
 // `slots` is the whole layout, in order, as view-models the host builds:
 //   { kind: 'action', id, label, icon, ap, ammoCost, unavailable }
