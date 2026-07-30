@@ -79,8 +79,10 @@ src/
                      bends the click and the hover through it; hover.js still
                      owns what the cursor says
   aim-paint.js       The aim wash (TACTICS_PLAN M7): pooled translucent
-                     quads over every tile an armed verb can legally reach,
-                     line of sight included; combat.js decides the tiles
+                     quads over every tile an armed verb can legally reach
+                     RIGHT NOW - line of sight included, and never a tile
+                     whose occupant the click would have to walk to;
+                     combat.js decides the tiles
   combat.js          Tactical on-map combat: per-unit INITIATIVE order, AP
                      turns, movement, ranged/melee, AI-driven units - costs
                      from data
@@ -266,7 +268,11 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   disagree. The walk only ever aims at a stand point the swing is
   LEGAL from (`routeBeside`/`swingPointAt`: reach distance plus the partition
   line test - the same `canReach` the strike runs on arrival), the melee
-  target rings read that same rule (`hasSwingSpot`), and every walk refusal
+  target rings read that same rule (`hasSwingSpot`), **and the aim wash does
+  not over-promise**: an ANY-target purge is washed at its FRIENDLY reach
+  (Reboot reaches a colleague across the room) while its coworker half goes
+  down the melee walk-in, so coworkers the click would walk to are left OUT of
+  the wash rather than painted as castable ground. Every walk refusal
   names its true cause: a degenerate walk is "as close as the route gets",
   never "not enough AP", and an arrival that can't fire says so instead of
   standing down silently. Before this held together, the walk could aim at a

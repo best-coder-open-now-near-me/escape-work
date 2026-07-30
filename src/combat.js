@@ -1309,12 +1309,32 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     } else {
       const ax = active.actor.x;
       const az = active.actor.z;
+      // An ANY-target verb (a purge - Reboot) has TWO reaches, and the wash is
+      // sized by the wider one: a colleague can be rebooted from across the
+      // room (the friendly click resolves at buff range), while a coworker
+      // goes down handleEnemyClick's melee walk-in and has to be walked up to.
+      // Painting the friendly radius over a coworker promises a cast that
+      // would actually be a walk, so those tiles drop out of the wash - it
+      // covers the ground an aim LANDS on right now, and the coworker's own
+      // ring (which already reads the walk-in rule) says the rest.
+      //
+      // Scoped to `aimsAtAnyone` deliberately: every other verb's wash radius
+      // IS its act range, so the test would be a no-op - and a cone, whose
+      // range lives in `cone` rather than where actRangeOf looks, would have
+      // holes punched in a wash that is perfectly honest.
+      const twoReaches = aimsAtAnyone(ACTIONS[armed]);
+      const body = posOf(active);
+      const walkOnly = (x, z) => {
+        if (!twoReaches) return false;
+        const en = world.liveEnemies().find((e) => e.x === x && e.z === z);
+        return !!en && !verbReaches(armed, en, body.x, body.z);
+      };
       aimPaint.show(`${armed}:${ax},${az}:${paintEpoch}`, () => rangeTiles(
         ax, az, spec.r,
         // Paintable ground: open floor the aimer can SEE. Solid cells stay
         // unpainted - they read as objects standing in the wash, and the
         // shadow they cast behind themselves is the whole lesson.
-        (x, z) => world.terrainOpen(x, z) && world.hasLos(ax, az, x, z),
+        (x, z) => world.terrainOpen(x, z) && world.hasLos(ax, az, x, z) && !walkOnly(x, z),
         spec.euclid,
       ));
     }

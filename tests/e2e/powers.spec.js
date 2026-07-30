@@ -220,3 +220,45 @@ test('Stand Post holds an overwatch, and it fires once on somebody crossing the 
   // AP would cover the rest of the fight for free.
   expect(await page.evaluate(() => window.__combat.watching)).toHaveLength(0);
 });
+
+test('the aim wash does not paint coworkers Reboot would have to walk to', async ({ page }) => {
+  // The wash and the click have to agree. Reboot is an ANY-target purge, so
+  // it is washed at its FRIENDLY reach (buff range, five tiles) - but aiming
+  // it at a coworker resolves down the melee walk-in, which is arm's length.
+  // Painting the wide radius over a coworker promises a cast that would
+  // actually be a walk, so their tile has to drop out of the wash.
+  await bootStash(page, VERB_ARENA, 'it-support');
+  await enterCombat(page);
+  await waitForPlayerTurn(page);
+  await refillAp(page);
+
+  // Stage the gap: enterCombat necessarily walks the player up, and this test
+  // is about a coworker standing INSIDE the wash but OUTSIDE arm's length.
+  await page.evaluate(() => {
+    const place = (a, x, z) => {
+      const y = a.entity.getPosition().y;
+      a.path = null;
+      a.slideTo = null;
+      a.entity.setPosition(x, y, z);
+      a.x = Math.round(x);
+      a.z = Math.round(z);
+    };
+    place(window.__god.enemies.find((e) => e.alive), 8, 3);
+    place(window.__god.playerActor, 4, 3);
+    window.__combat.refresh();
+  });
+  await page.waitForTimeout(400);
+
+  await clickAction(page, 'reboot');
+  expect(await page.evaluate(() => window.__combat.armed)).toBe('reboot');
+  await expect.poll(() => page.evaluate(() => window.__combat.aimPaint.count),
+    { timeout: 10_000 }).toBeGreaterThan(0);
+
+  const tiles = await page.evaluate(() => window.__combat.aimPaint.tiles);
+  const painted = (x, z) => tiles.some(([tx, tz]) => tx === x && tz === z);
+  // Four tiles out: inside the five-tile wash, and open floor with a clear
+  // line - so the wash reaches that far...
+  expect(painted(8, 4), 'the wash should still cover ground four tiles out').toBe(true);
+  // ...but the coworker standing at that distance is a WALK, not a cast.
+  expect(painted(8, 3), 'the wash promised a coworker the click would walk to').toBe(false);
+});
