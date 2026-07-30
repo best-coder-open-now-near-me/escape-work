@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseLevel, parseWallRuns, compressWallRuns } from '../../src/grid.js';
-import { TILE_TYPES, blocksSight, SIGHT_BLOCK_HEIGHT } from '../../src/data/tiles.js';
+import { TILE_TYPES, blocksSight, SIGHT_BLOCK_HEIGHT, PARTITION_HP } from '../../src/data/tiles.js';
 
 const level = (map, extra = {}) => ({
   name: 'test-floor',
@@ -233,4 +233,49 @@ test('parseLevel still accepts every real kind of actor', () => {
   assert.deepEqual(g.playerSpawn, { x: 0, z: 0 });
   assert.equal(g.enemySpawns.length, 1);
   assert.equal(g.enemySpawns[0].type, 'manager');
+});
+
+// --- destructible cover bookkeeping (TACTICS_PLAN M8) -------------------------
+// Damage lives in the grid's side maps: hidden pool, "gone means gone" is the
+// caller's move, and a pool dies with the thing it described.
+
+test('damageProp runs a pool down and only for props that carry one', () => {
+  const g = parseLevel({
+    name: 't', tiles: { '.': 'floor', B: 'cabinet', '#': 'wall' },
+    actors: { '@': 'player' }, map: ['@B#'],
+  });
+  const full = TILE_TYPES.cabinet.hp;
+  assert.equal(g.propHpAt(1, 0), full);
+  assert.equal(g.propHpAt(2, 0), null, 'a wall has no pool');
+  assert.equal(g.damageProp(2, 0, 5), null, 'no pool, no damage recorded');
+  assert.equal(g.damageProp(1, 0, 4), full - 4);
+  assert.equal(g.propHpAt(1, 0), full - 4, 'the dent persists');
+  assert.equal(g.damageProp(1, 0, full), 0, 'clamped at zero');
+});
+
+test('setType resets a pool - the fallen twin starts fresh', () => {
+  const g = parseLevel({
+    name: 't', tiles: { '.': 'floor', B: 'cabinet' },
+    actors: { '@': 'player' }, map: ['@B.'],
+  });
+  g.damageProp(1, 0, 6);
+  g.setType(1, 0, 'cabinet-fallen'); // a topple, mid-demolition
+  assert.equal(g.propHpAt(1, 0), TILE_TYPES['cabinet-fallen'].hp,
+    'the pool belonged to what STOOD here');
+});
+
+test('edge pools: partitions dent, and the pool dies with the edge', () => {
+  const g = parseLevel({
+    name: 't', tiles: { '.': 'floor' }, actors: { '@': 'player' },
+    map: ['@..', '...'], walls: ['V 1 0 1'],
+  });
+  assert.equal(g.edgeHpBetween(0, 0, 1, 0), PARTITION_HP);
+  assert.equal(g.edgeHpBetween(0, 1, 1, 1), null, 'no wall, no pool');
+  assert.equal(g.damageEdge(0, 0, 1, 0, 3), PARTITION_HP - 3);
+  assert.equal(g.edgeHpBetween(0, 0, 1, 0), PARTITION_HP - 3);
+  // Retire the edge (the topple or the final hit) - and the record with it,
+  // so a wall painted here by a future level edit starts whole.
+  const e = g.removeEdgeBetween(0, 0, 1, 0);
+  assert.ok(e);
+  assert.equal(g.edgeHpBetween(0, 0, 1, 0), null);
 });

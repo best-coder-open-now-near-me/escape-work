@@ -442,10 +442,13 @@ killing anyone, and therefore the correct play every time.
       **Props are a second axis, not more of the same one.** Bodies are picked
       by mesh (`enemyAtPoint`/`allyAtPoint`); furniture is aimed at by TILE and
       resolved through `topplePlan` (`combat.js:2180`, "the same verb, aimed at
-      furniture instead of a person" — `shove` is the only verb that does this
-      today). So "reboot targets props" means the click path must consult the
-      prop layer as well as the two body layers, which `shove` is the working
-      precedent for. Decide what a purge even DOES to a prop before building
+      furniture instead of a person"). Since TACTICS_PLAN M8 there are two
+      working precedents: `shove` (the topple) and the damage-rolling attack
+      (`powers.aimsAtProps` + `breakPlanAt`, which is the first cut of the
+      target-class idea — a predicate saying "may point at the furniture").
+      So "reboot targets props" means the click path must consult the
+      prop layer as well as the two body layers, which both precedents show
+      the shape of. Decide what a purge even DOES to a prop before building
       it — there is no prop-status system yet, so "compromised item" is new
       content, not a retarget.
       Note for triage: this is *not* currently a dead end for players —

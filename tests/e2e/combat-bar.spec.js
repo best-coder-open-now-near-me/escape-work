@@ -228,7 +228,7 @@ test('a snack comes out of your pockets mid-fight, and costs a turn to eat', asy
   });
   // Park it on the bar out of combat, so what gets pressed in the fight is the
   // player's own arrangement - the layout is supposed to survive the mode.
-  await page.click('#hotbar-slot-8', { button: 'right' });
+  await page.click('#hotbar-slot-9', { button: 'right' });
   await page.click('#context-menu >> text=Cold Coffee');
   await expect(page.locator('#hotbar-item-cold-coffee')).toBeVisible();
 

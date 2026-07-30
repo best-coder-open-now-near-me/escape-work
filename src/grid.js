@@ -11,7 +11,7 @@
 //   "H x z len" - horizontal run on the NORTH edge of cells (x..x+len-1, z)
 //   "V x z len" - vertical run on the WEST edge of cells (x, z..z+len-1)
 // (`#` cell walls still exist for solid blocks/pillars; partitions are edges.)
-import { TILE_TYPES, blocksSight } from './data/tiles.js';
+import { TILE_TYPES, PARTITION_HP, blocksSight } from './data/tiles.js';
 import { SURFACES } from './data/surfaces.js';
 import { NPCS } from './data/npcs.js';
 import { ENEMY_TYPES } from './data/enemies.js';
@@ -201,8 +201,46 @@ export function parseLevel(level) {
     const e = wallEdgeBetween(x, z, nx, nz);
     if (!e) return null;
     (e.o === 'h' ? hWalls : vWalls).delete(e.k);
+    edgeDamage.delete(e.o + ':' + e.k); // the pool dies with the edge
     electrified = computeElectrified();
     return e;
+  };
+
+  // --- destructible cover (TACTICS_PLAN M8) ---------------------------------
+  // Damage lives in side maps, not on tile defs: defs are static SHARED
+  // objects, so a number mutated there would wound every cabinet on the
+  // floor at once. Keyed like everything else here - cells by "x,z", edges
+  // by "o:x,z" - and persistent across fights: "gradually break down a
+  // barrier" is allowed to span them. A pool dies with the thing it
+  // described (setType swaps the tile, removeEdgeBetween retires the edge),
+  // so a topple's fallen twin starts its own fresh pool.
+  const propDamage = new Map(); // 'x,z' -> damage taken so far
+  const edgeDamage = new Map(); // 'h:x,z' | 'v:x,z' -> damage taken so far
+  const propHpAt = (x, z) => {
+    const def = defAt(x, z);
+    if (!Number.isFinite(def.hp)) return null;
+    return Math.max(0, def.hp - (propDamage.get(x + ',' + z) || 0));
+  };
+  // Record a hit; returns hp remaining, or null for a prop with no pool.
+  // What a broken prop BECOMES (the setType to floor, the mesh, the fx) is
+  // the caller's move - bookkeeping does not decide "gone means gone".
+  const damageProp = (x, z, amount) => {
+    const left = propHpAt(x, z);
+    if (left === null) return null;
+    propDamage.set(x + ',' + z, (propDamage.get(x + ',' + z) || 0) + amount);
+    return Math.max(0, left - amount);
+  };
+  const edgeHpBetween = (x, z, nx, nz) => {
+    const e = wallEdgeBetween(x, z, nx, nz);
+    if (!e) return null;
+    return Math.max(0, PARTITION_HP - (edgeDamage.get(e.o + ':' + e.k) || 0));
+  };
+  const damageEdge = (x, z, nx, nz, amount) => {
+    const left = edgeHpBetween(x, z, nx, nz);
+    if (left === null) return null;
+    const e = wallEdgeBetween(x, z, nx, nz);
+    edgeDamage.set(e.o + ':' + e.k, (edgeDamage.get(e.o + ':' + e.k) || 0) + amount);
+    return Math.max(0, left - amount);
   };
   // The live version movement consults: walls, plus any CLOSED door.
   const edgeOpen = (x, z, nx, nz) => {
@@ -274,6 +312,7 @@ export function parseLevel(level) {
   const setType = (x, z, type) => {
     if (z >= 0 && z < height && x >= 0 && x < width) {
       typeGrid[z][x] = type;
+      propDamage.delete(x + ',' + z); // the pool belonged to what stood here
       electrified = computeElectrified();
     }
   };
@@ -281,6 +320,7 @@ export function parseLevel(level) {
   return {
     name: level.name || '', width, height,
     typeAt, defAt, terrainOpen, sightOpenCell, surfaceAt, isElectrified, setType,
+    propHpAt, damageProp, edgeHpBetween, damageEdge,
     hWalls, vWalls, edgeOpen, stepOpen, sightOpen, wallEdgeBetween, removeEdgeBetween,
     doors, doorBetween, setDoorOpen,
     playerSpawn, enemySpawns, npcSpawns, companionSpawns,

@@ -163,16 +163,18 @@ export function createTacticalButton({ onToggle, isOn }) {
 // player assigns - without the row growing until it spans the screen and the
 // number keys stop lining up with it.
 //
-// Nine, because every class's whole kit fits in nine today - eight actions
-// since Take Cover joined the universal pair beside Shove (TACTICS_PLAN M6),
+// Ten, because every class's whole kit fits in ten today - nine actions
+// since Pull Over joined Shove and Take Cover as the third universal cover
+// verb (TACTICS_PLAN M8, designer: "all cover related moves are universal"),
 // plus the deliberate empty slot: a row that pages what a character ALREADY
 // HAS would hide the weapon swing behind a pager on a fresh Office Drone,
 // which is a worse trade than an unused pager. Rows arrive when the player
 // builds past one (the host pads the layout with an empty slot so there is
-// always somewhere to assign to - see main.js layoutOf). Nine is also the
-// ceiling the NUMBER KEYS can address (1-9), so the next universal verb has
-// to earn its slot by retiring one - it cannot just widen the row again.
-export const HOTBAR_ROW_SLOTS = 9;
+// always somewhere to assign to - see main.js layoutOf). Ten is the hard
+// ceiling the NUMBER KEYS can address (1-9, then 0 for the tenth) - the row
+// genuinely cannot widen again, so the NEXT universal verb has to earn its
+// slot by retiring one.
+export const HOTBAR_ROW_SLOTS = 10;
 
 // `slots` is the whole layout, in order, as view-models the host builds:
 //   { kind: 'action', id, label, icon, ap, ammoCost, unavailable }
@@ -281,7 +283,7 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
     buttons.forEach(({ b, slot, keyTag, countTag, face }, i) => {
       b.style.display = rowOf(i) === row ? '' : 'none';
       const key = (i % HOTBAR_ROW_SLOTS) + 1;
-      keyTag.textContent = String(key);
+      keyTag.textContent = String(key % 10); // the tenth slot answers to '0'
       countTag.textContent = '';
       if (!slot) {
         face.textContent = '—';

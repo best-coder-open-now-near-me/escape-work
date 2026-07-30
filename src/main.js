@@ -1423,7 +1423,7 @@ function startGame(level) {
       const a = ACTIONS[id];
       return a.ammoCost && (!a.needsTalent || !!(s.talent?.effects || {})[a.needsTalent]);
     });
-    return orderedActionIds(s, [...s.actions, equippedAction(s), 'shove', 'take-cover', ...throwables]);
+    return orderedActionIds(s, [...s.actions, equippedAction(s), 'shove', 'take-cover', 'pull', ...throwables]);
   }
   // Consumables in the pockets, deduped, with how many are in there. These are
   // the ITEMS a slot can carry: something with a `heal` or an `ammo` on it does
@@ -1990,6 +1990,38 @@ function startGame(level) {
           const e = grid.removeEdgeBetween(x, z, nx, nz);
           if (e) scene.removeEdgeWall?.(e.o, e.k);
           return !!e;
+        },
+        // Breaking cover down (TACTICS_PLAN M8). Grid keeps the pool, this
+        // pairs the grid rule with the mesh exactly as setType/toppleEdge do:
+        // a surviving prop leans (the damaged tell - the pool is hidden by
+        // design, so the object has to wear the damage), a spent one is
+        // REMOVED - tile to floor, edge out of the world, no debris ("gone
+        // means gone", designer 2026-07-30). Returns hp remaining, 0 for
+        // destroyed, null for a target with no pool.
+        propHpAt: (x, z) => grid.propHpAt(x, z),
+        damageProp: (x, z, amount) => {
+          const left = grid.damageProp(x, z, amount);
+          if (left === null) return null;
+          if (left <= 0) {
+            grid.setType(x, z, 'floor');
+            scene.refreshTile?.(x, z);
+            return 0;
+          }
+          scene.markPropDamaged?.(x, z);
+          return left;
+        },
+        edgeHpBetween: (x, z, nx, nz) => grid.edgeHpBetween(x, z, nx, nz),
+        damageEdge: (x, z, nx, nz, amount) => {
+          const left = grid.damageEdge(x, z, nx, nz, amount);
+          if (left === null) return null;
+          if (left <= 0) {
+            const e = grid.removeEdgeBetween(x, z, nx, nz);
+            if (e) scene.removeEdgeWall?.(e.o, e.k);
+            return 0;
+          }
+          const e = grid.wallEdgeBetween(x, z, nx, nz);
+          if (e) scene.markEdgeDamaged?.(e.o, e.k);
+          return left;
         },
         leaveSurface: (x, z, tileType, turns = 0) => {
           if (grid.typeAt(x, z) !== 'floor') return false;
@@ -3041,16 +3073,17 @@ function startGame(level) {
       hover.setCtrl(true); // rings under everyone while held (drawCharacterRings)
     } else if ((e.key === 'i' || e.key === 'I') && sheet && !gameOver) {
       loot.togglePanel(sheet);
-    } else if (/^[1-9]$/.test(e.key) && sheet && !gameOver && !modalOpen()) {
+    } else if (/^[0-9]$/.test(e.key) && sheet && !gameOver && !modalOpen()) {
       // Number keys press the matching slot of the VISIBLE row, so 1 is always
-      // the leftmost button on screen however many rows the kit needs.
+      // the leftmost button on screen however many rows the kit needs - and 0
+      // answers for the tenth slot (TACTICS_PLAN M8's row of ten).
       //
       // These used to be gated `!inCombat`, which meant a FIGHT - the half of
       // the game that is nothing but pressing verbs under pressure - was the
       // half with no keyboard shortcuts at all. The row you learn out of combat
       // is the row you get in one, which was always the stated point of the
       // layout living on the sheet.
-      const i = hotbar?.indexAtKey(Number(e.key)) ?? -1;
+      const i = hotbar?.indexAtKey(e.key === '0' ? 10 : Number(e.key)) ?? -1;
       if (i >= 0) pressHotbarSlot(i);
     } else if ((e.key === '[' || e.key === ']') && sheet && !gameOver && !modalOpen()) {
       // Page the hotbar rows from the keyboard - the pager buttons and the wheel
@@ -3613,6 +3646,11 @@ function startGame(level) {
     // the tile grid alone cannot say whether the wall between two open tiles
     // is still standing.
     stepOpenAt: (x, z, nx, nz) => grid.stepOpen(x, z, nx, nz),
+    // The hidden pools (TACTICS_PLAN M8) - the demolition specs' only honest
+    // window: the tile keeps its type until the pool empties, so "the hit
+    // landed" is invisible from the type grid alone.
+    propHpAt: (x, z) => grid.propHpAt(x, z),
+    edgeHpAt: (x, z, nx, nz) => grid.edgeHpBetween(x, z, nx, nz),
     // The leader's out-of-combat crouch, for the specs that seed a fight
     // with one (TACTICS_PLAN M6 OOC).
     get oocCrouch() { return oocCrouch; },

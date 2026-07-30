@@ -170,7 +170,7 @@ test('every registry cross-reference resolves', () => {
   // No orphaned actions. `firewall` sat in the registry unreferenced after IT
   // Support's kit was re-cut - dead content that still costs a reader's time
   // and still looks like something the game does.
-  const reachable = new Set(['shove', 'punch', 'take-cover']); // universal
+  const reachable = new Set(['shove', 'punch', 'take-cover', 'pull']); // universal
   for (const regs of [CLASSES, COMPANIONS]) {
     for (const def of Object.values(regs)) {
       for (const a of def.actions || []) reachable.add(a);

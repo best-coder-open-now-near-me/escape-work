@@ -139,6 +139,11 @@ export const REACH = {
   // A shove is arms-length whatever you are holding: a broom must not become a
   // telekinesis upgrade. Its own constant, deliberately not weapon reach.
   SHOVE: 1.5,
+  // Pull Over reaches ACROSS the barrier the target crouches behind
+  // (TACTICS_PLAN M8): one shield cell between the two bodies puts them ~2
+  // tiles apart, and 2.5 keeps the grab legal from the off-centre points
+  // bodies actually stand at. Like the shove, it is anatomy, not equipment.
+  PULL: 2.5,
 };
 
 // How far a thrown weapon carries, in tiles (Chebyshev). Combat's throw gate

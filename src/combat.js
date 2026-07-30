@@ -16,7 +16,7 @@ import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitCh
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, crouchShields, hasCover, TACTICS } from './tactics.js';
 import {
-  buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, isPurge, coneFrom, conePolyline, aimRangeOf, rangeTiles,
+  buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, isPurge, coneFrom, conePolyline, aimRangeOf, rangeTiles, isBreakable, aimsAtProps, isPull, pullLanding,
 } from './powers.js';
 import { createAimPaint } from './aim-paint.js';
 import { STATUSES } from './data/statuses.js';
@@ -332,7 +332,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // different orders is a tax paid mid-fight, when there is least attention to
   // spare for re-reading a row of buttons.
   const actionIdsOf = (m) => orderedActionIds(
-    m.sheet, [...m.sheet.actions, equippedAction(m.sheet), 'shove', 'take-cover', ...throwablesFor(m)],
+    m.sheet, [...m.sheet.actions, equippedAction(m.sheet), 'shove', 'take-cover', 'pull', ...throwablesFor(m)],
   );
   // The acting member's cost for a throw - the shared rule (stats.js), bound to
   // whoever currently has the floor.
@@ -1452,7 +1452,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // of the truth. The per-enemy rings below answer it exactly for those.
     if (hoverFoe?.alive && !rangeOf(id)) {
       const me = posOf(active);
-      drawRing(me.x, me.z, a.type === 'shove' ? REACH.SHOVE : reachOfUnit(active), REACH_RING);
+      const r = a.type === 'shove' ? REACH.SHOVE : isPull(a) ? REACH.PULL : reachOfUnit(active);
+      drawRing(me.x, me.z, r, REACH_RING);
     }
     // Props are targets too, and nothing ever said so. A shove that puts a
     // filing cabinet on somebody is strictly the better move where it is
@@ -1493,12 +1494,46 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           world.terrainOpen(px, pz) && active.ap >= a.ap ? PREVIEW_OK : PREVIEW_FAR);
       }
     }
+    // Breakable cover rings under an ARMED attack (TACTICS_PLAN M8) - the
+    // same promise the shove's prop rings make: green means the click lands
+    // the hit. A melee swing rings its neighbourhood, a ranged attack
+    // everything it could hit; adjacent partitions ring like the shove's do
+    // (a DISTANT partition stays un-rung - the shove's own partial-affordance
+    // precedent `[proposed]` - though the ranged click still resolves).
+    if (aimsAtProps(a)) {
+      const b = bodyOf(active);
+      const lim = rangeOf(id) || 1;
+      for (let dx = -lim; dx <= lim; dx++) {
+        for (let dz = -lim; dz <= lim; dz++) {
+          if (!dx && !dz) continue;
+          const px = b.x + dx;
+          const pz = b.z + dz;
+          if (!isBreakable(world.tileDefAt(px, pz))) continue;
+          const plan = breakPlanAt(id, px, pz);
+          const ok = !!plan && !plan.refusal
+            && (!a.ammoCost || active.sheet.paper >= ammoCostOf(id)) && active.ap >= a.ap;
+          drawRing(px, pz, 0.42, ok ? PREVIEW_OK : PREVIEW_FAR);
+        }
+      }
+      for (const [dx, dz] of ORTHO) {
+        const px = b.x + dx;
+        const pz = b.z + dz;
+        if (world.edgeHpBetween(b.x, b.z, px, pz) === null) continue;
+        drawRing(px, pz, 0.42,
+          (!a.ammoCost || active.sheet.paper >= ammoCostOf(id)) && active.ap >= a.ap
+            ? PREVIEW_OK : PREVIEW_FAR);
+      }
+    }
     for (const en of world.liveEnemies()) {
       if (!en.entity) continue;
       let ok;
       const range = rangeOf(id);
       if (a.type === 'shove') {
         ok = canReach(active, en, REACH.SHOVE) && active.ap >= a.ap;
+      } else if (isPull(a)) {
+        // Green is the pull's whole promise: crouched, their shield between
+        // you, in reach over it, room on your side (TACTICS_PLAN M8).
+        ok = !!pullPlanFor(en) && active.ap >= a.ap;
       } else if (isControl(a) && controlIsRanged(a)) {
         // A thrown control needs the range and the line, same as a throw. A
         // touch-range one falls to the melee case below: clicking a distant
@@ -2161,6 +2196,103 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return true;
   }
 
+  // --- breaking cover down (TACTICS_PLAN M8) --------------------------------
+  // An attack aimed at the FURNITURE: melee and ranged both, per the designer
+  // ("melee could gradually break down a barrier", clarified "melee and
+  // ranged"). Only the cover-grade set carries an HP pool (data/tiles.js), and
+  // at zero the object is REMOVED - not toppled, not substituted: "gone means
+  // gone", because every other verb keeps the barrier in play. Objects do not
+  // dodge `[proposed]`: the swing auto-hits, spends its full cost, and rolls
+  // its normal damage - pricing is what keeps demolition from being free.
+
+  // What the armed attack resolves on at (tx, tz): a breakable prop ON the
+  // tile, or a partition edge - square-on for a swing (the topple's own aim),
+  // or on the clicked tile's face TOWARD the shooter for a shot. Returns
+  // { kind } to commit, { refusal } to explain, null to fall through. Melee
+  // does not walk in for v1 `[proposed]` - the rings only promise reach.
+  function breakPlanAt(id, tx, tz) {
+    const a = ACTIONS[id];
+    if (!aimsAtProps(a)) return null;
+    const me = posOf(active);
+    const range = rangeOf(id);
+    if (isBreakable(world.tileDefAt(tx, tz))) {
+      if (range) {
+        if (cheb(active.actor.x, active.actor.z, tx, tz) > range) return { refusal: 'Too far.' };
+        if (!world.hasLos(active.actor.x, active.actor.z, tx, tz)) return { refusal: 'No clear line to it.' };
+      } else if (!inReach(me.x, me.z, tx, tz, reachOfUnit(active), world.stepOpen)) {
+        return { refusal: 'Too far to swing at it.' };
+      }
+      return { kind: 'prop', tx, tz };
+    }
+    const ax = active.actor.x;
+    const az = active.actor.z;
+    if (!range) {
+      // Square-on and at arm's reach, exactly as the partition shove aims.
+      if (Math.abs(tx - ax) + Math.abs(tz - az) === 1
+        && world.edgeHpBetween(ax, az, tx, tz) !== null) {
+        return { kind: 'edge', a: [ax, az], b: [tx, tz] };
+      }
+      return null;
+    }
+    // A shot takes the panel on the clicked tile's near face - the edge a
+    // sightline from here would cross first. Partitions never block sight
+    // (M6a), so the line test is about smoke and doors, not the target.
+    const sx = Math.sign(ax - tx);
+    const sz = Math.sign(az - tz);
+    for (const [nx, nz] of [[tx + sx, tz], [tx, tz + sz]]) {
+      if (nx === tx && nz === tz) continue;
+      if (world.edgeHpBetween(tx, tz, nx, nz) === null) continue;
+      if (cheb(ax, az, tx, tz) > range) return { refusal: 'Too far.' };
+      if (!world.hasLos(ax, az, tx, tz)) return { refusal: 'No clear line to it.' };
+      return { kind: 'edge', a: [tx, tz], b: [nx, nz] };
+    }
+    return null;
+  }
+
+  // Put the hit in. One resolver for both shapes: spend, swing or shoot,
+  // roll the dice into the pool, and either report the dent (the world
+  // facade leans the mesh - the pool is hidden, the object wears it) or
+  // watch the world facade delete the thing. The crouch behind it needs no
+  // hook: refresh()'s revalidation finds the shield missing.
+  function performBreak(id, plan) {
+    const a = ACTIONS[id];
+    if (active.ap < a.ap) { log('Not enough AP.'); return; }
+    if (a.ammoCost && active.sheet.paper < ammoCostOf(id)) { log('Out of paper.'); return; }
+    const prop = plan.kind === 'prop';
+    const px = prop ? plan.tx : (plan.a[0] + plan.b[0]) / 2;
+    const pz = prop ? plan.tz : (plan.a[1] + plan.b[1]) / 2;
+    const label = prop
+      ? (world.tileDefAt(plan.tx, plan.tz)?.label || 'furniture').toLowerCase()
+      : 'partition';
+    if (a.ammoCost) active.sheet.paper -= ammoCostOf(id);
+    active.ap = roundAp(active.ap - a.ap);
+    if (a.uses) active.usesLeft[id] -= 1;
+    if (rangeOf(id)) {
+      fx.projectile({ x: active.actor.x, z: active.actor.z }, { x: px, z: pz },
+        a.ammoCost ? 'ball' : 'shot');
+    } else {
+      active.actor.lunge(px, pz);
+    }
+    faceTarget(active, px, pz);
+    const dmg = rand(a.min, a.max) + damageBonus(active.sheet);
+    const left = prop
+      ? world.damageProp(plan.tx, plan.tz, dmg)
+      : world.damageEdge(plan.a[0], plan.a[1], plan.b[0], plan.b[1], dmg);
+    fx.damageText(px, pz, `-${dmg}`, '#ffd76b', { big: left === 0 });
+    fx.impact(px, pz, 'slam', { y: 0.4 });
+    if (left === 0) {
+      fx.shake(0.09, 0.24);
+      log(prop
+        ? `The ${label} comes apart. The office is short one piece of cover.`
+        : 'The partition comes apart. Open plan, the hard way.');
+    } else {
+      log(`You lay into the ${label}. -${dmg}.${left <= dmg ? ' It is coming apart.' : ''}`);
+    }
+    armed = null;
+    refresh(); // any crouch behind it revalidates here
+    if (!hostilesRemain()) victory();
+  }
+
   // --- take cover (TACTICS_PLAN M6) -----------------------------------------
 
   // Whoever is standing on (x, z) - member, summon or coworker. The take-cover
@@ -2309,6 +2441,112 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return true;
     }
     return false;
+  }
+
+  // --- Pull Over (TACTICS_PLAN M8) ------------------------------------------
+  // The third universal cover verb (designer: "all cover related moves are
+  // universal"): reach across the thing a target crouches behind and haul
+  // them onto your side of it. The barrier STAYS STANDING - the shove
+  // relocates cover, the break-down deletes it, this one moves the PERSON -
+  // and the trip over is dropOnto's own Grit save arrived at from the far
+  // side: pass lands them on their feet, fail wears the crush, the existing
+  // stun, and the pin.
+
+  // Can the pull haul `en` right now, and where do they land? Null when any
+  // leg fails. pullRefusal walks the same legs in the same order, so the
+  // click's explanation can never disagree with the plan.
+  function pullPlanFor(en) {
+    const s = crouchStateOf(en);
+    if (!s) return null;
+    // A HUMAN shield is not a barrier: you do not haul somebody over a
+    // colleague, you deal with the colleague. Objects and edges only.
+    if (s.shield) return null;
+    const A = bodyOf(active);
+    const D = bodyOf(en);
+    // Their shield must stand BETWEEN you: the verb is a reach OVER cover,
+    // which is also what keeps it from being a generic drag - from their
+    // open side you have swings and shoves already.
+    const shielded = s.edges
+      ? hasCover(A.x, A.z, D.x, D.z, world.stepOpen)
+      : crouchShields(A.x, A.z, D.x, D.z, s.x, s.z);
+    if (!shielded) return null;
+    const me = posOf(active);
+    const dp = posOf(en);
+    if (dist(me.x, me.z, dp.x, dp.z) > REACH.PULL) return null;
+    const landing = pullLanding(A.x, A.z, D.x, D.z,
+      (x, z) => world.isWalkable(x, z) && !unitStandingAt(x, z));
+    return landing ? { s, landing } : null;
+  }
+
+  // WHY the pull refuses, leg by leg - the plan above in message form.
+  function pullRefusal(en) {
+    const s = crouchStateOf(en);
+    if (!s) return `${en.def.name} is not dug in behind anything - nothing to pull them over.`;
+    if (s.shield) return 'Their cover is a person - that is a shove, not a pull.';
+    const A = bodyOf(active);
+    const D = bodyOf(en);
+    const shielded = s.edges
+      ? hasCover(A.x, A.z, D.x, D.z, world.stepOpen)
+      : crouchShields(A.x, A.z, D.x, D.z, s.x, s.z);
+    if (!shielded) return 'Their cover is not between you - get to its far side first.';
+    const me = posOf(active);
+    const dp = posOf(en);
+    if (dist(me.x, me.z, dp.x, dp.z) > REACH.PULL) return 'Too far to reach over.';
+    return 'No room on your side to land them.';
+  }
+
+  function performPull(id, en, plan) {
+    const a = ACTIONS[id];
+    const [lx, lz] = plan.landing;
+    const what = crouchLabel(plan.s);
+    active.actor.lunge(en.x, en.z);
+    faceTarget(active, en.x, en.z);
+    // The crouch dies in your fist, quietly - the haul is the story. pushTo
+    // is forced movement: no provoke, no per-tile hooks, the shove's seam.
+    breakCrouch(en, true);
+    en.pushTo(lx, lz);
+    let msg = `You haul ${en.def.name} over the ${what}.`;
+    // The same save everything manhandled rolls (stats.gritSaveChance), with
+    // the same forceHit pin for the specs: true = the haul fully lands.
+    const saved = forceHit !== null ? !forceHit : rollHit(gritSaveChance(en.def.grit ?? 2), rng);
+    if (saved) {
+      en.flinch?.();
+      msg += ' They twist and land on their feet.';
+    } else {
+      const dmg = rand(a.crush[0], a.crush[1]);
+      const died = en.takeDamage(dmg);
+      hitFx(en, 'slam', active);
+      if (died) deathFx(en);
+      fx.damageText(lx, lz, `-${dmg}`, '#ffd76b', { big: died });
+      msg += ` They come down hard. -${dmg}.`;
+      if (!died) {
+        const blocked = blockedBy(en, 'stunned');
+        if (applyStatus(en, 'stunned')) {
+          statusFxAt(en, 'stunned');
+          msg += ' Dazed.';
+        } else if (blocked) msg += ` ${immunityLine(blocked, en.def.name)}`;
+        if (applyStatus(en, 'pinned')) statusFxAt(en, 'pinned');
+      } else {
+        callbacks.onEnemyKilled(en);
+      }
+    }
+    // Landing them in a hazard is the puller's gift to give - the same
+    // surface rule the shove's glide applies.
+    if (en.alive) {
+      const sdmg = world.enemySurfDamage(lx, lz);
+      if (sdmg > 0) {
+        const died = en.takeDamage(sdmg);
+        fx.impact(lx, lz, hazardKind(lx, lz), { y: 0.4 });
+        if (died) deathFx(en);
+        fx.damageText(lx, lz, `-${sdmg}`, '#ffd76b', { big: died });
+        msg += ` The landing is ${world.isElectrified && world.isElectrified(lx, lz) ? 'LIVE' : 'a hazard'}. -${sdmg}.`;
+        if (died) callbacks.onEnemyKilled(en);
+      }
+    }
+    log(msg);
+    armed = null;
+    refresh();
+    if (!hostilesRemain()) victory();
   }
 
   // --- the mobility verb (POWERS_PLAN M4) ----------------------------------
@@ -2815,6 +3053,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (!hostilesRemain()) victory();
       return;
     }
+    if (isPull(a)) {
+      const plan = pullPlanFor(en);
+      if (!plan) { refuse(pullRefusal(en)); return; }
+      if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
+      joinCombat(en);
+      active.ap = roundAp(active.ap - a.ap);
+      performPull(armed, en, plan);
+      return;
+    }
     const range = rangeOf(armed);
     if (range) {
       const thrown = !!a.ammoCost; // a wad and a staple miss differently
@@ -3195,6 +3442,24 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         // the PARTITION over onto it (designer, 2026-07-30).
         if (performPartitionTopple(tile.x, tile.z)) return;
       }
+      // Pull Over aimed at the ground resolves on whoever HOLDS the tile -
+      // the same rule Take Cover reads, and for the same reason: its whole
+      // target class is crouched bodies, and a crouched body is a squashed
+      // pose that is easy to click past (TACTICS_PLAN M8).
+      if (isPull(a)) {
+        const en = world.liveEnemies().find((e) => e.x === tile.x && e.z === tile.z);
+        if (en) { handleEnemyClick(en); return; }
+        log('Aim at a coworker dug in behind cover.');
+        return;
+      }
+      // An attack aimed at the furniture (TACTICS_PLAN M8): a breakable prop
+      // on the tile, or a partition on its face toward you, takes the hit -
+      // melee and ranged both, and "gone means gone" at zero.
+      if (aimsAtProps(a)) {
+        const plan = breakPlanAt(armed, tile.x, tile.z);
+        if (plan?.refusal) { log(plan.refusal); return; }
+        if (plan) { performBreak(armed, plan); return; }
+      }
       // Aiming: a left click NEVER cancels. Missing the target used to lower
       // the action (and, with a cone out of AP, could strand you unable to do
       // either) - so say what went wrong and stay armed. Right-click cancels.
@@ -3247,6 +3512,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       out.push('Ranged attacks from the shielded side cannot touch you - melee and flanking still can');
       out.push('Moving breaks it; attacking does not');
     }
+    if (isPull(a)) {
+      out.push('Aim at an enemy dug in behind cover, from its far side - you reach over and haul them to you');
+      out.push(`Grit save: pass lands them on their feet, fail is ${a.crush[0]}-${a.crush[1]} damage, dazed and pinned`);
+      out.push('Their cover stays standing');
+    }
     if (isStance(a)) {
       out.push(`Watches ${watchRadiusOf(a)} tiles until your next turn`);
       out.push('Spends your reaction when it fires - one per round, shared with opportunity attacks');
@@ -3290,13 +3560,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const wasPending = pendingConfirm;
     pendingConfirm = null;
     if (a.type === 'attack' || a.type === 'shove' || a.type === 'summon' || a.type === 'cover'
-      || isFriendly(a) || isControl(a) || isZone(a) || isMobility(a) || isPurge(a)) {
+      || isPull(a) || isFriendly(a) || isControl(a) || isZone(a) || isMobility(a) || isPurge(a)) {
       armed = id; // arm it; clicking a ringed target (or a spot) fires it
       hidePreview(); // aiming now - the movement trail yields to targets
       log(a.type === 'summon'
         ? `${a.label} armed. Click where they should report.`
         : a.type === 'cover'
           ? `${a.label} armed. Click something solid - or somebody brave.`
+          : isPull(a)
+          ? `${a.label} armed. Click a coworker dug in behind cover.`
           : isZone(a)
           ? `${a.label} armed. Click where it should land.`
           : isMobility(a) && !aimsAtAlly(a)
@@ -4246,6 +4518,21 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
       refresh();
       return ok;
+    },
+    // Crouch a named coworker behind the cell (sx, sz) - or, with no cell,
+    // against their own tile's partitions (edge mode). Same rationale as the
+    // status pin above: the enemy-side crouch is half of Pull Over's testable
+    // surface (TACTICS_PLAN M8), and the only natural route there is steering
+    // the AI into its turtle beat - which would make a pull spec a test of AI
+    // pathing instead of the verb. Routes through the real crouchAt, so the
+    // commitment it plants is the one the pull actually reads.
+    crouch: (targetName, sx = null, sz = null) => {
+      const u = engaged.find((e) => e.alive && e.def.name === targetName);
+      if (!u) return false;
+      if (sx === null) crouchAtEdges(u);
+      else crouchAt(u, sx, sz);
+      refresh();
+      return true;
     },
     // End the ACTING turn programmatically. The e2e suite needs this: driving
     // rounds by clicking End Turn costs a DOM round-trip and a settle per turn,

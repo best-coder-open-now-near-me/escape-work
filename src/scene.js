@@ -114,6 +114,7 @@ export function buildLevel(app, grid, { picking = null } = {}) {
     const entry = edgeWallVisuals.get(orient + ':' + k);
     if (!entry) return;
     edgeWallVisuals.delete(orient + ':' + k);
+    damagedEdges.delete(orient + ':' + k);
     entry.entity.destroy();
     const i = walls.indexOf(entry);
     if (i >= 0) walls.splice(i, 1);
@@ -193,6 +194,32 @@ export function buildLevel(app, grid, { picking = null } = {}) {
     }
   }
 
+  // The damaged TELL (TACTICS_PLAN M8): a wounded prop sits visibly askew -
+  // knocked a few degrees off true - because the HP pool is hidden by design
+  // and a barrier that is half gone must not look factory-fresh. Additive
+  // rotation on the holder (rotateLocal), so a model's authored rotY/tilt
+  // survives; the sets keep it one nudge per object however many hits land.
+  // State dies with the visual: refreshTile rebuilds straight, which is right
+  // - a tile that changed TYPE starts a fresh pool (grid.setType).
+  const damagedProps = new Set();
+  const damagedEdges = new Set();
+  function markPropDamaged(x, z) {
+    const key = x + ',' + z;
+    if (damagedProps.has(key)) return;
+    const v = propVisuals.get(key);
+    if (!v) return;
+    damagedProps.add(key);
+    v.rotateLocal(2, 9, 3);
+  }
+  function markEdgeDamaged(orient, k) {
+    const key = orient + ':' + k;
+    if (damagedEdges.has(key)) return;
+    const entry = edgeWallVisuals.get(key);
+    if (!entry) return;
+    damagedEdges.add(key);
+    entry.entity.rotateLocal(4, 0, orient === 'h' ? 2 : -2);
+  }
+
   // Re-render whatever this cell has BECOME (POWERS_PLAN M6). The two existing
   // mutators each know one shape - removePropVisual only deletes,
   // addSurfaceVisual only keeps a `surface` result and drops a model's async
@@ -203,6 +230,7 @@ export function buildLevel(app, grid, { picking = null } = {}) {
   function refreshTile(x, z) {
     removePropVisual(x, z);
     hideSurfaceVisual(x, z);
+    damagedProps.delete(x + ',' + z); // rebuilt straight; a new pool leans anew
     const type = grid.typeAt(x, z);
     if (type === null) return;
     r.renderFloor(x, z, carpetAt.get(x + ',' + z) || type);
@@ -229,7 +257,7 @@ export function buildLevel(app, grid, { picking = null } = {}) {
     addFlame: r.addFlame, explosionFlash: r.explosionFlash,
     addSmoke: r.addSmoke, removeSmoke: r.removeSmoke,
     hideSurfaceVisual, addSurfaceVisual, removePropVisual, refreshTile,
-    refreshDoor: renderDoorAt, removeEdgeWall,
+    refreshDoor: renderDoorAt, removeEdgeWall, markPropDamaged, markEdgeDamaged,
     floorHeight: r.floorHeight,
   };
 }
