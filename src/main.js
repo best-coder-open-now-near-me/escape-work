@@ -437,6 +437,28 @@ function startGame(level) {
       loot.forgetPaper?.(x, z); // a fresh drift here later is gatherable again
     }
   }
+  // Drop a power's surface on bare floor: grid, visual and the litter clock in
+  // one write. Combat's world callback and the out-of-combat cone both land
+  // here, so a drift laid with no fight on ages and reverts exactly like one
+  // laid mid-round - two copies of this rule is how the two would drift.
+  function leaveSurfaceAt(x, z, tileType, turns = 0) {
+    if (grid.typeAt(x, z) !== 'floor') return false;
+    grid.setType(x, z, tileType);
+    scene.addSurfaceVisual(x, z, tileType);
+    if (turns > 0) tempSurfaces.set(x + ',' + z, { left: turns, type: tileType });
+    // Ammo comes from the WORLD, never from a power. A paper-laying verb
+    // that could be harvested afterwards is an AP-to-ammo converter, and
+    // expiry alone does not prevent it: harvesting is refused in combat
+    // but legal the moment a fight ends, and the litter clock runs at
+    // OOC_TURN_SECONDS, so a cone laid late in a fight is still on the
+    // floor for seconds after it - one click takes the whole patch.
+    // Marking the tile picked-clean at birth closes that without touching
+    // the surface itself: the sheets still burn, still cut, still fuel a
+    // fire. `forgetPaper` drops the mark when the tile reverts to bare
+    // floor, so a WORLD drift laid there later is gatherable again.
+    if (tileType === 'paper') loot.markPaperSpent?.(x, z);
+    return true;
+  }
   const portraits = createPortraits(app);
   // The face on the HUD card belongs to whoever the card is SHOWING. It rides
   // the actor (portraits.js), so resolve it from the sheet on every repaint
@@ -1537,10 +1559,13 @@ function startGame(level) {
     if (!armedOoc) { ui.say('You stand down.'); return; }
     const a = ACTIONS[armedOoc];
     // What the armed slot is waiting for. A summon aims at the FLOOR, so
-    // "click a coworker" would be aiming instructions for the wrong thing.
+    // "click a coworker" would be aiming instructions for the wrong thing -
+    // and a cone needs no coworker at all, so its hint must not demand one.
     ui.say(a.type === 'summon'
       ? `${a.label} ready — click a spot within ${summonRange(a)} tiles to post it.`
-      : `${a.label} ready — click a coworker to start it.`);
+      : a.cone
+        ? `${a.label} ready — point it and click to fire.`
+        : `${a.label} ready — click a coworker to start it.`);
   }
 
   // --- posting the role with no fight on ----------------------------------------
@@ -1770,24 +1795,7 @@ function startGame(level) {
           if (e) scene.markEdgeDamaged?.(e.o, e.k);
           return left;
         },
-        leaveSurface: (x, z, tileType, turns = 0) => {
-          if (grid.typeAt(x, z) !== 'floor') return false;
-          grid.setType(x, z, tileType);
-          scene.addSurfaceVisual(x, z, tileType);
-          if (turns > 0) tempSurfaces.set(x + ',' + z, { left: turns, type: tileType });
-          // Ammo comes from the WORLD, never from a power. A paper-laying verb
-          // that could be harvested afterwards is an AP-to-ammo converter, and
-          // expiry alone does not prevent it: harvesting is refused in combat
-          // but legal the moment a fight ends, and the litter clock runs at
-          // OOC_TURN_SECONDS, so a cone laid late in a fight is still on the
-          // floor for seconds after it - one click takes the whole patch.
-          // Marking the tile picked-clean at birth closes that without touching
-          // the surface itself: the sheets still burn, still cut, still fuel a
-          // fire. `forgetPaper` drops the mark when the tile reverts to bare
-          // floor, so a WORLD drift laid there later is gatherable again.
-          if (tileType === 'paper') loot.markPaperSpent?.(x, z);
-          return true;
-        },
+        leaveSurface: leaveSurfaceAt,
         // Anyone alive is a legal target - bystanders outside the initial
         // engagement get pulled in when attacked.
         // A BORROWED coworker is off this list for the duration (TODO Phase 8).
@@ -1930,6 +1938,32 @@ function startGame(level) {
       && canTakePart(player, e)); // same rule as checkCombatTrigger - see there
     if (!engaged.includes(en)) engaged.push(en);
     beginCombat({ engaged, primary: en, opening: { actionId, target: en } });
+  }
+
+  // A cone fired at an EMPTY wedge, with no fight on. It fires anyway
+  // (designer, 2026-07-31: no target needed, in or out of combat) - combat's
+  // fireCone already resolves this exact case as a swing with no casualties
+  // and a carpeted wedge, so this is that outcome minus the two things a
+  // fight owns (AP, per-fight uses), the same subtraction the out-of-combat
+  // summon post makes. `test` is the wedge from coneFrom, aimed at (tx, tz).
+  function fireOocCone(a, test, tx, tz) {
+    player.lunge(tx, tz); // the fan of envelopes, aimed where you pointed
+    if (a.leaves) {
+      const R = Math.ceil(a.cone.range);
+      for (let z = Math.floor(player.z) - R; z <= Math.ceil(player.z) + R; z++) {
+        for (let x = Math.floor(player.x) - R; x <= Math.ceil(player.x) + R; x++) {
+          if (!test(x, z)) continue;
+          // No carpeting a tile a teammate is standing on - combat's own rule.
+          if (partyAt(x, z)) continue;
+          if (!hasLos(player, { x, z })) continue;
+          leaveSurfaceAt(x, z, a.leaves, a.leavesTurns || 0);
+        }
+      }
+    }
+    ui.say(`${a.log} No casualties. Plenty of litter.`); // combat's own zero-hit line
+    // One click, one volley: the slot disarms, same as a posted summon.
+    armedOoc = null;
+    hotbar?.setArmed(null);
   }
 
   // --- the office topples out of combat too (TACTICS_PLAN M6 OOC) -------------
@@ -2544,19 +2578,23 @@ function startGame(level) {
       // and the ground branch only ever handled summons, so aiming Bulk Mail at
       // the floor silently walked you there instead. It opens the fight on
       // whoever the wedge actually catches, which is the same rule the preview
-      // just drew.
+      // just drew - and an EMPTY wedge fires all the same (designer,
+      // 2026-07-31): it needed a coworker in the way before, which made the
+      // one cone whose whole point is the paper behind it the one attack you
+      // could not fire at the floor.
       if (armedOoc && ACTIONS[armedOoc].cone && point) {
         const a = ACTIONS[armedOoc];
         const test = coneFrom(a, { x: player.x, z: player.z }, point.x, point.z);
-        const caught = test ? coneCatches(test) : [];
-        if (!caught.length) {
-          ui.say(`Nobody is in the way of that ${a.label.toLowerCase()}.`);
+        if (!test) { ui.say('Aim somewhere.'); return; } // the cursor is on you
+        const caught = coneCatches(test);
+        if (caught.length) {
+          // The nearest one is the primary; the rest join through the engage
+          // radius exactly as they would for any other opener.
+          caught.sort((p, q) => cheb(player, p) - cheb(player, q));
+          engageWithAction(caught[0], armedOoc);
           return;
         }
-        // The nearest one is the primary; the rest join through the engage
-        // radius exactly as they would for any other opener.
-        caught.sort((p, q) => cheb(player, p) - cheb(player, q));
-        engageWithAction(caught[0], armedOoc);
+        fireOocCone(a, test, point.x, point.z);
         return;
       }
       // An armed SHOVE aimed at the office itself works out here too
@@ -2831,7 +2869,10 @@ function startGame(level) {
         const test = coneFrom(a, { x: player.x, z: player.z }, oocAim.x, oocAim.z);
         if (!test) return null;
         const caught = coneCatches(test);
-        return { line: conePolyline(a, test), caught: caught.map((e) => [e.x, e.z]), usable: !!caught.length };
+        // The wedge is ALWAYS usable - an empty one fires too (fireOocCone),
+        // exactly as combat's own preview draws it - so the color must not
+        // read as a refusal. `caught` still rings whoever it would open on.
+        return { line: conePolyline(a, test), caught: caught.map((e) => [e.x, e.z]), usable: true };
       },
       summonDrop: () => {
         if (!armedOoc || inCombat || !oocAim) return null;
