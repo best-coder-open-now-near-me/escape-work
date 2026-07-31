@@ -465,7 +465,7 @@ Changes only; the Drone, the Mail Room and Security keep their primaries.
 | **Office Drone** | `attack` | `attack`, `defend`, **—** | Loses `coffee`. Still the baseline, now a baseline with two buttons; a third wants finding (see risks). |
 | **Middle Manager** | **`summon`** | `delegate`, **`escalate`**, **—** | Loses `own-calendar` and `espresso`. Gains a summon. Keeps `delegate` as flavour, not as identity — decision 21. |
 | **Mail Room** | `mobility` | `mail-cone`, `courier-route`, **—** | Loses `snack-cart`. |
-| **IT Support** | `purge` | `reboot`, **—** | Loses `energy-drink`. Down to one base power (plus two track controls); see risk 10. |
+| **IT Support** | `purge` | `reboot`, **—** | Loses `energy-drink`. Still has `kick` from the ESD Steel-Toes talent and the two richest track grants in the game (`percussive-maintenance`, `remote-session`) — see risk 10. |
 | **Human Resources** | **`heal`**† | `performance-review`, `onboarding`, **`triage`** | Loses `summon-applicants` and `coffee`. Gains the game's only heal, aimed at anyone on your side including itself. |
 | **Security** | `stance` | `detain`, `stand-post`, **—** | Loses `night-thermos`. |
 
@@ -533,11 +533,13 @@ tip into *mandatory* — a support class you must recruit is a tax, not a choice
 - **E2E (`tests/e2e/classes.spec.js`)** — the Manager's bar shows a summon and
   no heal; HR's heal lands on a *teammate's* HP bar when aimed at one, and on
   its own when aimed at itself.
-- **Manual** — one floor as IT Support, no HR in the party. That is the
-  thinnest kit on the frailest body with nothing to top it up, so it is where
-  decision 18's "for now" gets tested. If it is miserable, the answer is the
-  item economy or a second healer — in that order, and not by giving the
-  energy drink back.
+- **Manual** — floor one as IT Support with no HR in the party, at level 1 and
+  again with the track bought out. The frailest body with nothing to top it up
+  is where decision 18's "for now" gets tested, and playing it at both ends of
+  the growth curve is what separates "this class is under-powered" from "floor
+  one is short of class points" — which have different fixes. If it is
+  miserable, the answer is the item economy, `PROGRESSION_PLAN`'s point pacing,
+  or a second healer, in that order. Not the energy drink back.
 
 ### Risks
 
@@ -546,25 +548,34 @@ tip into *mandatory* — a support class you must recruit is a tax, not a choice
    there" (designer, 2026-07-31). The difficulty swing is the intent, not the
    hazard. Left in the record because it is the risk this milestone *looks*
    like it has, and the next reader will re-derive it otherwise.
-10. **Kit sizes go lopsided.** Nobody's bar is actually empty — the weapon
-    swing, `shove`, `take-cover` and the paper throws are universal — but among
-    *class* powers M9 leaves: HR 3, Drone / Manager / Mail Room / Security 2,
-    **IT Support 1** (`reboot`, plus two track controls it may never buy). Two
-    separate problems hide in that spread:
-    - **IT is thin by count.** One base power on the game's most fragile class,
-      and its identity verb is a utility that deals no damage. A level-1 IT
-      Support is a letter opener and a cleanse.
-    - **The Drone is thin by kind.** It keeps `attack` + `defend` — the two
-      most generic verbs in the game, and `defend` is the one this plan already
-      calls the least interesting survivor of the M8 sweep. Everyone else's
-      remaining two are distinctive. That is awkward for the class *defined* as
-      "the baseline the others read against": a baseline should be plain, but
-      when it is the only kit made entirely of the generic verbs, "plain"
-      stops reading as deliberate and starts reading as unfinished.
+10. **A level-1 kit is two powers wide.** Not a roster problem — count the
+    whole growth path and M9 leaves the classes level:
 
-    Both want a third power eventually. Neither blocks M9 — this is the
-    milestone that *takes things away*, and adding replacements in the same
-    breath would hide whether the removal worked.
+    | Class | Level 1 | Track grants | Grown |
+    |---|---|---|---|
+    | Office Drone | `attack`, `defend` | `paper-storm` | 3 |
+    | Middle Manager | `delegate`, `escalate` | `all-hands` | 3 |
+    | Mail Room | `mail-cone`, `courier-route` | `courier-swap` | 3 |
+    | IT Support | `reboot`, `kick` (talent) | `percussive-maintenance`, `remote-session` | 4 |
+    | Human Resources | `performance-review`, `triage` | `onboarding` | 3 |
+    | Security | `detain`, `stand-post` | `hold-the-line`, `lockdown` | 4 |
+
+    Plus the universal bar everyone always has (the weapon swing, `shove`,
+    `take-cover`, the paper throws). 3/3/3/3/4/4 grown is as even as the
+    roster has been, and IT — the class this risk previously called thinnest —
+    has the *most* track actions in the game.
+
+    So the residue is a **pacing** note about floor one, not a class-design
+    one: every kit is two wide before any class points are spent, where it used
+    to be three. "Your kit fills out as you level" is what a progression system
+    is for, and `PROGRESSION_PLAN` owns when the first point lands. The only
+    thing worth watching is the Office Drone, whose two are `attack` +
+    `defend` — the two most generic verbs in the game, and `defend` is the one
+    this plan calls the least interesting survivor of the M8 sweep. A baseline
+    class should be plain on purpose; it should not be the one kit made
+    entirely of the leftovers. If that reads badly on floor one the answer is
+    to make the Drone's *track* land earlier or hit harder, not to give the
+    coffee back.
 11. **`primary: 'control'` ends up owned by nobody** (decision 21). The lint
     checks uniqueness, not coverage, so nothing breaks — but "one verb per
     class" quietly becomes "one verb per class, and one spare." Worth deciding
