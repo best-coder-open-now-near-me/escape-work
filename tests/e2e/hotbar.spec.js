@@ -104,13 +104,14 @@ test('right-click a slot to reassign it; assigning swaps rather than duplicates'
     'hotbar-slot-9',
   ]);
 
-  // The layout rides on the SHEET, so pressing key 1 now arms what is in slot 1
-  // - Paper Storm, which aims at a point and previews out of combat too. That
-  // it arms the ZONE rather than the email is the proof the press followed the
-  // swap rather than the old position.
+  // The layout rides on the SHEET, so pressing key 1 now arms what is in slot 1.
+  // (Paper Storm is combat-only out here, so it refuses and says why - which is
+  // proof the press landed on the zone and not on the email that used to be
+  // there. The refusal is the zone's, not a heal's: the message names swinging
+  // rather than pockets.)
   await page.keyboard.press('1');
-  await expect.poll(() => page.evaluate(() => window.__game.armed)).toBe('paper-storm');
-  await page.keyboard.press('Escape');
+  expect(await page.evaluate(() => window.__game.narration.at(-1))).toMatch(/swinging/i);
+  expect(await page.evaluate(() => window.__game.armed)).toBe(null);
 
   // Clearing a slot leaves it empty and addressable, not collapsed.
   await page.click('#hotbar-act-paper-storm', { button: 'right' });
