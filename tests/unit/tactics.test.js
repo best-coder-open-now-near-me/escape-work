@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   toHitTerms, cheb, threatens, provokedBy, hasCover, isFlanked, isBackstab, positionMods,
-  dist, reachOpen, inReach, crouchShields,
+  dist, reachOpen, inReach, crouchShields, shieldedFaces, facesShieldFrom,
 } from '../../src/tactics.js';
 import { HIT, REACH, hitChance } from '../../src/stats.js';
 
@@ -497,4 +497,77 @@ test('crouchShields: only the committed cell shields - not other adjacency', () 
   assert.equal(crouchShields(2, 2, 5, 5, 4, 4), false);
   // Standing on top of the defender: no angle at all.
   assert.equal(crouchShields(5, 5, 5, 5, 4, 5), false);
+});
+
+// --- the crouch as a POSITION (TACTICS_PLAN M6, revised 2026-07-31) ---------
+//
+// The crouch stopped being a commitment to one OBJECT and became a commitment
+// to a SPOT: whatever shields the faces of the tile you stand on covers you
+// along those faces. `shieldedFaces` names them; `facesShieldFrom` asks which
+// of them points at a shooter. `hasCover` is now just those two composed, so
+// the M3 to-hit modifier and the M6 immunity read one rule.
+
+const openAll = () => true;
+const wallOnFace = (fx, fz) => (x, z, nx, nz) => !(x === 5 && z === 5 && nx === fx && nz === fz);
+
+test('shieldedFaces names the faces, it does not just count them', () => {
+  // A corner: partitions on the east and north faces of (5,5).
+  const corner = (x, z, nx, nz) =>
+    !(x === 5 && z === 5 && ((nx === 6 && nz === 5) || (nx === 5 && nz === 4)));
+  const faces = shieldedFaces(5, 5, { edgeOpen: corner });
+  assert.equal(faces.length, 2);
+  assert.deepEqual(faces.map((f) => f.join(',')).sort(), ['0,-1', '1,0']);
+});
+
+test('a corner covers BOTH its axes - uncapped, by decision', () => {
+  // designer 2026-07-31: "uncapped - if the environment allows it thats a
+  // design issue more than anything, plus we have the counters".
+  const corner = (x, z, nx, nz) =>
+    !(x === 5 && z === 5 && ((nx === 6 && nz === 5) || (nx === 5 && nz === 4)));
+  const faces = shieldedFaces(5, 5, { edgeOpen: corner });
+  assert.equal(facesShieldFrom(faces, 9, 5, 5, 5), true, 'shooter east - the east face');
+  assert.equal(facesShieldFrom(faces, 5, 1, 5, 5), true, 'shooter north - the north face');
+  // ...and the open quarter stays open. That is what keeps flanking the answer
+  // however many faces are covered.
+  assert.equal(facesShieldFrom(faces, 1, 5, 5, 5), false, 'shooter west - wide open');
+  assert.equal(facesShieldFrom(faces, 5, 9, 5, 5), false, 'shooter south - wide open');
+});
+
+test('losing one face leaves the others exactly as they were', () => {
+  // The destructible-cover question: break the wall the shooter is behind and
+  // their shot opens, while a shooter on the surviving axis stays refused.
+  const before = shieldedFaces(5, 5, {
+    edgeOpen: (x, z, nx, nz) =>
+      !(x === 5 && z === 5 && ((nx === 6 && nz === 5) || (nx === 5 && nz === 4))),
+  });
+  assert.equal(facesShieldFrom(before, 9, 5, 5, 5), true);
+  assert.equal(facesShieldFrom(before, 5, 1, 5, 5), true);
+  const after = shieldedFaces(5, 5, { edgeOpen: wallOnFace(5, 4) }); // east face gone
+  assert.equal(facesShieldFrom(after, 9, 5, 5, 5), false, 'the broken face stops covering');
+  assert.equal(facesShieldFrom(after, 5, 1, 5, 5), true, 'the standing one still does');
+});
+
+test('a body shields a face exactly like a prop does', () => {
+  // The unification that let take-cover-behind-a-person be the same verb.
+  const byBody = shieldedFaces(5, 5, {
+    edgeOpen: openAll,
+    coverCell: (x, z) => x === 6 && z === 5,
+  });
+  assert.deepEqual(byBody.map((f) => f.join(',')), ['1,0']);
+  assert.equal(facesShieldFrom(byBody, 9, 5, 5, 5), true);
+  assert.equal(facesShieldFrom(byBody, 1, 5, 5, 5), false);
+});
+
+test('a crouch with no shielded face is a crouch behind nothing', () => {
+  assert.deepEqual(shieldedFaces(5, 5, { edgeOpen: openAll, coverCell: () => false }), []);
+  assert.equal(facesShieldFrom([], 9, 5, 5, 5), false);
+});
+
+test('hasCover is those two composed - the old answers, unchanged', () => {
+  const east = wallOnFace(6, 5);
+  assert.equal(hasCover(9, 5, 5, 5, east), true);
+  assert.equal(hasCover(1, 5, 5, 5, east), false);
+  assert.equal(hasCover(5, 5, 5, 5, east), false, 'standing on them - no angle at all');
+  // A diagonal shooter is stopped by either face their way.
+  assert.equal(hasCover(9, 1, 5, 5, east), true);
 });

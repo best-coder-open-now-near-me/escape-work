@@ -53,7 +53,13 @@ src/
                      thing on both sides of the door (STATUS_PLAN #2)
                                                                (pure logic)
   tactics.js         Positional to-hit modifiers: facing, flanking, cover
-                     (TACTICS_PLAN.md)                         (pure logic)
+                     (TACTICS_PLAN.md). `shieldedFaces` is the one cover
+                     primitive: WHICH faces of a tile something shields -
+                     walls and partitions on the edges, props and BODIES on
+                     the neighbouring cells - with `facesShieldFrom` asking
+                     which of them points at an attacker. `hasCover` is those
+                     two composed, so the M3 to-hit modifier and the M6 crouch
+                     immunity read one rule and cannot drift  (pure logic)
   surfaces-runtime.js Fire/smoke/fuse state machine, advanced one turn at a
                      time over a grid interface                (pure logic)
   stats.js           Character sheet, XP/levels, damage       (pure logic)

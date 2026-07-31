@@ -101,6 +101,42 @@ out of combat unmetered is the exact farm `surfaces.js:74` was written to
 prevent. Mobility and `pull` are safe (you can already walk anywhere out
 there; nothing crouches out there).
 
+### The crouch became a position (2026-07-31)
+
+Not a review finding — a design change made in-session, recorded here because
+it supersedes what the earlier passes describe. `[stated]` throughout
+(designer, 2026-07-31).
+
+Take Cover used to ask you to name a SHIELD, then chose which side of it you
+stood on. That made the side an output, which is why the aim emblem hopped
+tile to tile and why "the other side of that person" was unsayable. It now
+asks you to name the SPOT YOU WILL STAND, and whatever shields that tile's
+faces covers you along them.
+
+- Three crouch modes (cell / human shield / edge) collapse into the one edge
+  mode always had. `tactics.shieldedFaces` is the single primitive; `hasCover`
+  is it composed with `facesShieldFrom`, so the M3 to-hit modifier and the M6
+  immunity can no longer drift apart.
+- **Uncapped**: a corner covers two axes, an enclosed tile covers four, and
+  such a body cannot be shot from anywhere. Accepted deliberately — the
+  counters are melee, the topple, the break-down and Pull Over.
+- **Cover behind a person works out of combat** now. It never did: the
+  out-of-combat verb knew only tiles and partitions and refused a body with a
+  rule nothing else in the game observed.
+- **The covered faces are drawn** — while aiming and while the crouch holds,
+  in a fight and out of one, off the same live list the shot resolves against.
+  A held crouch used to show only an "In Cover" chip, so a corner told you
+  nothing about which way was open.
+- `combat-plans.coverSpot` is deleted with the rule it served.
+
+One shipped e2e changed meaning as a result, which is worth flagging rather
+than burying: `cover.spec.js`'s flanking test used a Manager boxed in by four
+cabinets. Immobile needs four solids, and four solids is now four covered
+faces — so that arena cannot be flanked, by design. The spec now asserts what
+the new rule does (every angle refused; break one face and exactly that shot
+opens), and flanking a partially covered target is pinned in
+`tests/unit/tactics.test.js`, where the geometry can be stated exactly.
+
 ### Confirmed, still open
 
 - **Player-typed names go raw into `innerHTML`,** on four surfaces now, not

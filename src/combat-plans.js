@@ -114,25 +114,33 @@ export function breakPlan(id, attacker, tx, tz, { tileDefAt, edgeHpBetween, hasL
 // reason the leg that failed gives. The click's explanation and the plan are
 // now the same computation rather than two lists kept in step by hand.
 //
-// `crouch` is the target's crouch state (null if they are not dug in);
-// `open(x, z)` is the caller's walkable-and-unoccupied test.
-export function pullPlan(puller, target, crouch, { stepOpen, open, name = 'They' }) {
+// `crouch` is the target's crouch state (null if they are not dug in), whose
+// `faces` are the shielded faces of the tile they are dug in on; `open(x, z)`
+// is the caller's walkable-and-unoccupied test; `bodyAt(x, z)` says whether a
+// character is standing on a cell.
+export function pullPlan(puller, target, crouch, { stepOpen, open, name = 'They', bodyAt = null }) {
   if (!crouch) {
     return { refusal: `${name} is not dug in behind anything - nothing to pull them over.` };
   }
-  // A HUMAN shield is not a barrier: you do not haul somebody over a colleague,
-  // you deal with the colleague. Objects and edges only.
-  if (crouch.shield) return { refusal: 'Their cover is a person - that is a shove, not a pull.' };
-
   const A = puller.actor || puller;
   const D = target.actor || target;
   // Their shield must stand BETWEEN you: the verb is a reach OVER cover, which
   // is also what keeps it from being a generic drag - from their open side you
-  // have swings and shoves already.
-  const shielded = crouch.edges
-    ? hasCover(A.x, A.z, D.x, D.z, stepOpen)
-    : crouchShields(A.x, A.z, D.x, D.z, crouch.x, crouch.z);
-  if (!shielded) return { refusal: 'Their cover is not between you - get to its far side first.' };
+  // have swings and shoves already. One test now that the crouch is a
+  // position: is a shielded face pointing your way?
+  const face = (crouch.faces || []).find(([ox, oz]) => {
+    const sx = Math.sign(A.x - D.x);
+    const sz = Math.sign(A.z - D.z);
+    return (sx !== 0 && ox === sx && oz === 0) || (sz !== 0 && oz === sz && ox === 0);
+  });
+  if (!face) return { refusal: 'Their cover is not between you - get to its far side first.' };
+  // A HUMAN shield is not a barrier: you do not haul somebody over a colleague,
+  // you deal with the colleague. Asked of the face that is actually in the
+  // way, so a crouch covered by both a person and a wall is pullable over the
+  // wall and refused over the person, which is the honest reading of each.
+  if (bodyAt && bodyAt(D.x + face[0], D.z + face[1])) {
+    return { refusal: 'Their cover is a person - that is a shove, not a pull.' };
+  }
 
   const me = posOf(puller);
   const dp = posOf(target);
@@ -144,42 +152,14 @@ export function pullPlan(puller, target, crouch, { stepOpen, open, name = 'They'
 }
 
 // --- take cover (TACTICS_PLAN M6) --------------------------------------------
-
-// Where the aimer would crouch to take cover behind (tx, tz), and how they get
-// there. Two modes, because this office has two kinds of cover:
-//   cell  - a shield object or body ON the tile; you tuck in BESIDE it, on an
-//           open 4-neighbour you can SEE, nearest by route. Orthogonal because
-//           the shield must sit on a FACE (tactics.crouchShields).
-//   edges - the tile's OWN partitions; you stand ON it.
-// Returns { sx, sz, path } (path null when you are already standing there), or
-// { refusal }.
-export function coverSpot(aimer, tx, tz, edgeMode, { isWalkable, hasLos, findPath, occupantAt }) {
-  const b = aimer.actor || aimer;
-  const me = { x: b.x, z: b.z };
-
-  if (edgeMode) {
-    if (me.x === tx && me.z === tz) return { sx: tx, sz: tz, path: null };
-    if (!hasLos(me.x, me.z, tx, tz)) return { refusal: 'No clear way in behind it.' };
-    const p = findPath(me.x, me.z, tx, tz);
-    if (!p || p.length < 2) return { refusal: 'No clear way in behind it.' };
-    return { sx: tx, sz: tz, path: p };
-  }
-
-  let best = null;
-  for (const [dx, dz] of ORTHO) {
-    const sx = tx + dx;
-    const sz = tz + dz;
-    const here = sx === me.x && sz === me.z;
-    if (!here && (!isWalkable(sx, sz) || occupantAt(sx, sz))) continue;
-    if (!hasLos(me.x, me.z, sx, sz)) continue;
-    // Already there: nothing to walk, and no route can beat a zero-length one.
-    if (here) return { sx, sz, path: null };
-    const p = findPath(me.x, me.z, sx, sz);
-    if (!p || p.length < 2) continue;
-    if (!best || p.length < best.path.length) best = { sx, sz, path: p };
-  }
-  return best || { refusal: 'No clear way in behind it.' };
-}
+//
+// `coverSpot` lived here: given a shield, it chose which of that shield's free
+// neighbours you would stand on. It is gone with the rule it served. The
+// crouch is a POSITION now (designer, 2026-07-31) - you aim at the tile you
+// want to stand on, and combat asks `shieldedFaces` whether anything covers
+// it - so there is no side left for a helper to pick on your behalf. That
+// choosing-for-you was the bug: it made the emblem hop between an object's
+// neighbours and left you unable to say which side of a person you wanted.
 
 // --- displacement, shared (POWERS_PLAN M2) -----------------------------------
 

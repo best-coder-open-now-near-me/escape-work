@@ -222,6 +222,19 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
   }
 
   // --- rings ----------------------------------------------------------------
+  // A tile's shielded faces, as bars along the tile's own edges. The twin of
+  // combat's `drawFaces`; both take the face list the cover rule produced, so
+  // neither can draw a side the rule would not honour.
+  function faces(cx, cz, list, color, y = 0.15) {
+    const H = 0.42;
+    for (const [ox, oz] of list || []) {
+      const mx = cx + ox * 0.5;
+      const mz = cz + oz * 0.5;
+      app.drawLine(
+        new pc.Vec3(mx - oz * H, y, mz - ox * H),
+        new pc.Vec3(mx + oz * H, y, mz + ox * H), color);
+    }
+  }
   function ring(cx, cz, r, color, y = 0.14) {
     const SEGS = 18;
     let prev = null;
@@ -327,13 +340,24 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
           new pc.Vec3(aim.landing[0], 0.14, aim.landing[1]), color);
       }
     },
-    // TAKE COVER armed out of combat: the hovered shield rings in the cover
-    // yellow - and ONLY the hovered one (the designer's rings-everywhere-is-
-    // noise rule, same as combat's read).
+    // TAKE COVER armed out of combat: the ring is the SPOT YOU WOULD STAND
+    // and the bars are the faces that would shield you there - combat's read,
+    // out of combat. Ringing the shield instead told you which object you had
+    // named while the side you would end up on, which is what decides the
+    // shots you are safe from, was chosen for you and never drawn.
     drawCoverAim() {
       const aim = queries.coverAim?.();
       if (!aim) return;
       ring(aim.x, aim.z, 0.42, aim.usable ? RING_COVER : RING_FAR);
+      if (aim.usable) faces(aim.x, aim.z, aim.faces, RING_COVER);
+    },
+    // ...and the crouch you are ALREADY in, whatever is armed. A crouch that
+    // says only "In Cover" is a crouch whose shape you have to guess, and in a
+    // corner the shape is the decision.
+    drawHeldCover() {
+      const held = queries.heldCover?.();
+      if (!held?.faces?.length) return;
+      faces(held.x, held.z, held.faces, RING_COVER);
     },
     // A SUMMON armed out of combat aims at the floor, so there is no coworker
     // to ring - the spot is the target. Green on the tiles the arrivals would

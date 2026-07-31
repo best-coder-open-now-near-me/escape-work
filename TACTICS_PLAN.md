@@ -592,12 +592,49 @@ None. See decision #6.
      Line of sight gates the aim (`hasLos(you, object)`), "as line of sight
      driven as possible." No cooldown and no need to leave cover first: you
      can hop cover-to-cover.
+
+     **Superseded on the AIM, 2026-07-31 `[stated]`.** You aim at the SPOT YOU
+     WILL STAND, not at a shield, and whatever shields the faces of that tile
+     covers you along those faces — partitions, props and people alike. The
+     designer's words: *"the take cover target emblem moves in discrete tile
+     sized steps, makes it impossible to use as i cant pick a side of the
+     person, its just wherever the thing happens to land in relation to the
+     targeted shield object... what we need is something that is continuous
+     and smooth for starters, and 2 it should like find the objects within its
+     target area range, whatever is there is the side of the object(s) we are
+     covered by."*
+
+     Naming a shield made the SIDE you ended up on an output (`coverSpot`
+     picked the nearest free neighbour), which is why the emblem hopped and
+     why "the other side of Dave" was unsayable. Aiming at the ground answers
+     it by construction. It also collapses the three crouch modes — cell,
+     human shield, edge — into the one edge mode always had: a crouch is a
+     POSITION, and `tactics.shieldedFaces` names what covers it.
+
+     Two things fell out. Cover is now UNCAPPED `[stated]` (designer: *"if the
+     environment allows it thats a design issue more than anything, plus we
+     have the counters like grabbing someone over, destroying and toppling
+     barriers"*) — a corner covers two axes, a fully enclosed tile covers all
+     four, and such a body genuinely cannot be shot from anywhere; the counters
+     are melee, the topple, the break-down and Pull Over. And taking cover
+     behind a PERSON now works out of combat, which it never did: the
+     out-of-combat verb knew only tiles and partitions and refused a body with
+     a rule nothing else observed (*"it wont let me take cover on a person out
+     of combat but i can in combat"*). People move, and when they do the crouch
+     breaks — which is what `crouchStateOf` has always done.
    - `[stated]` It grants IMMUNITY to ranged attacks — not a modifier — but
      only from the directions the object shields. Flanking still works.
    - `[stated]` Cost: the path distance to the object + 1 AP.
    - `[stated]` Works on all solid objects, with UI color-coding for safe
      cover vs topplable furniture; take-cover rings draw only on the hovered
-     object ("there would just be rings everywhere if not").
+     object ("there would just be rings everywhere if not"). **Revised
+     2026-07-31:** the ring is on the hovered STAND SPOT rather than a shield,
+     and the faces that would cover you are drawn as bars along that tile's
+     edges — still one hover, still no rings everywhere. The same bars stay up
+     while the crouch HOLDS, in a fight and out of one, which answers the
+     complaint that a held crouch showed only an "In Cover" chip: *"if im
+     taking cover in a corner i have no indication currently of which
+     partition is my actual cover"*.
    - `[ratified]` Any character can be crouched behind, no stance required
      ("using any character as cover is the right shape id like for now",
      2026-07-29). The existing `hold-the-line` guard stance "wasnt ever a

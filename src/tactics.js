@@ -178,18 +178,59 @@ export function provokedBy(threats, fx, fz, tx, tz, edgeOpen = null) {
 // The "at most once per attack" rule survives: an edge AND a cell on the same
 // face still grant one cover, because this returns on the first hit.
 export function hasCover(ax, az, dx, dz, edgeOpen, coverCell = null) {
+  return facesShieldFrom(shieldedFaces(dx, dz, { edgeOpen, coverCell }), ax, az, dx, dz);
+}
+
+// The four orthogonal faces, in a fixed order so a UI drawing them gets the
+// same list twice running.
+export const FACES = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+// WHICH faces of (dx, dz) have something shielding them - a wall, partition or
+// closed door on the edge, or a cell-shaped shield (a solid prop, a fallen
+// one, a BODY) standing on the neighbour. Returns the offsets, not a boolean.
+//
+// This is the question `hasCover` was always asking; it just threw away the
+// answer and kept the yes/no. Naming the faces is what lets the crouch stop
+// being a commitment to one OBJECT and become a commitment to a POSITION
+// (designer, 2026-07-31: "it should find the objects within its target area
+// range, whatever is there is the side of the object(s) we are covered by") -
+// and it is what lets the affordance light the walls that are actually
+// covering you, which nothing could do while the rule returned a bare true.
+//
+// Deliberately UNCAPPED `[stated]` (designer, 2026-07-31: "uncapped - if the
+// environment allows it thats a design issue more than anything, plus we have
+// the counters like grabbing someone over, destroying and toppling
+// barriers"). A corner covering three of four axes is a level-design fact,
+// and Pull Over, the break-down and the topple all take it away.
+export function shieldedFaces(dx, dz, { edgeOpen = null, coverCell = null } = {}) {
   const edges = typeof edgeOpen === 'function';
   const cells = typeof coverCell === 'function';
-  if (!edges && !cells) return false;
+  if (!edges && !cells) return [];
+  const out = [];
+  for (const [ox, oz] of FACES) {
+    const nx = dx + ox;
+    const nz = dz + oz;
+    if ((edges && !edgeOpen(dx, dz, nx, nz)) || (cells && coverCell(nx, nz))) {
+      out.push([ox, oz]);
+    }
+  }
+  return out;
+}
+
+// Does any of those faces point at the attacker? The octant test, unchanged:
+// take the direction from defender toward attacker, and a diagonal attacker is
+// blocked by EITHER of the two faces pointing their way - going around one
+// corner is enough.
+//
+// Still boolean at the point of use, which is what keeps "cover applies at
+// most once per attack" true for the to-hit modifier: more covered faces means
+// more covered DIRECTIONS, never a deeper discount along one of them.
+export function facesShieldFrom(faces, ax, az, dx, dz) {
   const sx = Math.sign(ax - dx);
   const sz = Math.sign(az - dz);
-  // Each axis is checked as its own orthogonal face. A diagonal attacker is
-  // blocked by either face - going around one corner is enough.
-  if (sx !== 0 && edges && !edgeOpen(dx, dz, dx + sx, dz)) return true;
-  if (sz !== 0 && edges && !edgeOpen(dx, dz, dx, dz + sz)) return true;
-  if (sx !== 0 && cells && coverCell(dx + sx, dz)) return true;
-  if (sz !== 0 && cells && coverCell(dx, dz + sz)) return true;
-  return false;
+  if (sx === 0 && sz === 0) return false; // standing on them - no angle at all
+  return faces.some(([ox, oz]) =>
+    (sx !== 0 && ox === sx && oz === 0) || (sz !== 0 && oz === sz && ox === 0));
 }
 
 // --- take cover (TACTICS_PLAN M6) ---------------------------------------------

@@ -28,7 +28,8 @@ import { applyStatus, removeStatus, statusFx, hasStatus, tickStep, tickTurn, sta
 import { createDraft, createCharacter, draftModel, draftLook } from './creation.js';
 import { CUSTOM_RIGS } from './data/looks.js';
 import { aimsAtAlly, coneFrom, conePolyline, isToppleable, toppleLanding } from './powers.js';
-import { PARTITION_TOPPLE } from './data/tiles.js';
+import { PARTITION_TOPPLE, blocksSight } from './data/tiles.js';
+import { shieldedFaces } from './tactics.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel } from './scene.js';
@@ -2016,46 +2017,87 @@ function startGame(level) {
   // An armed TAKE COVER with no fight on: crouch before anyone has noticed
   // you. The crouch rides into the fight that starts (beginCombat hands it to
   // startCombat as preCrouch), which is the whole point of taking it early.
-  // Furniture and partitions only out here - people move (the character
-  // shield is a combat commitment).
-  function oocTakeCoverAt(tile) {
-    if (enemyAt(tile.x, tile.z) || npcAt(tile.x, tile.z) || partyAt(tile.x, tile.z)) {
-      ui.say('Out here, hide behind furniture - people move.');
-      return;
+  //
+  // The same rule combat runs, and for the same reason it changed there: you
+  // aim at the SPOT YOU WILL STAND, and whatever shields that spot's faces
+  // covers you along them - partitions, props, and PEOPLE. Out here used to
+  // refuse a person outright ("people move - the character shield is a combat
+  // commitment"), which read as arbitrary from the player's side: the verb was
+  // on the bar, the coworker was right there, and the refusal named a rule
+  // nothing else in the game observed. People move, and when they do the
+  // crouch breaks - which is exactly what happens in a fight, and what
+  // `crouchStateOf` has always done. That is the rule, not a reason to have
+  // two verbs (designer, 2026-07-31: "it wont let me take cover on a person
+  // out of combat but i can in combat").
+  // A member's or summon's record standing on a cell, for naming who is
+  // covering you. `partyAt`/`summonAt` answer "is anyone there"; this answers
+  // "who", which the narration needs and they do not carry.
+  const memberBodyAt = (x, z) => (party?.members || []).find((m) =>
+    m.actor && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z)
+    || summons.find((sm) => sm.sheet.hp > 0 && sm.actor.x === x && sm.actor.z === z)
+    || null;
+  const oocCoverCell = (x, z) => {
+    const d = grid.defAt(x, z);
+    if (d && (!!d.cover || (!!d.solid && !blocksSight(d)))) return true;
+    return !!(enemyAt(x, z) || npcAt(x, z) || partyAt(x, z) || summonAt(x, z));
+  };
+  // Which faces of a tile would shield a crouch there. One helper, read by the
+  // aim preview, the click and the held-crouch affordance, so none of the
+  // three can describe a different crouch from the others.
+  const oocCoverFaces = (x, z) => shieldedFaces(x, z, {
+    edgeOpen: grid.stepOpen,
+    coverCell: (cx, cz) => (cx === player.x && cz === player.z ? false : oocCoverCell(cx, cz)),
+  });
+  // Why this spot is not a crouch, or null when it is one.
+  function oocCoverProblem(x, z) {
+    const here = player.x === x && player.z === z;
+    if (!here && (!isWalkable(x, z) || enemyAt(x, z) || npcAt(x, z) || partyAt(x, z))) {
+      return 'No room to tuck in there.';
     }
-    const def = grid.defAt(tile.x, tile.z);
-    const cellMode = !!(def && (def.solid || def.cover));
-    const edgeMode = !cellMode && grid.terrainOpen(tile.x, tile.z)
-      && ORTHO4.some(([dx, dz]) => !grid.stepOpen(tile.x, tile.z, tile.x + dx, tile.z + dz));
-    if (!cellMode && !edgeMode) { ui.say('Nothing there to hide behind.'); return; }
-    const commit = (cx, cz) => {
-      oocCrouch = { x: tile.x, z: tile.z, edges: edgeMode, at: { x: cx, z: cz } };
+    if (!oocCoverFaces(x, z).length) return 'Nothing there to hide behind.';
+    return null;
+  }
+  // What is covering a spot, in words - the out-of-combat twin of combat's
+  // `coverNames`, so "You tuck in behind..." names the same things on both
+  // sides of a fight starting.
+  function oocCoverNames(x, z) {
+    const seen = [];
+    for (const [ox, oz] of oocCoverFaces(x, z)) {
+      const cx = x + ox;
+      const cz = z + oz;
+      const body = enemyAt(cx, cz) || npcAt(cx, cz) || memberBodyAt(cx, cz);
+      if (body) {
+        const name = body.sheet?.name || body.def?.name || 'them';
+        if (!seen.includes(name)) seen.push(name);
+        continue;
+      }
+      const d = grid.defAt(cx, cz);
+      const label = d && (d.cover || d.solid)
+        ? `the ${(d.label || 'cover').toLowerCase()}` : 'the partition';
+      if (!seen.includes(label)) seen.push(label);
+    }
+    if (!seen.length) return 'cover';
+    if (seen.length === 1) return seen[0];
+    return `${seen.slice(0, -1).join(', ')} and ${seen[seen.length - 1]}`;
+  }
+
+  function oocTakeCoverAt(tile) {
+    const problem = oocCoverProblem(tile.x, tile.z);
+    if (problem) { ui.say(problem); return; }
+    const commit = () => {
+      // Re-ask on ARRIVAL: a coworker who wandered off during the walk is a
+      // crouch that never happens, not one that lands on empty carpet.
+      if (oocCoverProblem(tile.x, tile.z)) { ui.say('The moment passes - no cover taken.'); return; }
+      oocCrouch = { at: { x: tile.x, z: tile.z } };
       applyStatus(sheet, 'covered');
       player.crouched = true; // the held pose (actors.js): torso down onto the legs
       paintHud(sheet);
-      ui.say(edgeMode
-        ? 'You tuck in against the partition.'
-        : `You tuck in behind the ${(def.label || 'cover').toLowerCase()}.`);
+      ui.say(`You tuck in behind ${oocCoverNames(tile.x, tile.z)}.`);
       armedOoc = null;
       hotbar?.setArmed(null);
     };
-    if (edgeMode) {
-      if (player.x === tile.x && player.z === tile.z) { commit(tile.x, tile.z); return; }
-      if (!walkToExact(tile.x, tile.z, () => commit(tile.x, tile.z))) ui.say('No way in there.');
-      return;
-    }
-    let spot = null;
-    for (const [dx, dz] of ORTHO4) {
-      const sx = tile.x + dx;
-      const sz = tile.z + dz;
-      if (player.x === sx && player.z === sz) { spot = { x: sx, z: sz, here: true }; break; }
-      if (!isWalkable(sx, sz)) continue;
-      const p = findPath(isWalkable, player.x, player.z, sx, sz, hazardCost, grid.stepOpen);
-      if (p && p.length >= 2 && (!spot || p.length < spot.len)) spot = { x: sx, z: sz, len: p.length };
-    }
-    if (!spot) { ui.say('No clear way in behind it.'); return; }
-    if (spot.here) { commit(spot.x, spot.z); return; }
-    walkToExact(spot.x, spot.z, () => commit(spot.x, spot.z));
+    if (player.x === tile.x && player.z === tile.z) { commit(); return; }
+    if (!walkToExact(tile.x, tile.z, commit)) ui.say('No way in there.');
   }
 
   // Tile effects (data-driven from TILE_TYPES[..].onEnter) fire per step, for
@@ -2152,7 +2194,14 @@ function startGame(level) {
     // terms rather than letting the new clock time it out from under a
     // stationary character. Without this, a crouch taken before a fight
     // evaporated after four ticks of standing still.
-    if (oocCrouch && sheet) applyStatus(sheet, 'covered');
+    // ...and the same revalidation combat does: the crouch is only real while
+    // its position still has a shielded face. A partition toppled out of a
+    // fight, or a coworker who wandered off the face they were covering, ends
+    // it here rather than lingering until a fight starts and combat notices.
+    if (oocCrouch && sheet) {
+      if (oocCoverProblem(oocCrouch.at.x, oocCrouch.at.z)) clearOocCrouch();
+      else applyStatus(sheet, 'covered');
+    }
     const downed = [];
     for (const m of party.members) {
       if (!m.actor || m.sheet.hp <= 0) continue;
@@ -2789,17 +2838,24 @@ function startGame(level) {
       },
       // The hovered TAKE COVER shield, or null over plain floor - only the
       // hovered object rings (the rings-everywhere-is-noise rule).
+      // The aim is the SPOT YOU WOULD STAND, and the faces are what would
+      // cover you there - the same pair combat draws, off the same rule
+      // (oocCoverProblem / oocCoverFaces), so the two sides of a fight
+      // starting cannot promise different crouches.
       coverAim: () => {
         if (!armedOoc || inCombat || !oocAim || !sheet) return null;
         if (ACTIONS[armedOoc].type !== 'cover') return null;
         const x = Math.round(oocAim.x);
         const z = Math.round(oocAim.z);
-        if (enemyAt(x, z) || npcAt(x, z) || partyAt(x, z)) return { x, z, usable: false };
-        const def = grid.defAt(x, z);
-        const cell = !!(def && (def.solid || def.cover));
-        const edge = !cell && grid.terrainOpen(x, z)
-          && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => !grid.stepOpen(x, z, x + dx, z + dz));
-        return cell || edge ? { x, z, usable: true } : null;
+        const usable = !oocCoverProblem(x, z);
+        return { x, z, usable, faces: usable ? oocCoverFaces(x, z) : [] };
+      },
+      // What is covering the leader RIGHT NOW, whatever is armed - the
+      // held-crouch affordance, so a crouch taken before a fight shows its
+      // shape out here too rather than only once the dice come out.
+      heldCover: () => {
+        if (inCombat || !oocCrouch || !sheet) return null;
+        return { x: oocCrouch.at.x, z: oocCrouch.at.z, faces: oocCoverFaces(oocCrouch.at.x, oocCrouch.at.z) };
       },
       inCombat: () => inCombat && !!combat,
       doorNear: doorNearPoint,
@@ -3187,6 +3243,9 @@ function startGame(level) {
       // (every attack and throw), a spot on the floor (a summon), the
       // hovered furniture/partition (shove - which ALSO rings coworkers,
       // they're targets too), or the hovered shield (take cover).
+      // The crouch you are in draws whatever is armed - it is not an aim, it
+      // is the state of the character.
+      if (show && !inCombat) hover.drawHeldCover();
       if (show && !inCombat && armedOoc) {
         if (ACTIONS[armedOoc].type === 'summon') hover.drawSummonDrop();
         else if (ACTIONS[armedOoc].cone) hover.drawConeAim();
