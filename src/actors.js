@@ -284,11 +284,15 @@ export class GridActor {
   }
 
   // Teleport the logical tile and glide the body there in a straight line
-  // (shoves). Free-form travel goes through setPath instead.
-  pushTo(x, z) {
+  // (shoves). Free-form travel goes through setPath instead. The optional
+  // rest point (px, pz) is where the body actually comes to rest - it must
+  // round back to (x, z), and it is what keeps a forced move from re-centring
+  // a body onto the grid mid-fight. Defaults to the tile centre for callers
+  // that genuinely mean it (the test hook).
+  pushTo(x, z, px = x, pz = z) {
     this.x = x;
     this.z = z;
-    this.slideTo = { x, z };
+    this.slideTo = { x: px, z: pz };
     this.path = null;
   }
 

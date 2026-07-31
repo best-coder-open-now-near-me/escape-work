@@ -1886,9 +1886,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       let flight = 'shot'; // fired: a small pellet, flat and quick
       if (id === 'paper-airplane') flight = 'plane';
       else if (a.ammoCost) flight = 'ball';
-      fx.projectile({ x: active.actor.x, z: active.actor.z }, { x: en.x, z: en.z }, flight);
+      // Body to body, like hitFx: the shot departs the shooter's actual
+      // stance and lands on the target's, not on their tile centres - the
+      // walk-up just stopped at a trimmed free point, and a ball spawning
+      // half a tile beside the model gives the grid away.
+      fx.projectile(posOf(active), posOf(en), flight);
     } else {
-      active.actor.lunge(en.x, en.z);
+      active.actor.lunge(posOf(en).x, posOf(en).z);
     }
     faceTarget(active, en.x, en.z); // you face what you swing at
     active.ap = roundAp(active.ap - a.ap);
@@ -2019,7 +2023,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (died) callbacks.onEnemyKilled(en);
       return { slammed: true, died, msg };
     }
-    en.pushTo(tx, tz);
+    // Land carried PAST the centre along the push - momentum, not a snap to
+    // grid. Deterministic (no rng draw: the rest point feeds cover octants
+    // and body-to-body sight, so it must replay under a seed), and clamped
+    // so the body still rounds home to the tile the plan chose.
+    const pd = Math.hypot(dx, dz) || 1;
+    const [lpx, lpz] = world.clampPoint(tx + (dx / pd) * 0.22, tz + (dz / pd) * 0.22);
+    en.pushTo(tx, tz, lpx, lpz);
     const dmg = world.enemySurfDamage(tx, tz);
     if (dmg > 0) {
       const live = world.isElectrified && world.isElectrified(tx, tz);
@@ -2206,7 +2216,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     active.ap = roundAp(active.ap - a.ap);
     if (a.uses) active.usesLeft[id] -= 1;
     if (rangeOf(id)) {
-      fx.projectile({ x: active.actor.x, z: active.actor.z }, { x: px, z: pz },
+      // The prop's break point is real geometry (a tile centre or an edge
+      // midpoint); only the ORIGIN moves to the body.
+      fx.projectile(posOf(active), { x: px, z: pz },
         a.ammoCost ? 'ball' : 'shot');
     } else {
       active.actor.lunge(px, pz);
@@ -2424,12 +2436,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const a = ACTIONS[id];
     const [lx, lz] = plan.landing;
     const what = crouchLabel(plan.s);
-    active.actor.lunge(en.x, en.z);
+    active.actor.lunge(posOf(en).x, posOf(en).z);
     faceTarget(active, en.x, en.z);
     // The crouch dies in your fist, quietly - the haul is the story. pushTo
     // is forced movement: no provoke, no per-tile hooks, the shove's seam.
+    // The hauled body rests pulled toward YOU, not on the tile's dead centre
+    // - deterministic, and inside the landing tile.
     breakCrouch(en, true);
-    en.pushTo(lx, lz);
+    const pp = posOf(active);
+    const hd = Math.hypot(pp.x - lx, pp.z - lz) || 1;
+    const [hpx, hpz] = world.clampPoint(
+      lx + ((pp.x - lx) / hd) * 0.25,
+      lz + ((pp.z - lz) / hd) * 0.25);
+    en.pushTo(lx, lz, hpx, hpz);
     let msg = `You haul ${en.def.name} over the ${what}.`;
     // The same save everything manhandled rolls (stats.gritSaveChance), with
     // the same forceHit pin for the specs: true = the haul fully lands.
@@ -2534,6 +2553,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (m === active) { log('You are already there.'); return; }
     const mine = { x: active.actor.x, z: active.actor.z };
     const theirs = { x: m.actor.x, z: m.actor.z };
+    // Trade PLACES, not tile centres: each body takes the other's actual
+    // rest point, so the free-point stances both had survive the trick.
+    const myRest = posOf(active);
+    const theirRest = posOf(m);
     active.ap = roundAp(active.ap - a.ap);
     if (a.uses) active.usesLeft[id] -= 1;
     // pushTo is the existing "move a body without it counting as a walk" call
@@ -2545,8 +2568,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // the same beat as the trade instead of a surprise line later.
     breakCrouch(active);
     breakCrouch(m);
-    active.actor.pushTo(theirs.x, theirs.z);
-    m.actor.pushTo(mine.x, mine.z);
+    active.actor.pushTo(theirs.x, theirs.z, theirRest.x, theirRest.z);
+    m.actor.pushTo(mine.x, mine.z, myRest.x, myRest.z);
     log(`${a.log} You and ${m.sheet.name} trade places.`);
     armed = null;
     refresh();
@@ -2626,9 +2649,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     active.ap = roundAp(active.ap - a.ap);
     if (a.uses) active.usesLeft[id] -= 1;
     if (ranged) {
-      fx.projectile({ x: active.actor.x, z: active.actor.z }, { x: en.x, z: en.z }, 'ball');
+      fx.projectile(posOf(active), posOf(en), 'ball');
     } else {
-      active.actor.lunge(en.x, en.z);
+      active.actor.lunge(posOf(en).x, posOf(en).z);
     }
     faceTarget(active, en.x, en.z);
     if (!rollAgainst(active, en)) {
@@ -2816,7 +2839,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (!test(bp.x, bp.z, TARGET_R)) continue;
       if (!world.hasLos(active.actor.x, active.actor.z, en.x, en.z)) continue;
       joinCombat(en); // a bystander caught in the mail joins the fight
-      fx.projectile({ x: active.actor.x, z: active.actor.z }, { x: en.x, z: en.z }, 'plane');
+      fx.projectile(posOf(active), { x: bp.x, z: bp.z }, 'plane');
       // Roll per target. A dodged envelope flies but doesn't land; the wedge's
       // `leaves` surface still carpets below (HIT_PLAN #4). A surprised target
       // is easier to catch.
@@ -2968,7 +2991,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
       joinCombat(en); // shoving a bystander is also an opinion they'll return
       active.ap = roundAp(active.ap - a.ap);
-      active.actor.lunge(en.x, en.z);
+      active.actor.lunge(posOf(en).x, posOf(en).z);
       faceTarget(active, en.x, en.z);
       log(displaceBody(en, Math.sign(en.x - active.actor.x), Math.sign(en.z - active.actor.z)).msg);
       armed = null;
@@ -3760,7 +3783,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // sheet (deflect, gum, and the downed/handoff/party-wipe rules).
   function aiAttack(unit, target) {
     const atk = unit.combat.attacks[rand(0, unit.combat.attacks.length - 1)];
-    unit.lunge(target.actor.x, target.actor.z);
+    unit.lunge(posOf(target).x, posOf(target).z);
     faceTarget(unit, target.actor.x, target.actor.z); // you face what you swing at
     if (target.member) unitStrikesMember(unit, target.member, atk);
   }
@@ -4004,7 +4027,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // A party-side body catches a fleeing enemy.
       const a = ACTIONS[equippedAction(attacker.sheet)];
       if (!a) return; // no basic swing to make (shouldn't happen - punch is the floor)
-      attacker.actor.lunge(defender.x, defender.z);
+      attacker.actor.lunge(posOf(defender).x, posOf(defender).z);
       faceTarget(attacker, defender.x, defender.z);
       if (!rollAgainst(attacker, defender)) {
         hitFx(defender, 'whiff');
@@ -4031,7 +4054,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // `attacks` at all - see stats.js).
     if (!attacker.combat.attacks.length) return;
     const base = attacker.combat.attacks[rand(0, attacker.combat.attacks.length - 1)];
-    attacker.lunge(defender.actor.x, defender.actor.z);
+    attacker.lunge(posOf(defender).x, posOf(defender).z);
     unitStrikesMember(attacker, defender, {
       ...base,
       log: `${attacker.def.name} catches ${defender.sheet.name} pulling away.`,
@@ -4241,7 +4264,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (beat === 'summon') {
       unit.summonCd = sm.cooldownRounds || 0;
       acting.ap = roundAp(acting.ap - sm.ap);
-      unit.lunge(target.actor.x, target.actor.z);
+      unit.lunge(posOf(target).x, posOf(target).z);
       log(sm.log || `${unit.def.name} calls in reinforcements.`);
       acting.wait = 0.6;
       refresh();
