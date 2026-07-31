@@ -3,6 +3,7 @@ import { CLASSES } from './data/classes.js';
 import { COMPANIONS } from './data/companions.js';
 import { ITEMS } from './data/items.js';
 import { ACTIONS } from './data/actions.js';
+import { TALENTS, STARTING_TALENT_BY_CLASS } from './data/talents.js';
 
 // Thrown-weapon ammo: paper picked up from spills, spent on throws. There is
 // no longer a carry limit - hoarding sheets is the whole fantasy, and the cap
@@ -216,8 +217,6 @@ export function ensureAttributes(sheet) {
 // (classId for classes, companionId for companions).
 export function createSheetFrom(block, extra = {}) {
   const actions = [...block.actions];
-  // Talents can grant an extra combat action (Smoker's cigarette).
-  if (block.talent?.effects?.grantsAction) actions.push(block.talent.effects.grantsAction);
   const attr = normalizeAttr(block.attr);
   const maxHp = block.maxHp ?? block.hp;
   const base = baseFrom(maxHp, block.ap, attr); // reproduces the block's maxHp/ap
@@ -246,7 +245,12 @@ export function createSheetFrom(block, extra = {}) {
     xpNext: PROGRESSION.XP_BASE,
     bonusDmg: block.bonusDmg,
     actions,
-    talent: block.talent || null,
+    // TALENT_PLAN M1: talents are their own axis, so a class no longer brings
+    // one. `talents` is the ids held; `talent` stays the MERGED effects bag
+    // every read site already consults (talentFxOf and eight others), which is
+    // why multiple talents work without a single reader changing.
+    talents: [],
+    talent: null,
     paper: 0, // thrown-weapon ammo, picked up from paper spills
     statuses: {}, // active status effects (statuses.js) - gum, bleed, and the rest
     // Worn gear (EQUIPMENT_PLAN). A class can furnish a slot from creation via
@@ -257,9 +261,39 @@ export function createSheetFrom(block, extra = {}) {
     inventory: [], // looted item ids (data/items.js) - persists across floors
     ...extra,
   };
+  // The seeded starting talent (TALENT_PLAN M1, temporary - see the table).
+  // Until the picker exists this is what keeps a character from silently
+  // losing what their class used to grant.
+  const seed = STARTING_TALENT_BY_CLASS[sheet.classId || extra.classId || block.classId];
+  if (seed) grantTalent(sheet, seed);
   recomputeDerived(sheet); // no-op at creation (base was solved to match), but
   sheet.hp = sheet.maxHp;  // the invariant that keeps maxHp derived, not stored
   return sheet;
+}
+
+// Give a sheet a talent, in place: records the id and merges its effects into
+// the one bag. Idempotent - taking a talent twice is a no-op rather than a
+// double helping, which matters because the merge ACCUMULATES numbers.
+//
+// The merge itself is applyEffect's, unchanged. It was written for track nodes
+// granting `effect: { talent: {...} }` and is, without modification, a
+// multi-talent merge; that is the whole reason TALENT_PLAN M1 touches no
+// combat code.
+export function grantTalent(sheet, talentId) {
+  const t = TALENTS[talentId];
+  if (!t) return false;
+  if (!sheet.talents) sheet.talents = [];
+  if (sheet.talents.includes(talentId)) return false;
+  sheet.talents.push(talentId);
+  applyEffect(sheet, { ...t.effects, talent: t.effects });
+  // The sheet's headline is the FIRST talent taken - a character is "an
+  // Origami Specialist" the way they are "IT Support", one name with the
+  // fuller record underneath. applyEffect's own fallback would otherwise write
+  // 'Training', which reads as a placeholder on a character with three.
+  if (sheet.talents.length === 1) {
+    sheet.talent = { name: t.name, blurb: t.blurb, effects: sheet.talent?.effects || {} };
+  }
+  return true;
 }
 
 export function createSheet(classId) {

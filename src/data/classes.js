@@ -119,19 +119,11 @@ export const CLASSES = {
     // `effect` reuses the engine's known shapes (attrBonus / talent / grantsAction).
     track: [
       { id: 'drone-thick-skin', name: 'Thick Skin', cost: 1, effect: { attrBonus: { grit: 1 } } },
-      { id: 'drone-sharp-folds', name: 'Sharp Folds', cost: 1, effect: { talent: { paperDamageBonus: 1 } } },
       // Was a grant of `kick`, which the Mail Room and Security also handed
       // out - three classes unlocking one action (POWERS_PLAN M3).
       { id: 'drone-ream', name: 'Reams of It', cost: 1, effect: { grantsAction: 'ream-throw' } },
     ],
     actions: ['attack', 'defend', 'paper-storm'],
-    talent: {
-      name: 'Origami Specialist',
-      blurb: 'Immune to paper cuts. Projectiles +2 damage; airplanes fold for 1 sheet.',
-      // foldsAirplanes is what unlocks the Paper Airplane throwable at all
-      // (data/actions.js `needsTalent`) - the blurb above already promised it.
-      effects: { paperDamageBonus: 2, paperAmmoDiscount: 1, paperCutImmune: true, foldsAirplanes: true },
-    },
   },
   'middle-manager': {
     name: 'Middle Manager',
@@ -150,23 +142,11 @@ export const CLASSES = {
     track: [
       { id: 'mgr-stonewall', name: 'Stonewall', cost: 1, effect: { attrBonus: { composure: 1 } } },
       { id: 'mgr-reorg', name: 'Reorg Survivor', cost: 1, effect: { attrBonus: { grit: 1 } } },
-      { id: 'mgr-traction', name: 'Corner-Office Traction', cost: 1, requires: ['mgr-stonewall'], effect: { talent: { slipImmune: true } } },
-      // Frequent Flier (MOVEMENT_PLAN M3): never triggers an opportunity
-      // attack. The manager is always at a conference and never in the
-      // building to be hit - and it hands the slowest class an escape hatch,
-      // which is a better spread than piling every movement talent on the
-      // clerk.
-      { id: 'mgr-frequent-flier', name: 'Frequent Flier', cost: 1, effect: { talent: { noProvoke: true } } },
       // The Manager's track granted only passive talents, so levelling one
       // never changed what he could DO (POWERS_PLAN M2).
       { id: 'mgr-all-hands', name: 'All-Hands', cost: 1, requires: ['mgr-stonewall'], effect: { grantsAction: 'all-hands' } },
     ],
     actions: ['delegate', 'escalate'],
-    talent: {
-      name: 'Smoker',
-      blurb: 'A lighter, always. Ignite anything flammable. Smoke breaks steady the nerves in combat.',
-      effects: { hasLighter: true, grantsAction: 'cigarette' },
-    },
   },
   'mail-room': {
     name: 'Mail Room',
@@ -189,17 +169,8 @@ export const CLASSES = {
       { id: 'mail-routes', name: 'Route Knowledge', cost: 1, effect: { attrBonus: { savvy: 1 } } },
       // Was a third copy of `kick` (POWERS_PLAN M4).
       { id: 'mail-hand-off', name: 'Hand-Off', cost: 1, requires: ['mail-cart-legs'], effect: { grantsAction: 'courier-swap' } },
-      // The Pawn (MOVEMENT_PLAN M2): AP that ONLY movement may spend, drawn
-      // before real AP. Turns repositioning from a cost into a habit - the
-      // clerk flanks and gets behind people without giving up a swing.
-      { id: 'mail-always-moving', name: 'Always Moving', cost: 1, requires: ['mail-cart-legs'], effect: { talent: { freeMoveAp: 1 } } },
     ],
     actions: ['mail-cone', 'courier-route'],
-    talent: {
-      name: 'Warehouse Soles',
-      blurb: 'Eleven years of ignored wet-floor signs. You cannot slip. Ever.',
-      effects: { slipImmune: true },
-    },
   },
   'it-support': {
     name: 'IT Support',
@@ -231,11 +202,6 @@ export const CLASSES = {
     // (An anti-slip footwear talent is reserved for a future talent-choice
     // system - the engine already honors slipImmune. Until then, gum on your
     // shoe is the anti-slip option, at a price.)
-    talent: {
-      name: 'ESD Steel-Toes',
-      blurb: 'Electrostatic-discharge rated, steel toe box. Live water can\'t shock you, and the toe adds a Steel-Toe Kick to your repertoire.',
-      effects: { shockImmune: true, grantsAction: 'kick' },
-    },
   },
 
   'human-resources': {
@@ -266,11 +232,6 @@ export const CLASSES = {
     // to carry Deflect Blame and Coffee Break, which is the Office Drone's
     // kit, so the support class supported nobody but itself.
     actions: ['performance-review', 'triage'],
-    talent: {
-      name: 'Open Door Policy',
-      blurb: 'The door is always open. So is the req. There is always another employee.',
-      effects: {}, // flavor for now; a summon-scaling effect can land later
-    },
   },
 
   security: {
@@ -301,13 +262,6 @@ export const CLASSES = {
       { id: 'sec-lockdown', name: 'Badge Lockdown', cost: 1, requires: ['sec-post'], effect: { grantsAction: 'lockdown' } },
     ],
     actions: ['detain', 'stand-post'],
-    talent: {
-      name: 'Incident Report',
-      blurb: 'Eight years of walking through whatever the day shift spilled. Hazards on the floor hurt you less.',
-      // surfaceDamageResist is a live handler (main.js) that had no owner until
-      // now - flat reduction on the damage a surface deals you per step.
-      effects: { surfaceDamageResist: 1 },
-    },
   },
 
   // --- summoned, never chosen -------------------------------------------------
@@ -338,7 +292,6 @@ export const CLASSES = {
     // member; enemy-side AI summons roll from `attacks` below instead. The
     // employee carries both - the superset a shared archetype needs.
     actions: ['action-item'],
-    talent: null,
     // AI-combat fields (read only for AI-driven class units):
     attackAp: 3,
     xp: 0,

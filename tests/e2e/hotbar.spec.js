@@ -44,7 +44,7 @@ test('the kit is in canonical order, on one row, with room to grow', async ({ pa
   // cover verbs - Take Cover (TACTICS_PLAN M6) and Pull Over (M8) - and the
   // bare-handed swing that stands in for a weapon (data/actions.js,
   // stats.orderedActionIds). The trailing empty slot is deliberate: it is
-  // where the coffee goes, and the reason a player ever right-clicks a slot.
+  // where the zone goes, and the reason a player ever right-clicks a slot.
   const all = await slots(page);
   expect(all.map((s) => s.id)).toEqual([
     'hotbar-act-attack',
@@ -52,7 +52,7 @@ test('the kit is in canonical order, on one row, with room to grow', async ({ pa
     'hotbar-act-paper-ball',
     'hotbar-act-paper-airplane',
     'hotbar-act-defend',
-    'hotbar-act-coffee',
+    'hotbar-act-paper-storm',
     'hotbar-act-take-cover',
     'hotbar-act-pull',
     'hotbar-act-punch',
@@ -92,7 +92,7 @@ test('right-click a slot to reassign it; assigning swaps rather than duplicates'
   // a power can never be in two slots at once.
   await page.click('#context-menu >> text=Coffee Break');
   await expect.poll(async () => (await slots(page)).map((s) => s.id)).toEqual([
-    'hotbar-act-coffee',
+    'hotbar-act-paper-storm',
     'hotbar-act-shove',
     'hotbar-act-paper-ball',
     'hotbar-act-paper-airplane',
@@ -106,14 +106,14 @@ test('right-click a slot to reassign it; assigning swaps rather than duplicates'
 
   // The layout rides on the SHEET, so pressing key 1 now arms what is in slot 1.
   // (Coffee Break is combat-only out here, so it refuses and says why - which is
-  // proof the press landed on the coffee and not on the email that used to be
+  // proof the press landed on the zone and not on the email that used to be
   // there.)
   await page.keyboard.press('1');
   expect(await page.evaluate(() => window.__game.narration.at(-1))).toMatch(/pockets/i);
   expect(await page.evaluate(() => window.__game.armed)).toBe(null);
 
   // Clearing a slot leaves it empty and addressable, not collapsed.
-  await page.click('#hotbar-act-coffee', { button: 'right' });
+  await page.click('#hotbar-act-paper-storm', { button: 'right' });
   await page.click('#context-menu >> text=Clear this slot');
   await expect(page.locator('#hotbar-slot-0')).toBeVisible();
   await expect(page.locator('#hotbar-slot-0')).toHaveText(/^1—$/);

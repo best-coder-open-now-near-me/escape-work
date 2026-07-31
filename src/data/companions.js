@@ -74,7 +74,11 @@ const KITS = {
     maxHp: 14,
     ap: 6,
     attr: { savvy: 3 }, // the one dial that makes him the junior
-    talent: null, // too new for a talent - fresh eyes, no habits
+    // He used to carry `talent: null` - "too new for a talent, fresh eyes, no
+    // habits" - which was characterisation written in a field that no longer
+    // exists on anybody (TALENT_PLAN M1). It reads BETTER as a mechanical
+    // state now: he is seeded no starting talent and has the picks to spend,
+    // which is the same sentence the game can actually act on.
     dialogue: {
       start: 'hi',
       nodes: {

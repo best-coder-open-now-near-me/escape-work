@@ -211,7 +211,7 @@ test('a legacy single-sheet save loads as a one-member party', async ({ page }) 
       sheet: {
         classId: 'office-drone', className: 'Office Drone', model: 'worker',
         hp: 9, maxHp: 22, maxAp: 6, level: 2, xp: 0, xpNext: 15, bonusDmg: 1,
-        actions: ['attack', 'defend', 'coffee'], talent: null,
+        actions: ['attack', 'defend', 'paper-storm'],
       },
     }));
   });

@@ -8,10 +8,11 @@ import { gainXp, createSheetFrom, ensureAttributes, xpNextForLevel, EQUIP_SLOTS 
 import { ITEMS } from './data/items.js';
 import { CLASSES } from './data/classes.js';
 import { COMPANIONS } from './data/companions.js';
+import { STARTING_TALENT_BY_CLASS } from './data/talents.js';
 import { CUSTOM_RIGS } from './data/looks.js';
 
 export const PARTY_CAP = 3; // leader + 2 companions - see PARTY_PLAN.md
-export const SAVE_VERSION = 8; // v8 drops the creation look/background fields (CHARACTER_PLAN.md)
+export const SAVE_VERSION = 9; // v9 records which talents a character HOLDS (TALENT_PLAN.md)
 
 // Petty Cash is PARTY state, not sheet state (ECONOMY_PLAN #2): one purse the
 // whole roster spends from, so buying a sandwich never means switching leaders
@@ -122,6 +123,22 @@ function normalizeSheet(sheet, version = 0) {
   sheet.attrPoints ??= 0; // pre-M2 saves never banked any
   sheet.classPoints ??= 0;
   sheet.perks ??= []; // taken track nodes; effects are already baked into the sheet
+  // v9: talents became their own axis (TALENT_PLAN M1). A v8 character has its
+  // class's talent already BAKED into `sheet.talent.effects`, so the effects
+  // need no migrating - what is missing is the record of which talent that
+  // was, now that the class no longer says. Seed the id from the same table
+  // creation uses, so a saved Mail Room keeps Warehouse Soles AND it is a
+  // talent they HOLD rather than one their class implies.
+  //
+  // Defaulting state, not inventing it (see the rule above): the character
+  // already had this talent and its effects are already on the sheet. Note the
+  // effects are deliberately NOT re-applied - they are baked, and applyEffect
+  // accumulates numbers, so re-merging would silently double a paper bonus.
+  if (!sheet.talents) {
+    const seeded = STARTING_TALENT_BY_CLASS[sheet.classId]
+      || (sheet.companionId && STARTING_TALENT_BY_CLASS[COMPANIONS[sheet.companionId]?.classId]);
+    sheet.talents = seeded && sheet.talent ? [seeded] : [];
+  }
   // v5: equipment slots. The old "best carried stapler counts" rule became a
   // real weapon slot - auto-equip the best weapon still loose in the bag so no
   // migrated character loses the damage it used to get for free.

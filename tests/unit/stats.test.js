@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { COMPANIONS } from '../../src/data/companions.js';
 import {
-  createSheet, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist, accuracy, dodge, hitChance, rollHit, unitCombat, equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, stairwellHeal, gritSaveChance, SAVE,
+  createSheet, grantTalent, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist, accuracy, dodge, hitChance, rollHit, unitCombat, equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, stairwellHeal, gritSaveChance, SAVE,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
@@ -23,10 +23,40 @@ test('createSheet throws on an unknown class', () => {
 });
 
 test('talent-granted actions land on the sheet', () => {
-  const s = createSheet('middle-manager'); // Smoker grants the cigarette
-  assert.ok(s.actions.includes('cigarette'));
+  // A talent is no longer class property (TALENT_PLAN M1) - IT Support is
+  // SEEDED with ESD Steel-Toes rather than owning it, and the Steel-Toe Kick
+  // arrives through the registry.
+  const s = createSheet('it-support');
+  assert.ok(s.actions.includes('kick'));
   // ...and the granted action is appended, not replacing class actions.
-  for (const id of CLASSES['middle-manager'].actions) assert.ok(s.actions.includes(id));
+  for (const id of CLASSES['it-support'].actions) assert.ok(s.actions.includes(id));
+});
+
+test('a talent is held by the character, not by the class', () => {
+  // The whole point of the axis coming apart: nothing in data/classes.js may
+  // name a talent, and any character may hold any entry in the registry.
+  for (const def of Object.values(CLASSES)) assert.equal(def.talent, undefined);
+  const guard = createSheet('security');
+  assert.deepEqual(guard.talents, ['incident-report']);
+  assert.equal(guard.talent.effects.foldsAirplanes, undefined);
+  // A Security guard can be an Origami Specialist. Under the old shape that
+  // sentence could not be written at all.
+  grantTalent(guard, 'origami-specialist');
+  assert.deepEqual(guard.talents, ['incident-report', 'origami-specialist']);
+  assert.equal(guard.talent.effects.foldsAirplanes, true);
+  assert.equal(guard.talent.effects.surfaceDamageResist, 1); // and keeps the first
+  // The headline stays the first taken; the record underneath carries both.
+  assert.equal(guard.talent.name, 'Incident Report');
+});
+
+test('talent effects merge - numbers accumulate, flags replace', () => {
+  const s = createSheet('office-drone'); // Origami Specialist: paperDamageBonus 2
+  assert.equal(s.talent.effects.paperDamageBonus, 2);
+  grantTalent(s, 'always-moving');
+  assert.equal(s.talent.effects.freeMoveAp, 1);
+  assert.equal(s.talent.effects.paperDamageBonus, 2); // the first is untouched
+  assert.equal(grantTalent(s, 'always-moving'), false); // idempotent, not a second helping
+  assert.deepEqual(s.talents, ['origami-specialist', 'always-moving']);
 });
 
 test('gainXp promotes once, fully heals, and grows the next bar', () => {
@@ -199,12 +229,35 @@ test('spendClassPoint grants an action onto the sheet (respecting prereqs)', () 
   assert.ok(s.actions.includes('ream-throw'));
 });
 
-test('spendClassPoint merges a numeric talent effect', () => {
-  const s = createSheet('office-drone'); // Origami Specialist: paperDamageBonus 2
-  s.classPoints = 1;
-  const before = s.talent.effects.paperDamageBonus || 0;
-  assert.equal(spendClassPoint(s, 'drone-sharp-folds'), true); // +1
-  assert.equal(s.talent.effects.paperDamageBonus, before + 1);
+test('the freed talents reproduce the effects the classes used to bake', () => {
+  // The test that makes TALENT_PLAN M1 a MOVE rather than a rebalance. These
+  // are the exact bags data/classes.js carried before the extraction; if this
+  // drifts, the migration re-tuned something on the way past.
+  const was = {
+    'office-drone': { paperDamageBonus: 2, paperAmmoDiscount: 1, paperCutImmune: true, foldsAirplanes: true },
+    'mail-room': { slipImmune: true },
+    'it-support': { shockImmune: true, grantsAction: 'kick' },
+    security: { surfaceDamageResist: 1 },
+    'human-resources': {},
+  };
+  for (const [classId, effects] of Object.entries(was)) {
+    assert.deepEqual(createSheet(classId).talent.effects, effects, classId);
+  }
+  // The Manager is the one deliberate departure, and it is POWERS_PLAN M9's
+  // doing rather than this plan's: Smoker granted `cigarette`, a seventh
+  // self-heal hiding in a talent, which went with the other five.
+  assert.deepEqual(createSheet('middle-manager').talent.effects, { hasLighter: true });
+});
+
+test('no class track grants a talent effect any more', () => {
+  // Sharp Folds, Corner-Office Traction, Frequent Flier and Always Moving were
+  // talents wearing a track node's clothes (TALENT_PLAN decision 4). A track
+  // is for a class's VERB; "cannot slip" is not one.
+  for (const def of Object.values(CLASSES)) {
+    for (const node of def.track || []) {
+      assert.equal(node.effect?.talent, undefined, `${node.id} grants a talent effect`);
+    }
+  }
 });
 
 test('spendClassPoint refuses unknown nodes, empty pool, and double-takes', () => {

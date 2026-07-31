@@ -9,6 +9,7 @@ import { findPath } from '../../src/pathfinding.js';
 import { existsSync } from 'node:fs';
 import { TILE_TYPES, blocksSight } from '../../src/data/tiles.js';
 import { ENEMY_TYPES, ENEMY_KITS } from '../../src/data/enemies.js';
+import { TALENTS, TALENT_EFFECT_KEYS, STARTING_TALENT_BY_CLASS } from '../../src/data/talents.js';
 import { parseActorRef } from '../../src/data/actor-registries.js';
 import { NPCS } from '../../src/data/npcs.js';
 import { COMPANIONS, COMPANION_KITS } from '../../src/data/companions.js';
@@ -175,12 +176,16 @@ test('every registry cross-reference resolves', () => {
     for (const def of Object.values(regs)) {
       for (const a of def.actions || []) reachable.add(a);
       for (const n of def.track || []) if (n.effect?.grantsAction) reachable.add(n.effect.grantsAction);
-      if (def.talent?.effects?.grantsAction) reachable.add(def.talent.effects.grantsAction);
     }
+  }
+  // Talents are their own axis now (TALENT_PLAN M1) - a class no longer
+  // carries one, so an action a talent grants is reachable through the
+  // registry rather than through whoever used to own it.
+  for (const t of Object.values(TALENTS)) {
+    if (t.effects?.grantsAction) reachable.add(t.effects.grantsAction);
   }
   for (const def of Object.values(ENEMY_TYPES)) {
     for (const a of def.actions || []) reachable.add(a);
-    if (def.talent?.effects?.grantsAction) reachable.add(def.talent.effects.grantsAction);
   }
   for (const it of Object.values(ITEMS)) if (it.attack) reachable.add(it.attack);
   for (const [id, a] of Object.entries(ACTIONS)) {
@@ -546,5 +551,88 @@ test('every enemy type is placed on some shipped floor, or is explicitly a summo
   for (const id of Object.keys(ENEMY_TYPES)) {
     assert.ok(placed.has(id) || summonable.has(id) || ENEMY_TYPES[id].summonOnly,
       `enemy type "${id}" is never placed on a floor and never summoned`);
+  }
+});
+
+
+// --- the talent lint (TALENT_PLAN M1) ----------------------------------------
+// data/classes.js opens with an essay on adjectives strapped onto our people -
+// a state asserted in data that no rule enforces, drifting silently. The class
+// talent WAS that failure, at the top of every class entry, and the reason it
+// went unnoticed for so long is that nothing checked it. So the guard ships in
+// the same milestone as the change.
+test('no class or companion carries a talent', () => {
+  for (const [reg, name] of [[CLASSES, 'CLASSES'], [COMPANIONS, 'COMPANIONS']]) {
+    for (const [id, def] of Object.entries(reg)) {
+      assert.equal(def.talent, undefined, `${name}["${id}"] declares a talent`);
+    }
+  }
+});
+
+test('no track node grants a talent effect', () => {
+  // A track is for a class's verb. "Never provoke" and "cannot slip" are
+  // talents, and they live in the registry now.
+  for (const reg of [CLASSES, COMPANIONS]) {
+    for (const [id, def] of Object.entries(reg)) {
+      for (const node of def.track || []) {
+        assert.equal(node.effect?.talent, undefined,
+          `${id} track node "${node.id}" grants a talent effect`);
+      }
+    }
+  }
+});
+
+test('no talent requires a class', () => {
+  // The back door. The association grows back one entry at a time, and each
+  // one looks reasonable in isolation - so this is a lint and not a promise.
+  for (const [id, t] of Object.entries(TALENTS)) {
+    const req = t.requires || {};
+    assert.equal(req.classId, undefined, `talent "${id}" gates on a class`);
+    assert.equal(req.class, undefined, `talent "${id}" gates on a class`);
+    for (const key of Object.keys(req)) {
+      assert.ok(['talents', 'attr'].includes(key), `talent "${id}" requires unknown "${key}"`);
+    }
+  }
+});
+
+test('every talent effect key is one the engine honours', () => {
+  // Open Door Policy shipped with effects: {} and did nothing from the day it
+  // landed. A key nobody reads is a talent that silently does nothing, which
+  // is the same failure with a typo instead of an omission.
+  for (const [id, t] of Object.entries(TALENTS)) {
+    for (const key of Object.keys(t.effects || {})) {
+      assert.ok(TALENT_EFFECT_KEYS.includes(key),
+        `talent "${id}" has effect "${key}", which nothing reads`);
+    }
+  }
+});
+
+test('no effect key has two homes among talents', () => {
+  // The slipImmune case: it was the Mail Room's whole named talent, a Manager
+  // track node, AND a stat on boots, so a Manager could buy the Mail Room's
+  // identity for one point. Gear is a separate axis and may overlap; two
+  // TALENTS granting the same effect is the convergence worth catching.
+  const seen = new Map();
+  for (const [id, t] of Object.entries(TALENTS)) {
+    for (const key of Object.keys(t.effects || {})) {
+      if (key === 'grantsAction') continue; // distinct actions, not one effect
+      const prior = seen.get(key);
+      assert.equal(prior, undefined,
+        `talents "${prior}" and "${id}" both grant "${key}"`);
+      seen.set(key, id);
+    }
+  }
+});
+
+test('every talent a class is seeded with exists, and every class is covered', () => {
+  // The temporary seed table (deleted by TALENT_PLAN M2 when the picker
+  // lands). A missing entry is a character who silently starts with nothing.
+  for (const [classId, talentId] of Object.entries(STARTING_TALENT_BY_CLASS)) {
+    assert.ok(CLASSES[classId], `seed names unknown class "${classId}"`);
+    assert.ok(TALENTS[talentId], `seed names unknown talent "${talentId}"`);
+  }
+  for (const [id, def] of Object.entries(CLASSES)) {
+    if (def.playable === false) continue;
+    assert.ok(STARTING_TALENT_BY_CLASS[id], `playable class "${id}" has no seeded talent`);
   }
 });

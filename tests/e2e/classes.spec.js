@@ -133,7 +133,7 @@ test('Security: Detain roots without damaging, and the guard wears the cop rig',
   await enterCombat(page);
   await expect(page.locator('#hotbar-act-detain')).toBeVisible();
   await expect(page.locator('#hotbar-act-stand-post')).toBeVisible();
-  await expect(page.locator('#hotbar-act-night-thermos')).toBeVisible();
+  await expect(page.locator('#hotbar-act-stand-post')).toBeVisible();
 
   await page.evaluate(() => { window.__combat.forceHit = true; });
   const foe = await page.evaluate(() => window.__combat.enemies.find((e) => e.alive));
