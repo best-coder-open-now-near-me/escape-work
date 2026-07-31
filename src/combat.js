@@ -1397,10 +1397,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const range = rangeOf(id);
     for (const en of world.liveEnemies()) {
       if (!en.entity) continue;
-      // ONE shotOutcome per enemy, memoised, because it runs crouchStateOf -
-      // which lazily BREAKS a stale crouch. Idempotent (the second call finds
-      // nothing left to break), but this is a per-frame path and the baseline
-      // asked once.
+      // ONE shotOutcome per enemy, memoised and LAZY, because it runs
+      // crouchStateOf - which lazily BREAKS a stale crouch. Idempotent (a
+      // second call finds nothing left to break), but this is a per-frame path
+      // and asking twice where one answer will do is waste.
+      //
+      // Lazy is safe, and worth saying why: the ladder's `&&` chain means an
+      // out-of-range or blind target never reads it, so the incidental
+      // revalidation this used to do every frame no longer happens here. It
+      // does not need to. `refresh()` is the OWNER of crouch revalidation
+      // (it walks every crouch), and every event that can stale one - a shove
+      // glide, a topple taking the shield, a swap, a step - goes through it.
+      // Between refreshes only the cursor moves, and a cursor cannot invalidate
+      // a crouch.
       let shot = null;
       const outcome = () => (shot ??= shotOutcome(active, en));
       const ok = enemyRingOk(a, {
