@@ -91,6 +91,7 @@ class track survives, minus its talent nodes; see M2.
 | 7 | Talents stay **passive traits**, with `grantsAction` as the one exception | `[proposed]` | Two of the six already grant an action (`kick`, `cigarette`), so the exception is load-bearing and pre-existing. What talents should not become is a second action registry — if a talent's whole payload is a button, it is a power and belongs in `data/actions.js` behind a `needsTalent` gate, the way Paper Airplane already works. |
 | 8 | New effect kinds are in scope | `[ratified]` | Designer chose this over "existing eleven keys only" (2026-07-31). It is the one place this plan knowingly departs from content-is-data: a new effect kind is engine work, so the talent list becomes a systems backlog and not purely a registry. Mitigated by decision 9. |
 | 9 | Ship the registry on the existing vocabulary **first** | `[proposed]` | M1–M3 introduce no new effect kinds: the decoupling is provably pure data movement, and the suite can assert the merged effects bag is unchanged for an equivalent build. New kinds land in M5, afterwards, one at a time with their own tests. This is how decision 8 buys expressiveness without the first milestone becoming open-ended. |
+| 11 | A talent is a **rare, defining pick — 2–3 a campaign** | `[ratified]` | "rare defining pick, like 2-3 a campaign" (designer, 2026-07-31), answering the open question this plan shipped with. Consequences run through the whole design and are spelled out below, because a 2–3 budget is a different system from a per-level drip, not a smaller one. |
 | 10 | The merged `sheet.talent.effects` bag stays the read surface | `[proposed]` | Every consumer today — `talentFxOf`, the stepping and ignite checks, `combat.throwablesFor`, `stats.ammoCostOf` — reads the merged bag, not a talent list. Keeping that contract means **no read site changes**, and multiple talents work on day one. `sheet.talents` (the id list) is added alongside for the UI and for save integrity, not for the engine to consult. |
 
 ## The data
@@ -155,6 +156,49 @@ are "IT Support" — one headline, a fuller record underneath. Alternative
 (a generated summary, "Origami Specialist +3") was considered and rejected as
 a label nobody would read.
 
+## What "2–3 a campaign" does to the rest of the plan
+
+Decision 11 is not a tuning number, it is the system's shape. Four things fall
+out of it, and one of them contradicts something written above.
+
+**A talent must be worth a third of your build.** Ten entries carried over
+unchanged, and several of them are single-flag utilities — `slipImmune`,
+`noProvoke`, `freeMoveAp: 1`. Those are fine as one node in a five-node track
+you buy out. As **one of the three things that define a character for an entire
+campaign**, "you cannot slip" is thin. At this budget every entry has to be a
+*build*, not a modifier.
+
+This changes M4 from a balance pass into a **content pass**, and moves the
+pressure onto the wrong end: Origami Specialist carrying four effects stops
+being the outlier that needs trimming and starts being the template everything
+else should reach. `[proposed]` — the freed four (Sharp Folds, Corner-Office
+Traction, Frequent Flier, Always Moving) should be **merged upward into fuller
+talents rather than shipped as standalone picks**. Frequent Flier plus Always
+Moving is a coherent "never in the building" talent; alone, each is a nudge.
+
+**The registry wants to be small and sharp, not broad.** A 2–3 budget means a
+player sees perhaps 15% of the list per campaign. Twenty thin entries would
+mean most are never taken and none are memorable; **eight to twelve strong
+ones** makes each pick a real fork and each playthrough visibly different. Ten
+entries is coincidentally the right *size* — it is the *weight* that is off.
+
+**Prerequisites get less useful, and opportunity cost gets more.** Decision 6
+leaned on `requires` chains to stop convergence. Chains need depth to bite, and
+there is no depth in a 2–3 budget — you would spend your whole allowance
+climbing one. The real anti-convergence lever here is that **taking one talent
+means never taking two others**, which is doing the work on its own. Keep
+`requires` in the schema for attribute thresholds; stop expecting it to carry
+balance. Risk 1 is downgraded accordingly.
+
+**M1's seeding is now a real decision, not a no-op.** M1 seeds every character
+with the talents their class used to grant, so behaviour is identical. Under
+decision 11 that seed is **one of your two or three**, spent before you chose
+anything. That is the right default (it preserves existing characters exactly),
+but M2 has to decide whether the seeded talent is refundable when the picker
+arrives, or whether a class's old talent is simply your first pick. `[proposed]`:
+**refundable once**, at the moment the picker first opens, so no existing save
+is quietly down a third of its build.
+
 ## The talent lint
 
 `data/classes.js` opens with an essay on adjectives strapped onto our people —
@@ -218,10 +262,12 @@ guard in the same milestone as its change, not after:
 3. **The character screen shows a build.** Talents held, what they do, what
    they cost. The first milestone where the second axis is visible to a player
    rather than true in the data.
-4. **The tuning pass.** Open Door Policy gets a real effect (its blurb has
-   promised a summon-scaling one since it landed, and `PROGRESSION_PLAN:59`
-   already sketches it). Origami Specialist's four effects get looked at
-   against talents carrying one. Deliberately after the decoupling, not before:
+4. **The content pass** (was: the tuning pass — decision 11 changed its job).
+   Every entry gets weighed as *one of a character's three*, which means
+   levelling entries **up** rather than trimming the big one: Open Door Policy
+   gets a real effect (its blurb has promised a summon-scaling one since it
+   landed, `PROGRESSION_PLAN:59` sketches it), and the thin freed nodes merge
+   into fuller talents. Deliberately after the decoupling, not before:
    balancing a talent while it is still class property means balancing the
    class.
 5. **New effect kinds** (decision 8), one at a time, each with its own tests.
@@ -249,20 +295,23 @@ guard in the same milestone as its change, not after:
 ## Risks and open questions
 
 1. **Any character can now take any talent, so builds converge on the best
-   ones.** The old system's one virtue was that it forced variety by fiat. If
-   everyone takes Frequent Flier, the answer is prerequisites (decision 6) and
-   opportunity cost, not putting talents back in classes. Watch it from M2.
+   ones.** The old system's one virtue was that it forced variety by fiat.
+   *Downgraded by decision 11*: at 2–3 picks a campaign, opportunity cost does
+   most of this work by itself — taking one talent means never taking two
+   others. Watch it from M2, but the lever is making the alternatives strong,
+   not gating them.
 2. **A third currency is a third thing to explain on the level-up screen.**
    Attribute points, class points, talent points. `PROGRESSION_PLAN` decision 2
    already committed to player-allocated everything, so this is more of the
    same rather than a new idea — but three pools on one screen is where it
    stops being legible. If it does, merging talent points *into* class points
    is the retreat, and it costs decision 5.
-3. **Open: how many talent points, and how often?** Not answered here because
-   it depends on M2's screen and on `PROGRESSION_PLAN`'s level pacing. The
-   shape question — is a talent a rare, defining pick (2–3 a campaign) or a
-   steady drip (one every level)? — changes how the registry should be sized,
-   and wants an answer before M4's tuning pass.
+3. ~~**Open: how many talent points, and how often?**~~ **Answered** —
+   decision 11, 2–3 a campaign. What it leaves open is narrower and belongs to
+   `PROGRESSION_PLAN`: *which* levels grant one. Front-loading (levels 1/3/5)
+   means the build is set before the floors that test it; back-loading means
+   most of the campaign is played on the starting kit. Recommend **1 / mid /
+   late** so every act changes the character once.
 4. **Companions have talents too.** `data/companions.js` has one with
    `talent: null` ("too new for a talent — fresh eyes, no habits"), which is a
    deliberate characterisation that this plan turns into a mechanical state
