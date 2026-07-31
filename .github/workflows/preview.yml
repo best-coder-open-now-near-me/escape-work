@@ -1,0 +1,196 @@
+name: Branch preview
+
+# A playable build per branch, published to GitHub Pages, about ninety seconds
+# after you push. It exists because the itch.io path is a RELEASE path: deploy
+# chains off a green CI run on main, CI on main always runs the full e2e suite
+# (~35 min by its own reckoning), then butler uploads and itch processes the
+# HTML5 build. That is the right price for a release and an absurd one for
+# "did the cover indicator land in the right place".
+#
+#   https://best-coder-open-now-near-me.github.io/escape-work/
+#
+# is an index of every live preview; each build is at preview/<branch-slug>/.
+#
+# DELIBERATELY UNGATED. This runs no tests - not the unit suite, not smoke.
+# It is a viewing tool, and coupling it to the tests would rebuild the exact
+# latency problem it exists to solve. ci.yml still gates pull requests and
+# deploy.yml still gates itch.io; nothing here loosens either. The tradeoff is
+# that a preview can be broken, and finding that out by looking at it IS the
+# intended workflow.
+#
+# Requires, once, in repo Settings -> Pages: Source = "Deploy from a branch",
+# branch `gh-pages`, folder `/ (root)`. Until that is set the workflow succeeds
+# and publishes, but nothing is served.
+on:
+  push:
+    branches-ignore: [ main, gh-pages ]
+  delete:
+
+# Per-branch: a second push to the SAME branch supersedes the first (you only
+# ever want the newest preview of a branch). Different branches build in
+# parallel and contend for the gh-pages push, which the retry loop settles.
+concurrency:
+  group: preview-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write        # to push the gh-pages branch
+
+jobs:
+  publish:
+    name: Build and publish preview
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web bundle
+        run: npm run build
+
+      - name: Fail early if the build produced nothing
+        run: test -s build/web/index.html || { echo "Build produced no index.html"; exit 1; }
+
+      # A branch name can hold slashes and worse; a preview path should be one
+      # flat, guessable directory. Lossy in principle (two branches differing
+      # only in punctuation collide), which is why the real name is written to
+      # branch.txt for the index page to show.
+      - name: Derive preview slug
+        id: slug
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          SLUG=$(printf '%s' "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | cut -c1-100)
+          # A leading dot would hide the directory and confuse the scanner.
+          SLUG=${SLUG#.}
+          test -n "$SLUG" || { echo "Branch name produced an empty slug"; exit 1; }
+          echo "slug=$SLUG" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to gh-pages
+        env:
+          SLUG: ${{ steps.slug.outputs.slug }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git clone --depth 1 --branch gh-pages \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+            gh-pages 2>/dev/null || {
+              # First ever preview: gh-pages does not exist yet. An ORPHAN
+              # branch, so the site carries none of the source history.
+              git clone --depth 1 \
+                "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+                gh-pages
+              git -C gh-pages checkout --orphan gh-pages
+              git -C gh-pages rm -rf --quiet . || true
+            }
+
+          # Assemble the commit from scratch each attempt: another branch may
+          # have landed its own preview (and its own index.html) since we
+          # started, and rebasing that would just conflict on the index.
+          publish() {
+            rm -rf "gh-pages/preview/$SLUG"
+            mkdir -p "gh-pages/preview/$SLUG"
+            cp -r build/web/. "gh-pages/preview/$SLUG/"
+            printf '%s\n' "$BRANCH" > "gh-pages/preview/$SLUG/branch.txt"
+            # Without this, Pages runs Jekyll and drops anything underscore-led.
+            touch gh-pages/.nojekyll
+            node tools/preview-index.mjs gh-pages
+            git -C gh-pages add -A
+            git -C gh-pages diff --quiet --cached && return 0
+            git -C gh-pages commit -m "Preview: $BRANCH ($GITHUB_SHA)" --quiet
+          }
+
+          for attempt in 1 2 3 4 5; do
+            publish
+            if git -C gh-pages push origin gh-pages; then
+              exit 0
+            fi
+            echo "gh-pages push lost a race (attempt $attempt); resyncing"
+            git -C gh-pages fetch origin gh-pages
+            git -C gh-pages reset --hard origin/gh-pages
+            sleep $(( attempt * 3 ))
+          done
+          echo "Could not push gh-pages after 5 attempts"
+          exit 1
+
+      - name: Link
+        env:
+          SLUG: ${{ steps.slug.outputs.slug }}
+        run: |
+          URL="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/preview/$SLUG/"
+          # The trailing slash is load-bearing: index.html pulls bundle.js,
+          # playcanvas.min.js and assets/ by RELATIVE path, which resolve
+          # against the wrong directory without it. Pages redirects to add it,
+          # but link the correct form rather than relying on that.
+          echo "### Preview ready" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "[$URL]($URL)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "_Untested build - no unit suite, no smoke. For looking at._" >> "$GITHUB_STEP_SUMMARY"
+
+  # Branch deleted -> its preview goes with it, or gh-pages accretes dead
+  # builds forever and the index advertises branches nobody remembers.
+  cleanup:
+    name: Remove preview for deleted branch
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4    # for tools/preview-index.mjs
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Delete preview from gh-pages
+        env:
+          BRANCH: ${{ github.event.ref }}
+        run: |
+          set -euo pipefail
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Nothing published yet: nothing to clean up.
+          git clone --depth 1 --branch gh-pages \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+            gh-pages 2>/dev/null || { echo "No gh-pages branch; nothing to remove"; exit 0; }
+
+          SLUG=$(printf '%s' "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | cut -c1-100)
+          SLUG=${SLUG#.}
+          if [ ! -d "gh-pages/preview/$SLUG" ]; then
+            echo "No preview for $BRANCH; nothing to remove"
+            exit 0
+          fi
+
+          for attempt in 1 2 3 4 5; do
+            rm -rf "gh-pages/preview/$SLUG"
+            node tools/preview-index.mjs gh-pages
+            git -C gh-pages add -A
+            if git -C gh-pages diff --quiet --cached; then
+              echo "Nothing to commit"
+              exit 0
+            fi
+            git -C gh-pages commit -m "Preview: remove $BRANCH" --quiet
+            if git -C gh-pages push origin gh-pages; then
+              exit 0
+            fi
+            echo "gh-pages push lost a race (attempt $attempt); resyncing"
+            git -C gh-pages fetch origin gh-pages
+            git -C gh-pages reset --hard origin/gh-pages
+            sleep $(( attempt * 3 ))
+          done
+          echo "Could not push gh-pages after 5 attempts"
+          exit 1
