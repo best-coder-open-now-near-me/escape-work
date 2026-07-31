@@ -990,7 +990,11 @@ function startGame(level) {
       fromX: Math.round(player.x),
       fromZ: Math.round(player.z),
       isWalkable,
-      hasLos: (ax, az, bx, bz) => hasLos({ x: ax, z: az }, { x: bx, z: bz }),
+      // Under-promise the CIRCLE the arrival re-check measures (DEGRID D4):
+      // a corner tile inside the old cheb square but outside the radius would
+      // be walked to and then refused.
+      hasLos: (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz) <= range
+        && hasLos({ x: ax, z: az }, { x: bx, z: bz }),
       findPath: (ax, az) => findPath(isWalkable, player.x, player.z, ax, az, hazardCost, grid.stepOpen),
     });
   }
@@ -1004,7 +1008,7 @@ function startGame(level) {
     return enemies.filter((en) => {
       if (!en.alive || !en.entity) return false;
       const bp = en.entity.getPosition();
-      return test(bp.x, bp.z, 0.5) && hasLos(player, en);
+      return test(bp.x, bp.z, 0.5) && hasLos(leadBody(), { x: bp.x, z: bp.z });
     });
   }
 
@@ -1071,6 +1075,17 @@ function startGame(level) {
   // where being briefly hazed must not decide who is in the fight.
   const canTakePart = (a, b) =>
     segmentClear(grid.sightOpenCell, a.x, a.z, b.x, b.z, grid.sightOpen);
+  // The leader's continuous body. Targeted ranges and sight measure from HERE
+  // (DEGRID D4/D6) - `player.x/z` are the logical tile, up to half a tile
+  // from where the model visibly stands.
+  const leadBody = () => {
+    const p = player?.entity?.getPosition();
+    return p ? { x: p.x, z: p.z } : { x: player.x, z: player.z };
+  };
+  const enemyBody = (en) => {
+    const p = en?.entity?.getPosition();
+    return p ? { x: p.x, z: p.z } : { x: en.x, z: en.z };
+  };
   // The shared rule (stats.js), bound to the leader. A declaration, not a
   // const: the hotbar builder reads it and runs from paths that fire before
   // this point in the closure body.
@@ -1120,7 +1135,10 @@ function startGame(level) {
       // Range, a line, and ammo only where the shot bills for it. A ranged
       // WEAPON also passes if it can walk into range, the way a melee swing
       // passes on a route it hasn't taken yet - combat's opener walks it in.
-      const shot = cheb(player, en) <= range && hasLos(player, en);
+      // A range is a circle between the BODIES (DEGRID D4/D6).
+      const lb = leadBody();
+      const eb = enemyBody(en);
+      const shot = Math.hypot(lb.x - eb.x, lb.z - eb.z) <= range && hasLos(lb, eb);
       if (a.ammoCost) return shot && (sheet?.paper || 0) >= throwAmmoCost(id);
       // A weapon walks in to a FIRING position, not to their elbow - asking
       // canApproach here refused shots that were plainly on. This still refuses
@@ -1612,8 +1630,9 @@ function startGame(level) {
   // AP pool to spend out here and no per-fight `uses` to ration, so those
   // fields simply are not supplied.
   const summonDropProblem = (a, tx, tz) => summonSpotProblem(a, {
-    dist: cheb(player, { x: tx, z: tz }),
-    los: hasLos(player, { x: tx, z: tz }),
+    // The drop range is a circle from the poster's body; the SPOT is a tile.
+    dist: Math.hypot(leadBody().x - tx, leadBody().z - tz),
+    los: hasLos(leadBody(), { x: tx, z: tz }),
     hasRoomToStand: freeTilesNear(tx, tz, 1, 0).length > 0,
     room: roomFor(a),
   });
@@ -1937,7 +1956,7 @@ function startGame(level) {
   // Hotbar trigger: an armed attack, aimed at a coworker, opens combat with
   // that move. The clicked target joins even if it's beyond the engage radius
   // (a thrown opener can reach further than the auto-engage does).
-  function engageWithAction(en, actionId) {
+  function engageWithAction(en, actionId, point = null) {
     if (!sheet || inCombat || gameOver || !en?.alive) return;
     // Pre-flight the opener before any fight begins: an armed misclick on a
     // coworker nobody can actually reach (sealed behind walls and closed
@@ -1950,10 +1969,16 @@ function startGame(level) {
         return;
       }
     } else if (a.cone) {
-      // A cone fires from where you STAND: its reach is cone.range with a
-      // clear line, not arm's length. Falling through to the melee test below
-      // refused a wedge that plainly covered them, and then walked you in.
-      if (cheb(player, en) > a.cone.range || !hasLos(player, en)) {
+      // A cone fires from where you STAND, and its gate IS the wedge - the
+      // same coneFrom the preview drew and the resolution will run, aimed at
+      // the CLICK point when one came through (the armed ground click) and at
+      // the target's body otherwise. The old gate here was a third geometry
+      // (cheb square + tile-to-tile line) that could refuse a body the
+      // preview's wedge plainly clipped (DEGRID M5).
+      const lb = leadBody();
+      const eb = enemyBody(en);
+      const test = coneFrom(a, lb, point ? point.x : eb.x, point ? point.z : eb.z);
+      if (!test || !(test(eb.x, eb.z, 0.5) && hasLos(lb, eb))) {
         ui.say(`They are not in the way of that ${a.label.toLowerCase()}.`);
         return;
       }
@@ -1974,7 +1999,9 @@ function startGame(level) {
       e.alive && Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= ENGAGE_RADIUS
       && canTakePart(player, e)); // same rule as checkCombatTrigger - see there
     if (!engaged.includes(en)) engaged.push(en);
-    beginCombat({ engaged, primary: en, opening: { actionId, target: en } });
+    // The aimed point rides into the fight: the opener must fire the wedge
+    // the player SAW, not one re-aimed at the target's tile centre.
+    beginCombat({ engaged, primary: en, opening: { actionId, target: en, point } });
   }
 
   // A cone fired at an EMPTY wedge, with no fight on. It fires anyway
@@ -1986,13 +2013,13 @@ function startGame(level) {
   function fireOocCone(a, test, tx, tz) {
     player.lunge(tx, tz); // the fan of envelopes, aimed where you pointed
     if (a.leaves) {
-      const R = Math.ceil(a.cone.range);
+      const R = Math.ceil(a.cone.range) + 1;
       for (let z = Math.floor(player.z) - R; z <= Math.ceil(player.z) + R; z++) {
         for (let x = Math.floor(player.x) - R; x <= Math.ceil(player.x) + R; x++) {
           if (!test(x, z)) continue;
           // No carpeting a tile a teammate is standing on - combat's own rule.
           if (partyAt(x, z)) continue;
-          if (!hasLos(player, { x, z })) continue;
+          if (!hasLos(leadBody(), { x, z })) continue;
           leaveSurfaceAt(x, z, a.leaves, a.leavesTurns || 0);
         }
       }
@@ -2621,14 +2648,16 @@ function startGame(level) {
       // could not fire at the floor.
       if (armedOoc && ACTIONS[armedOoc].cone && point) {
         const a = ACTIONS[armedOoc];
-        const test = coneFrom(a, { x: player.x, z: player.z }, point.x, point.z);
+        // From the BODY, like the preview and the in-combat wedge - one
+        // geometry for the whole click (DEGRID M5).
+        const test = coneFrom(a, leadBody(), point.x, point.z);
         if (!test) { ui.say('Aim somewhere.'); return; } // the cursor is on you
         const caught = coneCatches(test);
         if (caught.length) {
           // The nearest one is the primary; the rest join through the engage
           // radius exactly as they would for any other opener.
           caught.sort((p, q) => cheb(player, p) - cheb(player, q));
-          engageWithAction(caught[0], armedOoc);
+          engageWithAction(caught[0], armedOoc, point);
           return;
         }
         fireOocCone(a, test, point.x, point.z);
@@ -2909,7 +2938,7 @@ function startGame(level) {
         if (!armedOoc || inCombat || !oocAim || !sheet) return null;
         const a = ACTIONS[armedOoc];
         if (!a.cone) return null;
-        const test = coneFrom(a, { x: player.x, z: player.z }, oocAim.x, oocAim.z);
+        const test = coneFrom(a, leadBody(), oocAim.x, oocAim.z);
         if (!test) return null;
         const caught = coneCatches(test);
         // The wedge is ALWAYS usable - an empty one fires too (fireOocCone),
