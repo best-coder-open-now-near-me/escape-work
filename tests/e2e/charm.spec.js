@@ -24,7 +24,7 @@ test('a borrowed coworker changes sides, keeps its turn, and is returned', async
   // list, and the readback below resolves it against the INITIATIVE order. Those
   // are two collections in two different orders, and names are not unique - HR
   // posts a req on her own turn, so by the time control reaches the player this
-  // arena can hold two slots both called "Applicant". Charming "Applicant" then
+  // arena can hold two slots both called "Employee". Charming "Employee" then
   // marks whichever one `engaged` lists first and asks about whichever one
   // initiative lists first, so the side-swap check below reads a unit that was
   // never charmed. That is how it failed on CI while passing locally, where HR

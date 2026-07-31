@@ -222,6 +222,23 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
   }
 
   // --- rings ----------------------------------------------------------------
+  // The cover aim's eased ring position - state carried between frames, since
+  // immediate-mode lines redraw every frame. Dropped whenever the aim is not
+  // live, so a re-arm never glides in from a stale spot.
+  let coverEase = null;
+  // A tile's shielded faces, as bars along the tile's own edges. The twin of
+  // combat's `drawFaces`; both take the face list the cover rule produced, so
+  // neither can draw a side the rule would not honour.
+  function faces(cx, cz, list, color, y = 0.15) {
+    const H = 0.42;
+    for (const [ox, oz] of list || []) {
+      const mx = cx + ox * 0.5;
+      const mz = cz + oz * 0.5;
+      app.drawLine(
+        new pc.Vec3(mx - oz * H, y, mz - ox * H),
+        new pc.Vec3(mx + oz * H, y, mz + ox * H), color);
+    }
+  }
   function ring(cx, cz, r, color, y = 0.14) {
     const SEGS = 18;
     let prev = null;
@@ -327,13 +344,36 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
           new pc.Vec3(aim.landing[0], 0.14, aim.landing[1]), color);
       }
     },
-    // TAKE COVER armed out of combat: the hovered shield rings in the cover
-    // yellow - and ONLY the hovered one (the designer's rings-everywhere-is-
-    // noise rule, same as combat's read).
-    drawCoverAim() {
+    // TAKE COVER armed out of combat: the ring is the SPOT YOU WOULD STAND
+    // and the bars are the faces that would shield you there - combat's read,
+    // out of combat. Ringing the shield instead told you which object you had
+    // named while the side you would end up on, which is what decides the
+    // shots you are safe from, was chosen for you and never drawn.
+    drawCoverAim(dt = 0) {
       const aim = queries.coverAim?.();
-      if (!aim) return;
-      ring(aim.x, aim.z, 0.42, aim.usable ? RING_COVER : RING_FAR);
+      if (!aim) { coverEase = null; return; }
+      const color = aim.usable ? RING_COVER : RING_FAR;
+      // Combat's three layers, out of combat (designer, 2026-07-31:
+      // "continuous and smooth"): the precise cursor point as a small marker
+      // - which is also where the commit walks you - the stand-tile ring
+      // eased toward the resolved tile instead of hopping to it, and the
+      // shielded faces snapped to the tile's edges, because that is where
+      // the edges are.
+      if (aim.px != null) ring(aim.px, aim.pz, 0.12, color);
+      if (!coverEase) coverEase = { x: aim.px ?? aim.x, z: aim.pz ?? aim.z };
+      const k = 1 - Math.exp(-dt * 14); // ~70ms settle, fps-independent
+      coverEase.x += (aim.x - coverEase.x) * k;
+      coverEase.z += (aim.z - coverEase.z) * k;
+      ring(coverEase.x, coverEase.z, 0.42, color);
+      if (aim.usable) faces(aim.x, aim.z, aim.faces, RING_COVER);
+    },
+    // ...and the crouch you are ALREADY in, whatever is armed. A crouch that
+    // says only "In Cover" is a crouch whose shape you have to guess, and in a
+    // corner the shape is the decision.
+    drawHeldCover() {
+      const held = queries.heldCover?.();
+      if (!held?.faces?.length) return;
+      faces(held.x, held.z, held.faces, RING_COVER);
     },
     // A SUMMON armed out of combat aims at the floor, so there is no coworker
     // to ring - the spot is the target. Green on the tiles the arrivals would

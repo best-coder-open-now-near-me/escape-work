@@ -12,7 +12,7 @@
 // The world arrives as small query callbacks, as everywhere else in the carve.
 
 import { cheb, posOf, reachOfUnit, AROUND, ORTHO } from './combat-geometry.js';
-import { inReach, dist, crouchShields, hasCover } from './tactics.js';
+import { inReach, dist, shieldedFaces, facesShieldFrom } from './tactics.js';
 import { blocksSight } from './data/tiles.js';
 
 // The route to a tile the unit could stand on and swing from: the shortest path
@@ -102,29 +102,28 @@ export function advanceRoute(unit, target, route, { approach, stepOpen }) {
   return [[here.x, here.z], step];
 }
 
-// The AI's turtle beat: with nobody in reach and nowhere useful to walk, a unit
-// tucks in behind an adjacent cell that actually stands between it and its
-// target - crouching on the WRONG side of the desk is worse than standing there
-// looking available, so no shielding neighbour means no crouch. Symmetric by
-// decision #11; ratified for v1 (designer, 2026-07-30).
+// The AI's turtle beat: with nobody in reach and nowhere useful to walk, a
+// unit tucks in WHERE IT STANDS - if the faces of its own tile actually shield
+// it from its target. Crouching with the desk behind you is worse than
+// standing there looking available, so an unshielded angle means no crouch.
+// Symmetric by decision #11; ratified for v1 (designer, 2026-07-30).
 //
-// Returns `{ x, z }` for a cell crouch, `{ edges: true }` to tuck in against
-// the tile's own partitions, or null.
-export function aiCrouchSpot(bx, bz, tx, tz, { tileDefAt, stepOpen }) {
-  for (const [dx, dz] of ORTHO) {
-    const sx = bx + dx;
-    const sz = bz + dz;
-    const d = tileDefAt(sx, sz);
-    // Low solids and fallen furniture only: behind a TALL solid nothing can
-    // shoot you anyway, so the beat would read as the AI hiding from air.
-    if (!d || !(d.cover || (d.solid && !blocksSight(d)))) continue;
-    if (!crouchShields(tx, tz, bx, bz, sx, sz)) continue;
-    return { x: sx, z: sz };
-  }
-  // No shielding furniture beside it - but the tile's own partitions count: if
-  // an edge already blocks the line to its target, crouch in place.
-  if (hasCover(tx, tz, bx, bz, stepOpen)) return { edges: true };
-  return null;
+// It used to hunt for a shield CELL to commit to and fell back to the tile's
+// partitions. There is no hunt now, because the crouch is a position: ask
+// whether this position is covered from the target and take the beat or don't.
+// True when crouching here would shield it.
+export function aiCrouchCovered(bx, bz, tx, tz, { tileDefAt, stepOpen, bodyAt = null }) {
+  const faces = shieldedFaces(bx, bz, {
+    edgeOpen: stepOpen,
+    coverCell: (x, z) => {
+      const d = tileDefAt(x, z);
+      // Low solids and fallen furniture only: behind a TALL solid nothing can
+      // shoot you anyway, so the beat would read as the AI hiding from air.
+      if (d && (d.cover || (d.solid && !blocksSight(d)))) return true;
+      return !!(bodyAt && bodyAt(x, z));
+    },
+  });
+  return facesShieldFrom(faces, tx, tz, bx, bz);
 }
 
 // Which beat this unit takes this turn. `s` is everything the decision reads,

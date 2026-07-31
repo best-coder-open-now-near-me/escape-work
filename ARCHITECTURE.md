@@ -43,9 +43,23 @@ src/
                      status map, both clocks, plus the SEVERITY a status
                      landed at - Composure shortens a resistable status
                      and blunts it, scaling every magnitude in the merged
-                     effect view (never a boolean)             (pure logic)
+                     effect view (never a boolean).
+                     BOTH CLOCKS RUN IN AND OUT OF COMBAT. The step clock
+                     ticks per tile walked, wherever you are; the turn clock
+                     ticks at a combatant's turn start in a fight and on
+                     main.js's world clock outside one - the same clock that
+                     ages fire, smoke and summon assignments. Nothing is
+                     swept when a fight ends, so a status means the same
+                     thing on both sides of the door (STATUS_PLAN #2)
+                                                               (pure logic)
   tactics.js         Positional to-hit modifiers: facing, flanking, cover
-                     (TACTICS_PLAN.md)                         (pure logic)
+                     (TACTICS_PLAN.md). `shieldedFaces` is the one cover
+                     primitive: WHICH faces of a tile something shields -
+                     walls and partitions on the edges, props and BODIES on
+                     the neighbouring cells - with `facesShieldFrom` asking
+                     which of them points at an attacker. `hasCover` is those
+                     two composed, so the M3 to-hit modifier and the M6 crouch
+                     immunity read one rule and cannot drift  (pure logic)
   surfaces-runtime.js Fire/smoke/fuse state machine, advanced one turn at a
                      time over a grid interface                (pure logic)
   stats.js           Character sheet, XP/levels, damage       (pure logic)
@@ -274,6 +288,15 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   too (a leader switch, a survivor stepping up, a fight starting) - the view
   belongs with whoever you're driving. main.js owns WHO (`focusCameraOn`);
   the rig only owns HOW.
+  **The body the rig follows is `steeredActor()`** - the acting combatant in a
+  fight, the leader out of one - and that is the ONE answer to "who is the
+  player driving?". `player` answers a different question ("who leads the
+  party"), and the two diverge the moment a shared turn hands you a teammate:
+  `makeActive` never re-keys `player`, and `switchLeader` returns early in
+  combat by design. While the follow loop read `player`, steering a companion
+  drove a body the camera wasn't tracking, and `Home` DETACHED the rig instead
+  of recentering it. The follow, the wall fade, `Home`, the profile card, the
+  party-bar card and the initiative rows all read the one function now.
 - **Walls between you and the camera are ghosted**, and the test for "between"
   is 3D (`occlusion.js`, unit tested). It walks the sightline from the camera to
   the character's FEET and ghosts a wall only where that segment is still below

@@ -81,14 +81,12 @@ test('the Pawn allowance pays for movement before AP does', async ({ page }) => 
   test.setTimeout(300_000);
   await bootStash(page, ROOM, 'mail-room');
   await enterCombat(page);
-  // Take Always Moving (the Pawn node) through the real progression path.
-  expect(await page.evaluate(() => typeof window.__god.spendClassPoint)).toBe('function');
-  await page.evaluate(() => {
-    const s = window.__god.player;
-    s.classPoints = 2;
-    window.__god.spendClassPoint(s, 'mail-cart-legs');
-    window.__god.spendClassPoint(s, 'mail-always-moving');
-  });
+  // Take Always Moving (the Pawn) through the real grant path. It was a Mail
+  // Room track node until TALENT_PLAN M1 - "the first step is always free" is
+  // not a statement about a class's verb, so it is a talent now, and ANY class
+  // can take it. That is what this asserts as much as the allowance itself.
+  expect(await page.evaluate(() => typeof window.__god.grantTalent)).toBe('function');
+  await page.evaluate(() => window.__god.grantTalent(window.__god.player, 'always-moving'));
   const granted = await page.evaluate(() => window.__god.player.talent?.effects?.freeMoveAp || 0);
   expect(granted).toBeGreaterThan(0);
 
@@ -130,8 +128,9 @@ test('Frequent Flier walks out of melee without being hit', async ({ page }) => 
     window.__combat.forceHit = true;          // any reaction WOULD land
     const s = window.__god.player;
     s.hp = s.maxHp;
-    s.classPoints = 1;
-    window.__god.spendClassPoint(s, 'mgr-frequent-flier');
+    // A talent since TALENT_PLAN M1, not a Manager track node: never being in
+    // the building to be hit is a fact about a person, not about managing.
+    window.__god.grantTalent(s, 'frequent-flier');
   });
   expect(await page.evaluate(() =>
     !!window.__god.player.talent?.effects?.noProvoke)).toBe(true);

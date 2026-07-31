@@ -8,10 +8,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   actionIdsFor, itemCountsFor, combatOnlyReason, padLayout, layoutFor, assignInto,
-  slotViewModel, combatSlotViewModel,
+  slotViewModel, combatSlotViewModel, throwablesFor,
 } from '../../src/hotbar-model.js';
 import { ACTIONS } from '../../src/data/actions.js';
-import { ammoCostOf } from '../../src/stats.js';
+import { ammoCostOf, createSheet, spendClassPoint, grantTalent } from '../../src/stats.js';
 
 const ROW = 10;
 const sheetOf = (over = {}) => ({
@@ -155,4 +155,31 @@ test('an unaffordable-but-armed slot is not greyed', () => {
   const cold = combatSlotViewModel({ kind: 'action', id: 'attack' },
     { affordable: false, live: null, reason: 'Not enough AP.' }, 'Dana');
   assert.match(cold.unavailable, /AP/);
+});
+
+// --- who has which throw (POWERS_PLAN M9) ------------------------------------
+test('an ammo-priced attack everybody has, and one you have to learn', () => {
+  // `ammoCost` says what a throw COSTS. Read as "who may make it" too - which
+  // both bars did, in two separate copies of the same filter - it handed the
+  // Drone's track grant to the entire roster the moment it was registered.
+  const drone = createSheet('office-drone');
+  const throws = throwablesFor(drone);
+  assert.ok(throws.includes('paper-ball'), 'anyone can crumple a wad');
+  assert.ok(!throws.includes('ream-throw'), 'a learned throw is not automatic');
+  // ...and learning it puts it on the bar through sheet.actions, not through
+  // the throwables list.
+  drone.classPoints = 1;
+  spendClassPoint(drone, 'drone-ream');
+  assert.ok(!throwablesFor(drone).includes('ream-throw'));
+  assert.ok(actionIdsFor(drone).includes('ream-throw'));
+});
+
+test('the airplane follows the talent, not the class', () => {
+  // The sharpest single proof the axes came apart (TALENT_PLAN M1): a Security
+  // guard who takes Origami Specialist can fold darts, which under the old
+  // shape was a sentence that could not be written.
+  const guard = createSheet('security');
+  assert.ok(!throwablesFor(guard).includes('paper-airplane'));
+  grantTalent(guard, 'origami-specialist');
+  assert.ok(throwablesFor(guard).includes('paper-airplane'));
 });

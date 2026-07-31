@@ -46,8 +46,54 @@ export const ITEMS = {
     value: 3,
     examine: 'A mug that says WORLD\'S OKAYEST EMPLOYEE. Still half full.',
   },
-  // NB: there is also an `energy-drink` ACTION (data/actions.js, IT's heal).
-  // Same id, separate registry, never cross-looked-up - see the note there.
+  // --- the retired class heals (POWERS_PLAN M9) --------------------------------
+  // Five classes each carried a self-heal on the action bar: Coffee Break,
+  // Executive Espresso, Snack Cart Raid, Night Thermos, Energy Drink. Six
+  // drinkable objects, 2 AP each, 15-18 HP a fight, none of them touching
+  // another system - the same "every kit's third button is the same button"
+  // problem the `defend` sweep fixed one layer up. Healing is HR's now
+  // (`triage`), and these are what everybody else lives on.
+  //
+  // They are LOOT rather than deletions on purpose. The flavour was the good
+  // part; what was wrong was that each class started every fight holding one.
+  // As objects you have to find, the same cup of break-room coffee becomes a
+  // floor-level resource instead of a per-fight reset.
+  //
+  // `energy-drink` was ALREADY an item (below) as well as an action - the two
+  // registries never share a lookup, so the namesake was harmless. Retiring the
+  // action leaves the item as the only survivor, which is the right one.
+  'coffee-break': {
+    name: 'Break-Room Coffee',
+    icon: '☕',
+    heal: 6,
+    useLog: 'You chug lukewarm coffee. +6 HP.',
+    value: 4,
+    examine: 'The break-room worst, and the most reliable thing on this floor.',
+  },
+  'executive-espresso': {
+    name: 'Executive Espresso',
+    icon: '⚡',
+    heal: 8,
+    useLog: 'You down a double espresso from the good machine. +8 HP.',
+    value: 9,
+    examine: 'From the machine on the floor you are not badged for.',
+  },
+  'snack-cart-pastry': {
+    name: 'Liberated Pastry',
+    icon: '🛒',
+    heal: 5,
+    useLog: 'You liberate a pastry from the cart. +5 HP.',
+    value: 5,
+    examine: 'Nobody counts these. Nobody has ever counted these.',
+  },
+  'night-thermos': {
+    name: 'Night Thermos',
+    icon: '🍶',
+    heal: 5,
+    useLog: 'You pour from the thermos. It is still, somehow, hot. +5 HP.',
+    value: 7,
+    examine: 'It has seen every 3am on this floor.',
+  },
   'energy-drink': {
     name: 'Loose Energy Drink',
     icon: '🥫',
@@ -309,6 +355,7 @@ export const LOOT_TABLES = {
     { item: 'half-sandwich', chance: 0.5 },
     { item: 'matches', chance: 0.4 },
     { item: 'energy-drink', chance: 0.25 },
+    { item: 'snack-cart-pastry', chance: 0.2 }, // liberated once already, then abandoned
     { item: 'warehouse-boots', chance: 0.2 },
     { item: 'running-shoes', chance: 0.18 },
     { item: 'usb-stick', chance: 0.15 },
@@ -319,8 +366,24 @@ export const LOOT_TABLES = {
     { item: 'toner-cartridge', chance: 1 },
     { item: 'paper-ream', chance: 0.6 },
   ],
+  // The break-room table (POWERS_PLAN M9). The five retired class heals had to
+  // land SOMEWHERE the moment the class bars stopped carrying them, and a
+  // break room is where a floor's healing actually lives - so this is the one
+  // table worth walking to rather than looting in passing.
+  'break-room': [
+    { item: 'coffee-break', chance: 1 },
+    { item: 'snack-cart-pastry', chance: 0.6 },
+    { item: 'night-thermos', chance: 0.35 },
+    { item: 'energy-drink', chance: 0.35 },
+    // The good machine is on a floor you are not badged for. It gets here by
+    // somebody carrying it down, which is rare and worth finding.
+    { item: 'executive-espresso', chance: 0.15 },
+    { item: 'half-sandwich', chance: 0.5 },
+  ],
   desk: [
     { item: 'cold-coffee', chance: 1 },
+    // Somebody's afternoon, saved for later and then forgotten.
+    { item: 'coffee-break', chance: 0.25 },
     { item: 'crumpled-fiver', chance: 0.4 }, // the drawer everyone keeps money in
     { item: 'stapler', chance: 0.4 },
     { item: 'performance-review', chance: 0.35 },

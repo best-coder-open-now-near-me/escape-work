@@ -163,17 +163,30 @@ export const aimsAtProps = (a) =>
 
 export const isPull = (a) => !!a && a.type === 'pull';
 
-// Where a pulled body lands: the free tile beside the PULLER nearest to where
-// the target was dragged from - "snag over an enemy to your side" (designer).
+// Where a pulled body lands: the free tile beside the PULLER on the FAR side
+// from where the target was dug in - "the enemy ends up on the far side of the
+// attacker from where they were tucked in at" (designer, 2026-07-31).
 // Orthogonal neighbours only (the haul ends square on your side, not slung
 // around a corner), never the puller's own tile and never the tile the target
-// already holds. `open(x, z)` is the caller's walkable-and-unoccupied test;
-// null when your side has no room, which is a refusal, not a fallback.
-export function pullLanding(ax, az, tx, tz, open) {
+// already holds.
+//
+// Two things were wrong with taking the NEAREST spot instead. The small one is
+// feel: a haul that ends one tile from the barrier reads as a nudge, and the
+// enemy is still in cover's shadow. The large one is that "beside the puller"
+// was measured in tiles alone, so the nearest spot was routinely the one
+// ACROSS the very partition the pull is supposed to cross - the target got
+// dragged one tile sideways on their own side, having never come over.
+// `stepOpen(fromX, fromZ, toX, toZ)` closes that: a landing you could not step
+// to from where you stand is not on your side of anything.
+//
+// `open(x, z)` is the caller's walkable-and-unoccupied test; null when your
+// side has no room, which is a refusal, not a fallback.
+export function pullLanding(ax, az, tx, tz, open, stepOpen = () => true) {
   const spots = [[ax + 1, az], [ax - 1, az], [ax, az + 1], [ax, az - 1]]
-    .sort((p, q) => Math.hypot(p[0] - tx, p[1] - tz) - Math.hypot(q[0] - tx, q[1] - tz));
+    .sort((p, q) => Math.hypot(q[0] - tx, q[1] - tz) - Math.hypot(p[0] - tx, p[1] - tz));
   for (const [x, z] of spots) {
     if (x === tx && z === tz) continue;
+    if (!stepOpen(ax, az, x, z)) continue;
     if (open(x, z)) return [x, z];
   }
   return null;
@@ -210,11 +223,24 @@ export const isMobility = (a) => !!a && a.type === 'mobility';
 // a way the AP economy cannot buy, so pricing it in AP would make it a
 // discount on walking rather than a different thing from walking.
 export const dashDistanceOf = (a) => a.distance ?? 4;
-// How far a swap or a pull reaches, in tiles.
+// How far a swap reaches, in tiles.
 export const mobilityRangeOf = (a) => a.range ?? 5;
 
 // Which mobility modes point at a TEAMMATE rather than at the ground.
-const ALLY_MODES = new Set(['swap', 'pull']);
+//
+// One entry, and it is meant to stay short. This held a second mode, 'pull'
+// ("draw an ally to an adjacent free tile"), promised by POWERS_PLAN decision
+// 7 and never built - no action ever declared it. That is worse than dead
+// data, because combat does not dispatch a mobility action on its `mode` at
+// all: the CLICK decides (ground -> performDash, teammate -> performSwap). So
+// a `mode: 'pull'` action would have passed every check here, been offered on
+// allies, and then silently performed a SWAP - implemented-looking behaviour
+// that was somebody else's verb. If an ally-pull is ever wanted, it needs a
+// dispatch branch before it needs a name here.
+//
+// The name is also spoken for now: `type: 'pull'` is Pull Over (TACTICS_PLAN
+// M8), which hauls an ENEMY over their cover - the opposite half of the board.
+const ALLY_MODES = new Set(['swap']);
 
 // Does this action aim at an ally? The one predicate every targeting decision
 // asks - arming, the rings, the cursor, the click. A buff always does; a
@@ -227,8 +253,8 @@ export const aimsAtAlly = (a) =>
 // Why this mobility action cannot be used right now, or null.
 //
 // `dist`/`los` describe the AIM: the ground for a dash, the teammate for a
-// swap or a pull. A dash checks neither - where you may end up is a pathing
-// question, and pathing needs the world.
+// swap. A dash checks neither - where you may end up is a pathing question,
+// and pathing needs the world.
 export function mobilityProblem(a, t = {}) {
   const { dist = 0, los = true, ap = 0, usesLeft = null, allyHp = 1 } = t;
   if (ap < a.ap) return 'Not enough AP.';

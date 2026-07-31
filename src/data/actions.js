@@ -61,7 +61,11 @@
 //   you in. `ammoCost` is now only a COST - an attack can be ranged and free
 //   (the staple gun), or cost ammo and be ranged (the paper throws, which
 //   default to THROW_RANGE without declaring one). See stats.rangeOf.
-//   ammoCost - sheets of paper the attack spends from `sheet.paper`.
+//   ammoCost - sheets of paper the attack spends from `sheet.paper`. An
+//   ammo-priced attack joins EVERY character's bar automatically (the paper
+//   throws are universal), because ammoCost answers "what does this cost" and
+//   was being read as "who may do this" too. One that has to be LEARNED says
+//   `universal: false` and arrives through sheet.actions like any class power.
 //
 // `icon` is the face the power wears on the hotbar, which is an icon grid: one
 // emoji, the same way items and loot labels are iconed. It is not decoration.
@@ -113,16 +117,6 @@ export const ACTIONS = {
     desc: 'Brace for the next hit. Incoming damage is halved until your next turn.',
     log: 'You pre-emptively deflect blame. Incoming damage halved.',
   },
-  coffee: {
-    type: 'heal',
-    ap: 2,
-    label: 'Coffee Break',
-    icon: '☕',
-    desc: 'A cup of the break-room worst. Small heal, always available.',
-    amount: 6,
-    uses: 3,
-    log: 'You chug lukewarm coffee. +6 HP.',
-  },
 
   // --- Middle Manager ---------------------------------------------------------
   // The Manager's primary verb is CONTROL (POWERS_PLAN M2): he does not out-hit
@@ -156,14 +150,6 @@ export const ACTIONS = {
   // uses, so he needs something to spend a turn on afterwards, and because two
   // entries sharing a type with different flavour is content - the problem was
   // never a duplicated data row, it was five classes with no other idea.
-  'own-calendar': {
-    type: 'defend',
-    ap: 2,
-    label: 'Decline the Invite',
-    icon: '📅',
-    desc: 'Block out the afternoon. Buys you back some action.',
-    log: 'You decline their meeting invite. Incoming damage halved.',
-  },
   // The Manager's track control: a cone that roots (POWERS_PLAN M2). His track
   // granted only passive talents, so levelling a Manager never changed what he
   // could DO. A room-wide root is the class fantasy stated plainly.
@@ -178,16 +164,6 @@ export const ACTIONS = {
     appliesLog: 'Attendance is mandatory.',
     uses: 1,
     log: 'You call an all-hands.',
-  },
-  espresso: {
-    type: 'heal',
-    ap: 2,
-    label: 'Executive Espresso',
-    icon: '⚡',
-    desc: 'A double shot. Bigger lift than drip coffee.',
-    amount: 8,
-    uses: 2,
-    log: 'You down a double espresso from the good machine. +8 HP.',
   },
 
   // --- IT Support ---------------------------------------------------------------
@@ -248,16 +224,6 @@ export const ACTIONS = {
   // consumable. They are distinct ids in separate registries and never share a
   // lookup, so the namesake is harmless; do NOT rename either (both action ids
   // in sheet.actions and item ids in sheet.inventory are persisted in saves).
-  'energy-drink': {
-    type: 'heal',
-    ap: 2,
-    label: 'Energy Drink',
-    icon: '🥤',
-    desc: 'Warm, neon, and technically legal. Solid self-heal.',
-    amount: 4,
-    uses: 4,
-    log: 'You crack open something neon. +4 HP.',
-  },
 
   // --- Mail Room ----------------------------------------------------------------
   'mail-cone': {
@@ -303,19 +269,6 @@ export const ACTIONS = {
     uses: 2,
     desc: 'Trade places with a teammate anywhere in sight. Pull the wounded out; put yourself in.',
     log: 'You execute a hand-off.',
-  },
-  'snack-cart': {
-    type: 'heal',
-    ap: 2,
-    label: 'Snack Cart Raid',
-    icon: '🛒',
-    // 5 HP over 3 raids: a shade under the Office Drone's coffee (6), which the
-    // registry itself calls a "small heal". It read "Strong heal" while healing
-    // less than the heal it was being compared against.
-    desc: 'Liberate a pastry. Steady heal, limited raids per fight.',
-    amount: 5,
-    uses: 3,
-    log: 'You liberate a pastry from the cart. +5 HP.',
   },
 
   // --- Security -------------------------------------------------------------------
@@ -381,16 +334,6 @@ export const ACTIONS = {
     icon: '🚧',
     desc: 'Cover the room. The first coworker to move within 4 tiles takes a free swing - once.',
     log: 'You plant yourself and watch the room. Nobody is getting past unremarked.',
-  },
-  'night-thermos': {
-    type: 'heal',
-    ap: 2,
-    label: 'Night Thermos',
-    icon: '🍶',
-    desc: 'The thermos that has seen every 3am on this floor. Steady heal.',
-    amount: 5,
-    uses: 3,
-    log: 'You pour from the thermos. It is still, somehow, hot. +5 HP.',
   },
 
   // --- universal ----------------------------------------------------------------
@@ -523,20 +466,20 @@ export const ACTIONS = {
     missLog: 'The spitball arcs wide and sticks to a monitor.',
   },
 
-  // --- applicants (player-controlled summons) -----------------------------------
-  // A summoned applicant you control swings with this (its AI-summon twin on
+  // --- employees (player-controlled summons) -----------------------------------
+  // A summoned employee you control swings with this (its AI-summon twin on
   // the enemy side rolls from the class's `attacks` instead). Cheap and weak -
   // a disposable body, not a bruiser.
-  'resume-slap': {
+  'action-item': {
     type: 'attack',
     ap: 2,
-    label: 'Résumé Slap',
+    label: 'Action Item',
     icon: '📋',
-    desc: 'A resume, delivered at speed.',
+    desc: 'A task, assigned at speed.',
     min: 1,
     max: 3,
-    log: 'The applicant slaps a résumé across the desk.',
-    missLog: 'The applicant\'s résumé sails wide. Unqualified.',
+    log: 'The employee drops an action item on them.',
+    missLog: 'The action item goes to the wrong distribution list.',
   },
 
   // --- Human Resources ----------------------------------------------------------
@@ -556,6 +499,30 @@ export const ACTIONS = {
     uses: 2,
     log: 'You file a glowing review.',
   },
+  // The only heal left in the game (POWERS_PLAN M9). Five classes carried a
+  // self-heal - six drinkable objects, 2 AP each, 15-18 HP a fight, none of
+  // them touching another system - which is the `defend` problem one layer
+  // down. They are lootable consumables now (data/items.js); this is the one
+  // power that puts HP back, and HR holds it.
+  //
+  // A `buff` rather than a `heal`, which is what lets it point at somebody
+  // else: `heal` is self-only and instant by construction. It may still be
+  // aimed at HR itself - "hr heal is for anyone" (designer, 2026-07-31) - and
+  // buff already documents self-targeting, so that costs nothing.
+  //
+  // Bigger than the drinks it replaces (they ran 4-8) and rationed harder, so
+  // it reads as treatment rather than as a round of coffees.
+  triage: {
+    type: 'buff',
+    ap: 2,
+    label: 'Triage',
+    icon: '🩹',
+    desc: 'Patch somebody up - anyone on your side, yourself included. The only real heal there is.',
+    amount: 10,
+    range: 5,
+    uses: 2,
+    log: 'You walk them through the incident, and the bleeding stops.',
+  },
   onboarding: {
     type: 'buff',
     ap: 2,
@@ -568,8 +535,9 @@ export const ACTIONS = {
     uses: 2,
     log: 'You walk them through the fire exits and the espresso machine.',
   },
-  // The HR class's power (SUMMON_PLAN.md): post the role and applicants report
-  // for duty on your side. `archetype` is the unit (the applicant class),
+  // The Middle Manager's power (SUMMON_PLAN.md, moved from HR by POWERS_PLAN
+  // M9): escalate the work and somebody else arrives to do it. `archetype` is
+  // the unit (the employee class),
   // `count` how many per post, `cap` how many may be live at once, `uses` how
   // many posts per fight, `lifetimeTurns` how many turns each one gets before
   // the contract runs out and it walks (in combat that is its own initiative
@@ -586,19 +554,26 @@ export const ACTIONS = {
   // second-tier req) that posts three is a data change and nothing else. What
   // is deliberately NOT flexible is the click: one placement resolves one post,
   // however many report to it.
-  'summon-applicants': {
+  //
+  // Why the MANAGER holds this now. Control and summon are the same fantasy
+  // pointed two ways - he spends other people's turns. `delegate` takes a turn
+  // away from an enemy; this adds turns to your side, and the class whose
+  // existing verb is "make it someone else's problem" is where that belongs.
+  // HR kept it only because `summon` happened to get built for HR first; the
+  // rest of HR's kit was already ally-facing (POWERS_PLAN M9 decision 17).
+  escalate: {
     type: 'summon',
     ap: 4,
-    archetype: 'applicant',
+    archetype: 'employee',
     count: 1,
     cap: 3,
     uses: 2,
     range: 5,
     lifetimeTurns: 6,
-    label: 'Post the Role',
+    label: 'Escalate',
     icon: '📢',
-    desc: 'Post the req. Click where they should report - the applicant fights on your side.',
-    log: 'You open a req.',
+    desc: 'Escalate it. Click where they should report - the employee fights on your side.',
+    log: 'You escalate. Somebody more junior is now on it.',
   },
 
   // --- talent-granted -----------------------------------------------------------
@@ -614,16 +589,6 @@ export const ACTIONS = {
     log: 'You deliver OSHA-approved footwear at speed.',
     missLog: 'The steel toe whistles past. A near miss, OSHA-wise.',
   },
-  cigarette: {
-    type: 'heal',
-    ap: 2,
-    label: 'Smoke Break',
-    icon: '🚬',
-    desc: 'A smoke break steadies the nerves. Heals and calms.',
-    amount: 3,
-    uses: 2,
-    log: 'You step "outside" without going anywhere. Nerves steadied. +3 HP.',
-  },
 
   // --- thrown weapons (any class; consume paper ammo picked up from paper
   // spills; see sheet.paper) -----------------------------------------------------
@@ -638,6 +603,30 @@ export const ACTIONS = {
     max: 4,
     log: 'You wad up a TPS report and bean them.',
     missLog: 'The wad sails past their ear and into a cubicle.',
+  },
+  // The Drone's track attack (POWERS_PLAN M9). `paper-storm` moved into the
+  // base kit - the class defined as "the baseline the others read against"
+  // was otherwise left holding `attack` + `defend`, the two most generic verbs
+  // in the game, which is a baseline made of leftovers rather than one made on
+  // purpose. This is what its track grants instead: the Drone's whole
+  // relationship with paper, escalated. Costs five sheets, so it is the shot
+  // you take once you have carpeted a room and not before.
+  'ream-throw': {
+    type: 'attack',
+    ap: 2,
+    ammoCost: 5,
+    // Priced in paper, but NOT one of the throws everybody has: it is learned
+    // off the Drone's track. Without this, `ammoCost` alone would have put it
+    // on every character's bar (combat.js throwableIds) and the class point
+    // that buys it would have bought nothing.
+    universal: false,
+    label: 'Throw the Ream',
+    icon: '📦',
+    desc: 'Five hundred sheets, still boxed, thrown overarm. Expensive, and worth it.',
+    min: 5,
+    max: 8,
+    log: 'You heave an unopened ream. It does not flutter.',
+    missLog: 'The ream goes wide and bursts. Paper everywhere.',
   },
   'paper-airplane': {
     type: 'attack',
@@ -666,28 +655,28 @@ export const ACTIONS = {
 // postSummonAt): the same event said two ways reads as two different events,
 // and "1 reports for duty" is how you get a number where a person should be.
 export const arrivalLine = (n) => (n === 1
-  ? 'One applicant reports for duty.'
-  : `${n} applicants report for duty.`);
+  ? 'One employee reports for duty.'
+  : `${n} employees report for duty.`);
 
 // --- the summon descriptor's one vocabulary -----------------------------------
 // What a summon descriptor INHERITS when it names the action it is the twin of.
 //
 // Exactly one field, and the narrowness is the point. WHO shows up when you
-// post a role is a fact about the role: an applicant is an applicant whoever
+// post a role is a fact about the role: an employee is an employee whoever
 // hired them, and two answers to that is the drift worth preventing. It is
 // also the whole of what was actually wrong - a class and an enemy naming the
 // same archetype with nothing tying them together.
 //
 // Everything else is per side, because the two sides post differently. The
 // player's action drops ONE because you click the tile they report to, and a
-// pair means one lands somewhere you did not choose (see `summon-applicants`);
+// pair means one lands somewhere you did not choose (see `escalate`);
 // an AI has no click, so a small batch beside the summoner on a tight cap is
 // its own pacing, next to its cooldown and what the post costs its turn. How
 // long a temp serves belongs there too: it sets how many AI turns a fight
 // carries, which is pacing, not identity.
 //
 // This list was drawn twice too wide before it was drawn right. First it took
-// `count` and `cap`, which left an enemy HR posting one applicant on a cap of
+// `count` and `cap`, which left an enemy HR posting one employee on a cap of
 // three - not a reinforcement - and the suite caught it. Then it kept
 // `lifetimeTurns`, which quietly gave the AI's temps a sixth turn where they
 // had served five: not obviously wrong, never asked for, and it widens the
@@ -696,7 +685,7 @@ export const arrivalLine = (n) => (n === 1
 export const SUMMON_CONTRACT = ['archetype'];
 
 // An enemy's descriptor may name the ACTION it is the AI-side twin of
-// (`from: 'summon-applicants'`) and inherit the contract above.
+// (`from: 'escalate'`) and inherit the contract above.
 //
 // This exists because HR posted the same req twice, from a class action and an
 // enemy block that named the same archetype with nothing tying them together -

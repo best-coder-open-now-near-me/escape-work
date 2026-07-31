@@ -16,7 +16,7 @@ import { ACTIONS, arrivalLine } from './data/actions.js';
 import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, routeToFiringPosition, DIRS8 } from './pathfinding.js';
 import {
-  createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
+  createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, grantTalent, classTrack,
   scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
   orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, lookOf, stairwellHeal, REACH,
 } from './stats.js';
@@ -24,11 +24,12 @@ import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP, addCash,
 } from './party.js';
-import { applyStatus, removeStatus, statusFx, hasStatus, tickStep, statusLeft, statusList } from './statuses.js';
+import { applyStatus, removeStatus, statusFx, hasStatus, tickStep, tickTurn, statusLeft, statusList } from './statuses.js';
 import { createDraft, createCharacter, draftModel, draftLook } from './creation.js';
 import { CUSTOM_RIGS } from './data/looks.js';
 import { aimsAtAlly, coneFrom, conePolyline, isToppleable, toppleLanding } from './powers.js';
-import { PARTITION_TOPPLE } from './data/tiles.js';
+import { PARTITION_TOPPLE, blocksSight } from './data/tiles.js';
+import { shieldedFaces } from './tactics.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel } from './scene.js';
@@ -48,7 +49,7 @@ import {
   surfaceEffect, rawSurfaceDamage, effectiveSurfaceDamage, slipChance, slips,
   hasGum, surfacePathCost,
 } from './step-rules.js';
-import { createDoors, atDoor, COMBAT_DOOR_AP } from './doors.js';
+import { createDoors, atDoor, COMBAT_DOOR_AP, doorMidpoint } from './doors.js';
 import { createDialogue, shopKeyForNpc, sayRecruited } from './dialogue.js';
 import { summonRange, summonRoom, dropCount, summonSpotProblem } from './summon-rules.js';
 import {
@@ -312,7 +313,7 @@ function startGame(level) {
   // Out-of-combat, a summon's assignment is spent by the world clock instead of
   // by initiative turns - one per fire/smoke turn - so temps don't loiter
   // forever just because you stopped fighting. Returns nothing; expired
-  // applicants show themselves out.
+  // employees show themselves out.
   function ageSummons() {
     for (const s of [...summons]) {
       if (s.actor.summonTurns == null) continue;
@@ -436,6 +437,28 @@ function startGame(level) {
       loot.forgetPaper?.(x, z); // a fresh drift here later is gatherable again
     }
   }
+  // Drop a power's surface on bare floor: grid, visual and the litter clock in
+  // one write. Combat's world callback and the out-of-combat cone both land
+  // here, so a drift laid with no fight on ages and reverts exactly like one
+  // laid mid-round - two copies of this rule is how the two would drift.
+  function leaveSurfaceAt(x, z, tileType, turns = 0) {
+    if (grid.typeAt(x, z) !== 'floor') return false;
+    grid.setType(x, z, tileType);
+    scene.addSurfaceVisual(x, z, tileType);
+    if (turns > 0) tempSurfaces.set(x + ',' + z, { left: turns, type: tileType });
+    // Ammo comes from the WORLD, never from a power. A paper-laying verb
+    // that could be harvested afterwards is an AP-to-ammo converter, and
+    // expiry alone does not prevent it: harvesting is refused in combat
+    // but legal the moment a fight ends, and the litter clock runs at
+    // OOC_TURN_SECONDS, so a cone laid late in a fight is still on the
+    // floor for seconds after it - one click takes the whole patch.
+    // Marking the tile picked-clean at birth closes that without touching
+    // the surface itself: the sheets still burn, still cut, still fuel a
+    // fire. `forgetPaper` drops the mark when the tile reverts to bare
+    // floor, so a WORLD drift laid there later is gatherable again.
+    if (tileType === 'paper') loot.markPaperSpent?.(x, z);
+    return true;
+  }
   const portraits = createPortraits(app);
   // The face on the HUD card belongs to whoever the card is SHOWING. It rides
   // the actor (portraits.js), so resolve it from the sheet on every repaint
@@ -514,7 +537,7 @@ function startGame(level) {
   // level data, rendered by buildLevel and respected by pathfinding.)
 
   // Summon reinforcements: drop up to `n` archetype units (a class id - e.g.
-  // 'applicant' - or an ENEMY_TYPES id) onto free tiles, wire their models, and
+  // 'employee' - or an ENEMY_TYPES id) onto free tiles, wire their models, and
   // hand the records back to whoever asked.
   //   enemy team -> an EnemyActor filed into `enemies` (AI-driven); every
   //     existing enemy system applies for free. Returned as the actor.
@@ -862,13 +885,18 @@ function startGame(level) {
   // Walk to EXACTLY (x, z), then run - the crouch and the partition shove
   // need a precise standing spot, where approachAndDo's "within reach" would
   // settle for a diagonal that shields (or shoves) nothing.
-  function walkToExact(x, z, run) {
+  // `end` is an optional FREE POINT inside the goal tile to finish on - the
+  // same last-waypoint substitution every plain ground click already does.
+  // The arrival check reads the logical tile, and a clamped point always
+  // rounds back to its own tile, so `exact` still means exact.
+  function walkToExact(x, z, run, end = null) {
     if (!sheet || inCombat || gameOver) return false;
     clearOocCrouch();
     if (player.x === x && player.z === z) { run(); return true; }
     const p = findPath(isWalkable, player.x, player.z, x, z, hazardCost, grid.stepOpen);
     if (!p || p.length < 2) return false;
     pendingAction = { x, z, run, exact: true };
+    if (end) p[p.length - 1] = end;
     const s = smoothFromBody(p);
     player.setPath(s);
     lastPath = s;
@@ -1526,15 +1554,29 @@ function startGame(level) {
     // and a button that does nothing at all is indistinguishable from a bug.
     const blocked = combatOnlyReason(id);
     if (blocked) { ui.say(blocked); return; }
+    // ONE live slot at a time, out of a fight exactly as in one (designer,
+    // 2026-07-31): pressing a different slot lowers the armed one and does
+    // nothing else - arming the new one takes a second, deliberate press.
+    // (A combat-only slot above still only explains itself: it could never
+    // arm, so it does not count as reaching for another power.)
+    if (armedOoc && armedOoc !== id) {
+      armedOoc = null;
+      hotbar?.setArmed(null);
+      ui.say('You stand down.');
+      return;
+    }
     armedOoc = armedOoc === id ? null : id;
     hotbar?.setArmed(armedOoc);
     if (!armedOoc) { ui.say('You stand down.'); return; }
     const a = ACTIONS[armedOoc];
     // What the armed slot is waiting for. A summon aims at the FLOOR, so
-    // "click a coworker" would be aiming instructions for the wrong thing.
+    // "click a coworker" would be aiming instructions for the wrong thing -
+    // and a cone needs no coworker at all, so its hint must not demand one.
     ui.say(a.type === 'summon'
       ? `${a.label} ready — click a spot within ${summonRange(a)} tiles to post it.`
-      : `${a.label} ready — click a coworker to start it.`);
+      : a.cone
+        ? `${a.label} ready — point it and click to fire.`
+        : `${a.label} ready — click a coworker to start it.`);
   }
 
   // --- posting the role with no fight on ----------------------------------------
@@ -1659,7 +1701,7 @@ function startGame(level) {
         // and the costs are the walker's own talents, not the leader's.
         // "The walker" includes a summon you're driving - it has its own sheet
         // and its own talents, so looking only at party.members made a shock-
-        // immune leader route an applicant straight through live water.
+        // immune leader route an employee straight through live water.
         // Summons block too: a member's move must not end stacked on one.
         findPath: (sx, sz, tx, tz, self = player) => {
           const walker = party.members.find((m) => m.actor === self)
@@ -1764,24 +1806,7 @@ function startGame(level) {
           if (e) scene.markEdgeDamaged?.(e.o, e.k);
           return left;
         },
-        leaveSurface: (x, z, tileType, turns = 0) => {
-          if (grid.typeAt(x, z) !== 'floor') return false;
-          grid.setType(x, z, tileType);
-          scene.addSurfaceVisual(x, z, tileType);
-          if (turns > 0) tempSurfaces.set(x + ',' + z, { left: turns, type: tileType });
-          // Ammo comes from the WORLD, never from a power. A paper-laying verb
-          // that could be harvested afterwards is an AP-to-ammo converter, and
-          // expiry alone does not prevent it: harvesting is refused in combat
-          // but legal the moment a fight ends, and the litter clock runs at
-          // OOC_TURN_SECONDS, so a cone laid late in a fight is still on the
-          // floor for seconds after it - one click takes the whole patch.
-          // Marking the tile picked-clean at birth closes that without touching
-          // the surface itself: the sheets still burn, still cut, still fuel a
-          // fire. `forgetPaper` drops the mark when the tile reverts to bare
-          // floor, so a WORLD drift laid there later is gatherable again.
-          if (tileType === 'paper') loot.markPaperSpent?.(x, z);
-          return true;
-        },
+        leaveSurface: leaveSurfaceAt,
         // Anyone alive is a legal target - bystanders outside the initial
         // engagement get pulled in when attacked.
         // A BORROWED coworker is off this list for the duration (TODO Phase 8).
@@ -1825,7 +1850,7 @@ function startGame(level) {
           inCombat = false;
           combat = null;
           // Summons stay. They used to blink out the instant the last coworker
-          // fell, which made a two-turn-old applicant feel like a prop; now the
+          // fell, which made a two-turn-old employee feel like a prop; now the
           // assignment (`lifetimeTurns`) is what ends them, whether that runs
           // out mid-fight, between fights, or in the next one. combat.js has
           // already swept any that were killed.
@@ -1926,6 +1951,32 @@ function startGame(level) {
     beginCombat({ engaged, primary: en, opening: { actionId, target: en } });
   }
 
+  // A cone fired at an EMPTY wedge, with no fight on. It fires anyway
+  // (designer, 2026-07-31: no target needed, in or out of combat) - combat's
+  // fireCone already resolves this exact case as a swing with no casualties
+  // and a carpeted wedge, so this is that outcome minus the two things a
+  // fight owns (AP, per-fight uses), the same subtraction the out-of-combat
+  // summon post makes. `test` is the wedge from coneFrom, aimed at (tx, tz).
+  function fireOocCone(a, test, tx, tz) {
+    player.lunge(tx, tz); // the fan of envelopes, aimed where you pointed
+    if (a.leaves) {
+      const R = Math.ceil(a.cone.range);
+      for (let z = Math.floor(player.z) - R; z <= Math.ceil(player.z) + R; z++) {
+        for (let x = Math.floor(player.x) - R; x <= Math.ceil(player.x) + R; x++) {
+          if (!test(x, z)) continue;
+          // No carpeting a tile a teammate is standing on - combat's own rule.
+          if (partyAt(x, z)) continue;
+          if (!hasLos(player, { x, z })) continue;
+          leaveSurfaceAt(x, z, a.leaves, a.leavesTurns || 0);
+        }
+      }
+    }
+    ui.say(`${a.log} No casualties. Plenty of litter.`); // combat's own zero-hit line
+    // One click, one volley: the slot disarms, same as a posted summon.
+    armedOoc = null;
+    hotbar?.setArmed(null);
+  }
+
   // --- the office topples out of combat too (TACTICS_PLAN M6 OOC) -------------
   // The same furniture-topple rule combat runs, evaluated from the leader's
   // spot: sign-derived landing, open ground, no free demolition into a wall.
@@ -2016,46 +2067,110 @@ function startGame(level) {
   // An armed TAKE COVER with no fight on: crouch before anyone has noticed
   // you. The crouch rides into the fight that starts (beginCombat hands it to
   // startCombat as preCrouch), which is the whole point of taking it early.
-  // Furniture and partitions only out here - people move (the character
-  // shield is a combat commitment).
-  function oocTakeCoverAt(tile) {
-    if (enemyAt(tile.x, tile.z) || npcAt(tile.x, tile.z) || partyAt(tile.x, tile.z)) {
-      ui.say('Out here, hide behind furniture - people move.');
-      return;
+  //
+  // The same rule combat runs, and for the same reason it changed there: you
+  // aim at the SPOT YOU WILL STAND, and whatever shields that spot's faces
+  // covers you along them - partitions, props, and PEOPLE. Out here used to
+  // refuse a person outright ("people move - the character shield is a combat
+  // commitment"), which read as arbitrary from the player's side: the verb was
+  // on the bar, the coworker was right there, and the refusal named a rule
+  // nothing else in the game observed. People move, and when they do the
+  // crouch breaks - which is exactly what happens in a fight, and what
+  // `crouchStateOf` has always done. That is the rule, not a reason to have
+  // two verbs (designer, 2026-07-31: "it wont let me take cover on a person
+  // out of combat but i can in combat").
+  // A member's or summon's record standing on a cell, for naming who is
+  // covering you. `partyAt`/`summonAt` answer "is anyone there"; this answers
+  // "who", which the narration needs and they do not carry.
+  const memberBodyAt = (x, z) => (party?.members || []).find((m) =>
+    m.actor && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z)
+    || summons.find((sm) => sm.sheet.hp > 0 && sm.actor.x === x && sm.actor.z === z)
+    || null;
+  const oocCoverCell = (x, z) => {
+    const d = grid.defAt(x, z);
+    if (d && (!!d.cover || (!!d.solid && !blocksSight(d)))) return true;
+    return !!(enemyAt(x, z) || npcAt(x, z) || partyAt(x, z) || summonAt(x, z));
+  };
+  // Which faces of a tile would shield a crouch there. One helper, read by the
+  // aim preview, the click and the held-crouch affordance, so none of the
+  // three can describe a different crouch from the others.
+  const oocCoverFaces = (x, z) => shieldedFaces(x, z, {
+    edgeOpen: grid.stepOpen,
+    coverCell: (cx, cz) => (cx === player.x && cz === player.z ? false : oocCoverCell(cx, cz)),
+  });
+  // Why this spot is not a crouch, or null when it is one.
+  function oocCoverProblem(x, z) {
+    const here = player.x === x && player.z === z;
+    if (!here && (!isWalkable(x, z) || enemyAt(x, z) || npcAt(x, z) || partyAt(x, z))) {
+      return 'No room to tuck in there.';
     }
-    const def = grid.defAt(tile.x, tile.z);
-    const cellMode = !!(def && (def.solid || def.cover));
-    const edgeMode = !cellMode && grid.terrainOpen(tile.x, tile.z)
-      && ORTHO4.some(([dx, dz]) => !grid.stepOpen(tile.x, tile.z, tile.x + dx, tile.z + dz));
-    if (!cellMode && !edgeMode) { ui.say('Nothing there to hide behind.'); return; }
-    const commit = (cx, cz) => {
-      oocCrouch = { x: tile.x, z: tile.z, edges: edgeMode, at: { x: cx, z: cz } };
+    if (!oocCoverFaces(x, z).length) return 'Nothing there to hide behind.';
+    return null;
+  }
+  // What is covering a spot, in words - the out-of-combat twin of combat's
+  // `coverNames`, so "You tuck in behind..." names the same things on both
+  // sides of a fight starting.
+  function oocCoverNames(x, z) {
+    const seen = [];
+    for (const [ox, oz] of oocCoverFaces(x, z)) {
+      const cx = x + ox;
+      const cz = z + oz;
+      const body = enemyAt(cx, cz) || npcAt(cx, cz) || memberBodyAt(cx, cz);
+      if (body) {
+        const name = body.sheet?.name || body.def?.name || 'them';
+        if (!seen.includes(name)) seen.push(name);
+        continue;
+      }
+      const d = grid.defAt(cx, cz);
+      const label = d && (d.cover || d.solid)
+        ? `the ${(d.label || 'cover').toLowerCase()}` : 'the partition';
+      if (!seen.includes(label)) seen.push(label);
+    }
+    if (!seen.length) return 'cover';
+    if (seen.length === 1) return seen[0];
+    return `${seen.slice(0, -1).join(', ')} and ${seen[seen.length - 1]}`;
+  }
+
+  function oocTakeCoverAt(tile, point = null) {
+    const problem = oocCoverProblem(tile.x, tile.z);
+    if (problem) { ui.say(problem); return; }
+    const commit = () => {
+      // Re-ask on ARRIVAL: a coworker who wandered off during the walk is a
+      // crouch that never happens, not one that lands on empty carpet.
+      if (oocCoverProblem(tile.x, tile.z)) { ui.say('The moment passes - no cover taken.'); return; }
+      oocCrouch = { at: { x: tile.x, z: tile.z } };
       applyStatus(sheet, 'covered');
       player.crouched = true; // the held pose (actors.js): torso down onto the legs
       paintHud(sheet);
-      ui.say(edgeMode
-        ? 'You tuck in against the partition.'
-        : `You tuck in behind the ${(def.label || 'cover').toLowerCase()}.`);
+      ui.say(`You tuck in behind ${oocCoverNames(tile.x, tile.z)}.`);
       armedOoc = null;
       hotbar?.setArmed(null);
     };
-    if (edgeMode) {
-      if (player.x === tile.x && player.z === tile.z) { commit(tile.x, tile.z); return; }
-      if (!walkToExact(tile.x, tile.z, () => commit(tile.x, tile.z))) ui.say('No way in there.');
+    if (player.x === tile.x && player.z === tile.z) {
+      // Your own tile: a click on a meaningfully different POINT within it is
+      // a sub-tile shuffle to fine-tune the tuck - the marker promised the
+      // point, not the tile. The arrival hook fires on path-finished even
+      // without a tile change (actors.js: `changed || finished`), so the
+      // exact-tile pendingAction resolves like any other walk-then-crouch.
+      const end = point ? clampPoint(point.x, point.z) : null;
+      const pp = player.entity ? player.entity.getPosition() : player;
+      if (end && Math.hypot(end[0] - pp.x, end[1] - pp.z) > 0.1) {
+        clearOocCrouch();
+        pendingAction = { x: tile.x, z: tile.z, run: commit, exact: true };
+        const s = [[pp.x, pp.z], end];
+        player.setPath(s);
+        lastPath = s;
+        return;
+      }
+      commit();
       return;
     }
-    let spot = null;
-    for (const [dx, dz] of ORTHO4) {
-      const sx = tile.x + dx;
-      const sz = tile.z + dz;
-      if (player.x === sx && player.z === sz) { spot = { x: sx, z: sz, here: true }; break; }
-      if (!isWalkable(sx, sz)) continue;
-      const p = findPath(isWalkable, player.x, player.z, sx, sz, hazardCost, grid.stepOpen);
-      if (p && p.length >= 2 && (!spot || p.length < spot.len)) spot = { x: sx, z: sz, len: p.length };
-    }
-    if (!spot) { ui.say('No clear way in behind it.'); return; }
-    if (spot.here) { commit(spot.x, spot.z); return; }
-    walkToExact(spot.x, spot.z, () => commit(spot.x, spot.z));
+    // Finish on the POINT you clicked, clamped to clearance - tucked where
+    // you chose, not teleport-parked on the tile centre (designer,
+    // 2026-07-31: "continuous and smooth"). Combat's crouch walk does the
+    // same through walkActive's endpoint.
+    if (!walkToExact(tile.x, tile.z, commit,
+      point ? clampPoint(point.x, point.z) : null)) ui.say('No way in there.');
   }
 
   // Tile effects (data-driven from TILE_TYPES[..].onEnter) fire per step, for
@@ -2108,6 +2223,85 @@ function startGame(level) {
       syncHudFor(ms);
     }
     return down;
+  }
+
+  // Turn-clock statuses OUT of combat (designer, 2026-07-31: "that clock
+  // should've been used from the beginning ... they should all be using the
+  // same thing in and out of combat, its not something new going on here").
+  //
+  // Exactly right, and the clock was already here. `turn-order.js` ticks these
+  // as each combatant's turn opens; out of a fight the world clock below
+  // stands in, and it already spends everything a combat round spends - fire,
+  // smoke, summon assignments, the litter a power dropped. Statuses were the
+  // ONE thing it did not spend, and that omission is what made a turn-clocked
+  // status mean two different things depending on whether dice were out: a
+  // 3-turn buff applied on the map was permanent, and a coworker set alight
+  // outside a fight never burned. Same `tickTurn`, same durations, both sides.
+  //
+  // `hurt(damage)` is how this carrier takes a dot - a sheet and a coworker
+  // count HP differently - and returns whether it dropped them. Returns the
+  // expired ids too, because a caller may need to react to what lapsed.
+  function tickTurnClockOn(carrier, actor, hurt) {
+    const { damage, expired } = tickTurn(carrier);
+    if (damage <= 0) return { down: false, damage, expired };
+    // The dot's look rides the body, not the tile centre, so a status burning
+    // somebody mid-walk lands its number on them.
+    const p = actor?.entity ? actor.entity.getPosition() : actor;
+    vfx.impact(p.x, p.z, 'fire', { y: 0.4 });
+    vfx.damageText(p.x, p.z, `-${damage}`, '#ff7a3c');
+    return { down: hurt(damage), damage, expired };
+  }
+
+  // One out-of-combat turn's worth of status clock, over everyone who can
+  // carry one: the roster, the temps still on assignment, and the coworkers
+  // wandering the floor. Deaths are collected and resolved AFTER the sweep,
+  // the same shape handleExplosion uses - one casualty must not cut the tick
+  // short for everybody else, or the XP for the coworkers it finished off.
+  function advanceStatusTurn() {
+    if (!party) return;
+    // `covered` is the one turn-clocked chip whose duration is a LEAK BOUND
+    // rather than a clock (data/statuses.js): combat revalidates the crouch on
+    // every consult and re-applies the chip while it holds, so only an
+    // abandoned fight lets it lapse. Out here the crouch is `oocCrouch`, and
+    // it holds until a deliberate walk breaks it - so re-apply on the same
+    // terms rather than letting the new clock time it out from under a
+    // stationary character. Without this, a crouch taken before a fight
+    // evaporated after four ticks of standing still.
+    // ...and the same revalidation combat does: the crouch is only real while
+    // its position still has a shielded face. A partition toppled out of a
+    // fight, or a coworker who wandered off the face they were covering, ends
+    // it here rather than lingering until a fight starts and combat notices.
+    if (oocCrouch && sheet) {
+      if (oocCoverProblem(oocCrouch.at.x, oocCrouch.at.z)) clearOocCrouch();
+      else applyStatus(sheet, 'covered');
+    }
+    const downed = [];
+    for (const m of party.members) {
+      if (!m.actor || m.sheet.hp <= 0) continue;
+      const r = tickTurnClockOn(m.sheet, m.actor, (d) => applyDamage(m.sheet, d));
+      if (r.damage > 0 || r.expired.length) syncHudFor(m.sheet);
+      if (r.down) downed.push(m);
+    }
+    for (const s of [...summons]) {
+      if (!s.actor || s.sheet.hp <= 0) continue;
+      // A temp takes the rules in silence, like everywhere else in this file.
+      if (tickTurnClockOn(s.sheet, s.actor, (d) => applyDamage(s.sheet, d)).down) {
+        dismissSummon(s.actor);
+      }
+    }
+    const slain = [];
+    for (const en of enemies) {
+      if (!en.alive) continue;
+      if (tickTurnClockOn(en, en, (d) => en.takeDamage(d)).down) slain.push(en);
+    }
+    for (const en of slain) {
+      vfx.impact(en.x, en.z, 'blood', { y: 0.4 });
+      awardKill(en);
+    }
+    for (const m of downed) {
+      downOrLose(m, 'Burned down at your desk. The incident report writes itself.');
+      if (gameOver) return; // that was the wipe
+    }
   }
 
   // Surfaces (data/surfaces.js): fire and electrified pools hurt, paper cuts
@@ -2395,19 +2589,23 @@ function startGame(level) {
       // and the ground branch only ever handled summons, so aiming Bulk Mail at
       // the floor silently walked you there instead. It opens the fight on
       // whoever the wedge actually catches, which is the same rule the preview
-      // just drew.
+      // just drew - and an EMPTY wedge fires all the same (designer,
+      // 2026-07-31): it needed a coworker in the way before, which made the
+      // one cone whose whole point is the paper behind it the one attack you
+      // could not fire at the floor.
       if (armedOoc && ACTIONS[armedOoc].cone && point) {
         const a = ACTIONS[armedOoc];
         const test = coneFrom(a, { x: player.x, z: player.z }, point.x, point.z);
-        const caught = test ? coneCatches(test) : [];
-        if (!caught.length) {
-          ui.say(`Nobody is in the way of that ${a.label.toLowerCase()}.`);
+        if (!test) { ui.say('Aim somewhere.'); return; } // the cursor is on you
+        const caught = coneCatches(test);
+        if (caught.length) {
+          // The nearest one is the primary; the rest join through the engage
+          // radius exactly as they would for any other opener.
+          caught.sort((p, q) => cheb(player, p) - cheb(player, q));
+          engageWithAction(caught[0], armedOoc);
           return;
         }
-        // The nearest one is the primary; the rest join through the engage
-        // radius exactly as they would for any other opener.
-        caught.sort((p, q) => cheb(player, p) - cheb(player, q));
-        engageWithAction(caught[0], armedOoc);
+        fireOocCone(a, test, point.x, point.z);
         return;
       }
       // An armed SHOVE aimed at the office itself works out here too
@@ -2418,7 +2616,7 @@ function startGame(level) {
         && oocShoveAt(tile)) return;
       // An armed TAKE COVER: crouch before anyone has noticed you.
       if (armedOoc && ACTIONS[armedOoc].type === 'cover' && tile) {
-        oocTakeCoverAt(tile);
+        oocTakeCoverAt(tile, point);
         return;
       }
       // Out of combat, the interactable ENTITY under the cursor wins over the
@@ -2456,11 +2654,17 @@ function startGame(level) {
         // a crosshair mid-walk and on AI turns, promising a swing while the
         // to-hit readout and the click itself refused.
         const picked = hit?.kind === 'enemy' && hit.ref.alive ? hit.ref : null;
-        const foe = combat.handleHover(point, sx, sy, picked);
+        // The hovered door, resolved ONCE with the click's own predicate
+        // (combatDoorAt) and handed to combat alongside the hover - the
+        // pointer cursor and the threshold ring read this same answer, so
+        // the two affordances light together and die together.
+        const doorKey = combatDoorAt(hit, point);
+        const foe = combat.handleHover(point, sx, sy, picked,
+          doorKey ? doorMidpoint(doorKey) : null);
         // A coworker wins the cursor; failing that, a door you could work says
         // so with the same pointer it uses out of combat. The click reads the
         // very same predicate, so the two cannot disagree.
-        hover.setCursor(foe ? 'crosshair' : (combatDoorAt(hit, point) ? 'pointer' : null));
+        hover.setCursor(foe ? 'crosshair' : (doorKey ? 'pointer' : null));
         // Hovering a character glows their BODY and names them in the banner -
         // the DOS2 read, and the same one you already get out of combat. This
         // used to be held behind Ctrl, which meant the half of the game where
@@ -2682,7 +2886,10 @@ function startGame(level) {
         const test = coneFrom(a, { x: player.x, z: player.z }, oocAim.x, oocAim.z);
         if (!test) return null;
         const caught = coneCatches(test);
-        return { line: conePolyline(a, test), caught: caught.map((e) => [e.x, e.z]), usable: !!caught.length };
+        // The wedge is ALWAYS usable - an empty one fires too (fireOocCone),
+        // exactly as combat's own preview draws it - so the color must not
+        // read as a refusal. `caught` still rings whoever it would open on.
+        return { line: conePolyline(a, test), caught: caught.map((e) => [e.x, e.z]), usable: true };
       },
       summonDrop: () => {
         if (!armedOoc || inCombat || !oocAim) return null;
@@ -2717,17 +2924,29 @@ function startGame(level) {
       },
       // The hovered TAKE COVER shield, or null over plain floor - only the
       // hovered object rings (the rings-everywhere-is-noise rule).
+      // The aim is the SPOT YOU WOULD STAND, and the faces are what would
+      // cover you there - the same pair combat draws, off the same rule
+      // (oocCoverProblem / oocCoverFaces), so the two sides of a fight
+      // starting cannot promise different crouches.
       coverAim: () => {
         if (!armedOoc || inCombat || !oocAim || !sheet) return null;
         if (ACTIONS[armedOoc].type !== 'cover') return null;
         const x = Math.round(oocAim.x);
         const z = Math.round(oocAim.z);
-        if (enemyAt(x, z) || npcAt(x, z) || partyAt(x, z)) return { x, z, usable: false };
-        const def = grid.defAt(x, z);
-        const cell = !!(def && (def.solid || def.cover));
-        const edge = !cell && grid.terrainOpen(x, z)
-          && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => !grid.stepOpen(x, z, x + dx, z + dz));
-        return cell || edge ? { x, z, usable: true } : null;
+        const usable = !oocCoverProblem(x, z);
+        // px/pz is the CLAMPED stand point - the continuous marker, and
+        // exactly the spot the commit will walk to. The raw cursor point can
+        // sit inside a wall's clearance band; a marker there would promise a
+        // spot the body cannot occupy.
+        const [px, pz] = clampPoint(oocAim.x, oocAim.z);
+        return { x, z, px, pz, usable, faces: usable ? oocCoverFaces(x, z) : [] };
+      },
+      // What is covering the leader RIGHT NOW, whatever is armed - the
+      // held-crouch affordance, so a crouch taken before a fight shows its
+      // shape out here too rather than only once the dice come out.
+      heldCover: () => {
+        if (inCombat || !oocCrouch || !sheet) return null;
+        return { x: oocCrouch.at.x, z: oocCrouch.at.z, faces: oocCoverFaces(oocCrouch.at.x, oocCrouch.at.z) };
       },
       inCombat: () => inCombat && !!combat,
       doorNear: doorNearPoint,
@@ -2760,9 +2979,30 @@ function startGame(level) {
   // gets a glide to where they stand right now: follow can't attach to a
   // body the rig doesn't track, and pretending otherwise would drift the
   // view back to the followed character a frame later.
+  // Who the player is DRIVING right now: the acting combatant in a fight, the
+  // leader out of one. `player` answers a DIFFERENT question - "who leads the
+  // party" - and while a fight is on those two stop being the same body:
+  // `makeActive` hands you a teammate to steer without touching `player`, and
+  // `switchLeader` returns early in combat by design.
+  //
+  // Letting the camera read `player` meant steering a companion through a
+  // shared turn drove a body the rig was not tracking, and `Home` - the key
+  // whose comment promises "whoever you're driving" - resolved to the panTo
+  // branch below, DETACHING the rig and freezing it where that member stood.
+  // Nothing re-attached until control changed hands. One function is where
+  // that question gets answered now, and the follow loop, the wall fade, the
+  // recenter key, the profile card and the initiative rows all read it.
+  //
+  // Follow the acting character (designer, 2026-07-31: "agreed") - which is
+  // also what BG3 and DOS2 do with the character whose turn it is.
+  const steeredActor = () => (inCombat && combat ? combat.actingActor || player : player);
+
   function focusCameraOn(actor) {
     if (!actor) return;
-    if (actor === player) { controls.recenter(); return; }
+    // Re-ATTACH when the target is the body the rig already follows; glide to
+    // a detached point when it is anyone else (another member's card, an
+    // enemy's initiative row), where snapping follow onto them would be a lie.
+    if (actor === steeredActor()) { controls.recenter(); return; }
     const p = actor.entity?.getPosition();
     if (p) controls.panTo({ x: p.x, z: p.z });
     else controls.panTo({ x: actor.x, z: actor.z });
@@ -2780,7 +3020,7 @@ function startGame(level) {
     statsCard.onmousedown = (e) => e.stopPropagation(); // clicks stay off the canvas
     statsCard.ondblclick = () => {
       if (!sheet || gameOver) return;
-      focusCameraOn(inCombat && combat ? combat.actingActor : player);
+      focusCameraOn(steeredActor());
     };
   }
 
@@ -2851,7 +3091,7 @@ function startGame(level) {
     } else if (e.key === 'Home' && sheet && !gameOver) {
       // BG3's recenter key: put the camera back on whoever you're driving
       // (the acting combatant in a fight, the leader out of one).
-      focusCameraOn(inCombat && combat ? combat.actingActor : player);
+      focusCameraOn(steeredActor());
     }
   });
   window.addEventListener('keyup', (e) => {
@@ -3094,10 +3334,16 @@ function startGame(level) {
       // (every attack and throw), a spot on the floor (a summon), the
       // hovered furniture/partition (shove - which ALSO rings coworkers,
       // they're targets too), or the hovered shield (take cover).
+      // The crouch you are in draws whatever is armed - it is not an aim, it
+      // is the state of the character. drawCoverAim is called EVERY frame and
+      // gates itself on its own query, so its eased ring resets the moment
+      // cover stops being the armed verb - gated at the call site, a disarm
+      // would leave the ease pointing at wherever cover was last aimed.
+      if (show && !inCombat) { hover.drawHeldCover(); hover.drawCoverAim(dt); }
       if (show && !inCombat && armedOoc) {
         if (ACTIONS[armedOoc].type === 'summon') hover.drawSummonDrop();
         else if (ACTIONS[armedOoc].cone) hover.drawConeAim();
-        else if (ACTIONS[armedOoc].type === 'cover') hover.drawCoverAim();
+        else if (ACTIONS[armedOoc].type === 'cover') { /* drawn above, every frame */ }
         else if (ACTIONS[armedOoc].type === 'shove') {
           hover.drawArmedTargets();
           hover.drawShoveAim();
@@ -3131,6 +3377,10 @@ function startGame(level) {
       while (oocTurnClock >= OOC_TURN_SECONDS) {
         oocTurnClock -= OOC_TURN_SECONDS;
         runtime.advanceTurn();
+        // ...and so are the statuses everyone is carrying. Same clock, same
+        // `tickTurn`, same durations as a fight - see advanceStatusTurn.
+        advanceStatusTurn();
+        if (gameOver) break;
         ageSummons(); // temps you brought out of the last fight are on the clock
         // ...and so is the litter a power dropped. This clock stands in for
         // combat's rounds, so it has to spend everything a round spends (see
@@ -3154,8 +3404,8 @@ function startGame(level) {
     // looking through their eyes while the coworkers move), out of one it's the
     // leader. A blinded companion you are not driving costs you their accuracy,
     // not your screen.
-    const steered = inCombat && combat ? combat.actingSheet : sheet;
-    const impair = !gameOver && steered ? statusFx(steered) : null;
+    const steeredSheet = inCombat && combat ? combat.actingSheet : sheet;
+    const impair = !gameOver && steeredSheet ? statusFx(steeredSheet) : null;
     vision.set(impair?.aimSway || 0, impair?.sightBlots || 0);
     vision.update(dt);
     // A drifting aim goes stale the moment the mouse stops, so re-ask the world
@@ -3182,12 +3432,17 @@ function startGame(level) {
         controls.refreshHover();
       }
     }
-    // Follow the player, keeping them centred in frame. Track the entity's
-    // CONTINUOUS position (player.x/z is the logical tile, which jumps a whole
-    // tile at a time and makes the camera step along with the walk).
-    const pp = player.entity ? player.entity.getPosition() : player;
+    // Follow whoever you're STEERING, keeping them centred in frame. Track the
+    // entity's CONTINUOUS position (actor.x/z is the logical tile, which jumps
+    // a whole tile at a time and makes the camera step along with the walk).
+    // The walls ghost for the same body, or you would be driving a character
+    // the room keeps solid.
+    // (`steeredSheet` above is this same question asked of the SHEET - vision
+    // already read the acting body correctly; only the camera read `player`.)
+    const steeredBody = steeredActor();
+    const pp = steeredBody.entity ? steeredBody.entity.getPosition() : steeredBody;
     controls.follow({ x: pp.x, z: pp.z }, dt);
-    updateWallFade(controls.cameraEntity, player.entity ? player.entity.getPosition() : null);
+    updateWallFade(controls.cameraEntity, steeredBody.entity ? steeredBody.entity.getPosition() : null);
   });
 
   // --- boot -------------------------------------------------------------------------
@@ -3325,6 +3580,17 @@ function startGame(level) {
     get playerPos() {
       const p = player.entity?.getPosition();
       return p ? { x: p.x, z: p.z } : { x: player.x, z: player.z };
+    },
+    // Where the body you are STEERING is - the camera's follow target. Out of
+    // a fight this is `playerPos`; in one it is the acting member, which is a
+    // DIFFERENT body the moment a shared turn hands you a teammate. The camera
+    // specs assert against this one, because asserting against `playerPos`
+    // is what let the follow read the leader for so long: with a one-member
+    // party the two agree, and the spec passed on a true negative.
+    get steeredPos() {
+      const a = steeredActor();
+      const p = a.entity?.getPosition();
+      return p ? { x: p.x, z: p.z } : { x: a.x, z: a.z };
     },
     // Where the camera actually sits, for tests that assert on the framing
     // (the tactical view collapses the horizontal offset to ~nothing).
@@ -3493,9 +3759,12 @@ function startGame(level) {
     },
     switchTo(i) {
       // In combat this steers the open shared turn instead - refused unless
-      // party.members[i] is holding the floor (INITIATIVE_PLAN).
-      if (!inCombat) switchLeader(i);
-      else combat?.steerMember(party?.members[i]);
+      // party.members[i] is holding the floor (INITIATIVE_PLAN). Returns
+      // whether the steer was ACCEPTED, because refusal is the common case
+      // (no shared turn this round) and a spec that cannot tell "it steered"
+      // from "it declined" has to guess which one it just asserted about.
+      if (!inCombat) { switchLeader(i); return true; }
+      return !!combat?.steerMember(party?.members[i]);
     },
     reviveMember(i) {
       const m = party?.members[i];
@@ -3525,6 +3794,10 @@ function startGame(level) {
     // level-up screen calls - so a test exercises the real path rather than
     // hand-writing talent effects the game would never produce.
     spendClassPoint: (sheet, nodeId) => spendClassPoint(sheet, nodeId),
+    // Talents are their own axis (TALENT_PLAN M1) and the picker that spends
+    // talent points is M2, so this is how a test takes one through the real
+    // grant path rather than hand-writing an effects bag.
+    grantTalent: (sheet, talentId) => grantTalent(sheet, talentId),
     get doors() { return [...grid.doors].map(([key, d]) => ({ key, open: d.open })); },
     setDoorOpen(key, open) {
       if (!grid.doors.has(key)) return;
@@ -3532,7 +3805,7 @@ function startGame(level) {
       scene.refreshDoor(key);
       for (const e of enemies) e.clearPath(); // their routes may have changed
     },
-    // Resolves an ENEMY_TYPES id or a class archetype (e.g. 'applicant'), so a
+    // Resolves an ENEMY_TYPES id or a class archetype (e.g. 'employee'), so a
     // tester can drop class-based units to feel out balance.
     spawnEnemy(typeId, x, z) {
       const base = ENEMY_TYPES[typeId] || CLASSES[typeId];
@@ -3549,8 +3822,8 @@ function startGame(level) {
     // Drop a player-team summon beside the active member (combat only) - the
     // console-side twin of the HR class's Post the Role, for tuning.
     // `lifetimeTurns` null = permanent, a number = turns of assignment before
-    // the applicant files out (the tuning knob milestone 4 left open).
-    summonAlly(archetypeId = 'applicant', n = 1, lifetimeTurns = null) {
+    // the employee files out (the tuning knob milestone 4 left open).
+    summonAlly(archetypeId = 'employee', n = 1, lifetimeTurns = null) {
       return window.__combat ? window.__combat.summonAlly(archetypeId, n, lifetimeTurns) : 0;
     },
     giveItem(id) {

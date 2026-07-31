@@ -3,6 +3,7 @@
 // badge. Each owns the frame it is in, so they share the `overlay` shell and
 // its button below rather than each inventing one.
 import { BUTTON_CHROME } from './chrome.js';
+import { TALENTS, STARTING_TALENT_BY_CLASS } from '../data/talents.js';
 
 // --- end-of-game overlays ----------------------------------------------------
 function overlay(id, inner) {
@@ -188,7 +189,7 @@ export const CUSTOM_ID = '__custom__';
 
 export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
   // Only playable careers reach the desk - archetypes like the summoned
-  // applicant (playable: false) are units, not résumés (SUMMON_PLAN.md).
+  // employee (playable: false) are units, not résumés (SUMMON_PLAN.md).
   const classIds = Object.keys(classes).filter((id) => classes[id].playable !== false);
   const ids = [...classIds, CUSTOM_ID];
   // Whose kit a custom character does. Starts on the first job and is changed
@@ -235,13 +236,21 @@ export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
   const section = (t) =>
     `<div style="font:700 10px system-ui, sans-serif; letter-spacing:2px; color:#8a8577;
       border-bottom:1px solid #d8d2c2; padding-bottom:2px; margin:10px 0 5px;">${t}</div>`;
-  const kitHtml = (cls) => `
+  // The résumé's talent line reads the REGISTRY now, not the class (TALENT_PLAN
+  // M1). A class does not have a talent any more; what it has is a talent it
+  // STARTS you with, which is a different sentence and a temporary one - when
+  // the picker lands this becomes a choice made on this screen rather than a
+  // fact printed on the card.
+  const kitHtml = (cls, classId) => {
+    const t = TALENTS[STARTING_TALENT_BY_CLASS[classId]];
+    return `
       ${section('SKILLS')}
       <div style="line-height:1.55;">
         ${cls.actions.map((a) => '&bull; ' + esc(actions[a].label)).join('<br>')}
       </div>
-      ${section('TALENTS')}
-      <div>${cls.talent ? `<b>${esc(cls.talent.name)}.</b> ${esc(cls.talent.blurb)}` : '&mdash;'}</div>`;
+      ${section('STARTING TALENT')}
+      <div>${t ? `<b>${esc(t.name)}.</b> ${esc(t.blurb)}` : '&mdash;'}</div>`;
+  };
 
   const resumeHtml = (id) => {
     if (id === CUSTOM_ID) {
@@ -256,7 +265,7 @@ export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
         <div style="opacity:.75; font-style:italic;">Blank. You have not worked here.</div>
         ${section('DOING THE JOB OF')}
         <div id="custom-jobs" style="display:flex; flex-wrap:wrap; gap:4px; margin-bottom:2px;"></div>
-        ${kitHtml(cls)}
+        ${kitHtml(cls, customClass)}
         <div style="position:absolute; top:10px; right:12px; font:700 9px system-ui, sans-serif;
           letter-spacing:1px; color:#8a8577; border:1px solid #8a8577; border-radius:2px;
           padding:2px 5px; transform:rotate(6deg); opacity:.85;">BLANK</div>`;
@@ -267,7 +276,7 @@ export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
       <div style="font-size:11px; color:#8a8577; margin-top:2px;">Applying for: Former Employee</div>
       ${section('EXPERIENCE')}
       <div>${esc(cls.experience)}</div>
-      ${kitHtml(cls)}
+      ${kitHtml(cls, id)}
       <div style="position:absolute; top:10px; right:12px; font:700 9px system-ui, sans-serif;
         letter-spacing:1px; color:#b0392e; border:1px solid #b0392e; border-radius:2px;
         padding:2px 5px; transform:rotate(6deg); opacity:.85;">CONFIDENTIAL</div>`;

@@ -32,7 +32,8 @@ test('the midpoint is always on one of the two tiles the key divides', () => {
 });
 
 test('a point near an edge names it; a point mid-tile names nothing', () => {
-  // The band is deliberately wide - you aim at a doorway, not at a line.
+  // The band is a hair either side of the edge line: the door PANEL is what
+  // you aim at, and the pick ray finds that itself.
   assert.equal(doorKeyNear({ x: 4.45, z: 7 }), 'v:5,7');
   assert.equal(doorKeyNear({ x: 3.55, z: 7 }), 'v:4,7');
   assert.equal(doorKeyNear({ x: 4, z: 7.45 }), 'h:4,8');
@@ -40,6 +41,11 @@ test('a point near an edge names it; a point mid-tile names nothing', () => {
   // Dead centre of a tile is not near any edge.
   assert.equal(doorKeyNear({ x: 4, z: 7 }), null);
   assert.equal(doorKeyNear(null), null);
+  // Nor is most of the tile. A click on the floor a third of a tile from the
+  // doorway is a step through it, not a hand on the handle - under the old
+  // band everything outside the middle 40% worked the door instead.
+  assert.equal(doorKeyNear({ x: 4.3, z: 7 }), null);
+  assert.equal(doorKeyNear({ x: 4, z: 7.3 }), null);
 });
 
 test('the nearer axis wins when a point sits by a corner', () => {

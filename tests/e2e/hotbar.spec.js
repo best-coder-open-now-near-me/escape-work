@@ -44,7 +44,7 @@ test('the kit is in canonical order, on one row, with room to grow', async ({ pa
   // cover verbs - Take Cover (TACTICS_PLAN M6) and Pull Over (M8) - and the
   // bare-handed swing that stands in for a weapon (data/actions.js,
   // stats.orderedActionIds). The trailing empty slot is deliberate: it is
-  // where the coffee goes, and the reason a player ever right-clicks a slot.
+  // where the zone goes, and the reason a player ever right-clicks a slot.
   const all = await slots(page);
   expect(all.map((s) => s.id)).toEqual([
     'hotbar-act-attack',
@@ -52,7 +52,7 @@ test('the kit is in canonical order, on one row, with room to grow', async ({ pa
     'hotbar-act-paper-ball',
     'hotbar-act-paper-airplane',
     'hotbar-act-defend',
-    'hotbar-act-coffee',
+    'hotbar-act-paper-storm',
     'hotbar-act-take-cover',
     'hotbar-act-pull',
     'hotbar-act-punch',
@@ -77,6 +77,22 @@ test('the kit is in canonical order, on one row, with room to grow', async ({ pa
   expect(await page.evaluate(() => window.__game.narration.at(-1))).toMatch(/empty/i);
 });
 
+test('one live slot at a time out of combat too: a different press stands down first', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, QUIET, 'office-drone');
+  await expect(page.locator('#hotbar-act-attack')).toBeVisible();
+
+  await page.click('#hotbar-act-attack');
+  expect(await page.evaluate(() => window.__game.armed)).toBe('attack');
+  // A different press lowers the email and arms nothing in its place.
+  await page.click('#hotbar-act-shove');
+  expect(await page.evaluate(() => window.__game.armed)).toBe(null);
+  expect(await page.evaluate(() => window.__game.narration.at(-1))).toMatch(/stand down/i);
+  // The press it asked for: the same slot again, and the shove arms.
+  await page.click('#hotbar-act-shove');
+  expect(await page.evaluate(() => window.__game.armed)).toBe('shove');
+});
+
 test('right-click a slot to reassign it; assigning swaps rather than duplicates', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, QUIET, 'office-drone');
@@ -85,14 +101,14 @@ test('right-click a slot to reassign it; assigning swaps rather than duplicates'
   // Right-click the leftmost slot: the menu lists every power the character has.
   await page.click('#hotbar-act-attack', { button: 'right' });
   await expect(page.locator('#context-menu')).toBeVisible();
-  await expect(page.locator('#context-menu')).toContainText('Coffee Break');
+  await expect(page.locator('#context-menu')).toContainText('Paper Storm');
   await expect(page.locator('#context-menu')).toContainText('Shove');
 
-  // Assign Coffee Break there. It was already on the bar, so the two SWAP -
+  // Assign Paper Storm there. It was already on the bar, so the two SWAP -
   // a power can never be in two slots at once.
-  await page.click('#context-menu >> text=Coffee Break');
+  await page.click('#context-menu >> text=Paper Storm');
   await expect.poll(async () => (await slots(page)).map((s) => s.id)).toEqual([
-    'hotbar-act-coffee',
+    'hotbar-act-paper-storm',
     'hotbar-act-shove',
     'hotbar-act-paper-ball',
     'hotbar-act-paper-airplane',
@@ -105,15 +121,16 @@ test('right-click a slot to reassign it; assigning swaps rather than duplicates'
   ]);
 
   // The layout rides on the SHEET, so pressing key 1 now arms what is in slot 1.
-  // (Coffee Break is combat-only out here, so it refuses and says why - which is
-  // proof the press landed on the coffee and not on the email that used to be
-  // there.)
+  // (Paper Storm is combat-only out here, so it refuses and says why - which is
+  // proof the press landed on the zone and not on the email that used to be
+  // there. The refusal is the zone's, not a heal's: the message names swinging
+  // rather than pockets.)
   await page.keyboard.press('1');
-  expect(await page.evaluate(() => window.__game.narration.at(-1))).toMatch(/pockets/i);
+  expect(await page.evaluate(() => window.__game.narration.at(-1))).toMatch(/swinging/i);
   expect(await page.evaluate(() => window.__game.armed)).toBe(null);
 
   // Clearing a slot leaves it empty and addressable, not collapsed.
-  await page.click('#hotbar-act-coffee', { button: 'right' });
+  await page.click('#hotbar-act-paper-storm', { button: 'right' });
   await page.click('#context-menu >> text=Clear this slot');
   await expect(page.locator('#hotbar-slot-0')).toBeVisible();
   await expect(page.locator('#hotbar-slot-0')).toHaveText(/^1—$/);

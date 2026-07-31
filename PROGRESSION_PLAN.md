@@ -73,6 +73,12 @@ never appears in it.
   - **Class points** — spend on a per-class **ability track**: unlock a new
     combat action, upgrade one you own, or take a talent. This is the
     talent-choice system the code has been reserving space for.
+    > **Superseded in part (`TALENT_PLAN.md`, designer 2026-07-31).** "Take a
+    > talent" leaves the class track. Talents are their own axis now — a shared
+    > registry, a currency of their own — because a talent bought with class
+    > points is still a talent your class gates. The track keeps unlocking and
+    > upgrading class actions; the four nodes that granted talent effects move
+    > to the registry.
 - **A level-up screen** where you spend them — banked during combat, resolved at
   the next safe moment (BG3 "level up at camp" feel), openable any time points
   are pending.

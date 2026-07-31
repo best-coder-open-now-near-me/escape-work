@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  topplePlan, aiTopplePlan, breakPlan, pullPlan, coverSpot, displacePlan,
+  topplePlan, aiTopplePlan, breakPlan, pullPlan, displacePlan,
 } from '../../src/combat-plans.js';
 import { REACH } from '../../src/stats.js';
 
@@ -99,10 +99,12 @@ test('a swing takes a partition square-on and never diagonally', () => {
 
 // --- Pull Over --------------------------------------------------------------
 
-const crouchCell = { x: 1, z: 0 }; // shield cell between (0,0) and (2,0)
+// The crouch is a POSITION with shielded FACES: the target at (2,0) is covered
+// on its west face, which is the one pointing at a puller standing at (0,0).
+const crouchCell = { at: { x: 2, z: 0 }, faces: [[-1, 0]] };
 const pullWorld = (over = {}) => ({ stepOpen: () => true, open: () => true, name: 'The Guard', ...over });
 
-test('a pull over a cover cell finds a landing on your side', () => {
+test('a pull over a shielded face finds a landing on your side', () => {
   const r = pullPlan(unit(0, 0), at(2, 0), crouchCell, pullWorld());
   assert.ok(r.landing);
   assert.equal(r.refusal, undefined);
@@ -112,20 +114,19 @@ test('a pull over a cover cell finds a landing on your side', () => {
 test('every refusal is the leg that failed, in order', () => {
   // Not dug in at all.
   assert.match(pullPlan(unit(0, 0), at(2, 0), null, pullWorld()).refusal, /not dug in/);
-  // Dug in behind a PERSON: that is a shove, not a pull.
+  // Dug in behind a PERSON on the face in the way: that is a shove, not a pull.
   assert.match(
-    pullPlan(unit(0, 0), at(2, 0), { ...crouchCell, shield: {} }, pullWorld()).refusal,
+    pullPlan(unit(0, 0), at(2, 0), crouchCell, pullWorld({ bodyAt: () => true })).refusal,
     /shove, not a pull/,
   );
-  // Their cover is not between you.
+  // Their cover is not between you - covered, but on the far face.
   assert.match(
-    pullPlan(unit(0, 0), at(2, 0), { x: 5, z: 5 }, pullWorld()).refusal,
+    pullPlan(unit(0, 0), at(2, 0), { at: { x: 2, z: 0 }, faces: [[1, 0]] }, pullWorld()).refusal,
     /not between you/,
   );
-  // Properly shielded (the cell sits on their face, between the two of you) but
-  // well out of arm's reach across it.
+  // Properly shielded (the face points your way) but well out of arm's reach.
   assert.match(
-    pullPlan(unit(0, 0), at(6, 0), { x: 5, z: 0 }, pullWorld()).refusal,
+    pullPlan(unit(0, 0), at(6, 0), { at: { x: 6, z: 0 }, faces: [[-1, 0]] }, pullWorld()).refusal,
     /Too far/,
   );
   // Nowhere on your side to put them.
@@ -156,58 +157,6 @@ test('the plan and its refusal are the same walk - never both, never neither', (
 
 test('the target\'s name reaches the first refusal', () => {
   assert.match(pullPlan(unit(0, 0), at(2, 0), null, pullWorld()).refusal, /The Guard/);
-});
-
-// --- take cover -------------------------------------------------------------
-
-const coverWorld = (over = {}) => ({
-  isWalkable: () => true,
-  hasLos: () => true,
-  findPath: (sx, sz, gx, gz) => [[sx, sz], [gx, gz]],
-  occupantAt: () => null,
-  ...over,
-});
-
-test('cell cover tucks you in beside the shield, on a face', () => {
-  const spot = coverSpot(unit(0, 0), 3, 0, false, coverWorld());
-  assert.equal(Math.abs(spot.sx - 3) + Math.abs(spot.sz - 0), 1); // orthogonal
-  assert.ok(spot.path);
-});
-
-test('already standing on the spot means no walk at all', () => {
-  // The zero-length-route case: the character CLOSEST to the cover must not be
-  // the one told there is no way in.
-  const spot = coverSpot(unit(2, 0), 3, 0, false, coverWorld());
-  assert.deepEqual([spot.sx, spot.sz], [2, 0]);
-  assert.equal(spot.path, null);
-});
-
-test('edge cover puts you ON the tile, and needs a line to it', () => {
-  const spot = coverSpot(unit(0, 0), 3, 0, true, coverWorld());
-  assert.deepEqual([spot.sx, spot.sz], [3, 0]);
-  assert.ok(spot.path);
-  assert.match(coverSpot(unit(0, 0), 3, 0, true, coverWorld({ hasLos: () => false })).refusal, /way in/);
-});
-
-test('occupied and unreachable neighbours are not spots', () => {
-  assert.match(
-    coverSpot(unit(0, 0), 3, 0, false, coverWorld({ occupantAt: () => ({}) })).refusal,
-    /way in/,
-  );
-  assert.match(
-    coverSpot(unit(0, 0), 3, 0, false, coverWorld({ findPath: () => null })).refusal,
-    /way in/,
-  );
-});
-
-test('the shortest route beside the shield wins', () => {
-  const spot = coverSpot(unit(0, 0), 3, 0, false, coverWorld({
-    // (2,0) is a long way round; (3,1) is next door.
-    findPath: (sx, sz, gx, gz) => (gx === 3 && gz === 1
-      ? [[sx, sz], [gx, gz]]
-      : [[sx, sz], [1, 1], [2, 1], [gx, gz]]),
-  }));
-  assert.deepEqual([spot.sx, spot.sz], [3, 1]);
 });
 
 // --- displacement -----------------------------------------------------------

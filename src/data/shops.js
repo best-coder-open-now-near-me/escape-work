@@ -35,6 +35,11 @@ export const SHOPS = {
       { item: 'candy-bar', qty: 3, chance: 1 },
       { item: 'vending-crisps', qty: 2, chance: 1 },
       { item: 'energy-drink', qty: 2, chance: 0.8 },
+      // The class heals are objects now (POWERS_PLAN M9), so the machine sells
+      // the two it plausibly holds. At a 1.6 markup this is the expensive way
+      // to stay alive, which is the point of it having a price at all.
+      { item: 'coffee-break', qty: 3, chance: 0.9 },
+      { item: 'executive-espresso', qty: 1, chance: 0.35 },
       { item: 'stale-danish', qty: 1, chance: 0.55 },
       // The machine-exclusive: the only place in the game it drops. A row that
       // is empty more often than not is what makes checking the next machine

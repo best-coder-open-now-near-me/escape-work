@@ -1,5 +1,230 @@
 # Project Review — Escape Work
 
+## Consolidated re-verification — 2026-07-31
+
+Baseline: `claude/combat-interaction-bugs-po78ob` merged up to `origin/main`
+(`9373dd0`), 622 unit tests passing. Two earlier review passes were folded
+together here and **every claim was re-traced through the code on this
+branch** before it was kept. Findings that the branch has since fixed are
+recorded as closed rather than deleted, so they are not re-found later.
+
+### Questions for the designer — answered 2026-07-31
+
+All four came back the same day they were asked. Recorded in the designer's
+own terms, with what each one changed.
+
+1. **The camera follows the acting character in a fight.** `[ratified]`
+   (designer, 2026-07-31: "agreed"). **Done.** `main.js:steeredActor()` is
+   the one answer to "who is the player driving?" — the acting combatant in
+   a fight, the leader out of one — and the follow loop, the wall fade,
+   `Home`, the profile card, the party-bar card and the initiative rows all
+   read it. `player` keeps its old, narrower meaning ("who leads the
+   party"). See "the camera detach" under *Closed*.
+
+2. **Everything should work out of combat.** `[stated]` (designer,
+   2026-07-31: "yes, i dont see any reason anything shouldnt ever work out
+   of combat"). Broader than the question asked, and correct as a
+   direction — but it lands on a real obstacle that is worth stating
+   plainly, because it is not about the verbs. **Out of combat there are no
+   meters.** AP, per-fight `uses`, and the turn clock are all combat-only
+   state, so a verb armed out there costs nothing, is limited by nothing,
+   and — if it applies a turn-clocked status — never expires. Concretely:
+   `performance-review` and `onboarding` apply 3-turn buffs on the `turn`
+   clock, and only `tickStep` runs outside a fight (`main.js:2093`), so an
+   out-of-combat buff is **permanent** until a fight starts and burns it
+   down. Pre-buffing before every fight becomes free, mandatory, and
+   invisible. See "the metering question" below — it is the one thing still
+   open on this, and it is a design question, not an engineering one.
+
+3. **Withdrawn — the premise was wrong.** `[stated]` (designer,
+   2026-07-31: "why would staples create paper? i find the questions whole
+   premise confusing"). Fair: it came out of an earlier review pass, not
+   from anything in the design, and it does not survive contact with the
+   fiction. The `paper` surface is shredded TPS reports you gather once
+   (`surfaces.js:74`); a fired staple has nothing to do with it. Dropped,
+   and recorded here so it is not re-raised.
+
+4. **`POWERS_PLAN.md` is not retro-tagged — it is a live document.**
+   `[stated]` (designer, 2026-07-31: "thats a design doc im working on
+   now"). The tagging finding is **withdrawn**: a doc being written now is
+   not a doc that skipped the discipline, and going through it to stamp
+   tags on decisions the designer is still forming would be exactly the
+   presumption CLAUDE.md exists to prevent. Hands off until they say
+   otherwise. (The other zero-tag docs in the list below stand as an
+   observation, not a work item.)
+   **God mode stays ungated.** `[stated]` (designer, 2026-07-31: "god mode
+   can stay around"). `TODO.md`'s dev-flag box is closed as answered rather
+   than done.
+
+### The metering question — answered: one clock (A)
+
+`[stated]` (designer, 2026-07-31): *"yes its A. that clock should've been
+used from the beginning for tracking fire and player effects. whats ticking
+player effects then? those should all be using the same thing in and out of
+combat, its not something new going on here."*
+
+**Done.** To answer the question inside it, because it is a fair one and the
+answer is short: `tickTurn` had exactly **one** caller, `turn-order.js:135`,
+which fires as each combatant's turn opens — so the turn clock only ever ran
+inside a fight. `tickStep` is called from `main.js` on each tile entered, so
+the step clock (gum, bleed) always ran on both sides. Two clocks, one of
+which stopped at the door.
+
+And the designer is right that this was never a new mechanism: the
+out-of-combat world clock has been there all along (`OOC_TURN_SECONDS`,
+`main.js:3149`) and already spends everything a combat round spends — fire,
+smoke, summon assignments, the litter a power dropped. Statuses were the one
+thing it did not spend. `advanceStatusTurn()` now spends them too, over the
+roster, the temps and the coworkers on the floor, through the same `tickTurn`
+with the same durations.
+
+Two things fell out of it:
+
+- **Combat's end-of-fight sweep is gone.** `cleanup()` used to clear every
+  turn-clock status from every combatant on the grounds that "there are no
+  turns on the map". There are now. That sweep was also doing real damage on
+  its way out: walking out of a fight put out the fire you were carrying,
+  cleared a stun mid-sentence, and handed back a Deflect you had spent.
+- **`covered` is the one status that needed care**, and it always was the odd
+  one: its duration is a leak bound, not a clock (`data/statuses.js:197`), and
+  combat re-applies it on every consult while the crouch holds. `main.js` now
+  does the same against `oocCrouch`, or the new clock would have timed a
+  stationary character out of their own cover in four ticks — which the
+  "a crouch taken before the fight rides into it" spec would have caught.
+
+It also closes the metering worry that prompted the question. A 3-turn buff
+is ~4.8 seconds of standing around out of combat, so pre-buffing is
+self-limiting: you cannot walk across the floor wearing it. No `uses` ledger
+needed for that. The remaining unmetered verb to watch is `paper-storm` — it
+lays the `paper` surface, which is gatherable for ammo, so opening zones up
+out of combat unmetered is the exact farm `surfaces.js:74` was written to
+prevent. Mobility and `pull` are safe (you can already walk anywhere out
+there; nothing crouches out there).
+
+### The crouch became a position (2026-07-31)
+
+Not a review finding — a design change made in-session, recorded here because
+it supersedes what the earlier passes describe. `[stated]` throughout
+(designer, 2026-07-31).
+
+Take Cover used to ask you to name a SHIELD, then chose which side of it you
+stood on. That made the side an output, which is why the aim emblem hopped
+tile to tile and why "the other side of that person" was unsayable. It now
+asks you to name the SPOT YOU WILL STAND, and whatever shields that tile's
+faces covers you along them.
+
+- Three crouch modes (cell / human shield / edge) collapse into the one edge
+  mode always had. `tactics.shieldedFaces` is the single primitive; `hasCover`
+  is it composed with `facesShieldFrom`, so the M3 to-hit modifier and the M6
+  immunity can no longer drift apart.
+- **Uncapped**: a corner covers two axes, an enclosed tile covers four, and
+  such a body cannot be shot from anywhere. Accepted deliberately — the
+  counters are melee, the topple, the break-down and Pull Over.
+- **Cover behind a person works out of combat** now. It never did: the
+  out-of-combat verb knew only tiles and partitions and refused a body with a
+  rule nothing else in the game observed.
+- **The covered faces are drawn** — while aiming and while the crouch holds,
+  in a fight and out of one, off the same live list the shot resolves against.
+  A held crouch used to show only an "In Cover" chip, so a corner told you
+  nothing about which way was open.
+- `combat-plans.coverSpot` is deleted with the rule it served.
+- **The aim is continuous** (landed 2026-07-31, after the position rework):
+  a marker rides the precise cursor point, the stand-tile ring eases toward
+  the resolved tile instead of hopping, and the commit walks the body to the
+  CLICKED point clamped to clearance — `walkActive`'s free endpoint in
+  combat, `walkToExact`'s new one outside it — so the spot you chose is the
+  spot you occupy. The rule still resolves on the tile's faces.
+
+One shipped e2e changed meaning as a result, which is worth flagging rather
+than burying: `cover.spec.js`'s flanking test used a Manager boxed in by four
+cabinets. Immobile needs four solids, and four solids is now four covered
+faces — so that arena cannot be flanked, by design. The spec now asserts what
+the new rule does (every angle refused; break one face and exactly that shot
+opens), and flanking a partially covered target is pinned in
+`tests/unit/tactics.test.js`, where the geometry can be stated exactly.
+
+### Confirmed, still open
+
+- **Player-typed names go raw into `innerHTML`,** on four surfaces now, not
+  one: the initiative strip (`ui/combat.js:48`), the HUD profile card
+  (`ui/hud.js:96`), the party-bar slot (`ui/hud.js:426`) and the character
+  sheet (`ui/panels.js:255`). `cleanName` (`creation.js:76`) only trims and
+  slices to 24 chars, which is room enough for `<svg onload=…>`; a bare
+  `<b>` corrupts the strip. `esc()` exists in exactly one file,
+  `ui/screens.js:30` — it should move somewhere all of `ui/` can reach it.
+- **Pan keys `preventDefault()` before any gate** (`main.js:2802`), so the
+  arrows kill scrolling in every DOM panel; and `modalOpen()` is still only
+  `dialogue || shopping` (`main.js:1260`), so WASD pans the world behind the
+  level-up screen, the sheet, the pockets and the game menu.
+- **Member slips still roll `Math.random()`** (`main.js:2171`) while AI slips
+  roll off the seeded stream (`combat.js:3882`), so a seeded fight does not
+  replay. One line. The recent slip work consolidated the *rule* into
+  `step-rules.js` and stopped slip-proof characters drawing at all — it did
+  not change where the member roll's randomness comes from.
+- **God mode ships ungated** (`god.js:74`, `main.js:3585`): backquote/F8, and
+  `localStorage` makes it stick across reloads. See question 4.
+- **Intent-tagging holds in 4 plan docs out of 18** — `TACTICS_PLAN` (32
+  tags), `CHARACTER_PLAN` (22), `INITIATIVE_PLAN` (15), `REFACTOR_PLAN` (4);
+  zero in `PROGRESSION_PLAN`, `SUMMON_PLAN`, `STATUS_PLAN`, `PARTY_PLAN`,
+  `MOVEMENT_PLAN`, `HIT_PLAN`, `EQUIPMENT_PLAN`, `ECONOMY_PLAN`. Recorded as
+  an observation, not a work item: retro-tagging somebody else's docs is the
+  presumption the rule exists to prevent. `POWERS_PLAN` is deliberately off
+  this list — it is being written now (question 4).
+- **Eight-plus `stats.js` exports are named by no test at all** — 12 by a
+  strict count: `pendingPoints`, `effectiveAttr`, `createSheetFrom`,
+  `normalizeAttr`, `trackNode`, `nodeAvailable`, `applyEffect`,
+  `xpNextForLevel`, and the `PAPER`/`MOVE`/`ATTR`/`EQUIP` tables.
+  `pendingPoints` is the function `ARCHITECTURE.md` credits with stopping a
+  rule that had drifted across four surfaces.
+- **`[quick]` in CI has the never-fires bug the header documents for
+  `[e2e]`** (`ci.yml:83`, `:91`, `:95`, `:99`): it reads
+  `github.event.head_commit.message`, which does not exist on
+  `pull_request`. A branch push raises only `pull_request`, so `[quick]`
+  never fires on a branch — exactly the failure the header carefully
+  explains two jobs above. It does work on `main`.
+- **79 `waitForTimeout` sleeps across 22 specs**, `helpers.js` included — up
+  from the 73 and 78 the two earlier passes counted.
+- **Two modules are still missing from the module map:** `portraits.js` and
+  `powers.js`. `powers.js` is not a small omission — it owns the predicates
+  (`isPull`, `aimsAtProps`, `pullLanding`) that three other modules dispatch
+  on.
+
+### Closed since the earlier passes
+
+- **The camera detach is fixed** (question 1). The rig followed `player` —
+  the *leader's* actor — every frame, `makeActive` never re-keyed that
+  binding, and `switchLeader` returns early while `inCombat` by design. So
+  in a multi-member fight `combat.actingActor !== player`, and
+  `focusCameraOn` took the `panTo` branch: the key whose comment promised
+  "whoever you're driving" **detached** the rig and froze it where that
+  member stood, with nothing re-attaching until control changed hands.
+  `steeredActor()` is the one owner now. The spec that missed it asserted
+  against `playerPos` in a one-member fight, where the leader and the acting
+  member are the same object — a true negative. It asserts against
+  `steeredPos` now, and a new two-member leg steers a teammate mid-fight and
+  checks the camera goes with them. That leg needs a SHARED turn, which is a
+  dice outcome, so it skips when the roll does not produce one — a seeded
+  initiative hook would make it deterministic and is worth doing.
+- **The Phase 0 critical is fixed, better than `TODO.md:329` specified.**
+  `combat-targeting.verbKind` dispatches before any melee fall-through, so
+  an armed buff/mobility can no longer resolve as a strike, and
+  `actors.js:430` clamps non-finite damage to a visible no-op. The TODO box
+  is ticked.
+- **The slip rule no longer exists three times.** `step-rules.js` is the one
+  owner for members, summons, AI units and wanderers, with the
+  sample-before-tick rule in it. (The seeded-stream half is still open,
+  above.)
+- **The god files shrank rather than grew.** `combat.js` 4,396 → 4,367 and
+  `main.js` 3,802 → 3,586 since the second pass — the panel extraction
+  (`ui/combat.js`), the AI beat ladder (`combat-ai.js`), the plan/perform
+  split (`combat-plans.js`) and the four subsystems `main.js` handed off.
+  Still 7,953 lines with no unit coverage; the extraction plan stands.
+- **Registry integrity and economy arbitrage: still clean.** Both mechanical
+  passes came back with zero dangling ids and nothing selling above its buy
+  price. Worth re-running, not worth re-reading.
+
+---
+
 Date: 2026-07-28 · Baseline: `d5c96d5`, all 379 unit tests passing.
 
 Method: eleven scoped review passes (per-subsystem bug hunts, data-registry integrity,

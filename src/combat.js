@@ -10,11 +10,12 @@
 // do. Fire keeps burning throughout.
 import { ACTIONS, arrivalLine, summonSpec } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
+import { throwablesFor as throwableIdsFor } from './hotbar-model.js';
 import { truncateByBudget, routeToFiringPosition, trimToFirst } from './pathfinding.js';
 import { pronounsOf, capitalize, verb } from './creation.js';
 import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, gritSaveChance, MOVE, REACH } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
-import { toHitTerms, provokedBy, positionMods, inReach, dist, crouchShields, hasCover, TACTICS } from './tactics.js';
+import { toHitTerms, provokedBy, positionMods, inReach, dist, crouchShields, hasCover, shieldedFaces, TACTICS } from './tactics.js';
 import {
   buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, aimsAtAnyone, isPurge, coneFrom, conePolyline, aimRangeOf, rangeTiles, isBreakable, aimsAtProps, isPull,
 } from './powers.js';
@@ -26,11 +27,11 @@ import { createTurnOrder } from './turn-order.js';
 import { slips, speedUnderStatus } from './step-rules.js';
 import {
   topplePlan as toppleplanAt, aiTopplePlan as aiToppleplanFor, breakPlan,
-  pullPlan as pullplanFor, coverSpot, displacePlan,
+  pullPlan as pullplanFor, displacePlan,
 } from './combat-plans.js';
 import {
   standTilePath as standTileRoute, pickTarget as pickBest, advanceRoute,
-  aiCrouchSpot, chooseBeat, afterFailedAdvance,
+  aiCrouchCovered, chooseBeat, afterFailedAdvance,
 } from './combat-ai.js';
 import {
   enemyRingOk, ringsAtBodies, verbKind, toppleRings, partitionRings, breakRings,
@@ -40,7 +41,6 @@ import {
   cheb, TARGET_R, SURPRISE_RADIUS, AROUND, ORTHO, reachOfUnit, posOf, withinReach,
   canReach as canReachAt, reachSpecOf, actRangeOf, verbReaches as verbReachesAt,
   swingPointAt as swingPointFrom, hasSwingSpot as hasSwingSpotFor, zoneCellsFor,
-  edgeShieldedTile as edgeShieldedTileIn,
 } from './combat-geometry.js';
 
 const pc = window.pc;
@@ -92,7 +92,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // left. They enter after the real roster, so party.active still indexes right.
   for (const s of allies) {
     // Carrying the summoner in with them is what keeps the live cap honest
-    // across fights: counted as summonedBy: null, two applicants who survived
+    // across fights: counted as summonedBy: null, two employees who survived
     // the last fight were invisible to the cap check and their summoner could
     // post a full new batch on top of them.
     if (s.sheet.hp > 0 && s.actor) {
@@ -296,14 +296,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const moveBudget = (holder) => (rootedNow(holder)
     ? 0
     : Math.max(0, (holder.freeAp || 0) + holder.ap));
-  const throwableIds = Object.keys(ACTIONS).filter((id) => ACTIONS[id].ammoCost);
-  // A throwable can be gated behind a talent effect (`needsTalent`): folding a
-  // dart that lands in someone's eye is a craft, so paper airplanes belong to
-  // the Origami Specialist. Anyone can crumple a wad.
-  const throwablesFor = (m) => throwableIds.filter((id) => {
-    const need = ACTIONS[id].needsTalent;
-    return !need || !!(m.sheet.talent?.effects || {})[need];
-  });
+  // Which throws a member has: hotbar-model.js owns that rule for both bars.
+  // Combat kept its own copy of the filter, and two copies of one rule is how
+  // a learned power ended up on everybody's bar - the flag that fixed it here
+  // did nothing out of combat until they were merged.
+  const throwablesFor = (m) => throwableIdsFor(m.sheet);
   // Everyone can shove - it's an office, not a fencing academy - and everyone
   // has a basic weapon swing (the equipped weapon's, or bare-handed 'punch').
   // In the canonical order (stats.orderedActionIds), the same one the
@@ -553,15 +550,30 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   };
 
   // --- the take-cover crouch (TACTICS_PLAN M6) --------------------------------
-  // Who is crouched, and behind WHAT: unit -> { x, z (the shield cell),
-  //   at (the tile they crouched on), shield (a unit when the cover is a body,
-  //   null when it is furniture) }.
-  // The rule the map buys: a single-target RANGED attack from a direction the
-  // shield cell blocks (tactics.crouchShields) cannot touch the croucher -
-  // refused outright behind an object, REDIRECTED into the shield behind a
-  // body (a tank that deleted shots would make teammates free walls). Melee
-  // never asks - a crouch is no answer to someone at arm's length - and area
-  // attacks (cones, zones) deliberately ignore it: flushing entrenched
+  // A crouch is a POSITION, not a commitment to one object: unit -> { at }.
+  //
+  // It used to be three shapes wearing one map - a shield CELL (`x, z`), a
+  // human shield (`shield`), or the tile's own partitions (`edges`) - each
+  // with its own validity test and its own branch in shotOutcome. The two
+  // object modes made you name a thing and then had `coverSpot` choose which
+  // SIDE of it you stood on, which is why the aim emblem hopped tile to tile
+  // and why you could not pick a side of a person (designer, 2026-07-31:
+  // "makes it impossible to use as i cant pick a side of the person").
+  //
+  // One rule now, and it is the one edge mode already had: you crouch WHERE
+  // YOU ARE, and whatever shields the faces of that tile covers you along
+  // those faces - partitions and walls on the edges, props and BODIES on the
+  // neighbouring cells (designer: "it should find the objects within its
+  // target area range, whatever is there is the side of the object(s) we are
+  // covered by"). Uncapped: a corner covering three faces covers three
+  // directions.
+  //
+  // The rule the map buys is unchanged: a single-target RANGED attack from a
+  // direction a shielded face points cannot touch the croucher - refused
+  // outright behind an object, REDIRECTED into the shield when that face
+  // holds a body (a tank that deleted shots would make teammates free walls).
+  // Melee never asks - a crouch is no answer to someone at arm's length - and
+  // area attacks (cones, zones) deliberately ignore it: flushing entrenched
   // targets is their job.
   const crouched = new Map();
   const nameOf = (u) => (u.sheet ? u.sheet.name : u.def.name);
@@ -573,58 +585,107 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (b) b.crouched = false; // stand the body up (actors.js holds the pose)
     if (!quiet) log(`${nameOf(unit)} is out of cover.`);
   }
+  // What shields a CELL, for the crouch: a prop a shot passes over (the M6a
+  // height rule - one threshold decides both, so a prop can never block the
+  // shot AND grant cover for it), or any body standing there. The take-cover
+  // verb has always treated "any character as cover" (designer); this is that
+  // rule with the special case taken out - a person is a shielding cell like
+  // a filing cabinet is, and stops being one by walking away or falling over.
+  // `exclude` keeps a croucher from shielding themselves.
+  const coverCellFor = (...exclude) => (cx, cz) => {
+    const d = world.tileDefAt(cx, cz);
+    if (d && (!!d.cover || (!!d.solid && !blocksSight(d)))) return true;
+    const u = unitStandingAt(cx, cz);
+    return !!u && !exclude.includes(u) && standing(u);
+  };
+  // Which faces of the tile `unit` stands on are shielded, right now. Read
+  // LIVE off the world on every consult - a partition that fell, a cabinet
+  // that broke, a teammate who walked off - so nothing has to tell the crouch
+  // its cover is gone.
+  // `against` is the character ASKING - excluded from being cover, because
+  // your own body cannot shield the person you are shooting at. Without it,
+  // standing next to a croucher made you their cover from yourself: the shot
+  // refused, and so did Pull Over, whose whole geometry is "be on the far
+  // side of the thing they are behind".
+  const crouchFacesOf = (unit, against = null) => {
+    const b = bodyOf(unit);
+    if (!b) return [];
+    return shieldedFaces(b.x, b.z, {
+      edgeOpen: world.stepOpen,
+      coverCell: coverCellFor(unit, against),
+    });
+  };
   // The validated crouch, or null - the ONE owner of "is that cover still
-  // real": the croucher still on the tile they tucked in at, the shield still
-  // standing (a solid or `cover` def for furniture, a live body on the cell
-  // for a character). Lazy on purpose: consulted at every read instead of
-  // hooked into every way a fight can move things, so it stays correct when a
-  // new displacement verb arrives. While the crouch holds it re-applies the
-  // status chip, so the chip's nominal duration can never outlive the rule
-  // or lapse under it.
+  // real": the croucher still on the tile they tucked in at, still standing,
+  // and still with at least one shielded face. Lazy on purpose: consulted at
+  // every read instead of hooked into every way a fight can move things, so it
+  // stays correct when a new displacement verb arrives. While the crouch holds
+  // it re-applies the status chip, so the chip's nominal duration can never
+  // outlive the rule or lapse under it.
+  //
+  // One test now instead of three. A destroyed cabinet, a toppled partition, a
+  // shield who walked off or went down all fail the SAME way - the face they
+  // were covering stops being shielded - and a crouch with no faces left is a
+  // crouch behind nothing.
   function crouchStateOf(unit) {
     const s = crouched.get(unit);
     if (!s) return null;
     const b = bodyOf(unit);
     let ok = !!b && b.x === s.at.x && b.z === s.at.z && standing(unit);
-    if (ok && s.shield) {
-      const sb = standing(s.shield) ? bodyOf(s.shield) : null;
-      ok = !!sb && sb.x === s.x && sb.z === s.z;
-    } else if (ok && !s.edges) {
-      const d = world.tileDefAt(s.x, s.z);
-      ok = !!d && (d.solid || d.cover); // toppled or destroyed = no shield left
-    } else if (ok && s.edges) {
-      // The partitions themselves can fall now (partition topple): a crouch
-      // whose every face has opened is a crouch behind nothing - break it,
-      // or the chip lies. WHICH shots a surviving face blocks stays a live
-      // per-shot question (shotOutcome).
-      ok = ORTHO.some(([dx, dz]) => !world.stepOpen(s.at.x, s.at.z, s.at.x + dx, s.at.z + dz));
+    if (ok) {
+      s.faces = crouchFacesOf(unit);
+      ok = s.faces.length > 0;
     }
     if (!ok) { breakCrouch(unit); return null; }
     if (!hasStatus(carrierOf(unit), 'covered')) applyStatus(carrierOf(unit), 'covered');
     return s;
   }
   // What a single-target ranged shot at `defender` actually does: passes
-  // untouched, is BLOCKED by a crouch behind furniture or against a
-  // partition, or lands on the human shield instead.
+  // untouched, is BLOCKED by a shielded face pointing the shooter's way, or
+  // lands on the body holding that face instead.
+  //
+  // One branch now instead of three. The face pointing at the shooter is what
+  // decides - which is why flanking still beats a crouch however many faces
+  // are covered, and why breaking THAT face opens the shot without disturbing
+  // the others.
   function shotOutcome(attacker, defender) {
     const s = crouchStateOf(defender);
     if (!s) return { target: defender };
     const A = bodyOf(attacker);
     const D = bodyOf(defender);
-    // Edge mode: the crouch is against the tile's own partitions, and which
-    // shots they block is the M3 cover test (tactics.hasCover) read LIVE off
-    // the edges - a door swinging open just stops blocking - upgraded from
-    // -20% to immunity while the crouch holds.
-    if (s.edges) {
-      return hasCover(A.x, A.z, D.x, D.z, world.stepOpen)
-        ? { target: null, blocked: s } : { target: defender };
+    // Re-asked without the SHOOTER counting as cover (see crouchFacesOf).
+    const face = shieldingFaceFrom(crouchFacesOf(defender, attacker), A.x, A.z, D.x, D.z);
+    if (!face) return { target: defender };
+    // A BODY on that face eats the shot; furniture and partitions refuse it.
+    const holder = unitStandingAt(D.x + face[0], D.z + face[1]);
+    if (holder && holder !== defender && standing(holder)) {
+      return { target: holder, redirected: true };
     }
-    if (!crouchShields(A.x, A.z, D.x, D.z, s.x, s.z)) return { target: defender };
-    return s.shield ? { target: s.shield, redirected: true } : { target: null, blocked: s };
+    return { target: null, blocked: { ...s, face } };
   }
-  // What the refusal calls the thing doing the blocking.
-  const crouchLabel = (s) => (s.edges ? 'partition'
-    : (world.tileDefAt(s.x, s.z)?.label || 'cover').toLowerCase());
+  // The shielded face pointing at the attacker, or null. A diagonal attacker
+  // is blocked by either of the two faces their way; when both are shielded
+  // the x face answers first, which only matters for naming the blocker.
+  function shieldingFaceFrom(faces, ax, az, dx, dz) {
+    const sx = Math.sign(ax - dx);
+    const sz = Math.sign(az - dz);
+    if (sx === 0 && sz === 0) return null;
+    return (faces || []).find(([ox, oz]) =>
+      (sx !== 0 && ox === sx && oz === 0) || (sz !== 0 && oz === sz && ox === 0)) || null;
+  }
+  // What the refusal calls the thing doing the blocking - the thing on the
+  // face that actually stopped THIS shot, not a mode name.
+  const crouchLabel = (s) => {
+    if (!s?.face) return 'cover';
+    const [ox, oz] = s.face;
+    const cx = (s.at?.x ?? 0) + ox;
+    const cz = (s.at?.z ?? 0) + oz;
+    const body = unitStandingAt(cx, cz);
+    if (body) return nameOf(body);
+    const d = world.tileDefAt(cx, cz);
+    if (d && (d.cover || d.solid)) return (d.label || 'cover').toLowerCase();
+    return 'partition'; // nothing on the cell, so the face itself is the wall
+  };
   // Back out of whatever is armed or awaiting confirmation. RIGHT-CLICK does
   // this from anywhere; a left click never cancels (it reports an invalid
   // target instead), so aiming can't be lost by a near-miss.
@@ -802,6 +863,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // drawing while a walk finishes.
   let hoverFoe = null;
   let hoverHitChance = null; // to-hit chance shown for the enemy under an armed cursor
+  // The door under the cursor as of the last hover event, as an edge midpoint
+  // - main.js resolves it with the click's own combatDoorAt and hands it in,
+  // so the threshold ring below can only exist while the cursor is actually
+  // on the door (the same life the pointer cursor has).
+  let hoverDoor = null;
   // Test-only: what the last combat click resolved to. Every silent path
   // stamps a reason, so a wedged e2e run can say WHY a click did nothing
   // instead of leaving a trace full of clicks with no visible effect.
@@ -1039,7 +1105,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     costTag.style.display = 'block';
   }
 
-  // While a summon is armed, the cursor previews the DROP: how many applicants
+  // While a summon is armed, the cursor previews the DROP: how many employees
   // that spot fits, or why it doesn't work. Same rule the click runs.
   function showSummonPreview(point, sx, sy) {
     preview = null; // the drop zone replaces the trail, same as the hit readout
@@ -1049,7 +1115,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const problem = summonSpotProblem(a, tx, tz);
     const room = problem ? 0 : world.summonSpots(tx, tz, a.count).length;
     costTag.textContent = problem
-      || `Post ${room} applicant${room === 1 ? '' : 's'} here · ${a.ap} AP`;
+      || `Post ${room} employee${room === 1 ? '' : 's'} here · ${a.ap} AP`;
     costTag.style.left = `${sx + 14}px`;
     costTag.style.top = `${sy + 14}px`;
     costTag.style.display = 'block';
@@ -1061,7 +1127,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // the same gate (handleEnemyClick's: your turn, standing still) - the cursor
   // used to read its own ungated body pick, promising a swing mid-walk or on
   // an AI turn that the readout and the click both refused.
-  function handleHover(point, sx, sy, picked = null) {
+  function handleHover(point, sx, sy, picked = null, doorMid = null) {
+    // Tracked before any gate, like hoverFoe: a hover that leaves the canvas
+    // (main.js calls in with nulls) must clear the door ring the same frame.
+    hoverDoor = doorMid;
     // While aiming, target rings replace the movement trail entirely. Cone
     // attacks and summon placement additionally track the cursor - the wedge
     // (or the drop zone) follows it.
@@ -1153,7 +1222,42 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
   }
 
-  function drawPreview() {
+  // The shielded faces of a tile, as bars laid on the floor along the tile's
+  // own edges. This is the affordance the crouch never had: the rule always
+  // knew which sides were covered and the player never did, so tucking into a
+  // corner told you "In Cover" and left you to guess which way was open
+  // (designer, 2026-07-31: "i have no indication of which partition is my
+  // actual cover"). Drawn while AIMING and again while the crouch HOLDS, off
+  // the same live face list the shot resolves against - so a wall that comes
+  // down goes dark on the next frame rather than lying until somebody shoots.
+  function drawFaces(cx, cz, faces, color, y = 0.15) {
+    const H = 0.42; // half the bar's length: a little short of the full edge
+    for (const [ox, oz] of faces) {
+      // The edge midpoint, then out along the perpendicular.
+      const mx = cx + ox * 0.5;
+      const mz = cz + oz * 0.5;
+      const px = oz; // perpendicular to the face
+      const pz = ox;
+      app.drawLine(
+        new pc.Vec3(mx - px * H, y, mz - pz * H),
+        new pc.Vec3(mx + px * H, y, mz + pz * H), color);
+    }
+  }
+  // The faces that would shield a crouch on this tile - the aim's twin of
+  // `crouchFacesOf`, which asks the same of a unit already standing somewhere.
+  const crouchFacesAt = (tx, tz) => shieldedFaces(tx, tz, {
+    edgeOpen: world.stepOpen,
+    coverCell: coverCellFor(active),
+  });
+
+  // The cover aim's eased ring position, and the frame's dt for the easing -
+  // immediate-mode lines redraw every frame, so smoothness is state carried
+  // between frames, not an animation the engine runs.
+  let coverEase = null;
+  let previewDt = 0;
+
+  function drawPreview(dt = 0) {
+    previewDt = dt;
     if (!preview) return;
     const y = 0.14; // above the floor top (0.1) and surface decals (0.12)
     const seg = (pts, color) => {
@@ -1226,13 +1330,30 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       ));
     }
     if (phase !== 'player') return;
-    // A door you are standing at, rung before anything else and regardless of
-    // what is armed. It is not an ACTION - it has no bar slot, it lives on the
-    // right-click menu - so gating it behind `previewAction` would hide the one
-    // affordance for the only terrain a fight can change. Green when the AP is
-    // there for it, red when it is not, same as every other ring here.
-    for (const mid of world.doorsBeside?.(active.actor.x, active.actor.z) || []) {
-      drawRing(mid.x, mid.z, 0.3, active.ap >= mid.ap ? PREVIEW_OK : PREVIEW_FAR);
+    // What is covering the character you are steering, RIGHT NOW, whatever is
+    // armed - the held-crouch half of the aiming affordance above. A crouch
+    // that says only "In Cover" is a crouch you have to guess the shape of,
+    // and in a corner the shape is the whole decision. Read through
+    // `crouchStateOf`, so the bars are the faces the next shot will actually
+    // be resolved against, and a shield that falls takes its bar with it.
+    {
+      const s = crouchStateOf(active);
+      if (s) drawFaces(s.at.x, s.at.z, s.faces, PREVIEW_COVER);
+    }
+    // A door rings only UNDER THE CURSOR (designer, 2026-07-31): it used to
+    // ring whenever the acting member stood beside one, whatever was armed,
+    // and a marker that never leaves the threshold reads as state, not
+    // affordance. The hover hands in the same predicate the pointer cursor
+    // reads (combatDoorAt), so the ring and the cursor light together - and
+    // matching it against doorsBeside keeps the ring on doors the acting
+    // member is actually AT, so it can never promise a handle across the
+    // room. Green when the AP is there for it, red when it is not, same as
+    // every other ring here.
+    if (hoverDoor) {
+      for (const mid of world.doorsBeside?.(active.actor.x, active.actor.z) || []) {
+        if (Math.abs(mid.x - hoverDoor.x) > 0.01 || Math.abs(mid.z - hoverDoor.z) > 0.01) continue;
+        drawRing(mid.x, mid.z, 0.3, active.ap >= mid.ap ? PREVIEW_OK : PREVIEW_FAR);
+      }
     }
     // Not gated on `armed`: with nothing armed a click still swings (the basic
     // attack), and a swing you can't see coming is worse than no swing at all -
@@ -1240,8 +1361,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // you can afford it. previewAction() is that same fallback, so what's drawn
     // is always what would happen.
     const id = previewAction();
+    const a = id ? ACTIONS[id] : null;
+    // A stale ease position would make the next arm GLIDE in from wherever
+    // cover was last aimed - drop it the moment cover is not the live verb
+    // (including when no verb previews at all).
+    if (a?.type !== 'cover') coverEase = null;
     if (!id) return;
-    const a = ACTIONS[id];
     // A zone rings the tiles it would actually cover - the same list the click
     // paints (zoneCells), so a tile that shows a ring is a tile that gets the
     // surface. Red on the aim point alone when the placement itself is refused.
@@ -1259,7 +1384,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       for (const [x, z] of zoneCells(a, tx, tz)) drawRing(x, z, 0.42, PREVIEW_OK);
       return;
     }
-    // A summon rings the tiles its applicants would actually land on (green),
+    // A summon rings the tiles its employees would actually land on (green),
     // or the aimed tile alone in red when the spot is unusable - so "where do
     // they go?" is answered before the AP is spent.
     if (a.type === 'summon') {
@@ -1271,18 +1396,39 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       for (const [sx, sz] of spots) drawRing(sx, sz, 0.42, PREVIEW_OK);
       return;
     }
-    // Take Cover rings ONLY the hovered shield, in the cover yellow - valid
-    // shields are most of the furniture in the room, and ringing them all
-    // would be noise (designer). Red on a hover that shields nothing.
+    // Take Cover rings the SPOT YOU WOULD STAND, in the cover yellow, and
+    // draws the faces that would shield it. Ringing the shield instead was
+    // the old aim's own confusion made visible: it told you which object you
+    // had named while the side you would end up on - the thing that decides
+    // which shots you are safe from - was chosen for you and never shown.
+    // Now the ring is where you go and the bars are what covers you, so a
+    // corner reads as a corner and you can see the open angle you are leaving.
     if (a.type === 'cover') {
-      if (!armed || !aimPoint) return;
+      if (!armed || !aimPoint) { coverEase = null; return; }
       const tx = Math.round(aimPoint.x);
       const tz = Math.round(aimPoint.z);
-      const d = world.tileDefAt(tx, tz);
-      const body = unitStandingAt(tx, tz);
-      const ok = body ? body !== active
-        : (!!(d && (d.solid || d.cover)) || edgeShieldedTile(tx, tz));
-      drawRing(tx, tz, 0.42, ok ? PREVIEW_COVER : PREVIEW_FAR);
+      const ok = !coverSpotProblem(tx, tz);
+      const color = ok ? PREVIEW_COVER : PREVIEW_FAR;
+      // Three layers, from the cursor down to the rule (designer, 2026-07-31:
+      // "something that is continuous and smooth for starters" - the emblem
+      // used to hop in discrete tile-sized steps):
+      //  - a small marker at the CLAMPED stand point - continuous, and
+      //    exactly where the walk will park you: the raw cursor point can
+      //    sit inside a wall's clearance band, and a marker there would
+      //    promise a spot the body cannot occupy;
+      //  - the stand-tile ring, EASED toward the resolved tile rather than
+      //    teleporting to it, so sweeping the cursor reads as one motion;
+      //  - the shielded faces, snapped to the tile's edges - they are tile
+      //    geometry, and drawing them anywhere between two tiles would show
+      //    cover on edges that do not exist.
+      const [mx, mz] = world.clampPoint(aimPoint.x, aimPoint.z);
+      drawRing(mx, mz, 0.12, color);
+      if (!coverEase) coverEase = { x: aimPoint.x, z: aimPoint.z };
+      const k = 1 - Math.exp(-(previewDt || 0) * 14); // ~70ms settle, fps-independent
+      coverEase.x += (tx - coverEase.x) * k;
+      coverEase.z += (tz - coverEase.z) * k;
+      drawRing(coverEase.x, coverEase.z, 0.42, color);
+      if (ok) drawFaces(tx, tz, crouchFacesAt(tx, tz), PREVIEW_COVER);
       return;
     }
     // A buff rings the FRIENDLY side instead: green on every ally it could
@@ -1377,7 +1523,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // everything it could hit; adjacent partitions ring like the shove's do
     // (a DISTANT partition stays un-rung - the shove's own partial-affordance
     // precedent `[proposed]` - though the ranged click still resolves).
-    {
+    //
+    // ARMED is load-bearing, and was not enforced. The coworker rings above
+    // are deliberately drawn with nothing armed, because a bare click still
+    // swings; these are not the same. `aimsAtProps` passes for the plain
+    // basic attack, so every partition edge you stood beside rang green for
+    // the whole fight - a ring on the tile ACROSS a cubicle wall, promising
+    // a verb nobody had reached for (designer, 2026-07-31). Breaking cover
+    // down is a thing you go looking for; its affordance appears when you do.
+    if (armed) {
       const b = bodyOf(active);
       const paid = (!a.ammoCost || active.sheet.paper >= ammoCostOf(id)) && active.ap >= a.ap;
       const { props, edges } = breakRings(a, b.x, b.z, rangeOf(id), {
@@ -1648,11 +1802,18 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   }
 
   function cleanup() {
-    // Turn-clock statuses (Deflect, surprise, and later stun/burn) are
-    // combat-scoped - there are no turns on the map, so sweep them from every
-    // combatant as the fight ends. Step-clock statuses (gum/bleed) persist.
-    for (const m of members) clearStatuses(m.sheet, { clock: 'turn' });
-    for (const e of engaged) clearStatuses(e, { clock: 'turn' });
+    // Turn-clock statuses used to be swept off every combatant here, because
+    // "there are no turns on the map". There are now: main.js's out-of-combat
+    // clock spends a status turn the same way it spends a fire turn (designer,
+    // 2026-07-31 - one clock, in and out of combat), so these keep counting
+    // down where they stand instead of being cured by the fight ending.
+    //
+    // That sweep was doing real damage to the fiction on its way out: walking
+    // out of a fight put out the fire you were carrying, cleared the stun mid
+    // -sentence, and handed back a Deflect you had spent. What it protected
+    // against - a status hanging on a sheet forever with nothing to tick it -
+    // is exactly what the clock now prevents. Step-clock statuses (gum/bleed)
+    // persisted through this all along; the two clocks agree at last.
     // Summons OUTLIVE the fight now (main.js keeps them until their assignment
     // runs out), with one exception: one that fell is gone for good. There is no
     // body to loot and no revive courtesy, so sweep it here rather than leaving
@@ -1852,7 +2013,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         const blocked = blockedBy(en, 'stunned');
         if (applyStatus(en, 'stunned')) {
           statusFxAt(en, 'stunned');
-          msg += ' They crumple - dazed.';
+          msg += ` They crumple - ${STATUSES.stunned.name}, they lose their next turn.`;
         } else if (blocked) msg += ` ${immunityLine(blocked, en.def.name)}`;
       }
       if (died) callbacks.onEnemyKilled(en);
@@ -2080,88 +2241,122 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return engaged.find((e) => e.alive && e.x === x && e.z === z) || null;
   }
 
-  // Tuck `unit` in behind the cell (tx, tz). Shared by the player's verb and
-  // the AI's turtle beat, so both sides crouch by identical rules. Hopping
-  // cover-to-cover replaces the old crouch - the verb has no cooldown and no
-  // need to stand up first (designer).
-  function crouchAt(unit, tx, tz, shield = null) {
+  // Tuck `unit` in WHERE THEY STAND. Shared by the player's verb and the AI's
+  // turtle beat, so both sides crouch by identical rules. Hopping cover-to
+  // -cover replaces the old crouch - the verb has no cooldown and no need to
+  // stand up first (designer).
+  //
+  // One entry point where there were two (`crouchAt` behind a cell,
+  // `crouchAtEdges` against the partitions), because there is one rule now:
+  // the faces of the tile you are on. `faceToward` points you at the middle of
+  // whatever is covering you, which for a corner is the diagonal between the
+  // two walls - the pose reads as "tucked into the corner" rather than
+  // arbitrarily facing one of them.
+  function crouchHere(unit) {
     breakCrouch(unit, true);
     const b = bodyOf(unit);
-    crouched.set(unit, { x: tx, z: tz, at: { x: b.x, z: b.z }, shield });
+    const faces = crouchFacesOf(unit);
+    if (!faces.length) return false;
+    crouched.set(unit, { at: { x: b.x, z: b.z }, faces });
     b.crouched = true; // the held pose (actors.js): torso down onto the legs
     applyStatus(carrierOf(unit), 'covered');
     statusFxAt(unit, 'covered');
-    (unit.actor || unit).faceToward?.(tx, tz);
-    const what = shield ? nameOf(shield)
-      : `the ${(world.tileDefAt(tx, tz)?.label || 'cover').toLowerCase()}`;
-    log(`${nameOf(unit)} tucks in behind ${what}.`);
+    const fx_ = faces.reduce((acc, [ox, oz]) => [acc[0] + ox, acc[1] + oz], [0, 0]);
+    if (fx_[0] || fx_[1]) (unit.actor || unit).faceToward?.(b.x + fx_[0], b.z + fx_[1]);
+    log(`${nameOf(unit)} tucks in behind ${coverNames(b.x, b.z, faces)}.`);
+    return true;
   }
-
-  // Tuck in against the tile's OWN partitions (edge mode): cubicle walls are
-  // edges, not cells, so the crouch happens on the tile and shotOutcome reads
-  // which faces block live off the edges. The other half of "doesn't
-  // recognise cubicle walls as cover" (designer, playtesting 2026-07-30).
-  function crouchAtEdges(unit) {
-    breakCrouch(unit, true);
-    const b = bodyOf(unit);
-    crouched.set(unit, { edges: true, at: { x: b.x, z: b.z } });
-    b.crouched = true;
-    applyStatus(carrierOf(unit), 'covered');
-    statusFxAt(unit, 'covered');
-    log(`${nameOf(unit)} tucks in against the partition.`);
+  // What is covering you, in words: "the partition", "the filing cabinet and
+  // Dave". Named from the faces rather than a mode, so a corner reads as the
+  // two things it actually is instead of a singular "the partition" that was
+  // wrong the moment there was more than one.
+  function coverNames(x, z, faces) {
+    const seen = [];
+    for (const [ox, oz] of faces) {
+      const body = unitStandingAt(x + ox, z + oz);
+      if (body) { if (!seen.includes(nameOf(body))) seen.push(nameOf(body)); continue; }
+      const d = world.tileDefAt(x + ox, z + oz);
+      const label = d && (d.cover || d.solid)
+        ? `the ${(d.label || 'cover').toLowerCase()}` : 'the partition';
+      if (!seen.includes(label)) seen.push(label);
+    }
+    if (!seen.length) return 'cover';
+    if (seen.length === 1) return seen[0];
+    return `${seen.slice(0, -1).join(', ')} and ${seen[seen.length - 1]}`;
   }
-
-  // A walkable tile with a partition (or closed door) on any face - the other
-  // thing this office calls cover, and a legal take-cover aim.
-  const edgeShieldedTile = (tx, tz) => edgeShieldedTileIn(tx, tz, world);
 
   // The player's verb: walk to the shield and crouch. Priced as "the walk,
   // plus 1 AP" (designer: distance cost + 1) - the walk is billed by the same
   // movement engine as every other step, the +1 is the action's own `ap`, and
   // the crouch resolves ON ARRIVAL (the pendingMelee pattern), so a walk cut
   // short by an opportunity attack downs the crouch with it.
-  function performTakeCover(tx, tz) {
+  // You aim at the SPOT YOU WANT TO STAND, not at a shield. That inversion is
+  // the whole fix: naming a shield made the side you ended up on an output of
+  // `coverSpot`, so the aim emblem hopped between that object's free
+  // neighbours and there was no way to say "the other side of Dave"
+  // (designer, 2026-07-31). Aiming at the ground answers it by construction -
+  // west of Dave and east of Dave are two different aim points - and it is
+  // what makes a continuous aim meaningful, since a floor position varies
+  // smoothly where "which object" cannot.
+  //
+  // A spot is legal when you could stand on it and at least one of its faces
+  // is shielded. What is doing the shielding never comes up.
+  function coverSpotProblem(tx, tz) {
+    const here = active.actor.x === tx && active.actor.z === tz;
+    const occupant = unitStandingAt(tx, tz);
+    if (!here && (!world.isWalkable(tx, tz) || (occupant && occupant !== active))) {
+      return 'No room to tuck in there.';
+    }
+    if (!shieldedFaces(tx, tz, {
+      edgeOpen: world.stepOpen,
+      coverCell: coverCellFor(active),
+    }).length) return 'Nothing there to hide behind.';
+    return null;
+  }
+
+  function performTakeCover(tx, tz, point = null) {
     const a = ACTIONS['take-cover'];
-    const shield = unitStandingAt(tx, tz);
-    const def = world.tileDefAt(tx, tz);
-    if (shield === active) { log('You cannot hide behind yourself.'); return; }
-    const cellMode = !!shield || !!(def && (def.solid || def.cover));
-    // A tile with a partition on a face is ALSO a legal aim (edge mode): the
-    // office's cubicle walls are edges, not cells, and they are the cover
-    // the designer reached for first.
-    const edgeMode = !cellMode && edgeShieldedTile(tx, tz);
-    if (!cellMode && !edgeMode) { log('Nothing there to hide behind.'); return; }
-    // The crouch SPOT: beside a cell shield (an open 4-neighbour the aimer
-    // can SEE - "as line of sight driven as possible" - nearest by route;
-    // orthogonal because the shield must sit on a FACE, tactics.crouchShields),
-    // or ON the edge-shielded tile itself.
-    const best = coverSpot(active, tx, tz, edgeMode, {
-      isWalkable: world.isWalkable,
-      hasLos: world.hasLos,
-      findPath: (sx, sz, gx, gz) => world.findPath(sx, sz, gx, gz, active.actor),
-      occupantAt: unitStandingAt,
-    });
-    if (best.refusal) { log(best.refusal); return; }
+    const problem = coverSpotProblem(tx, tz);
+    if (problem) { log(problem); return; }
     if (active.ap < a.ap) { log('Not enough AP.'); return; }
     armed = null;
-    const commit = () => (edgeMode ? crouchAtEdges(active) : crouchAt(active, tx, tz, shield));
-    if (!best.path) {
+    if (active.actor.x === tx && active.actor.z === tz) {
+      // Your own tile. A click on a meaningfully different POINT within it is
+      // a sub-tile shuffle - fine-tune the tuck, billed as the sliver of
+      // movement it is - because the marker promised the point, not the tile.
+      // Same logical tile, so nothing provokes and the arrival check holds.
+      const pos = posOf(active);
+      const end = point ? world.clampPoint(point.x, point.z) : null;
+      if (end && Math.hypot(end[0] - pos.x, end[1] - pos.z) > 0.1) {
+        const walk = walkActive([[pos.x, pos.z], [tx, tz]],
+          moveBudget(active) - a.ap, end);
+        if (walk?.done) { pendingCrouch = { spot: [tx, tz] }; return; }
+      }
       active.ap = roundAp(active.ap - a.ap);
-      commit();
+      crouchHere(active);
       refresh();
       return;
     }
+    const path = world.findPath(active.actor.x, active.actor.z, tx, tz, active.actor);
+    if (!path || path.length < 2) { log('No clear way in behind it.'); return; }
     // Reserve the crouch's own AP out of the walk budget, exactly as a
     // walk-up shot reserves its trigger pull. Same honest split as the
     // walk-ups: a degenerate route is not an AP problem.
     const crouchBudget = moveBudget(active) - a.ap;
-    const walk = walkActive(best.path, crouchBudget);
+    // The walk ends at the POINT you clicked, clamped to body clearance -
+    // not the tile's dead centre. Bodies in this engine rest at free points
+    // (movement, walk-ups and dashes all do), and the crouch was the one
+    // deliberate destination that still teleport-parked you on the centre.
+    // "Continuous and smooth" (designer, 2026-07-31) means the spot you
+    // chose is the spot you occupy; the RULE still reads the tile's faces.
+    const walk = walkActive(path, crouchBudget,
+      point ? world.clampPoint(point.x, point.z) : null);
     if (!walk) {
       log(crouchBudget > 0.05 ? 'No closer way in.' : 'Not enough AP to reach it.');
       return;
     }
-    if (walk.done && Math.round(walk.end[0]) === best.sx && Math.round(walk.end[1]) === best.sz) {
-      pendingCrouch = { tx, tz, spot: [best.sx, best.sz], edges: edgeMode };
+    if (walk.done && Math.round(walk.end[0]) === tx && Math.round(walk.end[1]) === tz) {
+      pendingCrouch = { spot: [tx, tz] };
     } else {
       log('You close the distance toward cover.');
     }
@@ -2178,11 +2373,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (canReach(unit, target)) return false; // melee ignores cover - swing instead
     const b = bodyOf(unit);
     const t = bodyOf(target);
-    const spot = aiCrouchSpot(b.x, b.z, t.x, t.z, world);
-    if (!spot) return false;
+    if (!aiCrouchCovered(b.x, b.z, t.x, t.z, {
+      tileDefAt: world.tileDefAt,
+      stepOpen: world.stepOpen,
+      bodyAt: (x, z) => { const u = unitStandingAt(x, z); return !!u && u !== unit && standing(u); },
+    })) return false;
+    if (!crouchHere(unit)) return false;
     acting.ap = roundAp(acting.ap - coverAp);
-    if (spot.edges) crouchAtEdges(unit);
-    else crouchAt(unit, spot.x, spot.z);
     refresh();
     return true;
   }
@@ -2199,9 +2396,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Can the pull haul `en` right now, and where do they land? Null when any
   // leg fails. pullRefusal walks the same legs in the same order, so the
   // click's explanation can never disagree with the plan.
-  const pullPlanned = (en) => pullplanFor(active, en, crouchStateOf(en), {
+  // The target's crouch as the PULLER sees it: validated as always, but with
+  // the puller's own body not counted among what covers them. Standing beside
+  // somebody is how you reach over their barrier, not a barrier of your own.
+  const pullCrouchOf = (en) => {
+    const s = crouchStateOf(en);
+    return s && { ...s, faces: crouchFacesOf(en, active) };
+  };
+  const pullPlanned = (en) => pullplanFor(active, en, pullCrouchOf(en), {
     stepOpen: world.stepOpen,
     open: (x, z) => world.isWalkable(x, z) && !unitStandingAt(x, z),
+    bodyAt: (x, z) => {
+      const u = unitStandingAt(x, z);
+      return !!u && u !== en && u !== active && standing(u);
+    },
     name: en.def.name,
   });
   // The two faces the click wants: the plan when it works, the reason when it
@@ -2240,7 +2448,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         const blocked = blockedBy(en, 'stunned');
         if (applyStatus(en, 'stunned')) {
           statusFxAt(en, 'stunned');
-          msg += ' Dazed.';
+          // Name the status the HUD chip names, and say what it costs them.
+          // "Dazed." named nothing on the sheet and sounded like a to-hit
+          // penalty; the status is a SKIPPED TURN (designer, 2026-07-31: "what
+          // does it do?"), and a lost turn is worth reading as one.
+          msg += ` ${STATUSES.stunned.name} - they lose their next turn.`;
         } else if (blocked) msg += ` ${immunityLine(blocked, en.def.name)}`;
         if (applyStatus(en, 'pinned')) statusFxAt(en, 'pinned');
       } else {
@@ -2973,9 +3185,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const routeIntoRange = (en, range) => {
     const s = crouchStateOf(en);
     const angleClear = (x, z) => {
-      if (!s || s.shield) return true;
-      return s.edges ? !hasCover(x, z, en.x, en.z, world.stepOpen)
-        : !crouchShields(x, z, en.x, en.z, s.x, s.z);
+      if (!s) return true;
+      // A face held by a BODY does not shrink the set: the shot resolves on
+      // that body from anywhere, and whether to take it is performOn's call.
+      const face = shieldingFaceFrom(s.faces, x, z, en.x, en.z);
+      if (!face) return true;
+      return !!unitStandingAt(en.x + face[0], en.z + face[1]);
     };
     return routeToFiringPosition({
       tx: en.x,
@@ -3067,7 +3282,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // Take Cover aimed at the ground resolves on whatever the tile holds -
       // furniture or a body - and performTakeCover says why when it is
       // neither (TACTICS_PLAN M6).
-      if (a.type === 'cover') { performTakeCover(tile.x, tile.z); return; }
+      if (a.type === 'cover') { performTakeCover(tile.x, tile.z, point); return; }
       // Shove a PROP over (POWERS_PLAN M6). The same verb, aimed at furniture
       // instead of a person: walk up, put your shoulder into the bookcase, and
       // it lands on whoever is behind it. It costs the shove's own AP and
@@ -3172,8 +3387,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       out.push('Moving breaks it; attacking does not');
     }
     if (isPull(a)) {
-      out.push('Aim at an enemy dug in behind cover, from its far side - you reach over and haul them to you');
-      out.push(`Grit save: pass lands them on their feet, fail is ${a.crush[0]}-${a.crush[1]} damage, dazed and pinned`);
+      out.push('Aim at an enemy dug in behind cover, from its far side - you reach over and haul them past you, clear of what they were tucked behind');
+      out.push(`Grit save: pass lands them on their feet, fail is ${a.crush[0]}-${a.crush[1]} damage, a skipped turn (${STATUSES.stunned.name}) and pinned`);
       out.push('Their cover stays standing');
     }
     if (isStance(a)) {
@@ -3213,9 +3428,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // the bar's own rule and used to be lost the moment a button went dead.
     if (!st) return;
     if (!st.affordable && id !== pendingConfirm) { log(st.reason); return; }
-    // Reaching for ANY other action drops whatever was awaiting confirmation -
-    // a pending confirm shouldn't survive in the background while you arm
-    // something else and spend the AP it was priced against.
+    // ONE live slot at a time (designer, 2026-07-31): pressing a DIFFERENT
+    // slot while one is up - armed, or awaiting its confirm - lowers what was
+    // up and does nothing else; arming the new one takes a second, deliberate
+    // press. Arming straight over the top is how the bar came to show two lit
+    // buttons: an armed attack survived an instant's first press, so the
+    // attack's target rings (a breakable partition included) kept painting
+    // under a bar that read as Deflect Blame.
+    if (armed || (pendingConfirm && pendingConfirm !== id)) {
+      cancelArmed();
+      refresh();
+      return;
+    }
+    // Past the gate, the only confirm that can be pending is this slot's own.
     const wasPending = pendingConfirm;
     pendingConfirm = null;
     if (a.type === 'attack' || a.type === 'shove' || a.type === 'summon' || a.type === 'cover'
@@ -3301,7 +3526,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // --- targeted summoning -------------------------------------------------------
   // Post the role AT a spot you pick (Divinity-style placement) rather than
   // wherever the summoner happens to stand: arm the action, then click a tile
-  // within `range` with a clear line to it. The applicants take that tile and
+  // within `range` with a clear line to it. The employees take that tile and
   // the free tiles ringing outward from it, so a click into open floor puts
   // them exactly where you wanted them - flanking, or screening a corridor.
   // Why a spot is unusable, or null when it's good. Shared by the click and the
@@ -3320,7 +3545,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const problem = summonSpotProblem(a, tx, tz);
     if (problem) { log(problem); return; }
     const n = resolveSummon(active.actor, 'player', a, { x: tx, z: tz });
-    if (n <= 0) { log('No room - the applicants can\'t find a free desk there.'); return; }
+    if (n <= 0) { log('No room - the employees can\'t find a free desk there.'); return; }
     if (a.uses) active.usesLeft[armed] -= 1;
     active.ap = roundAp(active.ap - a.ap);
     active.actor.lunge(tx, tz);
@@ -3604,7 +3829,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       m.actor.fx = { kind: 'death', t: 0 };
       if (!livingParty().length) { defeat(); return; } // party wipe - the only true loss
       log(m.isSummon
-        ? `${m.sheet.name} is dismissed - back to the applicant pool.`
+        ? `${m.sheet.name} is dismissed - back to the employee pool.`
         : `${m.sheet.name} is out cold. They'll sit the rest of this one out.`);
       // Keep `active` (the sheet the HUD reflects, and the post-combat leader)
       // on a real member still standing - never a summon, which despawns.
@@ -3910,7 +4135,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const body = bodyOf(u);
       if (!body || !body.moving) moveStart.delete(u);
     }
-    drawPreview(); // immediate-mode lines last one frame - redraw while shown
+    drawPreview(dt); // immediate-mode lines last one frame - redraw while shown
     drawTargets();
     // prune anyone killed externally (printer explosions during combat)
     if (!hostilesRemain()) { victory(); return; }
@@ -3950,13 +4175,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
       // finish a queued walk-up crouch (TACTICS_PLAN M6)
       if (pendingCrouch && !active.actor.moving) {
-        const { tx, tz, spot, edges } = pendingCrouch;
+        const { spot } = pendingCrouch;
         pendingCrouch = null;
         const a = ACTIONS['take-cover'];
-        if (active.actor.x === spot[0] && active.actor.z === spot[1] && active.ap >= a.ap) {
+        // `crouchHere` re-asks the faces on arrival, so a shield that moved or
+        // fell during the walk-up is a crouch that never happens rather than
+        // one that lands on nothing.
+        if (active.actor.x === spot[0] && active.actor.z === spot[1] && active.ap >= a.ap
+          && crouchHere(active)) {
           active.ap = roundAp(active.ap - a.ap);
-          if (edges) crouchAtEdges(active);
-          else crouchAt(active, tx, tz, unitStandingAt(tx, tz));
           refresh();
         } else {
           log('The moment passes - no cover taken.');
@@ -4059,9 +4286,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   if (preCrouch) {
     const lead = members.find((m) => m.sheet === party.members[party.active]?.sheet);
     if (lead && standing(lead)) {
-      crouched.set(lead, preCrouch.edges
-        ? { edges: true, at: { x: preCrouch.at.x, z: preCrouch.at.z } }
-        : { x: preCrouch.x, z: preCrouch.z, at: { x: preCrouch.at.x, z: preCrouch.at.z }, shield: null });
+      crouched.set(lead, { at: { x: preCrouch.at.x, z: preCrouch.at.z } });
       bodyOf(lead).crouched = true; // usually already true; seeding must not depend on it
     }
   }
@@ -4104,16 +4329,31 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Who is crouched, and behind which cell (TACTICS_PLAN M6) - the suite's
     // window into the take-cover commitment and its lazy breaks. Edge-mode
     // crouches (against a partition) carry `edges` and no cell.
+    // Who is crouched, WHERE, and which faces are covering them. `x, z` is
+    // the tile they stand on - the crouch IS a position now, so there is no
+    // separate shield cell to report - and `faces` is the live list the next
+    // shot resolves against, which is what a spec should assert on.
     get crouched() {
-      return [...crouched.entries()].map(([u, s]) => ({
-        name: nameOf(u), x: s.x ?? null, z: s.z ?? null, human: !!s.shield, edges: !!s.edges,
-      }));
+      return [...crouched.entries()].map(([u]) => {
+        const s = crouchStateOf(u);
+        return s && {
+          name: nameOf(u), x: s.at.x, z: s.at.z,
+          faces: s.faces.map(([ox, oz]) => `${ox},${oz}`),
+          covers: coverNames(s.at.x, s.at.z, s.faces),
+        };
+      }).filter(Boolean);
     },
     // The movement allowance left this turn (MOVEMENT_PLAN M2). 0 for a
     // character without the talent.
     get freeAp() { return active.freeAp || 0; },
     set ap(v) { active.ap = Math.max(0, roundAp(Number(v) || 0)); refresh(); },
     get armed() { return armed; },
+    // The instant awaiting its confirm click, or null - the other half of
+    // "which slot is lit", which is what the one-live-slot rule asserts on.
+    get pendingConfirm() { return pendingConfirm; },
+    // The hovered door's midpoint, or null - the threshold ring's own gate,
+    // so a spec can assert the ring exists only while the cursor is on it.
+    get hoverDoor() { return hoverDoor; },
     // The aim wash (TACTICS_PLAN M7): which aim is painted and how many tiles
     // it covers. A test that can't see the wash can only assert the click.
     get aimPaint() { return aimPaint.debug; },
@@ -4172,18 +4412,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       refresh();
       return ok;
     },
-    // Crouch a named coworker behind the cell (sx, sz) - or, with no cell,
-    // against their own tile's partitions (edge mode). Same rationale as the
-    // status pin above: the enemy-side crouch is half of Pull Over's testable
-    // surface (TACTICS_PLAN M8), and the only natural route there is steering
-    // the AI into its turtle beat - which would make a pull spec a test of AI
-    // pathing instead of the verb. Routes through the real crouchAt, so the
-    // commitment it plants is the one the pull actually reads.
-    crouch: (targetName, sx = null, sz = null) => {
+    // Crouch a named coworker where they stand. Same rationale as the status
+    // pin above: the enemy-side crouch is half of Pull Over's testable surface
+    // (TACTICS_PLAN M8), and the only natural route there is steering the AI
+    // into its turtle beat - which would make a pull spec a test of AI pathing
+    // instead of the verb. Routes through the real `crouchHere`, so the
+    // commitment it plants is the one the pull actually reads - and it returns
+    // false when that tile has no shielded face, rather than planting a crouch
+    // the rules would refuse.
+    crouch: (targetName) => {
       const u = engaged.find((e) => e.alive && e.def.name === targetName);
-      if (!u) return false;
-      if (sx === null) crouchAtEdges(u);
-      else crouchAt(u, sx, sz);
+      if (!u || !crouchHere(u)) return false;
       refresh();
       return true;
     },

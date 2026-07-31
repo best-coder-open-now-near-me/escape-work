@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  standTilePath, pickTarget, advanceRoute, aiCrouchSpot, chooseBeat, afterFailedAdvance,
+  standTilePath, pickTarget, advanceRoute, aiCrouchCovered, chooseBeat, afterFailedAdvance,
 } from '../../src/combat-ai.js';
 import { REACH } from '../../src/stats.js';
 
@@ -130,36 +130,51 @@ test('the in-place shuffle is refused when it would not earn a swing', () => {
 const LOW_SOLID = { solid: true, height: 0.6 };
 const TALL_SOLID = { solid: true, blocksSight: true };
 
-test('a unit tucks in behind a low solid that stands between it and its target', () => {
+test('a unit tucks in where a low solid stands between it and its target', () => {
   // Target at (0,5), unit at (0,3), shield at (0,4): on the face, in the way.
-  const spot = aiCrouchSpot(0, 3, 0, 5, {
+  assert.equal(aiCrouchCovered(0, 3, 0, 5, {
     tileDefAt: (x, z) => (x === 0 && z === 4 ? LOW_SOLID : null),
     stepOpen: () => true,
-  });
-  assert.deepEqual(spot, { x: 0, z: 4 });
+  }), true);
 });
 
-test('crouching on the WRONG side of the desk is worse than standing there', () => {
+test('crouching with the desk BEHIND you is worse than standing there', () => {
   // The shield is behind the unit, not between it and the target.
-  assert.equal(aiCrouchSpot(0, 3, 0, 5, {
+  assert.equal(aiCrouchCovered(0, 3, 0, 5, {
     tileDefAt: (x, z) => (x === 0 && z === 2 ? LOW_SOLID : null),
     stepOpen: () => true,
-  }), null);
+  }), false);
 });
 
-test('a TALL solid is not a crouch spot - nothing could shoot you anyway', () => {
+test('a TALL solid is not cover - nothing could shoot you anyway', () => {
   // The beat would read as the AI hiding from air.
-  assert.equal(aiCrouchSpot(0, 3, 0, 5, {
+  assert.equal(aiCrouchCovered(0, 3, 0, 5, {
     tileDefAt: (x, z) => (x === 0 && z === 4 ? TALL_SOLID : null),
     stepOpen: () => true,
-  }), null);
+  }), false);
 });
 
 test('with no furniture, the tile\'s own partitions count', () => {
-  assert.deepEqual(aiCrouchSpot(0, 3, 0, 5, {
+  assert.equal(aiCrouchCovered(0, 3, 0, 5, {
     tileDefAt: () => null,
     stepOpen: () => false, // an edge already blocks the line
-  }), { edges: true });
+  }), true);
+});
+
+test('a BODY on the face is cover like anything else', () => {
+  // The unified rule: a person shields a face the way a cabinet does, which is
+  // what makes "take cover behind a teammate" the same verb as every other.
+  assert.equal(aiCrouchCovered(0, 3, 0, 5, {
+    tileDefAt: () => null,
+    stepOpen: () => true,
+    bodyAt: (x, z) => x === 0 && z === 4,
+  }), true);
+  // ...and on the wrong face it is not.
+  assert.equal(aiCrouchCovered(0, 3, 0, 5, {
+    tileDefAt: () => null,
+    stepOpen: () => true,
+    bodyAt: (x, z) => x === 0 && z === 2,
+  }), false);
 });
 
 // --- the beat ladder ---------------------------------------------------------

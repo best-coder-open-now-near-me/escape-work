@@ -454,11 +454,15 @@ export const TILE_TYPES = {
     char: 'Z', category: 'breakroom', solid: true,
     height: 0.92, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/kitchenFridge', label: 'Fridge',
+    // The break room is where a floor's healing lives now that the class bars
+    // stopped carrying it (POWERS_PLAN M9).
+    loot: 'break-room',
   },
   'mini-fridge': {
     char: '0', category: 'breakroom', solid: true,
     height: 0.6, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/kitchenFridgeSmall', label: 'Mini Fridge',
+    loot: 'break-room',
   },
   'microwave': {
     char: '1', category: 'breakroom', solid: true,
@@ -469,6 +473,7 @@ export const TILE_TYPES = {
     char: '2', category: 'breakroom', solid: true,
     height: 0.3, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/kitchenCoffeeMachine', label: 'Coffee Machine',
+    loot: 'break-room',
   },
   'kitchen-sink': {
     char: '3', category: 'breakroom', solid: true,

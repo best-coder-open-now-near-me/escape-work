@@ -586,16 +586,25 @@ test('pull is universal data: type, crush range, and a real icon', () => {
   assert.ok(a.icon && a.icon !== '❔');
 });
 
-test('pullLanding lands them beside the puller, nearest where they came from', () => {
+test('pullLanding lands them past the puller, clear of what they came from', () => {
   // Puller at (2,0), target crouched at (0,0) behind a shield on (1,0):
-  // the shield tile is not open, so the haul dumps them on the puller's
-  // flank nearest the barrier - never the puller's own tile.
+  // the shield tile is not open, so the haul drags them across the puller and
+  // down on the far flank - the attacker ends up between them and the barrier.
   const open = (x, z) => !(x === 1 && z === 0) && !(x === 2 && z === 0);
   const spot = pullLanding(2, 0, 0, 0, open);
-  assert.ok(spot, 'a free flank exists');
-  assert.ok(!(spot[0] === 2 && spot[1] === 0), 'never onto the puller');
-  assert.ok(!(spot[0] === 0 && spot[1] === 0), 'never back where they were');
-  assert.equal(Math.abs(spot[0] - 2) + Math.abs(spot[1] - 0), 1, 'orthogonal beside the puller');
+  assert.deepEqual(spot, [3, 0], 'the far side of the puller from the barrier');
+});
+
+test('pullLanding never lands them across the barrier they were pulled over', () => {
+  // The bug the far-side rule closed: puller at (1,0) with a partition on the
+  // edge between them and the target at (0,0). (0,1) is walkable and free, and
+  // by tiles alone it is the nearest flank - but it is on THEIR side of the
+  // wall, so the "haul" was a one-tile sidestep that never crossed anything.
+  const acrossTheWall = (x, z) => x < 1;
+  const stepOpen = (fx, fz, tx, tz) => !(acrossTheWall(tx, tz) !== acrossTheWall(fx, fz));
+  const spot = pullLanding(1, 0, 0, 0, () => true, stepOpen);
+  assert.ok(spot, 'the puller has room on their own side');
+  assert.ok(!acrossTheWall(spot[0], spot[1]), 'landed on the puller\'s side of the wall');
 });
 
 test('pullLanding refuses when your side has no room', () => {
