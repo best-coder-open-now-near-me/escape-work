@@ -1,42 +1,5 @@
 # Powers Plan (The Verb Vocabulary, Class Identity & Toppling)
 
-## Questions for the designer
-
-These are open on **M9 (below)** — the heal audit and the summoner swap. M1–M8
-are shipped and none of this touches them.
-
-1. **Does the Manager keep `control` as an identity, or only as flavour?**
-   M9 moves him to `primary: 'summon'`, and the lint allows one primary per
-   class. He'd keep `delegate` — it is too good a piece of flavour to cut — but
-   he would stop being *about* turn denial.
-   - **A (recommended):** he stops being about it. Control is the most crowded
-     verb in the game already (Security has `detain` + `lockdown`, IT has
-     `percussive-maintenance` + `remote-session`); nobody would miss it as a
-     headline. Costs: `control` becomes a primary no class owns, so the
-     "every primary has a home" reading of the lint gets weaker.
-   - **B:** keep him on `control` and give summoning to Security instead
-     ("call for backup"). Cleaner metaphor, but it makes the tankiest class
-     also the one that outnumbers you, and it fights the stance identity —
-     overwatch and hold-the-line are about *one body holding a lane*.
-   *If B, M9's kit table changes wholesale; the heal audit is unaffected.*
-
-2. **Does HR's heal aim at others only, or also at itself?**
-   - **A (recommended):** others-only, with no self-option. A support class you
-     have to protect is a real tactical shape, and it is the sharpest possible
-     answer to "every class heals itself."
-   - **B:** others-only plus a weak self-heal. Softer solo play; blunter
-     identity.
-   *This is a feel call that only play answers — B is a one-line data change
-   from A, so A is the cheap default.*
-
-3. **Which second class keeps a heal, if any?** The stated direction is "a
-   class or 2." M9 proposes **IT Support** as the second, justified by the stat
-   line (17 max HP, lowest in the game) rather than by fairness. The
-   alternative is **exactly one** — HR — and everyone else lives on looted
-   consumables. Recommend IT as the second; say the word and it drops to one.
-
----
-
 Six playable classes, and five of them are the same character. Every kit in
 `data/classes.js` is `attack + defend + heal` with different words on the
 buttons — only Human Resources departs from it, and only because `summon`
@@ -457,11 +420,12 @@ classes differ along; it is a ritual every kit performs.
 | # | Decision | Status | Notes |
 |---|----------|--------|-------|
 | 15 | Healing is not a universal class power | `[stated]` | "im not sure i even want more than a class or 2 that can" (designer, 2026-07-31). |
-| 16 | HR becomes the class healing belongs to | `[proposed]` | Follows from 17: with `summon` gone, HR's remaining kit is already two `type: 'buff'` entries. It is mechanically the support class today and has been since M1; the `summon` tag was the outlier, not the buffs. |
+| 16 | HR becomes the class healing belongs to | `[ratified]` | "hr only healer for now" (designer, 2026-07-31). Follows from 17: with `summon` gone, HR's remaining kit is already two `type: 'buff'` entries. It is mechanically the support class today and has been since M1; the `summon` tag was the outlier, not the buffs. |
 | 17 | The Middle Manager becomes the summoner | `[ratified]` | "yeah manager as summoner works" (designer, 2026-07-31), answering a proposal that HR was overloaded carrying both. |
-| 18 | IT Support keeps a self-heal; the other three lose theirs | `[proposed]` | Justified by the stat line — 17 max HP is the lowest in the game — not by fairness. See question 3. |
-| 19 | HR's heal targets allies, not itself | `[proposed]` | See question 2. It also means the heal ships as a `buff` with `amount`, which the verb already supports (`buffOutcome` computes `healed`), so this costs no new plumbing. |
-| 20 | The Manager's Smoker talent stops granting a heal | `[proposed]` | `cigarette` is a seventh heal hiding in a talent. The talent's genuinely unique half is `hasLighter: true`, which currently has no action attached to it — see below. |
+| 18 | HR is the **only** healer — every other class loses its heal | `[ratified]` | "hr only healer for now" (designer, 2026-07-31), overruling a proposal that IT keep one on the strength of its 17 max HP. Note the **"for now"**: this is the sharp version, taken deliberately to see how it plays. If a second healer comes back, IT is where the argument was. |
+| 19 | HR's heal may target anyone on your side, including HR | `[ratified]` | "hr heal is for anyone" (designer, 2026-07-31), overruling a proposed others-only restriction. Ships as a `buff` with `amount`, which the verb already supports (`buffOutcome` computes `healed`, and `data/actions.js` already documents buff as "at an ALLY ... or at yourself"), so this costs no new plumbing — it is strictly *less* work than the restriction was. |
+| 21 | The Manager stops being *about* control | `[ratified]` | "manager stops being about control" (designer, 2026-07-31). He keeps `delegate` as flavour and moves to `primary: 'summon'`. Control was the most crowded verb in the game — Security carries `detain` + `lockdown`, IT carries `percussive-maintenance` + `remote-session` — so it loses a headline, not a home. See risk 11 for what this does to the lint's reading. |
+| 20 | The Manager's Smoker talent stops granting a heal | `[proposed]` | `cigarette` is a seventh heal hiding in a talent, and 18 leaves it as the only heal outside HR — which is the ritual surviving in the one place the class lint would not look. The talent's genuinely unique half is `hasLighter: true`, which currently has no action attached to it — see below. |
 
 ### Why the Manager, and not Security or IT
 
@@ -475,8 +439,10 @@ He also has the room. His third slot is `own-calendar`, one of the two
 surviving `defend` entries and the least interesting thing in his kit.
 
 Considered and not taken:
-- **Security ("call for backup")** — cleanest metaphor, worst fit. See
-  question 1B.
+- **Security ("call for backup")** — cleanest metaphor, worst fit. It would
+  make the tankiest class also the one that outnumbers you, and it fights the
+  stance identity: overwatch and hold-the-line are about *one body holding a
+  lane*, and adding bodies dilutes exactly what makes him good.
 - **IT Support (automation, not people)** — the most mechanically *distinct*
   summon available: not applicants but immobile things, a script or a bot that
   holds a lane and ticks. `remote-session` is already "borrow somebody's body,"
@@ -493,10 +459,10 @@ Changes only; the Drone, the Mail Room and Security keep their primaries.
 | Class | Primary | Kit after M9 | Change |
 |---|---|---|---|
 | **Office Drone** | `attack` | `attack`, `defend`, **—** | Loses `coffee`. Still the baseline, now a baseline with two buttons; a third wants finding (see risks). |
-| **Middle Manager** | **`summon`** | `delegate`, **`escalate`**, **—** | Loses `own-calendar` and `espresso`. Gains a summon. Keeps `delegate` as flavour, not as identity. |
+| **Middle Manager** | **`summon`** | `delegate`, **`escalate`**, **—** | Loses `own-calendar` and `espresso`. Gains a summon. Keeps `delegate` as flavour, not as identity — decision 21. |
 | **Mail Room** | `mobility` | `mail-cone`, `courier-route`, **—** | Loses `snack-cart`. |
-| **IT Support** | `purge` | `reboot`, `energy-drink` | Unchanged — the one self-heal that survives. |
-| **Human Resources** | **`heal`**† | `performance-review`, `onboarding`, **`triage`** | Loses `summon-applicants` and `coffee`. Gains an ally-targeted heal. |
+| **IT Support** | `purge` | `reboot`, **—** | Loses `energy-drink`. Down to one base power (plus two track controls); see risk 10. |
+| **Human Resources** | **`heal`**† | `performance-review`, `onboarding`, **`triage`** | Loses `summon-applicants` and `coffee`. Gains the game's only heal, aimed at anyone on your side including itself. |
 | **Security** | `stance` | `detain`, `stand-post`, **—** | Loses `night-thermos`. |
 
 † The primary's *name* is open — `heal` describes the verb but reads thin for a
@@ -511,9 +477,12 @@ New entries this milestone wants:
   `direct-report` archetype that arrives already rooted (holds ground, does not
   chase — which is what a direct report does) is the obvious follow-up and a
   pure `data/classes.js` addition under the shared-archetype rule.
-- **`triage`** (HR, `buff` with `amount`) — the only real heal in the game,
-  aimed at somebody else. Numbers deliberately unset here: they depend on
-  whether three classes are living on consumables, which is a play question.
+- **`triage`** (HR, `buff` with `amount`) — the only heal in the game, aimed at
+  anyone on your side, HR included. Numbers deliberately unset here: with five
+  classes living on consumables it is the single dial the whole HP economy
+  turns on, and that is a play question, not a spreadsheet one. Starting point:
+  bigger than the drinks it replaces (they were 4–8) and rationed harder, so it
+  reads as *treatment* rather than as a round of coffees.
 - **A replacement for `cigarette`** (Manager talent) — the Smoker talent's
   `hasLighter: true` is the interesting half and has no button. An action that
   *ignites* a flammable surface at range would hand the fire runtime a second
@@ -522,53 +491,89 @@ New entries this milestone wants:
 
 ### What carries the HP economy afterwards
 
-Three classes with no heal at all is the point, not an oversight: HP stops
-being a per-fight resource that resets and becomes a **floor-level** one. Two
-things have to be true for that to land, and neither is new code:
+Five classes with no heal at all is the point, not an oversight: HP stops being
+a per-fight resource that resets and becomes a **floor-level** one.
 
-1. `data/items.js` already carries heal consumables and `shops.js` already
-   sells stock. The item economy has to actually supply them — this is a
-   tuning pass on loot tables, and it is the real risk in M9 (see risks).
-2. "We have no HR in the party" becomes a genuine tactical state, which is a
-   feature — it gives `PARTY_PLAN`'s recruitment decisions weight they do not
-   currently have.
+The obvious follow-on question — "can the item economy carry that?" — is
+answered `[stated]`, and answered by *not needing an answer yet*:
+
+> "the game is laughably easy right now so no concern there"
+> — designer, 2026-07-31
+
+So M9 does **not** ship a compensating loot-table pass. Removing ~16 HP a fight
+from five of six classes is a difficulty change made on purpose, into a game
+with difficulty headroom to spend. `data/items.js` consumables and `shops.js`
+stock remain the lever if it overshoots; they are deliberately not pulled
+pre-emptively, because tuning a supply against a shortage nobody has felt yet
+is how you end up back where you started with more moving parts.
+
+The party consequence is the good half of the same coin: **"we have no HR"
+becomes a genuine tactical state**, which gives `PARTY_PLAN`'s recruitment
+decisions weight they do not currently have. Worth watching that it does not
+tip into *mandatory* — a support class you must recruit is a tax, not a choice
+— and the tell will be whether a no-HR party can still clear a floor.
 
 ### Testing
 
 - **Unit (`tests/unit/levels.test.js`)** — extend the primary lint: assert that
-  at most **two** playable classes carry an action of `type: 'heal'` (or a
+  at most **one** playable class carries an action of `type: 'heal'` (or a
   `buff` with `amount`), so the ritual cannot creep back one PR at a time. This
   is the guard that makes M9 stick; without it, the next class added gets a
-  drink because every other class has one.
+  drink because every other class has one. The number is decision 18's "for
+  now" written down where a change to it has to be deliberate — raising the
+  lint to two is how a second healer gets ratified, not a thing that happens
+  by accident in a class PR.
 - **Unit (`tests/unit/powers.test.js`)** — `buffOutcome` already computes
   `healed` against `maxHp`; pin that an ally-targeted `triage` refuses a
   full-health target through `emptyPayload` rather than spending the use.
 - **E2E (`tests/e2e/classes.spec.js`)** — the Manager's bar shows a summon and
-  no heal; HR's heal lands on a *teammate's* HP bar, not the caster's.
-- **Manual** — one floor as the Office Drone with no heal at all. That is the
-  class this hurts most, and if it is miserable the answer is the item economy,
-  not giving the coffee back.
+  no heal; HR's heal lands on a *teammate's* HP bar when aimed at one, and on
+  its own when aimed at itself.
+- **Manual** — one floor as IT Support, no HR in the party. That is the
+  thinnest kit on the frailest body with nothing to top it up, so it is where
+  decision 18's "for now" gets tested. If it is miserable, the answer is the
+  item economy or a second healer — in that order, and not by giving the
+  energy drink back.
 
 ### Risks
 
-9. **This is a nerf to five of six classes, and it lands all at once.** The
-   honest read is that ~16 HP a fight is being removed from most of the roster
-   while enemy damage stays where it is. The lever is the loot tables, and they
-   should be tuned in the *same* PR — shipping the removal and the supply
-   separately means one release where the game is simply harder for no stated
-   reason.
-10. **The Drone drops to two powers** and it is the class defined as "the
-    baseline the others read against." A baseline that is thinner than
-    everything it is compared to inverts its own job. Either it gets a third
-    power in M9 or the milestone ships knowing the Drone needs one.
-11. **`primary: 'control'` ends up owned by nobody** (question 1A). The lint
+9. ~~**This is a nerf to five of six classes and the loot tables must absorb
+   it.**~~ **Closed** — "the game is laughably easy right now so no concern
+   there" (designer, 2026-07-31). The difficulty swing is the intent, not the
+   hazard. Left in the record because it is the risk this milestone *looks*
+   like it has, and the next reader will re-derive it otherwise.
+10. **Kit sizes go lopsided.** Nobody's bar is actually empty — the weapon
+    swing, `shove`, `take-cover` and the paper throws are universal — but among
+    *class* powers M9 leaves: HR 3, Drone / Manager / Mail Room / Security 2,
+    **IT Support 1** (`reboot`, plus two track controls it may never buy). Two
+    separate problems hide in that spread:
+    - **IT is thin by count.** One base power on the game's most fragile class,
+      and its identity verb is a utility that deals no damage. A level-1 IT
+      Support is a letter opener and a cleanse.
+    - **The Drone is thin by kind.** It keeps `attack` + `defend` — the two
+      most generic verbs in the game, and `defend` is the one this plan already
+      calls the least interesting survivor of the M8 sweep. Everyone else's
+      remaining two are distinctive. That is awkward for the class *defined* as
+      "the baseline the others read against": a baseline should be plain, but
+      when it is the only kit made entirely of the generic verbs, "plain"
+      stops reading as deliberate and starts reading as unfinished.
+
+    Both want a third power eventually. Neither blocks M9 — this is the
+    milestone that *takes things away*, and adding replacements in the same
+    breath would hide whether the removal worked.
+11. **`primary: 'control'` ends up owned by nobody** (decision 21). The lint
     checks uniqueness, not coverage, so nothing breaks — but "one verb per
     class" quietly becomes "one verb per class, and one spare." Worth deciding
-    whether coverage was ever the goal.
-12. **`espresso`, `snack-cart`, `night-thermos` and `coffee` become orphans.**
-    Do not delete them: they are exactly the shape `data/items.js` consumables
-    want, and moving a heal from a class action to a lootable object is the
-    substance of this milestone rather than a side effect of it.
+    whether coverage was ever the goal, or whether the lint was only ever
+    guarding against two classes being *about* the same thing.
+12. **`espresso`, `snack-cart`, `night-thermos`, `energy-drink` and `coffee`
+    become orphans.** Do not delete them: they are exactly the shape
+    `data/items.js` consumables want, and moving a heal from a class action to
+    a lootable object is the substance of this milestone rather than a side
+    effect of it. (`energy-drink` is the fiddly one — there is *already* an
+    item by that id in `data/items.js`, and `data/actions.js` documents the
+    collision as deliberate and harmless because the two registries never share
+    a lookup. Retiring the action means checking that the survivor is the item.)
 
 ## Milestones (each a PR that keeps `npm test` + e2e green)
 
@@ -602,9 +607,9 @@ things have to be true for that to land, and neither is new code:
    for a unique primary, and lint that no two playable classes share one.
 9. **The heal audit and the summoner swap.** M8's sweep audited primaries and
    stopped there; this one audits the rest of the kit. Summoning moves to the
-   Middle Manager, healing consolidates onto Human Resources, and the loot
-   tables pick up what the class bars put down. Ships with the lint that keeps
-   the third-button ritual from growing back. Full section above.
+   Middle Manager, and healing consolidates onto Human Resources as the only
+   class that has any. Ships with the lint that keeps the third-button ritual
+   from growing back. Full section above.
 
 ## Testing
 
