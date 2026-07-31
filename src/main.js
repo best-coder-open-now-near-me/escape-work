@@ -14,7 +14,7 @@ import { ITEMS } from './data/items.js';
 import { CLASSES } from './data/classes.js';
 import { ACTIONS, arrivalLine } from './data/actions.js';
 import { parseLevel } from './grid.js';
-import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, routeToFiringPosition, DIRS8 } from './pathfinding.js';
+import { findPath, smoothPath, routeOpen, segmentClear, clampToClearance, approachPoint, routeToFiringPosition, DIRS8 } from './pathfinding.js';
 import {
   createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, grantTalent, classTrack,
   scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
@@ -858,10 +858,23 @@ function startGame(level) {
   // Smooth a raw tile path into any-angle runs, starting from where the
   // walker's body actually stands - not their tile centre, which they may be
   // nowhere near after a free-point stop. Defaults to the leader.
-  function smoothFromBody(p, actor = player) {
+  //
+  // The smoothing walkability is the hazard-averse base UNION the cells the
+  // route itself steps on (routeOpen): the router only ever SURCHARGES a
+  // surface (hazardCost), so a route legally crosses one when the detour is
+  // dearer - and refusing to straighten across ground the route chose is what
+  // used to un-smooth every walk near a spill into tile-centre stair-steps.
+  // Cells the route avoided stay blocked, so a straight line still cannot cut
+  // through the fire the Dijkstra paid to go around. `extraClear` narrows the
+  // base further for callers with their own blockers (combat's teammate rule)
+  // or their own sheet (the walker's talents, not the leader's).
+  function smoothFromBody(p, actor = player, extraClear = null) {
     const pos = actor.entity?.getPosition();
     if (pos) p = [[pos.x, pos.z], ...p.slice(1)];
-    return smoothPath(clearOfHazards, p, grid.edgeOpen);
+    const base = extraClear
+      ? (x, z) => isWalkable(x, z) && extraClear(x, z)
+      : clearOfHazards;
+    return smoothPath(routeOpen(base, p), p, grid.edgeOpen);
   }
   // Where the body may actually stand: the exact clicked point, pulled in
   // from walls/partitions so the model never clips them.
@@ -1719,16 +1732,29 @@ function startGame(level) {
         findEnemyPath: (sx, sz, tx, tz) => findPath(
           (x, z) => isWalkable(x, z) && !partyAt(x, z) && !summonAt(x, z),
           sx, sz, tx, tz, enemyHazardCost, grid.stepOpen),
-        // Any-angle smoothing for combat walks. The party variant starts
-        // from the acting member's body; the enemy variant treats the enemy's
-        // own tile as open (they're standing on it) and starts from their body.
-        smooth: (p, actor) => smoothFromBody(p, actor),
+        // Any-angle smoothing for combat walks, each mirroring ITS router's
+        // world - a smoother that disagrees with the route it was handed
+        // degrades to raw tile centres (or worse, straightens through a tile
+        // the route detoured around). The party variant blocks the same
+        // teammates findPath blocked and fears the WALKER's hazards, not the
+        // leader's; the enemy variant blocks the party members and summons
+        // findEnemyPath routed around. Both splice the body and both let the
+        // route's own cells through (routeOpen, which also covers the mover's
+        // own start tile - a body standing in a spill can smooth its way out).
+        smooth: (p, actor) => {
+          const walker = party.members.find((m) => m.actor === actor)
+            || summons.find((s) => s.actor === actor);
+          const ms = walker?.sheet || sheet;
+          const blocked = (x, z) => [...party.members, ...summons].some((m) =>
+            m.actor && m.actor !== actor && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z);
+          return smoothFromBody(p, actor,
+            (x, z) => !blocked(x, z) && effectiveSurfDamage(x, z, ms) <= 0);
+        },
         smoothEnemy: (en, p) => {
           const pos = en.entity?.getPosition();
           if (pos) p = [[pos.x, pos.z], ...p.slice(1)];
-          return smoothPath(
-            (x, z) => (x === en.x && z === en.z ? grid.terrainOpen(x, z) : enemyClearOfHazards(x, z)),
-            p, grid.edgeOpen);
+          const base = (x, z) => enemyClearOfHazards(x, z) && !partyAt(x, z) && !summonAt(x, z);
+          return smoothPath(routeOpen(base, p), p, grid.edgeOpen);
         },
         clampPoint,
         approach: approachTo,
@@ -3245,10 +3271,17 @@ function startGame(level) {
       claimed.add(spot[0] + ',' + spot[1]);
       const p = findPath(open, m.actor.x, m.actor.z, spot[0], spot[1], hazardCostFor(m.sheet), grid.stepOpen);
       if (!p || p.length < 2) continue;
-      p[p.length - 1] = clampPoint(spot[0], spot[1]);
+      // A loose spot in the formation tile, not its dead centre - the party
+      // used to park on a perfect grid ring around the leader (the one body
+      // cluster on screen that still LOOKED tiled) while wanderers already
+      // ambled to scattered points. Same jitter as theirs.
+      p[p.length - 1] = clampPoint(
+        spot[0] + (Math.random() - 0.5) * 0.7,
+        spot[1] + (Math.random() - 0.5) * 0.7);
       const pos = m.actor.entity.getPosition();
-      const s = smoothPath((x, z) => open(x, z) && effectiveSurfDamage(x, z, m.sheet) <= 0,
-        [[pos.x, pos.z], ...p.slice(1)], grid.edgeOpen);
+      const spliced = [[pos.x, pos.z], ...p.slice(1)];
+      const base = (x, z) => open(x, z) && effectiveSurfDamage(x, z, m.sheet) <= 0;
+      const s = smoothPath(routeOpen(base, spliced), spliced, grid.edgeOpen);
       m.actor.setPath(s);
     }
   }
@@ -3288,9 +3321,14 @@ function startGame(level) {
           : enemyClearOfHazards(x, z) && !partyAt(x, z));
         const p = findPath(open, en.x, en.z, tx, tz, null, grid.stepOpen);
         if (!p || p.length < 2) return null;
+        // The wanderer rests at last amble's loose point, not its tile centre
+        // - smooth from the BODY like every other feeder, or the first step of
+        // each amble snaps back toward the centre (setPath's precondition).
+        const pos = en.entity?.getPosition();
+        if (pos) p[0] = [pos.x, pos.z];
         // amble to a loose spot in the tile, not its dead centre
         p[p.length - 1] = clampPoint(tx + (Math.random() - 0.5) * 0.7, tz + (Math.random() - 0.5) * 0.7);
-        return smoothPath(open, p, grid.edgeOpen);
+        return smoothPath(routeOpen(open, p), p, grid.edgeOpen);
       },
     };
     let anyoneMoved = false;
