@@ -33,8 +33,14 @@ complete all of the work weve identified").
 3. **Overwatch: does the watch circle go Euclidean with everything else?**
    It is a reaction range, so "circles for targeted" (D4) says yes, and M5
    also moves its trigger to the same continuous metric opportunity attacks
-   already use. Flagging because it changes when overwatch fires. Recommended
-   yes. `[proposed]`
+   already use. Implemented per this recommendation - flagged because it
+   changes when overwatch fires; the revert is one gate. `[proposed]`
+4. **The aim wash's look.** M6 jitters the wash's per-tile chips (nudge,
+   turn, size - deterministic per cell) so its edge stops tracing the grid;
+   the old dead-square look's stated rationale ("the seams are the grid the
+   aim thinks in") went stale when M5 made the aim think in circles from the
+   body. Needs eyes; the alternative is a merged soft-edged region
+   (pool-style marching squares), a bigger renderer change. `[proposed]`
 
 ## What the review established (evidence, 2026-07-31)
 
@@ -142,12 +148,14 @@ continuous metric opportunity attacks use (question 3). Engagement and
 `canTakePart` stay tile-based - who is IN the fight is an area question (D4).
 
 **M6 - The organic skin.** Ground-aimed verbs aim at the exact point: the
-zone's covered cells derive from a disc at the clicked point (cells whose
-centres fall inside - storage untouched), the wash renders that same set.
-Surface decals get irregular, jittered edges that cross tile lines; the aim
-wash renders as a soft-edged region rather than painted squares. Storage,
-conduction, spread, electrification: untouched (D5). The look needs the
-designer's eyes; the mechanics land first.
+zone's covered cells derive from a disc at the clicked POINT (cells whose
+centres fall inside - storage untouched); preview, rings and click all read
+that same disc. Surface decals turned out to already be organic on this
+branch line - liquids render as shared metaball pools with marching-squares
+edges and per-cell hash wobble, paper/cable/gum as scatter styles, carpet
+with hash tints - so the remaining grid-tracing layer was the aim wash,
+whose chips now carry deterministic per-cell jitter (question 4). Storage,
+conduction, spread, electrification: untouched (D5).
 
 ## Testing
 

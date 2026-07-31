@@ -279,9 +279,13 @@ export const zoneRadiusOf = (a) => a.radius ?? 1;
 export function zoneTiles(cx, cz, radius) {
   const out = [];
   const r = Math.max(0, radius);
-  const lim = Math.ceil(r);
-  for (let z = cz - lim; z <= cz + lim; z++) {
-    for (let x = cx - lim; x <= cx + lim; x++) {
+  const lim = Math.ceil(r) + 1;
+  // The centre may be a continuous aim point (DEGRID M6: a zone lands where
+  // you POINTED, not on the tile the point rounds to); the cells are tiles.
+  const bx = Math.round(cx);
+  const bz = Math.round(cz);
+  for (let z = bz - lim; z <= bz + lim; z++) {
+    for (let x = bx - lim; x <= bx + lim; x++) {
       if (Math.hypot(x - cx, z - cz) <= r + 1e-9) out.push([x, z]);
     }
   }

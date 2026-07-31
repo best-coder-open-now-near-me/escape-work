@@ -1123,8 +1123,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function showZonePreview(point, sx, sy) {
     preview = null;
     const a = ACTIONS[armed];
-    const tx = Math.round(point.x);
-    const tz = Math.round(point.z);
+    // The zone lands where you POINT (DEGRID M6): the disc of covered cells
+    // is centred on the exact aim point, so the preview prices that point,
+    // not the tile it rounds to.
+    const tx = point.x;
+    const tz = point.z;
     const problem = zoneProblem(a, {
       dist: distToTile(active, tx, tz),
       los: losToTile(active, tx, tz),
@@ -1408,8 +1411,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // surface. Red on the aim point alone when the placement itself is refused.
     if (isZone(a)) {
       if (!armed || !aimPoint) return;
-      const tx = Math.round(aimPoint.x);
-      const tz = Math.round(aimPoint.z);
+      // The exact aim point - the rings must show the same disc the click
+      // lays (DEGRID M6).
+      const tx = aimPoint.x;
+      const tz = aimPoint.z;
       const problem = zoneProblem(a, {
         dist: distToTile(active, tx, tz),
         los: losToTile(active, tx, tz),
@@ -2997,7 +3002,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // under THEM - so it resolves on their tile rather than refusing. Their own
     // tile is excluded from the footprint (zoneCells), so what lands is the
     // ring around their feet.
-    if (kind === 'zone') { performZone(armed, en.x, en.z); return; }
+    if (kind === 'zone') { performZone(armed, posOf(en).x, posOf(en).z); return; }
     // A RANGED control (a cone, or one carrying `range`) resolves from where
     // you stand. A touch-range one classifies as 'melee' and falls through to
     // the walk-up below rather than getting its own copy of it - and `strike`
@@ -3312,7 +3317,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // A summon is placed at the clicked tile (the whole point of arming it).
       if (a.type === 'summon') { placeSummon(tile.x, tile.z); return; }
       // A zone lands where you clicked - ground, and only ground.
-      if (isZone(a)) { performZone(armed, tile.x, tile.z); return; }
+      if (isZone(a)) {
+        // The exact clicked point when the pick has one - the zone's disc is
+        // centred where the player aimed (DEGRID M6).
+        performZone(armed, point ? point.x : tile.x, point ? point.z : tile.z);
+        return;
+      }
       // A buff aimed at the ground resolves to whoever is STANDING there -
       // yourself included. This branch sits above the purge self-cast below
       // deliberately: Remote Restart is a `buff` that happens to purge, and
