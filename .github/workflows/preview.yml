@@ -21,16 +21,29 @@ name: Branch preview
 # Requires, once, in repo Settings -> Pages: Source = "Deploy from a branch",
 # branch `gh-pages`, folder `/ (root)`. Until that is set the workflow succeeds
 # and publishes, but nothing is served.
+#
+# A push only triggers a workflow that exists IN THE PUSHED COMMIT, so branches
+# cut before this file landed publish nothing when you push them. Merging main
+# into each one fixes that permanently; `workflow_dispatch` is the escape hatch
+# in the meantime. Dispatch reads this file from whatever ref you launch it
+# from - run it from `main` and name the branch, and it builds a branch that
+# has never heard of this workflow.
 on:
   push:
     branches-ignore: [ main, gh-pages ]
   delete:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to preview (blank = the branch you launched from)'
+        required: false
+        default: ''
 
 # Per-branch: a second push to the SAME branch supersedes the first (you only
 # ever want the newest preview of a branch). Different branches build in
 # parallel and contend for the gh-pages push, which the retry loop settles.
 concurrency:
-  group: preview-${{ github.ref }}
+  group: preview-${{ inputs.branch || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -39,11 +52,29 @@ permissions:
 jobs:
   publish:
     name: Build and publish preview
-    if: github.event_name == 'push'
+    if: github.event_name != 'delete'
     runs-on: ubuntu-latest
+    env:
+      # The branch being PREVIEWED, which on a dispatch is not the branch this
+      # workflow file came from.
+      BRANCH: ${{ inputs.branch || github.ref_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || github.ref }}
+
+      # The whole point of dispatch is previewing a branch that predates this
+      # workflow - and such a branch has no tools/preview-index.mjs either. Take
+      # the tooling from the ref the workflow itself came from, never from the
+      # branch under preview.
+      - name: Checkout preview tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          path: .preview-tools
+          sparse-checkout: tools
+          sparse-checkout-cone-mode: false
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -66,8 +97,6 @@ jobs:
       # branch.txt for the index page to show.
       - name: Derive preview slug
         id: slug
-        env:
-          BRANCH: ${{ github.ref_name }}
         run: |
           SLUG=$(printf '%s' "$BRANCH" | sed 's/[^a-zA-Z0-9._-]/-/g' | cut -c1-100)
           # A leading dot would hide the directory and confuse the scanner.
@@ -78,7 +107,6 @@ jobs:
       - name: Publish to gh-pages
         env:
           SLUG: ${{ steps.slug.outputs.slug }}
-          BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           git config --global user.name "github-actions[bot]"
@@ -106,7 +134,7 @@ jobs:
             printf '%s\n' "$BRANCH" > "gh-pages/preview/$SLUG/branch.txt"
             # Without this, Pages runs Jekyll and drops anything underscore-led.
             touch gh-pages/.nojekyll
-            node tools/preview-index.mjs gh-pages
+            node .preview-tools/tools/preview-index.mjs gh-pages
             git -C gh-pages add -A
             git -C gh-pages diff --quiet --cached && return 0
             git -C gh-pages commit -m "Preview: $BRANCH ($GITHUB_SHA)" --quiet
