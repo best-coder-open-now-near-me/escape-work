@@ -2,7 +2,7 @@
 // '#' solid, '.' open. No PlayCanvas, no DOM - plain node --test.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findPath, segmentClear, clampToClearance, approachPoint, truncateByBudget, smoothPath, routeToFiringPosition, trimToFirst } from '../../src/pathfinding.js';
+import { findPath, segmentClear, clampToClearance, approachPoint, truncateByBudget, smoothPath, routeOpen, routeToFiringPosition, trimToFirst } from '../../src/pathfinding.js';
 
 // Build isWalkable from rows of '.'/'#'; everything off-map is solid.
 const walkableFrom = (rows) => (x, z) =>
@@ -151,6 +151,73 @@ test('smoothPath collapses a dog-leg with clear line of sight', () => {
   assert.deepEqual(s[s.length - 1], [2, 2]);
 });
 
+// --- smoothing from where the body ACTUALLY stands ---------------------------
+// The signature jut: walk-ups park the body within BODY_RADIUS of the target's
+// blocked tile (approachPoint) or exactly touching a wall (clampToClearance).
+// The corridor test must not refuse every span from such a start, or smoothPath
+// degrades to raw tile centres and the next click darts to one of them.
+
+test('smoothing from a stand point beside a blocked tile still straightens', () => {
+  // The verified jut trace: an NPC occupies (5,8); approachPoint parked the
+  // body at ~(4.399, 7.399) - 0.14 from the blocked tile's corner, inside
+  // BODY_RADIUS. Clicking toward (8,3) put a probe line's start inside (5,8),
+  // so every span from the body failed and the walk visited the raw route's
+  // (5,6) tile centre first - the on-screen dart. One straight run now.
+  const blocked = (x, z) => x === 5 && z === 8;
+  const w = (x, z) => x >= 0 && x <= 9 && z >= 0 && z <= 9 && !blocked(x, z);
+  const body = [4.399, 7.399];
+  const raw = [body, [5, 6], [6, 5], [7, 4], [8, 3]];
+  const s = smoothPath(w, raw);
+  assert.equal(s.length, 2, `one straight run, got ${JSON.stringify(s)}`);
+  assert.deepEqual(s[0], body);
+  assert.deepEqual(s[1], [8, 3]);
+});
+
+test('smoothing along a wall the body touches still straightens', () => {
+  // Both endpoints clamped against the wall row (clampToClearance leaves the
+  // body EXACTLY BODY_RADIUS from the boundary: z = 0.2 against walls at z=1),
+  // so the travel is dead parallel and a probe line at the full radius lies ON
+  // the boundary - which segmentClear resolves INTO the wall. The old
+  // exact-radius probe therefore refused every span and kept a tile-centre
+  // elbow; the walk must now be one straight run.
+  const w = walkableFrom([
+    '......',
+    '######',
+  ]);
+  const raw = [[0.5, 0.2], [1, 0], [2, 0], [3, 0], [4, 0], [4.8, 0.2]];
+  const s = smoothPath(w, raw);
+  assert.equal(s.length, 2, `one straight run along the wall, got ${JSON.stringify(s)}`);
+});
+
+test('endpoint forgiveness does not open a straightening through a partition', () => {
+  // A partition on the x=1<->x=2 boundary right beside the stand point. The
+  // route goes around its end; the shortcut across it must STILL be refused -
+  // the centreline gets no endpoint forgiveness.
+  const w = walkableFrom([
+    '...',
+    '...',
+    '...',
+  ]);
+  const edgeOpen = (x, z, nx, nz) =>
+    !((z === 0 || nz === 0) && ((x === 1 && nx === 2) || (x === 2 && nx === 1)));
+  const raw = [[1.3, 0], [1, 1], [2, 1], [2, 0]];
+  const s = smoothPath(w, raw, edgeOpen);
+  assert.ok(s.length >= 3, `must keep the detour around the partition, got ${JSON.stringify(s)}`);
+});
+
+test('smoothing from a body leaning over the target tile refuses a run THROUGH it', () => {
+  // Forgiving the stand point's overlap must not license a straight run whose
+  // centreline crosses the blocked tile itself.
+  const blocked = (x, z) => x === 5 && z === 8;
+  const w = (x, z) => x >= 0 && x <= 9 && z >= 0 && z <= 9 && !blocked(x, z);
+  const body = [4.399, 7.399];
+  // Destination diagonally PAST the NPC: the direct line crosses (5,8).
+  const raw = [body, [4, 8], [5, 9], [6, 9]];
+  const s = smoothPath(w, raw);
+  const crosses = s.length === 2;
+  assert.ok(!crosses, 'must not straighten through the occupied tile');
+});
+
 test('smoothPath never straightens through a cell the route avoided', () => {
   // Route hugs the open top-right corridor around a solid centre column.
   const w = walkableFrom([
@@ -162,6 +229,59 @@ test('smoothPath never straightens through a cell the route avoided', () => {
   const s = smoothPath(w, raw);
   // A straight (0,0)->(2,2) shortcut would clip the solid centre.
   assert.ok(!(s.length === 2), 'must not shortcut through the blocked cell');
+});
+
+// --- routeOpen: the smoother believes the route it was handed ----------------
+// The router SURCHARGES hazards (extraCost), so a route legally crosses one;
+// a smoother that treats those cells as walls can never straighten across
+// ground the route chose - stair-steps around every spill. routeOpen unions
+// the route's own cells into the smoothing walkability; avoided cells stay
+// blocked.
+
+test('routeOpen lets smoothing straighten across a surface the route crossed', () => {
+  // Paper on (2,0) and (3,0); no detour exists on a 1-row map, so the route
+  // crosses. The hazard-averse base refuses those cells; the smoothed walk
+  // must still collapse to one straight run because the ROUTE chose them.
+  const hazard = (x, z) => z === 0 && (x === 2 || x === 3);
+  const w = walkableFrom(['......']);
+  const base = (x, z) => w(x, z) && !hazard(x, z);
+  const raw = [[0.3, 0.1], [1, 0], [2, 0], [3, 0], [4, 0], [5, 0]];
+  const jagged = smoothPath(base, raw);
+  assert.ok(jagged.length > 2, 'sanity: the bare base refuses to straighten');
+  const s = smoothPath(routeOpen(base, raw), raw);
+  assert.equal(s.length, 2, `one straight run across the chosen cells, got ${JSON.stringify(s)}`);
+});
+
+test('routeOpen never opens a hazard cell the route avoided', () => {
+  // Fire at (1,1); the route detours around it through z=0. The diagonal-ish
+  // shortcut through the fire must STILL be refused.
+  const hazard = (x, z) => x === 1 && z === 1;
+  const w = walkableFrom(['...', '...', '...']);
+  const base = (x, z) => w(x, z) && !hazard(x, z);
+  const raw = [[0, 2], [0, 1], [1, 0], [2, 1], [2, 2]];
+  const s = smoothPath(routeOpen(base, raw), raw);
+  for (let i = 1; i < s.length; i++) {
+    const [ax, az] = s[i - 1];
+    const [bx, bz] = s[i];
+    // sample the run: no point of it may sit in the avoided fire cell
+    for (let t = 0; t <= 1; t += 0.05) {
+      const cx = Math.round(ax + (bx - ax) * t);
+      const cz = Math.round(az + (bz - az) * t);
+      assert.ok(!hazard(cx, cz), `run ${i} passes through the avoided fire at t=${t}`);
+    }
+  }
+});
+
+test('routeOpen exempts the mover\'s own start tile via the spliced body point', () => {
+  // The body stands IN a spill (truncation stopped there). The base refuses
+  // the start cell, which used to fail every corridor from vertex 0; the
+  // spliced body point's rounded tile is a route cell, so smoothing works.
+  const hazard = (x, z) => x === 0 && z === 0;
+  const w = walkableFrom(['....']);
+  const base = (x, z) => w(x, z) && !hazard(x, z);
+  const raw = [[0.2, 0.1], [1, 0], [2, 0], [3, 0]];
+  const s = smoothPath(routeOpen(base, raw), raw);
+  assert.equal(s.length, 2, `smooths out of the spill, got ${JSON.stringify(s)}`);
 });
 
 // --- routeToFiringPosition (TODO Phase 1) ----------------------------------

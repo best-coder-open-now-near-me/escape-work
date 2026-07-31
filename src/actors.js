@@ -257,7 +257,19 @@ export class GridActor {
     this.visual.setLocalScale(sx, sy, sx);
   }
 
+  // PRECONDITION: path[0] is this body's TRUE continuous position - every
+  // feeder splices it in before smoothing (smoothFromBody and its kin). It is
+  // skipped, so a stale tile-centre there is harmless, but path[1] is walked
+  // verbatim: a feeder that smooths from anywhere but the body sends the body
+  // darting to a vertex planned from its rounded tile. Fix the feeder, not
+  // this.
   setPath(path) {
+    if (!path || path.length < 2) {
+      // A degenerate "path" has nowhere to walk to; index 1 would read
+      // undefined and crash the update loop mid-frame.
+      this.path = null;
+      return;
+    }
     this.path = path;
     this.pathIndex = 1; // index 0 is where we already stand
     this.slideTo = null;

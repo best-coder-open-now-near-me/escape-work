@@ -100,15 +100,53 @@ export function segmentClear(isWalkable, ax, az, bx, bz, edgeOpen = null) {
 
 // A character has width: check the centreline plus two offset lines.
 export const BODY_RADIUS = 0.3;
+
+// The offset lines probe at a hair UNDER the body radius. clampToClearance
+// parks bodies at exactly BODY_RADIUS from a blocked boundary, so a probe at
+// exactly that radius lies ON the boundary - and segmentClear's floor resolves
+// an exact boundary coordinate INTO the blocked cell. A body touching a wall
+// is legal; the test must not treat touching as clipping, or every character
+// who last stopped against a wall loses all smoothing on their next walk.
+const PROBE_RADIUS = BODY_RADIUS - 0.02;
+
+// Cells the body ALREADY legally overlaps while standing at (px, pz): every
+// cell whose square comes within `r` of the point. At most four. The corridor
+// forgives these for its probe lines - the game itself put the body there
+// (approachPoint deliberately leans a stand point over the target's blocked
+// tile), so clipping them at the span's ends is the stance, not a new
+// violation. The CENTRELINE never gets this forgiveness: it is the travel
+// path, and it must genuinely cross only open ground and open edges.
+function overlappedCells(px, pz, r) {
+  const out = new Set();
+  for (let cx = Math.round(px - r); cx <= Math.round(px + r); cx++) {
+    for (let cz = Math.round(pz - r); cz <= Math.round(pz + r); cz++) {
+      const nx = Math.max(cx - 0.5, Math.min(cx + 0.5, px));
+      const nz = Math.max(cz - 0.5, Math.min(cz + 0.5, pz));
+      if (Math.hypot(nx - px, nz - pz) <= r) out.add(cx + ',' + cz);
+    }
+  }
+  return out;
+}
+
 function walkableCorridor(isWalkable, ax, az, bx, bz, edgeOpen) {
   const dx = bx - ax;
   const dz = bz - az;
   const len = Math.hypot(dx, dz) || 1;
-  const ox = (-dz / len) * BODY_RADIUS;
-  const oz = (dx / len) * BODY_RADIUS;
-  return segmentClear(isWalkable, ax, az, bx, bz, edgeOpen)
-    && segmentClear(isWalkable, ax + ox, az + oz, bx + ox, bz + oz, edgeOpen)
-    && segmentClear(isWalkable, ax - ox, az - oz, bx - ox, bz - oz, edgeOpen);
+  const ox = (-dz / len) * PROBE_RADIUS;
+  const oz = (dx / len) * PROBE_RADIUS;
+  // The travel path itself: strict.
+  if (!segmentClear(isWalkable, ax, az, bx, bz, edgeOpen)) return false;
+  // The width probes: forgiven the cells (and edges wholly between such
+  // cells) that the body legally overlaps at either endpoint.
+  const exempt = overlappedCells(ax, az, BODY_RADIUS + 0.05);
+  for (const c of overlappedCells(bx, bz, BODY_RADIUS + 0.05)) exempt.add(c);
+  const open = (x, z) => isWalkable(x, z) || exempt.has(x + ',' + z);
+  const eOpen = edgeOpen
+    ? (x, z, nx, nz) => edgeOpen(x, z, nx, nz)
+      || (exempt.has(x + ',' + z) && exempt.has(nx + ',' + nz))
+    : null;
+  return segmentClear(open, ax + ox, az + oz, bx + ox, bz + oz, eOpen)
+    && segmentClear(open, ax - ox, az - oz, bx - ox, bz - oz, eOpen);
 }
 
 // Standing spots are free points, not tile centres - but a body must stay
@@ -231,6 +269,22 @@ export function truncateByBudget(path, budget, rate) {
     out.push([bx, bz]);
   }
   return { points: out, cost, done: true, tail: null };
+}
+
+// The smoothing walkability for a just-planned route: the base rule, plus
+// the cells the route itself steps on. The router prices hazard cells
+// (extraCost) rather than blocking them, so a route legally crosses a spill
+// when the detour costs more - and a smoother that treats those same cells
+// as walls can never straighten across ground the route deliberately chose,
+// which un-smooths every walk near a surface into tile-centre stair-steps.
+// Cells the route AVOIDED stay exactly as blocked as `base` says: the union
+// only ever opens ground the router already accepted, so a straight line
+// still refuses to cut through the fire the Dijkstra paid to go around.
+// Vertices are rounded, so the spliced body point exempts the mover's own
+// tile - a walker standing IN a spill can smooth its way out.
+export function routeOpen(base, path) {
+  const chosen = new Set((path || []).map(([x, z]) => Math.round(x) + ',' + Math.round(z)));
+  return (x, z) => base(x, z) || chosen.has(x + ',' + z);
 }
 
 // "String pulling": collapse a tile-by-tile path into the fewest straight
