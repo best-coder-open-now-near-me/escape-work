@@ -54,7 +54,10 @@ const server = createServer(async (req, res) => {
     return;
   }
 
-  const filePath = resolve(join(ROOT, pathname === '/' ? '/index.html' : pathname));
+  // Any directory serves its index.html, not just the root. GitHub Pages does
+  // this (the branch previews live at /preview/<branch>/), so a server that
+  // only special-cased '/' would 404 on a URL that works once deployed.
+  const filePath = resolve(join(ROOT, pathname.endsWith('/') ? `${pathname}index.html` : pathname));
 
   // Never serve outside the root. resolve() has already collapsed any '..',
   // so a prefix check settles it - with the separator so that a sibling
