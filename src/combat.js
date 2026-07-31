@@ -1399,14 +1399,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // Three layers, from the cursor down to the rule (designer, 2026-07-31:
       // "something that is continuous and smooth for starters" - the emblem
       // used to hop in discrete tile-sized steps):
-      //  - a small marker at the PRECISE point under the cursor, continuous,
-      //    which is also where the walk will actually park you;
+      //  - a small marker at the CLAMPED stand point - continuous, and
+      //    exactly where the walk will park you: the raw cursor point can
+      //    sit inside a wall's clearance band, and a marker there would
+      //    promise a spot the body cannot occupy;
       //  - the stand-tile ring, EASED toward the resolved tile rather than
       //    teleporting to it, so sweeping the cursor reads as one motion;
       //  - the shielded faces, snapped to the tile's edges - they are tile
       //    geometry, and drawing them anywhere between two tiles would show
       //    cover on edges that do not exist.
-      drawRing(aimPoint.x, aimPoint.z, 0.12, color);
+      const [mx, mz] = world.clampPoint(aimPoint.x, aimPoint.z);
+      drawRing(mx, mz, 0.12, color);
       if (!coverEase) coverEase = { x: aimPoint.x, z: aimPoint.z };
       const k = 1 - Math.exp(-(previewDt || 0) * 14); // ~70ms settle, fps-independent
       coverEase.x += (tx - coverEase.x) * k;

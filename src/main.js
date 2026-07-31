@@ -2876,9 +2876,12 @@ function startGame(level) {
         const x = Math.round(oocAim.x);
         const z = Math.round(oocAim.z);
         const usable = !oocCoverProblem(x, z);
-        // px/pz is the PRECISE cursor point - the continuous marker, and the
-        // spot the commit will actually walk to.
-        return { x, z, px: oocAim.x, pz: oocAim.z, usable, faces: usable ? oocCoverFaces(x, z) : [] };
+        // px/pz is the CLAMPED stand point - the continuous marker, and
+        // exactly the spot the commit will walk to. The raw cursor point can
+        // sit inside a wall's clearance band; a marker there would promise a
+        // spot the body cannot occupy.
+        const [px, pz] = clampPoint(oocAim.x, oocAim.z);
+        return { x, z, px, pz, usable, faces: usable ? oocCoverFaces(x, z) : [] };
       },
       // What is covering the leader RIGHT NOW, whatever is armed - the
       // held-crouch affordance, so a crouch taken before a fight shows its
