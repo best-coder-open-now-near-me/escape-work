@@ -56,33 +56,50 @@ own terms, with what each one changed.
    can stay around"). `TODO.md`'s dev-flag box is closed as answered rather
    than done.
 
-### The metering question (open)
+### The metering question — answered: one clock (A)
 
-The one thing question 2 does not settle, put with options because it
-changes shape rather than detail:
+`[stated]` (designer, 2026-07-31): *"yes its A. that clock should've been
+used from the beginning for tracking fire and player effects. whats ticking
+player effects then? those should all be using the same thing in and out of
+combat, its not something new going on here."*
 
-- **A — run the turn clock out of combat** (recommended). There is already
-  an out-of-combat clock: `runtime.advanceTurn()` / `ageTempSurfaces()` age
-  fire and smoke. Tying turn-clocked statuses to it makes a 3-turn buff
-  mean three turns everywhere, and fixes the root rather than special-casing
-  buffs. Costs: it is a wide semantic change — *every* turn-clocked status
-  starts ticking out of combat, `burning` and `stunned` included, and what
-  "a turn" means out of a fight has to be pinned to something (steps taken?
-  real seconds? the existing surface tick?).
-- **B — price the verbs out of combat instead**: give the sheet an
-  out-of-combat `uses` ledger that resets when a fight starts, and leave the
-  clock alone. Narrower, but it leaves the permanent-buff hole open — a
-  limited number of permanent buffs is still permanent.
-- **C — let them be free and permanent out there.** Cheapest, and honestly
-  defensible if pre-buffing is meant to be part of the loop rather than a
-  tax. Costs: the buffs stop being a decision.
+**Done.** To answer the question inside it, because it is a fair one and the
+answer is short: `tickTurn` had exactly **one** caller, `turn-order.js:135`,
+which fires as each combatant's turn opens — so the turn clock only ever ran
+inside a fight. `tickStep` is called from `main.js` on each tile entered, so
+the step clock (gum, bleed) always ran on both sides. Two clocks, one of
+which stopped at the door.
 
-Until this is answered, the verbs that need no meter are the safe ones to
-open up — mobility (out of combat you can already walk anywhere, so a free
-dash grants nothing) and `pull` (inert: nothing crouches out there). The
-zone verb `paper-storm` is NOT in that set: it lays down the `paper`
-surface, which is gatherable for ammo, so unmetered it is the exact ammo
-farm `surfaces.js:74` was written to prevent.
+And the designer is right that this was never a new mechanism: the
+out-of-combat world clock has been there all along (`OOC_TURN_SECONDS`,
+`main.js:3149`) and already spends everything a combat round spends — fire,
+smoke, summon assignments, the litter a power dropped. Statuses were the one
+thing it did not spend. `advanceStatusTurn()` now spends them too, over the
+roster, the temps and the coworkers on the floor, through the same `tickTurn`
+with the same durations.
+
+Two things fell out of it:
+
+- **Combat's end-of-fight sweep is gone.** `cleanup()` used to clear every
+  turn-clock status from every combatant on the grounds that "there are no
+  turns on the map". There are now. That sweep was also doing real damage on
+  its way out: walking out of a fight put out the fire you were carrying,
+  cleared a stun mid-sentence, and handed back a Deflect you had spent.
+- **`covered` is the one status that needed care**, and it always was the odd
+  one: its duration is a leak bound, not a clock (`data/statuses.js:197`), and
+  combat re-applies it on every consult while the crouch holds. `main.js` now
+  does the same against `oocCrouch`, or the new clock would have timed a
+  stationary character out of their own cover in four ticks — which the
+  "a crouch taken before the fight rides into it" spec would have caught.
+
+It also closes the metering worry that prompted the question. A 3-turn buff
+is ~4.8 seconds of standing around out of combat, so pre-buffing is
+self-limiting: you cannot walk across the floor wearing it. No `uses` ledger
+needed for that. The remaining unmetered verb to watch is `paper-storm` — it
+lays the `paper` surface, which is gatherable for ammo, so opening zones up
+out of combat unmetered is the exact farm `surfaces.js:74` was written to
+prevent. Mobility and `pull` are safe (you can already walk anywhere out
+there; nothing crouches out there).
 
 ### Confirmed, still open
 

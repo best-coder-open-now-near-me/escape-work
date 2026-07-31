@@ -278,3 +278,61 @@ test('a status map written before severity existed reads as full strength', () =
   assert.equal(statusFx(legacy).accMod, -0.3);
 });
 
+
+// --- one clock, in and out of combat (STATUS_PLAN #2, superseded) ------------
+//
+// `tickTurn` was combat-only by convention, not by construction: turn-order.js
+// was its one caller, and combat's cleanup swept every turn-clock status off
+// its carriers on the way out. Out of combat main.js's world clock now spends
+// a status turn the same way it spends a fire turn, and nothing is swept - so
+// these assert the property that makes that safe, which is that `tickTurn` was
+// never combat-shaped in the first place. It takes a carrier and a duration,
+// and has no idea whether dice are out.
+
+test('tickTurn is a pure duration walk - it knows nothing about combat', () => {
+  // The same carrier, ticked by nobody in particular, expires on schedule.
+  const wanderer = {};
+  applyStatus(wanderer, 'commended'); // turn clock, duration 3 - an HR buff
+  assert.equal(statusLeft(wanderer, 'commended'), 3);
+  tickTurn(wanderer);
+  tickTurn(wanderer);
+  assert.equal(statusLeft(wanderer, 'commended'), 1);
+  const last = tickTurn(wanderer);
+  assert.deepEqual(last.expired, ['commended']);
+  assert.equal(hasStatus(wanderer, 'commended'), false);
+});
+
+test('a turn-clock dot burns a carrier down over its own duration', () => {
+  // A coworker set alight outside a fight used to burn forever and never take
+  // a point of it, because nothing out there ticked the turn clock.
+  const coworker = {};
+  applyStatus(coworker, 'burning'); // turn clock, duration 2, dot 2
+  let total = 0;
+  total += tickTurn(coworker).damage;
+  const second = tickTurn(coworker);
+  total += second.damage;
+  assert.equal(total, 4, 'two ticks of a 2-point dot');
+  assert.deepEqual(second.expired, ['burning']);
+  // ...and a third tick on a spent status is a no-op, not a negative duration.
+  const third = tickTurn(coworker);
+  assert.equal(third.damage, 0);
+  assert.deepEqual(third.expired, []);
+});
+
+test('re-applying `covered` each tick holds the crouch chip open', () => {
+  // `covered`'s duration is a LEAK BOUND, not a clock: combat re-applies it on
+  // every consult while the crouch holds, and out of combat main.js does the
+  // same against `oocCrouch`. Without that, the new world clock would time a
+  // stationary character out of their own cover in four ticks.
+  const croucher = {};
+  applyStatus(croucher, 'covered'); // turn clock, duration 4
+  for (let i = 0; i < 12; i++) {
+    applyStatus(croucher, 'covered'); // the re-apply main.js does each tick
+    tickTurn(croucher);
+  }
+  assert.equal(hasStatus(croucher, 'covered'), true, 'the crouch outlives its own duration');
+  assert.equal(statusLeft(croucher, 'covered'), 3, 'refreshed to max, then ticked once');
+  // Stop re-applying (the walk that breaks cover) and it lapses on schedule.
+  tickTurn(croucher); tickTurn(croucher); tickTurn(croucher);
+  assert.equal(hasStatus(croucher, 'covered'), false);
+});

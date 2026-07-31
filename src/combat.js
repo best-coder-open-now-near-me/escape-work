@@ -1656,11 +1656,18 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   }
 
   function cleanup() {
-    // Turn-clock statuses (Deflect, surprise, and later stun/burn) are
-    // combat-scoped - there are no turns on the map, so sweep them from every
-    // combatant as the fight ends. Step-clock statuses (gum/bleed) persist.
-    for (const m of members) clearStatuses(m.sheet, { clock: 'turn' });
-    for (const e of engaged) clearStatuses(e, { clock: 'turn' });
+    // Turn-clock statuses used to be swept off every combatant here, because
+    // "there are no turns on the map". There are now: main.js's out-of-combat
+    // clock spends a status turn the same way it spends a fire turn (designer,
+    // 2026-07-31 - one clock, in and out of combat), so these keep counting
+    // down where they stand instead of being cured by the fight ending.
+    //
+    // That sweep was doing real damage to the fiction on its way out: walking
+    // out of a fight put out the fire you were carrying, cleared the stun mid
+    // -sentence, and handed back a Deflect you had spent. What it protected
+    // against - a status hanging on a sheet forever with nothing to tick it -
+    // is exactly what the clock now prevents. Step-clock statuses (gum/bleed)
+    // persisted through this all along; the two clocks agree at last.
     // Summons OUTLIVE the fight now (main.js keeps them until their assignment
     // runs out), with one exception: one that fell is gone for good. There is no
     // body to loot and no revive courtesy, so sweep it here rather than leaving

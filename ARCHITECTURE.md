@@ -43,7 +43,15 @@ src/
                      status map, both clocks, plus the SEVERITY a status
                      landed at - Composure shortens a resistable status
                      and blunts it, scaling every magnitude in the merged
-                     effect view (never a boolean)             (pure logic)
+                     effect view (never a boolean).
+                     BOTH CLOCKS RUN IN AND OUT OF COMBAT. The step clock
+                     ticks per tile walked, wherever you are; the turn clock
+                     ticks at a combatant's turn start in a fight and on
+                     main.js's world clock outside one - the same clock that
+                     ages fire, smoke and summon assignments. Nothing is
+                     swept when a fight ends, so a status means the same
+                     thing on both sides of the door (STATUS_PLAN #2)
+                                                               (pure logic)
   tactics.js         Positional to-hit modifiers: facing, flanking, cover
                      (TACTICS_PLAN.md)                         (pure logic)
   surfaces-runtime.js Fire/smoke/fuse state machine, advanced one turn at a

@@ -24,7 +24,7 @@ import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
   serializeProgress, parseProgress, PARTY_CAP, addCash,
 } from './party.js';
-import { applyStatus, removeStatus, statusFx, hasStatus, tickStep, statusLeft, statusList } from './statuses.js';
+import { applyStatus, removeStatus, statusFx, hasStatus, tickStep, tickTurn, statusLeft, statusList } from './statuses.js';
 import { createDraft, createCharacter, draftModel, draftLook } from './creation.js';
 import { CUSTOM_RIGS } from './data/looks.js';
 import { aimsAtAlly, coneFrom, conePolyline, isToppleable, toppleLanding } from './powers.js';
@@ -2110,6 +2110,78 @@ function startGame(level) {
     return down;
   }
 
+  // Turn-clock statuses OUT of combat (designer, 2026-07-31: "that clock
+  // should've been used from the beginning ... they should all be using the
+  // same thing in and out of combat, its not something new going on here").
+  //
+  // Exactly right, and the clock was already here. `turn-order.js` ticks these
+  // as each combatant's turn opens; out of a fight the world clock below
+  // stands in, and it already spends everything a combat round spends - fire,
+  // smoke, summon assignments, the litter a power dropped. Statuses were the
+  // ONE thing it did not spend, and that omission is what made a turn-clocked
+  // status mean two different things depending on whether dice were out: a
+  // 3-turn buff applied on the map was permanent, and a coworker set alight
+  // outside a fight never burned. Same `tickTurn`, same durations, both sides.
+  //
+  // `hurt(damage)` is how this carrier takes a dot - a sheet and a coworker
+  // count HP differently - and returns whether it dropped them. Returns the
+  // expired ids too, because a caller may need to react to what lapsed.
+  function tickTurnClockOn(carrier, actor, hurt) {
+    const { damage, expired } = tickTurn(carrier);
+    if (damage <= 0) return { down: false, damage, expired };
+    // The dot's look rides the body, not the tile centre, so a status burning
+    // somebody mid-walk lands its number on them.
+    const p = actor?.entity ? actor.entity.getPosition() : actor;
+    vfx.impact(p.x, p.z, 'fire', { y: 0.4 });
+    vfx.damageText(p.x, p.z, `-${damage}`, '#ff7a3c');
+    return { down: hurt(damage), damage, expired };
+  }
+
+  // One out-of-combat turn's worth of status clock, over everyone who can
+  // carry one: the roster, the temps still on assignment, and the coworkers
+  // wandering the floor. Deaths are collected and resolved AFTER the sweep,
+  // the same shape handleExplosion uses - one casualty must not cut the tick
+  // short for everybody else, or the XP for the coworkers it finished off.
+  function advanceStatusTurn() {
+    if (!party) return;
+    // `covered` is the one turn-clocked chip whose duration is a LEAK BOUND
+    // rather than a clock (data/statuses.js): combat revalidates the crouch on
+    // every consult and re-applies the chip while it holds, so only an
+    // abandoned fight lets it lapse. Out here the crouch is `oocCrouch`, and
+    // it holds until a deliberate walk breaks it - so re-apply on the same
+    // terms rather than letting the new clock time it out from under a
+    // stationary character. Without this, a crouch taken before a fight
+    // evaporated after four ticks of standing still.
+    if (oocCrouch && sheet) applyStatus(sheet, 'covered');
+    const downed = [];
+    for (const m of party.members) {
+      if (!m.actor || m.sheet.hp <= 0) continue;
+      const r = tickTurnClockOn(m.sheet, m.actor, (d) => applyDamage(m.sheet, d));
+      if (r.damage > 0 || r.expired.length) syncHudFor(m.sheet);
+      if (r.down) downed.push(m);
+    }
+    for (const s of [...summons]) {
+      if (!s.actor || s.sheet.hp <= 0) continue;
+      // A temp takes the rules in silence, like everywhere else in this file.
+      if (tickTurnClockOn(s.sheet, s.actor, (d) => applyDamage(s.sheet, d)).down) {
+        dismissSummon(s.actor);
+      }
+    }
+    const slain = [];
+    for (const en of enemies) {
+      if (!en.alive) continue;
+      if (tickTurnClockOn(en, en, (d) => en.takeDamage(d)).down) slain.push(en);
+    }
+    for (const en of slain) {
+      vfx.impact(en.x, en.z, 'blood', { y: 0.4 });
+      awardKill(en);
+    }
+    for (const m of downed) {
+      downOrLose(m, 'Burned down at your desk. The incident report writes itself.');
+      if (gameOver) return; // that was the wipe
+    }
+  }
+
   // Surfaces (data/surfaces.js): fire and electrified pools hurt, paper cuts
   // (and arms you), gum sticks, water and coffee editorialize. The walker's own
   // talents can shrug the damage off. True if it dropped them.
@@ -3152,6 +3224,10 @@ function startGame(level) {
       while (oocTurnClock >= OOC_TURN_SECONDS) {
         oocTurnClock -= OOC_TURN_SECONDS;
         runtime.advanceTurn();
+        // ...and so are the statuses everyone is carrying. Same clock, same
+        // `tickTurn`, same durations as a fight - see advanceStatusTurn.
+        advanceStatusTurn();
+        if (gameOver) break;
         ageSummons(); // temps you brought out of the last fight are on the clock
         // ...and so is the litter a power dropped. This clock stands in for
         // combat's rounds, so it has to spend everything a round spends (see
