@@ -2760,9 +2760,30 @@ function startGame(level) {
   // gets a glide to where they stand right now: follow can't attach to a
   // body the rig doesn't track, and pretending otherwise would drift the
   // view back to the followed character a frame later.
+  // Who the player is DRIVING right now: the acting combatant in a fight, the
+  // leader out of one. `player` answers a DIFFERENT question - "who leads the
+  // party" - and while a fight is on those two stop being the same body:
+  // `makeActive` hands you a teammate to steer without touching `player`, and
+  // `switchLeader` returns early in combat by design.
+  //
+  // Letting the camera read `player` meant steering a companion through a
+  // shared turn drove a body the rig was not tracking, and `Home` - the key
+  // whose comment promises "whoever you're driving" - resolved to the panTo
+  // branch below, DETACHING the rig and freezing it where that member stood.
+  // Nothing re-attached until control changed hands. One function is where
+  // that question gets answered now, and the follow loop, the wall fade, the
+  // recenter key, the profile card and the initiative rows all read it.
+  //
+  // Follow the acting character (designer, 2026-07-31: "agreed") - which is
+  // also what BG3 and DOS2 do with the character whose turn it is.
+  const steeredActor = () => (inCombat && combat ? combat.actingActor || player : player);
+
   function focusCameraOn(actor) {
     if (!actor) return;
-    if (actor === player) { controls.recenter(); return; }
+    // Re-ATTACH when the target is the body the rig already follows; glide to
+    // a detached point when it is anyone else (another member's card, an
+    // enemy's initiative row), where snapping follow onto them would be a lie.
+    if (actor === steeredActor()) { controls.recenter(); return; }
     const p = actor.entity?.getPosition();
     if (p) controls.panTo({ x: p.x, z: p.z });
     else controls.panTo({ x: actor.x, z: actor.z });
@@ -2780,7 +2801,7 @@ function startGame(level) {
     statsCard.onmousedown = (e) => e.stopPropagation(); // clicks stay off the canvas
     statsCard.ondblclick = () => {
       if (!sheet || gameOver) return;
-      focusCameraOn(inCombat && combat ? combat.actingActor : player);
+      focusCameraOn(steeredActor());
     };
   }
 
@@ -2851,7 +2872,7 @@ function startGame(level) {
     } else if (e.key === 'Home' && sheet && !gameOver) {
       // BG3's recenter key: put the camera back on whoever you're driving
       // (the acting combatant in a fight, the leader out of one).
-      focusCameraOn(inCombat && combat ? combat.actingActor : player);
+      focusCameraOn(steeredActor());
     }
   });
   window.addEventListener('keyup', (e) => {
@@ -3154,8 +3175,8 @@ function startGame(level) {
     // looking through their eyes while the coworkers move), out of one it's the
     // leader. A blinded companion you are not driving costs you their accuracy,
     // not your screen.
-    const steered = inCombat && combat ? combat.actingSheet : sheet;
-    const impair = !gameOver && steered ? statusFx(steered) : null;
+    const steeredSheet = inCombat && combat ? combat.actingSheet : sheet;
+    const impair = !gameOver && steeredSheet ? statusFx(steeredSheet) : null;
     vision.set(impair?.aimSway || 0, impair?.sightBlots || 0);
     vision.update(dt);
     // A drifting aim goes stale the moment the mouse stops, so re-ask the world
@@ -3182,12 +3203,17 @@ function startGame(level) {
         controls.refreshHover();
       }
     }
-    // Follow the player, keeping them centred in frame. Track the entity's
-    // CONTINUOUS position (player.x/z is the logical tile, which jumps a whole
-    // tile at a time and makes the camera step along with the walk).
-    const pp = player.entity ? player.entity.getPosition() : player;
+    // Follow whoever you're STEERING, keeping them centred in frame. Track the
+    // entity's CONTINUOUS position (actor.x/z is the logical tile, which jumps
+    // a whole tile at a time and makes the camera step along with the walk).
+    // The walls ghost for the same body, or you would be driving a character
+    // the room keeps solid.
+    // (`steeredSheet` above is this same question asked of the SHEET - vision
+    // already read the acting body correctly; only the camera read `player`.)
+    const steeredBody = steeredActor();
+    const pp = steeredBody.entity ? steeredBody.entity.getPosition() : steeredBody;
     controls.follow({ x: pp.x, z: pp.z }, dt);
-    updateWallFade(controls.cameraEntity, player.entity ? player.entity.getPosition() : null);
+    updateWallFade(controls.cameraEntity, steeredBody.entity ? steeredBody.entity.getPosition() : null);
   });
 
   // --- boot -------------------------------------------------------------------------
@@ -3325,6 +3351,17 @@ function startGame(level) {
     get playerPos() {
       const p = player.entity?.getPosition();
       return p ? { x: p.x, z: p.z } : { x: player.x, z: player.z };
+    },
+    // Where the body you are STEERING is - the camera's follow target. Out of
+    // a fight this is `playerPos`; in one it is the acting member, which is a
+    // DIFFERENT body the moment a shared turn hands you a teammate. The camera
+    // specs assert against this one, because asserting against `playerPos`
+    // is what let the follow read the leader for so long: with a one-member
+    // party the two agree, and the spec passed on a true negative.
+    get steeredPos() {
+      const a = steeredActor();
+      const p = a.entity?.getPosition();
+      return p ? { x: p.x, z: p.z } : { x: a.x, z: a.z };
     },
     // Where the camera actually sits, for tests that assert on the framing
     // (the tactical view collapses the horizontal offset to ~nothing).
@@ -3493,9 +3530,12 @@ function startGame(level) {
     },
     switchTo(i) {
       // In combat this steers the open shared turn instead - refused unless
-      // party.members[i] is holding the floor (INITIATIVE_PLAN).
-      if (!inCombat) switchLeader(i);
-      else combat?.steerMember(party?.members[i]);
+      // party.members[i] is holding the floor (INITIATIVE_PLAN). Returns
+      // whether the steer was ACCEPTED, because refusal is the common case
+      // (no shared turn this round) and a spec that cannot tell "it steered"
+      // from "it declined" has to guess which one it just asserted about.
+      if (!inCombat) { switchLeader(i); return true; }
+      return !!combat?.steerMember(party?.members[i]);
     },
     reviveMember(i) {
       const m = party?.members[i];

@@ -274,6 +274,15 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   too (a leader switch, a survivor stepping up, a fight starting) - the view
   belongs with whoever you're driving. main.js owns WHO (`focusCameraOn`);
   the rig only owns HOW.
+  **The body the rig follows is `steeredActor()`** - the acting combatant in a
+  fight, the leader out of one - and that is the ONE answer to "who is the
+  player driving?". `player` answers a different question ("who leads the
+  party"), and the two diverge the moment a shared turn hands you a teammate:
+  `makeActive` never re-keys `player`, and `switchLeader` returns early in
+  combat by design. While the follow loop read `player`, steering a companion
+  drove a body the camera wasn't tracking, and `Home` DETACHED the rig instead
+  of recentering it. The follow, the wall fade, `Home`, the profile card, the
+  party-bar card and the initiative rows all read the one function now.
 - **Walls between you and the camera are ghosted**, and the test for "between"
   is 3D (`occlusion.js`, unit tested). It walks the sightline from the camera to
   the character's FEET and ghosts a wall only where that segment is still below

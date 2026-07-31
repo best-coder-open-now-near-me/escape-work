@@ -326,10 +326,12 @@ killing anyone, and therefore the correct play every time.
 
 ## Phase 0 — Critical fix + data-loss fixes
 
-- [ ] **Fix the combat soft-lock** (`combat.js:2060`): guard `handleEnemyClick`'s
-      melee fall-through so armed buff/mobility actions never resolve as
-      strikes; clamp `takeDamage` against non-finite amounts (`actors.js:390`)
-      so any future NaN source degrades to a visible no-op, not a soft-lock.
+- [x] ~~**Fix the combat soft-lock**~~ — done, and by a better route than this
+      entry specified. `combat-targeting.verbKind` is now the ONE classifier
+      both the rings and the click dispatch on, so an armed buff/mobility can
+      no longer reach the melee fall-through at all (rather than being guarded
+      out of it at one call site); `actors.js:430` clamps a non-finite
+      `takeDamage` to a visible no-op.
 - [ ] **Editor playtest must not wipe the campaign save** (`main.js:592`):
       gate `clearProgress()` on campaign mode in both `loseGame()` and the
       exit handler's non-campaign branch.
@@ -767,8 +769,10 @@ Still open, and genuinely optional:
       `onEnter.effect` (`scene.js:65`); harvest/icon/footprint fields on data
       entries (`looting.js:59`, `:309`, `fx.js:634`); item verbs from data,
       not `heal||ammo` sniffing in panels (`ui/panels.js:165`).
-- [ ] Gate `god.js` behind a dev flag (hash/query/localStorage opt-in that
-      does not ship claimed hotkeys) (`god.js:73`).
+- [x] ~~Gate `god.js` behind a dev flag~~ — **not doing it.** `[stated]`
+      (designer, 2026-07-31): "god mode can stay around". It ships on the
+      itch.io build, opens on backquote/F8, and persists across reloads.
+      Closed as answered, not as done.
 - [ ] Edge-aware `isFlanked` (`tactics.js:208`); decide surprise-vs-POSITION_CAP
       spec question and align code or TACTICS_PLAN (`tactics.js:263`).
 

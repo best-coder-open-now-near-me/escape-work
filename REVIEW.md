@@ -8,73 +8,84 @@ together here and **every claim was re-traced through the code on this
 branch** before it was kept. Findings that the branch has since fixed are
 recorded as closed rather than deleted, so they are not re-found later.
 
-### Questions for the designer
+### Questions for the designer — answered 2026-07-31
 
-Four findings are questions about intent, not defects. Options, consequences
-and a recommendation each; nothing below is implemented until you answer.
+All four came back the same day they were asked. Recorded in the designer's
+own terms, with what each one changed.
 
-1. **In a fight, should the camera follow whoever's turn it is, or stay with
-   the leader?** Today it stays with the leader, always. The fix depends
-   entirely on which you want.
-   - **A — follow the acting character** (recommended). Matches BG3/DOS2 and
-     matches what `main.js:2851`'s own comment already promises. Costs: what
-     `player` MEANS in `main.js` has to change (it is both "the leader" and
-     "the body the camera follows", and those stop being the same thing).
-   - **B — stay with the leader, and fix the promise instead.** Cheaper: the
-     `Home` comment and the ARCHITECTURE paragraph get rewritten to say
-     "leader", and `focusCameraOn` stops detaching. Costs: steering a
-     companion through a shared turn keeps you driving a body off-frame.
-   Either way the detach bug below is real and gets fixed.
+1. **The camera follows the acting character in a fight.** `[ratified]`
+   (designer, 2026-07-31: "agreed"). **Done.** `main.js:steeredActor()` is
+   the one answer to "who is the player driving?" — the acting combatant in
+   a fight, the leader out of one — and the follow loop, the wall fade,
+   `Home`, the profile card, the party-bar card and the initiative rows all
+   read it. `player` keeps its old, narrower meaning ("who leads the
+   party"). See "the camera detach" under *Closed*.
 
-2. **Should the HR/Mail buffs work out of combat?** `performance-review`,
-   `onboarding` (buffs) and `courier-swap` (mobility) cannot be armed
-   outside a fight, so two classes' identity verbs are unreachable there —
-   and the refusal names the wrong reason ("only means something once
-   someone is swinging at you", said about a morale buff).
-   - **A — let buffs arm out of combat** (recommended): they are how those
-     classes feel like themselves, and there is already a dispatch path
-     waiting for them (`oocFriendlyOn`, `main.js:1157`, currently dead code).
-   - **B — keep them combat-only** and give them an honest refusal line.
-   Cheap either way; the current state is the one option nobody chose.
+2. **Everything should work out of combat.** `[stated]` (designer,
+   2026-07-31: "yes, i dont see any reason anything shouldnt ever work out
+   of combat"). Broader than the question asked, and correct as a
+   direction — but it lands on a real obstacle that is worth stating
+   plainly, because it is not about the verbs. **Out of combat there are no
+   meters.** AP, per-fight `uses`, and the turn clock are all combat-only
+   state, so a verb armed out there costs nothing, is limited by nothing,
+   and — if it applies a turn-clocked status — never expires. Concretely:
+   `performance-review` and `onboarding` apply 3-turn buffs on the `turn`
+   clock, and only `tickStep` runs outside a fight (`main.js:2093`), so an
+   out-of-combat buff is **permanent** until a fight starts and burns it
+   down. Pre-buffing before every fight becomes free, mandatory, and
+   invisible. See "the metering question" below — it is the one thing still
+   open on this, and it is a design question, not an engineering one.
 
-3. **Should a fired staple land as gatherable paper?** The `paper` surface
-   already exists, is gatherable once via the Alt overlay, and is explicitly
-   designed not to be farmable ("a Mail Room can't farm their own cone for
-   endless paper", `surfaces.js:74`). A staple landing as a drift would be a
-   second, per-shot source of exactly that.
-   - **A — no** (recommended): keep ammo recovery to the one deliberate
-     source. Ranged ammo staying spent is what prices the ranged game.
-   - **B — yes**, with the same once-only gather rule.
+3. **Withdrawn — the premise was wrong.** `[stated]` (designer,
+   2026-07-31: "why would staples create paper? i find the questions whole
+   premise confusing"). Fair: it came out of an earlier review pass, not
+   from anything in the design, and it does not survive contact with the
+   fiction. The `paper` surface is shredded TPS reports you gather once
+   (`surfaces.js:74`); a fired staple has nothing to do with it. Dropped,
+   and recorded here so it is not re-raised.
 
-4. **Does `POWERS_PLAN.md` get retro-tagged?** It was written the day the
-   tagging rule landed, edited two days later, carries **zero** tags, and
-   its decisions are already shipped as the six-class kit. Under CLAUDE.md
-   every one of them is `[proposed]` — which is not what a shipped kit
-   should be.
-   - **A — retro-tag it** (recommended): walk it once, mark what the played
-     game embodies as `[ratified]`, and leave the rest `[proposed]` with
-     their questions named. An afternoon.
-   - **B — declare the shipped kit ratified wholesale** and tag only what
-     is not yet built. Faster, but it ratifies decisions you may never have
-     been asked about.
-   Also unanswered from the last pass: **is god mode ungated on the shipped
-   itch.io build deliberate?** It is in the bundle, opens on backquote/F8,
-   and persists across reloads via `localStorage`. `TODO.md:770` proposes a
-   dev flag; nobody ratified it.
+4. **`POWERS_PLAN.md` is not retro-tagged — it is a live document.**
+   `[stated]` (designer, 2026-07-31: "thats a design doc im working on
+   now"). The tagging finding is **withdrawn**: a doc being written now is
+   not a doc that skipped the discipline, and going through it to stamp
+   tags on decisions the designer is still forming would be exactly the
+   presumption CLAUDE.md exists to prevent. Hands off until they say
+   otherwise. (The other zero-tag docs in the list below stand as an
+   observation, not a work item.)
+   **God mode stays ungated.** `[stated]` (designer, 2026-07-31: "god mode
+   can stay around"). `TODO.md`'s dev-flag box is closed as answered rather
+   than done.
+
+### The metering question (open)
+
+The one thing question 2 does not settle, put with options because it
+changes shape rather than detail:
+
+- **A — run the turn clock out of combat** (recommended). There is already
+  an out-of-combat clock: `runtime.advanceTurn()` / `ageTempSurfaces()` age
+  fire and smoke. Tying turn-clocked statuses to it makes a 3-turn buff
+  mean three turns everywhere, and fixes the root rather than special-casing
+  buffs. Costs: it is a wide semantic change — *every* turn-clocked status
+  starts ticking out of combat, `burning` and `stunned` included, and what
+  "a turn" means out of a fight has to be pinned to something (steps taken?
+  real seconds? the existing surface tick?).
+- **B — price the verbs out of combat instead**: give the sheet an
+  out-of-combat `uses` ledger that resets when a fight starts, and leave the
+  clock alone. Narrower, but it leaves the permanent-buff hole open — a
+  limited number of permanent buffs is still permanent.
+- **C — let them be free and permanent out there.** Cheapest, and honestly
+  defensible if pre-buffing is meant to be part of the loop rather than a
+  tax. Costs: the buffs stop being a decision.
+
+Until this is answered, the verbs that need no meter are the safe ones to
+open up — mobility (out of combat you can already walk anywhere, so a free
+dash grants nothing) and `pull` (inert: nothing crouches out there). The
+zone verb `paper-storm` is NOT in that set: it lays down the `paper`
+surface, which is gatherable for ammo, so unmetered it is the exact ammo
+farm `surfaces.js:74` was written to prevent.
 
 ### Confirmed, still open
 
-- **`Home` detaches the camera from the member you are steering.** The rig
-  follows `player` — the *leader's* actor — every frame (`main.js:3189`),
-  and `makeActive` (`combat.js:1531`) never re-keys that binding;
-  `switchLeader` returns early while `inCombat` (`main.js:1500`). So in a
-  multi-member fight `combat.actingActor !== player`, and `focusCameraOn`
-  (`main.js:2763`) takes the `panTo` branch: the key whose comment promises
-  "whoever you're driving" **detaches** the rig and freezes it where that
-  member stood. Nothing re-attaches until a control change. Same for the
-  profile card, the party-bar card and the initiative row. `camera.spec.js`
-  fights with a one-member party, so `actingActor === player` always holds
-  and the spec asserts the true negative.
 - **Player-typed names go raw into `innerHTML`,** on four surfaces now, not
   one: the initiative strip (`ui/combat.js:48`), the HUD profile card
   (`ui/hud.js:96`), the party-bar slot (`ui/hud.js:426`) and the character
@@ -93,11 +104,13 @@ and a recommendation each; nothing below is implemented until you answer.
   not change where the member roll's randomness comes from.
 - **God mode ships ungated** (`god.js:74`, `main.js:3585`): backquote/F8, and
   `localStorage` makes it stick across reloads. See question 4.
-- **Intent-tagging holds in 4 plan docs out of 18.** `TACTICS_PLAN` (32
-  tags), `CHARACTER_PLAN` (22), `INITIATIVE_PLAN` (15), `REFACTOR_PLAN` (4).
-  Zero in `POWERS_PLAN`, `PROGRESSION_PLAN`, `SUMMON_PLAN`, `STATUS_PLAN`,
-  `PARTY_PLAN`, `MOVEMENT_PLAN`, `HIT_PLAN`, `EQUIPMENT_PLAN`,
-  `ECONOMY_PLAN`.
+- **Intent-tagging holds in 4 plan docs out of 18** — `TACTICS_PLAN` (32
+  tags), `CHARACTER_PLAN` (22), `INITIATIVE_PLAN` (15), `REFACTOR_PLAN` (4);
+  zero in `PROGRESSION_PLAN`, `SUMMON_PLAN`, `STATUS_PLAN`, `PARTY_PLAN`,
+  `MOVEMENT_PLAN`, `HIT_PLAN`, `EQUIPMENT_PLAN`, `ECONOMY_PLAN`. Recorded as
+  an observation, not a work item: retro-tagging somebody else's docs is the
+  presumption the rule exists to prevent. `POWERS_PLAN` is deliberately off
+  this list — it is being written now (question 4).
 - **Eight-plus `stats.js` exports are named by no test at all** — 12 by a
   strict count: `pendingPoints`, `effectiveAttr`, `createSheetFrom`,
   `normalizeAttr`, `trackNode`, `nodeAvailable`, `applyEffect`,
@@ -119,11 +132,25 @@ and a recommendation each; nothing below is implemented until you answer.
 
 ### Closed since the earlier passes
 
-- **The Phase 0 critical is fixed, better than `TODO.md:329` specifies.**
+- **The camera detach is fixed** (question 1). The rig followed `player` —
+  the *leader's* actor — every frame, `makeActive` never re-keyed that
+  binding, and `switchLeader` returns early while `inCombat` by design. So
+  in a multi-member fight `combat.actingActor !== player`, and
+  `focusCameraOn` took the `panTo` branch: the key whose comment promised
+  "whoever you're driving" **detached** the rig and froze it where that
+  member stood, with nothing re-attaching until control changed hands.
+  `steeredActor()` is the one owner now. The spec that missed it asserted
+  against `playerPos` in a one-member fight, where the leader and the acting
+  member are the same object — a true negative. It asserts against
+  `steeredPos` now, and a new two-member leg steers a teammate mid-fight and
+  checks the camera goes with them. That leg needs a SHARED turn, which is a
+  dice outcome, so it skips when the roll does not produce one — a seeded
+  initiative hook would make it deterministic and is worth doing.
+- **The Phase 0 critical is fixed, better than `TODO.md:329` specified.**
   `combat-targeting.verbKind` dispatches before any melee fall-through, so
   an armed buff/mobility can no longer resolve as a strike, and
   `actors.js:430` clamps non-finite damage to a visible no-op. The TODO box
-  is stale and should be ticked.
+  is ticked.
 - **The slip rule no longer exists three times.** `step-rules.js` is the one
   owner for members, summons, AI units and wanderers, with the
   sample-before-tick rule in it. (The seeded-stream half is still open,
