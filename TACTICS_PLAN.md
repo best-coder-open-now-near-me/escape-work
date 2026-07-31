@@ -790,11 +790,19 @@ None. See decision #6.
      fallen twins are also breakable, so topple-then-destroy prices full
      tile denial at two actions; Pull Over requires an actual crouched
      target — it is cover-denial, not a generic yank — and lands them on
-     the free tile beside the puller nearest the barrier they came over;
+     the free tile beside the puller nearest the barrier they came over
+     (**superseded** — `[stated]` designer, 2026-07-31: the landing is the
+     free tile beside the puller on the FAR side from where they were tucked
+     in, so the puller ends up between them and the barrier. "nearest" also
+     shipped a bug: measured in tiles alone it could pick the tile across the
+     partition, dragging the target one tile on their own side);
      the AI neither breaks barriers nor pulls in v1 (deferred with AI
      partition toppling); partitions ring their break affordance only when
      adjacent (the shove's own partial-affordance precedent) though the
-     ranged click resolves at any legal range.
+     ranged click resolves at any legal range — and, `[stated]` (designer,
+     2026-07-31), only while the attack is deliberately ARMED. The break
+     rings shipped ungated: the basic attack satisfies `aimsAtProps`, so
+     every partition you stood beside rang green for the whole fight.
 
    **As landed (2026-07-30):**
    - The pools: `hp` on the cover-grade tile defs and `PARTITION_HP` for

@@ -1377,7 +1377,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // everything it could hit; adjacent partitions ring like the shove's do
     // (a DISTANT partition stays un-rung - the shove's own partial-affordance
     // precedent `[proposed]` - though the ranged click still resolves).
-    {
+    //
+    // ARMED is load-bearing, and was not enforced. The coworker rings above
+    // are deliberately drawn with nothing armed, because a bare click still
+    // swings; these are not the same. `aimsAtProps` passes for the plain
+    // basic attack, so every partition edge you stood beside rang green for
+    // the whole fight - a ring on the tile ACROSS a cubicle wall, promising
+    // a verb nobody had reached for (designer, 2026-07-31). Breaking cover
+    // down is a thing you go looking for; its affordance appears when you do.
+    if (armed) {
       const b = bodyOf(active);
       const paid = (!a.ammoCost || active.sheet.paper >= ammoCostOf(id)) && active.ap >= a.ap;
       const { props, edges } = breakRings(a, b.x, b.z, rangeOf(id), {
@@ -1852,7 +1860,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         const blocked = blockedBy(en, 'stunned');
         if (applyStatus(en, 'stunned')) {
           statusFxAt(en, 'stunned');
-          msg += ' They crumple - dazed.';
+          msg += ` They crumple - ${STATUSES.stunned.name}, they lose their next turn.`;
         } else if (blocked) msg += ` ${immunityLine(blocked, en.def.name)}`;
       }
       if (died) callbacks.onEnemyKilled(en);
@@ -2240,7 +2248,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         const blocked = blockedBy(en, 'stunned');
         if (applyStatus(en, 'stunned')) {
           statusFxAt(en, 'stunned');
-          msg += ' Dazed.';
+          // Name the status the HUD chip names, and say what it costs them.
+          // "Dazed." named nothing on the sheet and sounded like a to-hit
+          // penalty; the status is a SKIPPED TURN (designer, 2026-07-31: "what
+          // does it do?"), and a lost turn is worth reading as one.
+          msg += ` ${STATUSES.stunned.name} - they lose their next turn.`;
         } else if (blocked) msg += ` ${immunityLine(blocked, en.def.name)}`;
         if (applyStatus(en, 'pinned')) statusFxAt(en, 'pinned');
       } else {
@@ -3172,8 +3184,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       out.push('Moving breaks it; attacking does not');
     }
     if (isPull(a)) {
-      out.push('Aim at an enemy dug in behind cover, from its far side - you reach over and haul them to you');
-      out.push(`Grit save: pass lands them on their feet, fail is ${a.crush[0]}-${a.crush[1]} damage, dazed and pinned`);
+      out.push('Aim at an enemy dug in behind cover, from its far side - you reach over and haul them past you, clear of what they were tucked behind');
+      out.push(`Grit save: pass lands them on their feet, fail is ${a.crush[0]}-${a.crush[1]} damage, a skipped turn (${STATUSES.stunned.name}) and pinned`);
       out.push('Their cover stays standing');
     }
     if (isStance(a)) {

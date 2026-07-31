@@ -138,7 +138,7 @@ export function pullPlan(puller, target, crouch, { stepOpen, open, name = 'They'
   const dp = posOf(target);
   if (dist(me.x, me.z, dp.x, dp.z) > REACH.PULL) return { refusal: 'Too far to reach over.' };
 
-  const landing = pullLanding(A.x, A.z, D.x, D.z, open);
+  const landing = pullLanding(A.x, A.z, D.x, D.z, open, stepOpen);
   if (!landing) return { refusal: 'No room on your side to land them.' };
   return { landing, crouch };
 }

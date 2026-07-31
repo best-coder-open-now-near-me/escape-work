@@ -26,9 +26,20 @@ export function createDoors({
 }) {
   // Only a key the grid actually has is a door. Kept separate from the pure
   // `doorKeyNear` so the arithmetic stays testable without a grid.
+  //
+  // An OPEN door is not claimed from the ground at all. An open doorway is a
+  // gap you walk through - it is the tile you most want to click ON - and
+  // letting the floor there resolve to the door meant a step through a
+  // doorway pulled it shut instead (designer, 2026-07-31). Closing it is
+  // still one click: the swung-open panel is a registered pick target, so
+  // aiming at the door itself works, as do the right-click menu and the Alt
+  // overlay. Every ground-point surface reads this - the cursor, the focus
+  // banner, the click - so they cannot disagree about what the floor means.
   const doorNearPoint = (point) => {
     const key = doorKeyNear(point);
-    return key && grid.doors.has(key) ? key : null;
+    if (!key) return null;
+    const door = grid.doors.get(key);
+    return door && !door.open ? key : null;
   };
 
   // The door a click or a hover means IN COMBAT, or null. One predicate, read
@@ -44,9 +55,9 @@ export function createDoors({
   // Hitting the door MESH always counts - you aimed at the door, there is
   // nothing else you could have meant. A ground point merely NEAR a door edge
   // only counts when you are already standing beside it, because
-  // `doorNearPoint` claims a wide band either side of the edge and movement is
+  // `doorNearPoint` claims a band either side of the edge and movement is
   // the expensive thing in a fight: a click on the floor by a doorway has to
-  // stay a step, not become a refusal.
+  // stay a step, not become a refusal - or, worse, a 2 AP door swing.
   const combatDoorAt = (hit, point) => {
     if (hit?.kind === 'door') return hit.ref;
     const key = point ? doorNearPoint(point) : null;

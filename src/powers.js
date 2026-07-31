@@ -163,17 +163,30 @@ export const aimsAtProps = (a) =>
 
 export const isPull = (a) => !!a && a.type === 'pull';
 
-// Where a pulled body lands: the free tile beside the PULLER nearest to where
-// the target was dragged from - "snag over an enemy to your side" (designer).
+// Where a pulled body lands: the free tile beside the PULLER on the FAR side
+// from where the target was dug in - "the enemy ends up on the far side of the
+// attacker from where they were tucked in at" (designer, 2026-07-31).
 // Orthogonal neighbours only (the haul ends square on your side, not slung
 // around a corner), never the puller's own tile and never the tile the target
-// already holds. `open(x, z)` is the caller's walkable-and-unoccupied test;
-// null when your side has no room, which is a refusal, not a fallback.
-export function pullLanding(ax, az, tx, tz, open) {
+// already holds.
+//
+// Two things were wrong with taking the NEAREST spot instead. The small one is
+// feel: a haul that ends one tile from the barrier reads as a nudge, and the
+// enemy is still in cover's shadow. The large one is that "beside the puller"
+// was measured in tiles alone, so the nearest spot was routinely the one
+// ACROSS the very partition the pull is supposed to cross - the target got
+// dragged one tile sideways on their own side, having never come over.
+// `stepOpen(fromX, fromZ, toX, toZ)` closes that: a landing you could not step
+// to from where you stand is not on your side of anything.
+//
+// `open(x, z)` is the caller's walkable-and-unoccupied test; null when your
+// side has no room, which is a refusal, not a fallback.
+export function pullLanding(ax, az, tx, tz, open, stepOpen = () => true) {
   const spots = [[ax + 1, az], [ax - 1, az], [ax, az + 1], [ax, az - 1]]
-    .sort((p, q) => Math.hypot(p[0] - tx, p[1] - tz) - Math.hypot(q[0] - tx, q[1] - tz));
+    .sort((p, q) => Math.hypot(q[0] - tx, q[1] - tz) - Math.hypot(p[0] - tx, p[1] - tz));
   for (const [x, z] of spots) {
     if (x === tx && z === tz) continue;
+    if (!stepOpen(ax, az, x, z)) continue;
     if (open(x, z)) return [x, z];
   }
   return null;

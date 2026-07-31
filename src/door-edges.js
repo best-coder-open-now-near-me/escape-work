@@ -28,16 +28,25 @@ export function doorMidpoint(key) {
 }
 
 // The edge key nearest a precise ground point, or null when the point is not
-// near any edge. The 0.3 band is deliberately wide - you aim at a doorway, not
-// at a line - which is also why the callers that use it in a fight require the
-// clicker to already be standing beside the door (see `combatDoorAt`).
+// near any edge.
+//
+// The band used to be 0.3, which meant everything outside a tile's middle
+// 40% counted as "at the edge" - so a click meant for the floor beside a
+// doorway worked the handle instead (designer, 2026-07-31: "it should only
+// close when clicking directly on the door"). A doorway is a place you walk
+// through far more often than a door is a thing you work, and in a fight the
+// misfire costs AP. The band is now a hair either side of the edge line: the
+// door PANEL is what you aim at, and the pick ray finds that on its own -
+// this fallback only exists for the sliver the mesh does not cover.
+const DOOR_EDGE_BAND = 0.15;
+
 export function doorKeyNear(point) {
   if (!point) return null;
   const x = Math.round(point.x);
   const z = Math.round(point.z);
   const dx = point.x - x;
   const dz = point.z - z;
-  if (0.5 - Math.max(Math.abs(dx), Math.abs(dz)) > 0.3) return null;
+  if (0.5 - Math.max(Math.abs(dx), Math.abs(dz)) > DOOR_EDGE_BAND) return null;
   return Math.abs(dx) >= Math.abs(dz)
     ? `v:${dx > 0 ? x + 1 : x},${z}`
     : `h:${x},${dz > 0 ? z + 1 : z}`;
