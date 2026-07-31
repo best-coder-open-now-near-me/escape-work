@@ -223,11 +223,24 @@ export const isMobility = (a) => !!a && a.type === 'mobility';
 // a way the AP economy cannot buy, so pricing it in AP would make it a
 // discount on walking rather than a different thing from walking.
 export const dashDistanceOf = (a) => a.distance ?? 4;
-// How far a swap or a pull reaches, in tiles.
+// How far a swap reaches, in tiles.
 export const mobilityRangeOf = (a) => a.range ?? 5;
 
 // Which mobility modes point at a TEAMMATE rather than at the ground.
-const ALLY_MODES = new Set(['swap', 'pull']);
+//
+// One entry, and it is meant to stay short. This held a second mode, 'pull'
+// ("draw an ally to an adjacent free tile"), promised by POWERS_PLAN decision
+// 7 and never built - no action ever declared it. That is worse than dead
+// data, because combat does not dispatch a mobility action on its `mode` at
+// all: the CLICK decides (ground -> performDash, teammate -> performSwap). So
+// a `mode: 'pull'` action would have passed every check here, been offered on
+// allies, and then silently performed a SWAP - implemented-looking behaviour
+// that was somebody else's verb. If an ally-pull is ever wanted, it needs a
+// dispatch branch before it needs a name here.
+//
+// The name is also spoken for now: `type: 'pull'` is Pull Over (TACTICS_PLAN
+// M8), which hauls an ENEMY over their cover - the opposite half of the board.
+const ALLY_MODES = new Set(['swap']);
 
 // Does this action aim at an ally? The one predicate every targeting decision
 // asks - arming, the rings, the cursor, the click. A buff always does; a
@@ -240,8 +253,8 @@ export const aimsAtAlly = (a) =>
 // Why this mobility action cannot be used right now, or null.
 //
 // `dist`/`los` describe the AIM: the ground for a dash, the teammate for a
-// swap or a pull. A dash checks neither - where you may end up is a pathing
-// question, and pathing needs the world.
+// swap. A dash checks neither - where you may end up is a pathing question,
+// and pathing needs the world.
 export function mobilityProblem(a, t = {}) {
   const { dist = 0, los = true, ap = 0, usesLeft = null, allyHp = 1 } = t;
   if (ap < a.ap) return 'Not enough AP.';

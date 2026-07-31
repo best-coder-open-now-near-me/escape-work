@@ -99,7 +99,7 @@ bespoke plumbing, which is the exact hole statuses were built to close.
 | 4 | Control still rolls to hit | `control` goes through `resolveHit` like any attack | A guaranteed stun at 2 AP is the degenerate case, and `HIT_PLAN`'s rule is already "a miss spends the AP and does nothing else". Free CC would also make the anti-chain immunity window the only counterplay, which is a floor, not a defense. |
 | 5 | Turn-denial keeps the anti-chain rule | Every new `skipTurn`-carrying status inherits `IMMUNITY_WINDOW_MULT` for free | It is enforced in `applyStatus`, not at call sites, so new control powers cannot reintroduce stun-lock. This is the payoff for having built it in the status layer instead of in the shove. |
 | 6 | `zone` promotes `leaves` to a verb | `type: 'zone'` places a surface at an aimed point, no attack required | `leaves` exists but is welded to the cone attack, so the only way to put paper on the floor is to also swing at someone. Freeing it makes surface placement a *plan* rather than a side effect, and it feeds the fire/conduction simulation that is already the most Divinity-like thing we have. |
-| 7 | `mobility` is a verb, not a movement discount | `type: 'mobility'` — dash, swap with an ally, pull an ally | Talents already discount movement (`freeMoveAp`, `moveCost`). A mobility *action* is different: it repositions in a way the AP economy cannot buy, and it gives the opportunity-attack system the counterplay it lacks (today only the Manager's `noProvoke` answers it, as a passive). |
+| 7 | `mobility` is a verb, not a movement discount | `type: 'mobility'` — dash, swap with an ally ~~, pull an ally~~ | Talents already discount movement (`freeMoveAp`, `moveCost`). A mobility *action* is different: it repositions in a way the AP economy cannot buy, and it gives the opportunity-attack system the counterplay it lacks (today only the Manager's `noProvoke` answers it, as a passive). |
 | 8 | `stance` spends the reaction budget | `type: 'stance'` sets a persistent posture that consumes the unit's reaction to interrupt | `REACTIONS_PER_ROUND` is built, refilled every round by the turn engine, and spent by exactly one thing. Overwatch is nearly free given that plumbing, and it is the one power shape that makes *not moving* a decision. |
 | 9 | Toppling is a tile property, not a new entity | `topple: {...}` on a `TILE_TYPES` entry; the runtime mutates the grid via `setType` | Props are already tiles, already destructible (printers), already re-rendered on mutation. An entity layer for furniture would be a parallel implementation of the grid, and the explosion path proves the tile route works. |
 | 10 | A fallen prop is a **runtime-only tile type** | New `runtimeOnly: true` flag; such tiles are exempt from the char-uniqueness lint and hidden from the editor palette | **This is forced by a hard constraint**: `data/tiles.js` documents that 92 of 94 printable characters are spoken for, and `tests/unit/levels.test.js:192` lints every tile for a unique one. A `-fallen` twin per toppleable prop would need six chars that do not exist. `runtimeOnly` costs zero chars because nobody paints these — they only ever arrive through `setType`. It also opens the door for future rubble/scorch tiles under the same rule. |
@@ -128,9 +128,13 @@ bespoke plumbing, which is the exact hole statuses were built to close.
 //              NO damage roll - control is not a swing. Rolls to hit.
 //   zone     - aim at a POINT: paint `leaves` (a tile type carrying a surface)
 //              over `radius` tiles of plain floor. No target needed.
-//   mobility - move yourself: `dash` (extra distance this turn, no provoke),
-//              `swap` (trade places with an ally), or `pull` (draw an ally
-//              to an adjacent free tile). Never provokes.
+//   mobility - move yourself: `dash` (extra distance this turn, no provoke)
+//              or `swap` (trade places with an ally). Never provokes.
+//              A third mode, `pull` (draw an ally to an adjacent free tile),
+//              was planned here and cut: `courier-swap` already solves what it
+//              was for, symmetrically and better - a swap pulls the wounded out
+//              AND fills the hole they leave. See the ALLY_MODES note in
+//              powers.js for why the leftover string was worse than nothing.
 //   stance   - a persistent posture held until your next turn. `watch`
 //              spends your REACTION to strike the first enemy who moves
 //              within `radius`; `guard` extends cover to adjacent allies.
