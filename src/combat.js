@@ -3413,9 +3413,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // the bar's own rule and used to be lost the moment a button went dead.
     if (!st) return;
     if (!st.affordable && id !== pendingConfirm) { log(st.reason); return; }
-    // Reaching for ANY other action drops whatever was awaiting confirmation -
-    // a pending confirm shouldn't survive in the background while you arm
-    // something else and spend the AP it was priced against.
+    // ONE live slot at a time (designer, 2026-07-31): pressing a DIFFERENT
+    // slot while one is up - armed, or awaiting its confirm - lowers what was
+    // up and does nothing else; arming the new one takes a second, deliberate
+    // press. Arming straight over the top is how the bar came to show two lit
+    // buttons: an armed attack survived an instant's first press, so the
+    // attack's target rings (a breakable partition included) kept painting
+    // under a bar that read as Deflect Blame.
+    if (armed || (pendingConfirm && pendingConfirm !== id)) {
+      cancelArmed();
+      refresh();
+      return;
+    }
+    // Past the gate, the only confirm that can be pending is this slot's own.
     const wasPending = pendingConfirm;
     pendingConfirm = null;
     if (a.type === 'attack' || a.type === 'shove' || a.type === 'summon' || a.type === 'cover'
@@ -4323,6 +4333,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     get freeAp() { return active.freeAp || 0; },
     set ap(v) { active.ap = Math.max(0, roundAp(Number(v) || 0)); refresh(); },
     get armed() { return armed; },
+    // The instant awaiting its confirm click, or null - the other half of
+    // "which slot is lit", which is what the one-live-slot rule asserts on.
+    get pendingConfirm() { return pendingConfirm; },
     // The aim wash (TACTICS_PLAN M7): which aim is painted and how many tiles
     // it covers. A test that can't see the wash can only assert the click.
     get aimPaint() { return aimPaint.debug; },

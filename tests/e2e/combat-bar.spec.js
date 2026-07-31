@@ -27,6 +27,48 @@ const BAR_ARENA = {
   ],
 };
 
+test('one live slot at a time: a different press lowers what was up, never stacks', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, BAR_ARENA, 'office-drone');
+  await expect(page.locator('#hotbar-act-attack')).toBeVisible();
+  await enterCombat(page);
+  await waitForPlayerTurn(page);
+  await refillAp(page);
+
+  const live = () => page.evaluate(() => ({
+    armed: window.__combat.armed,
+    pending: window.__combat.pendingConfirm,
+  }));
+
+  // Arm the email, then press Deflect Blame: the attack lowers and NOTHING
+  // arms in its place. This used to stack - the armed attack survived the
+  // instant's first press, so the bar showed two lit slots while the
+  // attack's target rings went on painting under a bar that read as Deflect.
+  await page.click('#hotbar-act-attack');
+  await expect.poll(() => page.evaluate(() => window.__combat.armed)).toBe('attack');
+  await page.click('#hotbar-act-defend');
+  await expect.poll(live).toEqual({ armed: null, pending: null });
+
+  // The second, deliberate press is what raises Deflect's confirm...
+  await page.click('#hotbar-act-defend');
+  await expect.poll(() => page.evaluate(() => window.__combat.pendingConfirm)).toBe('defend');
+  // ...and reaching for another slot drops that confirm without arming it.
+  await page.click('#hotbar-act-shove');
+  await expect.poll(live).toEqual({ armed: null, pending: null });
+  // Pressed again, the shove arms - one press stands down, the next raises.
+  await page.click('#hotbar-act-shove');
+  await expect.poll(() => page.evaluate(() => window.__combat.armed)).toBe('shove');
+
+  // The confirm flow itself still commits: lower the shove, then Deflect
+  // twice puts the status on.
+  await page.click('#hotbar-act-shove');
+  await page.click('#hotbar-act-defend');
+  await page.click('#hotbar-act-defend');
+  await expect.poll(() => page.evaluate(() =>
+    (window.__combat.party.find((m) => m.active)?.statuses ?? []).map((s) => s.id)))
+    .toContain('deflecting');
+});
+
 test('the bar in a fight is the same bar: same slot ids, same number keys', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, BAR_ARENA, 'office-drone');

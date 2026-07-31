@@ -1554,6 +1554,17 @@ function startGame(level) {
     // and a button that does nothing at all is indistinguishable from a bug.
     const blocked = combatOnlyReason(id);
     if (blocked) { ui.say(blocked); return; }
+    // ONE live slot at a time, out of a fight exactly as in one (designer,
+    // 2026-07-31): pressing a different slot lowers the armed one and does
+    // nothing else - arming the new one takes a second, deliberate press.
+    // (A combat-only slot above still only explains itself: it could never
+    // arm, so it does not count as reaching for another power.)
+    if (armedOoc && armedOoc !== id) {
+      armedOoc = null;
+      hotbar?.setArmed(null);
+      ui.say('You stand down.');
+      return;
+    }
     armedOoc = armedOoc === id ? null : id;
     hotbar?.setArmed(armedOoc);
     if (!armedOoc) { ui.say('You stand down.'); return; }

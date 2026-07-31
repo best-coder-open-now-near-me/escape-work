@@ -77,6 +77,22 @@ test('the kit is in canonical order, on one row, with room to grow', async ({ pa
   expect(await page.evaluate(() => window.__game.narration.at(-1))).toMatch(/empty/i);
 });
 
+test('one live slot at a time out of combat too: a different press stands down first', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, QUIET, 'office-drone');
+  await expect(page.locator('#hotbar-act-attack')).toBeVisible();
+
+  await page.click('#hotbar-act-attack');
+  expect(await page.evaluate(() => window.__game.armed)).toBe('attack');
+  // A different press lowers the email and arms nothing in its place.
+  await page.click('#hotbar-act-shove');
+  expect(await page.evaluate(() => window.__game.armed)).toBe(null);
+  expect(await page.evaluate(() => window.__game.narration.at(-1))).toMatch(/stand down/i);
+  // The press it asked for: the same slot again, and the shove arms.
+  await page.click('#hotbar-act-shove');
+  expect(await page.evaluate(() => window.__game.armed)).toBe('shove');
+});
+
 test('right-click a slot to reassign it; assigning swaps rather than duplicates', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, QUIET, 'office-drone');
