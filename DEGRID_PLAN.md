@@ -147,6 +147,23 @@ wedge is Euclid from a tile origin). Overwatch triggers on the same
 continuous metric opportunity attacks use (question 3). Engagement and
 `canTakePart` stay tile-based - who is IN the fight is an area question (D4).
 
+**M7 - Bends hug corners and walk as curves.** Playtest feedback on M1-M6
+(designer, 2026-07-31: "the rigidity of the paths is still aparent and
+doesnt hug walls, seems to still be focused on them as waypoints"): string
+pulling can only DROP vertices, so every bend it keeps sits on a raw route
+vertex - a tile centre, half a tile off the wall it turns around. Grid
+RESOLUTION is not the lever (a finer grid quantizes the same error smaller,
+at multiplied route cost - ruled out; the 2x2 idea in question 2 was only
+ever about surface visuals): the fix is making the bend continuous.
+`tightenPath` slides each interior bend toward its neighbours' chord until
+the body-radius corridor and the stand-clearance rule stop it - the bend
+converges onto the obstacle corner at exactly body radius, the shape a
+navmesh funnel produces - and `roundBends` replaces the point turn with a
+short validated arc (samples clamped to legal standing room; a corridor too
+tight to round keeps its sharp, legal turn). Both live inside `smoothPath`,
+so every feeder - clicks, walk-ups, dashes, AI advances, followers,
+wanderers - inherits them.
+
 **M6 - The organic skin.** Ground-aimed verbs aim at the exact point: the
 zone's covered cells derive from a disc at the clicked POINT (cells whose
 centres fall inside - storage untouched); preview, rings and click all read

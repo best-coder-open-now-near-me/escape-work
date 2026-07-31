@@ -231,6 +231,61 @@ test('smoothPath never straightens through a cell the route avoided', () => {
   assert.ok(!(s.length === 2), 'must not shortcut through the blocked cell');
 });
 
+// --- bends hug corners and walk as curves (DEGRID M7) ------------------------
+// String pulling can only DROP vertices, so every bend it kept sat on a raw
+// route vertex - a tile centre half a tile off the wall it turned around
+// (designer, 2026-07-31: "doesnt hug walls, seems to still be focused on
+// them as waypoints"). The tighten pass slides each bend onto the corner at
+// body clearance; the rounding pass curves through it.
+
+const pathLen = (p) => {
+  let d = 0;
+  for (let i = 1; i < p.length; i++) d += Math.hypot(p[i][0] - p[i - 1][0], p[i][1] - p[i - 1][1]);
+  return d;
+};
+
+test('a bend around a solid cell is pulled onto its corner, at clearance', () => {
+  // Solid (1,1); the route goes (0,0) -> (2,0) -> (2,2) around it. The kept
+  // bend used to BE the tile centre (2,0); it must now hug the block.
+  const w = (x, z) => x >= 0 && x <= 4 && z >= 0 && z <= 4 && !(x === 1 && z === 1);
+  const s = smoothPath(w, [[0, 0], [1, 0], [2, 0], [2, 1], [2, 2]]);
+  // Strictly shorter than the corner-at-tile-centre path (length 4)...
+  assert.ok(pathLen(s) < 3.9, `hugging shortens the walk, got ${pathLen(s)}`);
+  // ...some interior point came close to the block (it hugs, not orbits)...
+  const near = s.slice(1, -1).some(([x, z]) => Math.hypot(x - 1, z - 1) < 1.35);
+  assert.ok(near, `no vertex hugs the block: ${JSON.stringify(s)}`);
+  // ...and nothing clips: every vertex is a spot a body may legally stand.
+  for (const [x, z] of s.slice(1, -1)) {
+    const [cx, cz] = clampToClearance(w, null, x, z);
+    assert.ok(Math.hypot(cx - x, cz - z) < 1e-3, `vertex (${x},${z}) clips the block`);
+  }
+});
+
+test('a rounded bend is a curve, not a point turn', () => {
+  const w = (x, z) => x >= 0 && x <= 4 && z >= 0 && z <= 4 && !(x === 1 && z === 1);
+  const s = smoothPath(w, [[0, 0], [1, 0], [2, 0], [2, 1], [2, 2]]);
+  // More than one interior vertex: the single sharp elbow became arc samples.
+  assert.ok(s.length > 3, `expected arc samples, got ${JSON.stringify(s)}`);
+});
+
+test('a corridor too tight to round keeps its sharp, legal turn', () => {
+  // A one-wide L of open floor through walls: no room to swing the bend.
+  const rows = [
+    '#.##',
+    '#.##',
+    '#...',
+    '####',
+  ];
+  const w = walkableFrom(rows);
+  const s = smoothPath(w, [[1, 0], [1, 1], [1, 2], [2, 2], [3, 2]]);
+  // Every vertex still on open floor - the rounding never bought a shortcut
+  // through the wall corner.
+  for (const [x, z] of s) {
+    assert.ok(w(Math.round(x), Math.round(z)), `vertex (${x},${z}) left the corridor`);
+  }
+  assert.deepEqual(s[s.length - 1], [3, 2]);
+});
+
 // --- routeOpen: the smoother believes the route it was handed ----------------
 // The router SURCHARGES hazards (extraCost), so a route legally crosses one;
 // a smoother that treats those cells as walls can never straighten across

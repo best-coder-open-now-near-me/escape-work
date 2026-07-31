@@ -287,9 +287,121 @@ export function routeOpen(base, path) {
   return (x, z) => base(x, z) || chosen.has(x + ',' + z);
 }
 
+// Would a body legally STAND at (px, pz)? clampToClearance is the rule that
+// places every stand point; a point it would not move is a point the body may
+// occupy. The tightening pass below uses this as its hard stop, so a moved
+// bend can hug a corner down to exactly body radius and never into it.
+function standsClear(isWalkable, edgeOpen, px, pz) {
+  const [cx, cz] = clampToClearance(isWalkable, edgeOpen, px, pz);
+  return Math.hypot(cx - px, cz - pz) < 1e-3;
+}
+
+// Pull each interior bend toward the straight line between its neighbours,
+// as far as the body-radius corridor allows (DEGRID M7). String pulling can
+// only DROP vertices, never move them - so every bend it keeps sits on a raw
+// route vertex, a tile centre half a tile off the wall it turns around, and
+// walks read as aiming at waypoints instead of hugging the corner. Sliding
+// the bend toward its neighbours' chord shortens the path until the capsule
+// touches the obstacle: the bend converges onto the corner at exact
+// clearance, which is the shape a navmesh funnel would have produced.
+//
+// The corridor's endpoint forgiveness (walkableCorridor) is for stand points
+// the game itself placed; a vertex this pass MOVES earns no such grace, so
+// every candidate must also be a spot a body could legally stand
+// (standsClear). A few rounds propagate the slack along the path.
+const TIGHTEN_ROUNDS = 3;
+function tightenPath(isWalkable, path, edgeOpen) {
+  if (path.length <= 2) return path;
+  const out = path.map((p) => [p[0], p[1]]);
+  for (let r = 0; r < TIGHTEN_ROUNDS; r++) {
+    let moved = false;
+    for (let i = 1; i < out.length - 1; i++) {
+      const a = out[i - 1];
+      const b = out[i];
+      const c = out[i + 1];
+      const mx = (a[0] + c[0]) / 2;
+      const mz = (a[1] + c[1]) / 2;
+      if (Math.hypot(mx - b[0], mz - b[1]) < 1e-3) continue;
+      // Binary search along bend -> chord midpoint for the deepest legal pull.
+      let lo = 0;
+      let hi = 1;
+      for (let k = 0; k < 8; k++) {
+        const t = (lo + hi) / 2;
+        const px = b[0] + (mx - b[0]) * t;
+        const pz = b[1] + (mz - b[1]) * t;
+        if (standsClear(isWalkable, edgeOpen, px, pz)
+          && walkableCorridor(isWalkable, a[0], a[1], px, pz, edgeOpen)
+          && walkableCorridor(isWalkable, px, pz, c[0], c[1], edgeOpen)) lo = t;
+        else hi = t;
+      }
+      if (lo > 1e-3) {
+        b[0] += (mx - b[0]) * lo;
+        b[1] += (mz - b[1]) * lo;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  return out;
+}
+
+// Round each bend into a short validated arc (DEGRID M7), so the walk curves
+// through corners instead of turning on a point. The arc is a quadratic
+// bezier between two lead-in points on the legs; it bows AWAY from the
+// obstacle the tightened bend hugs (the curve stays between the sharp corner
+// and its chord), but every chord is still corridor-checked and the sharp
+// bend kept whenever the room genuinely is that tight.
+const BEND_RADIUS = 0.4;
+const BEND_STEPS = 3;
+function roundBends(isWalkable, path, edgeOpen) {
+  if (path.length <= 2) return path;
+  const out = [path[0]];
+  for (let i = 1; i < path.length - 1; i++) {
+    const a = out[out.length - 1];
+    const b = path[i];
+    const c = path[i + 1];
+    const ab = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const bc = Math.hypot(c[0] - b[0], c[1] - b[1]);
+    const d = Math.min(BEND_RADIUS, ab / 2, bc / 2);
+    if (d < 0.05) { out.push(b); continue; }
+    const p1 = [b[0] - ((b[0] - a[0]) / ab) * d, b[1] - ((b[1] - a[1]) / ab) * d];
+    const p2 = [b[0] + ((c[0] - b[0]) / bc) * d, b[1] + ((c[1] - b[1]) / bc) * d];
+    const arc = [p1];
+    for (let s = 1; s < BEND_STEPS; s++) {
+      const t = s / BEND_STEPS;
+      const u = 1 - t;
+      arc.push([
+        u * u * p1[0] + 2 * u * t * b[0] + t * t * p2[0],
+        u * u * p1[1] + 2 * u * t * b[1] + t * t * p2[1],
+      ]);
+    }
+    arc.push(p2);
+    // Every sample must be a spot a body may legally STAND - the tightened
+    // bend earned its clearance through clampToClearance, and the curve
+    // through it may not spend what the bend banked. Clamping (rather than
+    // rejecting) keeps the curve when it merely grazes; the corridor checks
+    // below still throw the whole arc away if clamping bent it into a wall.
+    for (const p of arc) {
+      const [qx, qz] = clampToClearance(isWalkable, edgeOpen, p[0], p[1]);
+      p[0] = qx;
+      p[1] = qz;
+    }
+    let ok = walkableCorridor(isWalkable, a[0], a[1], p1[0], p1[1], edgeOpen);
+    for (let s = 1; ok && s < arc.length; s++) {
+      ok = walkableCorridor(isWalkable, arc[s - 1][0], arc[s - 1][1], arc[s][0], arc[s][1], edgeOpen);
+    }
+    if (ok) out.push(...arc);
+    else out.push(b); // too tight to round - the sharp turn is the truth
+  }
+  out.push(path[path.length - 1]);
+  return out;
+}
+
 // "String pulling": collapse a tile-by-tile path into the fewest straight
-// runs with clear line of sight, so movement flows at any angle instead of
-// stair-stepping tile centres.
+// runs with clear line of sight - then pull the surviving bends onto the
+// corners they round (tightenPath) and curve through them (roundBends), so
+// movement flows at any angle, hugs walls at body radius, and never reads
+// as aiming at waypoints.
 export function smoothPath(isWalkable, path, edgeOpen = null) {
   if (!path || path.length <= 2) return path;
   const out = [path[0]];
@@ -300,7 +412,7 @@ export function smoothPath(isWalkable, path, edgeOpen = null) {
     out.push(path[j]);
     i = j;
   }
-  return out;
+  return roundBends(isWalkable, tightenPath(isWalkable, out, edgeOpen), edgeOpen);
 }
 
 // The cheapest route to a tile a RANGED attack could fire at (tx, tz) from, or
