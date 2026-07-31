@@ -317,3 +317,55 @@ test('a partition topples with no fight on, and no fight starts', async ({ page 
   expect(await page.evaluate(() => window.__game.walkable(2, 3)), 'a board, not a wall').toBe(true);
   expect(await page.evaluate(() => window.__game.inCombat), 'nobody noticed').toBe(false);
 });
+
+// The CONTINUOUS half of the 2026-07-31 revision: "what we need is something
+// that is continuous and smooth for starters". Aiming at a position made the
+// side choosable; these pin that the position is honoured PRECISELY - the
+// walk ends on the point you clicked (clamped to body clearance), not on the
+// tile's dead centre. Bodies in this engine rest at free points everywhere
+// else (movement, walk-ups, dashes); the crouch was the one deliberate
+// destination that still teleport-parked you.
+test('the crouch walk parks you on the point you clicked, not the tile centre', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, CROUCH_LAB);
+  await enterCombat(page);
+  await waitForPlayerTurn(page);
+  await refillAp(page);
+
+  await page.click('#hotbar-act-take-cover');
+  await expect.poll(() => page.evaluate(() => window.__combat.armed), { timeout: 10_000 })
+    .toBe('take-cover');
+  // A point deliberately OFF the centre of (4,1): east of centre, tucked
+  // toward the desk on (4,2). Clamping pushes it to body clearance of the
+  // desk edge (z <= 1.2) and leaves the chosen x alone.
+  expect(await clickWorld(page, 4.3, 1.3)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__combat.crouched.length),
+    { timeout: 30_000 }).toBe(1);
+
+  const at = await page.evaluate(() => window.__combat.actingAt);
+  const pt = await page.evaluate(() => window.__game.playerTile);
+  expect([pt.x, pt.z], 'the logical tile is the one aimed at').toEqual([4, 1]);
+  expect(Math.abs(at.x - 4.3), 'x is the clicked x, not the centre').toBeLessThan(0.15);
+  expect(at.z, 'z clamped off the desk edge, still south of centre').toBeGreaterThan(1.0);
+  expect(Math.abs(at.x - 4) > 0.2, 'demonstrably NOT centre-parked').toBe(true);
+});
+
+test('the out-of-combat crouch parks on the clicked point too', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, OOC_LAB);
+
+  await page.click('#hotbar-act-take-cover');
+  await expect.poll(() => page.evaluate(() => window.__game.armed), { timeout: 10_000 })
+    .toBe('take-cover');
+  // Off-centre on (2,1), tucked toward the desk on (3,1): clamping pushes x
+  // to clearance of the desk face (x <= 2.2) and keeps the chosen z.
+  expect(await clickWorld(page, 2.3, 1.2)).toBe(true);
+  await expect.poll(() => page.evaluate(() => !!window.__game.oocCrouch), { timeout: 30_000 })
+    .toBe(true);
+
+  const pos = await page.evaluate(() => window.__game.playerPos);
+  const pt = await page.evaluate(() => window.__game.playerTile);
+  expect([pt.x, pt.z], 'the logical tile is the one aimed at').toEqual([2, 1]);
+  expect(pos.x, 'x clamped to the desk face, east of centre').toBeGreaterThan(2.05);
+  expect(Math.abs(pos.z - 1.2), 'z is the clicked z').toBeLessThan(0.15);
+});

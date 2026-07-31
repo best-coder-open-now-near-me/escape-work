@@ -863,13 +863,18 @@ function startGame(level) {
   // Walk to EXACTLY (x, z), then run - the crouch and the partition shove
   // need a precise standing spot, where approachAndDo's "within reach" would
   // settle for a diagonal that shields (or shoves) nothing.
-  function walkToExact(x, z, run) {
+  // `end` is an optional FREE POINT inside the goal tile to finish on - the
+  // same last-waypoint substitution every plain ground click already does.
+  // The arrival check reads the logical tile, and a clamped point always
+  // rounds back to its own tile, so `exact` still means exact.
+  function walkToExact(x, z, run, end = null) {
     if (!sheet || inCombat || gameOver) return false;
     clearOocCrouch();
     if (player.x === x && player.z === z) { run(); return true; }
     const p = findPath(isWalkable, player.x, player.z, x, z, hazardCost, grid.stepOpen);
     if (!p || p.length < 2) return false;
     pendingAction = { x, z, run, exact: true };
+    if (end) p[p.length - 1] = end;
     const s = smoothFromBody(p);
     player.setPath(s);
     lastPath = s;
@@ -2081,7 +2086,7 @@ function startGame(level) {
     return `${seen.slice(0, -1).join(', ')} and ${seen[seen.length - 1]}`;
   }
 
-  function oocTakeCoverAt(tile) {
+  function oocTakeCoverAt(tile, point = null) {
     const problem = oocCoverProblem(tile.x, tile.z);
     if (problem) { ui.say(problem); return; }
     const commit = () => {
@@ -2096,8 +2101,31 @@ function startGame(level) {
       armedOoc = null;
       hotbar?.setArmed(null);
     };
-    if (player.x === tile.x && player.z === tile.z) { commit(); return; }
-    if (!walkToExact(tile.x, tile.z, commit)) ui.say('No way in there.');
+    if (player.x === tile.x && player.z === tile.z) {
+      // Your own tile: a click on a meaningfully different POINT within it is
+      // a sub-tile shuffle to fine-tune the tuck - the marker promised the
+      // point, not the tile. The arrival hook fires on path-finished even
+      // without a tile change (actors.js: `changed || finished`), so the
+      // exact-tile pendingAction resolves like any other walk-then-crouch.
+      const end = point ? clampPoint(point.x, point.z) : null;
+      const pp = player.entity ? player.entity.getPosition() : player;
+      if (end && Math.hypot(end[0] - pp.x, end[1] - pp.z) > 0.1) {
+        clearOocCrouch();
+        pendingAction = { x: tile.x, z: tile.z, run: commit, exact: true };
+        const s = [[pp.x, pp.z], end];
+        player.setPath(s);
+        lastPath = s;
+        return;
+      }
+      commit();
+      return;
+    }
+    // Finish on the POINT you clicked, clamped to clearance - tucked where
+    // you chose, not teleport-parked on the tile centre (designer,
+    // 2026-07-31: "continuous and smooth"). Combat's crouch walk does the
+    // same through walkActive's endpoint.
+    if (!walkToExact(tile.x, tile.z, commit,
+      point ? clampPoint(point.x, point.z) : null)) ui.say('No way in there.');
   }
 
   // Tile effects (data-driven from TILE_TYPES[..].onEnter) fire per step, for
@@ -2539,7 +2567,7 @@ function startGame(level) {
         && oocShoveAt(tile)) return;
       // An armed TAKE COVER: crouch before anyone has noticed you.
       if (armedOoc && ACTIONS[armedOoc].type === 'cover' && tile) {
-        oocTakeCoverAt(tile);
+        oocTakeCoverAt(tile, point);
         return;
       }
       // Out of combat, the interactable ENTITY under the cursor wins over the
@@ -2848,7 +2876,9 @@ function startGame(level) {
         const x = Math.round(oocAim.x);
         const z = Math.round(oocAim.z);
         const usable = !oocCoverProblem(x, z);
-        return { x, z, usable, faces: usable ? oocCoverFaces(x, z) : [] };
+        // px/pz is the PRECISE cursor point - the continuous marker, and the
+        // spot the commit will actually walk to.
+        return { x, z, px: oocAim.x, pz: oocAim.z, usable, faces: usable ? oocCoverFaces(x, z) : [] };
       },
       // What is covering the leader RIGHT NOW, whatever is armed - the
       // held-crouch affordance, so a crouch taken before a fight shows its
@@ -3244,12 +3274,15 @@ function startGame(level) {
       // hovered furniture/partition (shove - which ALSO rings coworkers,
       // they're targets too), or the hovered shield (take cover).
       // The crouch you are in draws whatever is armed - it is not an aim, it
-      // is the state of the character.
-      if (show && !inCombat) hover.drawHeldCover();
+      // is the state of the character. drawCoverAim is called EVERY frame and
+      // gates itself on its own query, so its eased ring resets the moment
+      // cover stops being the armed verb - gated at the call site, a disarm
+      // would leave the ease pointing at wherever cover was last aimed.
+      if (show && !inCombat) { hover.drawHeldCover(); hover.drawCoverAim(dt); }
       if (show && !inCombat && armedOoc) {
         if (ACTIONS[armedOoc].type === 'summon') hover.drawSummonDrop();
         else if (ACTIONS[armedOoc].cone) hover.drawConeAim();
-        else if (ACTIONS[armedOoc].type === 'cover') hover.drawCoverAim();
+        else if (ACTIONS[armedOoc].type === 'cover') { /* drawn above, every frame */ }
         else if (ACTIONS[armedOoc].type === 'shove') {
           hover.drawArmedTargets();
           hover.drawShoveAim();

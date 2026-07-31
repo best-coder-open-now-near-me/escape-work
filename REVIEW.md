@@ -128,6 +128,12 @@ faces covers you along them.
   A held crouch used to show only an "In Cover" chip, so a corner told you
   nothing about which way was open.
 - `combat-plans.coverSpot` is deleted with the rule it served.
+- **The aim is continuous** (landed 2026-07-31, after the position rework):
+  a marker rides the precise cursor point, the stand-tile ring eases toward
+  the resolved tile instead of hopping, and the commit walks the body to the
+  CLICKED point clamped to clearance — `walkActive`'s free endpoint in
+  combat, `walkToExact`'s new one outside it — so the spot you chose is the
+  spot you occupy. The rule still resolves on the tile's faces.
 
 One shipped e2e changed meaning as a result, which is worth flagging rather
 than burying: `cover.spec.js`'s flanking test used a Manager boxed in by four

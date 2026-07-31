@@ -611,6 +611,18 @@ None. See decision #6.
      human shield, edge — into the one edge mode always had: a crouch is a
      POSITION, and `tactics.shieldedFaces` names what covers it.
 
+     The CONTINUOUS half is landed too. The aim draws three layers — a small
+     marker at the precise cursor point, the stand-tile ring eased toward the
+     resolved tile (~70ms, fps-independent) instead of hopping to it, and the
+     shielded faces snapped to the tile's edges, because that is where edges
+     are — and the commit walks you to the CLICKED point, clamped to body
+     clearance, rather than teleport-parking on the tile centre. Bodies rest
+     at free points everywhere else in this engine (movement, walk-ups,
+     dashes); the crouch was the last deliberate destination that quantised.
+     The rule still resolves on the tile's faces — a face is tile geometry —
+     which is the honest split: continuous CHOICE, discrete RULE. Same three
+     layers in and out of combat, off the same queries the click commits.
+
      Two things fell out. Cover is now UNCAPPED `[stated]` (designer: *"if the
      environment allows it thats a design issue more than anything, plus we
      have the counters like grabbing someone over, destroying and toppling

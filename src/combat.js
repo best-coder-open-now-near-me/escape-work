@@ -1244,7 +1244,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     coverCell: coverCellFor(active),
   });
 
-  function drawPreview() {
+  // The cover aim's eased ring position, and the frame's dt for the easing -
+  // immediate-mode lines redraw every frame, so smoothness is state carried
+  // between frames, not an animation the engine runs.
+  let coverEase = null;
+  let previewDt = 0;
+
+  function drawPreview(dt = 0) {
+    previewDt = dt;
     if (!preview) return;
     const y = 0.14; // above the floor top (0.1) and surface decals (0.12)
     const seg = (pts, color) => {
@@ -1341,8 +1348,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // you can afford it. previewAction() is that same fallback, so what's drawn
     // is always what would happen.
     const id = previewAction();
+    const a = id ? ACTIONS[id] : null;
+    // A stale ease position would make the next arm GLIDE in from wherever
+    // cover was last aimed - drop it the moment cover is not the live verb
+    // (including when no verb previews at all).
+    if (a?.type !== 'cover') coverEase = null;
     if (!id) return;
-    const a = ACTIONS[id];
     // A zone rings the tiles it would actually cover - the same list the click
     // paints (zoneCells), so a tile that shows a ring is a tile that gets the
     // surface. Red on the aim point alone when the placement itself is refused.
@@ -1380,11 +1391,27 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Now the ring is where you go and the bars are what covers you, so a
     // corner reads as a corner and you can see the open angle you are leaving.
     if (a.type === 'cover') {
-      if (!armed || !aimPoint) return;
+      if (!armed || !aimPoint) { coverEase = null; return; }
       const tx = Math.round(aimPoint.x);
       const tz = Math.round(aimPoint.z);
       const ok = !coverSpotProblem(tx, tz);
-      drawRing(tx, tz, 0.42, ok ? PREVIEW_COVER : PREVIEW_FAR);
+      const color = ok ? PREVIEW_COVER : PREVIEW_FAR;
+      // Three layers, from the cursor down to the rule (designer, 2026-07-31:
+      // "something that is continuous and smooth for starters" - the emblem
+      // used to hop in discrete tile-sized steps):
+      //  - a small marker at the PRECISE point under the cursor, continuous,
+      //    which is also where the walk will actually park you;
+      //  - the stand-tile ring, EASED toward the resolved tile rather than
+      //    teleporting to it, so sweeping the cursor reads as one motion;
+      //  - the shielded faces, snapped to the tile's edges - they are tile
+      //    geometry, and drawing them anywhere between two tiles would show
+      //    cover on edges that do not exist.
+      drawRing(aimPoint.x, aimPoint.z, 0.12, color);
+      if (!coverEase) coverEase = { x: aimPoint.x, z: aimPoint.z };
+      const k = 1 - Math.exp(-(previewDt || 0) * 14); // ~70ms settle, fps-independent
+      coverEase.x += (tx - coverEase.x) * k;
+      coverEase.z += (tz - coverEase.z) * k;
+      drawRing(coverEase.x, coverEase.z, 0.42, color);
       if (ok) drawFaces(tx, tz, crouchFacesAt(tx, tz), PREVIEW_COVER);
       return;
     }
@@ -2271,13 +2298,24 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return null;
   }
 
-  function performTakeCover(tx, tz) {
+  function performTakeCover(tx, tz, point = null) {
     const a = ACTIONS['take-cover'];
     const problem = coverSpotProblem(tx, tz);
     if (problem) { log(problem); return; }
     if (active.ap < a.ap) { log('Not enough AP.'); return; }
     armed = null;
     if (active.actor.x === tx && active.actor.z === tz) {
+      // Your own tile. A click on a meaningfully different POINT within it is
+      // a sub-tile shuffle - fine-tune the tuck, billed as the sliver of
+      // movement it is - because the marker promised the point, not the tile.
+      // Same logical tile, so nothing provokes and the arrival check holds.
+      const pos = posOf(active);
+      const end = point ? world.clampPoint(point.x, point.z) : null;
+      if (end && Math.hypot(end[0] - pos.x, end[1] - pos.z) > 0.1) {
+        const walk = walkActive([[pos.x, pos.z], [tx, tz]],
+          moveBudget(active) - a.ap, end);
+        if (walk?.done) { pendingCrouch = { spot: [tx, tz] }; return; }
+      }
       active.ap = roundAp(active.ap - a.ap);
       crouchHere(active);
       refresh();
@@ -2289,7 +2327,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // walk-up shot reserves its trigger pull. Same honest split as the
     // walk-ups: a degenerate route is not an AP problem.
     const crouchBudget = moveBudget(active) - a.ap;
-    const walk = walkActive(path, crouchBudget);
+    // The walk ends at the POINT you clicked, clamped to body clearance -
+    // not the tile's dead centre. Bodies in this engine rest at free points
+    // (movement, walk-ups and dashes all do), and the crouch was the one
+    // deliberate destination that still teleport-parked you on the centre.
+    // "Continuous and smooth" (designer, 2026-07-31) means the spot you
+    // chose is the spot you occupy; the RULE still reads the tile's faces.
+    const walk = walkActive(path, crouchBudget,
+      point ? world.clampPoint(point.x, point.z) : null);
     if (!walk) {
       log(crouchBudget > 0.05 ? 'No closer way in.' : 'Not enough AP to reach it.');
       return;
@@ -3221,7 +3266,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // Take Cover aimed at the ground resolves on whatever the tile holds -
       // furniture or a body - and performTakeCover says why when it is
       // neither (TACTICS_PLAN M6).
-      if (a.type === 'cover') { performTakeCover(tile.x, tile.z); return; }
+      if (a.type === 'cover') { performTakeCover(tile.x, tile.z, point); return; }
       // Shove a PROP over (POWERS_PLAN M6). The same verb, aimed at furniture
       // instead of a person: walk up, put your shoulder into the bookcase, and
       // it lands on whoever is behind it. It costs the shove's own AP and
@@ -4064,7 +4109,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const body = bodyOf(u);
       if (!body || !body.moving) moveStart.delete(u);
     }
-    drawPreview(); // immediate-mode lines last one frame - redraw while shown
+    drawPreview(dt); // immediate-mode lines last one frame - redraw while shown
     drawTargets();
     // prune anyone killed externally (printer explosions during combat)
     if (!hostilesRemain()) { victory(); return; }

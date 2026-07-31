@@ -222,6 +222,10 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
   }
 
   // --- rings ----------------------------------------------------------------
+  // The cover aim's eased ring position - state carried between frames, since
+  // immediate-mode lines redraw every frame. Dropped whenever the aim is not
+  // live, so a re-arm never glides in from a stale spot.
+  let coverEase = null;
   // A tile's shielded faces, as bars along the tile's own edges. The twin of
   // combat's `drawFaces`; both take the face list the cover rule produced, so
   // neither can draw a side the rule would not honour.
@@ -345,10 +349,22 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
     // out of combat. Ringing the shield instead told you which object you had
     // named while the side you would end up on, which is what decides the
     // shots you are safe from, was chosen for you and never drawn.
-    drawCoverAim() {
+    drawCoverAim(dt = 0) {
       const aim = queries.coverAim?.();
-      if (!aim) return;
-      ring(aim.x, aim.z, 0.42, aim.usable ? RING_COVER : RING_FAR);
+      if (!aim) { coverEase = null; return; }
+      const color = aim.usable ? RING_COVER : RING_FAR;
+      // Combat's three layers, out of combat (designer, 2026-07-31:
+      // "continuous and smooth"): the precise cursor point as a small marker
+      // - which is also where the commit walks you - the stand-tile ring
+      // eased toward the resolved tile instead of hopping to it, and the
+      // shielded faces snapped to the tile's edges, because that is where
+      // the edges are.
+      if (aim.px != null) ring(aim.px, aim.pz, 0.12, color);
+      if (!coverEase) coverEase = { x: aim.px ?? aim.x, z: aim.pz ?? aim.z };
+      const k = 1 - Math.exp(-dt * 14); // ~70ms settle, fps-independent
+      coverEase.x += (aim.x - coverEase.x) * k;
+      coverEase.z += (aim.z - coverEase.z) * k;
+      ring(coverEase.x, coverEase.z, 0.42, color);
       if (aim.usable) faces(aim.x, aim.z, aim.faces, RING_COVER);
     },
     // ...and the crouch you are ALREADY in, whatever is armed. A crouch that
