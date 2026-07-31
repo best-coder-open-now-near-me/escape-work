@@ -15,7 +15,7 @@ import { truncateByBudget, routeToFiringPosition, trimToFirst } from './pathfind
 import { pronounsOf, capitalize, verb } from './creation.js';
 import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, gritSaveChance, MOVE, REACH } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
-import { toHitTerms, provokedBy, positionMods, inReach, dist, crouchShields, hasCover, shieldedFaces, TACTICS } from './tactics.js';
+import { toHitTerms, provokedBy, positionMods, inReach, dist, dirOctant, shieldedFaces, TACTICS } from './tactics.js';
 import {
   buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, aimsAtAnyone, isPurge, coneFrom, conePolyline, aimRangeOf, rangeTiles, isBreakable, aimsAtProps, isPull,
 } from './powers.js';
@@ -379,17 +379,24 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const attackMods = (attacker, defender, plan = null) => {
     // Position is a per-PAIR term - it depends on where the other one stands,
     // so it is computed at roll time and never cached on a unit.
-    const A = plan ? { x: Math.round(plan.x), z: Math.round(plan.z) } : bodyOf(attacker);
-    const D = bodyOf(defender);
+    //
+    // The BODIES, not their rounded tiles (DEGRID M4): cover, flank and
+    // backstab used to flip when a body drifted across a tile's invisible
+    // midline; the octants now bucket the real angle between the stances
+    // (tactics.dirOctant), so they flip where the model visibly changes
+    // sides. The cover FACES still belong to the defender's tile - the
+    // furniture is genuinely grid-shaped (positionMods rounds internally).
+    const A = plan ? { x: plan.x, z: plan.z } : posOf(attacker);
+    const D = posOf(defender);
     const dp = plan ? posOf(defender) : null;
-    // The attacker's own side, minus itself: a pincer needs a second body.
+    // The attacker's own side, minus itself: a pincer needs a second body -
+    // each carrying its own reach, because "in its face" is now the same
+    // reach test every other melee rule reads.
     const allies = (attacker.sheet ? members : engaged)
       .filter((u) => u !== attacker && standing(u))
-      .map((u) => ({ x: bodyOf(u).x, z: bodyOf(u).z }));
+      .map((u) => ({ x: posOf(u).x, z: posOf(u).z, reach: reachOfUnit(u) }));
     const pos = positionMods(A.x, A.z, D.x, D.z, {
-      // Cover/flank/backstab geometry stays on TILE octants - a cover face and
-      // a pincer are genuinely grid-shaped. Only the melee/ranged SPLIT moves
-      // to real distance, and it reads reach without the line test so turning
+      // The melee/ranged SPLIT reads reach without the line test so turning
       // walls on (M3) can't silently change who gets cover.
       melee: plan
         ? inReach(plan.x, plan.z, dp.x, dp.z, reachOfUnit(attacker))
@@ -651,13 +658,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function shotOutcome(attacker, defender) {
     const s = crouchStateOf(defender);
     if (!s) return { target: defender };
-    const A = bodyOf(attacker);
-    const D = bodyOf(defender);
+    // Direction between the BODIES (DEGRID M4); the face-neighbour queries
+    // stay on the defender's tile, where the faces live.
+    const A = posOf(attacker);
+    const D = posOf(defender);
+    const Dt = bodyOf(defender);
     // Re-asked without the SHOOTER counting as cover (see crouchFacesOf).
     const face = shieldingFaceFrom(crouchFacesOf(defender, attacker), A.x, A.z, D.x, D.z);
     if (!face) return { target: defender };
     // A BODY on that face eats the shot; furniture and partitions refuse it.
-    const holder = unitStandingAt(D.x + face[0], D.z + face[1]);
+    const holder = unitStandingAt(Dt.x + face[0], Dt.z + face[1]);
     if (holder && holder !== defender && standing(holder)) {
       return { target: holder, redirected: true };
     }
@@ -666,9 +676,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // The shielded face pointing at the attacker, or null. A diagonal attacker
   // is blocked by either of the two faces their way; when both are shielded
   // the x face answers first, which only matters for naming the blocker.
+  // Continuous or tile inputs both work - dirOctant buckets the angle.
   function shieldingFaceFrom(faces, ax, az, dx, dz) {
-    const sx = Math.sign(ax - dx);
-    const sz = Math.sign(az - dz);
+    const { x: sx, z: sz } = dirOctant(ax, az, dx, dz);
     if (sx === 0 && sz === 0) return null;
     return (faces || []).find(([ox, oz]) =>
       (sx !== 0 && ox === sx && oz === 0) || (sz !== 0 && oz === sz && ox === 0)) || null;

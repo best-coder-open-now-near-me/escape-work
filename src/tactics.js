@@ -58,6 +58,33 @@ export const cheb = (ax, az, bx, bz) => Math.max(Math.abs(ax - bx), Math.abs(az 
 // Math.round of one, so a tile test can be off by up to 2.83 units.
 export const dist = (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz);
 
+// The direction from (dx, dz) toward (ax, az), quantized to one of the eight
+// octant sign-vectors - the threshold every positional rule (cover faces,
+// pincers, backstab arcs) buckets its angle through.
+//
+// `Math.sign` of the deltas did this for free while the inputs were tile
+// ints. On continuous bodies it breaks BOTH ways: a shooter dead east with
+// 0.2 of sideways drift reads "diagonal" (suddenly the north partition
+// shields against an eastward shot), and the flip between sectors happens
+// wherever a body crosses a tile midline rather than where it visibly rounds
+// the corner. So: bucket the ANGLE around the defender's body instead - each
+// cardinal and diagonal owns a 45-degree wedge, boundaries on the
+// 22.5-degree lines. Fed exact tile ints it agrees with Math.sign for every
+// adjacent and diagonal pair; the shallow long-range pairs it disagrees on
+// are the ones sign got wrong (designer, 2026-07-31: "not really tiled if
+// the initial point isnt tile centered").
+const OCTANTS = [
+  { x: 0, z: 1 }, { x: 1, z: 1 }, { x: 1, z: 0 }, { x: 1, z: -1 },
+  { x: 0, z: -1 }, { x: -1, z: -1 }, { x: -1, z: 0 }, { x: -1, z: 1 },
+];
+export function dirOctant(ax, az, dx, dz) {
+  const vx = ax - dx;
+  const vz = az - dz;
+  if (Math.hypot(vx, vz) < 1e-9) return { x: 0, z: 0 }; // standing on them
+  const k = ((Math.round(Math.atan2(vx, vz) / (Math.PI / 4)) % 8) + 8) % 8;
+  return OCTANTS[k];
+}
+
 const SWEEP = 0.1; // segment sampling step for reachOpen, in tile-units
 
 // Is the straight line from (ax, az) to (bx, bz) free of solid edges? An arm
@@ -178,7 +205,11 @@ export function provokedBy(threats, fx, fz, tx, tz, edgeOpen = null) {
 // The "at most once per attack" rule survives: an edge AND a cell on the same
 // face still grant one cover, because this returns on the first hit.
 export function hasCover(ax, az, dx, dz, edgeOpen, coverCell = null) {
-  return facesShieldFrom(shieldedFaces(dx, dz, { edgeOpen, coverCell }), ax, az, dx, dz);
+  // Faces belong to the defender's TILE (the furniture is genuinely on the
+  // grid); the direction is measured between the BODIES.
+  return facesShieldFrom(
+    shieldedFaces(Math.round(dx), Math.round(dz), { edgeOpen, coverCell }),
+    ax, az, dx, dz);
 }
 
 // The four orthogonal faces, in a fixed order so a UI drawing them gets the
@@ -217,43 +248,19 @@ export function shieldedFaces(dx, dz, { edgeOpen = null, coverCell = null } = {}
   return out;
 }
 
-// Does any of those faces point at the attacker? The octant test, unchanged:
-// take the direction from defender toward attacker, and a diagonal attacker is
-// blocked by EITHER of the two faces pointing their way - going around one
-// corner is enough.
+// Does any of those faces point at the attacker? The octant test: take the
+// direction from defender toward attacker (bucketed by dirOctant, so
+// continuous bodies work), and a diagonal attacker is blocked by EITHER of
+// the two faces pointing their way - going around one corner is enough.
 //
 // Still boolean at the point of use, which is what keeps "cover applies at
 // most once per attack" true for the to-hit modifier: more covered faces means
 // more covered DIRECTIONS, never a deeper discount along one of them.
 export function facesShieldFrom(faces, ax, az, dx, dz) {
-  const sx = Math.sign(ax - dx);
-  const sz = Math.sign(az - dz);
+  const { x: sx, z: sz } = dirOctant(ax, az, dx, dz);
   if (sx === 0 && sz === 0) return false; // standing on them - no angle at all
   return faces.some(([ox, oz]) =>
     (sx !== 0 && ox === sx && oz === 0) || (sz !== 0 && oz === sz && ox === 0));
-}
-
-// --- take cover (TACTICS_PLAN M6) ---------------------------------------------
-
-// Does a crouch behind the shield CELL (sx, sz) protect the defender at
-// (dx, dz) from a shot fired from (ax, az)?
-//
-// The same octant question hasCover asks of a face, asked of the ONE cell the
-// defender committed to: the shield must sit on an orthogonal face of the
-// defender's tile pointing attackward. Deliberately not "any adjacent cover"
-// - crouching is a commitment to one object, and which sides that object
-// covers is what makes flanking the counter (designer: "only the direction
-// it blocks, flanking still works").
-//
-// Like hasCover's diagonal rule, a diagonal attacker is shielded if the cell
-// sits on EITHER of the two faces pointing their way - the shot has to clear
-// the object's corner no matter which axis it favours.
-export function crouchShields(ax, az, dx, dz, sx, sz) {
-  const ox = Math.sign(ax - dx);
-  const oz = Math.sign(az - dz);
-  if (ox === 0 && oz === 0) return false; // standing on them - no angle at all
-  return (ox !== 0 && sx === dx + ox && sz === dz)
-    || (oz !== 0 && sx === dx && sz === dz + oz);
 }
 
 // --- flanking (TACTICS_PLAN M4) ---------------------------------------------
@@ -264,15 +271,21 @@ export function crouchShields(ax, az, dx, dz, sx, sz) {
 // Strict opposition rather than a headcount (TACTICS_PLAN #7): a crowd bunched
 // on one flank is not a sandwich, and rewarding "stand next to each other"
 // would reward clumping, which is the opposite of the point. `allies` is any
-// list carrying x/z - the attacker's own side, attacker excluded.
-export function isFlanked(ax, az, dx, dz, allies) {
-  const sx = Math.sign(ax - dx);
-  const sz = Math.sign(az - dz);
+// list carrying x/z (continuous bodies) and optionally their own `reach` -
+// the attacker's own side, attacker excluded.
+//
+// "In its face" is the same reach test every melee rule migrated to (the old
+// `cheb <= 1` tile ring admitted bodies up to 2.83 apart and was the last
+// adjacency still measured in tiles), and it takes the edge test: a pincer
+// arm that could not actually swing through the partition is no pincer.
+export function isFlanked(ax, az, dx, dz, allies, edgeOpen = null) {
+  const { x: sx, z: sz } = dirOctant(ax, az, dx, dz);
   if (sx === 0 && sz === 0) return false; // attacker standing on the defender
-  return (allies || []).some((a) =>
-    cheb(a.x, a.z, dx, dz) <= 1            // must be in its face, not lobbing from afar
-    && Math.sign(a.x - dx) === -sx
-    && Math.sign(a.z - dz) === -sz);
+  return (allies || []).some((a) => {
+    if (!inReach(a.x, a.z, dx, dz, a.reach ?? REACH.DEFAULT, edgeOpen)) return false;
+    const o = dirOctant(a.x, a.z, dx, dz);
+    return o.x === -sx && o.z === -sz;
+  });
 }
 
 // --- backstab (TACTICS_PLAN M5) ---------------------------------------------
@@ -293,8 +306,7 @@ export function isBackstab(ax, az, dx, dz, facing) {
   const fx = Math.sign(facing.x || 0);
   const fz = Math.sign(facing.z || 0);
   if (fx === 0 && fz === 0) return false;
-  const sx = Math.sign(ax - dx);
-  const sz = Math.sign(az - dz);
+  const { x: sx, z: sz } = dirOctant(ax, az, dx, dz);
   if (sx === 0 && sz === 0) return false; // standing on them - no angle at all
   return (sx * fx + sz * fz) < 0; // negative dot: the attacker is in the rear arc
 }
@@ -309,17 +321,19 @@ export function isBackstab(ax, az, dx, dz, facing) {
 // here - it rides the accuracy term in toHitTerms - but hitChance's CLAMP_HI
 // still bounds everything, so nothing becomes a guaranteed hit.
 //
-// `ax/az/dx/dz` are TILE coordinates: a cover face and an exactly-opposite
-// pincer are genuinely grid-shaped, and octant signs are the honest way to ask
-// them. Only `melee` moved to real distance - the caller decides it, because
-// only the caller knows the attacker's reach (TACTICS_PLAN revision). It
-// defaults to the old tile rule so a caller that hasn't been updated behaves
-// exactly as before.
+// `ax/az/dx/dz` are the CONTINUOUS bodies (exact tile ints still work - the
+// octant bucketing agrees with the old signs for every near pair): direction
+// is measured between the bodies, while the cover faces and coverCell queries
+// stay on the defender's tile, because the furniture genuinely is grid-shaped
+// (DEGRID_PLAN D3). `melee` is still the caller's call - only the caller
+// knows the attacker's reach (TACTICS_PLAN revision); the fallback rounds to
+// the old tile rule for callers that haven't been updated.
 export function positionMods(ax, az, dx, dz, opts = {}) {
   const { edgeOpen = null, allies = [], facing = null, coverCell = null } = opts;
-  const melee = opts.melee ?? (cheb(ax, az, dx, dz) <= 1);
+  const melee = opts.melee
+    ?? (cheb(Math.round(ax), Math.round(az), Math.round(dx), Math.round(dz)) <= 1);
   const covered = !melee && hasCover(ax, az, dx, dz, edgeOpen, coverCell);
-  const flanked = melee && isFlanked(ax, az, dx, dz, allies);
+  const flanked = melee && isFlanked(ax, az, dx, dz, allies, edgeOpen);
   // Backstab is range-agnostic: shooting someone in the back counts, which is
   // also why it can coexist with the defender's cover - the cap and
   // hitChance's CLAMP_HI keep the stack honest.
