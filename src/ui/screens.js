@@ -188,7 +188,7 @@ export const CUSTOM_ID = '__custom__';
 
 export function showClassPicker(classes, actions, onPick, onEditor, onPreview) {
   // Only playable careers reach the desk - archetypes like the summoned
-  // applicant (playable: false) are units, not résumés (SUMMON_PLAN.md).
+  // employee (playable: false) are units, not résumés (SUMMON_PLAN.md).
   const classIds = Object.keys(classes).filter((id) => classes[id].playable !== false);
   const ids = [...classIds, CUSTOM_ID];
   // Whose kit a custom character does. Starts on the first job and is changed

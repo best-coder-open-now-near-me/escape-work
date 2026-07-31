@@ -79,7 +79,7 @@ test('a fresh sheet carries the four office attributes from its class', () => {
 
 test('derived maxHp/maxAp reproduce every playable class exactly', () => {
   for (const [id, cls] of Object.entries(CLASSES)) {
-    if (cls.playable === false) continue; // applicant is AI-driven, never a sheet
+    if (cls.playable === false) continue; // employee is AI-driven, never a sheet
     const s = createSheet(id);
     assert.equal(s.maxHp, cls.maxHp, `${id} maxHp`);
     assert.equal(s.maxAp, cls.ap, `${id} maxAp`);
@@ -187,14 +187,16 @@ test('spendClassPoint on an attrBonus node raises the attribute and derives', ()
 test('spendClassPoint grants an action onto the sheet (respecting prereqs)', () => {
   // The Drone's grant used to be `kick` - which the Mail Room and Security
   // handed out too, so three classes unlocked one action and levelling up
-  // converged the roster (POWERS_PLAN M3). It is now Paper Storm, a zone.
+  // converged the roster (POWERS_PLAN M3). Paper Storm took its place, and
+  // POWERS_PLAN M9 moved Paper Storm into the base kit (the Drone was
+  // otherwise left holding the two most generic verbs in the game), so the
+  // track now grants Throw the Ream.
   const s = createSheet('office-drone');
   s.classPoints = 2;
-  assert.ok(!s.actions.includes('paper-storm'));
-  assert.equal(spendClassPoint(s, 'drone-paper-storm'), false); // prereq not met yet
-  assert.equal(spendClassPoint(s, 'drone-sharp-folds'), true);
-  assert.equal(spendClassPoint(s, 'drone-paper-storm'), true); // now unlocks it
-  assert.ok(s.actions.includes('paper-storm'));
+  assert.ok(s.actions.includes('paper-storm'), 'the zone ships in the kit now');
+  assert.ok(!s.actions.includes('ream-throw'));
+  assert.equal(spendClassPoint(s, 'drone-ream'), true);
+  assert.ok(s.actions.includes('ream-throw'));
 });
 
 test('spendClassPoint merges a numeric talent effect', () => {
@@ -301,10 +303,10 @@ test('scaleEnemy adds the depth nudge on top of innate accuracy', () => {
 });
 
 test('scaleEnemy scales the maxHp field for a class-backed AI unit', () => {
-  // The applicant class spells max HP `maxHp` (not `hp`); scaleEnemy must scale
+  // The employee class spells max HP `maxHp` (not `hp`); scaleEnemy must scale
   // that field and never invent a phantom `hp` (stats.js unitCombat prefers maxHp).
-  const s = scaleEnemy(CLASSES.applicant, 3);
-  assert.ok(s.maxHp > CLASSES.applicant.maxHp, 'maxHp grows');
+  const s = scaleEnemy(CLASSES.employee, 3);
+  assert.ok(s.maxHp > CLASSES.employee.maxHp, 'maxHp grows');
   assert.equal(s.hp, undefined, 'no phantom hp field appears');
   assert.equal(s.level, 3);
 });
@@ -527,7 +529,7 @@ test('every equippable item declares a valid slot, stat vocabulary, and weapon s
 
 test('every playable class walks in wearing its startGear, curve-neutral', () => {
   for (const [id, cls] of Object.entries(CLASSES)) {
-    if (cls.playable === false) continue; // applicant is AI-driven, never a picked sheet
+    if (cls.playable === false) continue; // employee is AI-driven, never a picked sheet
     assert.ok(cls.startGear, `${id} furnishes a starting slot`); // a new character is never naked
     const s = createSheet(id);
     for (const [slot, itemId] of Object.entries(cls.startGear)) {
@@ -734,7 +736,7 @@ test('rangeOf leaves the paper throws exactly where they were', () => {
 });
 
 test('rangeOf ignores every range that is not a firing range', () => {
-  // `range` is a shared word: a summon's is how far applicants may report, a
+  // `range` is a shared word: a summon's is how far employees may report, a
   // zone's how far it can be dropped, a control's and a buff's their own reach.
   // Each resolves through its own gate in powers.js. Read as a firing range,
   // Post the Role would look like a gun and a touch control would stop walking
@@ -806,31 +808,27 @@ test('the basic attack leads, then shove, then the throws', () => {
   assert.equal(ids[3], 'paper-airplane');
   // Class utilities follow the things you throw, and the bare-handed swing is
   // last - it is what your EQUIPMENT brings, and it brings the least.
-  assert.deepEqual(ids.slice(4), ['defend', 'coffee', 'punch']);
+  assert.deepEqual(ids.slice(4), ['defend', 'paper-storm', 'punch']);
 });
 
 test('a class with no swing of its own leads with the one in its hands', () => {
-  // HR posts reqs; it does not punch anybody as a class power. The gear swing is
-  // therefore its basic attack, and it goes first rather than last.
+  // HR patches people up; it does not punch anybody as a class power. The gear
+  // swing is therefore its basic attack, and it goes first rather than last.
   const hr = createSheet('human-resources');
   const ids = barIds(hr, ['paper-ball']);
   assert.equal(ids[0], 'punch');
   assert.equal(ids[1], 'shove');
-  assert.ok(ids.indexOf('summon-applicants') > ids.indexOf('paper-ball'));
+  assert.ok(ids.indexOf('triage') > ids.indexOf('paper-ball'));
 });
 
 test('a talent power and a perk power sit after the class list, gear last', () => {
   const s = createSheet('office-drone');
   s.classPoints = 9;
   spendClassPoint(s, 'drone-thick-skin');
-  // Paper Storm, behind Sharp Folds - the Drone's track grant since
-  // POWERS_PLAN M3 (it used to be `kick`, which the Mail Room and Security
-  // also handed out, so three classes unlocked one action).
-  spendClassPoint(s, 'drone-sharp-folds');
-  spendClassPoint(s, 'drone-paper-storm'); // grants 'paper-storm'
+  spendClassPoint(s, 'drone-ream'); // grants 'ream-throw'
   equipItem(s, s.inventory.push('stapler') - 1); // brings its own swing
   const ids = barIds(s, ['paper-ball']);
-  assert.ok(ids.indexOf('paper-storm') > ids.indexOf('coffee'), 'a learned power follows the class kit');
+  assert.ok(ids.indexOf('ream-throw') > ids.indexOf('paper-storm'), 'a learned power follows the class kit');
   assert.equal(ids[ids.length - 1], 'staple-jab', 'the weapon swing is last');
 });
 
@@ -842,7 +840,7 @@ test('the order is stable as a kit grows - buttons do not shuffle', () => {
     const s = createSheet('office-drone');
     s.classPoints = 9;
     spendClassPoint(s, 'drone-thick-skin');
-    spendClassPoint(s, 'drone-sharp-folds');
+    spendClassPoint(s, 'drone-ream');
     spendClassPoint(s, 'drone-paper-storm');
     return barIds(s, ['paper-ball']);
   })();

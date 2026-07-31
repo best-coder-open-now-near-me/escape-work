@@ -91,7 +91,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // left. They enter after the real roster, so party.active still indexes right.
   for (const s of allies) {
     // Carrying the summoner in with them is what keeps the live cap honest
-    // across fights: counted as summonedBy: null, two applicants who survived
+    // across fights: counted as summonedBy: null, two employees who survived
     // the last fight were invisible to the cap check and their summoner could
     // post a full new batch on top of them.
     if (s.sheet.hp > 0 && s.actor) {
@@ -1102,7 +1102,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     costTag.style.display = 'block';
   }
 
-  // While a summon is armed, the cursor previews the DROP: how many applicants
+  // While a summon is armed, the cursor previews the DROP: how many employees
   // that spot fits, or why it doesn't work. Same rule the click runs.
   function showSummonPreview(point, sx, sy) {
     preview = null; // the drop zone replaces the trail, same as the hit readout
@@ -1112,7 +1112,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const problem = summonSpotProblem(a, tx, tz);
     const room = problem ? 0 : world.summonSpots(tx, tz, a.count).length;
     costTag.textContent = problem
-      || `Post ${room} applicant${room === 1 ? '' : 's'} here · ${a.ap} AP`;
+      || `Post ${room} employee${room === 1 ? '' : 's'} here · ${a.ap} AP`;
     costTag.style.left = `${sx + 14}px`;
     costTag.style.top = `${sy + 14}px`;
     costTag.style.display = 'block';
@@ -1371,7 +1371,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       for (const [x, z] of zoneCells(a, tx, tz)) drawRing(x, z, 0.42, PREVIEW_OK);
       return;
     }
-    // A summon rings the tiles its applicants would actually land on (green),
+    // A summon rings the tiles its employees would actually land on (green),
     // or the aimed tile alone in red when the spot is unusable - so "where do
     // they go?" is answered before the AP is spent.
     if (a.type === 'summon') {
@@ -3503,7 +3503,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // --- targeted summoning -------------------------------------------------------
   // Post the role AT a spot you pick (Divinity-style placement) rather than
   // wherever the summoner happens to stand: arm the action, then click a tile
-  // within `range` with a clear line to it. The applicants take that tile and
+  // within `range` with a clear line to it. The employees take that tile and
   // the free tiles ringing outward from it, so a click into open floor puts
   // them exactly where you wanted them - flanking, or screening a corridor.
   // Why a spot is unusable, or null when it's good. Shared by the click and the
@@ -3522,7 +3522,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const problem = summonSpotProblem(a, tx, tz);
     if (problem) { log(problem); return; }
     const n = resolveSummon(active.actor, 'player', a, { x: tx, z: tz });
-    if (n <= 0) { log('No room - the applicants can\'t find a free desk there.'); return; }
+    if (n <= 0) { log('No room - the employees can\'t find a free desk there.'); return; }
     if (a.uses) active.usesLeft[armed] -= 1;
     active.ap = roundAp(active.ap - a.ap);
     active.actor.lunge(tx, tz);
@@ -3806,7 +3806,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       m.actor.fx = { kind: 'death', t: 0 };
       if (!livingParty().length) { defeat(); return; } // party wipe - the only true loss
       log(m.isSummon
-        ? `${m.sheet.name} is dismissed - back to the applicant pool.`
+        ? `${m.sheet.name} is dismissed - back to the employee pool.`
         : `${m.sheet.name} is out cold. They'll sit the rest of this one out.`);
       // Keep `active` (the sheet the HUD reflects, and the post-combat leader)
       // on a real member still standing - never a summon, which despawns.

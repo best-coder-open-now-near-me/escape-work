@@ -21,8 +21,8 @@ test('unitCombat normalizes an ENEMY_TYPES def (max HP spelled `hp`)', () => {
 });
 
 test('unitCombat normalizes a class archetype (max HP spelled `maxHp`)', () => {
-  const c = unitCombat(CLASSES.applicant);
-  assert.equal(c.maxHp, CLASSES.applicant.maxHp); // classes spell it `maxHp`
+  const c = unitCombat(CLASSES.employee);
+  assert.equal(c.maxHp, CLASSES.employee.maxHp); // classes spell it `maxHp`
   assert.ok(Number.isFinite(c.maxHp));
   assert.ok(Array.isArray(c.attacks) && c.attacks.length > 0);
   assert.equal(typeof c.attackAp, 'number');
@@ -34,8 +34,8 @@ test('unitCombat defaults xp/loot for a player class with no AI fields', () => {
   assert.deepEqual(c.loot, []);
 });
 
-test('the applicant is a non-playable archetype with BOTH kits', () => {
-  const a = CLASSES.applicant;
+test('the employee is a non-playable archetype with BOTH kits', () => {
+  const a = CLASSES.employee;
   assert.equal(a.playable, false); // kept out of the class picker
   // The superset a shared archetype needs: `actions` for a player-controlled
   // summon's action bar, `attacks`/`attackAp` for its AI-summon twin.
@@ -43,8 +43,8 @@ test('the applicant is a non-playable archetype with BOTH kits', () => {
   assert.ok(a.attacks.length > 0 && typeof a.attackAp === 'number', 'has an AI attack set');
 });
 
-test('applicants are anti-farm: no XP, no loot', () => {
-  const c = unitCombat(CLASSES.applicant);
+test('employees are anti-farm: no XP, no loot', () => {
+  const c = unitCombat(CLASSES.employee);
   assert.equal(c.xp, 0);
   assert.deepEqual(c.loot, []);
 });
@@ -58,9 +58,9 @@ test('every playable class is a real career (has a name, model, actions)', () =>
   }
 });
 
-test('applicant is the only non-playable class today', () => {
+test('employee is the only non-playable class today', () => {
   const hidden = Object.keys(CLASSES).filter((id) => CLASSES[id].playable === false);
-  assert.deepEqual(hidden, ['applicant']);
+  assert.deepEqual(hidden, ['employee']);
 });
 
 // Every summon descriptor in the enemy registry must reference an archetype
@@ -103,7 +103,7 @@ test('every summon descriptor spends a bounded number of turns', () => {
   }
 });
 
-test('HR is a summoner; its applicants are worth no XP (spawner, not farm)', () => {
+test('HR is a summoner; its employees are worth no XP (spawner, not farm)', () => {
   assert.ok(ENEMY_TYPES.hr.summon, 'HR has a summon power');
   assert.equal(unitCombat(archetypeOf(summonSpec(ENEMY_TYPES.hr.summon).archetype)).xp, 0);
 });
@@ -128,13 +128,13 @@ test('summon actions reference a valid, combat-ready archetype', () => {
 // A posting announces PEOPLE arriving, and it is announced from one place -
 // the in-combat post and the out-of-combat one both call this, so the same
 // event can't read two ways. "1 reports for duty" was the number-where-a-person
-// -should-be that made a single-applicant post look like a spreadsheet row.
+// -should-be that made a single-employee post look like a spreadsheet row.
 test('a posting announces its arrivals in whole people', () => {
-  assert.match(arrivalLine(1), /^One applicant reports/);
-  assert.equal(arrivalLine(3), '3 applicants report for duty.');
-  // Whatever the count, the line never says "1 applicants" or "One report".
+  assert.match(arrivalLine(1), /^One employee reports/);
+  assert.equal(arrivalLine(3), '3 employees report for duty.');
+  // Whatever the count, the line never says "1 employees" or "One report".
   for (const n of [1, 2, 5]) {
-    assert.ok(!/\b1 applicants\b/.test(arrivalLine(n)), `${n} reads as people`);
+    assert.ok(!/\b1 employees\b/.test(arrivalLine(n)), `${n} reads as people`);
   }
 });
 
@@ -148,13 +148,20 @@ test('a summon action never posts more than its cap allows', () => {
     assert.ok(Number.isInteger(a.count) && a.count >= 1, `${id}.count is a whole hire`);
     assert.ok((a.cap ?? a.count) >= a.count, `${id}.cap can hold a full post`);
   }
-  assert.equal(ACTIONS['summon-applicants'].count, 1); // one applicant per post
+  assert.equal(ACTIONS['escalate'].count, 1); // one employee per post
 });
 
-test('Human Resources is a playable summoner class', () => {
-  const hr = CLASSES['human-resources'];
-  assert.ok(hr, 'the HR class exists');
-  assert.notEqual(hr.playable, false); // shows in the picker
-  assert.ok(hr.actions.includes('summon-applicants'), 'HR carries Post the Role');
-  assert.equal(ACTIONS['summon-applicants'].type, 'summon');
+test('the Middle Manager is the playable summoner class', () => {
+  // It was HR until POWERS_PLAN M9. Control and summon are the same fantasy
+  // pointed two ways - he spends other people's turns - and HR's remaining kit
+  // was already ally-facing, so the summon went to the class whose existing
+  // verb is "make it someone else's problem".
+  const mgr = CLASSES['middle-manager'];
+  assert.ok(mgr, 'the Manager class exists');
+  assert.notEqual(mgr.playable, false); // shows in the picker
+  assert.ok(mgr.actions.includes('escalate'), 'the Manager carries Escalate');
+  assert.equal(ACTIONS['escalate'].type, 'summon');
+  assert.equal(mgr.primary, 'summon');
+  // ...and HR is out of the summoning business entirely.
+  assert.ok(!CLASSES['human-resources'].actions.includes('escalate'));
 });

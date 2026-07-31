@@ -22,7 +22,7 @@ import { fromClass } from './classes.js';
 // Manager, the Executive and the rest are their own archetypes". `the rest`
 // included the HR Representative, and `human-resources` was sitting in the
 // class registry the whole time - doing the same job, and summoning the same
-// applicants through a second descriptor that disagreed with the class's own.
+// employees through a second descriptor that disagreed with the class's own.
 // The rule below is right; it had been asserted about five entries and checked
 // on none. Check it when you add one.
 //
@@ -120,7 +120,7 @@ const KITS = {
       { min: 2, max: 4, log: 'HR slides a self-evaluation form across the desk.' },
       { min: 1, max: 4, log: 'HR reminds you fun is mandatory at the offsite.' },
     ],
-    // HR's power (SUMMON_PLAN.md): posts the role and applicants materialize to
+    // HR's power (SUMMON_PLAN.md): posts the role and employees materialize to
     // fight for it. It is the SAME req the class posts, so it names the class
     // action and inherits WHO arrives from it (actions.js SUMMON_CONTRACT)
     // rather than restating an archetype that could drift.
@@ -130,15 +130,15 @@ const KITS = {
     // beside her as a pair on a tight cap; `cooldownRounds` paces her where
     // `uses` budgets the player; and five turns of service is five turns of AI
     // in the initiative order, which is the fight's pacing rather than the
-    // applicant's identity.
+    // employee's identity.
     summon: {
-      from: 'summon-applicants',
+      from: 'escalate',
       count: 2,
       cap: 2,
       cooldownRounds: 2,
       ap: 3,
       lifetimeTurns: 5,
-      log: 'HR posts the role internally. Applicants materialize, résumés in hand.',
+      log: 'HR posts the role internally. Employees materialize, résumés in hand.',
     },
   },
 

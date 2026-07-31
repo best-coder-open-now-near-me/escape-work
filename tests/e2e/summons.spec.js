@@ -1,4 +1,4 @@
-// Summons, in bespoke arenas. Enemy HR posts the role and its applicants join
+// Summons, in bespoke arenas. Enemy HR posts the role and its employees join
 // the engaged enemies as AI. A player summon is the opposite: a temporary
 // MEMBER you control - it takes its own initiative turn in PLAYER phase, with
 // its own action bar - not an autopilot ally (SUMMON_PLAN.md).
@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 import { bootStash, clickWorld, enterCombat, clickAction, refillAp } from './helpers.js';
 
 // Just you and one HR Rep, two tiles apart, in an open room with plenty of
-// free floor for applicants to spawn onto. No other coworkers, so enterCombat
+// free floor for employees to spawn onto. No other coworkers, so enterCombat
 // engages HR and combat opens against HR alone.
 const SUMMON_ARENA = {
   name: 'Summon Arena',
@@ -23,30 +23,30 @@ const SUMMON_ARENA = {
   ],
 };
 
-// Living applicants among the engaged enemies (combat exposes engaged as
+// Living employees among the engaged enemies (combat exposes engaged as
 // __combat.enemies).
-const applicants = (page) => page.evaluate(() =>
-  (window.__combat?.enemies || []).filter((e) => e.name === 'Applicant' && e.alive).length);
+const employees = (page) => page.evaluate(() =>
+  (window.__combat?.enemies || []).filter((e) => e.name === 'Employee' && e.alive).length);
 
-test('HR summons applicants that join the fight as enemies, capped', async ({ page }) => {
+test('HR summons employees that join the fight as enemies, capped', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, SUMMON_ARENA, 'office-drone');
   await enterCombat(page);
 
   // HR posts the role on its own initiative turn. Drive the fight - ending
-  // each of the player's turns lets the AI act - until two applicants have
+  // each of the player's turns lets the AI act - until two employees have
   // materialized and joined the engaged enemies (cap: 2). Order-agnostic:
   // HR may even win initiative and post before the player's first turn.
   await expect.poll(async () => {
     if (await page.evaluate(() => window.__combat?.phase === 'player')) await page.click('#combat-end-turn').catch(() => {});
-    return applicants(page);
+    return employees(page);
   }, { timeout: 45_000 }).toBe(2);
 
   // A further round doesn't stack a fresh batch on top - the live cap holds.
   if (await page.evaluate(() => !!window.__combat)) {
     if (await page.evaluate(() => window.__combat?.phase === 'player')) await page.click('#combat-end-turn').catch(() => {});
     await page.waitForTimeout(1500);
-    expect(await applicants(page)).toBeLessThanOrEqual(2);
+    expect(await employees(page)).toBeLessThanOrEqual(2);
   }
 });
 
@@ -81,22 +81,22 @@ test('a player summon is a controllable member, outlives the fight, then times o
   await bootStash(page, MELEE_ARENA, 'office-drone');
   await enterCombat(page);
 
-  // Summon applicants onto the player's side (the HR action drives this in
+  // Summon employees onto the player's side (the HR action drives this in
   // game; the debug hook stands in). Three of them, so the Manager can't pick
   // off a lone one before its turn comes up. They're summons, not enemies.
   // The third argument is the assignment: 12 turns, spent by their own combat
   // turns and - once the fight is over - by the world clock.
-  await page.evaluate(() => window.__combat.summonAlly('applicant', 3, 12));
+  await page.evaluate(() => window.__combat.summonAlly('employee', 3, 12));
   expect(await page.evaluate(() => window.__game.summons.length)).toBeGreaterThanOrEqual(1);
   expect(await page.evaluate(() =>
-    (window.__combat.enemies || []).some((e) => e.name === 'Applicant'))).toBe(false);
-  // Each applicant takes a PLAYER-team MEMBER slot in the one initiative order
+    (window.__combat.enemies || []).some((e) => e.name === 'Employee'))).toBe(false);
+  // Each employee takes a PLAYER-team MEMBER slot in the one initiative order
   // (member: true) - a controllable unit, not an AI ally (member: false).
   expect(await page.evaluate(() => window.__combat.order.some(
-    (o) => o.name === 'Applicant' && o.member && o.team === 'player'))).toBe(true);
+    (o) => o.name === 'Employee' && o.member && o.team === 'player'))).toBe(true);
 
   // Drive the order: end each real member's turn, wait through the AI's, and
-  // catch an applicant's OWN turn. Landing on it in PLAYER phase, with its
+  // catch an employee's OWN turn. Landing on it in PLAYER phase, with its
   // Résumé Slap on the bar, is the proof that YOU control the summon.
   let controlled = false;
   for (let i = 0; i < 24 && !controlled; i++) {
@@ -104,9 +104,9 @@ test('a player summon is a controllable member, outlives the fight, then times o
     await page.evaluate(() => { if (window.__god.player) window.__god.player.hp = window.__god.player.maxHp; });
     const cur = await currentSlot(page);
     if (!cur) { await page.waitForTimeout(400); continue; }
-    if (cur.phase === 'player' && cur.name === 'Applicant') {
+    if (cur.phase === 'player' && cur.name === 'Employee') {
       controlled = true;
-      await expect(page.locator('#hotbar-act-resume-slap')).toBeVisible(); // the summon's own bar
+      await expect(page.locator('#hotbar-act-action-item')).toBeVisible(); // the summon's own bar
     } else if (cur.phase === 'player') {
       await page.click('#combat-end-turn').catch(() => {}); // a real member - pass the turn
       await page.waitForTimeout(400);
@@ -117,7 +117,7 @@ test('a player summon is a controllable member, outlives the fight, then times o
   expect(controlled).toBe(true);
 
   // End the fight (force-kill the remaining coworkers). Victory no longer
-  // evaporates your summons: an applicant with assignment left walks out of the
+  // evaporates your summons: an employee with assignment left walks out of the
   // fight with you and is still standing on the floor afterwards.
   await page.evaluate(() => window.__god.enemies.forEach((e) => e.alive && e.die()));
   await expect.poll(() => page.evaluate(() => window.__game.inCombat),
@@ -146,8 +146,8 @@ test('the HR class posts the role AT a spot you pick', async ({ page }) => {
   await bootStash(page, MELEE_ARENA, 'human-resources');
   await enterCombat(page);
 
-  // Post the Role is on the bar, and no applicants have shown up yet.
-  await expect(page.locator('#hotbar-act-summon-applicants')).toBeVisible();
+  // Post the Role is on the bar, and no employees have shown up yet.
+  await expect(page.locator('#hotbar-act-escalate')).toBeVisible();
   expect(await page.evaluate(() => window.__game.summons.length)).toBe(0);
 
   // A full turn: the walk-up into this fight can bleed AP (see refillAp), and
@@ -155,9 +155,9 @@ test('the HR class posts the role AT a spot you pick', async ({ page }) => {
   await refillAp(page);
   // A summon is TARGETED: arming it picks the action, not the spot. The press
   // must not spend a thing until you say where they report.
-  await clickAction(page, 'summon-applicants');
+  await clickAction(page, 'escalate');
   await expect.poll(() => page.evaluate(() => window.__combat?.armed),
-    { timeout: 10_000 }).toBe('summon-applicants');
+    { timeout: 10_000 }).toBe('escalate');
   expect(await page.evaluate(() => window.__game.summons.length)).toBe(0);
 
   // Choose a spot several tiles off, so "where I clicked" and "beside the
@@ -183,12 +183,12 @@ test('the HR class posts the role AT a spot you pick', async ({ page }) => {
   const p = await page.evaluate(([x, z]) => window.__game.project(x, z), [target.x, target.z]);
   await page.mouse.click(p.x, p.y);
 
-  // ONE applicant reports for duty on YOUR side (summons, not enemies) - a post
-  // is a hire, not a batch (ACTIONS['summon-applicants'].count).
+  // ONE employee reports for duty on YOUR side (summons, not enemies) - a post
+  // is a hire, not a batch (ACTIONS['escalate'].count).
   await expect.poll(() => page.evaluate(() => window.__game.summons.length),
     { timeout: 15_000 }).toBe(1);
   expect(await page.evaluate(() =>
-    (window.__combat.enemies || []).some((e) => e.name === 'Applicant'))).toBe(false);
+    (window.__combat.enemies || []).some((e) => e.name === 'Employee'))).toBe(false);
 
   // ...and they report WHERE YOU CLICKED: the drop point itself, not wherever
   // the summoner is standing.
@@ -217,18 +217,18 @@ test('Post the Role is on the out-of-combat bar, and posts where you click', asy
   await bootStash(page, QUIET_ARENA, 'human-resources');
 
   // The whole kit is listed out of combat, not just the slot we are about to
-  // press. HR's kit is exactly these three (classes.js: summon-applicants,
+  // press. HR's kit is exactly these three (classes.js: escalate,
   // performance-review, coffee) - this used to ask for #hotbar-act-defend,
   // which no HR has ever had. Deflect Blame belongs to the Office Drone, so
   // the assertion could only ever have failed; it sat in the tail of the suite
   // that CI's maxFailures cap kept it from ever reaching.
-  await expect(page.locator('#hotbar-act-summon-applicants')).toBeVisible();
+  await expect(page.locator('#hotbar-act-escalate')).toBeVisible();
   await expect(page.locator('#hotbar-act-performance-review')).toBeVisible();
   await expect(page.locator('#hotbar-act-coffee')).toBeVisible();
   expect(await page.evaluate(() => window.__game.summons.length)).toBe(0);
 
-  await page.click('#hotbar-act-summon-applicants');
-  expect(await page.evaluate(() => window.__game.armed)).toBe('summon-applicants');
+  await page.click('#hotbar-act-escalate');
+  expect(await page.evaluate(() => window.__game.armed)).toBe('escalate');
 
   // A spot two tiles off: "where I clicked" and "beside the summoner" are
   // different answers, and it is inside the action's range of 5.
@@ -278,9 +278,9 @@ test('an out-of-range spot is refused, and the posting is not spent', async ({ p
   // stable `apBefore`, not a full one.
   await refillAp(page);
 
-  await clickAction(page, 'summon-applicants');
+  await clickAction(page, 'escalate');
   await expect.poll(() => page.evaluate(() => window.__combat?.armed),
-    { timeout: 10_000 }).toBe('summon-applicants');
+    { timeout: 10_000 }).toBe('escalate');
   const apBefore = await page.evaluate(() => window.__combat.ap);
 
   // The NEAREST tile past range 5 - far enough to be refused, close enough to
@@ -310,5 +310,5 @@ test('an out-of-range spot is refused, and the posting is not spent', async ({ p
   // click somewhere sensible instead of re-arming it.
   expect(await page.evaluate(() => window.__game.summons.length)).toBe(0);
   expect(await page.evaluate(() => window.__combat.ap)).toBe(apBefore);
-  expect(await page.evaluate(() => window.__combat.armed)).toBe('summon-applicants');
+  expect(await page.evaluate(() => window.__combat.armed)).toBe('escalate');
 });

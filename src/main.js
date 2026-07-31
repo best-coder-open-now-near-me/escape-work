@@ -313,7 +313,7 @@ function startGame(level) {
   // Out-of-combat, a summon's assignment is spent by the world clock instead of
   // by initiative turns - one per fire/smoke turn - so temps don't loiter
   // forever just because you stopped fighting. Returns nothing; expired
-  // applicants show themselves out.
+  // employees show themselves out.
   function ageSummons() {
     for (const s of [...summons]) {
       if (s.actor.summonTurns == null) continue;
@@ -515,7 +515,7 @@ function startGame(level) {
   // level data, rendered by buildLevel and respected by pathfinding.)
 
   // Summon reinforcements: drop up to `n` archetype units (a class id - e.g.
-  // 'applicant' - or an ENEMY_TYPES id) onto free tiles, wire their models, and
+  // 'employee' - or an ENEMY_TYPES id) onto free tiles, wire their models, and
   // hand the records back to whoever asked.
   //   enemy team -> an EnemyActor filed into `enemies` (AI-driven); every
   //     existing enemy system applies for free. Returned as the actor.
@@ -1665,7 +1665,7 @@ function startGame(level) {
         // and the costs are the walker's own talents, not the leader's.
         // "The walker" includes a summon you're driving - it has its own sheet
         // and its own talents, so looking only at party.members made a shock-
-        // immune leader route an applicant straight through live water.
+        // immune leader route an employee straight through live water.
         // Summons block too: a member's move must not end stacked on one.
         findPath: (sx, sz, tx, tz, self = player) => {
           const walker = party.members.find((m) => m.actor === self)
@@ -1831,7 +1831,7 @@ function startGame(level) {
           inCombat = false;
           combat = null;
           // Summons stay. They used to blink out the instant the last coworker
-          // fell, which made a two-turn-old applicant feel like a prop; now the
+          // fell, which made a two-turn-old employee feel like a prop; now the
           // assignment (`lifetimeTurns`) is what ends them, whether that runs
           // out mid-fight, between fights, or in the next one. combat.js has
           // already swept any that were killed.
@@ -3743,7 +3743,7 @@ function startGame(level) {
       scene.refreshDoor(key);
       for (const e of enemies) e.clearPath(); // their routes may have changed
     },
-    // Resolves an ENEMY_TYPES id or a class archetype (e.g. 'applicant'), so a
+    // Resolves an ENEMY_TYPES id or a class archetype (e.g. 'employee'), so a
     // tester can drop class-based units to feel out balance.
     spawnEnemy(typeId, x, z) {
       const base = ENEMY_TYPES[typeId] || CLASSES[typeId];
@@ -3760,8 +3760,8 @@ function startGame(level) {
     // Drop a player-team summon beside the active member (combat only) - the
     // console-side twin of the HR class's Post the Role, for tuning.
     // `lifetimeTurns` null = permanent, a number = turns of assignment before
-    // the applicant files out (the tuning knob milestone 4 left open).
-    summonAlly(archetypeId = 'applicant', n = 1, lifetimeTurns = null) {
+    // the employee files out (the tuning knob milestone 4 left open).
+    summonAlly(archetypeId = 'employee', n = 1, lifetimeTurns = null) {
       return window.__combat ? window.__combat.summonAlly(archetypeId, n, lifetimeTurns) : 0;
     },
     giveItem(id) {

@@ -520,7 +520,7 @@ export function reachOf(sheet) {
 // you chuck a wad". Anything else declares `range` outright.
 //
 // Only ATTACKS answer, and the type test is load-bearing: `range` is a shared
-// word across the registry. A summon's is how far from the summoner applicants
+// word across the registry. A summon's is how far from the summoner employees
 // may report, a zone's is how far it can be dropped, a control's and a buff's
 // are their own reach, and each of those verbs resolves through its own gate in
 // powers.js. Read here as a firing range, Post the Role would look like a gun -

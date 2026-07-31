@@ -122,9 +122,9 @@ export const CLASSES = {
       { id: 'drone-sharp-folds', name: 'Sharp Folds', cost: 1, effect: { talent: { paperDamageBonus: 1 } } },
       // Was a grant of `kick`, which the Mail Room and Security also handed
       // out - three classes unlocking one action (POWERS_PLAN M3).
-      { id: 'drone-paper-storm', name: 'Paper Storm', cost: 1, requires: ['drone-sharp-folds'], effect: { grantsAction: 'paper-storm' } },
+      { id: 'drone-ream', name: 'Reams of It', cost: 1, effect: { grantsAction: 'ream-throw' } },
     ],
-    actions: ['attack', 'defend', 'coffee'],
+    actions: ['attack', 'defend', 'paper-storm'],
     talent: {
       name: 'Origami Specialist',
       blurb: 'Immune to paper cuts. Projectiles +2 damage; airplanes fold for 1 sheet.',
@@ -135,7 +135,7 @@ export const CLASSES = {
   },
   'middle-manager': {
     name: 'Middle Manager',
-    primary: 'control', // he does not out-hit you, he takes your turn
+    primary: 'summon', // he does not do the work, he finds somebody who will
     // The rig named for the job. Short and settled from six years in the
     // chair - the build is character here, not a way to tell two people apart.
     model: 'midmanager',
@@ -161,7 +161,7 @@ export const CLASSES = {
       // never changed what he could DO (POWERS_PLAN M2).
       { id: 'mgr-all-hands', name: 'All-Hands', cost: 1, requires: ['mgr-stonewall'], effect: { grantsAction: 'all-hands' } },
     ],
-    actions: ['delegate', 'own-calendar', 'espresso'],
+    actions: ['delegate', 'escalate'],
     talent: {
       name: 'Smoker',
       blurb: 'A lighter, always. Ignite anything flammable. Smoke breaks steady the nerves in combat.',
@@ -194,7 +194,7 @@ export const CLASSES = {
       // clerk flanks and gets behind people without giving up a swing.
       { id: 'mail-always-moving', name: 'Always Moving', cost: 1, requires: ['mail-cart-legs'], effect: { talent: { freeMoveAp: 1 } } },
     ],
-    actions: ['mail-cone', 'courier-route', 'snack-cart'],
+    actions: ['mail-cone', 'courier-route'],
     talent: {
       name: 'Warehouse Soles',
       blurb: 'Eleven years of ignored wet-floor signs. You cannot slip. Ever.',
@@ -227,7 +227,7 @@ export const CLASSES = {
     // `aimsAtAnyone` exists, one verb covers the board, which is what IT's
     // identity was always describing: nobody else can take a status off
     // anybody.
-    actions: ['reboot', 'energy-drink'],
+    actions: ['reboot'],
     // (An anti-slip footwear talent is reserved for a future talent-choice
     // system - the engine already honors slipImmune. Until then, gum on your
     // shoe is the anti-slip option, at a price.)
@@ -240,7 +240,7 @@ export const CLASSES = {
 
   'human-resources': {
     name: 'Human Resources',
-    primary: 'summon', // it staffs the fight; the buffs are the other half
+    primary: 'buff', // the only class that puts anything back
     // The rig named for the job. Shared with the HR Representative you FIGHT
     // (data/enemies.js), who inherits this class and reads apart by build.
     model: 'hrrep',
@@ -260,15 +260,15 @@ export const CLASSES = {
       // of Performance Review (POWERS_PLAN M1).
       { id: 'hr-onboarding', name: 'Onboarding Buddy', cost: 1, requires: ['hr-read-room'], effect: { grantsAction: 'onboarding' } },
     ],
-    // Post the Role summons applicants to fight for you; Performance Review
+    // Post the Role summons employees to fight for you; Performance Review
     // makes whoever is already swinging connect more often. HR is the only
     // class that spends its turns on OTHER people (POWERS_PLAN M1) - it used
     // to carry Deflect Blame and Coffee Break, which is the Office Drone's
     // kit, so the support class supported nobody but itself.
-    actions: ['summon-applicants', 'performance-review', 'coffee'],
+    actions: ['performance-review', 'triage'],
     talent: {
       name: 'Open Door Policy',
-      blurb: 'The door is always open. So is the req. There is always another applicant.',
+      blurb: 'The door is always open. So is the req. There is always another employee.',
       effects: {}, // flavor for now; a summon-scaling effect can land later
     },
   },
@@ -300,7 +300,7 @@ export const CLASSES = {
       // the roster instead of separating it.
       { id: 'sec-lockdown', name: 'Badge Lockdown', cost: 1, requires: ['sec-post'], effect: { grantsAction: 'lockdown' } },
     ],
-    actions: ['detain', 'stand-post', 'night-thermos'],
+    actions: ['detain', 'stand-post'],
     talent: {
       name: 'Incident Report',
       blurb: 'Eight years of walking through whatever the day shift spilled. Hazards on the floor hurt you less.',
@@ -311,16 +311,16 @@ export const CLASSES = {
   },
 
   // --- summoned, never chosen -------------------------------------------------
-  // The applicant is a class with no résumé worth reading: spawned by an HR
+  // The employee is a class with no résumé worth reading: spawned by an HR
   // summon (data/enemies.js hr.summon, and later the HR class's Post the Role),
   // it fights on whichever side called it. `playable: false` keeps it out of
   // the picker; the AI-combat fields below are what let a class stand in for an
   // AI-driven unit (stats.js unitCombat, combat.js). Deliberately flimsy - a
   // swarm you clear, not a wall you grind - and worth no XP or loot, so an HR
   // that summons on a cooldown is a spawner, not a farm (SUMMON_PLAN #6).
-  applicant: {
-    name: 'Applicant',
-    // Deliberately the office-worker rig: an applicant is meant to read as
+  employee: {
+    name: 'Employee',
+    // Deliberately the office-worker rig: an employee is meant to read as
     // anonymous, and the wash-out below is the point, not a workaround. It is
     // the one character type that shares a model, by choice.
     model: 'worker',
@@ -332,23 +332,23 @@ export const CLASSES = {
     // Explicit zeros keep the source-of-truth rule (every class carries `attr`)
     // without changing behavior: base is solved to reproduce maxHp/ap, and a
     // zero spread means no Savvy damage, no Composure deflect, +0 initiative -
-    // exactly what the applicant had when it omitted the block.
+    // exactly what the employee had when it omitted the block.
     attr: { grit: 0, hustle: 0, savvy: 0, composure: 0 },
     // Player-controlled summons swing from `actions` (an action bar) like any
     // member; enemy-side AI summons roll from `attacks` below instead. The
-    // applicant carries both - the superset a shared archetype needs.
-    actions: ['resume-slap'],
+    // employee carries both - the superset a shared archetype needs.
+    actions: ['action-item'],
     talent: null,
     // AI-combat fields (read only for AI-driven class units):
     attackAp: 3,
     xp: 0,
     loot: [],
-    // Side-neutral flavor: applicants fight on either team, so no line
+    // Side-neutral flavor: employees fight on either team, so no line
     // addresses "you" - it reads the same whoever they're swinging at.
     attacks: [
-      { min: 1, max: 2, log: 'An applicant brandishes a résumé.' },
-      { min: 1, max: 3, log: 'An applicant asks about the growth trajectory.' },
-      { min: 1, max: 2, log: 'An applicant follows up. And follows up again.' },
+      { min: 1, max: 2, log: 'An employee circles back on an action item.' },
+      { min: 1, max: 3, log: 'An employee asks to be looped in.' },
+      { min: 1, max: 2, log: 'An employee follows up. And follows up again.' },
     ],
   },
 };
