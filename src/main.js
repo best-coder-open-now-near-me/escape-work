@@ -16,7 +16,7 @@ import { ACTIONS, arrivalLine } from './data/actions.js';
 import { parseLevel } from './grid.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, routeToFiringPosition, DIRS8 } from './pathfinding.js';
 import {
-  createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, classTrack,
+  createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, grantTalent, classTrack,
   scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
   orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, lookOf, stairwellHeal, REACH,
 } from './stats.js';
@@ -3736,6 +3736,10 @@ function startGame(level) {
     // level-up screen calls - so a test exercises the real path rather than
     // hand-writing talent effects the game would never produce.
     spendClassPoint: (sheet, nodeId) => spendClassPoint(sheet, nodeId),
+    // Talents are their own axis (TALENT_PLAN M1) and the picker that spends
+    // talent points is M2, so this is how a test takes one through the real
+    // grant path rather than hand-writing an effects bag.
+    grantTalent: (sheet, talentId) => grantTalent(sheet, talentId),
     get doors() { return [...grid.doors].map(([key, d]) => ({ key, open: d.open })); },
     setDoorOpen(key, open) {
       if (!grid.doors.has(key)) return;
