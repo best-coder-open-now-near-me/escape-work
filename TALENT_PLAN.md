@@ -20,6 +20,23 @@ deliberate exception, stated up front in decision 8.
 *inside* the class track, which is the entanglement rather than the cure. The
 class track survives, minus its talent nodes; see M2.
 
+> **Status: M1 shipped.** Departures from the plan below:
+> - **Nine entries, not ten.** Sharp Folds was cut on arrival - the
+>   effect-duplication lint caught it granting `paperDamageBonus` alongside
+>   Origami Specialist, and as a standalone pick it is that talent with a
+>   smaller number. The "merge the thin ones upward" note under decision 11
+>   predicted this; it just applied sooner than M4.
+> - **Corner-Office Traction survived as `moveCost: 0.9`**, not `slipImmune` -
+>   it could not keep the effect Warehouse Soles owns. It is the thinnest entry
+>   in the file and is flagged in place as M4's problem.
+> - **Smoker lost `grantsAction: 'cigarette'`** to POWERS_PLAN M9's heal audit,
+>   leaving `hasLighter` - which was always its interesting half.
+> - **`STARTING_TALENT_BY_CLASS` is the seed**, in `data/talents.js` rather
+>   than on the class entries, so the lint forbidding a class talent cannot be
+>   sidestepped by a `startTalent` field. It is marked for deletion by M2.
+> - **`grantTalent(sheet, id)`** is the new seam in `stats.js`; `applyEffect`
+>   itself needed no change, as predicted.
+
 ## Where we are today
 
 - **Six named talents, one welded to each class.** `CLASSES[x].talent` is a

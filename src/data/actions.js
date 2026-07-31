@@ -61,7 +61,11 @@
 //   you in. `ammoCost` is now only a COST - an attack can be ranged and free
 //   (the staple gun), or cost ammo and be ranged (the paper throws, which
 //   default to THROW_RANGE without declaring one). See stats.rangeOf.
-//   ammoCost - sheets of paper the attack spends from `sheet.paper`.
+//   ammoCost - sheets of paper the attack spends from `sheet.paper`. An
+//   ammo-priced attack joins EVERY character's bar automatically (the paper
+//   throws are universal), because ammoCost answers "what does this cost" and
+//   was being read as "who may do this" too. One that has to be LEARNED says
+//   `universal: false` and arrives through sheet.actions like any class power.
 //
 // `icon` is the face the power wears on the hotbar, which is an icon grid: one
 // emoji, the same way items and loot labels are iconed. It is not decoration.
@@ -611,6 +615,11 @@ export const ACTIONS = {
     type: 'attack',
     ap: 2,
     ammoCost: 5,
+    // Priced in paper, but NOT one of the throws everybody has: it is learned
+    // off the Drone's track. Without this, `ammoCost` alone would have put it
+    // on every character's bar (combat.js throwableIds) and the class point
+    // that buys it would have bought nothing.
+    universal: false,
     label: 'Throw the Ream',
     icon: '📦',
     desc: 'Five hundred sheets, still boxed, thrown overarm. Expensive, and worth it.',

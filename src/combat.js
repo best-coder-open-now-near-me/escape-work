@@ -10,6 +10,7 @@
 // do. Fire keeps burning throughout.
 import { ACTIONS, arrivalLine, summonSpec } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
+import { throwablesFor as throwableIdsFor } from './hotbar-model.js';
 import { truncateByBudget, routeToFiringPosition, trimToFirst } from './pathfinding.js';
 import { pronounsOf, capitalize, verb } from './creation.js';
 import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, gritSaveChance, MOVE, REACH } from './stats.js';
@@ -295,14 +296,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const moveBudget = (holder) => (rootedNow(holder)
     ? 0
     : Math.max(0, (holder.freeAp || 0) + holder.ap));
-  const throwableIds = Object.keys(ACTIONS).filter((id) => ACTIONS[id].ammoCost);
-  // A throwable can be gated behind a talent effect (`needsTalent`): folding a
-  // dart that lands in someone's eye is a craft, so paper airplanes belong to
-  // the Origami Specialist. Anyone can crumple a wad.
-  const throwablesFor = (m) => throwableIds.filter((id) => {
-    const need = ACTIONS[id].needsTalent;
-    return !need || !!(m.sheet.talent?.effects || {})[need];
-  });
+  // Which throws a member has: hotbar-model.js owns that rule for both bars.
+  // Combat kept its own copy of the filter, and two copies of one rule is how
+  // a learned power ended up on everybody's bar - the flag that fixed it here
+  // did nothing out of combat until they were merged.
+  const throwablesFor = (m) => throwableIdsFor(m.sheet);
   // Everyone can shove - it's an office, not a fencing academy - and everyone
   // has a basic weapon swing (the equipped weapon's, or bare-handed 'punch').
   // In the canonical order (stats.orderedActionIds), the same one the

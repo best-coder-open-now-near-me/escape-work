@@ -31,13 +31,34 @@ import { orderedActionIds, equippedAction, ammoCostOf } from './stats.js';
 // fold (needsTalent) is not theirs to list.
 export function actionIdsFor(s) {
   if (!s) return [];
-  const throwables = Object.keys(ACTIONS).filter((id) => {
-    const a = ACTIONS[id];
-    return a.ammoCost && (!a.needsTalent || !!(s.talent?.effects || {})[a.needsTalent]);
-  });
   return orderedActionIds(s, [
-    ...s.actions, equippedAction(s), 'shove', 'take-cover', 'pull', ...throwables,
+    ...s.actions, equippedAction(s), 'shove', 'take-cover', 'pull', ...throwablesFor(s),
   ]);
+}
+
+// The throws THIS character has, which is two questions and used to be one.
+//
+// `ammoCost` says what a throw costs, and was doing double duty as "who may
+// make it" - so any ammo-priced attack joined every character's bar the moment
+// it entered the registry. That is right for the paper throws (anyone can
+// crumple a wad) and wrong for one you LEARN: it made the Office Drone's track
+// grant universal and its class point worthless. `universal: false` opts out;
+// such an action reaches the bar through sheet.actions like any class power.
+//
+// `needsTalent` is the other gate, and a different shape: folding a dart that
+// lands in someone's eye is a craft, so the airplane is the Origami
+// Specialist's - and, since TALENT_PLAN M1, anyone who takes that talent.
+//
+// Lives here, in the pure module, because combat.js kept its own copy of this
+// filter and the two had to be corrected separately to stay in step - which is
+// exactly the drift that put a learned power on everybody's bar in the first
+// place. One rule, two renderers.
+export function throwablesFor(s) {
+  const fx = s?.talent?.effects || {};
+  return Object.keys(ACTIONS).filter((id) => {
+    const a = ACTIONS[id];
+    return a.ammoCost && a.universal !== false && (!a.needsTalent || !!fx[a.needsTalent]);
+  });
 }
 
 // Consumables in the pockets, deduped, with how many are in there. These are

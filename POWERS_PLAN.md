@@ -388,6 +388,28 @@ Where the implementation departed from this document, and why:
 
 ## M9: the heal audit and the summoner swap
 
+> **Status: shipped.** Where it departed from what is written below:
+> - HR's primary is **`buff`**, not `heal`. The lint requires a class's
+>   primary to name a TYPE its kit actually contains, and `triage` is a buff
+>   carrying `amount` (a `heal` is self-only and instant by construction, so it
+>   could not have pointed at anyone else). The † note below anticipated the
+>   name being wrong; this is what it resolved to.
+> - **`escalate` summons `employee`, not a new `direct-report`.** With HR out
+>   of the summoning business nobody is posting a req, so `applicant` was freed
+>   rather than needing a sibling - "i thought we changed hr to not summon
+>   anymore, so we would just be renaming applicant to 'employee'" (designer,
+>   2026-07-31). Its attack `resume-slap` became `action-item` with it.
+> - **Paper Storm moved into the Drone's base kit** and its track grants
+>   `ream-throw` instead (risk 10's "thin by kind" half, answered rather than
+>   watched).
+> - **`own-calendar` and `cigarette` were deleted outright**, not just
+>   unreferenced: the second surviving `defend` existed because the Manager's
+>   rationed primary needed something to spend a turn on, and his primary is a
+>   summon now.
+> - **The enemy HR Representative still summons**, pointing `from: 'escalate'`.
+>   See the open question at the end of this section.
+
+
 M8 audited primaries and found six distinct ones. It did not audit the rest of
 the kit, and underneath the primaries every class still carries the same third
 button.
@@ -429,7 +451,7 @@ classes differ along; it is a ritual every kit performs.
 | 18 | HR is the **only** healer — every other class loses its heal | `[ratified]` | "hr only healer for now" (designer, 2026-07-31), overruling a proposal that IT keep one on the strength of its 17 max HP. Note the **"for now"**: this is the sharp version, taken deliberately to see how it plays. If a second healer comes back, IT is where the argument was. |
 | 19 | HR's heal may target anyone on your side, including HR | `[ratified]` | "hr heal is for anyone" (designer, 2026-07-31), overruling a proposed others-only restriction. Ships as a `buff` with `amount`, which the verb already supports (`buffOutcome` computes `healed`, and `data/actions.js` already documents buff as "at an ALLY ... or at yourself"), so this costs no new plumbing — it is strictly *less* work than the restriction was. |
 | 21 | The Manager stops being *about* control | `[ratified]` | "manager stops being about control" (designer, 2026-07-31). He keeps `delegate` as flavour and moves to `primary: 'summon'`. Control was the most crowded verb in the game — Security carries `detain` + `lockdown`, IT carries `percussive-maintenance` + `remote-session` — so it loses a headline, not a home. See risk 11 for what this does to the lint's reading. |
-| 20 | The Manager's Smoker talent stops granting a heal | `[proposed]` | `cigarette` is a seventh heal hiding in a talent, and 18 leaves it as the only heal outside HR — which is the ritual surviving in the one place the class lint would not look. The talent's genuinely unique half is `hasLighter: true`, which currently has no action attached to it — see below. |
+| 20 | The Manager's Smoker talent stops granting a heal | `[ratified]` | `cigarette` is a seventh heal hiding in a talent, and 18 leaves it as the only heal outside HR — which is the ritual surviving in the one place the class lint would not look. The talent's genuinely unique half is `hasLighter: true`, which currently has no action attached to it — see below. |
 
 ### Why the Manager, and not Security or IT
 
@@ -582,7 +604,11 @@ tip into *mandatory* — a support class you must recruit is a tax, not a choice
     whether coverage was ever the goal, or whether the lint was only ever
     guarding against two classes being *about* the same thing.
 12. **`espresso`, `snack-cart`, `night-thermos`, `energy-drink` and `coffee`
-    become orphans.** Do not delete them: they are exactly the shape
+    become orphans.** *(Shipped as items: `coffee-break`,
+    `executive-espresso`, `snack-cart-pastry`, `night-thermos`, and the
+    pre-existing `energy-drink` item. A `break-room` loot table on the fridge,
+    mini-fridge and coffee machine carries them; the vending machine sells two
+    at 1.6x; a desk drawer turns up a coffee at 0.25.)* Do not delete them: they are exactly the shape
     `data/items.js` consumables want, and moving a heal from a class action to
     a lootable object is the substance of this milestone rather than a side
     effect of it. (`energy-drink` is the fiddly one — there is *already* an
@@ -689,3 +715,25 @@ tip into *mandatory* — a support class you must recruit is a tax, not a choice
    good. But a *cone* control that roots your own teammates may just read as a
    bug. Recommend: control cones check allegiance, zones do not. Revisit if
    the asymmetry reads as inconsistent.
+
+### Open after M9: the enemy HR Representative
+
+She inherits `classId: 'human-resources'` and carries her own `summon`
+descriptor, which now reads `from: 'escalate'` - an HR enemy inheriting the
+Manager's action id. It works (the contract shares only `archetype`, and who
+shows up is still the honest shared fact) but it reads oddly, and there are
+three ways out:
+
+- **Leave it.** Descriptors are per-side by design; hers is her own and only
+  the archetype is shared. Cheapest, and the oddness is confined to one line.
+- **Move her summon to a manager-shaped enemy**, mirroring the player side
+  exactly. Cleanest conceptually. Costs: The Manager and The Executive
+  deliberately have no class twin, so there is no enemy that IS a middle
+  manager to give it to - one would have to be written.
+- **Make her a support enemy** - heals and buffs the other enemies, mirroring
+  the player HR precisely, which is what "a class is the shared unit archetype"
+  actually implies. Blocked today by `POWERS_PLAN` risk 7, which defers `buff`
+  for the AI: a healing enemy needs friendly target selection and retreat
+  logic, and that is the faction work `SUMMON_PLAN.md` gestures at.
+
+Recommend the first until the AI can buff, then the third. `[proposed]`

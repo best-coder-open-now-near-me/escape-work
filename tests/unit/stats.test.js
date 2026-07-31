@@ -229,6 +229,23 @@ test('spendClassPoint grants an action onto the sheet (respecting prereqs)', () 
   assert.ok(s.actions.includes('ream-throw'));
 });
 
+test('an ammo-priced attack is not automatically everybody\'s', () => {
+  // `ammoCost` says what a throw COSTS, not who may make it. Read as both, it
+  // handed every ammo-priced attack to the whole roster the moment it entered
+  // the registry - which made the Drone's track grant universal and the class
+  // point that buys it worthless. Throw the Ream opts out; the paper throws,
+  // which really are everybody's, do not.
+  assert.equal(ACTIONS['ream-throw'].universal, false);
+  assert.equal(ACTIONS['paper-ball'].universal, undefined);
+  assert.equal(ACTIONS['paper-airplane'].universal, undefined);
+  // ...and it is genuinely learned: a fresh Drone does not have it.
+  const s = createSheet('office-drone');
+  assert.ok(!s.actions.includes('ream-throw'));
+  s.classPoints = 1;
+  spendClassPoint(s, 'drone-ream');
+  assert.ok(s.actions.includes('ream-throw'));
+});
+
 test('the freed talents reproduce the effects the classes used to bake', () => {
   // The test that makes TALENT_PLAN M1 a MOVE rather than a rebalance. These
   // are the exact bags data/classes.js carried before the extraction; if this

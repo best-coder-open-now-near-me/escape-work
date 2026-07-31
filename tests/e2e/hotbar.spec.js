@@ -85,12 +85,12 @@ test('right-click a slot to reassign it; assigning swaps rather than duplicates'
   // Right-click the leftmost slot: the menu lists every power the character has.
   await page.click('#hotbar-act-attack', { button: 'right' });
   await expect(page.locator('#context-menu')).toBeVisible();
-  await expect(page.locator('#context-menu')).toContainText('Coffee Break');
+  await expect(page.locator('#context-menu')).toContainText('Paper Storm');
   await expect(page.locator('#context-menu')).toContainText('Shove');
 
-  // Assign Coffee Break there. It was already on the bar, so the two SWAP -
+  // Assign Paper Storm there. It was already on the bar, so the two SWAP -
   // a power can never be in two slots at once.
-  await page.click('#context-menu >> text=Coffee Break');
+  await page.click('#context-menu >> text=Paper Storm');
   await expect.poll(async () => (await slots(page)).map((s) => s.id)).toEqual([
     'hotbar-act-paper-storm',
     'hotbar-act-shove',
@@ -104,13 +104,13 @@ test('right-click a slot to reassign it; assigning swaps rather than duplicates'
     'hotbar-slot-9',
   ]);
 
-  // The layout rides on the SHEET, so pressing key 1 now arms what is in slot 1.
-  // (Coffee Break is combat-only out here, so it refuses and says why - which is
-  // proof the press landed on the zone and not on the email that used to be
-  // there.)
+  // The layout rides on the SHEET, so pressing key 1 now arms what is in slot 1
+  // - Paper Storm, which aims at a point and previews out of combat too. That
+  // it arms the ZONE rather than the email is the proof the press followed the
+  // swap rather than the old position.
   await page.keyboard.press('1');
-  expect(await page.evaluate(() => window.__game.narration.at(-1))).toMatch(/pockets/i);
-  expect(await page.evaluate(() => window.__game.armed)).toBe(null);
+  await expect.poll(() => page.evaluate(() => window.__game.armed)).toBe('paper-storm');
+  await page.keyboard.press('Escape');
 
   // Clearing a slot leaves it empty and addressable, not collapsed.
   await page.click('#hotbar-act-paper-storm', { button: 'right' });
