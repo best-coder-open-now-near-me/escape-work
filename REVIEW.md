@@ -1,5 +1,144 @@
 # Project Review — Escape Work
 
+## Consolidated re-verification — 2026-07-31
+
+Baseline: `claude/combat-interaction-bugs-po78ob` merged up to `origin/main`
+(`9373dd0`), 622 unit tests passing. Two earlier review passes were folded
+together here and **every claim was re-traced through the code on this
+branch** before it was kept. Findings that the branch has since fixed are
+recorded as closed rather than deleted, so they are not re-found later.
+
+### Questions for the designer
+
+Four findings are questions about intent, not defects. Options, consequences
+and a recommendation each; nothing below is implemented until you answer.
+
+1. **In a fight, should the camera follow whoever's turn it is, or stay with
+   the leader?** Today it stays with the leader, always. The fix depends
+   entirely on which you want.
+   - **A — follow the acting character** (recommended). Matches BG3/DOS2 and
+     matches what `main.js:2851`'s own comment already promises. Costs: what
+     `player` MEANS in `main.js` has to change (it is both "the leader" and
+     "the body the camera follows", and those stop being the same thing).
+   - **B — stay with the leader, and fix the promise instead.** Cheaper: the
+     `Home` comment and the ARCHITECTURE paragraph get rewritten to say
+     "leader", and `focusCameraOn` stops detaching. Costs: steering a
+     companion through a shared turn keeps you driving a body off-frame.
+   Either way the detach bug below is real and gets fixed.
+
+2. **Should the HR/Mail buffs work out of combat?** `performance-review`,
+   `onboarding` (buffs) and `courier-swap` (mobility) cannot be armed
+   outside a fight, so two classes' identity verbs are unreachable there —
+   and the refusal names the wrong reason ("only means something once
+   someone is swinging at you", said about a morale buff).
+   - **A — let buffs arm out of combat** (recommended): they are how those
+     classes feel like themselves, and there is already a dispatch path
+     waiting for them (`oocFriendlyOn`, `main.js:1157`, currently dead code).
+   - **B — keep them combat-only** and give them an honest refusal line.
+   Cheap either way; the current state is the one option nobody chose.
+
+3. **Should a fired staple land as gatherable paper?** The `paper` surface
+   already exists, is gatherable once via the Alt overlay, and is explicitly
+   designed not to be farmable ("a Mail Room can't farm their own cone for
+   endless paper", `surfaces.js:74`). A staple landing as a drift would be a
+   second, per-shot source of exactly that.
+   - **A — no** (recommended): keep ammo recovery to the one deliberate
+     source. Ranged ammo staying spent is what prices the ranged game.
+   - **B — yes**, with the same once-only gather rule.
+
+4. **Does `POWERS_PLAN.md` get retro-tagged?** It was written the day the
+   tagging rule landed, edited two days later, carries **zero** tags, and
+   its decisions are already shipped as the six-class kit. Under CLAUDE.md
+   every one of them is `[proposed]` — which is not what a shipped kit
+   should be.
+   - **A — retro-tag it** (recommended): walk it once, mark what the played
+     game embodies as `[ratified]`, and leave the rest `[proposed]` with
+     their questions named. An afternoon.
+   - **B — declare the shipped kit ratified wholesale** and tag only what
+     is not yet built. Faster, but it ratifies decisions you may never have
+     been asked about.
+   Also unanswered from the last pass: **is god mode ungated on the shipped
+   itch.io build deliberate?** It is in the bundle, opens on backquote/F8,
+   and persists across reloads via `localStorage`. `TODO.md:770` proposes a
+   dev flag; nobody ratified it.
+
+### Confirmed, still open
+
+- **`Home` detaches the camera from the member you are steering.** The rig
+  follows `player` — the *leader's* actor — every frame (`main.js:3189`),
+  and `makeActive` (`combat.js:1531`) never re-keys that binding;
+  `switchLeader` returns early while `inCombat` (`main.js:1500`). So in a
+  multi-member fight `combat.actingActor !== player`, and `focusCameraOn`
+  (`main.js:2763`) takes the `panTo` branch: the key whose comment promises
+  "whoever you're driving" **detaches** the rig and freezes it where that
+  member stood. Nothing re-attaches until a control change. Same for the
+  profile card, the party-bar card and the initiative row. `camera.spec.js`
+  fights with a one-member party, so `actingActor === player` always holds
+  and the spec asserts the true negative.
+- **Player-typed names go raw into `innerHTML`,** on four surfaces now, not
+  one: the initiative strip (`ui/combat.js:48`), the HUD profile card
+  (`ui/hud.js:96`), the party-bar slot (`ui/hud.js:426`) and the character
+  sheet (`ui/panels.js:255`). `cleanName` (`creation.js:76`) only trims and
+  slices to 24 chars, which is room enough for `<svg onload=…>`; a bare
+  `<b>` corrupts the strip. `esc()` exists in exactly one file,
+  `ui/screens.js:30` — it should move somewhere all of `ui/` can reach it.
+- **Pan keys `preventDefault()` before any gate** (`main.js:2802`), so the
+  arrows kill scrolling in every DOM panel; and `modalOpen()` is still only
+  `dialogue || shopping` (`main.js:1260`), so WASD pans the world behind the
+  level-up screen, the sheet, the pockets and the game menu.
+- **Member slips still roll `Math.random()`** (`main.js:2171`) while AI slips
+  roll off the seeded stream (`combat.js:3882`), so a seeded fight does not
+  replay. One line. The recent slip work consolidated the *rule* into
+  `step-rules.js` and stopped slip-proof characters drawing at all — it did
+  not change where the member roll's randomness comes from.
+- **God mode ships ungated** (`god.js:74`, `main.js:3585`): backquote/F8, and
+  `localStorage` makes it stick across reloads. See question 4.
+- **Intent-tagging holds in 4 plan docs out of 18.** `TACTICS_PLAN` (32
+  tags), `CHARACTER_PLAN` (22), `INITIATIVE_PLAN` (15), `REFACTOR_PLAN` (4).
+  Zero in `POWERS_PLAN`, `PROGRESSION_PLAN`, `SUMMON_PLAN`, `STATUS_PLAN`,
+  `PARTY_PLAN`, `MOVEMENT_PLAN`, `HIT_PLAN`, `EQUIPMENT_PLAN`,
+  `ECONOMY_PLAN`.
+- **Eight-plus `stats.js` exports are named by no test at all** — 12 by a
+  strict count: `pendingPoints`, `effectiveAttr`, `createSheetFrom`,
+  `normalizeAttr`, `trackNode`, `nodeAvailable`, `applyEffect`,
+  `xpNextForLevel`, and the `PAPER`/`MOVE`/`ATTR`/`EQUIP` tables.
+  `pendingPoints` is the function `ARCHITECTURE.md` credits with stopping a
+  rule that had drifted across four surfaces.
+- **`[quick]` in CI has the never-fires bug the header documents for
+  `[e2e]`** (`ci.yml:83`, `:91`, `:95`, `:99`): it reads
+  `github.event.head_commit.message`, which does not exist on
+  `pull_request`. A branch push raises only `pull_request`, so `[quick]`
+  never fires on a branch — exactly the failure the header carefully
+  explains two jobs above. It does work on `main`.
+- **79 `waitForTimeout` sleeps across 22 specs**, `helpers.js` included — up
+  from the 73 and 78 the two earlier passes counted.
+- **Two modules are still missing from the module map:** `portraits.js` and
+  `powers.js`. `powers.js` is not a small omission — it owns the predicates
+  (`isPull`, `aimsAtProps`, `pullLanding`) that three other modules dispatch
+  on.
+
+### Closed since the earlier passes
+
+- **The Phase 0 critical is fixed, better than `TODO.md:329` specifies.**
+  `combat-targeting.verbKind` dispatches before any melee fall-through, so
+  an armed buff/mobility can no longer resolve as a strike, and
+  `actors.js:430` clamps non-finite damage to a visible no-op. The TODO box
+  is stale and should be ticked.
+- **The slip rule no longer exists three times.** `step-rules.js` is the one
+  owner for members, summons, AI units and wanderers, with the
+  sample-before-tick rule in it. (The seeded-stream half is still open,
+  above.)
+- **The god files shrank rather than grew.** `combat.js` 4,396 → 4,367 and
+  `main.js` 3,802 → 3,586 since the second pass — the panel extraction
+  (`ui/combat.js`), the AI beat ladder (`combat-ai.js`), the plan/perform
+  split (`combat-plans.js`) and the four subsystems `main.js` handed off.
+  Still 7,953 lines with no unit coverage; the extraction plan stands.
+- **Registry integrity and economy arbitrage: still clean.** Both mechanical
+  passes came back with zero dangling ids and nothing selling above its buy
+  price. Worth re-running, not worth re-reading.
+
+---
+
 Date: 2026-07-28 · Baseline: `d5c96d5`, all 379 unit tests passing.
 
 Method: eleven scoped review passes (per-subsystem bug hunts, data-registry integrity,
