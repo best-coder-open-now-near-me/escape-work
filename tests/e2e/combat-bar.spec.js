@@ -218,6 +218,19 @@ test('a door can be worked mid-fight, from the tile beside it, for AP', async ({
   await refillAp(page);
 
   expect(await page.evaluate(() => window.__game.doorOpen('h:2,2')), 'the door starts shut').toBe(false);
+
+  // The threshold ring is a HOVER affordance now (designer, 2026-07-31): its
+  // gate (__combat.hoverDoor, fed by the same combatDoorAt the pointer cursor
+  // reads) holds the door only while the cursor is on it. It used to ring for
+  // as long as you stood beside the door, whatever the cursor was doing -
+  // a marker that never leaves the doorway reads as state, not affordance.
+  const pEdge = await page.evaluate(() => window.__game.project(2, 1.6));
+  await page.mouse.move(pEdge.x, pEdge.y);
+  await expect.poll(() => page.evaluate(() => window.__combat.hoverDoor)).not.toBe(null);
+  const pFloor = await page.evaluate(() => window.__game.project(1, 2));
+  await page.mouse.move(pFloor.x, pFloor.y);
+  await expect.poll(() => page.evaluate(() => window.__combat.hoverDoor)).toBe(null);
+
   const apBefore = await page.evaluate(() => window.__combat.party[0].ap);
 
   expect(await page.evaluate(() => window.__game.playerTile),
@@ -250,11 +263,19 @@ test('a door can be worked mid-fight, from the tile beside it, for AP', async ({
   // never try first.
   await refillAp(page);
   const apBeforeClick = await page.evaluate(() => window.__combat.party[0].ap);
-  await page.mouse.move(p.x, p.y);
+  // Aim at the swung-open PANEL, not the old edge midpoint: an open doorway's
+  // ground band deliberately resolves to no door (stepping through must stay
+  // a step - doors.js), so closing one is a click on the panel itself. The
+  // panel hinges at the edge's west end (1.5, 1.5) and swings 100 degrees
+  // into the room (tile-renderer renderDoor), which puts its middle here -
+  // aiming at (2, 1.6) was hovering the empty threshold the panel had just
+  // swung out of, and the pointer never came.
+  const panel = await page.evaluate(() => window.__game.project3(1.42, 0.45, 1.03));
+  await page.mouse.move(panel.x, panel.y);
   await expect.poll(() => page.evaluate(() => document.getElementById('app').style.cursor),
     { timeout: 10_000 }).toBe('pointer');
 
-  await page.mouse.click(p.x, p.y);
+  await page.mouse.click(panel.x, panel.y);
   await expect.poll(() => page.evaluate(() => window.__game.doorOpen('h:2,2'))).toBe(false);
   expect(await page.evaluate(() => window.__combat.party[0].ap)).toBe(apBeforeClick - 1);
   // And it worked the handle rather than walking at it.

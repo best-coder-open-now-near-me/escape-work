@@ -863,6 +863,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // drawing while a walk finishes.
   let hoverFoe = null;
   let hoverHitChance = null; // to-hit chance shown for the enemy under an armed cursor
+  // The door under the cursor as of the last hover event, as an edge midpoint
+  // - main.js resolves it with the click's own combatDoorAt and hands it in,
+  // so the threshold ring below can only exist while the cursor is actually
+  // on the door (the same life the pointer cursor has).
+  let hoverDoor = null;
   // Test-only: what the last combat click resolved to. Every silent path
   // stamps a reason, so a wedged e2e run can say WHY a click did nothing
   // instead of leaving a trace full of clicks with no visible effect.
@@ -1122,7 +1127,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // the same gate (handleEnemyClick's: your turn, standing still) - the cursor
   // used to read its own ungated body pick, promising a swing mid-walk or on
   // an AI turn that the readout and the click both refused.
-  function handleHover(point, sx, sy, picked = null) {
+  function handleHover(point, sx, sy, picked = null, doorMid = null) {
+    // Tracked before any gate, like hoverFoe: a hover that leaves the canvas
+    // (main.js calls in with nulls) must clear the door ring the same frame.
+    hoverDoor = doorMid;
     // While aiming, target rings replace the movement trail entirely. Cone
     // attacks and summon placement additionally track the cursor - the wedge
     // (or the drop zone) follows it.
@@ -1332,13 +1340,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       const s = crouchStateOf(active);
       if (s) drawFaces(s.at.x, s.at.z, s.faces, PREVIEW_COVER);
     }
-    // A door you are standing at, rung before anything else and regardless of
-    // what is armed. It is not an ACTION - it has no bar slot, it lives on the
-    // right-click menu - so gating it behind `previewAction` would hide the one
-    // affordance for the only terrain a fight can change. Green when the AP is
-    // there for it, red when it is not, same as every other ring here.
-    for (const mid of world.doorsBeside?.(active.actor.x, active.actor.z) || []) {
-      drawRing(mid.x, mid.z, 0.3, active.ap >= mid.ap ? PREVIEW_OK : PREVIEW_FAR);
+    // A door rings only UNDER THE CURSOR (designer, 2026-07-31): it used to
+    // ring whenever the acting member stood beside one, whatever was armed,
+    // and a marker that never leaves the threshold reads as state, not
+    // affordance. The hover hands in the same predicate the pointer cursor
+    // reads (combatDoorAt), so the ring and the cursor light together - and
+    // matching it against doorsBeside keeps the ring on doors the acting
+    // member is actually AT, so it can never promise a handle across the
+    // room. Green when the AP is there for it, red when it is not, same as
+    // every other ring here.
+    if (hoverDoor) {
+      for (const mid of world.doorsBeside?.(active.actor.x, active.actor.z) || []) {
+        if (Math.abs(mid.x - hoverDoor.x) > 0.01 || Math.abs(mid.z - hoverDoor.z) > 0.01) continue;
+        drawRing(mid.x, mid.z, 0.3, active.ap >= mid.ap ? PREVIEW_OK : PREVIEW_FAR);
+      }
     }
     // Not gated on `armed`: with nothing armed a click still swings (the basic
     // attack), and a swing you can't see coming is worse than no swing at all -
@@ -4336,6 +4351,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // The instant awaiting its confirm click, or null - the other half of
     // "which slot is lit", which is what the one-live-slot rule asserts on.
     get pendingConfirm() { return pendingConfirm; },
+    // The hovered door's midpoint, or null - the threshold ring's own gate,
+    // so a spec can assert the ring exists only while the cursor is on it.
+    get hoverDoor() { return hoverDoor; },
     // The aim wash (TACTICS_PLAN M7): which aim is painted and how many tiles
     // it covers. A test that can't see the wash can only assert the click.
     get aimPaint() { return aimPaint.debug; },

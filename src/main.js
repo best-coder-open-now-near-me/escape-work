@@ -49,7 +49,7 @@ import {
   surfaceEffect, rawSurfaceDamage, effectiveSurfaceDamage, slipChance, slips,
   hasGum, surfacePathCost,
 } from './step-rules.js';
-import { createDoors, atDoor, COMBAT_DOOR_AP } from './doors.js';
+import { createDoors, atDoor, COMBAT_DOOR_AP, doorMidpoint } from './doors.js';
 import { createDialogue, shopKeyForNpc, sayRecruited } from './dialogue.js';
 import { summonRange, summonRoom, dropCount, summonSpotProblem } from './summon-rules.js';
 import {
@@ -2654,11 +2654,17 @@ function startGame(level) {
         // a crosshair mid-walk and on AI turns, promising a swing while the
         // to-hit readout and the click itself refused.
         const picked = hit?.kind === 'enemy' && hit.ref.alive ? hit.ref : null;
-        const foe = combat.handleHover(point, sx, sy, picked);
+        // The hovered door, resolved ONCE with the click's own predicate
+        // (combatDoorAt) and handed to combat alongside the hover - the
+        // pointer cursor and the threshold ring read this same answer, so
+        // the two affordances light together and die together.
+        const doorKey = combatDoorAt(hit, point);
+        const foe = combat.handleHover(point, sx, sy, picked,
+          doorKey ? doorMidpoint(doorKey) : null);
         // A coworker wins the cursor; failing that, a door you could work says
         // so with the same pointer it uses out of combat. The click reads the
         // very same predicate, so the two cannot disagree.
-        hover.setCursor(foe ? 'crosshair' : (combatDoorAt(hit, point) ? 'pointer' : null));
+        hover.setCursor(foe ? 'crosshair' : (doorKey ? 'pointer' : null));
         // Hovering a character glows their BODY and names them in the banner -
         // the DOS2 read, and the same one you already get out of combat. This
         // used to be held behind Ctrl, which meant the half of the game where
