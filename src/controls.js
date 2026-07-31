@@ -206,10 +206,56 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   // frame's wobble back into the next one's start.
   let baseX = focus.x;
   let baseZ = focus.z;
+
+  // Free look (BG3/DOS2 style): a keyboard pan DETACHES the rig from the
+  // follow target - the camera stays where you sent it while the world moves -
+  // until recenter() re-attaches it. panTo() glides to a point and stays
+  // detached: that is the double-click recenter aimed at a body that is not
+  // the one the rig follows (another member's card, an enemy's initiative
+  // row), where snapping follow onto them would be a lie - the camera would
+  // drift back to the followed character on the next frame.
+  let free = false;
+  let glide = null; // {x,z} the detached rig is easing toward, else null
+  // The floor's extent, set by the host once a level exists - keyboard pan is
+  // the one camera move with no anchor in the world, so without a fence you
+  // can fly the view into the black void past the carpet.
+  let bounds = null;
+  const clampFocusX = (x) => (bounds ? pc.math.clamp(x, bounds.minX, bounds.maxX) : x);
+  const clampFocusZ = (z) => (bounds ? pc.math.clamp(z, bounds.minZ, bounds.maxZ) : z);
+  // Screen-relative pan: `rx`/`uz` are -1..1 (right, up), and the world
+  // direction comes from the YAW alone - the pitched camera forward projects
+  // to the same heading, but degenerates to zero straight down in the
+  // tactical view, where panning matters most. Speed scales with the boom so
+  // a pan covers the same fraction of the screen zoomed in or out.
+  const PAN_RATE = 0.55; // screens-worth per second, roughly
+  function pan(rx, uz, dt) {
+    const len = Math.hypot(rx, uz);
+    if (!len) return;
+    const yaw = CAM.yaw * pc.math.DEG_TO_RAD;
+    const dx = (Math.cos(yaw) * rx - Math.sin(yaw) * uz) / len;
+    const dz = (-Math.sin(yaw) * rx - Math.cos(yaw) * uz) / len;
+    const speed = CAM.dist * PAN_RATE;
+    free = true;
+    glide = null;
+    baseX = clampFocusX(baseX + dx * speed * dt);
+    baseZ = clampFocusZ(baseZ + dz * speed * dt);
+  }
+  function panTo(point) {
+    free = true;
+    glide = { x: clampFocusX(point.x), z: clampFocusZ(point.z) };
+  }
+  function recenter() {
+    free = false;
+    glide = null;
+  }
+
   function follow(target, dt = 1 / 60) {
+    // Detached, the rig ignores the host's target: it holds where the pan
+    // left it, or eases toward a panTo point on the same curve as a follow.
+    const tgt = free ? glide || { x: baseX, z: baseZ } : target;
     const k = 1 - Math.exp(-dt * 7);
-    baseX = pc.math.lerp(baseX, target.x, k);
-    baseZ = pc.math.lerp(baseZ, target.z, k);
+    baseX = pc.math.lerp(baseX, tgt.x, k);
+    baseZ = pc.math.lerp(baseZ, tgt.z, k);
     let ox = 0;
     let oz = 0;
     if (shakeT > 0) {
@@ -278,6 +324,15 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     },
     follow,
     shake,
+    pan,
+    panTo,
+    recenter,
+    setPanBounds: (b) => { bounds = b; },
+    // Is the rig detached from its follow target (a pan or panTo is live)?
+    get panning() { return free; },
+    // The point the rig is looking at (pre-shake), for tests that assert on
+    // where a pan or a recenter actually sent the view.
+    get focus() { return { x: baseX, z: baseZ }; },
     setView,
     setTactical,
     toggleTactical: () => setTactical(!tactical),

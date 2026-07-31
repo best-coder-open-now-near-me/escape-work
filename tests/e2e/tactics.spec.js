@@ -2,7 +2,7 @@
 // and forced movement doesn't. Both assertions run inside the player's OWN
 // turn, so the enemy's scheduled attack can't be mistaken for a reaction.
 import { test, expect } from '@playwright/test';
-import { bootStash, enterCombat, clickWorld, endTurnUntilPlayer, waitForPlayerTurn, clickAction, withWorldStill } from './helpers.js';
+import { bootStash, enterCombat, clickWorld, endTurnUntilPlayer, waitForPlayerTurn, clickAction, withWorldStill, refillAp, waitStill } from './helpers.js';
 
 // An open room with space to run: the player engages the Manager, then has
 // somewhere far enough to break contact.
@@ -137,13 +137,43 @@ test('a partition gives the defender cover against a ranged attacker', async ({ 
   await bootStash(page, COVER_ARENA, 'office-drone');
   await enterCombat(page); // the adjacent Manager starts the fight; we barely move
 
-  // Arm the attack and hover a specific tile, returning the honest to-hit the
-  // roll would use plus the tag the player actually reads.
+  // The measuring instrument is a THROW. Cover is a rule about ranged
+  // attacks, and the hover now prices a melee attack from its PLANNED stand
+  // point - adjacent, where cover does not apply - so a melee hover can no
+  // longer read the cover term from across the room (that from-here reading
+  // was the exact lie the walk-in preview replaced). A wad needs range 5 AND
+  // a line, which the old alcove control at (8,1) can never offer (its walls
+  // are TALL) - so the open-field control is the fight-opening Manager
+  // himself: same def, same dodge, engaged at arm's length (never surprised),
+  // standing on bare floor. One deliberate AI beat runs before the reads (see
+  // below); after it the turn is held, so nothing moves BETWEEN the reads.
+  await waitForPlayerTurn(page);
+  await page.evaluate(() => { window.__god.player.paper = 8; window.__combat?.refresh(); });
+  await refillAp(page);
+  // Step into wad range of the partitioned foe. Leaving the opener's reach
+  // provokes his free swing on the way out - damage, and nothing else the
+  // reads care about (his committed facing tracks the player either way, so
+  // both reads see his FRONT: no backstab term to pollute the gap).
+  expect(await clickWorld(page, 5, 3)).toBe(true);
+  await waitStill(page, 20_000).catch(() => {});
+  // Let the opener take one beat before reading: he closes on the player (or
+  // flicks gum from where he stands) and either way COMMITS his facing toward
+  // them - so the open-field read below is frontal by construction. Without
+  // this, the facing he committed during the opening scrap points at the
+  // player's OLD spot, which can put the read position in his rear arc and
+  // pollute the measured gap with a backstab term.
+  await page.click('#combat-end-turn');
+  await page.waitForTimeout(1500);
+  await waitForPlayerTurn(page);
+  await refillAp(page);
+
+  // Arm the throw and hover a body, returning the honest to-hit the roll
+  // would use plus the tag the player actually reads.
   const readAt = async (x, z) => {
     let c = null;
     for (let i = 0; i < 8 && c == null; i++) {
       await page.waitForTimeout(400);
-      if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#hotbar-act-attack');
+      if (await page.evaluate(() => window.__combat.armed) !== 'paper-ball') await page.click('#hotbar-act-paper-ball');
       const fp = await page.evaluate(([wx, wz]) => window.__game.project(wx, wz), [x, z]);
       await page.mouse.move(fp.x, fp.y);
       await page.waitForTimeout(150);
@@ -152,40 +182,22 @@ test('a partition gives the defender cover against a ranged attacker', async ({ 
     return { chance: c, tag: (await page.locator('#combat-move-cost').textContent()) || '' };
   };
 
-  // Both foes must still be at range for cover to be in play at all.
-  const pt = await page.evaluate(() => window.__game.playerTile);
-  expect(pt.x).toBeLessThan(8);
-  expect(Math.max(Math.abs(8 - pt.x), Math.abs(1 - pt.z))).toBeGreaterThan(1);
-  expect(Math.max(Math.abs(8 - pt.x), Math.abs(3 - pt.z))).toBeGreaterThan(1);
-  // Both test foes must still be standing where they were placed - if either
-  // joined the fight and advanced, this run cannot compare like with like.
+  // The covered read: the partitioned foe, over its west-face partition.
   expect(await page.evaluate(() => window.__game.enemies
-    .filter((e) => e.alive && e.x === 8 && (e.z === 1 || e.z === 3)).length)).toBe(2);
+    .some((e) => e.alive && e.x === 8 && e.z === 3))).toBe(true);
+  const behind = await readAt(8, 3);
+  // The open read: the opener, wherever the scrap left him standing.
+  const ctrl = await page.evaluate(() => {
+    const e = window.__game.enemies.find((f) => f.alive && !(f.x === 8 && (f.z === 1 || f.z === 3)));
+    return e ? { x: e.px ?? e.x, z: e.pz ?? e.z } : null;
+  });
+  expect(ctrl).not.toBeNull();
+  const open = await readAt(ctrl.x, ctrl.z);
 
-  // The like-with-like check above runs ONCE, before either read - so it
-  // cannot see the board move BETWEEN them, which is where the two numbers
-  // stop being comparable. COVER_ARENA also seats a third Manager beside the
-  // player (it is the one that opens the fight) and nothing pins where it
-  // wanders: in the line for one read and not the other, it adds a cover term
-  // of its own and the gap is no longer just the partition. That matches the
-  // shape of the CI failure - 0.05, where cover failing to apply at all would
-  // have read 0.00. So hold the invariant ACROSS both reads, and re-take them
-  // if anything shifted underneath.
-  const boardNow = () => page.evaluate(() => ({
-    me: window.__game.playerTile,
-    foes: window.__game.enemies.filter((e) => e.alive).map((e) => `${e.x},${e.z}`).sort(),
-  }));
-  let open = null;
-  let behind = null;
-  for (let i = 0; i < 3; i++) {
-    const before = JSON.stringify(await boardNow());
-    open = await readAt(8, 1);   // no partition between us
-    behind = await readAt(8, 3); // partition on its near face
-    if (JSON.stringify(await boardNow()) === before) break;
-  }
   expect(typeof open.chance).toBe('number');
   expect(typeof behind.chance).toBe('number');
-  // Same range, same enemy - the whole gap is the cover term (HIT.COVER_DODGE).
+  // Same throw, same enemy type - the whole gap is the cover term
+  // (HIT.COVER_DODGE).
   expect(open.chance - behind.chance).toBeCloseTo(0.20, 5);
   expect(behind.tag).toContain('in cover'); // and the player can SEE why
   expect(open.tag).not.toContain('in cover');
@@ -214,25 +226,31 @@ test('a desk on the near face gives cover, same as a partition', async ({ page }
   await bootStash(page, DESK_COVER_ARENA, 'office-drone');
   await enterCombat(page); // the adjacent Manager starts the fight; we barely move
 
-  // Shed the joiners' surprise BEFORE reading: `surprised` hands the attacker
-  // +0.15 against that defender, and each far foe sheds it on its own
-  // (skipped) turn - which the initiative dice can place on OPPOSITE sides of
-  // ours, leaving exactly one read 0.15 hot and the measured gap at 0.05.
-  // Two full rounds settle both. (Both test foes are sealed in - walls and
-  // the desk - so the rounds cannot move them.)
-  for (let i = 0; i < 2; i++) {
-    await waitForPlayerTurn(page);
-    await page.click('#combat-end-turn');
-    await page.waitForTimeout(1500);
-  }
-
-  // Same honest read the partition test uses: arm, hover, read the number the
-  // roll will use plus the tag the player will.
+  // Same throw instrument and same open-field control as the partition test
+  // (see the note there): the fight-opening Manager reads as the uncovered
+  // baseline, the desk foe as the covered one. One deliberate AI beat runs
+  // before the reads (see below); after it the turn is held, so nothing -
+  // a step, a crouch - moves either body between the reads.
+  await waitForPlayerTurn(page);
+  await page.evaluate(() => { window.__god.player.paper = 8; window.__combat?.refresh(); });
+  await refillAp(page);
+  expect(await clickWorld(page, 5, 3)).toBe(true);
+  await waitStill(page, 20_000).catch(() => {});
+  // Let the opener take one beat before reading: he closes on the player (or
+  // flicks gum from where he stands) and either way COMMITS his facing toward
+  // them - so the open-field read below is frontal by construction. Without
+  // this, the facing he committed during the opening scrap points at the
+  // player's OLD spot, which can put the read position in his rear arc and
+  // pollute the measured gap with a backstab term.
+  await page.click('#combat-end-turn');
+  await page.waitForTimeout(1500);
+  await waitForPlayerTurn(page);
+  await refillAp(page);
   const readAt = async (x, z) => {
     let c = null;
     for (let i = 0; i < 8 && c == null; i++) {
       await page.waitForTimeout(400);
-      if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#hotbar-act-attack');
+      if (await page.evaluate(() => window.__combat.armed) !== 'paper-ball') await page.click('#hotbar-act-paper-ball');
       const fp = await page.evaluate(([wx, wz]) => window.__game.project(wx, wz), [x, z]);
       await page.mouse.move(fp.x, fp.y);
       await page.waitForTimeout(150);
@@ -241,28 +259,18 @@ test('a desk on the near face gives cover, same as a partition', async ({ page }
     return { chance: c, tag: (await page.locator('#combat-move-cost').textContent()) || '' };
   };
 
-  // Both foes must still be at range for cover to be in play at all.
-  const pt = await page.evaluate(() => window.__game.playerTile);
-  expect(pt.x).toBeLessThan(8);
-  expect(Math.max(Math.abs(8 - pt.x), Math.abs(1 - pt.z))).toBeGreaterThan(1);
-  expect(Math.max(Math.abs(8 - pt.x), Math.abs(3 - pt.z))).toBeGreaterThan(1);
+  // The covered read: the desk foe, over the desk on its near face.
   expect(await page.evaluate(() => window.__game.enemies
-    .filter((e) => e.alive && e.x === 8 && (e.z === 1 || e.z === 3)).length)).toBe(2);
+    .some((e) => e.alive && e.x === 8 && e.z === 3))).toBe(true);
+  const behind = await readAt(8, 3);
+  // The open read: the opener, wherever the scrap left him standing.
+  const ctrl = await page.evaluate(() => {
+    const e = window.__game.enemies.find((f) => f.alive && !(f.x === 8 && (f.z === 1 || f.z === 3)));
+    return e ? { x: e.px ?? e.x, z: e.pz ?? e.z } : null;
+  });
+  expect(ctrl).not.toBeNull();
+  const open = await readAt(ctrl.x, ctrl.z);
 
-  // Hold the board-invariant ACROSS both reads, exactly as the partition test
-  // learned to (the third Manager wanders; see the note there).
-  const boardNow = () => page.evaluate(() => ({
-    me: window.__game.playerTile,
-    foes: window.__game.enemies.filter((e) => e.alive).map((e) => `${e.x},${e.z}`).sort(),
-  }));
-  let open = null;
-  let behind = null;
-  for (let i = 0; i < 3; i++) {
-    const before = JSON.stringify(await boardNow());
-    open = await readAt(8, 1);   // wall cell beside it is TALL: no cover from it
-    behind = await readAt(8, 3); // desk on its near face: shot over, shielded behind
-    if (JSON.stringify(await boardNow()) === before) break;
-  }
   expect(typeof open.chance).toBe('number');
   expect(typeof behind.chance).toBe('number');
   expect(open.chance - behind.chance).toBeCloseTo(0.20, 5);

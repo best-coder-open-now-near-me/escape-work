@@ -3,7 +3,7 @@
 // rather than re-derives.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buffProblem, buffOutcome, buffRangeOf, isFriendly, BUFF_RANGE, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, coneFrom, conePolyline, aimRangeOf, rangeTiles } from '../../src/powers.js';
+import { buffProblem, buffOutcome, buffRangeOf, isFriendly, BUFF_RANGE, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, coneFrom, conePolyline, aimRangeOf, rangeTiles, isBreakable, aimsAtProps, isPull, pullLanding } from '../../src/powers.js';
 import { TILE_TYPES, blocksSight } from '../../src/data/tiles.js';
 import { ACTIONS } from '../../src/data/actions.js';
 import { STATUSES } from '../../src/data/statuses.js';
@@ -542,4 +542,71 @@ test('rangeTiles euclid trims the corners a true radius cannot reach', () => {
   assert.equal(disc.length, 13); // r=2 disc on tile centres
   assert.ok(disc.some(([x, z]) => x === 2 && z === 0));
   assert.ok(!disc.some(([x, z]) => x === 2 && z === 2), 'hypot(2,2) is out of a cone\'s range');
+});
+
+// --- destructible cover & Pull Over (TACTICS_PLAN M8) -------------------------
+
+test('isBreakable marks exactly the cover-grade set', () => {
+  const withHp = Object.entries(TILE_TYPES).filter(([, d]) => Number.isFinite(d.hp)).map(([id]) => id);
+  // The set the designer ratified: partitions (their pool lives in
+  // PARTITION_HP, not here), the five toppleable props, and their fallen
+  // twins - the flat partition board excepted (walkable, nothing to deny).
+  assert.deepEqual(withHp.sort(), [
+    'bookcase', 'bookcase-fallen', 'bookcase-wide', 'bookcase-wide-fallen',
+    'bookshelf', 'bookshelf-fallen', 'cabinet', 'cabinet-fallen',
+    'coat-rack', 'coat-rack-fallen',
+  ]);
+  for (const id of withHp) assert.ok(isBreakable(TILE_TYPES[id]));
+  assert.ok(!isBreakable(TILE_TYPES.desk), 'a loot desk is not cover-grade');
+  assert.ok(!isBreakable(TILE_TYPES.wall));
+  assert.ok(!isBreakable(null));
+  // Everything a topple produces that still blocks or covers is breakable
+  // too - full tile denial is topple-then-destroy, two actions' effort.
+  for (const [, d] of Object.entries(TILE_TYPES)) {
+    if (!d.topple) continue;
+    assert.ok(Number.isFinite(TILE_TYPES[d.topple.becomes].hp) || d.topple.becomes === 'partition-fallen');
+  }
+});
+
+test('aimsAtProps admits only the damage-rolling attack', () => {
+  assert.ok(aimsAtProps(ACTIONS.attack));
+  assert.ok(aimsAtProps(ACTIONS.punch));
+  assert.ok(!aimsAtProps(ACTIONS.shove), 'shove keeps its own prop path (the topple)');
+  assert.ok(!aimsAtProps(ACTIONS['take-cover']));
+  assert.ok(!aimsAtProps(ACTIONS.pull));
+  assert.ok(!aimsAtProps({ type: 'attack' }), 'no dice, no demolition');
+  assert.ok(!aimsAtProps(null));
+});
+
+test('pull is universal data: type, crush range, and a real icon', () => {
+  const a = ACTIONS.pull;
+  assert.ok(isPull(a));
+  assert.equal(a.type, 'pull');
+  assert.ok(Array.isArray(a.crush) && a.crush.length === 2 && a.crush[0] <= a.crush[1]);
+  assert.ok(a.icon && a.icon !== '❔');
+});
+
+test('pullLanding lands them beside the puller, nearest where they came from', () => {
+  // Puller at (2,0), target crouched at (0,0) behind a shield on (1,0):
+  // the shield tile is not open, so the haul dumps them on the puller's
+  // flank nearest the barrier - never the puller's own tile.
+  const open = (x, z) => !(x === 1 && z === 0) && !(x === 2 && z === 0);
+  const spot = pullLanding(2, 0, 0, 0, open);
+  assert.ok(spot, 'a free flank exists');
+  assert.ok(!(spot[0] === 2 && spot[1] === 0), 'never onto the puller');
+  assert.ok(!(spot[0] === 0 && spot[1] === 0), 'never back where they were');
+  assert.equal(Math.abs(spot[0] - 2) + Math.abs(spot[1] - 0), 1, 'orthogonal beside the puller');
+});
+
+test('pullLanding refuses when your side has no room', () => {
+  assert.equal(pullLanding(2, 0, 0, 0, () => false), null);
+});
+
+test('pullLanding never returns the tile the target already holds', () => {
+  // Edge crouch: target at (0,0), puller adjacent at (1,0) across the edge.
+  // (0,0) is "open" by the caller's test (the target is leaving it), but the
+  // landing must still not be it - that would be a pull to nowhere.
+  const spot = pullLanding(1, 0, 0, 0, () => true);
+  assert.ok(spot);
+  assert.ok(!(spot[0] === 0 && spot[1] === 0));
 });

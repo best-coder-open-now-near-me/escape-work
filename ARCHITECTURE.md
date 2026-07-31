@@ -79,11 +79,37 @@ src/
                      bends the click and the hover through it; hover.js still
                      owns what the cursor says
   aim-paint.js       The aim wash (TACTICS_PLAN M7): pooled translucent
-                     quads over every tile an armed verb can legally reach,
-                     line of sight included; combat.js decides the tiles
+                     quads over every tile an armed verb can legally reach
+                     RIGHT NOW - line of sight included, and never a tile
+                     whose occupant the click would have to walk to;
+                     combat.js decides the tiles
   combat.js          Tactical on-map combat: per-unit INITIATIVE order, AP
                      turns, movement, ranged/melee, AI-driven units - costs
-                     from data
+                     from data. Owns the BODIES, the AP ledger, the FX and
+                     the frame clock; the rules below are what it asks
+  combat-geometry.js Reach, the two range vocabularies (what a verb's WASH
+                     covers vs what its CLICK acts from), the walk-up's
+                     stand point, a zone's covered tiles     (pure logic)
+  combat-plans.js    Where a verb LANDS: the plan half of every plan/perform
+                     pair - topple, break, pull, take cover, displace. A
+                     plan returns the shape the perform half needs or the
+                     reason it refuses, never both                (pure)
+  combat-ai.js       What an AI unit DECIDES: who to fight, where to stand,
+                     and `chooseBeat` - the ladder of beats a turn walks
+                     (reinforce, topple, swing, close, tuck in, pass)
+                     (pure logic)
+  combat-targeting.js What the target rings PROMISE, and `verbKind` - the
+                     ONE classifier saying which branch a body-aimed verb
+                     takes. The rings and the click both dispatch on it, so
+                     they cannot pick different branches       (pure logic)
+  step-rules.js      What the floor does to whoever stands on it: the
+                     surface, the damage after talents, the wad, the slip,
+                     the speed under a status. One module for members,
+                     summons, AI units in a fight and wanderers out of one
+                     (pure logic)
+  summon-rules.js    Where a summon may be posted and how many arrive - one
+                     ladder, with the two legs a FIGHT owns (AP, the ration)
+                     supplied in combat and absent outside it  (pure logic)
   initiative.js      Combat turn order: d20 + speed roll, sort, joiner
                      insertion                                (pure logic)
   turn-order.js      The turn ENGINE over that order: advance, the round
@@ -96,6 +122,16 @@ src/
   shop.js            Merchant arithmetic: price, sell yield, the stock roll,
                      and the atomic buy/sell                  (pure logic)
   looting.js         Containers, bodies, loose items, pockets, Alt overlay
+  doors.js           The one piece of terrain a fight can change: reaching a
+                     handle, spending the AP, the Alt-overlay entry
+  door-edges.js      The edge arithmetic under it - a door is an EDGE, so
+                     every conversion between a key and the two tiles it
+                     divides lives here                        (pure logic)
+  dialogue.js        Talking to people and signing them on; `nodeOptions`
+                     is the pure half (which options a node can offer)
+  hotbar-model.js    The bar's VIEW-MODEL: what belongs on it, in what
+                     order, in which slot, and what each slot says about
+                     itself. ui/hud.js renders it             (pure logic)
   shopping.js        The merchant runtime: per-instance stock, the shop panel,
                      the buy/sell verbs (ECONOMY_PLAN.md)
   ui.js              All DOM. The FRONT DOOR only - it re-exports ui/,
@@ -114,6 +150,9 @@ src/
     creation.js        the short form beside the chosen body: pronouns, two
                        points, and - for a custom character only - a name
                        and a body from the rigs nobody else wears
+    combat.js          the combat readout: whose turn it is, the AP pips,
+                       End Turn and the initiative strip. A dumb view like
+                       the rest - combat.js hands it a decided picture
   god.js             God-mode tweak panel (` / F8): live-reflects the sheet,
                      enemies, combat + world; edit/pin values, pause, spawn
   editor.js          In-browser level editor (paint/erase, export, playtest)
@@ -130,7 +169,9 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - `data/*` imports nothing (`data/levels.js` is the one exception - it imports
   the level JSON files, which are themselves data).
 - `grid`, `pathfinding`, `stats`, `party`, `surfaces-runtime`, `initiative`,
-  `turn-order`, `statuses`, `tactics`, `occlusion`, `shop` are pure JS (no
+  `turn-order`, `statuses`, `tactics`, `occlusion`, `shop`, `powers`,
+  `combat-geometry`, `combat-plans`, `combat-ai`, `combat-targeting`,
+  `step-rules`, `summon-rules`, `hotbar-model`, `door-edges` are pure JS (no
   PlayCanvas, no DOM) - unit tested in isolation (tests/unit).
 - **A rules module that needs the world takes a HOST, not the world.**
   `turn-order.js` is the pattern: it owns the turn walk and asks an injected
@@ -142,9 +183,11 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   testing is trapped inside something that has to touch the engine.
 - `scene`, `shading`, `tile-renderer`, `models`, `controls`, `picking`,
   `actors` touch PlayCanvas; `ui` touches the DOM; `fx`, `combat`, `hover` and
-  `looting` touch both (combat draws its own previews/rings and builds its own
-  panel; hover writes the canvas cursor and draws rings; looting spawns
-  dropped-item entities).
+  `looting` touch both (combat draws its own previews/rings; hover writes the
+  canvas cursor and draws rings; looting spawns dropped-item entities).
+  `combat.js` no longer BUILDS a panel - the readout is `ui/combat.js` and the
+  bar is main.js's hotbar - so what it still owns of the DOM is the movement
+  cost tag and nothing else.
 - **A panel is a dumb VIEW.** Everything in `ui/` takes a host-supplied
   view-model plus callbacks, renders it, and reports clicks - it never reads a
   rule. Where a rule leaked in it drifted: the hotbar carried its own ammo-cost
@@ -161,6 +204,16 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   `dispatchHit`. A new affordance goes here, against the same `queries`, and
   the rules it consults are passed IN (`armedTargetOk` is the click resolver's
   own test, not a second copy of it).
+- **A rule read by two surfaces gets ONE owner, and both surfaces dispatch on
+  it.** The rings and the click each grew their own ladder of `a.type` tests
+  for "which verb is this?", in slightly different orders, and a ranged weapon
+  fell out of one and not the other: an out-of-range coworker rang red while
+  the click walked the member in and fired. `combat-targeting.verbKind` is that
+  ladder now, and both read it. The same shape closed three other drifts - the
+  per-tile step rules (three copies, one already compounding a slow), the
+  summon spot rules (two, one of them documented as a copy of the other), and
+  the pull's plan-vs-refusal (two hand-parallel walks down five legs). When you
+  find yourself writing "the same questions X asks, less Y", that is the seam.
 - Only `main.js` sees everything. It owns game state (`inCombat`, `gameOver`)
   and game flow (what a click means, when combat starts, tile effects).
 - Enemy AI decisions (pathing costs, wander avoidance) use a talent-free
@@ -211,6 +264,16 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   click lands exactly where it looks like it will. It banks the pitch/dist it
   replaced and restores them on the way out, and any manual pitch drag (or a
   raw `setView`) drops it, so the button's lit state never outlives the view.
+  **WASD/arrows pan the view free** (BG3/DOS2's keys): a pan detaches the rig
+  from its follow target, fenced to the floor's extent, until something
+  recenters it - `Home`, a double-click on the bottom-left profile card, a
+  party-bar card, or a combat-strip row. A recenter aimed at the body the rig
+  FOLLOWS re-attaches the follow (`recenter()`); aimed at anyone else it
+  glides to where they stand and stays detached (`panTo()`), because follow
+  can't honestly attach to a body it doesn't track. Control changes re-attach
+  too (a leader switch, a survivor stepping up, a fight starting) - the view
+  belongs with whoever you're driving. main.js owns WHO (`focusCameraOn`);
+  the rig only owns HOW.
 - **Walls between you and the camera are ghosted**, and the test for "between"
   is 3D (`occlusion.js`, unit tested). It walks the sightline from the camera to
   the character's FEET and ghosts a wall only where that segment is still below
@@ -236,7 +299,36 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   a body near the ground point (`enemyAtPoint`, measured against continuous
   body positions - the tile is derived), and the crosshair, the readout, the
   reach ring and the click resolve from that single result, behind the click's
-  own gate (your turn, standing still). Each consumer used to compute its own -
+  own gate (your turn, standing still).
+  **A target the click would WALK to previews the whole commitment first**
+  (BG3's move-then-act; `showHitPreview` via `previewWalk`): the route the
+  click will take, a ring on the stand point it stops at, and the odds plus
+  the total AP - move and swing together - priced FROM that planned point
+  (`attackMods` takes it as `plan`), because cover and flanking move with the
+  attacker. **A walk-up stops the moment ITS OWN verb is live**, not at the
+  target's elbow: `verbReaches` asks "could this power act from this point?"
+  through `actRangeOf` - the CLICK's own branching (a ranged attack's
+  `stats.rangeOf`, a ranged control's `range`, melee reach for everything
+  walked into), deliberately NOT the aim wash's wider `aimRangeOf`, which
+  covers verbs the click never walks in at all - and `pathfinding.trimToFirst`
+  cuts the SMOOTHED route at the first point where it holds. Trimming after
+  smoothing is what puts the stop point on the line actually walked; the fixed
+  0.85 approach point it replaced stopped half a tile closer than any swing
+  needed and sat offset on the target -> goal-tile line. One predicate serves
+  the trim, the pre-walk promise and the arrival check, so the three cannot
+  disagree. The walk only ever aims at a stand point the swing is
+  LEGAL from (`routeBeside`/`swingPointAt`: reach distance plus the partition
+  line test - the same `canReach` the strike runs on arrival), the melee
+  target rings read that same rule (`hasSwingSpot`), **and the aim wash does
+  not over-promise**: an ANY-target purge is washed at its FRIENDLY reach
+  (Reboot reaches a colleague across the room) while its coworker half goes
+  down the melee walk-in, so coworkers the click would walk to are left OUT of
+  the wash rather than painted as castable ground. Every walk refusal
+  names its true cause: a degenerate walk is "as close as the route gets",
+  never "not enough AP", and an arrival that can't fire says so instead of
+  standing down silently. Before this held together, the walk could aim at a
+  line-blocked tile, regenerate the same dead-end point on every click, and
+  narrate the loop as an AP shortage at nearly full AP. Each consumer used to compute its own -
   the cursor an ungated pick, the readout a gated tile-centre distance - so the
   crosshair could promise a swing while the readout blanked and a click walked.
   **Hold Ctrl or Alt to glow what you're hovering** (`shading.addHighlight`) -

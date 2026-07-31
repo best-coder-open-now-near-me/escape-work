@@ -37,6 +37,15 @@
 //              rather than a new knocked-down, so toppling inherits the
 //              anti-chain immunity window and cannot become a second way to
 //              lock somebody out of a fight. `becomes` names the fallen twin.
+//   hp       - this prop can be BROKEN DOWN by attacks, melee and ranged
+//              (TACTICS_PLAN M8). A hidden pool: damage accumulates in
+//              grid.js's side map (tile defs are static shared objects, so
+//              the number here is the ceiling, never mutated), and at zero
+//              the prop is REMOVED - the tile reverts to floor, no debris.
+//              "Gone means gone" (designer, 2026-07-30): a shove RELOCATES
+//              cover and a pull leaves it standing, so destruction is the
+//              one verb that deletes it. Only the cover-grade set carries
+//              this - the props whose job is to be hidden behind.
 //   onFloor  - draw the marker box ON the floor's top face rather than from
 //              ground level up: a flat remnant (the toppled partition) thinner
 //              than the floor slab would otherwise render inside the carpet
@@ -222,6 +231,7 @@ export const TILE_TYPES = {
     label: 'Filing Cabinet',
     examine: 'A filing cabinet. The second drawer has not opened since the merger.',
     topple: { damage: [3, 6], becomes: 'cabinet-fallen' },
+    hp: 10,
   },
   // The merchant you can paint (ECONOMY_PLAN M2). `shop` points at a SHOPS
   // entry (data/shops.js) exactly the way `loot` points at a loot table, and
@@ -274,6 +284,7 @@ export const TILE_TYPES = {
     scale: 0.5,
     label: 'Bookshelf',
     topple: { damage: [4, 7], becomes: 'bookshelf-fallen' },
+    hp: 12,
     examine: 'A bookshelf of binders nobody has opened. The spines are immaculate.',
   },
   lamp: {
@@ -323,12 +334,14 @@ export const TILE_TYPES = {
     height: 0.85, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/bookcaseClosed', label: 'Bookcase',
     topple: { damage: [4, 7], becomes: 'bookcase-fallen' },
+    hp: 12,
   },
   'bookcase-wide': {
     char: 'l', category: 'storage', solid: true,
     height: 0.79, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/bookcaseClosedWide', label: 'Bookcase Wide',
     topple: { damage: [4, 8], becomes: 'bookcase-wide-fallen' },
+    hp: 14,
   },
   'bookcase-low': {
     char: 'n', category: 'storage', solid: true,
@@ -350,6 +363,7 @@ export const TILE_TYPES = {
     height: 0.77, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/coatRackStanding', label: 'Coat Rack',
     topple: { damage: [1, 3], becomes: 'coat-rack-fallen' },
+    hp: 4,
   },
   'tv-cabinet': {
     char: 't', category: 'storage', solid: true,
@@ -662,6 +676,12 @@ export const TILE_TYPES = {
   // coat at 0.2 is a flat tangle you step over - it keeps the walkable-debris
   // shape, the explicit `cover` flag (the M6a rule cannot derive cover for a
   // NON-solid), and the `debris` clamber cost.
+  //
+  // The twins carry `hp` too (TACTICS_PLAN M8): a thing on its side is still
+  // in the way, so it can still be broken up. Less than standing - the fall
+  // did half the work - which prices FULL tile denial (topple, then destroy
+  // the debris) at two actions' effort. The flat partition board is the
+  // exception: walkable, no cover, nothing left to deny.
   'cabinet-fallen': {
     runtimeOnly: true,
     solid: true,
@@ -670,6 +690,7 @@ export const TILE_TYPES = {
     model: 'furniture/cabinet',
     scale: 0.5,
     tiltX: 90,
+    hp: 6,
     label: 'Toppled Filing Cabinet',
     examine: 'Eleven years of performance reviews, face down on the carpet.',
   },
@@ -681,6 +702,7 @@ export const TILE_TYPES = {
     model: 'furniture/kit/bookcaseClosed',
     scale: 1.0,
     tiltX: 90,
+    hp: 8,
     label: 'Toppled Bookcase',
     examine: 'Face down. The binders inside have not moved in years and are not starting now.',
   },
@@ -692,6 +714,7 @@ export const TILE_TYPES = {
     model: 'furniture/kit/bookcaseClosedWide',
     scale: 1.0,
     tiltX: 90,
+    hp: 8,
     label: 'Toppled Bookcase',
     examine: 'It took two people to put it up and one shove to put it down.',
   },
@@ -703,6 +726,7 @@ export const TILE_TYPES = {
     model: 'furniture/bookshelf',
     scale: 0.5,
     tiltX: 90,
+    hp: 8,
     label: 'Toppled Bookshelf',
     examine: 'The immaculate spines are now face down. Still unopened.',
   },
@@ -716,6 +740,7 @@ export const TILE_TYPES = {
     model: 'furniture/kit/coatRackStanding',
     scale: 1.0,
     tiltX: 90,
+    hp: 3,
     label: 'Fallen Coat Rack',
     examine: 'Somebody\'s good coat is under there.',
   },
@@ -743,3 +768,11 @@ export const TILE_TYPES = {
 // hollow panel, not a loaded bookcase. Doors are NOT toppleable - they go
 // floor to frame.
 export const PARTITION_TOPPLE = { damage: [1, 3], becomes: 'partition-fallen' };
+
+// ...and what SHOOTING or HITTING one does (TACTICS_PLAN M8): partitions are
+// edges, so like the topple block this lives beside the registry rather than
+// on a tile entry. A hollow panel - two or three solid swings. Destruction
+// removes the EDGE outright, fallen plank included ("gone means gone",
+// designer 2026-07-30): the topple keeps the board in play, the break-down
+// does not.
+export const PARTITION_HP = 8;

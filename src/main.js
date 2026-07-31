@@ -25,7 +25,6 @@ import {
   serializeProgress, parseProgress, PARTY_CAP, addCash,
 } from './party.js';
 import { applyStatus, removeStatus, statusFx, hasStatus, tickStep, statusLeft, statusList } from './statuses.js';
-import { inReach } from './tactics.js';
 import { createDraft, createCharacter, draftModel, draftLook } from './creation.js';
 import { CUSTOM_RIGS } from './data/looks.js';
 import { aimsAtAlly, coneFrom, conePolyline, isToppleable, toppleLanding } from './powers.js';
@@ -45,7 +44,19 @@ import { createHoverLayer } from './hover.js';
 import { createVisionLayer } from './vision.js';
 import { createLooting } from './looting.js';
 import { createShopping } from './shopping.js';
+import {
+  surfaceEffect, rawSurfaceDamage, effectiveSurfaceDamage, slipChance, slips,
+  hasGum, surfacePathCost,
+} from './step-rules.js';
+import { createDoors, atDoor, COMBAT_DOOR_AP } from './doors.js';
+import { createDialogue, shopKeyForNpc, sayRecruited } from './dialogue.js';
+import { summonRange, summonRoom, dropCount, summonSpotProblem } from './summon-rules.js';
+import {
+  actionIdsFor, itemCountsFor, layoutFor, assignInto, slotViewModel, combatSlotViewModel,
+  combatOnlyReason,
+} from './hotbar-model.js';
 import { startCombat } from './combat.js';
+import { cheb as chebOf, canReach as canReachAt } from './combat-geometry.js';
 import { startEditor } from './editor.js';
 import { NPCS } from './data/npcs.js';
 import { installGodMode } from './god.js';
@@ -238,7 +249,7 @@ function startGame(level) {
     spendCombatAp: (n) => combat?.spendAp(n) ?? false,
     isGameOver: () => gameOver,
     approachAndDo: (x, z, run) => approachAndDo(x, z, run),
-    extraEntries: () => doorEntries(), // doors share the Alt overlay
+    extraEntries: () => doors.overlayEntries(), // doors share the Alt overlay
     // Equipping changes derived stats AND the basic weapon swing on the bars -
     // refresh the HUD, hotbar, and char sheet.
     onGearChange: () => refreshProgressUi(),
@@ -327,42 +338,34 @@ function startGame(level) {
   // NPCs stand on their tile and block movement like any body.
   const isWalkable = (x, z) => grid.terrainOpen(x, z) && !enemyAt(x, z) && !npcAt(x, z);
   // Surface queries, consulting the runtime (fire) before static state.
-  const surfEffect = (x, z) => {
-    if (runtime.isBurning(x, z)) return FIRE.onEnter;
-    if (grid.isElectrified(x, z)) return ELECTRIFIED.onEnter;
-    return SURFACES[runtime.surfaceAt(x, z)]?.onEnter || null;
-  };
+  // The floor's raw facts at a tile, as step-rules.js wants them. Reading the
+  // dynamic layer (fire) here and the rules THERE is what stops the surface
+  // rules from being re-derived per caller: everything below is the same
+  // question asked of the same fact sheet.
+  const floorAt = (x, z) => ({
+    burning: runtime.isBurning(x, z),
+    electrified: grid.isElectrified(x, z),
+    surfaceId: runtime.surfaceAt(x, z),
+  });
+  const surfEffect = (x, z) => surfaceEffect(floorAt(x, z));
   // Raw surface damage on a cell, before anyone's talents. ENEMY decisions
   // (pathing, wander avoidance) run on this: what hurts a coworker has
   // nothing to do with the player's shoes.
-  const rawSurfDamage = (x, z) => surfEffect(x, z)?.amount || 0;
+  const rawSurfDamage = (x, z) => rawSurfaceDamage(floorAt(x, z));
   // What a step actually costs a party member, after their talents (Origami
   // Specialist, ESD Steel-Toes). Defaults to the leader - the one whose
   // pathing decisions this shapes.
-  const effectiveSurfDamage = (x, z, s = sheet) => {
-    const fx = surfEffect(x, z);
-    if (!fx || !fx.amount) return 0;
-    const t = s?.talent?.effects || {};
-    if (t.shockImmune && grid.isElectrified(x, z) && !runtime.isBurning(x, z)) return 0;
-    if (t.paperCutImmune && runtime.surfaceAt(x, z) === 'paper' && !runtime.isBurning(x, z)) return 0;
-    // surfaceDamageResist is a RESERVED talent effect - the handler is live but
-    // no class/companion sets it yet (a future flat surface-armor perk plugs in
-    // here with zero systems change). See ARCHITECTURE.md talents.
-    return Math.max(0, fx.amount - (t.surfaceDamageResist || 0));
-  };
+  const effectiveSurfDamage = (x, z, s = sheet) =>
+    effectiveSurfaceDamage(floorAt(x, z), s?.talent?.effects);
   const isHazard = (x, z) => effectiveSurfDamage(x, z) > 0;
   const enemyIsHazard = (x, z) => rawSurfDamage(x, z) > 0;
-  // Wet floors are SLIPPERY - unless electrified or burning, which are
-  // different problems. Chance per tile entered; safety tread ignores it.
-  // Talent-free by design: enemies consult it too.
-  const slipChanceAt = (x, z) => {
-    if (grid.isElectrified(x, z) || runtime.isBurning(x, z)) return 0;
-    return SURFACES[runtime.surfaceAt(x, z)]?.slippery || 0;
-  };
+  const slipChanceAt = (x, z) => slipChance(floorAt(x, z));
   // A gum wad sticks to whoever steps on it - the tile is spent (the wad is
-  // on their shoe now). Returns true if there was gum to collect.
+  // on their shoe now). Returns true if there was gum to collect. The rule is
+  // step-rules.hasGum; retiring the wad is this file's, because it touches the
+  // grid and the scene.
   const stickGum = (x, z) => {
-    if (runtime.surfaceAt(x, z) !== 'gum') return false;
+    if (!hasGum(floorAt(x, z))) return false;
     grid.setType(x, z, 'floor');
     scene.hideSurfaceVisual(x, z);
     return true;
@@ -372,19 +375,12 @@ function startGame(level) {
   // way; smoothing must never straighten a route through a damaging cell the
   // route avoided. The player and enemies get separate cost models - talents
   // discount only the player's.
-  const hazardCostFor = (ms) => (x, z) => {
-    if (runtime.isBurning(x, z)) return FIRE.pathCost;
-    if (grid.isElectrified(x, z)) {
-      return ms?.talent?.effects?.shockImmune ? 1 : ELECTRIFIED.pathCost;
-    }
-    return SURFACES[runtime.surfaceAt(x, z)]?.pathCost || 0;
-  };
+  const hazardCostFor = (ms) => (x, z) => surfacePathCost(floorAt(x, z), ms?.talent?.effects);
   const hazardCost = (x, z) => hazardCostFor(sheet)(x, z); // the leader's cost model
-  const enemyHazardCost = (x, z) => {
-    if (runtime.isBurning(x, z)) return FIRE.pathCost;
-    if (grid.isElectrified(x, z)) return ELECTRIFIED.pathCost;
-    return SURFACES[runtime.surfaceAt(x, z)]?.pathCost || 0;
-  };
+  // The enemy model is the same rule with NO talents - your shoes are not
+  // their problem, and passing the leader's would have them fearing exactly
+  // the tiles you are immune to.
+  const enemyHazardCost = (x, z) => surfacePathCost(floorAt(x, z));
   const clearOfHazards = (x, z) => isWalkable(x, z) && !isHazard(x, z);
   const enemyClearOfHazards = (x, z) => isWalkable(x, z) && !enemyIsHazard(x, z);
 
@@ -718,6 +714,7 @@ function startGame(level) {
     party.active = i;
     sheet = m.sheet;
     player = m.actor;
+    controls.recenter(); // the survivor stepping up is who the view should find
     pendingAction = null;
     armedOoc = null;
     buildHotbar();
@@ -735,6 +732,7 @@ function startGame(level) {
     clearOocCrouch(true);
     sheet = lead.sheet;
     player = lead.actor;
+    controls.recenter(); // control settled on them - a panned-away view follows
     pendingAction = null;
     armedOoc = null;
     buildHotbar();
@@ -987,115 +985,37 @@ function startGame(level) {
   }
 
   // --- doors --------------------------------------------------------------------
-  // A door is an EDGE, not a tile - clicks find the nearest door edge to the
-  // precise ground point, walk to either side, and swing it.
-  function doorNearPoint(point) {
-    if (!point) return null;
-    const x = Math.round(point.x);
-    const z = Math.round(point.z);
-    const dx = point.x - x;
-    const dz = point.z - z;
-    if (0.5 - Math.max(Math.abs(dx), Math.abs(dz)) > 0.3) return null; // not near any edge
-    const key = Math.abs(dx) >= Math.abs(dz)
-      ? 'v:' + (dx > 0 ? x + 1 : x) + ',' + z
-      : 'h:' + x + ',' + (dz > 0 ? z + 1 : z);
-    return grid.doors.has(key) ? key : null;
-  }
-  const doorSides = (key) => {
-    const [x, z] = key.slice(2).split(',').map(Number);
-    return key[0] === 'h' ? [[x, z - 1], [x, z]] : [[x - 1, z], [x, z]];
-  };
-  // What working a door costs when there is a fight on. Cheaper than a verb:
-  // the walk to reach it has already been billed as movement, and this is the
-  // handle, not the journey.
-  const COMBAT_DOOR_AP = 1;
-  // Can the acting body reach this door's handle? In a fight there is no
-  // walking-to-it - movement belongs to combat and is priced by the tile - so
-  // the rule is the tactical one: you work a door you are standing beside.
-  const atDoor = (key, actor) => !!actor
-    && doorSides(key).some(([x, z]) => actor.x === x && actor.z === z);
-  // The door a click or a hover means IN COMBAT, or null. One predicate, read
-  // by both the cursor and the click, so the pointer can never promise a swing
-  // of the handle that the click then declines.
-  //
-  // Doors were reachable in a fight only through the right-click menu: the
-  // left-click path had no door branch at all, so clicking one fell through to
-  // handleTileClick and walked you at it, and the hover path never asked, so
-  // the cursor stayed a plain arrow over the one piece of terrain you can
-  // change.
-  //
-  // Hitting the door MESH always counts - you aimed at the door, there is
-  // nothing else you could have meant. A ground point merely NEAR a door edge
-  // only counts when you are already standing beside it, because
-  // `doorNearPoint` claims a wide band either side of the edge and movement is
-  // the expensive thing in a fight: a click on the floor by a doorway has to
-  // stay a step, not become a refusal.
-  function combatDoorAt(hit, point) {
-    if (hit?.kind === 'door') return hit.ref;
-    const key = point ? doorNearPoint(point) : null;
-    return key && atDoor(key, combat?.actingActor) ? key : null;
-  }
-  function toggleDoor(key) {
-    if (gameOver) return;
-    // Doors used to be refused outright while `inCombat`, with no comment - and
-    // a closed door is the game's ONLY true line-of-sight blocker, so the half
-    // of the game that is about positioning was the half where the one piece of
-    // terrain you can change was untouchable. `examineAt` still described it.
-    if (inCombat) {
-      if (!atDoor(key, combat?.actingActor)) { ui.say('Too far - step up to the door first.'); return; }
-      if (!(combat?.spendAp(COMBAT_DOOR_AP) ?? false)) {
-        ui.say(`Not enough AP - working a door costs ${COMBAT_DOOR_AP}.`); return;
-      }
-    }
-    const open = !grid.doors.get(key).open;
-    grid.setDoorOpen(key, open);
-    scene.refreshDoor(key);
-    for (const e of enemies) e.clearPath(); // their routes may have just changed
-    approachEpoch += 1; // ...and so may yours: the armed target rings recheck
-    ui.say(open ? 'The door swings open.' : 'You pull the door shut.');
-    if (loot.labelsVisible) loot.showLabels();
-  }
-  function approachDoor(key) {
-    const sides = doorSides(key);
-    const [ax, az] = isWalkable(sides[0][0], sides[0][1]) ? sides[0] : sides[1];
-    approachAndDo(ax, az, () => toggleDoor(key));
-  }
-  // Doors join the Alt overlay through the looting module's extraEntries
-  // hook (doors aren't loot, so the door logic stays here).
-  function doorEntries() {
-    const out = [];
-    const near = (x, z) => Math.max(Math.abs(x - player.x), Math.abs(z - player.z)) <= 10;
-    for (const [key, d] of grid.doors) {
-      const [x, z] = key.slice(2).split(',').map(Number);
-      const wx = key[0] === 'v' ? x - 0.5 : x;
-      const wz = key[0] === 'h' ? z - 0.5 : z;
-      if (!near(Math.round(wx), Math.round(wz))) continue;
-      out.push({
-        icon: '🚪',
-        text: d.open ? 'Door (open)' : 'Door',
-        world: { x: wx, y: 0.95, z: wz },
-        onClick: () => approachDoor(key),
-      });
-    }
-    return out;
-  }
+  // The rules live in doors.js on the shopping.js host-callback pattern; what
+  // stays here is the wiring - what "the world changed" means, and who is
+  // currently holding the fight.
+  const doors = createDoors({
+    grid,
+    scene,
+    loot,
+    isInCombat: () => inCombat,
+    isGameOver: () => gameOver,
+    getCombat: () => combat,
+    getPlayer: () => player,
+    isWalkable,
+    approachAndDo,
+    onWorldChanged: () => {
+      for (const e of enemies) e.clearPath(); // their routes may have just changed
+      approachEpoch += 1; // ...and so may yours: the armed target rings recheck
+    },
+  });
+  const { doorNearPoint, combatDoorAt, toggleDoor, approachDoor } = doors;
 
   // --- targeting, hover highlight, cursor --------------------------------------
-  const cheb = (a, b) => Math.max(Math.abs(a.x - b.x), Math.abs(a.z - b.z));
+  const cheb = (a, b) => chebOf(a.x, a.z, b.x, b.z);
   // Melee reach out of combat, measured the same way combat measures it: real
   // distance between continuous positions against the leader's weapon reach
   // (TACTICS_PLAN revision). These pre-flight an opener before a fight starts,
   // so they must agree with combat's own predicate or a click could open a
   // fight the attacker can't actually swing in.
-  const posOf = (a) => {
-    if (a?.entity) { const p = a.entity.getPosition(); return { x: p.x, z: p.z }; }
-    return { x: a?.x ?? 0, z: a?.z ?? 0 };
-  };
-  const playerReaches = (en, r = null) => {
-    const a = posOf(player);
-    const b = posOf(en);
-    return inReach(a.x, a.z, b.x, b.z, r ?? (sheet ? reachOf(sheet) : REACH.DEFAULT), grid.stepOpen);
-  };
+  // combat-geometry.js owns both; out of combat the "unit" is the leader's
+  // body plus the leader's sheet, so reach reads the weapon they are holding.
+  const playerReaches = (en, r = null) =>
+    canReachAt({ actor: player, sheet }, en, r, grid.stepOpen);
   // A sight line for throws: cells a sightline passes (grid.sightOpenCell -
   // short furniture is shot OVER since TACTICS_PLAN M6a, only tall solids
   // block) that aren't hazed by smoke. Smoke hangs floor-to-ceiling for a
@@ -1319,61 +1239,25 @@ function startGame(level) {
   // the tree they started in - the recruit option's own `next` node lives
   // there); the next open reads `recruitedDialogue` instead.
   const dialoguePanel = ui.createDialoguePanel();
-  let dialogueNpc = null;
-  let dialogueTree = null;
-  const canRecruit = (npc) =>
-    npc instanceof CompanionActor && !npc.recruited && !!party && party.members.length < PARTY_CAP;
-  const dialogue = {
-    open(npc) {
-      if (inCombat || gameOver || !npc) return;
-      const tree = (npc.recruited && npc.def.recruitedDialogue) || npc.def.dialogue;
-      if (!tree) return; // nothing to say (a restored companion without lines)
-      dialogueNpc = npc;
-      dialogueTree = tree;
-      npc.faceToward(player.x, player.z);
-      loot.hideLabels();
-      hover.clear();
-      renderDialogueNode(dialogueTree.start);
-    },
-    close() { dialogueNpc = null; dialogueTree = null; dialoguePanel.hide(); },
-    get visible() { return dialoguePanel.visible; },
-  };
+  const dialogue = createDialogue({
+    panel: dialoguePanel,
+    getParty: () => party,
+    getPlayer: () => player,
+    partyCap: PARTY_CAP,
+    isRecruitable: (npc) => npc instanceof CompanionActor,
+    isInCombat: () => inCombat,
+    isGameOver: () => gameOver,
+    onRecruit: (npc) => recruitCompanion(npc),
+    onShop: (npc) => shopping.open(shopKeyForNpc(npc), npc.def.shop),
+    onOpen: () => { loot.hideLabels(); hover.clear(); },
+  });
+  const canRecruit = (npc) => dialogue.canRecruit(npc);
 
   // Anything that owns the screen and the clicks while it is up. The dialogue
   // panel and the shop panel are both modal in exactly the same way, and every
   // gate below cares about "is a panel talking to me", not which one - so they
   // ask this rather than naming one and quietly forgetting the other.
   const modalOpen = () => dialogue.visible || shopping.visible;
-  function renderDialogueNode(nodeId) {
-    const node = dialogueTree?.nodes[nodeId];
-    if (!node) { dialogue.close(); return; }
-    const speaker = dialogueNpc;
-    const options = (node.options || [{ label: 'Leave', next: null }])
-      // A recruit offer only shows while it can be accepted (not already
-      // aboard, roster not full).
-      .filter((o) => !o.effect?.recruit || canRecruit(dialogueNpc))
-      // ...and a trade offer only from someone who actually has a cart.
-      .filter((o) => !o.effect?.shop || !!dialogueNpc.def?.shop)
-      .map((o) => ({
-        label: o.label,
-        action: () => {
-          if (o.effect?.recruit) recruitCompanion(dialogueNpc);
-          // Trading REPLACES the conversation rather than layering on it: the
-          // shop is its own modal, and two panels stacked over each other is
-          // how you get a click that lands on neither (ECONOMY_PLAN #5).
-          if (o.effect?.shop && speaker.def?.shop) {
-            dialogue.close();
-            // Keyed by WHO, not where: a person carries their stock around
-            // (and a recruited one literally walks off with it), so their
-            // instance key must survive them moving.
-            shopping.open(`npc:${speaker.typeId || speaker.def.name}`, speaker.def.shop);
-            return;
-          }
-          if (o.next) renderDialogueNode(o.next); else dialogue.close();
-        },
-      }));
-    dialoguePanel.show({ name: dialogueNpc.def.name, text: node.text, options });
-  }
 
   // Sign a bystander onto the party: out of the `npcs` roster (they stop
   // blocking as an NPC - partyAt covers them now), sheet minted at the
@@ -1390,7 +1274,7 @@ function startGame(level) {
       picking.unregister(npc.entity);
       picking.register(npc.entity, 'party', npc);
     }
-    ui.toast(`${npc.def.name} joins the party.`);
+    sayRecruited(npc.def.name);
   }
 
   // --- persistent hotbar --------------------------------------------------------
@@ -1415,129 +1299,19 @@ function startGame(level) {
   // from the leader while combat priced it against whoever was acting, which is
   // the same two-sources-of-truth drift the bars themselves had.
   const barSheet = () => ((inCombat && combat) ? combat.actingSheet : sheet);
-  function hotbarActionIds() {
-    const s = barSheet();
-    const throwables = Object.keys(ACTIONS).filter((id) => {
-      const a = ACTIONS[id];
-      return a.ammoCost && (!a.needsTalent || !!(s.talent?.effects || {})[a.needsTalent]);
-    });
-    return orderedActionIds(s, [...s.actions, equippedAction(s), 'shove', 'take-cover', ...throwables]);
-  }
-  // Consumables in the pockets, deduped, with how many are in there. These are
-  // the ITEMS a slot can carry: something with a `heal` or an `ammo` on it does
-  // something when pressed. Gear is deliberately not here - equipping is a
-  // pockets-panel act with a stat fold behind it, not a hotbar press.
-  function hotbarItemIds() {
-    const counts = new Map();
-    for (const id of barSheet()?.inventory || []) {
-      const it = ITEMS[id];
-      if (!it || !(it.heal || it.ammo)) continue;
-      counts.set(id, (counts.get(id) || 0) + 1);
-    }
-    return counts;
-  }
-  // Why this action can't be used with no fight on, or null when it can be.
-  // Attacks, shoves and throws OPEN a fight (engageWithAction); a summon posts
-  // on the spot (postSummonAt). What's left is the reactive pair, and both need
-  // a fight to mean anything: Deflect Blame halves an incoming hit nobody is
-  // throwing, and a heal out here would be a free, per-fight-refilling pool of
-  // HP - which is precisely the thing the pockets exist to sell you.
-  function combatOnlyReason(id) {
-    const a = ACTIONS[id];
-    const t = a?.type;
-    // A purge is at its MOST useful out here: bleed runs on a step clock, so
-    // between fights is exactly when you want it gone. Gating it to combat
-    // would have made IT Support's identity verb unusable in the situation it
-    // most obviously answers.
-    // Take Cover works out here too (designer, 2026-07-30): crouch before
-    // anyone has noticed you, and the crouch rides into the fight.
-    if (!a || t === 'attack' || t === 'shove' || t === 'summon' || t === 'purge' || t === 'cover') return null;
-    if (t === 'heal') return `${a.label} is for a fight - out here, heal from your pockets.`;
-    return `${a.label} only means something once someone is swinging at you.`;
-  }
-  // --- the layout ---------------------------------------------------------------
-  // What sits in each slot, in order. The default is the whole kit in canonical
-  // order; `sheet.hotbar` is the player's own arrangement once they've moved
-  // something (right-click a slot), and it lives on the SHEET so it survives a
-  // leader switch, a save and a floor - each character keeps their own bar. An
-  // older save has no such field and simply gets the default.
-  //
-  // A layout entry is { kind: 'action'|'item', id }, or null for a slot left
-  // empty on purpose. Assignments are kept even when what they name is
-  // unreachable right now (a stapler stowed, a coffee drunk): the slot dims and
-  // says why instead of the bar rearranging itself under the player's hands,
-  // which is the one thing a muscle-memory surface must never do.
-  const defaultLayout = () => hotbarActionIds().map((id) => ({ kind: 'action', id }));
-  // The layout the BAR shows: what the character has, plus at least one empty
-  // slot, padded out to whole rows. The spare slot is the whole discoverability
-  // story - a bar with no free space has nowhere to put the coffee, and a player
-  // who can't see an empty slot has no reason to right-click one. It is also
-  // what grows the bar: fill the last row and the next one appears, pager and
-  // all, which is how a second row of items comes to exist at all.
-  const padLayout = (entries) => {
-    const rows = Math.max(1, Math.ceil((entries.length + 1) / ui.HOTBAR_ROW_SLOTS));
-    const out = [...entries];
-    while (out.length < rows * ui.HOTBAR_ROW_SLOTS) out.push(null);
-    return out;
-  };
-  const layoutOf = (s) => padLayout(s?.hotbar?.length ? s.hotbar : defaultLayout());
-  // A slot's view-model. An assignment whose power the character no longer has
-  // (a weapon swing from a weapon now in the bag) still renders - as itself,
-  // greyed, with the reason - rather than vanishing.
-  function slotVm(entry) {
-    if (!entry) return null;
-    if (entry.kind === 'item') {
-      const def = ITEMS[entry.id];
-      if (!def) return null;
-      return {
-        kind: 'item', id: entry.id, label: def.name, icon: def.icon,
-        count: hotbarItemIds().get(entry.id) || 0,
-      };
-    }
-    const a = ACTIONS[entry.id];
-    if (!a) return null;
-    // In a fight the rules belong to combat.js: what the ACTING member can
-    // afford, out of their own kit, with their own uses and paper. Out of one
-    // they belong here. Same slot, same fields, two rule-owners - which is the
-    // point of the bar being one widget instead of two that drift.
-    if (inCombat && combat) {
-      const st = combat.actionState(entry.id);
-      return {
-        kind: 'action',
-        id: entry.id,
-        label: a.label,
-        icon: a.icon,
-        ap: a.ap,
-        ammoCost: st?.ammoCost || 0,
-        uses: st?.uses ?? null,
-        // Armed (aiming) or awaiting its confirm click - the bar rings them
-        // differently, as combat's own bar used to.
-        live: st?.live || null,
-        tip: st?.tip || null,
-        unavailable: !st
-          ? `${a.label} is not something ${combat.actingSheet.name} can do.`
-          : (st.affordable || st.live) ? null : st.reason,
-      };
-    }
-    const available = hotbarActionIds().includes(entry.id);
-    return {
-      kind: 'action',
-      id: entry.id,
-      label: a.label,
-      icon: a.icon, // the face it wears on the bar (data/actions.js)
-      ap: a.ap,
-      // The ammo cost handed to the bar is THIS character's (the Origami
-      // Specialist throws an airplane for one sheet, not two) - the same number
-      // the targeting gate and combat itself charge. The bar used to be given
-      // the raw data cost and greyed out throws the other two would allow.
-      ammoCost: throwAmmoCost(entry.id),
-      // Why the slot can't act: not the character's power any more, or one a
-      // fight owns (combatOnlyReason).
-      unavailable: available
-        ? combatOnlyReason(entry.id)
-        : `${a.label} is not something you can do right now.`,
-    };
-  }
+  // The bar's rules live in hotbar-model.js; these bind them to whoever's bar
+  // is on screen. The DOM, the arming and the pager stay here.
+  const hotbarActionIds = () => actionIdsFor(barSheet());
+  const hotbarItemIds = () => itemCountsFor(barSheet());
+  const layoutOf = (s) => layoutFor(s, ui.HOTBAR_ROW_SLOTS);
+  // In a fight the numbers are combat's - the acting member's AP, uses and
+  // paper. Out of one they are this file's. Same slot, same fields, two
+  // rule-owners, which is the point of the bar being one widget instead of two
+  // that drift.
+  const slotVm = (entry) => ((inCombat && combat && entry?.kind === 'action')
+    ? combatSlotViewModel(entry, combat.actionState(entry.id), combat.actingSheet.name)
+    : slotViewModel(entry, barSheet()));
+
   // What the bar's item slots are counting, as one string - the gate that keeps
   // a per-frame DOM repaint off the hot path (like hotbarPaper for ammo).
   const bagKey = () => (barSheet()?.inventory || []).join(',');
@@ -1628,15 +1402,7 @@ function startGame(level) {
   }
   function assignHotbarSlot(i, entry) {
     if (!sheet) return;
-    const layout = [...layoutOf(barSheet())];
-    while (layout.length <= i) layout.push(null);
-    if (entry) {
-      const at = layout.findIndex((s) => s && s.kind === entry.kind && s.id === entry.id);
-      if (at >= 0) layout[at] = layout[i] || null; // a swap, so nothing is ever in two places
-    }
-    layout[i] = entry;
-    while (layout.length && !layout[layout.length - 1]) layout.pop(); // no trailing empties
-    barSheet().hotbar = layout;
+    barSheet().hotbar = assignInto(layoutOf(barSheet()), i, entry);
     buildHotbar();
     ui.say(entry
       ? `${entry.kind === 'item' ? ITEMS[entry.id].name : ACTIONS[entry.id].label} moves to slot ${Math.floor(i / ui.HOTBAR_ROW_SLOTS) + 1}·${(i % ui.HOTBAR_ROW_SLOTS) + 1}.`
@@ -1657,6 +1423,12 @@ function startGame(level) {
     // the floor, so clicking a member who waits on their own slot does nothing,
     // exactly as before spans existed.
     onSelect: (i) => { if (!inCombat) switchLeader(i); else combat?.steerMember(party.members[i]); },
+    // Double-click points the CAMERA at the member, switch or no switch. The
+    // first click of the pair already ran onSelect, so out of combat the
+    // camera lands on them as the new leader (recenter -> follow); a member
+    // the click could NOT take over (downed, waiting on their initiative
+    // slot) still gets looked at - that is the point of the second verb.
+    onFocus: (i) => focusCameraOn(party.members[i]?.actor),
     onLevelUp: (i) => openLevelUpFor(party.members[i]),
   });
   let partyBarKey = ''; // last rendered roster state (refresh gate)
@@ -1732,6 +1504,7 @@ function startGame(level) {
     party.active = i;
     sheet = m.sheet;
     player = m.actor;
+    controls.recenter(); // control moved - a panned-away view follows it back
     buildHotbar(); // their attacks, their ammo count
     paintHud(sheet);
     loot.refreshPanel(sheet);
@@ -1777,34 +1550,29 @@ function startGame(level) {
   // world clock out of combat (ageSummons), so a temp posted between fights
   // sees itself out on its own, and one posted just before a fight walks into
   // it (startCombat's `allies`) with whatever assignment is left.
-  const summonRange = (a) => a.range ?? 5;
   const liveSummonsOf = (summoner) => summons.filter((s) =>
     s.sheet.hp > 0 && s.actor && s.summonedBy === summoner).length;
-  const summonRoom = (a) => Math.max(0, (a.cap ?? a.count) - liveSummonsOf(player));
-  // Why a spot is unusable, or null when it's good - shared by the click and
-  // the hover rings, so what you see is the rule that runs (ARCHITECTURE.md on
-  // previewAction). Deliberately the same four questions combat's
-  // summonSpotProblem asks, less the AP and uses it can answer and we can't.
-  function summonDropProblem(a, tx, tz) {
-    const spot = { x: tx, z: tz };
-    if (cheb(player, spot) > summonRange(a)) return 'Too far - post it closer.';
-    if (!hasLos(player, spot)) return 'No clear line to that spot.';
-    if (!freeTilesNear(tx, tz, 1, 0).length) return 'No room for anyone to stand there.';
-    if (summonRoom(a) <= 0) return 'Your req is full - that is all the headcount you have.';
-    return null;
-  }
+  const roomFor = (a) => summonRoom(a, liveSummonsOf(player));
+  // The same ladder combat runs, minus the two legs a FIGHT owns - there is no
+  // AP pool to spend out here and no per-fight `uses` to ration, so those
+  // fields simply are not supplied.
+  const summonDropProblem = (a, tx, tz) => summonSpotProblem(a, {
+    dist: cheb(player, { x: tx, z: tz }),
+    los: hasLos(player, { x: tx, z: tz }),
+    hasRoomToStand: freeTilesNear(tx, tz, 1, 0).length > 0,
+    room: roomFor(a),
+  });
   // The tiles the arrivals would land on: the clicked tile first, then the free
   // ground ringing outward, bounded by `count` and by what the cap has left.
-  function summonDropSpots(a, tx, tz) {
-    if (summonDropProblem(a, tx, tz)) return [];
-    return freeTilesNear(tx, tz, Math.min(a.count, summonRoom(a)), 0);
-  }
+  const summonDropSpots = (a, tx, tz) => (summonDropProblem(a, tx, tz)
+    ? []
+    : freeTilesNear(tx, tz, dropCount(a, roomFor(a)), 0));
   function postSummonAt(id, tx, tz) {
     const a = ACTIONS[id];
     const problem = summonDropProblem(a, tx, tz);
     if (problem) { ui.say(problem); return; }
     const spawned = spawnSummonUnits(
-      a.archetype, 'player', player, Math.min(a.count, summonRoom(a)), { x: tx, z: tz },
+      a.archetype, 'player', player, dropCount(a, roomFor(a)), { x: tx, z: tz },
     );
     if (!spawned.length) { ui.say('No room - nobody can find a free desk there.'); return; }
     for (const rec of spawned) {
@@ -1859,6 +1627,7 @@ function startGame(level) {
     dialogue.close();
     shopping.close(); // the machine can wait; it is not going anywhere
     inCombat = true;
+    controls.recenter(); // a fight starts AT the party - a panned-away view returns
     ui.hideMenu();
     loot.hideLabels(); // no browsing the shelves mid-fight
     hover.clear();
@@ -1884,25 +1653,7 @@ function startGame(level) {
       allies: summons.filter((s) => s.sheet.hp > 0),
       world: {
         isWalkable,
-        // Doors the given tile is standing at, as edge midpoints, so combat can
-        // ring them. Doors are the only terrain a fight can change and the only
-        // true line-of-sight blocker, but they sit on EDGES rather than tiles -
-        // so combat cannot find them the way it finds a prop, and until it
-        // could, the one thing worth walking over to use had no affordance at
-        // all. Returns the midpoint because that is where the door IS: 'h:x,z'
-        // divides (x,z-1) from (x,z), so it lives at z - 0.5.
-        doorsBeside: (x, z) => {
-          const out = [];
-          for (const key of grid.doors.keys()) {
-            if (!doorSides(key).some(([sx, sz]) => sx === x && sz === z)) continue;
-            const [dx, dz] = key.slice(2).split(',').map(Number);
-            // The price rides along rather than being re-declared in combat.js:
-            // one number, owned by the rule that charges it (toggleDoor).
-            const mid = key[0] === 'h' ? { x: dx, z: dz - 0.5 } : { x: dx - 0.5, z: dz };
-            out.push({ ...mid, ap: COMBAT_DOOR_AP });
-          }
-          return out;
-        },
+        doorsBeside: (x, z) => doors.doorsBeside(x, z),
         // The acting body's own route: allies BLOCK in combat (no ending a
         // move stacked on a teammate; sequenced moves can afford the detour)
         // and the costs are the walker's own talents, not the leader's.
@@ -1981,6 +1732,38 @@ function startGame(level) {
           if (e) scene.removeEdgeWall?.(e.o, e.k);
           return !!e;
         },
+        // Breaking cover down (TACTICS_PLAN M8). Grid keeps the pool, this
+        // pairs the grid rule with the mesh exactly as setType/toppleEdge do:
+        // a surviving prop leans (the damaged tell - the pool is hidden by
+        // design, so the object has to wear the damage), a spent one is
+        // REMOVED - tile to floor, edge out of the world, no debris ("gone
+        // means gone", designer 2026-07-30). Returns hp remaining, 0 for
+        // destroyed, null for a target with no pool.
+        propHpAt: (x, z) => grid.propHpAt(x, z),
+        damageProp: (x, z, amount) => {
+          const left = grid.damageProp(x, z, amount);
+          if (left === null) return null;
+          if (left <= 0) {
+            grid.setType(x, z, 'floor');
+            scene.refreshTile?.(x, z);
+            return 0;
+          }
+          scene.markPropDamaged?.(x, z);
+          return left;
+        },
+        edgeHpBetween: (x, z, nx, nz) => grid.edgeHpBetween(x, z, nx, nz),
+        damageEdge: (x, z, nx, nz, amount) => {
+          const left = grid.damageEdge(x, z, nx, nz, amount);
+          if (left === null) return null;
+          if (left <= 0) {
+            const e = grid.removeEdgeBetween(x, z, nx, nz);
+            if (e) scene.removeEdgeWall?.(e.o, e.k);
+            return 0;
+          }
+          const e = grid.wallEdgeBetween(x, z, nx, nz);
+          if (e) scene.markEdgeDamaged?.(e.o, e.k);
+          return left;
+        },
         leaveSurface: (x, z, tileType, turns = 0) => {
           if (grid.typeAt(x, z) !== 'floor') return false;
           grid.setType(x, z, tileType);
@@ -2024,6 +1807,9 @@ function startGame(level) {
       fx: vfx,
       callbacks: {
         say: ui.say,
+        // Double-click on an initiative row: put the camera on that body.
+        // main.js owns the rig, so combat only names WHO.
+        focusCamera: focusCameraOn,
         // Combat passes the acting member's sheet (initiative controls who you
         // drive); default to the leader for any callless use.
         updateHud: (s = sheet) => paintHud(s || sheet),
@@ -2379,10 +2165,13 @@ function startGame(level) {
   // is traction. `wasSlipProof` is sampled BEFORE the step clock ticks, so the
   // tile a gum wad wears off on still keeps its grip.
   function maybeSlip(ms, actor, x, z, wasSlipProof, say) {
-    if (gameOver || ms.talent?.effects?.slipImmune) return;
-    if (wasSlipProof || statusFx(ms).slipProof || equippedStats(ms).slipProof) return;
-    const chance = slipChanceAt(x, z);
-    if (!chance || Math.random() >= chance) return;
+    if (gameOver) return;
+    if (!slips({
+      chance: slipChanceAt(x, z),
+      roll: Math.random,
+      slipProof: wasSlipProof || statusFx(ms).slipProof || equippedStats(ms).slipProof,
+      slipImmune: ms.talent?.effects?.slipImmune,
+    })) return;
     actor.clearPath();
     actor.flinch();
     vfx.impact(x, z, 'slip', { y: 0.12 });
@@ -2961,8 +2750,61 @@ function startGame(level) {
     isOn: () => controls.tactical,
   });
 
+  // Keyboard pan may not fly the view off the carpet into the void - fence it
+  // to the floor plus a little slack. Once per boot: a floor change reloads
+  // the page, so the grid the fence was measured against can't go stale.
+  controls.setPanBounds({ minX: -2, maxX: grid.width + 1, minZ: -2, maxZ: grid.height + 1 });
+
+  // Point the camera at a body. The one the rig FOLLOWS gets recenter() -
+  // follow resumes, so the view stays with them as they walk. Anyone else
+  // gets a glide to where they stand right now: follow can't attach to a
+  // body the rig doesn't track, and pretending otherwise would drift the
+  // view back to the followed character a frame later.
+  function focusCameraOn(actor) {
+    if (!actor) return;
+    if (actor === player) { controls.recenter(); return; }
+    const p = actor.entity?.getPosition();
+    if (p) controls.panTo({ x: p.x, z: p.z });
+    else controls.panTo({ x: actor.x, z: actor.z });
+  }
+  // The bottom-left profile card doubles as a recenter button (double-click),
+  // the way the reference games' portraits do. It names the ACTING combatant
+  // in a fight (paintHud follows initiative), so the camera goes to whoever
+  // the card is showing, not blindly to the leader. #hud is pointer-events:
+  // none so the banner stays click-through; the card opts back in - it sits
+  // over the world's corner, and every other HUD surface already swallows
+  // its clicks rather than letting them fall through to the floor.
+  const statsCard = document.getElementById('stats');
+  if (statsCard) {
+    statsCard.style.pointerEvents = 'auto';
+    statsCard.onmousedown = (e) => e.stopPropagation(); // clicks stay off the canvas
+    statsCard.ondblclick = () => {
+      if (!sheet || gameOver) return;
+      focusCameraOn(inCombat && combat ? combat.actingActor : player);
+    };
+  }
+
   // --- keyboard: hold Alt for the loot overlay, I for the pockets ---------------
+  // Camera pan keys (BG3/DOS2: WASD pans, and BG3 takes the arrows too -
+  // dotesports.com/pcgamesn BG3 camera guides; DOS2 fextralife Controls).
+  // Physical codes, not e.key, so WASD stays WASD on a non-QWERTY layout.
+  // keydown/keyup maintain the held set; the update loop drives the rig from
+  // it every frame, because pans are continuous and key-repeat isn't.
+  const PAN_CODES = {
+    KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down',
+    KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
+  };
+  const panHeld = new Set();
   window.addEventListener('keydown', (e) => {
+    // Ctrl/meta chords stay the browser's (Ctrl+A, Cmd+D); a plain pan key is
+    // ours. The typed-text surfaces (god panel, the creation name field)
+    // already stop keydown propagation, so typing "was" never pans.
+    if (PAN_CODES[e.code] && !e.ctrlKey && !e.metaKey) {
+      panHeld.add(PAN_CODES[e.code]);
+      // The arrows scroll the page hosting the game (the itch.io iframe) if
+      // left to default; suppressing it is harmless for the letters.
+      e.preventDefault();
+    }
     if (e.key === 'Alt') {
       e.preventDefault(); // keep focus off the browser's menu bar
       hover.setAlt(true); // lights what the cursor is already on, without a re-hover
@@ -2975,16 +2817,17 @@ function startGame(level) {
       hover.setCtrl(true); // rings under everyone while held (drawCharacterRings)
     } else if ((e.key === 'i' || e.key === 'I') && sheet && !gameOver) {
       loot.togglePanel(sheet);
-    } else if (/^[1-9]$/.test(e.key) && sheet && !gameOver && !modalOpen()) {
+    } else if (/^[0-9]$/.test(e.key) && sheet && !gameOver && !modalOpen()) {
       // Number keys press the matching slot of the VISIBLE row, so 1 is always
-      // the leftmost button on screen however many rows the kit needs.
+      // the leftmost button on screen however many rows the kit needs - and 0
+      // answers for the tenth slot (TACTICS_PLAN M8's row of ten).
       //
       // These used to be gated `!inCombat`, which meant a FIGHT - the half of
       // the game that is nothing but pressing verbs under pressure - was the
       // half with no keyboard shortcuts at all. The row you learn out of combat
       // is the row you get in one, which was always the stated point of the
       // layout living on the sheet.
-      const i = hotbar?.indexAtKey(Number(e.key)) ?? -1;
+      const i = hotbar?.indexAtKey(e.key === '0' ? 10 : Number(e.key)) ?? -1;
       if (i >= 0) pressHotbarSlot(i);
     } else if ((e.key === '[' || e.key === ']') && sheet && !gameOver && !modalOpen()) {
       // Page the hotbar rows from the keyboard - the pager buttons and the wheel
@@ -3005,13 +2848,19 @@ function startGame(level) {
       // Overhead tactical view - the same toggle as the rail button.
       controls.toggleTactical();
       tacticalBtn?.refresh();
+    } else if (e.key === 'Home' && sheet && !gameOver) {
+      // BG3's recenter key: put the camera back on whoever you're driving
+      // (the acting combatant in a fight, the leader out of one).
+      focusCameraOn(inCombat && combat ? combat.actingActor : player);
     }
   });
   window.addEventListener('keyup', (e) => {
+    if (PAN_CODES[e.code]) panHeld.delete(PAN_CODES[e.code]);
     if (e.key === 'Alt') { hover.setAlt(false); loot.hideLabels(); }
     if (e.key === 'Control') hover.setCtrl(false);
   });
   window.addEventListener('blur', () => {
+    panHeld.clear(); // a key can't be 'still held' across a focus loss
     loot.hideLabels();
     hover.releaseModifiers(); // a key can't be 'still held' across a focus loss
   });
@@ -3185,7 +3034,10 @@ function startGame(level) {
         partyAt(x, z)
         || summonAt(x, z)
         || enemies.some((e) => e.alive && e !== self && e.x === x && e.z === z),
-      slips: (x, z) => Math.random() < slipChanceAt(x, z),
+      // The CHANCE, not a pre-rolled verdict: actors.js runs the same
+      // step-rules.slips predicate combat and the party do, so the tread that
+      // saves a wanderer is checked by the same rule that saves you.
+      slipChanceAt,
       stickGum,
       // A wander route never crosses hazards, other actors, or a party
       // member's tile; the enemy's own start tile counts as open. Returns it
@@ -3316,6 +3168,19 @@ function startGame(level) {
         const s = worldToScreenCss(controls.cameraEntity, w.x, w.y, w.z);
         return s.behind ? null : s;
       });
+    }
+    // Keyboard camera pan (WASD/arrows), gated like the other game keys: it
+    // detaches the rig from the follow target until something recenters it.
+    // Opposed keys cancel per axis rather than fighting.
+    if (panHeld.size && sheet && !gameOver && !modalOpen()) {
+      const rx = (panHeld.has('right') ? 1 : 0) - (panHeld.has('left') ? 1 : 0);
+      const uz = (panHeld.has('up') ? 1 : 0) - (panHeld.has('down') ? 1 : 0);
+      if (rx || uz) {
+        controls.pan(rx, uz, dt);
+        // The world just slid under a stationary cursor - re-ask what the
+        // hover is on, or the glow/banner stay pinned to what WAS there.
+        controls.refreshHover();
+      }
     }
     // Follow the player, keeping them centred in frame. Track the entity's
     // CONTINUOUS position (player.x/z is the logical tile, which jumps a whole
@@ -3467,6 +3332,11 @@ function startGame(level) {
       const c = controls.cameraEntity.getPosition();
       return { x: c.x, y: c.y, z: c.z };
     },
+    // The point the rig is looking at, and whether a keyboard pan has
+    // detached it from the follow target - the pair the camera specs assert
+    // on (cameraPos moves with pitch/zoom too, which is noise to them).
+    get cameraFocus() { return controls.focus; },
+    get cameraFree() { return controls.panning; },
     // World point -> CSS-pixel screen point, so tests can click precise
     // ground points (mouse events arrive in CSS pixels).
     project(x, z) {
@@ -3523,6 +3393,11 @@ function startGame(level) {
     // the tile grid alone cannot say whether the wall between two open tiles
     // is still standing.
     stepOpenAt: (x, z, nx, nz) => grid.stepOpen(x, z, nx, nz),
+    // The hidden pools (TACTICS_PLAN M8) - the demolition specs' only honest
+    // window: the tile keeps its type until the pool empties, so "the hit
+    // landed" is invisible from the type grid alone.
+    propHpAt: (x, z) => grid.propHpAt(x, z),
+    edgeHpAt: (x, z, nx, nz) => grid.edgeHpBetween(x, z, nx, nz),
     // The leader's out-of-combat crouch, for the specs that seed a fight
     // with one (TACTICS_PLAN M6 OOC).
     get oocCrouch() { return oocCrouch; },

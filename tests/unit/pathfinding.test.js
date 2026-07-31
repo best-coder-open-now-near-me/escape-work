@@ -2,7 +2,7 @@
 // '#' solid, '.' open. No PlayCanvas, no DOM - plain node --test.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findPath, segmentClear, clampToClearance, approachPoint, truncateByBudget, smoothPath, routeToFiringPosition } from '../../src/pathfinding.js';
+import { findPath, segmentClear, clampToClearance, approachPoint, truncateByBudget, smoothPath, routeToFiringPosition, trimToFirst } from '../../src/pathfinding.js';
 
 // Build isWalkable from rows of '.'/'#'; everything off-map is solid.
 const walkableFrom = (rows) => (x, z) =>
@@ -246,4 +246,61 @@ test('routeToFiringPosition returns null when the target is sealed off', () => {
     '##########',
   ]);
   assert.equal(routeToFiringPosition({ tx: 4, tz: 3, range: 4, ...w.from(1, 1) }), null);
+});
+
+// --- trimToFirst: a walk-up stops the moment its verb is live ----------------
+// The rule that keeps an approach from overshooting. Combat binds `ok` to the
+// ARMED power's own range (combat.js verbReaches), so these cover the shape
+// rather than any one verb's number.
+
+test('trimToFirst cuts the walk at the first point the verb reaches from', () => {
+  // Walking west along z=0 toward a target at the origin, stopping at 1.5.
+  const path = [[5, 0], [0.2, 0]];
+  const out = trimToFirst(path, (x, z) => Math.hypot(x, z) <= 1.5);
+  assert.ok(out);
+  const [ex, ez] = out[out.length - 1];
+  const d = Math.hypot(ex, ez);
+  // Inside the legal zone...
+  assert.ok(d <= 1.5, `stopped at ${d}, outside reach`);
+  // ...and not one sample deeper than it had to go: the walk must not keep
+  // closing after the verb is already live (the "much closer than needed"
+  // report). One sampling slice (0.25) is the whole tolerance.
+  assert.ok(d > 1.5 - 0.25 - 1e-9, `overshot to ${d} - kept closing past reach`);
+  assert.equal(ez, 0); // stayed ON the line it was walking, not offset from it
+});
+
+test('trimToFirst keeps the earlier waypoints of a bent route', () => {
+  // A dog-leg: north, then west. The verb only comes live on the second leg,
+  // so the corner has to survive into the trimmed path or the walker would
+  // cut through whatever the bend was avoiding.
+  const path = [[4, 4], [4, 0], [0, 0]];
+  const out = trimToFirst(path, (x, z) => Math.hypot(x, z) <= 1.5);
+  assert.ok(out);
+  assert.deepEqual(out[0], [4, 4]);
+  assert.deepEqual(out[1], [4, 0]);
+  assert.ok(Math.hypot(...out[out.length - 1]) <= 1.5);
+});
+
+test('trimToFirst returns null when the verb never comes live', () => {
+  // No point on this route is within reach - the caller falls back to walking
+  // the whole thing (and its own arrival check refuses the strike).
+  assert.equal(trimToFirst([[9, 9], [6, 6]], (x, z) => Math.hypot(x, z) <= 1.5), null);
+});
+
+test('trimToFirst stops immediately when the verb is already live', () => {
+  // Already in range at the very first sample: the trimmed walk is a step, not
+  // a march to the target's elbow.
+  const out = trimToFirst([[1.4, 0], [0.2, 0]], (x, z) => Math.hypot(x, z) <= 1.5);
+  assert.ok(out);
+  assert.ok(out.length <= 2);
+  assert.ok(Math.hypot(...out[out.length - 1]) <= 1.5);
+});
+
+test('trimToFirst honors a long range - a straw does not walk to the elbow', () => {
+  // The same route, trimmed for a 6-tile weapon: it stops six tiles out, where
+  // a melee reach would have kept walking. The power's own range IS the aim.
+  const path = [[9, 0], [0.2, 0]];
+  const far = trimToFirst(path, (x) => x <= 6);
+  const near = trimToFirst(path, (x) => x <= 1.5);
+  assert.ok(far[far.length - 1][0] > near[near.length - 1][0] + 4);
 });

@@ -24,6 +24,11 @@ CONTROLS ignore the crouch; a failed Grit save deals the damage AND keeps the
 existing stun alongside the new pin; and shooting a target whose human shield
 is one of YOUR OWN refuses rather than rerouting damage into your teammate.
 
+**M8 (destructible cover + Pull Over)** raised its questions live in-session
+on 2026-07-30 and every one is answered — the milestone entry carries the
+tags. Nothing is waiting on the designer; the `[proposed]` items there are
+implementation defaults, each cheap to reverse if play disagrees.
+
 The playtest question is answered too — **partition toppling** `[ratified]`
 (2026-07-30, "your defaults seem fine" + the fallen-shape refinement): one
 edge segment per shove, falling away from the shover, same Grit
@@ -747,10 +752,93 @@ None. See decision #6.
    target (both pre-existing), blue = the wash, yellow reserved for the
    hovered take-cover object (M6).
 
+9. **Destructible cover + Pull Over (M8).** The finish-out of the cover game
+   (designer, 2026-07-30): barriers break down under attack, and a crouched
+   target can be hauled bodily over their own cover. The decisions, each
+   tagged with what the designer actually said:
+   - `[stated]` Objects are destructible by attacks — "melee and ranged"
+     both, per the designer's own clarification: "adds more dynamic to the
+     coverage approaches as then melee could gradually break down a barrier."
+   - `[stated]` Destruction REMOVES the object — "gone means gone." The
+     designer's rationale, verbatim: "it needs to be B because anything else
+     like shove or pull keeps the barrier, whereas destruction shouldnt." So
+     the three cover-denial verbs have distinct battlefield signatures:
+     shove/topple RELOCATES the barrier (solid debris stays in play), pull
+     KEEPS it standing and moves the person, destruction DELETES it. A
+     destroyed prop's tile reverts to floor; a destroyed partition loses the
+     edge entirely, no fallen plank ("gone means gone", answering the
+     follow-up directly).
+   - `[ratified]` HP on the cover-grade set only (2026-07-30, recommended
+     default accepted): partitions, the five toppleable props, and their
+     fallen twins. Loot desks, the snack machine, the printer and the rest
+     of the office stay indestructible for now.
+   - `[ratified]` A hidden HP pool with a damaged visual tell — no staged
+     art (same). Numbers are first drafts, deferred to playtest as always.
+   - `[stated]` Pull Over is UNIVERSAL — "i may have answered one wrong. i
+     want everyone to have that move", sharpened into the standing rule:
+     "so all cover related moves are universal." (This supersedes the
+     recommended power-grant; the hotbar row grows to ten.)
+   - `[ratified]` The pulled target rolls the SAME Grit save as everything
+     else that gets manhandled (2026-07-30, recommended default): pass and
+     they are hauled over but land on their feet; fail and they wear the
+     crush damage, the existing stun, and the pin — `dropOnto`'s exact
+     price, arrived at from the other side of the barrier.
+   - `[proposed]` implementation defaults, each cheap to reverse: objects
+     do not dodge — an attack aimed at a prop auto-hits, spends its full
+     cost, and deals its rolled damage (rolling to miss a bookcase reads as
+     a bug, and pricing the swing keeps "break it down" from being free);
+     fallen twins are also breakable, so topple-then-destroy prices full
+     tile denial at two actions; Pull Over requires an actual crouched
+     target — it is cover-denial, not a generic yank — and lands them on
+     the free tile beside the puller nearest the barrier they came over;
+     the AI neither breaks barriers nor pulls in v1 (deferred with AI
+     partition toppling); partitions ring their break affordance only when
+     adjacent (the shove's own partial-affordance precedent) though the
+     ranged click resolves at any legal range.
+
+   **As landed (2026-07-30):**
+   - The pools: `hp` on the cover-grade tile defs and `PARTITION_HP` for
+     edges (data/tiles.js); damage accumulates in grid.js side maps (defs
+     are static shared objects), persists ACROSS fights — "gradually break
+     down a barrier" is allowed to span them — and dies with the thing it
+     described: `setType` resets a cell's pool (a topple's fallen twin
+     starts fresh), `removeEdgeBetween` retires an edge's.
+   - The verb: an armed damage-rolling attack (`powers.aimsAtProps` — the
+     first cut of TODO's target-class concept) aimed at a breakable prop's
+     tile, or at a partition square-on (melee, the topple's own aim) / on
+     the clicked tile's face toward the shooter (ranged). `performBreak`
+     spends the full cost, rolls the dice into the pool, and the world
+     facade pairs rule and mesh exactly as setType/toppleEdge do: a
+     surviving object LEANS a few degrees (`scene.markPropDamaged` — the
+     pool is hidden, so the object wears the damage), a spent one is
+     removed. Crouches behind it break with no bespoke hook — refresh()'s
+     lazy revalidation was built for exactly this.
+   - Pull Over: universal `pull` entry (`crush: [2,4]`), granted beside
+     shove/take-cover on both bars; the hotbar row grew to TEN with '0' as
+     the tenth key (revising the row-of-nine note in hud.js — the designer's
+     "everyone has that move" outranks it; ten is the genuine key ceiling).
+     `pullPlanFor` demands a live crouch with the shield between the bodies
+     (`crouchShields` for a cell, the M3 edge test for edge mode), reach
+     `REACH.PULL` (2.5), and a landing from `powers.pullLanding`; the haul
+     is `pushTo` (forced movement — no provoke, no step hooks), the save is
+     the shared Grit roll (forceHit pins it), a fail wears crush + the
+     existing stun + `pinned`, and a hazard landing bills like a shove's.
+     A pull aimed at the ground resolves on whoever holds the tile — a
+     crouched body is a squashed pose, easy to click past. A HUMAN shield is
+     not pullable `[proposed]`: you do not haul somebody over a colleague —
+     that is a shove's problem, and the refusal says so.
+   - Honest scope notes: combat-only for v1 — OOC break/pull parity is a
+     follow-up if wanted `[proposed]` (an armed OOC attack still refuses
+     props); no walk-in for prop attacks (melee rings only promise reach);
+     the `pinned` chip's log line still says "under it", which reads odd on
+     a pull; enemies neither break nor pull yet.
+
 Milestones 1 and 2 are independent and may be swapped; 3–5 all depend on 1.
 M6 depends on 1, 2 and 5 (opportunity attacks and facing already exist for
 it to lean on) plus M6a and M7 above; its immunity slots into `positionMods`
-where the passive cover already lives.
+where the passive cover already lives. M8 depends on M6 (it reads the crouch
+map and the Grit save) and on M6a (the height rule is what makes a broken
+low barrier's absence legible to the shot).
 
 ### Verification as landed
 

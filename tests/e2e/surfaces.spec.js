@@ -57,8 +57,24 @@ test('plain water slips the walker, harmlessly', async ({ page }) => {
   expect(await page.evaluate(() => window.__game.stats.hp)).toBe(hp0); // dignity only
 });
 
+// The longest test in the suite, and the only one that needed its own budget.
+// It walks the player through ~32 click-settle cycles - a wad, eight water dips
+// to prove gum is traction, then fourteen more tiles to wear it off - and every
+// `waitStill` costs two 700ms polls before it can agree the body has stopped.
+//
+// 300s was not enough on CI and this is arithmetic, not flake: the test takes
+// ~175s here on one uncontended worker, `surfaces.spec.js` was already the
+// second-slowest FILE on main's own run (13.2m), and CI runs two workers over a
+// suite that keeps growing - 121 tests in 1.7h on main, 131 in 1.9h here. A
+// test sitting at 60% of its budget uncontended has nowhere to go when the
+// runner is shared, which is exactly what happened: it hit 300s twice, on the
+// run and on the retry, while every assertion in it passes locally.
+//
+// Raised rather than trimmed because what makes it slow is what makes it worth
+// having: the eight dips are the sample size that proves traction, and the
+// fourteen tiles are how the step clock actually gets spent.
 test('gum sticks, slows, shows on the HUD, grants traction, wears off', async ({ page }) => {
-  test.setTimeout(300_000);
+  test.setTimeout(600_000);
   await bootStash(page, SLIP_LAB);
   // Step on the wad.
   await clickWorld(page, 1, 1);

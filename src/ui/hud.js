@@ -163,16 +163,18 @@ export function createTacticalButton({ onToggle, isOn }) {
 // player assigns - without the row growing until it spans the screen and the
 // number keys stop lining up with it.
 //
-// Nine, because every class's whole kit fits in nine today - eight actions
-// since Take Cover joined the universal pair beside Shove (TACTICS_PLAN M6),
+// Ten, because every class's whole kit fits in ten today - nine actions
+// since Pull Over joined Shove and Take Cover as the third universal cover
+// verb (TACTICS_PLAN M8, designer: "all cover related moves are universal"),
 // plus the deliberate empty slot: a row that pages what a character ALREADY
 // HAS would hide the weapon swing behind a pager on a fresh Office Drone,
 // which is a worse trade than an unused pager. Rows arrive when the player
 // builds past one (the host pads the layout with an empty slot so there is
-// always somewhere to assign to - see main.js layoutOf). Nine is also the
-// ceiling the NUMBER KEYS can address (1-9), so the next universal verb has
-// to earn its slot by retiring one - it cannot just widen the row again.
-export const HOTBAR_ROW_SLOTS = 9;
+// always somewhere to assign to - see main.js layoutOf). Ten is the hard
+// ceiling the NUMBER KEYS can address (1-9, then 0 for the tenth) - the row
+// genuinely cannot widen again, so the NEXT universal verb has to earn its
+// slot by retiring one.
+export const HOTBAR_ROW_SLOTS = 10;
 
 // `slots` is the whole layout, in order, as view-models the host builds:
 //   { kind: 'action', id, label, icon, ap, ammoCost, unavailable }
@@ -212,7 +214,10 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
   const prev = pagerBtn('‹', -1, 'hotbar-prev');
   const next = pagerBtn('›', 1, 'hotbar-next');
   const slotsRow = document.createElement('div');
-  Object.assign(slotsRow.style, { display: 'flex', gap: '7px' });
+  // 6px, not 7: the row of ten (TACTICS_PLAN M8) has to clear the narrator
+  // box on a 1280 viewport - the dock is centred, the narrator right-anchored,
+  // and the combat-bar spec MEASURES the gap. Slot size below shrank with it.
+  Object.assign(slotsRow.style, { display: 'flex', gap: '6px' });
   const pageTag = document.createElement('div');
   pageTag.id = 'hotbar-page';
   Object.assign(pageTag.style, { font: '11px system-ui, sans-serif', opacity: '.6', minWidth: '26px', textAlign: 'center' });
@@ -231,7 +236,9 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
     if (slot) b.dataset.action = slot.id;
     b.dataset.slot = String(i);
     Object.assign(b.style, BUTTON_CHROME, {
-      position: 'relative', width: '46px', height: '46px', padding: '0',
+      // 44px squares: ten of them plus gaps must not run under the narrator
+      // box (see the slot-row gap note above).
+      position: 'relative', width: '44px', height: '44px', padding: '0',
       borderRadius: '8px', font: '20px system-ui, sans-serif', lineHeight: '1',
       display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none',
     });
@@ -281,7 +288,7 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
     buttons.forEach(({ b, slot, keyTag, countTag, face }, i) => {
       b.style.display = rowOf(i) === row ? '' : 'none';
       const key = (i % HOTBAR_ROW_SLOTS) + 1;
-      keyTag.textContent = String(key);
+      keyTag.textContent = String(key % 10); // the tenth slot answers to '0'
       countTag.textContent = '';
       if (!slot) {
         face.textContent = '—';
@@ -376,10 +383,13 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
 // with name, an HP bar, a DOWN marker, and a highlight on the member being
 // controlled. Clicking a slot asks the host to switch control - the host
 // decides whether that's allowed right now (combat, dialogue, downed).
+// Double-clicking asks the host to point the CAMERA at that member - a
+// separate verb, because a member you can't switch to (downed, waiting on
+// their own initiative slot) is still somewhere worth looking.
 // One decimal, and no trailing '.0' - the same shape combat.js prints AP in.
 const fmtAp = (v) => String(Math.round((Number(v) || 0) * 10) / 10).replace(/\.0$/, '');
 
-export function createPartyBar({ onSelect, onLevelUp }) {
+export function createPartyBar({ onSelect, onLevelUp, onFocus }) {
   const bar = document.createElement('div');
   bar.id = 'party-bar';
   Object.assign(bar.style, PANEL_CHROME, {
@@ -421,6 +431,10 @@ export function createPartyBar({ onSelect, onLevelUp }) {
             background:${down ? '#5a2a2a' : s.hp / s.maxHp > 0.4 ? '#6fc86f' : '#e0b23a'}; border-radius:2px;"></div>
         </div>`;
       slot.onclick = () => onSelect(i);
+      if (onFocus) {
+        slot.ondblclick = () => onFocus(i);
+        slot.title = `Double-click to center the camera on ${s.name}`;
+      }
       // Level-up pip: a living member with banked points (of either type) wears
       // a badge; clicking it opens their allocation screen (without switching
       // control to them).

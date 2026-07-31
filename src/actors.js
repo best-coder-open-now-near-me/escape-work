@@ -10,6 +10,7 @@
 import { rollLoot } from './data/items.js';
 import { unitCombat } from './stats.js';
 import { applyStatus, hasStatus, statusFx } from './statuses.js';
+import { slips, speedUnderStatus } from './step-rules.js';
 import { cloneMaterials, tintMaterials } from './models.js';
 
 // The engine handle, resolved LAZILY rather than read at module scope.
@@ -497,9 +498,13 @@ export class EnemyActor extends GridActor {
           // speed and then multiplied the status in on top of it. Deriving is
           // idempotent, so both sides can run in any order and agree.
           if (this.baseSpeed === undefined) this.baseSpeed = this.speed;
-          this.speed = this.baseSpeed * (statusFx(this).speedMult ?? 1);
+          this.speed = speedUnderStatus(this.baseSpeed, statusFx(this));
         }
-        if (changed && !statusFx(this).slipProof && world.slips(x, z)) {
+        if (changed && slips({
+          chance: world.slipChanceAt(x, z),
+          roll: Math.random,
+          slipProof: statusFx(this).slipProof,
+        })) {
           this.clearPath();
           this.flinch();
         }

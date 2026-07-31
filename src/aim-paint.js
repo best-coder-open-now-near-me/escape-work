@@ -71,7 +71,16 @@ export function createAimPaint(app) {
       for (const e of pool) e.enabled = false;
     },
     destroy() { holder.destroy(); },
-    // For the e2e suite: how many tiles the wash covers, and for which aim.
-    get debug() { return { key, count: used }; },
+    // For the e2e suite: how many tiles the wash covers, for which aim, and
+    // WHICH tiles - a spec asserting the wash does not over-promise has to
+    // name the tile it expects left out, which a count cannot express.
+    get debug() {
+      const tiles = [];
+      for (let i = 0; i < used; i++) {
+        const p = pool[i].getLocalPosition();
+        tiles.push([Math.round(p.x), Math.round(p.z)]);
+      }
+      return { key, count: used, tiles };
+    },
   };
 }

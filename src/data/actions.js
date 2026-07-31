@@ -41,6 +41,13 @@
 //            line, or at yourself: restores `amount` HP, clears their statuses
 //            (`purge`), and/or lands `applies` on them. Rolls nothing - you do
 //            not miss a colleague you are trying to help.
+//   pull   - the universal cover-denial grab (TACTICS_PLAN M8). Aim at an
+//            enemy crouched behind cover whose shielded side you are ON: they
+//            are hauled over it to your side, the cover stays standing, and
+//            they roll the Grit save everything manhandled rolls - pass lands
+//            them on their feet, fail wears `crush` damage plus the existing
+//            stun and pin. No to-hit roll: the save IS the resistance, the
+//            same shape as the topple's crush.
 // Modifiers:
 //   purge (on an attack) - hitting a target also wipes their status effects,
 //   harmful and helpful alike; click your own tile while armed to self-cast
@@ -406,6 +413,22 @@ export const ACTIONS = {
     icon: '🧎',
     desc: 'Get behind something solid - or someone brave. Ranged attacks from the shielded side cannot touch you until you move.',
     log: 'You tuck in behind cover.',
+  },
+  // The third universal cover verb (TACTICS_PLAN M8, designer: "all cover
+  // related moves are universal"): reach over the thing they are hiding
+  // behind and haul them onto your side of it. The barrier STAYS UP - that is
+  // the difference from toppling or breaking it - and the trip over is the
+  // same Grit save everything manhandled rolls: pass lands on their feet,
+  // fail wears `crush` damage plus the stun and the pin (dropOnto's price,
+  // arrived at from the other side of the cover).
+  pull: {
+    type: 'pull',
+    ap: 2,
+    label: 'Pull Over',
+    icon: '🫳',
+    desc: 'Haul whoever is dug in behind cover over it, onto your side. The cover stays up; their footing may not.',
+    crush: [2, 4],
+    log: 'You haul them over their own cover.',
   },
 
   // --- basic weapon attack (EQUIPMENT_PLAN) -------------------------------------

@@ -146,6 +146,39 @@ export function toppleLanding(ax, az, px, pz) {
   return [px + dx, pz + dz];
 }
 
+// --- destructible props & Pull Over (TACTICS_PLAN M8) ------------------------
+
+// Can this prop be broken down by attacks? `hp` is the cover-grade marker
+// (data/tiles.js): only the props whose job is to be hidden behind carry one.
+export const isBreakable = (def) => Number.isFinite(def?.hp);
+
+// Does this action aim at PROPS as well as bodies? The target-class gap
+// TODO.md names: `isFriendly` says "only friends", `aimsAtAlly` says "may
+// point at a friend", and this says "may point at the furniture" - a plain
+// damage-rolling attack can break a barrier down, while controls, purges and
+// everything payload-shaped still wants a body. Shove keeps its own prop path
+// (the topple) and deliberately stays out of this predicate.
+export const aimsAtProps = (a) =>
+  !!a && a.type === 'attack' && Number.isFinite(a.min) && Number.isFinite(a.max);
+
+export const isPull = (a) => !!a && a.type === 'pull';
+
+// Where a pulled body lands: the free tile beside the PULLER nearest to where
+// the target was dragged from - "snag over an enemy to your side" (designer).
+// Orthogonal neighbours only (the haul ends square on your side, not slung
+// around a corner), never the puller's own tile and never the tile the target
+// already holds. `open(x, z)` is the caller's walkable-and-unoccupied test;
+// null when your side has no room, which is a refusal, not a fallback.
+export function pullLanding(ax, az, tx, tz, open) {
+  const spots = [[ax + 1, az], [ax - 1, az], [ax, az + 1], [ax, az - 1]]
+    .sort((p, q) => Math.hypot(p[0] - tx, p[1] - tz) - Math.hypot(q[0] - tx, q[1] - tz));
+  for (const [x, z] of spots) {
+    if (x === tx && z === tz) continue;
+    if (open(x, z)) return [x, z];
+  }
+  return null;
+}
+
 // --- stance (POWERS_PLAN M5) -------------------------------------------------
 
 export const isStance = (a) => !!a && a.type === 'stance';
