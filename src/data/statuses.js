@@ -197,6 +197,20 @@ export const STATUSES = {
   // duration is a leak bound, not a clock: combat revalidates the crouch on
   // every consult and re-applies the chip while it holds, so only an
   // abandoned fight ever lets it lapse on its own.
+  // Sneaking (SNEAK_PLAN M2): a HELD mode, not a timed affliction - main.js
+  // applies it on the toggle and removes it when the sneak breaks (spotted,
+  // attacking, interacting, or toggled off), so the huge duration is never
+  // consumed; it exists because the framework sizes fx off a number. The
+  // speed cost mirrors STEALTH.SPEED_MULT (stats.js) the way gum's numbers
+  // mirror data/surfaces.js - one source of truth when statuses learn to
+  // read tunables.
+  sneaking: {
+    name: 'Sneaking', icon: '🤫', harmful: false, clock: 'turn',
+    duration: 9999, resistable: false,
+    effects: { speedMult: 0.7 },
+    log: '{name} goes quiet.',
+    fx: { color: [0.5, 0.55, 0.75], burst: 'none', aura: 'none', rate: 0 },
+  },
   covered: {
     name: 'In Cover', icon: '🧎', harmful: false, clock: 'turn',
     duration: 4, resistable: false,
