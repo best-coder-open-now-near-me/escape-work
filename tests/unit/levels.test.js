@@ -288,6 +288,15 @@ test('every registry cross-reference resolves', () => {
         `runtimeOnly tile "${id}" must not claim a character - that is the point of the flag`);
       continue;
     }
+    // `char` is a PREFERRED character now, not a claim on a global budget:
+    // the editor allocates per level, to the types a level actually uses, and
+    // falls back to a free pool character when a preference is taken or
+    // absent. So a type may legitimately declare none. What is still worth
+    // asserting is that a DECLARED one is single-character and unique - not
+    // for correctness (a collision just sends the loser to the pool) but for
+    // diff stability: two types wanting one character means whichever loses
+    // gets a pool character, and which one loses is registry order.
+    if (def.char === undefined) continue;
     assert.ok(typeof def.char === 'string' && def.char.length === 1, `tile "${id}" has a single-char code`);
     assert.ok(!byChar.has(def.char),
       `tile char "${def.char}" is unique (${id} collides with ${byChar.get(def.char)})`);
@@ -344,7 +353,7 @@ test('every registry cross-reference resolves', () => {
   // actors win the lookup (grid.js), so a shared char makes a tile unpaintable
   // wherever that actor is legal. Keep the actor namespace clean of both.
   const actorChars = new Map();
-  const tileChars = new Set(Object.values(TILE_TYPES).map((d) => d.char));
+  const tileChars = new Set(Object.values(TILE_TYPES).map((d) => d.char).filter(Boolean));
   for (const [regName, reg] of [['ENEMY_TYPES', ENEMY_TYPES], ['NPCS', NPCS], ['COMPANIONS', COMPANIONS]]) {
     for (const [id, def] of Object.entries(reg)) {
       assert.ok(typeof def.char === 'string' && def.char.length === 1, `${regName}.${id} has a single-char code`);

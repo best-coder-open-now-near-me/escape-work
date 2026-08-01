@@ -57,27 +57,34 @@
 //              shipped level is a lint failure, not a tile with no character.
 //   tiltX/tiltZ - degrees of lean for the model (a fallen prop lies over).
 //
-// NOTE ON `char`: a level's map is one CHARACTER per cell, and the editor
-// exports canonical registry chars, so every entry needs a globally unique
-// one. That is the real ceiling on how many props can exist - roughly the
-// printable ASCII set minus the actor/enemy chars. Adding a kit model that
-// isn't registered below is a one-entry job; finding it a free char is the
-// only constraint.
+// NOTE ON `char`: a level's map is one CHARACTER per cell, and the level's own
+// `tiles` legend says what each character means THERE. The field below is the
+// PREFERRED character - the one the editor hands a type when it happens to be
+// free in the level being written - and nothing more. It need not be unique,
+// and a type may omit it entirely; the editor allocates from a free pool.
+// Adding a kit model is a one-entry job, full stop.
 //
-// AND THAT CEILING IS NOW REACHED. As of the snack machine, 92 of the 94
-// printable non-space characters are spoken for. What is left is the player's
-// own '@' and a single backslash - which has to be escaped inside a level's
-// JSON map rows, so it is the least usable character in the set. THERE IS NO
-// NEXT ONE. A content pass that wants a new prop has to either retire a tile
-// type or decouple the map from single characters first (multi-char cells, or
-// an object layer beside the ASCII grid). Treat a free char as a spent
-// resource, not a formality.
+// THERE IS NO LONGER A CEILING ON TILE TYPES. There used to be, and this note
+// used to say it had been reached: 92 of 94 printable characters spoken for,
+// the next prop impossible without retiring one. That was never a property of
+// the FORMAT - `grid.parseLevel` has always resolved cells through the level's
+// own legend and has never once read the field below. It was the EDITOR, which
+// exported the whole registry as every level's legend, so every type needed a
+// globally unique character whether any level used it or not.
 //
-// A corollary, for whoever allocates the next one: give the JSON-awkward
-// characters to props nothing paints. The snack machine took '$' from
-// 'rug-round' for exactly this reason - the machine is painted on two floors
-// and needs a clean character, the round rug is painted nowhere and can live
-// with the escaped one.
+// The editor now allocates characters per level, to the types that level
+// actually paints, and exports a legend of only those (see the allocator at
+// the top of editor.js). So register as many types as the kits provide. The
+// remaining limit is how many DISTINCT types a SINGLE level uses - the pool is
+// the printable set minus the actor characters and the backslash, so roughly
+// ninety - and passing THAT would need a format change (multi-character cells,
+// or an object layer beside the ASCII grid). That is a long way off, and the
+// ASCII map is worth keeping legible until it arrives.
+//
+// One thing the old hand-count got wrong and the lint gets right: a tile
+// character must also not collide with an ACTOR character, since both legends
+// key the same map and parseLevel checks actors first. The editor's pool
+// reserves them. Trust tests/unit/levels.test.js over any count written here.
 // --- sight (TACTICS_PLAN M6a) ------------------------------------------------
 // A solid cell used to block line of sight at ANY height - a 0.18 microwave
 // stopped a throw as absolutely as a wall, while chest-high edge partitions
@@ -499,6 +506,45 @@ export const TILE_TYPES = {
     char: '7', category: 'decor', solid: true,
     height: 0.54, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/pottedPlant', label: 'Potted Plant',
+    examine: 'Somebody waters this. Nobody admits to it.',
+  },
+  // --- the plants you can hide behind (SNEAK_PLAN) ---------------------------
+  // Concealment is not a new field: a SOLID prop below SIGHT_BLOCK_HEIGHT is
+  // shot over by a standing shot and blocks a CROUCH-height line, which is
+  // exactly what a sneaking body is (grid.sightOpenCellLow). The desk rule,
+  // wearing leaves. So the design question here is only ever "is this plant
+  // big enough that ducking behind it should work?" - and the honest answer
+  // is a matter of the model's own size, which is why the knee-high
+  // `plant-small`/`plant-tiny` stay non-solid and hide nobody.
+  //
+  // 0.62 is deliberately just under the 0.75 threshold: tall enough to read
+  // as cover, short enough that a thrown stapler still sails over it. A plant
+  // that blocked shots outright would be a wall with leaves on, and the
+  // office already has walls.
+  ficus: {
+    char: 'G', category: 'decor', solid: true,
+    height: 0.62, scale: 1.0, color: [0.34, 0.6, 0.32],
+    model: 'furniture/kit/pottedPlant', label: 'Office Ficus',
+    examine: 'Big enough to hide behind, if you are the kind of person who would.',
+    // Sprite cards standing in the pot (tile-renderer addFoliage).
+    foliage: {
+      sprites: ['bush', 'bush2', 'rosette'],
+      cards: 4, size: 0.8, lift: 0.44, spread: 0.12, splay: 32,
+      tint: [0.42, 0.74, 0.36],
+    },
+  },
+  // The same trick with a spikier silhouette, so a row of plants is not a row
+  // of one plant. Same rule, same height band.
+  palm: {
+    char: 'X', category: 'decor', solid: true,
+    height: 0.62, scale: 1.0, color: [0.3, 0.55, 0.34],
+    model: 'furniture/kit/pottedPlant', label: 'Lobby Palm',
+    examine: 'Plastic, probably. It has not changed since the merger.',
+    foliage: {
+      sprites: ['tuft', 'leaf', 'tuft'],
+      cards: 4, size: 0.88, lift: 0.48, spread: 0.09, splay: 24,
+      tint: [0.36, 0.68, 0.42],
+    },
   },
   'plant-small': {
     char: '8', category: 'decor',

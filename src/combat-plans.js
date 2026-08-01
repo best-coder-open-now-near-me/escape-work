@@ -20,7 +20,7 @@
 
 import { ACTIONS } from './data/actions.js';
 import { rangeOf, REACH } from './stats.js';
-import { inReach, dist, crouchShields, hasCover } from './tactics.js';
+import { inReach, dist, dirOctant } from './tactics.js';
 import { isToppleable, toppleLanding, isBreakable, aimsAtProps, pullLanding } from './powers.js';
 import { cheb, posOf, reachOfUnit, ORTHO, AROUND } from './combat-geometry.js';
 
@@ -94,9 +94,10 @@ export function breakPlan(id, attacker, tx, tz, { tileDefAt, edgeHpBetween, hasL
   }
   // A shot takes the panel on the clicked tile's near face - the edge a
   // sightline from here would cross first. Partitions never block sight (M6a),
-  // so the line test is about smoke and doors, not the target.
-  const sx = Math.sign(ax - tx);
-  const sz = Math.sign(az - tz);
+  // so the line test is about smoke and doors, not the target. The near face
+  // is picked from the shooter's BODY (dirOctant), so a shooter who drifted
+  // half a tile does not shoot at the panel their rounded tile faces.
+  const { x: sx, z: sz } = dirOctant(me.x, me.z, tx, tz);
   for (const [nx, nz] of [[tx + sx, tz], [tx, tz + sz]]) {
     if (nx === tx && nz === tz) continue;
     if (edgeHpBetween(tx, tz, nx, nz) === null) continue;
@@ -127,12 +128,14 @@ export function pullPlan(puller, target, crouch, { stepOpen, open, name = 'They'
   // Their shield must stand BETWEEN you: the verb is a reach OVER cover, which
   // is also what keeps it from being a generic drag - from their open side you
   // have swings and shoves already. One test now that the crouch is a
-  // position: is a shielded face pointing your way?
-  const face = (crouch.faces || []).find(([ox, oz]) => {
-    const sx = Math.sign(A.x - D.x);
-    const sz = Math.sign(A.z - D.z);
-    return (sx !== 0 && ox === sx && oz === 0) || (sz !== 0 && oz === sz && ox === 0);
-  });
+  // position: is a shielded face pointing your way? Direction between the
+  // BODIES (dirOctant), like every other octant since DEGRID M4 - the puller
+  // just walked up to a free point, not to their tile centre.
+  const ab = posOf(puller);
+  const db = posOf(target);
+  const { x: sx, z: sz } = dirOctant(ab.x, ab.z, db.x, db.z);
+  const face = (crouch.faces || []).find(([ox, oz]) =>
+    (sx !== 0 && ox === sx && oz === 0) || (sz !== 0 && oz === sz && ox === 0));
   if (!face) return { refusal: 'Their cover is not between you - get to its far side first.' };
   // A HUMAN shield is not a barrier: you do not haul somebody over a colleague,
   // you deal with the colleague. Asked of the face that is actually in the

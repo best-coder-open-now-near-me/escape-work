@@ -16,7 +16,7 @@
 
 import { ACTIONS } from './data/actions.js';
 import { reachOf, rangeOf, REACH } from './stats.js';
-import { inReach } from './tactics.js';
+import { inReach, dist } from './tactics.js';
 import { aimRangeOf, isControl, controlIsRanged, zoneTiles, zoneRadiusOf } from './powers.js';
 
 // Chebyshev tile distance - THE metric this game measures range in (a diagonal
@@ -115,11 +115,12 @@ export function verbReaches(id, attacker, en, px, pz, { hasLos, stepOpen }) {
   const r = actRangeOf(id);
   const ep = posOf(en);
   if (r) {
-    // A declared range is a Chebyshev TILE range, and it always needs a line -
-    // the same pair every ranged gate in this module tests.
-    const tx = Math.round(px);
-    const tz = Math.round(pz);
-    return cheb(tx, tz, en.x, en.z) <= r && hasLos(tx, tz, en.x, en.z);
+    // A declared range is a true-distance CIRCLE measured body to body, and
+    // it always needs a line - from the stand point itself, not its rounded
+    // tile (DEGRID D4/D6: 'circles for targeted', designer 2026-07-31). The
+    // old cheb-square-from-the-rounded-tile pair flipped legality at tile
+    // boundaries and judged the shot from a centre the walker never reached.
+    return dist(px, pz, ep.x, ep.z) <= r && hasLos(px, pz, ep.x, ep.z);
   }
   return inReach(px, pz, ep.x, ep.z, reachOfUnit(attacker), stepOpen);
 }

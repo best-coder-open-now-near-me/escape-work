@@ -114,6 +114,27 @@ export const TALENTS = {
     // AP that ONLY movement may spend, drawn before real AP.
     effects: { freeMoveAp: 1 },
   },
+  // --- sneaking (SNEAK_PLAN M6) ---------------------------------------------
+  'quiet-shoes': {
+    name: 'Quiet Shoes',
+    blurb: 'Soft soles for hard floors. Nobody hears you coming, and you keep pace.',
+    // No movement penalty while sneaking (main.js memberSpeed).
+    effects: { sneakSpeed: true },
+  },
+  disgruntled: {
+    name: 'Disgruntled',
+    blurb: 'Years of performance reviews, repaid with interest, once.',
+    // +40% on the opening strike of a fight you start from sneak - DOS2's
+    // Guerrilla number (confirmed, SNEAK_PLAN inspirations).
+    effects: { ambushDamage: 0.4 },
+  },
+  'forgettable-face': {
+    name: 'Forgettable Face',
+    blurb: 'Security has looked straight at you for years. It never sticks.',
+    // Every coworker's watch cone narrows against your party (degrees off
+    // the half-angle - main.js sneakSightOpts).
+    effects: { coneShrink: 15 },
+  },
   'corner-office-traction': {
     name: 'Corner-Office Traction',
     blurb: 'Better shoes than the job requires.',
@@ -146,6 +167,9 @@ export const TALENT_EFFECT_KEYS = [
   'surfaceDamageResist',// main.js: flat reduction on surface damage per step
   'moveCost',           // stats.js: multiplies the AP a tile costs
   'grantsAction',       // stats.applyEffect: pushed onto sheet.actions
+  'sneakSpeed',         // main.js memberSpeed: no sneak movement penalty
+  'ambushDamage',       // combat.js ambushDmg: the sneak-opened first strike
+  'coneShrink',         // main.js sneakSightOpts: narrower watch cones
 ];
 
 // TEMPORARY (TALENT_PLAN M1 -> deleted by M2).

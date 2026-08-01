@@ -94,9 +94,12 @@ export const ACTIONS = {
   'paper-storm': {
     type: 'zone',
     ap: 2,
-    label: 'Paper Storm',
+    // The id stays `paper-storm`: it is a slug, and `sheet.actions` persists
+    // ids into saves (party.SAVE_VERSION), so renaming it would orphan the
+    // power on every character who already knows it.
+    label: 'TPS Form Storm',
     icon: '🗞️',
-    desc: 'Empty the recycling over an area. Fuel, caltrops, and a fire waiting to happen.',
+    desc: 'Empty a cabinet of TPS reports over an area. Fuel, caltrops, and a fire waiting to happen.',
     leaves: 'paper',
     // Litter, not terrain - the same rule Bulk Mail follows. Without this the
     // drifts were never handed to the ager at all (leaveSurface only registers

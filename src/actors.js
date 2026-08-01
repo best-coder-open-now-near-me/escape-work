@@ -257,7 +257,19 @@ export class GridActor {
     this.visual.setLocalScale(sx, sy, sx);
   }
 
+  // PRECONDITION: path[0] is this body's TRUE continuous position - every
+  // feeder splices it in before smoothing (smoothFromBody and its kin). It is
+  // skipped, so a stale tile-centre there is harmless, but path[1] is walked
+  // verbatim: a feeder that smooths from anywhere but the body sends the body
+  // darting to a vertex planned from its rounded tile. Fix the feeder, not
+  // this.
   setPath(path) {
+    if (!path || path.length < 2) {
+      // A degenerate "path" has nowhere to walk to; index 1 would read
+      // undefined and crash the update loop mid-frame.
+      this.path = null;
+      return;
+    }
     this.path = path;
     this.pathIndex = 1; // index 0 is where we already stand
     this.slideTo = null;
@@ -272,11 +284,15 @@ export class GridActor {
   }
 
   // Teleport the logical tile and glide the body there in a straight line
-  // (shoves). Free-form travel goes through setPath instead.
-  pushTo(x, z) {
+  // (shoves). Free-form travel goes through setPath instead. The optional
+  // rest point (px, pz) is where the body actually comes to rest - it must
+  // round back to (x, z), and it is what keeps a forced move from re-centring
+  // a body onto the grid mid-fight. Defaults to the tile centre for callers
+  // that genuinely mean it (the test hook).
+  pushTo(x, z, px = x, pz = z) {
     this.x = x;
     this.z = z;
-    this.slideTo = { x, z };
+    this.slideTo = { x: px, z: pz };
     this.path = null;
   }
 

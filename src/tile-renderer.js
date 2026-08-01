@@ -5,7 +5,7 @@
 // pulsing materials (electrified water, fire).
 import { TILE_TYPES } from './data/tiles.js';
 import { SURFACES, ELECTRIFIED, FIRE } from './data/surfaces.js';
-import { makeMaterial } from './shading.js';
+import { makeMaterial, makeSpriteMaterial } from './shading.js';
 import { placeModel } from './models.js';
 import { burst } from './fx.js';
 
@@ -305,6 +305,66 @@ export function createTileRenderer(app) {
     return holder;
   }
 
+  // --- foliage cards -----------------------------------------------------------
+  // Crossed sprite quads standing in a pot: the cheapest honest way to give a
+  // plant volume, and the one the flat look can absorb (shading.makeSpriteMaterial
+  // takes shape from the alpha and colour from the palette).
+  //
+  // Deliberately NOT run through placeModel's outline pass: the ink is an
+  // inverted hull, and a hull around a rectangular card is a black rectangle
+  // around the leaves rather than a line around the silhouette. Tiles and
+  // props already skip the ink for their own reasons - this one has a sharper
+  // one.
+  //
+  // `spec` is the tile def's `foliage` block:
+  //   sprites  - one or more PNG names under assets/foliage/
+  //   cards    - how many crossed quads (3 reads as a bush from any angle)
+  //   size     - card width in tiles
+  //   lift     - height of the card's CENTRE above the floor top
+  //   tint     - flat colour the alpha is filled with
+  //   spread   - how far off the tile centre the cards lean
+  //   splay    - degrees each card leans out from vertical (see below)
+  function addFoliage(x, z, spec) {
+    const {
+      sprites = ['bush'], cards = 3, size = 0.7, lift = 0.42,
+      tint = [0.34, 0.6, 0.32], spread = 0.1, splay = 30,
+    } = spec;
+    const holder = new pc.Entity('foliage');
+    for (let i = 0; i < cards; i++) {
+      const name = sprites[i % sprites.length];
+      const mat = makeSpriteMaterial(app, `assets/foliage/${name}.png`, tint);
+      const e = new pc.Entity();
+      e.addComponent('render', { type: 'plane', material: mat });
+      e.render.castShadows = false;
+      // A plane lies flat by default: stand it up, then fan the cards around
+      // the stem. Per-cell hash keeps a row of shrubs from looking stamped
+      // while staying identical between two renders of the same tile.
+      //
+      // SPLAYED, not upright: the camera looks down at 55 degrees (controls.js
+      // CAM.pitch), so a dead-vertical card shows barely half its face and a
+      // bush of them reads as flat sheets standing in a pot. Leaning each card
+      // outward from the stem - the way leaves actually sit - turns the fan
+      // into a cone that presents a face to a high camera from any yaw, and
+      // costs nothing but this angle. The lean follows each card's own spin,
+      // so the cone is even rather than one-sided.
+      const spin = (i * 180) / cards + hash01(x, z, 30 + i) * 24;
+      const lean = splay * (0.75 + hash01(x, z, 80 + i) * 0.5);
+      e.setLocalEulerAngles(90 - lean, spin, 0);
+      const a = (spin * Math.PI) / 180;
+      e.setLocalPosition(
+        Math.cos(a) * spread * (hash01(x, z, 40 + i) - 0.5) * 2,
+        lift + (hash01(x, z, 50 + i) - 0.5) * 0.06,
+        Math.sin(a) * spread * (hash01(x, z, 60 + i) - 0.5) * 2,
+      );
+      const s = size * (0.88 + hash01(x, z, 70 + i) * 0.24);
+      e.setLocalScale(s, 1, s);
+      holder.addChild(e);
+    }
+    holder.setPosition(x, floorDef.height / 2, z);
+    app.root.addChild(holder);
+    return holder;
+  }
+
   function renderFloor(x, z, type = 'floor') {
     return addBox(floorMatsFor(type)[(x * 31 + z * 17) % 3], x, 0, z, 1, floorDef.height, 1);
   }
@@ -376,7 +436,12 @@ export function createTileRenderer(app) {
         tiltX: def.tiltX || 0, tiltZ: def.tiltZ || 0,
         onReady: (holder) => onAsync && onAsync(holder),
       });
-      return { kind: 'model', entities: [] };
+      // A prop can wear FOLIAGE on top of its model (`def.foliage`) - sprite
+      // cards that bulk a small pot into something a person can duck behind.
+      // Registry data, so a new shrub is an entry rather than a renderer
+      // change, and it composes with any model.
+      const leaves = def.foliage ? addFoliage(x, z, def.foliage) : null;
+      return { kind: 'model', entities: leaves ? [leaves] : [] };
     }
     if (def.primitive) {
       const builder = { trash: addTrash, printer: addPrinter }[def.primitive];
