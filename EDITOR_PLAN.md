@@ -11,50 +11,52 @@ anything like that" `[stated]` (2026-08-01). No code yet — this is the plan.
 
 ## Questions for the designer
 
-Asked in-session on 2026-08-01; unanswered, so the plan proceeds on the
-recommended defaults below, tagged `[proposed]`. These three set the plan's
-shape — answers may resize milestones M1–M5.
+Asked in-session on 2026-08-01. **Q1 is answered in direction**: the designer
+proposed the layer-stack model this plan is now built around (see Q1's entry —
+one explicit go still flips it to ratified). Q2 and Q3 remain open and the
+plan proceeds on the recommended defaults, tagged `[proposed]`.
 
 **Q1 — What does "multifloor in a single level" mean mechanically?** The
 stated scene is "a lobby with a lot of height, multifloor in what is really a
 single 'floor' level."
 
-- **A. Elevation terrain (recommended).** Every tile gets an elevation step;
-  stairs connect heights; a mezzanine can ring a tall open lobby and overlook
-  it. One hard constraint: *no walking under a walkable tile* — the space
-  beneath the mezzanine is solid (offices you can't enter, reception backdrop,
-  void). Medium cost: format, movement rules, renderer, picking, editor brush.
-- **B. True stacked layers.** Full overlap — walk beneath the balcony. Delivers
-  everything but touches every spatial system (grid keys, pathfinding nodes,
-  LOS, camera, occlusion, editor layer UI); roughly 3–4× option A, the largest
-  single feature this project would have taken on.
-- **C. Cosmetic height only.** Tall ceilings and balcony scenery you can't
-  reach. Cheap, but the lobby *plays* flat — no multifloor gameplay.
-
-I'd pick A: it delivers the overlook, the sniper balcony, and the grand-lobby
-feel at a cost the codebase can absorb, and the format below is designed so a
-later catwalk/overlap extension (M5) adds walk-under without a rewrite. If the
-answer is "I need to walk under the balcony on day one," M5 moves before M2
-and the estimates grow.
+*Answered in direction by the designer (2026-08-01):* "construct them as full
+floors with one layer/height setting and a procedurally generated staircase
+tile/space on each layer? most of the editor difficulties would be resolved
+at least, but i know combat/los especially would still have its issues to
+deal with." The plan adopts this — see "The layer model" below — and the
+designer's cost instinct held up under scrutiny: each layer is authored and
+parsed as an ordinary flat map, so the editor grows a layer switcher rather
+than an elevation UI, and the existing per-map rules (walls, doors,
+conduction, within-floor movement) run per layer unchanged. Walk-under —
+standing beneath the mezzanine — comes free, which the original per-tile
+elevation recommendation structurally could not do. The honest remaining
+cost is exactly where the designer pointed: cross-layer LOS and the camera
+(M2/M3). One trade to confirm with the go: layers are **full storeys** — no
+half-height daises, loading-dock steps, or ramps; if a sub-storey space ever
+matters, that is a new question, not a silent extension. Status: model
+`[proposed]` awaiting the explicit go; the quote above is the source it
+ratifies against.
 
 **Q2 — Do different heights change combat math, or only geometry?**
 
 - **A. LOS + reach only (recommended).** Height decides what you can see and
-  shoot (no firing through the mezzanine slab; melee can't swing across a
-  ledge) but grants no stat bonus. Consistent with the settled "tactics stay
-  as shipped" record (TODO.md); bonuses can layer on later without rework.
+  shoot (no firing through the mezzanine slab; melee never crosses layers)
+  but grants no stat bonus. Consistent with the settled "tactics stay as
+  shipped" record (TODO.md); bonuses can layer on later without rework.
 - **B. DOS2-style damage bonus.** High ground boosts damage, low ground
   penalizes. Verified: DOS2's Huntsman ability adds +5% high-ground damage per
-  point ([Fextralife wiki](https://divinityoriginsin2.wiki.fextralife.com/Huntsman));
+  point ([Fextralife wiki](https://divinityoriginalsin2.wiki.fextralife.com/Huntsman));
   the *base* high/low-ground percentage is commonly reported around ±20% but I
   could not verify it in this session — treat that number as reported, not
   fact.
 - **C. BG3-style to-hit nudge.** Release-version BG3 grants +2 to attack rolls
   from ≥2.5m above the target and −2 from below ([Game8](https://game8.co/games/Baldurs-Gate-III/archives/419653),
   [Escapist](https://www.escapistmagazine.com/how-high-ground-vs-low-ground-positioning-works-in-baldurs-gate-3/)) —
-  this would slot into the existing to-hit `mods` stack beside facing, flank
-  and cover, so the UI story already exists.
-- **D. No cross-height combat.** Separate arenas per height. Cheapest, and
+  with full-storey layers, "any layer above" clears that bar, so the rule
+  degenerates to a clean "+2 from the floor above / −2 from below" that slots
+  into the existing to-hit `mods` stack beside facing, flank and cover.
+- **D. No cross-layer combat.** Separate arenas per floor. Cheapest, and
   almost certainly wrong for exactly the balcony scene this exists for.
 
 I'd pick A for v1 and leave C as the obvious later layer if play wants a
@@ -65,7 +67,7 @@ already itemizes modifiers.
 is confirmed — "yes youre seeing the gaps i do" `[stated]` (2026-08-01) — but
 not which gaps are v1. Candidates: undo/redo, region copy/paste stamps,
 NPC/companion/tiered-enemy brushes, save-directly-to-`levels/`. Recommended:
-all four (they're each small-to-medium and M0 is independent of the height
+all four (they're each small-to-medium and M0 is independent of the layer
 work), cutting stamps first if the round needs to shrink.
 
 ## Decisions
@@ -75,114 +77,117 @@ work), cutting stamps first if the round needs to shrink.
 | 1 | The in-repo editor is the authoring tool; no external editor or importer | `[stated]` | designer, 2026-08-01: "i dont mind using ours if its easiest" after the PlayCanvas/Tiled comparison |
 | 2 | Levels stay grid + legend + ASCII + edge runs; no freeform geometry | `[stated]` | designer, 2026-08-01: "we dont need full flexibility… no organic curves" |
 | 3 | Verticality is required: tall single-level spaces with multifloor play | `[stated]` | designer, 2026-08-01: "a lobby with a lot of height, multifloor in what is really a single 'floor' level" |
-| 4 | Verticality model: elevation terrain (per-tile height steps, no walk-under) | `[proposed]` | Q1; stands in for "how much of a real second storey do you need?" — if walk-under is required, M5 is promoted |
-| 5 | Format: optional `"elev"` digit grid parallel to `"map"`; omitted ⇒ flat | `[proposed]` | every shipped level stays valid unchanged; see format section |
-| 6 | Stairs are a tile type in `data/tiles.js`, not a new mechanism | `[proposed]` | content is data (ARCHITECTURE.md); the editor gets them as a brush for free |
-| 7 | Movement: free step at Δelev 0; stairs bridge ±1; no hop/fall/jump in v1 | `[proposed]` | cheap reversible default; DOS2-style jumps are a later verb |
-| 8 | Cross-height combat is LOS + reach only; no high/low-ground stat modifier | `[proposed]` | Q2; keeps the `[stated]` "tactics stay as shipped" record intact (TODO.md) |
+| 4 | Verticality model: stacked full-storey layers, each authored as an ordinary flat map, with one height setting per layer | `[proposed]` | designer-proposed, 2026-08-01: "full floors with one layer/height setting"; flips to ratified on the explicit go (Q1) |
+| 5 | Format: optional `"layers"` array, one entry per floor, bottom-up; a level without it is a single ground layer | `[proposed]` | every shipped level stays valid unchanged; see format section |
+| 6 | Stairs: one marker tile on the lower layer; the staircase — ramp geometry, the carved opening above, the connection — is generated | `[proposed]` | designer-proposed, 2026-08-01: "a procedurally generated staircase tile/space on each layer" |
+| 7 | Movement: within a layer as today; between layers only via stair portals; no hop/fall/jump in v1 | `[proposed]` | cheap reversible default; shoving someone off the balcony is a tempting later verb, not v1 |
+| 8 | Cross-layer combat is LOS + reach only; no high/low-ground stat modifier | `[proposed]` | Q2; keeps the `[stated]` "tactics stay as shipped" record intact (TODO.md) |
 | 9 | Editor QoL for v1: undo/redo, region stamps, actor brushes, save-to-disk | `[proposed]` | Q3; gap list itself confirmed by designer 2026-08-01 |
 | 10 | Save-to-disk = dev-server endpoint writing `levels/<id>.json` + regenerated registry | `[proposed]` | dev-mode only; see M0. Cheap default, easily swapped for export-and-paste |
+| 11 | Camera: cutaway — layers above the active character's floor are hidden, with markers for off-layer combatants | `[proposed]` | the genre-standard answer (X-COM, BG3); the readability risk lives here, see Risks |
 
-## The elevation model (decision 4, in detail)
+## The layer model (decisions 4–7, in detail)
 
-**Format.** A level may carry an `"elev"` block: an array of strings, one row
-per map row, one digit `0`–`9` per cell. Short rows and a missing block read
-as `0`. Example fragment — a mezzanine (elev 2) ringing a ground-floor lobby,
-joined by stairs (`/`):
+**Format.** A level may carry `"layers"`: an ordered array, ground floor
+first. Each layer is authored exactly like a level is today — its own ASCII
+`map`, its own `walls` and `doors` runs — plus an optional `height` in world
+units ("one layer/height setting", per the designer) defaulting to a
+`STOREY_H` constant. The tall lobby is the ground layer given extra height.
+Legends (`tiles`, `actors`) are shared level-wide. A level with no `"layers"`
+block is a single ground layer, so both shipped floors and every editor
+export stay valid unchanged.
 
-```json
-"map":  [ "..........",
-          ".DDDD..../",
-          ".........." ],
-"elev": [ "2222222220",
-          "2000000000",
-          "2222222220" ]
-```
+**Void is airspace.** The format already has a hole character: space. In an
+upper layer, void cells are open air over whatever is below — the "lot of
+height" lobby is authored by leaving layer 1 empty above it, with the
+mezzanine ring drawn as ordinary floor around the void. Sight and shots pass
+through void; floor slabs block. The airspace the designer described is
+expressible with zero new syntax.
 
-One elevation step is `ELEV_UNIT` world units (tunable constant, first guess
-0.75 — the existing `SIGHT_BLOCK_HEIGHT`, so one step already means "you can't
-shoot over it from below"). A "lot of height" lobby is two or three steps, not
-nine; digits 0–9 are headroom, not a target.
+**Parsing.** `parseLevel` runs once per layer, unchanged in its internals —
+walls, doors, conduction pools, prop damage, and within-floor movement are
+all per-layer concerns and keep their current code and tests. The game
+currently builds exactly one grid (`main.js:119`) and threads it through
+combat/tactics/scene; that becomes one grid per layer behind a thin router:
+actors carry a `layer` index, within-layer queries go to that layer's grid,
+and only the genuinely cross-layer questions (sight, targeting, stair
+traversal) know more than one floor exists.
 
-**Grid queries (`grid.js`).** `parseLevel` gains `elevAt(x, z)` (void and
-out-of-bounds report 0). The existing rules compose with it rather than fork:
+**Stairs.** The designer authors a single stair marker tile on the *lower*
+layer. Generation does the rest: carve the stairwell opening in the layer
+above (a load-time validation error if that space is occupied — never a
+silent head-bonk), orient the run from the open neighbours on both floors,
+emit the ramp geometry and the portal edge that pathfinding uses. Default
+footprint: two tiles of run per storey `[proposed]` — a single-tile storey
+climb reads as a ladder. Dijkstra needs no new theory: per-layer graphs
+joined by portal edges, and AI routes through stairs for free.
 
-- `stepOpen` additionally requires the elevation rule of decision 7; diagonal
-  steps require Δelev 0 on all four cells around the corner (same shape as the
-  existing partition-corner rule).
-- Sight: a blocker's effective top becomes `elev·ELEV_UNIT + def.height`, and
-  a sightline's own height rides its endpoints' elevations. The M6a rule
-  ("a desk is shot over, a snack machine is not") keeps working per-storey,
-  and a mezzanine lip blocks sight from below exactly like a wall of its
-  height would.
-- Conduction: pools never join across Δelev ≠ 0 (spills don't flow uphill, and
-  modelling downhill flow is out of scope — spills are static, as today).
-- Edge walls/doors on an edge between different elevations sit on the higher
-  cell's floor (a balcony railing is a partition on the mezzanine's edge).
+**Combat and LOS.** Within a layer, every shipped rule applies verbatim.
+Across layers, one new primitive carries the load: a 3D sightline sampled
+against upper-layer floor slabs (block), void (open), and each layer's
+blockers under the existing chest-high rule ("a desk is shot over, a snack
+machine is not"). Aim-paint, the AI's firing-position search, and throw
+targeting all consume that primitive, so game and editor cannot drift. Melee
+never crosses layers. High/low-ground modifiers only if Q2 ratifies them.
 
-**Pathfinding, actors, combat.** Dijkstra inherits legality from `stepOpen`,
-so it needs no new theory — stairs are just the only edges where Δelev ≠ 0 is
-passable, and AI naturally routes through them. Actors' world `y` becomes
-`elevAt·ELEV_UNIT`, interpolated along stair traversal; `fx.js`'s `project3`
-already projects arbitrary heights, so popups/overlays follow. Melee reach
-adds a vertical term (no punching across a ledge); `aim-paint` and the AI's
-firing-position search inherit correctness from the shared LOS/step queries —
-that shared-primitives shape is the same one `tactics.js` uses so game and
-editor cannot drift.
-
-**Camera, occlusion, picking — the risky third.** `controls.js` currently
-intersects clicks with the y=0 ground plane, and `occlusion.js` fades walls
-between camera and character. Both need elevation awareness: click resolution
-must pick the *highest* walkable surface under the cursor (front-most to the
-camera), and mezzanine slabs + riser faces join the occluder set so the
-character never vanishes behind their own balcony. This is the least
-mechanical part of the work and gets its own milestone (M2) rather than
-riding along.
+**Camera, picking, rendering.** Each layer renders as today, offset to its
+base height, plus underside slabs so the mezzanine reads as a ceiling from
+below. With true overlap, fading individual occluders can't save you —
+standing under the balcony puts a whole floor between camera and character —
+so the camera cuts away: layers above the active character's floor hide
+(decision 11), off-layer combatants get edge markers, and clicks resolve
+against the active layer with an explicit flip when selecting a unit on
+another floor.
 
 ## Milestones
 
 Each lands green (unit + e2e) before the next starts. M0 is independent of
-everything and can ship while Q1/Q2 are still open; M1 is safe under any Q1
-answer (the format is shared); M2+ assume decision 4's model.
+everything and can ship while the Q1 go and Q2/Q3 are pending.
 
-- **M0 — Editor quality of life** (`src/editor.js`, `serve.mjs`, `build.mjs`,
-  `src/data/actor-registries.js`). Undo/redo (snapshot history of rows + edge
-  sets; trivial at ≤40×40). Region select / copy / stamp for the
-  repeated-cubicle workflow. Brushes for NPCs, companions and tiered enemies
-  (closing the round-trip gap the load path already preserves). A metadata
-  strip (name, `depth`, `next`). Save-to-disk: a dev-only `POST /api/level`
-  in `serve.mjs` writing `levels/<id>.json`, with the registry regenerated
-  from the directory so `src/data/levels.js` can't drift `[proposed]` —
-  export-and-paste stays as the fallback path.
-- **M1 — Elevation as data** (`levels/*.json` schema, `grid.js`,
-  `pathfinding.js`, unit tests). Parse `elev`, expose `elevAt`, extend
-  `stepOpen`/sight/conduction per the model above. Flat levels bit-identical
-  in behavior; the level lint learns the new block.
-- **M2 — Elevation rendered** (`tile-renderer.js`, `scene.js`, `occlusion.js`,
-  `controls.js`, `picking.js`, `hover.js`, `actors.js`). Floor slabs at
-  height, riser faces, stair ramps, elevated edge walls; occlusion and
-  elevation-aware picking; actors walk stairs with `y` interpolation.
-- **M3 — Combat across height** (`combat.js`, `tactics.js`, `aim-paint.js`).
-  LOS with effective heights, vertical melee-reach gate, aim wash and AI
-  firing positions correct on mezzanines. High/low-ground modifiers only if
-  Q2 ratifies them — the hook (`hitChance` mods) already exists.
-- **M4 — Editor authors elevation** (`src/editor.js`). Raise/lower brush,
-  stairs brush, riser preview, digit overlay toggle, full load→edit→export
-  round-trip and playtest at height.
-- **M5 — Walk-under (gated on Q1).** Catwalk tiles carrying two walkable
-  surfaces — a bounded second layer for balconies that overhang, without
-  full stacked-layer generality. Not scheduled unless the designer wants it.
+- **M0 — Editor quality of life** (`src/editor.js`, `serve.mjs`, `build.mjs`).
+  Undo/redo (snapshot history of rows + edge sets; trivial at ≤40×40). Region
+  select / copy / stamp for the repeated-cubicle workflow. Brushes for NPCs,
+  companions and tiered enemies (closing the round-trip gap the load path
+  already preserves). A metadata strip (name, `depth`, `next`). Save-to-disk:
+  a dev-only `POST /api/level` in `serve.mjs` writing `levels/<id>.json`,
+  with the registry regenerated from the directory so `src/data/levels.js`
+  can't drift `[proposed]` — export-and-paste stays as the fallback path.
+- **M1 — Layers as data** (`levels/*.json` schema, `grid.js`,
+  `pathfinding.js`, unit tests). The `layers` block, per-layer parse, the
+  grid router, stair generation + validation, portal-edge pathfinding.
+  Single-layer levels bit-identical in behavior; the level lint learns the
+  new block.
+- **M2 — Layers rendered** (`tile-renderer.js`, `scene.js`, `occlusion.js`,
+  `controls.js`, `picking.js`, `actors.js`). Stacked rendering with underside
+  slabs, generated stair geometry, the cutaway camera, layer-aware picking,
+  actors traversing stairs with height interpolation. Prototype the cutaway
+  *first* — it is the plan's biggest unknown.
+- **M3 — Combat across layers** (`combat.js`, `tactics.js`, `aim-paint.js`).
+  The cross-layer sightline primitive and everything that consumes it: aim
+  wash on two floors, AI routing to stairs and picking targets it can
+  actually see. High/low-ground modifiers only if Q2 ratifies them — the
+  hook (`hitChance` mods) already exists.
+- **M4 — Editor authors layers** (`src/editor.js`). Layer switcher tabs,
+  add/remove layer, per-layer height field, stair marker brush with live
+  validation, and an onion-skin ghost of the layer below while painting an
+  upper floor. Deliberately small — the point of the layer model is that
+  painting a floor IS the editor's existing job.
 
 ## Risks and open questions (engineering)
 
 - `combat.js` is ~4.6k lines and geometry assumptions run through it; M3's
-  blast radius is the main schedule risk. Mitigation: M1's queries are pure
-  and unit-tested before combat touches them.
-- The e2e suite clicks precise screen points via projection helpers; elevated
-  test levels must use the same helpers or they'll be brittle. Flat levels'
-  geometry is untouched, so the existing 100+ specs should not notice.
-- Elevation-aware picking (highest-surface-wins vs camera ray) has real edge
-  cases at riser faces and balcony lips; budget for it in M2, not as M4
-  polish.
+  blast radius is the main schedule risk. Mitigation: the sightline primitive
+  is pure and unit-tested in M1/M2 before combat consumes it.
+- The cutaway camera is the design risk the layer model buys its simplicity
+  with: a fight split across floors must stay readable while the upper floor
+  is hidden. Prototype early in M2; if markers aren't enough, a ghosted
+  see-through mode is the fallback.
+- The cross-layer sightline is the correctness hot spot (balcony lips, shots
+  grazing the slab edge, void boundaries). Property-style unit tests over
+  hand-built two-layer fixtures before any renderer work consumes it.
+- The e2e suite clicks precise screen points via projection helpers; layered
+  test levels must use the same helpers or they'll be brittle. Single-layer
+  levels' geometry is untouched, so the existing 100+ specs should not
+  notice.
 - Save-to-disk writes into the repo from a browser button; it stays behind
   the dev server only (`serve.mjs`), never the itch.io build.
