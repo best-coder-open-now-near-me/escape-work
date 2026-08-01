@@ -136,6 +136,28 @@ try {
   }
 } catch { /* no URL machinery - keep whatever resolved above */ }
 
+// Dev express lane: ?seed=<n> makes fights repeatable (AI_PLAN M1's sparring
+// bouts). The stream feeds startCombat's injected `rng`, which reaches the
+// in-fight rolls - hits, damage, slips, the AI's attack picks. Known gap,
+// recorded in REVIEW.md: initiative still rolls its own hardwired closure,
+// so turn ORDER can differ between seeded runs until that closure joins the
+// injection; the bout tally is per-side totals precisely so order noise
+// doesn't wash the numbers. mulberry32, the same mixer the confused-shuffle
+// already trusts (combat.js). Absent means Math.random, the shipping default.
+let combatRng = Math.random;
+try {
+  const s = new URLSearchParams(location.search).get('seed');
+  if (s) {
+    let a = (Number(s) >>> 0) || 1;
+    combatRng = () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+} catch { /* no URL machinery - unseeded like always */ }
+
 const clearProgress = () => {
   localStorage.removeItem(PROGRESS_KEY);
   remote.clear(); // the desk must not offer a ghost of an abandoned run
@@ -2170,6 +2192,7 @@ function startGame(level) {
       engaged,
       opening,
       sneakOpened,
+      rng: combatRng,
       // A crouch taken before the fight rides into it (TACTICS_PLAN M6 OOC):
       // combat owns it from here - the status chip is already on the sheet.
       preCrouch: (() => { const c = oocCrouch; oocCrouch = null; return c; })(),

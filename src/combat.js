@@ -228,6 +228,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // can never leave a stale "unreachable" behind for longer than one turn -
   // within a turn the only thing moving is the unit itself, and its tile is in
   // the key.
+  // The sparring tally (AI_PLAN M1): what this fight's AI did, in numbers a
+  // seeded bout can diff. beats is the histogram of chosen AI beats - the
+  // regression tripwire a damage total can't be (a change that zeroes
+  // 'attack' broke gating, whatever the damage says). dmgDealt counts what
+  // AI swings actually land on member sheets (OAs included - they resolve
+  // through the same strike).
+  const bout = { rounds: 0, dmgDealt: 0, beats: {}, oaCount: 0 };
+
   const engageMemo = new Map(); // "ux,uz|mx,mz" -> boolean
   function canEngage(unit, m) {
     const key = `${unit.x},${unit.z}|${m.actor.x},${m.actor.z}`;
@@ -801,6 +809,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         // A full pass through the order is one round: age summoner cooldowns
         // and the fire/smoke lifecycle a tick.
         for (const e of engaged) if (e.summonCd > 0) e.summonCd -= 1;
+        bout.rounds += 1;
         reactions.clear(); // everyone gets their reaction back (TACTICS_PLAN M2)
         callbacks.onRound?.();
       },
@@ -3894,6 +3903,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       line += ` ${dmg} damage.`;
     }
     m.actor.flinch();
+    bout.dmgDealt += dmg;
     const dead = applyDamage(m.sheet, dmg);
     hitFx(m, 'melee', unit);
     // Taking one is worth a flinch from the camera too - small, and only when
@@ -4087,6 +4097,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     for (const t of provokedBy(threatsAgainst(mover), from.px, from.pz, to.x, to.z, world.stepOpen)) {
       if (!canReact(t.ref)) continue; // an earlier swing this step spent it
       reactions.set(t.ref, (reactions.get(t.ref) || 0) + 1);
+      bout.oaCount += 1;
       opportunityStrike(t.ref, mover);
       if (!standing(mover)) break; // dropped mid-flight - no further swings
     }
@@ -4340,6 +4351,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       coverAp: ACTIONS['take-cover'].ap,
     };
     const { beat } = chooseBeat(beatState);
+    bout.beats[beat] = (bout.beats[beat] || 0) + 1;
     if (beat === 'summon') {
       unit.summonCd = sm.cooldownRounds || 0;
       acting.ap = roundAp(acting.ap - sm.ap);
@@ -4417,6 +4429,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       };
     },
     get ap() { return active.ap; },
+    // The sparring tally (AI_PLAN M1). dmgTaken is an hp-diff read over the
+    // enemy side, not instrumentation - net damage worn so far, so enemy
+    // healing (M6) will understate it; the passive-party protocol doesn't
+    // care, and the instrumented half (dmgDealt) is the one bouts optimize.
+    get bout() {
+      return {
+        ...bout,
+        beats: { ...bout.beats },
+        dmgTaken: engaged.reduce((s, e) => s + (e.maxHp - Math.max(0, e.hp)), 0),
+      };
+    },
     // Where the acting member's BODY is (continuous, not the rounded tile) -
     // what a test aims project3 at to click on themselves. The tile alone is
     // off by up to half a tile at this camera angle, which is exactly the
