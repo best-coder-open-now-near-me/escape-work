@@ -15,8 +15,20 @@ runs identically with it unconfigured.
   quietly asks the cloud; if a save exists, a "Continue the run — restored
   from the cloud" button appears above the floor list. Clicking banks it
   locally and reboots through the normal restore path.
-- **Failure is silent by design.** Dead network, paused free-tier project,
-  bad key — pushes report false, pulls report null, the game never notices.
+- **Your save key is your identity** (designer, 2026-08-01: "a key they will
+  use locally as their save key so i dont have to sweat someone messing with
+  my stuff"). The floor-select desk has a field for a private phrase; it is
+  SHA-256-digested locally and only the digest ever goes over the wire or
+  into the table, so nobody browsing rows learns it and stomping your row
+  means guessing your whole phrase. The same phrase on another browser picks
+  up the same saves — the key is also how a run follows its owner across
+  machines. No key set → a per-browser random device id, as before. A fence,
+  not encryption: pick a phrase, not "save".
+- **Failure warns once, then stays quiet.** Dead network, bad key, paused
+  project — pushes report false, pulls report null, and the first failure of
+  a session raises one toast worded by cause. A paused free-tier project is
+  detected precisely (Supabase answers HTTP 540 for it) and the warning says
+  to wake it in the dashboard; 4xx failures point at the key/table setup.
 
 ## One-time project setup
 
@@ -56,5 +68,6 @@ runs identically with it unconfigured.
 - Anonymous auth + per-user policies, if saves ever matter enough to fence.
 - The same table pattern fits shared editor levels and leaderboards — new
   tables, same client shape.
-- Free-tier projects pause after ~a week idle; the game shrugs (silent
-  failure posture), un-pausing in the dashboard revives sync.
+- Free-tier projects pause after ~a week idle; the game warns once per
+  session ("the Supabase project is paused") and plays on local saves until
+  the dashboard un-pauses it.

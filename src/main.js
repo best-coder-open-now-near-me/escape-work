@@ -35,7 +35,7 @@ import { shieldedFaces } from './tactics.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel, buildLayeredLevel } from './scene.js';
-import { loadRemoteStore } from './remote-store.js';
+import { loadRemoteStore, SAVE_KEY_STORAGE } from './remote-store.js';
 import { placeModel, applyCharacterProportions, cloneMaterials, tintMaterials } from './models.js';
 import { createPortraits } from './portraits.js';
 import {
@@ -72,7 +72,18 @@ const PROGRESS_KEY = 'escape-work.progress';
 // Cloud saves (REMOTE_STORE.md): Supabase behind the local save, configured
 // per-browser via localStorage['escape-work.remote']. Unconfigured, every
 // call is an inert no-op - the game cannot tell the module is here.
-const remote = loadRemoteStore();
+// One warning per session, worded by cause - a paused free-tier project is
+// the expected one (Supabase answers HTTP 540 for it) and names its fix.
+let cloudWarned = false;
+const remote = loadRemoteStore(null, null, (kind) => {
+  if (cloudWarned) return;
+  cloudWarned = true;
+  ui.toast(kind === 'paused'
+    ? 'Cloud saves offline: the Supabase project is paused — wake it in the dashboard. Saves stay local.'
+    : kind === 'rejected'
+      ? 'Cloud saves refused — check the key and table setup (REMOTE_STORE.md). Saves stay local.'
+      : 'Cloud saves unreachable — no connection to the project. Saves stay local.', 6500);
+});
 const app = createApp(document.getElementById('app'));
 
 // Level resolution, in priority order:
@@ -187,6 +198,51 @@ function showLevelMenu() {
         playtesting = id !== FIRST_LEVEL;
         startGame(activeLevel);
       }));
+  }
+  // The save key (shown only when the cloud is configured): a private phrase
+  // that becomes this player's cloud identity - hashed locally, never sent
+  // raw - so nobody else's device stomps their rows, and the same phrase on
+  // another machine picks the same saves up. Changing it reboots the desk so
+  // the cloud lookup below re-runs under the new identity.
+  if (remote.enabled) {
+    const row = document.createElement('div');
+    Object.assign(row.style, {
+      display: 'flex', gap: '6px', marginTop: '14px', paddingTop: '12px',
+      borderTop: '1px solid #2b2e40', alignItems: 'center',
+    });
+    const input = document.createElement('input');
+    input.id = 'save-key-input';
+    input.type = 'password';
+    input.placeholder = localStorage.getItem(SAVE_KEY_STORAGE)
+      ? 'cloud save key is set — enter a new one to change it'
+      : 'cloud save key (optional) — saves follow it anywhere';
+    Object.assign(input.style, {
+      flex: '1', padding: '8px 10px', background: '#12141d', color: '#d7d9e4',
+      border: '1px solid #3a3d52', borderRadius: '8px', fontFamily: 'inherit', fontSize: '13px',
+    });
+    const set = document.createElement('button');
+    set.id = 'save-key-set';
+    set.textContent = 'Set';
+    Object.assign(set.style, {
+      padding: '8px 14px', background: '#20233199', color: '#d7d9e4', cursor: 'pointer',
+      border: '1px solid #3a3d52', borderRadius: '8px', fontFamily: 'inherit', fontSize: '13px',
+    });
+    const apply = () => {
+      try {
+        const key = input.value.trim();
+        // An empty Set with a key stored is a deliberate clearing - back to
+        // this-browser-only saves. An empty Set with nothing stored is a no-op.
+        if (key) localStorage.setItem(SAVE_KEY_STORAGE, key);
+        else if (localStorage.getItem(SAVE_KEY_STORAGE)) localStorage.removeItem(SAVE_KEY_STORAGE);
+        else return;
+        location.reload();
+      } catch { /* private mode: the key has nowhere to live */ }
+    };
+    set.onclick = apply;
+    input.onkeydown = (e) => { if (e.key === 'Enter') apply(); };
+    row.appendChild(input);
+    row.appendChild(set);
+    panel.appendChild(row);
   }
   // A cloud save can land after the desk is up: nothing local, but this
   // device pushed a run before (or the browser was rebuilt). Offer it as

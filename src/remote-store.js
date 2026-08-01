@@ -8,11 +8,32 @@
 //
 // Failure posture: a dead network, a paused free-tier project, a bad key -
 // none of it may cost a run. Nothing here throws; push/clear report false,
-// pull reports null, and the caller's local write already happened.
+// pull reports null, and the caller's local write already happened. The one
+// concession to visibility is `onTrouble(kind)`: the host gets told WHY the
+// cloud is failing - 'paused' (HTTP 540, Supabase's project-paused code),
+// 'rejected' (4xx: key/table/policy) or 'unreachable' (5xx, no network) -
+// so it can warn instead of shrugging in silence (designer, 2026-08-01:
+// "make sure to throw up a warning if its paused").
 
 const CONFIG_KEY = 'escape-work.remote';
 const DEVICE_KEY = 'escape-work.device';
+export const SAVE_KEY_STORAGE = 'escape-work.save-key';
 const TABLE = 'saves';
+
+// A user-chosen save key -> the cloud row identity (designer, 2026-08-01:
+// "a key they will use locally as their save key so i dont have to sweat
+// someone messing with my stuff"). The phrase is digested locally and only
+// the SHA-256 hex ever goes over the wire or into the table - someone
+// browsing the rows learns nothing, and stomping a row means guessing a
+// whole phrase, not picking a uuid off a list. Not encryption, and not
+// claimed to be: a fence, like a dreamlo board's secret. Same phrase on
+// another browser = same identity, so the key is also how a run follows
+// its owner across machines.
+export async function saveKeyIdentity(key) {
+  const bytes = new TextEncoder().encode('escape-work:' + String(key).trim());
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
 
 // Config JSON -> { url, anonKey } or null. Tolerates a trailing slash on the
 // url; rejects anything that lacks either field rather than half-working.
@@ -29,11 +50,12 @@ export function parseRemoteConfig(json) {
   }
 }
 
-// The store. `config` from parseRemoteConfig (null -> inert), `deviceId` is
-// this browser's stable identity, `fetchFn` injectable so tests never touch
-// a network.
-export function createRemoteStore({ config = null, deviceId = '', fetchFn = null } = {}) {
-  if (!config || !deviceId) {
+// The store. `config` from parseRemoteConfig (null -> inert). `identity` is
+// whose saves these are - a minted device id, or a hashed save key (possibly
+// still hashing: a promise is fine, every route awaits it). `fetchFn`
+// injectable so tests never touch a network.
+export function createRemoteStore({ config = null, identity = '', fetchFn = null, onTrouble = null } = {}) {
+  if (!config || !identity) {
     return {
       enabled: false,
       pull: async () => null,
@@ -42,24 +64,34 @@ export function createRemoteStore({ config = null, deviceId = '', fetchFn = null
     };
   }
   const doFetch = fetchFn || ((...a) => globalThis.fetch(...a));
+  // res = null means the fetch itself threw (offline, DNS, CORS).
+  const report = (res) => {
+    if (!onTrouble) return;
+    if (!res) onTrouble('unreachable');
+    else if (res.status === 540) onTrouble('paused'); // Supabase: project paused
+    else if (res.status >= 500) onTrouble('unreachable');
+    else onTrouble('rejected');
+  };
   const headers = {
     apikey: config.anonKey,
     Authorization: `Bearer ${config.anonKey}`,
     'Content-Type': 'application/json',
   };
-  const rowUrl = `${config.url}/rest/v1/${TABLE}?device_id=eq.${encodeURIComponent(deviceId)}`;
+  const rowUrl = async () =>
+    `${config.url}/rest/v1/${TABLE}?device_id=eq.${encodeURIComponent(await identity)}`;
   return {
     enabled: true,
     // The newest save pushed under this device id, as { data, updatedAt },
     // or null (no row, no network, no project - all the same to the caller).
     async pull() {
       try {
-        const res = await doFetch(`${rowUrl}&select=data,updated_at`, { headers });
-        if (!res.ok) return null;
+        const res = await doFetch(`${await rowUrl()}&select=data,updated_at`, { headers });
+        if (!res.ok) { report(res); return null; }
         const rows = await res.json();
         const row = Array.isArray(rows) ? rows[0] : null;
         return row ? { data: row.data, updatedAt: row.updated_at } : null;
       } catch {
+        report(null);
         return null;
       }
     },
@@ -70,10 +102,12 @@ export function createRemoteStore({ config = null, deviceId = '', fetchFn = null
         const res = await doFetch(`${config.url}/rest/v1/${TABLE}`, {
           method: 'POST',
           headers: { ...headers, Prefer: 'resolution=merge-duplicates,return=minimal' },
-          body: JSON.stringify([{ device_id: deviceId, data, updated_at: new Date().toISOString() }]),
+          body: JSON.stringify([{ device_id: await identity, data, updated_at: new Date().toISOString() }]),
         });
+        if (!res.ok) report(res);
         return res.ok;
       } catch {
+        report(null);
         return false;
       }
     },
@@ -81,31 +115,39 @@ export function createRemoteStore({ config = null, deviceId = '', fetchFn = null
     // ghost of the save the player deliberately abandoned.
     async clear() {
       try {
-        const res = await doFetch(rowUrl, { method: 'DELETE', headers });
+        const res = await doFetch(await rowUrl(), { method: 'DELETE', headers });
+        if (!res.ok) report(res);
         return res.ok;
       } catch {
+        report(null);
         return false;
       }
     },
   };
 }
 
-// Browser convenience: config + device identity out of storage, inert store
-// when either is unavailable (no config painted yet, private mode, quota).
-// The device id is minted once and reused - it IS the save's key, so losing
-// it means the cloud row is orphaned, which is why it never regenerates
-// while a stored one exists.
-export function loadRemoteStore(storage = null, fetchFn = null) {
+// Browser convenience: config + identity out of storage, inert store when
+// either is unavailable (no config painted yet, private mode, quota). A
+// save key, when set, IS the identity; without one the browser falls back
+// to a minted device id - which never regenerates while a stored one
+// exists, because it is the only pointer to that browser's cloud row.
+export function loadRemoteStore(storage = null, fetchFn = null, onTrouble = null) {
   try {
     const st = storage || globalThis.localStorage;
     const config = parseRemoteConfig(st.getItem(CONFIG_KEY));
     if (!config) return createRemoteStore();
-    let deviceId = st.getItem(DEVICE_KEY);
-    if (!deviceId) {
-      deviceId = globalThis.crypto.randomUUID();
-      st.setItem(DEVICE_KEY, deviceId);
+    const saveKey = (st.getItem(SAVE_KEY_STORAGE) || '').trim();
+    let identity;
+    if (saveKey) {
+      identity = saveKeyIdentity(saveKey);
+    } else {
+      identity = st.getItem(DEVICE_KEY);
+      if (!identity) {
+        identity = globalThis.crypto.randomUUID();
+        st.setItem(DEVICE_KEY, identity);
+      }
     }
-    return createRemoteStore({ config, deviceId, fetchFn });
+    return createRemoteStore({ config, identity, fetchFn, onTrouble });
   } catch {
     return createRemoteStore();
   }
