@@ -35,6 +35,7 @@ import { shieldedFaces } from './tactics.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel, buildLayeredLevel } from './scene.js';
+import { loadRemoteStore } from './remote-store.js';
 import { placeModel, applyCharacterProportions, cloneMaterials, tintMaterials } from './models.js';
 import { createPortraits } from './portraits.js';
 import {
@@ -68,6 +69,10 @@ import * as ui from './ui.js';
 const pc = window.pc;
 const STASH_KEY = 'escape-work.playtest';
 const PROGRESS_KEY = 'escape-work.progress';
+// Cloud saves (REMOTE_STORE.md): Supabase behind the local save, configured
+// per-browser via localStorage['escape-work.remote']. Unconfigured, every
+// call is an inert no-op - the game cannot tell the module is here.
+const remote = loadRemoteStore();
 const app = createApp(document.getElementById('app'));
 
 // Level resolution, in priority order:
@@ -120,7 +125,10 @@ try {
   }
 } catch { /* no URL machinery - keep whatever resolved above */ }
 
-const clearProgress = () => localStorage.removeItem(PROGRESS_KEY);
+const clearProgress = () => {
+  localStorage.removeItem(PROGRESS_KEY);
+  remote.clear(); // the desk must not offer a ghost of an abandoned run
+};
 
 // The floor-select desk: a plain fresh visit picks a level BEFORE a character
 // (designer, 2026-08-01: "lets add a pre character selection menu with level
@@ -179,6 +187,23 @@ function showLevelMenu() {
         playtesting = id !== FIRST_LEVEL;
         startGame(activeLevel);
       }));
+  }
+  // A cloud save can land after the desk is up: nothing local, but this
+  // device pushed a run before (or the browser was rebuilt). Offer it as
+  // Continue; clicking banks it locally and reboots through the restore
+  // path that already knows how to rebuild a party.
+  if (!restoredProgress && remote.enabled) {
+    remote.pull().then((row) => {
+      if (!row?.data || !document.getElementById('level-menu')) return;
+      if (document.getElementById('level-continue')) return;
+      const b = button('level-continue', 'Continue the run',
+        `${LEVELS[row.data.levelId]?.name || 'a saved floor'} — restored from the cloud`,
+        () => {
+          try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(row.data)); } catch { /* boot fresh */ }
+          location.reload();
+        });
+      panel.insertBefore(b, panel.children[2] || null); // above the floor list
+    });
   }
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
@@ -2822,7 +2847,11 @@ function startGame(level) {
           // out the stairwell heal and the floor-clear screen with it, turning
           // "your save did not persist" into "the game stopped".
           try {
-            localStorage.setItem(PROGRESS_KEY, JSON.stringify(serializeProgress(party, level.next)));
+            const saved = serializeProgress(party, level.next);
+            localStorage.setItem(PROGRESS_KEY, JSON.stringify(saved));
+            // Fire-and-forget: the local write above is the save; the cloud
+            // copy is the carrier that survives a rebuilt browser.
+            remote.push(saved);
           } catch { /* no save is bad; losing the run to an exception is worse */ }
           ui.showFloorClear({ nextName: LEVELS[level.next].name }, () => location.reload());
         } else {
