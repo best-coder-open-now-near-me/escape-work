@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  standTilePath, pickTarget, advanceRoute, aiCrouchCovered, chooseBeat, afterFailedAdvance,
+  standTilePath, pickTarget, advanceRoute, aiCrouchCovered, chooseBeat,
   AI, standTileRoutes, scoreDestination,
 } from '../../src/combat-ai.js';
 import { REACH } from '../../src/stats.js';
@@ -273,7 +273,10 @@ test('a BODY on the face is cover like anything else', () => {
 // A unit with every option live and the AP for all of them.
 const rich = (over = {}) => ({
   ap: 10, moveBudget: 10, moveCost: 1, inReach: true, hasAttack: true, attackAp: 2,
-  summon: null, toppleAp: 2, canTopple: false, canCrouch: true, coverAp: 1, ...over,
+  support: null, summon: null,
+  pullAp: 2, canPull: false, toppleAp: 2, canTopple: false, shoveAp: 2, canShove: false,
+  canEntrench: false, canShoot: false, breakAp: 2, canBreak: false,
+  canCrouch: true, coverAp: 1, ...over,
 });
 
 test('the summoner reinforces before it wades in', () => {
@@ -308,8 +311,52 @@ test('a boxed-in unit crouches rather than standing there as a target', () => {
   assert.equal(chooseBeat(rich({ inReach: false, moveBudget: 0, ap: 0 })).beat, 'pass');
 });
 
-test('an advance that spends nothing gets the crouch it would have had', () => {
-  assert.equal(afterFailedAdvance(rich()).beat, 'crouch');
-  assert.equal(afterFailedAdvance(rich({ canCrouch: false })).beat, 'stall');
-  assert.equal(afterFailedAdvance(rich({ ap: 0 })).beat, 'stall');
+// --- the cover-denial arms and the refused tail (AI_PLAN M4) -----------------
+
+test('the pull outranks everything but reinforcement', () => {
+  assert.equal(chooseBeat(rich({ canPull: true, canTopple: true, canShove: true })).beat, 'pull');
+  assert.equal(chooseBeat(rich({ canPull: true, summon: { ap: 3, ready: true } })).beat, 'summon');
+  assert.equal(chooseBeat(rich({ canPull: true, ap: 1 })).beat, 'crouch'); // cannot afford it
+});
+
+test('the shove sits between the topple and the swing', () => {
+  // The plan only EXISTS when strictly better (a slam or a hazard landing),
+  // so the arm outranking the plain attack is safe by construction.
+  assert.equal(chooseBeat(rich({ canShove: true })).beat, 'shove');
+  assert.equal(chooseBeat(rich({ canShove: true, canTopple: true })).beat, 'topple');
+});
+
+test('break fires only when there is no walk to make', () => {
+  // With a move budget the advance still wins - walking beats demolition.
+  assert.equal(chooseBeat(rich({ inReach: false, canBreak: true })).beat, 'advance');
+  assert.equal(chooseBeat(rich({ inReach: false, moveBudget: 0, canBreak: true })).beat, 'break');
+});
+
+test('a refused advance falls through the ladder to the crouch', () => {
+  const s = rich({ inReach: false });
+  assert.equal(chooseBeat(s).beat, 'advance');
+  assert.equal(chooseBeat(s, new Set(['advance'])).beat, 'crouch');
+  assert.equal(chooseBeat(s, new Set(['advance', 'crouch'])).beat, 'pass');
+});
+
+test('the turn terminates: every DECIDE spends, refuses, or ends', () => {
+  // Exhaustive walk of the refused-set lattice for a unit with everything
+  // live: keep refusing whatever the ladder offers and it must reach `pass`
+  // within one refusal per arm - the invariant both shipped stall bugs
+  // violated from outside the ladder.
+  const everything = rich({
+    inReach: false, canPull: true, canTopple: true, canShove: true, canBreak: true,
+    canEntrench: true, canShoot: true,
+    support: { ap: 2, ready: true }, summon: { ap: 3, ready: true },
+  });
+  const refused = new Set();
+  let steps = 0;
+  for (;;) {
+    const { beat } = chooseBeat(everything, refused);
+    steps += 1;
+    assert.ok(steps <= 12, 'the ladder must exhaust within one refusal per arm');
+    if (beat === 'pass') break;
+    assert.ok(!refused.has(beat), 'a refused arm must never be offered again');
+    refused.add(beat);
+  }
 });

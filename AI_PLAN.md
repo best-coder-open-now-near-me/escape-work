@@ -652,6 +652,58 @@ spec. All prices are the player's own (A9).
 | `entrench` | `ACTIONS['take-cover'].ap` | `crouchHere` (the AI crouch already calls it) | existing crouch line | 0.5 |
 | `shoot` | `attackAp` | a ranged twin of `unitStrikesMember`: same assembler, same statuses, plus `shotOutcome` resolution (redirects included) | the def's ranged line | 0.85 |
 
+## Multi-storey maps
+
+The layered levels (`floors.js`, the atrium spike; verticality is required
+`[stated]`, designer 2026-08-01, `EDITOR_PLAN.md` #3) intersect this plan,
+and the honest current state bounds the scope: **actors above the ground
+storey are not supported yet** — `parseLevel` throws a named error for
+them (`floors.js:31-38`), so every fight today happens on one storey and
+nothing in milestones 1–7 changes that. What this section owns is making
+sure the AI work doesn't make the vertical future HARDER, and naming what
+that future needs from it.
+
+**The trap to not build in: every body-to-body rule is 2D.** `dist`,
+`cheb`, the octants, reach, threats, pincers, rear arcs, SURPRISE_RADIUS —
+all measure in the storey plane. The day two bodies stand on different
+storeys at the same (x, z), an unguarded rule reads them as distance zero:
+in reach through a ceiling, flanked through a floor, backstabbed from a
+balcony. The rule when bodies go vertical: **same-storey gates on every
+body-to-body geometry test**, with cross-storey interaction arriving verb
+by verb (a thrown stapler over the balcony rail is a feature; a punch
+through the mezzanine is a bug). Until then, the single-storey assumption
+is documented where it lives rather than scattered: route points are
+`[x, z]` pairs and tile keys are `"x,z"` strings (`scoreDestination`'s
+entered-set, the engage memo's key) — when routes gain a storey
+coordinate, those keys grow it too, in one place each.
+
+**What each milestone owes the layers:**
+
+- *Targeting (M2):* `canEngage` inherits whatever router combat threads,
+  so a cross-storey member is engageable exactly when a stair-chained
+  route exists — correct by construction once `findEnemyPath` chains
+  storeys the way the player's planner already does (`floors.js`). The
+  `near` term is the one that lies vertically (cheb 0 through a ceiling);
+  when actors go vertical it should read route cost, not plane distance.
+- *Destinations (M3):* stair runs are chokepoints and hazard walks are
+  per-storey; the scoring walk needs layer-qualified tile keys and
+  nothing else — the terms themselves (cost, OA, hazard) are already
+  route-shaped, and a chained route is still a route.
+- *Cover-denial (M4):* partitions, props and doors are per-storey objects
+  already; `aiBreakPlan`'s "sealed" gate must ask the chained router, not
+  the flat one, or a stairs-only approach reads as sealed.
+- *Ranged (M5):* v1 is same-storey by scope — cross-storey LOS is real
+  3D sight geometry (the M6a height rule has no vertical axis) and it
+  belongs to the layers feature, not this plan. Named here so the
+  balcony-shooter fight — the atrium's obvious payoff, and the reason
+  the ranged beats should take a `sameStorey` gate from day one — is a
+  planned arrival, not an accident.
+- *Height advantage:* the reference games monetize high ground (range
+  and damage in DOS2 — reported); this game has NO height-advantage rule
+  and this plan deliberately adds none `[proposed]` — that is a design
+  question for the layers work, flagged for the designer there, not a
+  default to sneak in through the AI.
+
 ## Implementation notes — footguns
 
 The traps, from reading the code paths each milestone lands on. Each is
@@ -751,7 +803,15 @@ cheap to dodge on the way in and expensive to debug after.
     `lifetimeTurns` end (healing a body that despawns next round reads
     as AI stupidity) and re-validates the ally still stands at DOING
     time.
-15. **The believability floor is a feature.** Larian tunes its scorer
+15. **The single-storey assumption lives in the tile keys.** Route points
+    are `[x, z]` and dedup keys are `"x,z"` — fine while `floors.js`
+    refuses actors above the ground storey (a named error), wrong the day
+    it stops. Any new map keyed by tile coordinates gets its key built in
+    ONE helper, not inline, so the storey coordinate lands in one edit;
+    and any new body-to-body test goes through the existing geometry
+    helpers (never a raw `dist`/`cheb` inline), so the same-storey gate
+    can land once, in `tactics.js`, when bodies go vertical.
+16. **The believability floor is a feature.** Larian tunes its scorer
     away from raw optimality toward legible play — the base archetype
     file's own comments say "Damaging allies looks pretty stupid"
     (verified as file content; see the reference section). When a scored

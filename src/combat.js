@@ -27,12 +27,14 @@ import { createTurnOrder } from './turn-order.js';
 import { slips, speedUnderStatus } from './step-rules.js';
 import {
   topplePlan as toppleplanAt, aiTopplePlan as aiToppleplanFor, breakPlan,
+  aiShovePlan as aiShovePlanShared, aiEdgeTopplePlan as aiEdgeTopplePlanShared,
+  aiPullPlan as aiPullPlanShared, aiBreakPlan as aiBreakPlanShared,
   pullPlan as pullplanFor, displacePlan,
 } from './combat-plans.js';
 import {
   standTilePath as standTileRoute, standTileRoutes, scoreDestination,
   pickTarget as pickBest, advanceRoute,
-  aiCrouchCovered, chooseBeat, afterFailedAdvance,
+  aiCrouchCovered, chooseBeat,
 } from './combat-ai.js';
 import {
   enemyRingOk, ringsAtBodies, verbKind, toppleRings, partitionRings, breakRings,
@@ -2155,9 +2157,34 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
 
   // The AI's version of the same question - the victim test is combat's,
   // because only combat knows which side a body is on.
+  const memberAt = (x, z) => members.find((m) => m.sheet.hp > 0 && m.actor
+    && m.actor.x === x && m.actor.z === z) || null;
   const aiTopplePlan = (unit) => aiToppleplanFor(unit.x, unit.z, world,
-    (x, z) => members.some((m) => m.sheet.hp > 0 && m.actor
-      && m.actor.x === x && m.actor.z === z));
+    (x, z) => !!memberAt(x, z));
+  // The rest of the cover-denial plans (AI_PLAN M4), each the shared pure
+  // rule with combat's own side tests threaded in. All of them are gathered
+  // per-DECIDE and priced by chooseBeat, exactly as the summon and the
+  // furniture topple always were.
+  const aiEdgeToppleFor = (unit) => aiEdgeTopplePlanShared(unit.x, unit.z, world,
+    (x, z) => !!memberAt(x, z));
+  const aiShovePlanFor = (unit) => aiShovePlanShared(unit.x, unit.z, world, memberAt, {
+    hazardAt: (x, z) => world.enemySurfDamage(x, z) > 0 || world.slipChanceAt(x, z) > 0,
+  });
+  const aiPullPlanFor = (unit) => aiPullPlanShared(
+    unit,
+    members.filter((m) => standing(m)),
+    (m) => {
+      const s = crouchStateOf(m);
+      return s && { ...s, faces: crouchFacesOf(m, unit) };
+    },
+    {
+      stepOpen: world.stepOpen,
+      open: (x, z) => world.isWalkable(x, z) && !unitStandingAt(x, z),
+      bodyAt: (x, z) => !!unitStandingAt(x, z),
+    },
+  );
+  const aiBreakPlanFor = (unit, target) => aiBreakPlanShared(
+    unit.x, unit.z, target.actor.x, target.actor.z, world);
 
   // Put it over. `by` is whoever caused it (for the narration and the facing).
   function topple(by, plan) {
@@ -2586,6 +2613,133 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     armed = null;
     refresh();
     if (!hostilesRemain()) victory();
+  }
+
+  // --- the AI's cover-denial performs (AI_PLAN M4) --------------------------
+  // Each mirrors the player's own perform with the roles reversed, reusing
+  // the shared resolution pieces (pushTo, the Grit save shape, dropOnto's
+  // prices) rather than inventing parallel rules - the unitStrikesMember
+  // lesson applied forward. Members land through notifyMemberDown, the same
+  // downed path everything else uses.
+
+  // The pull, from the other side of the desk: performPull with the puller
+  // an AI unit and the hauled body a member.
+  function aiPullMember(unit, plan) {
+    const m = plan.victim;
+    const [lx, lz] = plan.landing;
+    unit.lunge(posOf(m).x, posOf(m).z);
+    faceTarget(unit, m.actor.x, m.actor.z);
+    breakCrouch(m, true);
+    const pp = posOf(unit);
+    const hd = Math.hypot(pp.x - lx, pp.z - lz) || 1;
+    const [hpx, hpz] = world.clampPoint(
+      lx + ((pp.x - lx) / hd) * 0.25,
+      lz + ((pp.z - lz) / hd) * 0.25);
+    m.actor.pushTo(lx, lz, hpx, hpz);
+    let msg = `${unit.def.name} hauls ${m.sheet.name} bodily over their own cover.`;
+    const saved = forceHit !== null ? !forceHit
+      : rollHit(gritSaveChance(effectiveAttr(m.sheet).grit), rng);
+    if (saved) {
+      m.actor.flinch();
+      msg += ' They twist and land on their feet.';
+    } else {
+      const a = ACTIONS.pull;
+      const dmg = rand(a.crush[0], a.crush[1]);
+      bout.dmgDealt += dmg;
+      const dead = applyDamage(m.sheet, dmg);
+      hitFx(m, 'slam', unit);
+      m.actor.flinch();
+      fx.damageText(lx, lz, `-${dmg}`, undefined, { big: dead });
+      msg += ` They come down hard. -${dmg}.`;
+      if (dead) {
+        log(msg);
+        notifyMemberDown();
+        refresh();
+        return;
+      }
+      applyStatus(m.sheet, 'stunned', {}, statusResist(m.sheet));
+      statusFxAt(m, 'stunned');
+      if (applyStatus(m.sheet, 'pinned')) statusFxAt(m, 'pinned');
+    }
+    log(msg);
+    refresh();
+  }
+
+  // The shove, member-shaped: a slam into something solid, or a walk-back
+  // into a hazard - the only two shapes the plan admits for a melee unit
+  // (a shove that merely moves somebody was refused at the plan). Slam
+  // damage matches displaceBody's own flat price; the hazard landing bills
+  // the surface's number. Known v1 approximation, recorded in AI_PLAN:
+  // the surface damage is the shared hazard value, so a member's personal
+  // hazard immunities (talent-shaped, main.js's walking model) are not
+  // consulted on a FORCED landing.
+  function aiShoveMember(unit, plan) {
+    const m = plan.victim;
+    unit.lunge(m.actor.x, m.actor.z);
+    faceTarget(unit, m.actor.x, m.actor.z);
+    if (plan.blocked) {
+      const dmg = 2; // displaceBody's slamDmg, the shove's flat price
+      bout.dmgDealt += dmg;
+      const dead = applyDamage(m.sheet, dmg);
+      hitFx(m, 'slam', unit);
+      m.actor.flinch();
+      fx.damageText(m.actor.x, m.actor.z, `-${dmg}`, undefined, { big: dead });
+      log(`${unit.def.name} slams ${m.sheet.name} into something solid. -${dmg}.`);
+      if (dead) notifyMemberDown();
+      refresh();
+      return;
+    }
+    const [rx, rz] = world.clampPoint(plan.tx, plan.tz);
+    m.actor.pushTo(plan.tx, plan.tz, rx, rz);
+    let msg = `${unit.def.name} walks ${m.sheet.name} back a step.`;
+    const sdmg = world.enemySurfDamage(plan.tx, plan.tz);
+    if (sdmg > 0) {
+      bout.dmgDealt += sdmg;
+      const dead = applyDamage(m.sheet, sdmg);
+      fx.impact(plan.tx, plan.tz, hazardKind(plan.tx, plan.tz), { y: 0.35 });
+      fx.damageText(plan.tx, plan.tz, `-${sdmg}`, undefined, { big: dead });
+      msg = `${unit.def.name} shoves ${m.sheet.name} into the hazard. -${sdmg}.`;
+      if (dead) {
+        log(msg);
+        notifyMemberDown();
+        refresh();
+        return;
+      }
+    }
+    log(msg);
+    refresh();
+  }
+
+  // A sealed unit battering its way through (AI_PLAN A10): performBreak's
+  // core with the unit's own attack line as the dice and attackAp as the
+  // price - the same pools, the same world-facade removal, the same lazy
+  // crouch revalidation. No walk-in, no rings: the plan already said the
+  // barrier is adjacent.
+  function aiBreak(unit, plan) {
+    const line = unit.combat.attacks[rand(0, unit.combat.attacks.length - 1)];
+    const prop = plan.kind === 'prop';
+    const px = prop ? plan.tx : (plan.a[0] + plan.b[0]) / 2;
+    const pz = prop ? plan.tz : (plan.a[1] + plan.b[1]) / 2;
+    const label = prop
+      ? (world.tileDefAt(plan.tx, plan.tz)?.label || 'furniture').toLowerCase()
+      : 'partition';
+    unit.lunge(px, pz);
+    faceTarget(unit, px, pz);
+    const dmg = rand(line.min, line.max);
+    const left = prop
+      ? world.damageProp(plan.tx, plan.tz, dmg)
+      : world.damageEdge(plan.a[0], plan.a[1], plan.b[0], plan.b[1], dmg);
+    fx.damageText(px, pz, `-${dmg}`, '#ffd76b', { big: left === 0 });
+    fx.impact(px, pz, 'slam', { y: 0.4 });
+    if (left === 0) {
+      fx.shake(0.09, 0.24);
+      log(prop
+        ? `${unit.def.name} takes the ${label} apart. One less thing between you.`
+        : `${unit.def.name} batters the partition down. Open plan, the hard way.`);
+    } else {
+      log(`${unit.def.name} lays into the ${label}.${left <= dmg ? ' It is coming apart.' : ''}`);
+    }
+    refresh(); // any crouch behind it revalidates here
   }
 
   // --- the mobility verb (POWERS_PLAN M4) ----------------------------------
@@ -4377,7 +4531,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const summonReady = !!sm && (unit.summonCd || 0) <= 0 && acting.ap >= sm.ap
       && resolveSummon(unit, 'enemy', sm) > 0;
     const toppleAp = ACTIONS.shove.ap;
-    const tp = acting.ap >= toppleAp ? aiTopplePlan(unit) : null;
+    // Furniture onto somebody, or failing that a partition onto somebody -
+    // one beat, two aims (AI_PLAN M4 closed TACTICS_PLAN M6's "AI does not
+    // yet topple partitions" follow-up).
+    const tp = acting.ap >= toppleAp ? (aiTopplePlan(unit) || aiEdgeToppleFor(unit)) : null;
+    const pullAp = ACTIONS.pull.ap;
+    const pullp = acting.ap >= pullAp ? aiPullPlanFor(unit) : null;
+    const shoveAp = ACTIONS.shove.ap;
+    const shovep = acting.ap >= shoveAp ? aiShovePlanFor(unit) : null;
+    // Sealed means NOBODY is engageable - while any route exists, walking it
+    // beats demolition, so the break plan is not even gathered.
+    const breakAp = unit.combat.attackAp;
+    const sealed = !canEngage(unit, target.member);
+    const brk = sealed && unit.combat.attacks.length > 0 && acting.ap >= breakAp
+      ? aiBreakPlanFor(unit, target) : null;
     const beatState = {
       ap: acting.ap,
       moveBudget: moveBudget(acting),
@@ -4388,10 +4555,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       summon: sm ? { ap: sm.ap, ready: summonReady } : null,
       toppleAp,
       canTopple: !!tp,
+      pullAp,
+      canPull: !!pullp,
+      shoveAp,
+      canShove: !!shovep,
+      breakAp,
+      canBreak: !!brk,
       canCrouch: true, // tryAiCrouch runs its own (world-shaped) test
       coverAp: ACTIONS['take-cover'].ap,
     };
-    const { beat } = chooseBeat(beatState);
+    // The per-turn refused set - the generalized failure tail (AI_PLAN M4).
+    // An arm whose doing spends nothing masks itself off and DECIDE re-runs;
+    // every iteration spends, refuses, or ends, so the turn terminates.
+    const refused = (acting.refused ??= new Set());
+    const { beat } = chooseBeat(beatState, refused);
     bout.beats[beat] = (bout.beats[beat] || 0) + 1;
     if (beat === 'summon') {
       unit.summonCd = sm.cooldownRounds || 0;
@@ -4404,10 +4581,41 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     if (beat === 'topple') {
       acting.ap = roundAp(acting.ap - toppleAp);
-      unit.lunge(tp.x, tp.z);
-      log(`${unit.def.name} puts a shoulder into the ${tp.def.label || 'furniture'}. ${topple(unit, tp)}`);
+      if (tp.edge) {
+        // The partition version: the panel comes off its feet and lands flat
+        // on the far tile, on whoever stands there - the player's own
+        // performPartitionTopple, from the other side of the cubicle.
+        unit.lunge(tp.tx, tp.tz);
+        faceTarget(unit, tp.tx, tp.tz);
+        world.toppleEdge(unit.x, unit.z, tp.tx, tp.tz);
+        world.setType(tp.tx, tp.tz, PARTITION_TOPPLE.becomes);
+        fx.impact(tp.tx, tp.tz, 'slam', { y: 0.3 });
+        fx.shake(0.08, 0.2);
+        log(`${unit.def.name} puts a shoulder into the partition. It goes over flat.${dropOnto(unit, tp.tx, tp.tz, PARTITION_TOPPLE.damage)}`);
+      } else {
+        unit.lunge(tp.x, tp.z);
+        log(`${unit.def.name} puts a shoulder into the ${tp.def.label || 'furniture'}. ${topple(unit, tp)}`);
+      }
       acting.wait = 0.85;
       refresh();
+      return;
+    }
+    if (beat === 'pull') {
+      acting.ap = roundAp(acting.ap - pullAp);
+      aiPullMember(unit, pullp);
+      acting.wait = 0.85;
+      return;
+    }
+    if (beat === 'shove') {
+      acting.ap = roundAp(acting.ap - shoveAp);
+      aiShoveMember(unit, shovep);
+      acting.wait = 0.6;
+      return;
+    }
+    if (beat === 'break') {
+      acting.ap = roundAp(acting.ap - breakAp);
+      aiBreak(unit, brk);
+      acting.wait = 0.85;
       return;
     }
     if (beat === 'attack') {
@@ -4419,18 +4627,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (beat === 'advance') {
       const spent = aiAdvance(unit, moveBudget(acting), target);
       if (spent > 0) { billMove(acting, spent); acting.wait = 0.15; return; }
-      // The advance went nowhere. Same tail the ladder gives a unit that never
-      // had a move to make.
-      if (afterFailedAdvance(beatState).beat === 'crouch' && tryAiCrouch(unit, target)) {
-        acting.wait = 0.5;
-        return;
-      }
-      acting.ap = 0; // burn the real AP so the turn can end; the allowance buys nothing
-      acting.wait = 0.15;
+      // The advance went nowhere: refuse the beat for the rest of the turn
+      // and let the ladder re-run - the crouch this used to special-case now
+      // arrives by ladder order (AI_PLAN M4's generalized tail).
+      refused.add('advance');
+      acting.wait = 0.1;
       return;
     }
-    if (beat === 'crouch' && tryAiCrouch(unit, target)) { acting.wait = 0.5; return; }
-    advanceTurn(); // out of AP / nothing to do - next in initiative
+    if (beat === 'crouch') {
+      if (tryAiCrouch(unit, target)) { acting.wait = 0.5; return; }
+      refused.add('crouch');
+      acting.wait = 0.05;
+      return;
+    }
+    advanceTurn(); // the pass beat - out of AP or everything refused
   }
 
   // A crouch taken OUT of combat rides into the fight (TACTICS_PLAN M6 OOC):

@@ -59,6 +59,85 @@ export function aiTopplePlan(bx, bz, world, victimAt) {
   return null;
 }
 
+// --- the AI's cover-denial plans (AI_PLAN M4) --------------------------------
+
+// Is there a shove WORTH taking - one that slams an adjacent victim into
+// something solid, or lands them in a hazard? A shove that merely moves
+// somebody is refused: it spends real AP to improve nothing, and the ladder
+// sits shove above the swing precisely because the plan only exists when it
+// is strictly better. `disengage` widens the gate for a unit that WANTS the
+// gap (the ranged kit, AI_PLAN A4's carve-out): any legal step-back
+// qualifies, because breaking contact is itself the value - the game's own
+// "shove is the safe disengage" doctrine (TACTICS_PLAN #9), read from the
+// other side.
+//
+// Adjacent-only, like the topple's own aim; `victimAt` is the caller's side
+// test, `hazardAt` its "would landing there hurt" test.
+export function aiShovePlan(bx, bz, world, victimAt, { hazardAt = null, disengage = false } = {}) {
+  for (const [dx, dz] of AROUND) {
+    const vx = bx + dx;
+    const vz = bz + dz;
+    const victim = victimAt(vx, vz);
+    if (!victim) continue;
+    const plan = displacePlan(vx, vz, dx, dz, world);
+    if (!plan) continue;
+    if (plan.blocked || disengage || (hazardAt && hazardAt(plan.tx, plan.tz))) {
+      return { victim, dx, dz, ...plan };
+    }
+  }
+  return null;
+}
+
+// The partition this unit could put a shoulder into WITH somebody behind it
+// - TACTICS_PLAN M6's partition topple, whose AI half was left as "a
+// follow-up" in that plan's landed notes. Square-on like the player's aim;
+// the panel falls AWAY from the shover, so the victim test is the far tile.
+export function aiEdgeTopplePlan(bx, bz, { wallEdgeBetween, terrainOpen }, victimAt) {
+  for (const [dx, dz] of ORTHO) {
+    const tx = bx + dx;
+    const tz = bz + dz;
+    if (!wallEdgeBetween(bx, bz, tx, tz)) continue;
+    if (!terrainOpen(tx, tz)) continue;
+    if (!victimAt(tx, tz)) continue;
+    return { edge: true, tx, tz };
+  }
+  return null;
+}
+
+// Which crouched victim a pull could haul (TACTICS_PLAN M8's verb, the AI
+// half). The rules are pullPlan's own - shield between the bodies,
+// REACH.PULL, landing room - this wrapper only walks the candidates.
+// `crouchOf(v)` returns the victim's live crouch AS THE PULLER SEES IT
+// (faces computed with the puller's own body not counted: standing beside
+// somebody is how you reach over their barrier, not a barrier of your own).
+export function aiPullPlan(unit, candidates, crouchOf, world) {
+  for (const v of candidates) {
+    const crouch = crouchOf(v);
+    if (!crouch) continue;
+    const plan = pullPlan(unit, v, crouch, world);
+    if (plan && !plan.refusal) return { victim: v, ...plan };
+  }
+  return null;
+}
+
+// What a SEALED unit batters (AI_PLAN A10): the adjacent breakable prop or
+// partition edge on the way toward where it wants to go. Only consulted when
+// no target is engageable at all - while a route exists, walking beats
+// demolition. v1 is deliberately adjacent-only, on the one or two faces the
+// target's octant names; pathing THROUGH breakables by pool HP is the
+// refinement AI_PLAN names and defers.
+export function aiBreakPlan(bx, bz, tx, tz, { tileDefAt, edgeHpBetween }) {
+  const { x: sx, z: sz } = dirOctant(tx, tz, bx, bz); // from the unit toward the target
+  const cands = [];
+  if (sx) cands.push([bx + sx, bz]);
+  if (sz) cands.push([bx, bz + sz]);
+  for (const [nx, nz] of cands) {
+    if (isBreakable(tileDefAt(nx, nz))) return { kind: 'prop', tx: nx, tz: nz };
+    if (edgeHpBetween(bx, bz, nx, nz) !== null) return { kind: 'edge', a: [bx, bz], b: [nx, nz] };
+  }
+  return null;
+}
+
 // --- breaking cover down (TACTICS_PLAN M8) -----------------------------------
 
 // What the armed attack resolves on at (tx, tz): a breakable prop ON the tile,

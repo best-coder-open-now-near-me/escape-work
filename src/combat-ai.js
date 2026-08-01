@@ -261,40 +261,57 @@ export function aiCrouchCovered(bx, bz, tx, tz, { tileDefAt, stepOpen, bodyAt = 
 // Which beat this unit takes this turn. `s` is everything the decision reads,
 // as plain values:
 //
-//   { ap, moveBudget, inReach, hasAttack, attackAp, moveCost,
-//     summon: { ap, ready } | null, toppleAp, canTopple, canCrouch, coverAp }
+//   { ap, moveBudget, moveCost, inReach, hasAttack, attackAp,
+//     support: { ap, ready } | null, summon: { ap, ready } | null,
+//     canPull, pullAp, canTopple, toppleAp, canShove, shoveAp,
+//     canEntrench, canShoot, canBreak, breakAp, canCrouch, coverAp }
 //
-// The ORDER is the design, and it is the thing worth having a test for:
+// The ORDER is the design (AI_PLAN's state machine), and it is the thing
+// worth having a test for. One ladder, fixed order; a beat a unit's kit
+// cannot take simply never gates on:
 //
+//   support  - triage outranks reinforcements: a body about to drop is worth
+//              more than a fresh temp.
 //   summon   - a summoner reinforces before it wades in. Posting the req is
 //              the whole beat.
+//   pull     - a member crouched with their shield between you: strictly
+//              better than walking around it. Breaks the crouch, rolls the
+//              Grit price, relocates them into your midst.
 //   topple   - strictly better than a swing when it is available: it damages,
 //              it stuns, and it leaves cover the party then has to walk
 //              around. Priced at the shove's own AP, so both sides push for
-//              the same.
+//              the same. Partition edges aim it too, since M4.
+//   shove    - only exists when the plan says strictly better: a slam or a
+//              hazard landing (or the ranged kit's disengage). Below topple -
+//              topple is shove-plus - above the plain swing.
 //   attack   - the ordinary swing, when the target is in reach.
-//   advance  - close the distance.
+//   entrench - the ranged kit's crouch-then-shoot, when it can afford BOTH.
+//              Must precede shoot or it never fires.
+//   shoot    - the "in range but not in reach" arm.
+//   advance  - close the distance (the destination rule is the kit's).
+//   break    - only when sealed: batter the barrier that IS the route.
 //   crouch   - a boxed-in unit that tucks in is a problem the player has to
-//              flank; one that stands there is a target. Tried both when the
-//              advance goes nowhere AND when there was never a move to make.
+//              flank; one that stands there is a target.
 //   pass     - hand the turn on.
-export function chooseBeat(s) {
-  if (s.summon && s.summon.ready && s.ap >= s.summon.ap) return { beat: 'summon' };
-  if (s.canTopple && s.ap >= s.toppleAp) return { beat: 'topple' };
-  if (s.inReach && s.hasAttack && s.ap >= s.attackAp) return { beat: 'attack' };
-  if (!s.inReach && s.moveBudget >= s.moveCost) return { beat: 'advance' };
-  if (s.canCrouch && s.ap >= s.coverAp) return { beat: 'crouch' };
-  return { beat: 'pass' };
-}
-
-// What the advance failing falls back to. Kept beside `chooseBeat` because it
-// is the same ladder's tail: an advance that spends nothing has not taken a
-// turn, so the unit gets the crouch it would have got had it never tried to
-// move - and only then burns its AP so the turn can end.
 //
-// Burning the real AP and NOT the movement allowance is deliberate: the
-// allowance cannot buy anything else, so leaving it is harmless.
-export function afterFailedAdvance(s) {
-  if (s.canCrouch && s.ap >= s.coverAp) return { beat: 'crouch' };
-  return { beat: 'stall' };
+// `refused` is the generalized failure tail (AI_PLAN M4): an arm whose DOING
+// spent nothing marks itself here for the rest of the turn and the ladder
+// re-runs with it masked. Each beat can fail at most once, the ladder is
+// finite, so a turn always terminates - the invariant both shipped stall
+// bugs violated from outside the ladder.
+const NO_REFUSALS = new Set();
+export function chooseBeat(s, refused = NO_REFUSALS) {
+  const ok = (b) => !refused.has(b);
+  if (ok('support') && s.support && s.support.ready && s.ap >= s.support.ap) return { beat: 'support' };
+  if (ok('summon') && s.summon && s.summon.ready && s.ap >= s.summon.ap) return { beat: 'summon' };
+  if (ok('pull') && s.canPull && s.ap >= s.pullAp) return { beat: 'pull' };
+  if (ok('topple') && s.canTopple && s.ap >= s.toppleAp) return { beat: 'topple' };
+  if (ok('shove') && s.canShove && s.ap >= s.shoveAp) return { beat: 'shove' };
+  if (ok('attack') && s.inReach && s.hasAttack && s.ap >= s.attackAp) return { beat: 'attack' };
+  if (ok('entrench') && s.canEntrench && s.ap >= s.coverAp + s.attackAp) return { beat: 'entrench' };
+  if (ok('shoot') && s.canShoot && s.ap >= s.attackAp) return { beat: 'shoot' };
+  if (ok('advance') && !s.inReach && s.moveBudget >= s.moveCost) return { beat: 'advance' };
+  if (ok('break') && s.canBreak && s.ap >= s.breakAp) return { beat: 'break' };
+  if (ok('crouch') && s.canCrouch && s.ap >= s.coverAp) return { beat: 'crouch' };
+  return { beat: 'pass' };
 }
