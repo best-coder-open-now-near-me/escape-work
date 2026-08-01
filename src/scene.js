@@ -282,11 +282,17 @@ export function buildLayeredLevel(app, floors, { picking = null } = {}) {
     scenes.push(buildLevel(app, g, { picking, root, baseY: floors.baseY[i] }));
   });
   // Stair flights render through the LOWER storey's renderer, so a hidden
-  // upper floor still leaves the way up standing in the world.
+  // upper floor still leaves the way up standing in the world. Every slice
+  // registers with the object picker: the flight RISES, so a click on its
+  // upper half projects onto a ground plane somewhere behind it - the ray
+  // must hit the boxes themselves, or clicks sail straight through the
+  // stairs (the spike playtest's first finding, designer 2026-08-01).
   for (const s of floors.stairs) {
     const rise = floors.baseY[s.upper] - floors.baseY[s.layer];
-    s.cells.forEach((c, idx) =>
-      scenes[s.layer].renderStair(c.x, c.z, s.dir.dx, s.dir.dz, rise, idx, s.cells.length));
+    s.cells.forEach((c, idx) => {
+      const slices = scenes[s.layer].renderStair(c.x, c.z, s.dir.dx, s.dir.dz, rise, idx, s.cells.length);
+      if (picking) for (const e of slices) picking.register(e, 'stair', s);
+    });
   }
   let active = 0;
   const activeScene = () => scenes[active];
@@ -302,6 +308,14 @@ export function buildLayeredLevel(app, floors, { picking = null } = {}) {
       roots.forEach((r, i) => { r.enabled = i <= activeLayer || !covers(i); });
     },
     layerVisible: (l) => roots[l].enabled,
+    // A scripted climb pins both of its storeys visible for the whole ride;
+    // the per-frame covering test stands down until the landing (the spike
+    // playtest's second finding: re-judging "covered" mid-flight popped the
+    // upper floor out and back as the body crossed the slab's edge).
+    holdForClimb(a, b) {
+      roots[a].enabled = true;
+      roots[b].enabled = true;
+    },
     // The fade list the flat destructure reads; layered fading runs per
     // visible storey through updateWallFade below.
     walls: scenes[0].walls,

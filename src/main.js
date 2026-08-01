@@ -1240,6 +1240,9 @@ function startGame(level) {
         sx: leg.from.x, sz: leg.from.z, run: leg.run, toLayer: leg.to.layer,
         y0: floors.baseY[leg.from.layer] + lift, y1: floors.baseY[leg.to.layer] + lift,
       };
+      // Both storeys stay visible for the whole ride - the cutaway stands
+      // down until the landing (see the update loop).
+      scene.holdForClimb(leg.from.layer, leg.to.layer);
       player.setPath([[leg.from.x, leg.from.z], [leg.to.x, leg.to.z]]);
     }
   }
@@ -3086,6 +3089,11 @@ function startGame(level) {
       // becomes the tile/point every verb below already reads.
       if (floors) {
         if (climbAnim) return; // the flight finishes before the next order
+        // The flight's own boxes win the click before any ground plane: a
+        // pixel on the risers would otherwise resolve to whatever tile the
+        // ray reaches BEHIND the raised steps.
+        const stairHit = picking.pick(controls.cameraEntity, sx, sy);
+        if (stairHit?.kind === 'stair') { routeViaStair(stairHit.ref); return; }
         const res = layeredPick(sx, sy);
         if (!res) return;
         if (res.stair) { routeViaStair(res.stair); return; }
@@ -3844,22 +3852,29 @@ function startGame(level) {
         const d = Math.hypot(pos.x - climbAnim.sx, pos.z - climbAnim.sz);
         const k = Math.min(1, Math.max(0, (d - 0.5) / climbAnim.run));
         player.entity.setPosition(pos.x, climbAnim.y0 + (climbAnim.y1 - climbAnim.y0) * k, pos.z);
+        // The rig climbs WITH the body: easing the focus height along the
+        // flight is what kills the snap (and half the pop) at the landing.
+        controls.setView({ focusY: climbAnim.y0 - lift + (climbAnim.y1 - climbAnim.y0) * k + 0.3 });
         if (!player.moving) {
           playerLayer = climbAnim.toLayer;
           player.entity.setPosition(pos.x, climbAnim.y1, pos.z);
-          // The rig now frames the storey the leader stands on.
           controls.setView({ focusY: floors.baseY[playerLayer] + 0.3 });
           climbAnim = null;
         }
       }
       if (!climbAnim && legQueue.length && !player.moving && !inCombat) startNextLeg();
-      scene.updateCutaway(playerLayer, (l) => {
-        // In-bounds check first: typeAt reads 'wall' outside the map, and a
-        // smaller upper storey must not count as covering the whole ground.
-        const g = floors.layers[l];
-        return player.x >= 0 && player.x < g.width && player.z >= 0 && player.z < g.height
-          && g.typeAt(player.x, player.z) !== null;
-      });
+      // The covering test stands down mid-climb: the logical tile reaches the
+      // landing before playerLayer flips, and judging "covered" off that
+      // half-state is what popped the upper floor out and straight back in.
+      if (!climbAnim) {
+        scene.updateCutaway(playerLayer, (l) => {
+          // In-bounds check first: typeAt reads 'wall' outside the map, and a
+          // smaller upper storey must not count as covering the whole ground.
+          const g = floors.layers[l];
+          return player.x >= 0 && player.x < g.width && player.z >= 0 && player.z < g.height
+            && g.typeAt(player.x, player.z) !== null;
+        });
+      }
     }
     const world = {
       paused: inCombat || gameOver,
