@@ -36,30 +36,27 @@ test('unconfigured store is inert on every route', async () => {
   assert.equal(await s.clear(), false);
 });
 
-test('push upserts this device row with both auth headers', async () => {
+test('push calls the save_put RPC with both auth headers', async () => {
   const f = stubFetch([{ ok: true }]);
   const s = createRemoteStore({ config: CONFIG, identity: 'dev-1', fetchFn: f });
   assert.equal(await s.push({ levelId: 'level2' }), true);
   const { url, opts } = f.calls[0];
-  assert.equal(url, 'https://proj.supabase.co/rest/v1/saves');
+  assert.equal(url, 'https://proj.supabase.co/rest/v1/rpc/save_put');
   assert.equal(opts.method, 'POST');
   assert.equal(opts.headers.apikey, 'anon-key');
   assert.equal(opts.headers.Authorization, 'Bearer anon-key');
-  assert.match(opts.headers.Prefer, /merge-duplicates/);
-  const body = JSON.parse(opts.body);
-  assert.equal(body[0].device_id, 'dev-1');
-  assert.deepEqual(body[0].data, { levelId: 'level2' });
-  assert.ok(body[0].updated_at);
+  assert.deepEqual(JSON.parse(opts.body), { p_id: 'dev-1', p_data: { levelId: 'level2' } });
 });
 
 test('pull returns the row, and null for empty / non-ok / thrown', async () => {
-  const f = stubFetch([{ ok: true, json: [{ data: { levelId: 'level2' }, updated_at: 't1' }] }]);
+  const f = stubFetch([{ ok: true, json: { data: { levelId: 'level2' }, updated_at: 't1' } }]);
   const s = createRemoteStore({ config: CONFIG, identity: 'dev-1', fetchFn: f });
   assert.deepEqual(await s.pull(), { data: { levelId: 'level2' }, updatedAt: 't1' });
-  assert.match(f.calls[0].url, /saves\?device_id=eq\.dev-1&select=data,updated_at/);
+  assert.equal(f.calls[0].url, 'https://proj.supabase.co/rest/v1/rpc/save_get');
+  assert.deepEqual(JSON.parse(f.calls[0].opts.body), { p_id: 'dev-1' });
 
   const empty = createRemoteStore({
-    config: CONFIG, identity: 'dev-1', fetchFn: stubFetch([{ ok: true, json: [] }]) });
+    config: CONFIG, identity: 'dev-1', fetchFn: stubFetch([{ ok: true, json: null }]) });
   assert.equal(await empty.pull(), null);
   const bad = createRemoteStore({
     config: CONFIG, identity: 'dev-1', fetchFn: stubFetch([{ ok: false }]) });
@@ -73,8 +70,8 @@ test('clear deletes exactly this device row and never throws', async () => {
   const f = stubFetch([{ ok: true }]);
   const s = createRemoteStore({ config: CONFIG, identity: 'dev 1', fetchFn: f });
   assert.equal(await s.clear(), true);
-  assert.equal(f.calls[0].opts.method, 'DELETE');
-  assert.match(f.calls[0].url, /device_id=eq\.dev%201/); // ids are URL-encoded
+  assert.equal(f.calls[0].url, 'https://proj.supabase.co/rest/v1/rpc/save_del');
+  assert.deepEqual(JSON.parse(f.calls[0].opts.body), { p_id: 'dev 1' });
   const dead = createRemoteStore({
     config: CONFIG, identity: 'dev-1', fetchFn: async () => { throw new Error('offline'); } });
   assert.equal(await dead.clear(), false);
@@ -106,7 +103,7 @@ test('a save key digests to a stable local identity, promises welcome', async ()
   const f = stubFetch([{ ok: true }]);
   const s = createRemoteStore({ config: CONFIG, identity: saveKeyIdentity('k'), fetchFn: f });
   await s.push({ levelId: 'level1' });
-  assert.equal(JSON.parse(f.calls[0].opts.body)[0].device_id, await saveKeyIdentity('k'));
+  assert.equal(JSON.parse(f.calls[0].opts.body).p_id, await saveKeyIdentity('k'));
 });
 
 test('a stored save key outranks the device id as the identity', async () => {
@@ -116,9 +113,9 @@ test('a stored save key outranks the device id as the identity', async () => {
     ['escape-work.device', 'dev-uuid'],
   ]);
   const st = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v) };
-  const f = stubFetch([{ ok: true, json: [] }]);
+  const f = stubFetch([{ ok: true, json: null }]);
   await loadRemoteStore(st, f).pull();
-  assert.match(f.calls[0].url, new RegExp(await saveKeyIdentity('phrase')));
+  assert.equal(JSON.parse(f.calls[0].opts.body).p_id, await saveKeyIdentity('phrase'));
 });
 
 test('trouble is classified: paused (540), rejected (4xx), unreachable', async () => {
@@ -134,7 +131,7 @@ test('trouble is classified: paused (540), rejected (4xx), unreachable', async (
   await dead.pull();
   assert.deepEqual(kinds, ['paused', 'rejected', 'unreachable', 'unreachable']);
   const fine = createRemoteStore({
-    config: CONFIG, identity: 'dev-1', fetchFn: stubFetch([{ ok: true, json: [] }]),
+    config: CONFIG, identity: 'dev-1', fetchFn: stubFetch([{ ok: true, json: null }]),
     onTrouble: (k) => kinds.push(k) });
   await fine.pull();
   assert.equal(kinds.length, 4); // a healthy call reports nothing

@@ -26,7 +26,6 @@ export const SHIPPED_REMOTE = {
   anonKey: '',
 };
 export const SAVE_KEY_STORAGE = 'escape-work.save-key';
-const TABLE = 'saves';
 
 // A user-chosen save key -> the cloud row identity (designer, 2026-08-01:
 // "a key they will use locally as their save key so i dont have to sweat
@@ -93,19 +92,24 @@ export function createRemoteStore({ config = null, identity = '', fetchFn = null
     Authorization: `Bearer ${config.anonKey}`,
     'Content-Type': 'application/json',
   };
-  const rowUrl = async () =>
-    `${config.url}/rest/v1/${TABLE}?device_id=eq.${encodeURIComponent(await identity)}`;
+  // All access goes through RPC functions, never table routes (the base
+  // minimum, designer 2026-08-01): the database demands the exact row
+  // identity, so rows can't be listed or blanket-written even with the
+  // shipped key, and it enforces the size cap and the global row backstop
+  // where no client can argue. REMOTE_STORE.md carries the SQL.
+  const rpc = async (fn, body) => doFetch(`${config.url}/rest/v1/rpc/${fn}`, {
+    method: 'POST', headers, body: JSON.stringify(body),
+  });
   return {
     enabled: true,
     // The newest save pushed under this device id, as { data, updatedAt },
     // or null (no row, no network, no project - all the same to the caller).
     async pull() {
       try {
-        const res = await doFetch(`${await rowUrl()}&select=data,updated_at`, { headers });
+        const res = await rpc('save_get', { p_id: await identity });
         if (!res.ok) { report(res); return null; }
-        const rows = await res.json();
-        const row = Array.isArray(rows) ? rows[0] : null;
-        return row ? { data: row.data, updatedAt: row.updated_at } : null;
+        const row = await res.json();
+        return row?.data ? { data: row.data, updatedAt: row.updated_at } : null;
       } catch {
         report(null);
         return null;
@@ -115,11 +119,7 @@ export function createRemoteStore({ config = null, identity = '', fetchFn = null
     // write already succeeded, so the cloud copy is strictly a bonus.
     async push(data) {
       try {
-        const res = await doFetch(`${config.url}/rest/v1/${TABLE}`, {
-          method: 'POST',
-          headers: { ...headers, Prefer: 'resolution=merge-duplicates,return=minimal' },
-          body: JSON.stringify([{ device_id: await identity, data, updated_at: new Date().toISOString() }]),
-        });
+        const res = await rpc('save_put', { p_id: await identity, p_data: data });
         if (!res.ok) report(res);
         return res.ok;
       } catch {
@@ -131,7 +131,7 @@ export function createRemoteStore({ config = null, identity = '', fetchFn = null
     // ghost of the save the player deliberately abandoned.
     async clear() {
       try {
-        const res = await doFetch(await rowUrl(), { method: 'DELETE', headers });
+        const res = await rpc('save_del', { p_id: await identity });
         if (!res.ok) report(res);
         return res.ok;
       } catch {
