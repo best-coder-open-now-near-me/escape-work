@@ -57,37 +57,34 @@
 //              shipped level is a lint failure, not a tile with no character.
 //   tiltX/tiltZ - degrees of lean for the model (a fallen prop lies over).
 //
-// NOTE ON `char`: a level's map is one CHARACTER per cell, and the editor
-// exports canonical registry chars, so every entry needs a globally unique
-// one. That is the real ceiling on how many props can exist - roughly the
-// printable ASCII set minus the actor/enemy chars. Adding a kit model that
-// isn't registered below is a one-entry job; finding it a free char is the
-// only constraint.
+// NOTE ON `char`: a level's map is one CHARACTER per cell, and the level's own
+// `tiles` legend says what each character means THERE. The field below is the
+// PREFERRED character - the one the editor hands a type when it happens to be
+// free in the level being written - and nothing more. It need not be unique,
+// and a type may omit it entirely; the editor allocates from a free pool.
+// Adding a kit model is a one-entry job, full stop.
 //
-// AND THAT CEILING IS NOW REACHED. As of the snack machine, 92 of the 94
-// printable non-space characters are spoken for. What is left is the player's
-// own '@' and a single backslash - which has to be escaped inside a level's
-// JSON map rows, so it is the least usable character in the set. THERE IS NO
-// NEXT ONE. A content pass that wants a new prop has to either retire a tile
-// type or decouple the map from single characters first (multi-char cells, or
-// an object layer beside the ASCII grid). Treat a free char as a spent
-// resource, not a formality.
+// THERE IS NO LONGER A CEILING ON TILE TYPES. There used to be, and this note
+// used to say it had been reached: 92 of 94 printable characters spoken for,
+// the next prop impossible without retiring one. That was never a property of
+// the FORMAT - `grid.parseLevel` has always resolved cells through the level's
+// own legend and has never once read the field below. It was the EDITOR, which
+// exported the whole registry as every level's legend, so every type needed a
+// globally unique character whether any level used it or not.
 //
-// UPDATE (the sneak plants): 'G' and 'X' were the last two genuinely free
-// characters - free of the tile registry AND of the actor legends, which is
-// the check that matters and which the count above did not make. The office
-// ficus and the lobby palm spent them. What remains is '@' (the player's own)
-// and the backslash, and NOTHING ELSE: the next prop of any kind cannot be
-// registered without first retiring a tile type or decoupling the map from
-// single characters. The levels lint (tests/unit/levels.test.js) is what
-// catches an actor/tile collision - it caught this pair mid-change - so trust
-// it over any hand count.
+// The editor now allocates characters per level, to the types that level
+// actually paints, and exports a legend of only those (see the allocator at
+// the top of editor.js). So register as many types as the kits provide. The
+// remaining limit is how many DISTINCT types a SINGLE level uses - the pool is
+// the printable set minus the actor characters and the backslash, so roughly
+// ninety - and passing THAT would need a format change (multi-character cells,
+// or an object layer beside the ASCII grid). That is a long way off, and the
+// ASCII map is worth keeping legible until it arrives.
 //
-// A corollary, for whoever allocates the next one: give the JSON-awkward
-// characters to props nothing paints. The snack machine took '$' from
-// 'rug-round' for exactly this reason - the machine is painted on two floors
-// and needs a clean character, the round rug is painted nowhere and can live
-// with the escaped one.
+// One thing the old hand-count got wrong and the lint gets right: a tile
+// character must also not collide with an ACTOR character, since both legends
+// key the same map and parseLevel checks actors first. The editor's pool
+// reserves them. Trust tests/unit/levels.test.js over any count written here.
 // --- sight (TACTICS_PLAN M6a) ------------------------------------------------
 // A solid cell used to block line of sight at ANY height - a 0.18 microwave
 // stopped a throw as absolutely as a wall, while chest-high edge partitions

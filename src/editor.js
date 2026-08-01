@@ -42,16 +42,51 @@ export function startEditor(app, levelData, stashKey) {
   let hDoors = new Set();
   let vDoors = new Set();
 
-  // char <-> meaning, from the registries (single source of truth for export)
-  // `runtimeOnly` tiles (the fallen twins, POWERS_PLAN M6) carry NO char - they
-  // only ever arrive through grid.setType. Skipping them here is not tidiness:
-  // `tileByChar[undefined] = id` would install a bogus lookup that every
-  // unrecognised map character then resolves to.
-  const tileByChar = {};
-  for (const [id, def] of Object.entries(TILE_TYPES)) {
-    if (def.runtimeOnly) continue;
-    tileByChar[def.char] = id;
+  // --- map characters are PER LEVEL, not per registry --------------------------
+  // A level's map is one character per cell, and its `tiles` legend says what
+  // each character means - which `grid.parseLevel` reads and the registry's
+  // own `char` never enters. The ceiling ("94 printable characters, therefore
+  // 94 tile types, ever") came from this editor alone: it exported the WHOLE
+  // registry as every level's legend, so each type needed a globally unique
+  // character whether the level used it or not.
+  //
+  // So characters are allocated HERE, on demand, to the types a level actually
+  // uses, and the export names only those. A type's registry `char` is a
+  // PREFERRED hint - taken when it is free, which keeps every hand-authored
+  // level byte-identical through a load/export round trip - and a type with no
+  // char, or one whose char is already spoken for, draws the next free one
+  // from the pool. The registry is now unbounded; the real limit is how many
+  // DISTINCT types one level uses, which is the pool size (~90).
+  //
+  // `runtimeOnly` tiles (the fallen twins, POWERS_PLAN M6) are never painted,
+  // so they never draw a character and never reach a legend.
+  const CHAR_POOL = [];
+  for (let c = 33; c < 127; c++) {
+    const ch = String.fromCharCode(c);
+    if (ch === '\\') continue; // escaped inside a JSON map row - the worst one
+    CHAR_POOL.push(ch);
   }
+  // Actor characters are off the table for tiles: a level's two legends share
+  // one map, and parseLevel checks `actors` first, so a tile handed an actor's
+  // character would silently become that actor. This is the collision the
+  // levels lint used to catch by hand-counting.
+  const reservedChars = new Set([PLAYER_CHAR, ' ', ...Object.keys(actorLegend())]);
+  const tileByChar = {};
+  const charByType = {};
+  function charOfType(id) {
+    const hit = charByType[id];
+    if (hit) return hit;
+    const want = TILE_TYPES[id]?.char;
+    const free = (ch) => ch && !reservedChars.has(ch) && !tileByChar[ch];
+    const ch = free(want) ? want : CHAR_POOL.find(free);
+    if (!ch) return charByType.floor; // pool exhausted: paint floor, say so below
+    charByType[id] = ch;
+    tileByChar[ch] = id;
+    return ch;
+  }
+  // Floor first, so its '.' is never handed to anything else - it is the
+  // fallback every unrecognised cell resolves to.
+  charOfType('floor');
   const enemyByChar = {};
   for (const [id, def] of Object.entries(ENEMY_TYPES)) enemyByChar[def.char] = id;
 
@@ -281,6 +316,11 @@ export function startEditor(app, levelData, stashKey) {
     for (const [ch, val] of Object.entries(data.actors || {})) {
       if (parseActorRef(val).level != null) tierChars.set(ch, val);
     }
+    // A tiered placement's character is whatever the source file chose, not a
+    // registry character, so the allocator cannot know it is taken - and a
+    // tile handed it would be read as that enemy by parseLevel, which checks
+    // actors first. Reserve them before any cell of this level allocates.
+    for (const ch of tierChars.keys()) reservedChars.add(ch);
     const canonical = (ch) => {
       if (ch === ' ') return ' ';
       const actor = (data.actors || {})[ch];
@@ -292,10 +332,10 @@ export function startEditor(app, levelData, stashKey) {
       // deleted the recruitable coworkers from it, silently, in the one tool
       // the docs point you at for editing levels. Both shipped floors place a
       // companion, so both lost one.
-      if (actor) return actorChar(actor) ?? TILE_TYPES.floor.char;
+      if (actor) return actorChar(actor) ?? charOfType('floor');
       const raw = (data.tiles || {})[ch] || 'floor';
       const type = TYPE_ALIASES[raw] || raw;
-      return TILE_TYPES[type]?.char ?? TILE_TYPES.floor.char;
+      return TILE_TYPES[type] ? charOfType(type) : charOfType('floor');
     };
     rows = data.map.map((r) => {
       const a = r.split('').map(canonical);
@@ -322,7 +362,7 @@ export function startEditor(app, levelData, stashKey) {
   function charForBrush() {
     if (brush === 'player') return PLAYER_CHAR;
     if (brush.startsWith('enemy:')) return ENEMY_TYPES[brush.slice(6)].char;
-    return TILE_TYPES[brush].char;
+    return charOfType(brush);
   }
 
   function paint(tile, ch = charForBrush()) {
@@ -334,7 +374,7 @@ export function startEditor(app, levelData, stashKey) {
     if (ch === PLAYER_CHAR) {
       for (let zz = 0; zz < height; zz++) {
         const xx = rows[zz].indexOf(PLAYER_CHAR);
-        if (xx !== -1) { rows[zz][xx] = TILE_TYPES.floor.char; renderCell(xx, zz); }
+        if (xx !== -1) { rows[zz][xx] = charOfType('floor'); renderCell(xx, zz); }
       }
     }
     rows[z][x] = ch;
@@ -361,10 +401,10 @@ export function startEditor(app, levelData, stashKey) {
     const nw = Math.min(MAX_SIZE, Math.max(MIN_SIZE, width + dw));
     const nh = Math.min(MAX_SIZE, Math.max(MIN_SIZE, height + dh));
     if (nw === width && nh === height) return;
-    while (rows.length < nh) rows.push(new Array(width).fill(TILE_TYPES.floor.char));
+    while (rows.length < nh) rows.push(new Array(width).fill(charOfType('floor')));
     while (rows.length > nh) rows.pop();
     for (const row of rows) {
-      while (row.length < nw) row.push(TILE_TYPES.floor.char);
+      while (row.length < nw) row.push(charOfType('floor'));
       while (row.length > nw) row.pop();
     }
     width = nw;
@@ -391,15 +431,21 @@ export function startEditor(app, levelData, stashKey) {
     onLeftClickTile: (t, g) => (brush === 'partition' || brush === 'door' ? paintEdge(nearestEdge(g), true) : paint(t)),
     onLeftDragTile: (t, g) => (brush === 'partition' || brush === 'door' ? paintEdge(nearestEdge(g), true) : paint(t)),
     onRightClickTile: (t, sx, sy, g) =>
-      (brush === 'partition' || brush === 'door' ? paintEdge(nearestEdge(g), false) : paint(t, TILE_TYPES.floor.char)),
+      (brush === 'partition' || brush === 'door' ? paintEdge(nearestEdge(g), false) : paint(t, charOfType('floor'))),
   });
 
   // --- level JSON in/out -----------------------------------------------------------
   function toJson() {
+    // ONLY the types this level actually uses (see the allocator above). The
+    // export used to name the whole registry, which is what made a character
+    // a scarce global resource instead of a per-level one. Walked in registry
+    // order rather than paint order so two exports of the same level agree.
+    const used = new Set(['floor']); // actor cells parse as floor beneath them
+    for (const r of rows) for (const ch of r) if (tileByChar[ch]) used.add(tileByChar[ch]);
     const tiles = {};
     for (const [id, def] of Object.entries(TILE_TYPES)) {
-      if (def.runtimeOnly) continue; // never painted, never exported
-      tiles[def.char] = id;
+      if (def.runtimeOnly || !used.has(id)) continue; // never painted, never exported
+      tiles[charByType[id]] = id;
     }
     // Every actor registry, so a companion that survived the load also
     // survives the export - a map char with no legend entry parses as floor,
@@ -494,7 +540,9 @@ export function startEditor(app, levelData, stashKey) {
     for (const id of byCategory.get(cat)) {
       const def = TILE_TYPES[id];
       const b = btn('brush-' + id, def.label || id.replace(/-/g, ' '), row);
-      b.title = `${def.label || id}  (map char "${def.char}")`;
+      b.title = def.char
+        ? `${def.label || id}  (map char "${def.char}" when free)`
+        : `${def.label || id}  (map char assigned when painted)`;
       b.onclick = () => selectBrush(id, b);
       brushButtons.push(b);
       if (id === brush) b.style.borderColor = '#8adf76';
