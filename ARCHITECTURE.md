@@ -36,6 +36,9 @@ src/
                        that says what they LOOK like (colour, landing burst,
                        live aura)
   grid.js            Level parsing, terrain + edge-wall queries (pure logic)
+  floors.js          Layered levels: storeys as stacked flat maps, generated
+                     stair runs, the active-storey grid facade, cross-storey
+                     route planning (pure logic; EDITOR_PLAN spike)
   occlusion.js       Which walls stand between camera and character (pure logic)
   pathfinding.js     8-dir Dijkstra, string-pulling smoother, free-point
                      clamping, distance-budget truncation      (pure logic)

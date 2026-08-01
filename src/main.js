@@ -14,6 +14,7 @@ import { ITEMS } from './data/items.js';
 import { CLASSES } from './data/classes.js';
 import { ACTIONS, arrivalLine } from './data/actions.js';
 import { parseLevel } from './grid.js';
+import { parseFloors, layeredGrid, planCrossLayerRoute } from './floors.js';
 import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, routeToFiringPosition, DIRS8 } from './pathfinding.js';
 import {
   createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, grantTalent, classTrack,
@@ -32,7 +33,7 @@ import { PARTITION_TOPPLE, blocksSight } from './data/tiles.js';
 import { shieldedFaces } from './tactics.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
-import { createApp, buildLevel } from './scene.js';
+import { createApp, buildLevel, buildLayeredLevel } from './scene.js';
 import { placeModel, applyCharacterProportions, cloneMaterials, tintMaterials } from './models.js';
 import { createPortraits } from './portraits.js';
 import {
@@ -105,10 +106,27 @@ try {
   }
 } catch { /* localStorage itself is unavailable (private mode, blocked) */ }
 
+// Dev express lane: ?level=<id> boots any registered level standalone - no
+// campaign restore, no progress writes (the same posture as an editor
+// playtest). How the layered feasibility level is reached.
+try {
+  const forced = new URLSearchParams(location.search).get('level');
+  if (forced && LEVELS[forced]) {
+    activeLevel = LEVELS[forced];
+    activeLevelId = forced;
+    playtesting = true;
+    restoredProgress = null;
+  }
+} catch { /* no URL machinery - keep whatever resolved above */ }
+
 const clearProgress = () => localStorage.removeItem(PROGRESS_KEY);
 
 if (location.hash.includes('editor')) {
-  startEditor(app, activeLevel, STASH_KEY);
+  // The editor speaks single-storey levels; hand it the ground storey of a
+  // layered one rather than crashing on level.layers.
+  startEditor(app, activeLevel.layers
+    ? { ...activeLevel, ...activeLevel.layers[0], layers: undefined }
+    : activeLevel, STASH_KEY);
 } else {
   startGame(activeLevel);
 }
@@ -116,12 +134,17 @@ app.start();
 
 // ---------------------------------------------------------------------------------
 function startGame(level) {
-  const grid = parseLevel(level);
+  // Layered level (EDITOR_PLAN feasibility spike): parse every storey and
+  // answer the game's grid questions from the storey the leader is on. Flat
+  // levels keep the single parse they always had.
+  const floors = level.layers ? parseFloors(level) : null;
+  let playerLayer = 0; // which storey the leader is on
+  const grid = floors ? layeredGrid(floors, level, () => playerLayer) : parseLevel(level);
   // Object picking: a click/hover resolves to the interactable ENTITY under
   // the cursor (door, enemy, NPC, prop), not just the floor tile behind it.
   // Built before the scene so doors/props can register as they're created.
   const picking = createPicker();
-  const scene = buildLevel(app, grid, { picking });
+  const scene = floors ? buildLayeredLevel(app, floors, { picking }) : buildLevel(app, grid, { picking });
   const { walls, updateWallFade, animateSurfaces, floorHeight } = scene;
   // Fire and its consequences live in the surface runtime; handleExplosion is
   // hoisted from below.
@@ -188,6 +211,10 @@ function startGame(level) {
   let combat = null; // active tactical-combat controller
   let gameOver = false;
   let lastPath = null; // kept for debugging/tests
+  // Cross-storey walking (layered levels): queued route legs, and the climb
+  // currently riding the stairs if any. Inert on flat levels.
+  const legQueue = [];
+  let climbAnim = null;
   let pendingAction = null; // walk-up interaction, runs on arrival
   let armedOoc = null; // hotbar action armed OUT of combat (a coworker, or a spot)
   // The leader's out-of-combat crouch (TACTICS_PLAN M6 OOC): { x, z, edges,
@@ -875,6 +902,7 @@ function startGame(level) {
   // the leader changes hands. `quiet` skips the line for handoffs where the
   // crouch is being consumed rather than abandoned.
   function clearOocCrouch(quiet = false) {
+    legQueue.length = 0; // a deliberate walk abandons any queued storey route
     if (!oocCrouch) return;
     oocCrouch = null;
     removeStatus(sheet, 'covered');
@@ -890,7 +918,7 @@ function startGame(level) {
   // The arrival check reads the logical tile, and a clamped point always
   // rounds back to its own tile, so `exact` still means exact.
   function walkToExact(x, z, run, end = null) {
-    if (!sheet || inCombat || gameOver) return false;
+    if (!sheet || inCombat || gameOver || climbAnim) return false;
     clearOocCrouch();
     if (player.x === x && player.z === z) { run(); return true; }
     const p = findPath(isWalkable, player.x, player.z, x, z, hazardCost, grid.stepOpen);
@@ -905,7 +933,7 @@ function startGame(level) {
 
   // Walk within reach of (x, z), then run the interaction.
   function approachAndDo(x, z, run) {
-    if (!sheet || inCombat || gameOver) return;
+    if (!sheet || inCombat || gameOver || climbAnim) return;
     clearOocCrouch();
     if (Math.abs(player.x - x) <= 1 && Math.abs(player.z - z) <= 1) {
       run();
@@ -932,7 +960,7 @@ function startGame(level) {
   // centre: route on the grid, then swap the final waypoint for the clamped
   // click point. A click inside the current tile just shuffles over.
   function moveTo(tile, point = null) {
-    if (!tile || !sheet || inCombat || gameOver || !isWalkable(tile.x, tile.z)) return;
+    if (!tile || !sheet || inCombat || gameOver || climbAnim || !isWalkable(tile.x, tile.z)) return;
     clearOocCrouch(); // a deliberate walk is the one thing a crouch never survives
     pendingAction = null;
     if (point && tile.x === player.x && tile.z === player.z && player.entity) {
@@ -949,6 +977,94 @@ function startGame(level) {
       const s = smoothFromBody(p);
       player.setPath(s);
       lastPath = s;
+    }
+  }
+
+  // --- layered-storey walking (EDITOR_PLAN feasibility spike) ---------------
+  // Click resolution against the visible storeys, cross-storey routing, and
+  // the scripted stair climb. All of it is inert on flat levels.
+  const walkableOn = (l) => (x, z) =>
+    floors.layers[l].terrainOpen(x, z)
+    // Bodies live on the ground storey only for now (parseFloors refuses
+    // actors above it), so a mezzanine tile can't be blocked by a coworker
+    // standing UNDER it.
+    && (l !== 0 || (!enemyAt(x, z) && !npcAt(x, z)));
+  // Screen point -> the topmost VISIBLE storey with real floor under the
+  // pixel. Scanning top-down is what makes "you click what you see" true:
+  // a cutaway-hidden storey never eats a click aimed at the floor below it,
+  // and open air over the atrium falls through to the lobby floor.
+  function layeredPick(sx, sy) {
+    const cam = controls.cameraEntity.camera;
+    const near = new pc.Vec3();
+    const far = new pc.Vec3();
+    cam.screenToWorld(sx, sy, cam.nearClip, near);
+    cam.screenToWorld(sx, sy, cam.farClip, far);
+    const dir = far.sub(near);
+    if (Math.abs(dir.y) < 1e-6) return null;
+    for (let l = floors.layers.length - 1; l >= 0; l--) {
+      if (!scene.layerVisible(l)) continue;
+      const t = (floors.baseY[l] - near.y) / dir.y;
+      if (t < 0) continue;
+      const px = near.x + dir.x * t;
+      const pz = near.z + dir.z * t;
+      const tx = Math.round(px);
+      const tz = Math.round(pz);
+      const g = floors.layers[l];
+      if (tx < 0 || tx >= g.width || tz < 0 || tz >= g.height) continue;
+      if (g.typeAt(tx, tz) === null) continue; // open air - the storey below owns this pixel
+      return { tile: { x: tx, z: tz }, point: { x: px, z: pz }, layer: l, stair: floors.stairAt(l, tx, tz) };
+    }
+    return null;
+  }
+  // Send the leader to a tile on another storey: within-storey walks chained
+  // through stair climbs, planned as one route so the click either commits
+  // to a whole path or honestly refuses.
+  function walkToLayer(tile, point, layer) {
+    if (!sheet || inCombat || gameOver || climbAnim) return;
+    clearOocCrouch(); // also clears any queued legs
+    pendingAction = null;
+    const route = planCrossLayerRoute(floors,
+      { x: player.x, z: player.z, layer: playerLayer },
+      { x: tile.x, z: tile.z, layer },
+      walkableOn,
+      // Surface-hazard avoidance is the leader's cost model on their own
+      // storey; other storeys route on distance alone for now.
+      (l) => (l === playerLayer ? hazardCost : null));
+    if (!route) { ui.say('No way to get there from here.'); return; }
+    const last = route.legs[route.legs.length - 1];
+    if (point && last.kind === 'walk' && last.path.length > 1) {
+      const g = floors.layers[last.layer];
+      last.path[last.path.length - 1] = clampToClearance(g.terrainOpen, g.edgeOpen, point.x, point.z);
+    }
+    legQueue.push(...route.legs);
+    startNextLeg();
+  }
+  // A click on a stair run means "take the stairs": up from its own storey,
+  // back down from the one above.
+  function routeViaStair(stair) {
+    if (playerLayer === stair.upper) walkToLayer({ x: stair.entry.x, z: stair.entry.z }, null, stair.layer);
+    else walkToLayer({ x: stair.top.x, z: stair.top.z }, null, stair.upper);
+  }
+  function startNextLeg() {
+    const leg = legQueue.shift();
+    if (!leg) return;
+    if (leg.kind === 'walk') {
+      if (leg.path.length < 2) { startNextLeg(); return; }
+      const g = floors.layers[leg.layer];
+      const smoothed = smoothPath(walkableOn(leg.layer), leg.path, g.edgeOpen);
+      const pos = player.entity?.getPosition();
+      if (pos) smoothed[0] = [pos.x, pos.z];
+      player.setPath(smoothed);
+      lastPath = smoothed;
+    } else {
+      // The scripted climb: walk the straight line entry -> landing while the
+      // update loop rides the body's height up the flight. The flat first
+      // half-tile is the approach to the bottom step; the last is the landing.
+      climbAnim = {
+        sx: leg.from.x, sz: leg.from.z, run: leg.run, toLayer: leg.to.layer,
+        y0: floors.baseY[leg.from.layer] + lift, y1: floors.baseY[leg.to.layer] + lift,
+      };
+      player.setPath([[leg.from.x, leg.from.z], [leg.to.x, leg.to.z]]);
     }
   }
 
@@ -2575,6 +2691,19 @@ function startGame(level) {
         return;
       }
       if (modalOpen()) return; // talking: clicks belong to the panel
+      // Layered storeys: a click means what the eye sees - resolve it against
+      // the visible storeys top-down. A stair run routes a climb, another
+      // storey routes a cross-storey walk, and a same-storey hit simply
+      // becomes the tile/point every verb below already reads.
+      if (floors) {
+        if (climbAnim) return; // the flight finishes before the next order
+        const res = layeredPick(sx, sy);
+        if (!res) return;
+        if (res.stair) { routeViaStair(res.stair); return; }
+        if (res.layer !== playerLayer) { walkToLayer(res.tile, res.point, res.layer); return; }
+        tile = res.tile;
+        point = res.point;
+      }
       // An armed SUMMON aims at the floor, so while it is armed the world is a
       // placement grid and nothing else: the click posts the role where you
       // pointed rather than walking there, rummaging the desk behind the point,
@@ -2683,6 +2812,12 @@ function startGame(level) {
         return;
       }
       if (!sheet || gameOver || modalOpen()) { hover.clear(); oocAim = null; return; }
+      // Layered: the hover point follows the same top-down storey pick as the
+      // click, so the banner and the drop rings describe what the eye is on.
+      if (floors) {
+        const res = layeredPick(sx, sy);
+        if (res) point = res.point;
+      }
       // The ground point is remembered, not just consumed: an armed summon
       // draws its drop rings every frame (immediate-mode lines last one), and
       // hover events only arrive when the mouse actually moves.
@@ -2735,6 +2870,16 @@ function startGame(level) {
         return;
       }
       if (modalOpen()) return;
+      // Layered: the menu describes the storey you are ON - a right-click
+      // aimed at another storey stays silent rather than offering verbs the
+      // walk rules would then refuse.
+      if (floors) {
+        if (climbAnim) return;
+        const res = layeredPick(sx, sy);
+        if (!res || res.layer !== playerLayer) return;
+        tile = res.tile;
+        point = res.point;
+      }
       const hit = picking.pick(controls.cameraEntity, sx, sy);
       if (hit && hit.kind === 'npc') {
         ui.showMenu(sx, sy, [
@@ -3265,6 +3410,32 @@ function startGame(level) {
     } else {
       player.update(dt); // idling on the spawn tile behind the class picker
     }
+    // Layered levels: ride the climb (the body's height follows its progress
+    // up the flight), chain the next queued route leg when one lands, and
+    // keep the cutaway honest about which storeys cover the leader.
+    if (floors) {
+      if (climbAnim && player.entity) {
+        const pos = player.entity.getPosition();
+        const d = Math.hypot(pos.x - climbAnim.sx, pos.z - climbAnim.sz);
+        const k = Math.min(1, Math.max(0, (d - 0.5) / climbAnim.run));
+        player.entity.setPosition(pos.x, climbAnim.y0 + (climbAnim.y1 - climbAnim.y0) * k, pos.z);
+        if (!player.moving) {
+          playerLayer = climbAnim.toLayer;
+          player.entity.setPosition(pos.x, climbAnim.y1, pos.z);
+          // The rig now frames the storey the leader stands on.
+          controls.setView({ focusY: floors.baseY[playerLayer] + 0.3 });
+          climbAnim = null;
+        }
+      }
+      if (!climbAnim && legQueue.length && !player.moving && !inCombat) startNextLeg();
+      scene.updateCutaway(playerLayer, (l) => {
+        // In-bounds check first: typeAt reads 'wall' outside the map, and a
+        // smaller upper storey must not count as covering the whole ground.
+        const g = floors.layers[l];
+        return player.x >= 0 && player.x < g.width && player.z >= 0 && player.z < g.height
+          && g.typeAt(player.x, player.z) !== null;
+      });
+    }
     const world = {
       paused: inCombat || gameOver,
       isWalkable,
@@ -3572,11 +3743,15 @@ function startGame(level) {
     // a test that hardcodes 6 breaks on every balance pass for no reason.
     get classes() { return CLASSES; },
     get playerTile() { return { x: player.x, z: player.z }; },
+    // Layered levels (feasibility spike): which storey the leader is on, and
+    // each storey's base height - what lets a spec project a mezzanine tile.
+    get playerLayer() { return playerLayer; },
+    get layerBaseY() { return floors ? floors.baseY : [0]; },
     // Is the leader mid-walk? The suite's honest alternative to sleeping: a
     // spec that wants "and then nothing happens" can poll for stillness rather
     // than guess a duration, which under software GL is reliably either too
     // short or wasteful on different runs.
-    get playerMoving() { return !!player?.moving; },
+    get playerMoving() { return !!player?.moving || legQueue.length > 0 || !!climbAnim; },
     get playerPos() {
       const p = player.entity?.getPosition();
       return p ? { x: p.x, z: p.z } : { x: player.x, z: player.z };

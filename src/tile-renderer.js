@@ -11,7 +11,11 @@ import { burst } from './fx.js';
 
 const pc = window.pc;
 
-export function createTileRenderer(app) {
+// `root` (default app.root) parents everything drawn, so a layered level can
+// show/hide a whole storey by toggling one entity; `baseY` lifts every world
+// Y by the storey's base height. Flat levels pass neither and are untouched.
+export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
+  const parent = root || app.root;
   const floorDef = TILE_TYPES.floor;
   const surfaceTop = floorDef.height / 2 + 0.02;
 
@@ -64,8 +68,8 @@ export function createTileRenderer(app) {
     const e = new pc.Entity();
     e.addComponent('render', { type: 'box', material });
     e.setLocalScale(sx, sy, sz);
-    e.setPosition(x, y, z);
-    app.root.addChild(e);
+    e.setPosition(x, y + baseY, z);
+    parent.addChild(e);
     return e;
   };
 
@@ -201,8 +205,8 @@ export function createTileRenderer(app) {
     if (ring) addPoolLayer(holder, ring, ringMats[surfId], -0.01);
     const liquid = poolPatchGeometry(x, z, sources, POOL_ISO_LIQUID);
     if (liquid) addPoolLayer(holder, liquid, electrified ? electricMat : surfaceMats[surfId], 0);
-    holder.setPosition(x, surfaceTop, z);
-    app.root.addChild(holder);
+    holder.setPosition(x, surfaceTop + baseY, z);
+    parent.addChild(holder);
     return holder;
   }
   // A trodden gum wad: small pink blobs, mine-sized - easy to not notice.
@@ -217,8 +221,8 @@ export function createTileRenderer(app) {
       holder.addChild(b);
     }
     holder.setEulerAngles(0, ((x * 47 + z * 113) % 8) * 45, 0);
-    holder.setPosition(x, surfaceTop, z);
-    app.root.addChild(holder);
+    holder.setPosition(x, surfaceTop + baseY, z);
+    parent.addChild(holder);
     return holder;
   }
 
@@ -245,8 +249,8 @@ export function createTileRenderer(app) {
       e.setLocalEulerAngles(0, ry, 0);
       holder.addChild(e);
     }
-    holder.setPosition(x, surfaceTop, z);
-    app.root.addChild(holder);
+    holder.setPosition(x, surfaceTop + baseY, z);
+    parent.addChild(holder);
     return holder;
   }
   // A frayed power strip: dark bar plus a glowing live end.
@@ -262,8 +266,8 @@ export function createTileRenderer(app) {
     tip.setLocalPosition(0.38, 0.01, 0);
     holder.addChild(tip);
     holder.setEulerAngles(0, ((x * 53 + z * 97) % 4) * 45 + 20, 0);
-    holder.setPosition(x, surfaceTop, z);
-    app.root.addChild(holder);
+    holder.setPosition(x, surfaceTop + baseY, z);
+    parent.addChild(holder);
     return holder;
   }
   function addTrash(x, z) {
@@ -278,8 +282,8 @@ export function createTileRenderer(app) {
     rim.setLocalScale(0.5, 0.05, 0.5);
     rim.setLocalPosition(0, 0.5, 0);
     holder.addChild(rim);
-    holder.setPosition(x, floorDef.height / 2, z);
-    app.root.addChild(holder);
+    holder.setPosition(x, floorDef.height / 2 + baseY, z);
+    parent.addChild(holder);
     return holder;
   }
   function addPrinter(x, z) {
@@ -300,13 +304,32 @@ export function createTileRenderer(app) {
     light.setLocalPosition(0.24, 0.34, 0.27);
     holder.addChild(light);
     holder.setEulerAngles(0, ((x * 37 + z * 71) % 4) * 90, 0);
-    holder.setPosition(x, floorDef.height / 2, z);
-    app.root.addChild(holder);
+    holder.setPosition(x, floorDef.height / 2 + baseY, z);
+    parent.addChild(holder);
     return holder;
   }
 
   function renderFloor(x, z, type = 'floor') {
     return addBox(floorMatsFor(type)[(x * 31 + z * 17) % 3], x, 0, z, 1, floorDef.height, 1);
+  }
+
+  // One cell's slice of a generated staircase (layered levels): solid steps
+  // rising through this tile's share of the climb toward (dx, dz). `idx` of
+  // `run` places the slice within the whole flight, so a 3-cell run reads as
+  // one continuous stair from its entry's floor to the landing's. Solid
+  // boxes from the ground up - a flight you can't see under, like poured
+  // concrete, which also hides the joint where it meets the upper slab.
+  const STAIR_STEPS = 4;
+  function renderStair(x, z, dx, dz, rise, idx = 0, run = 1) {
+    const out = [];
+    for (let s = 0; s < STAIR_STEPS; s++) {
+      const frac = (idx * STAIR_STEPS + s + 1) / (run * STAIR_STEPS);
+      const top = floorDef.height / 2 + rise * frac;
+      const along = -0.5 + (s + 0.5) / STAIR_STEPS;
+      out.push(addBox(tileMats.stairway, x + dx * along, top / 2, z + dz * along,
+        dx ? 1 / STAIR_STEPS + 0.02 : 0.98, top, dz ? 1 / STAIR_STEPS + 0.02 : 0.98));
+    }
+    return out;
   }
 
   // Edge walls: thin partitions BETWEEN tiles (see grid.js). 'h' sits on the
@@ -319,12 +342,12 @@ export function createTileRenderer(app) {
     e.addComponent('render', { type: 'box', material: tileMats.wall });
     if (orient === 'h') {
       e.setLocalScale(1 + EDGE_THICK, EDGE_HEIGHT, EDGE_THICK);
-      e.setPosition(x, EDGE_HEIGHT / 2, z - 0.5);
+      e.setPosition(x, EDGE_HEIGHT / 2 + baseY, z - 0.5);
     } else {
       e.setLocalScale(EDGE_THICK, EDGE_HEIGHT, 1 + EDGE_THICK);
-      e.setPosition(x - 0.5, EDGE_HEIGHT / 2, z);
+      e.setPosition(x - 0.5, EDGE_HEIGHT / 2 + baseY, z);
     }
-    app.root.addChild(e);
+    parent.addChild(e);
     return e;
   }
 
@@ -349,13 +372,13 @@ export function createTileRenderer(app) {
     holder.addChild(knob);
     // Hinge at the west/north end of the edge; open swings into the room.
     if (orient === 'h') {
-      holder.setPosition(x - 0.5, 0, z - 0.5);
+      holder.setPosition(x - 0.5, baseY, z - 0.5);
       holder.setEulerAngles(0, open ? 100 : 0, 0);
     } else {
-      holder.setPosition(x - 0.5, 0, z - 0.5);
+      holder.setPosition(x - 0.5, baseY, z - 0.5);
       holder.setEulerAngles(0, open ? -10 : -90, 0);
     }
-    app.root.addChild(holder);
+    parent.addChild(holder);
     return { holder, panel };
   }
 
@@ -370,7 +393,10 @@ export function createTileRenderer(app) {
     if (def.carpet) return { kind: 'none', entities: [] };
     if (def.model) {
       placeModel(app, `assets/${def.model}.glb`, x, z, {
-        scale: def.scale || 1, rotY: def.rotY || 0, lift: floorDef.height / 2,
+        // Models parent to app.root inside placeModel, so they sit outside a
+        // storey's show/hide root - keep model props off upper storeys until
+        // the layered builder owns their parenting.
+        scale: def.scale || 1, rotY: def.rotY || 0, lift: floorDef.height / 2 + baseY,
         // A toppled prop lies over (POWERS_PLAN M6). Data, so a new fallen
         // twin is a registry entry rather than a renderer change.
         tiltX: def.tiltX || 0, tiltZ: def.tiltZ || 0,
@@ -425,7 +451,7 @@ export function createTileRenderer(app) {
     if (exitClock < EXIT_INTERVAL) return;
     exitClock = 0;
     for (const e of exits) {
-      burst(app, { x: e.x, y: floorDef.height / 2 + 0.1, z: e.z }, {
+      burst(app, { x: e.x, y: floorDef.height / 2 + 0.1 + baseY, z: e.z }, {
         count: 1, color: [1, 0.85, 0.35], speed: 0.16, up: 0.9, upVar: 0.3,
         size: 0.09, life: 1.7, lifeVar: 0.2, gravity: 0, drag: 0.2,
         jitter: 0.34, floor: false,
@@ -452,8 +478,8 @@ export function createTileRenderer(app) {
     inner.setLocalScale(0.26, 0.42, 0.26);
     inner.setLocalPosition(0.04, 0.24, 0.03);
     holder.addChild(inner);
-    holder.setPosition(x, floorDef.height / 2 + lift, z);
-    app.root.addChild(holder);
+    holder.setPosition(x, floorDef.height / 2 + lift + baseY, z);
+    parent.addChild(holder);
     flames.push({ x, z, lift, holder });
     return holder;
   }
@@ -475,8 +501,8 @@ export function createTileRenderer(app) {
       holder.addChild(p);
       puffs.push({ e: p, baseY: oy, phase: x * 12.9 + z * 7.7 + puffs.length * 2.1 });
     }
-    holder.setPosition(x, floorDef.height / 2, z);
-    app.root.addChild(holder);
+    holder.setPosition(x, floorDef.height / 2 + baseY, z);
+    parent.addChild(holder);
     smokeVisuals.set(k, { holder, puffs });
     return holder;
   }
@@ -498,7 +524,7 @@ export function createTileRenderer(app) {
     for (let i = flames.length - 1; i >= 0; i--) {
       const f = flames[i];
       if (!f.holder.parent) { flames.splice(i, 1); continue; }
-      const y = floorDef.height / 2 + f.lift + 0.35;
+      const y = floorDef.height / 2 + f.lift + 0.35 + baseY;
       burst(app, { x: f.x, y, z: f.z }, {
         count: 1, color: [1, 0.6, 0.18], speed: 0.35, up: 1.5, upVar: 0.5,
         size: 0.09, life: 1, lifeVar: 0.3, gravity: 0.9, drag: 1.1,
@@ -518,9 +544,9 @@ export function createTileRenderer(app) {
   function explosionFlash(x, z) {
     const e = new pc.Entity();
     e.addComponent('render', { type: 'sphere', material: fireCore });
-    e.setPosition(x, 0.5, z);
-    app.root.addChild(e);
-    burst(app, { x, y: 0.5, z }, {
+    e.setPosition(x, 0.5 + baseY, z);
+    parent.addChild(e);
+    burst(app, { x, y: 0.5 + baseY, z }, {
       count: 10, color: [1, 0.7, 0.25], speed: 5.5, up: 2.4, size: 0.14,
       life: 0.45, gravity: -7, drag: 0.8,
     });
@@ -556,7 +582,7 @@ export function createTileRenderer(app) {
   }
 
   return {
-    renderFloor, renderMarker, renderEdgeWall, renderDoor, addFlame, explosionFlash, animate,
+    renderFloor, renderMarker, renderEdgeWall, renderDoor, renderStair, addFlame, explosionFlash, animate,
     addExitBeacon,
     addSmoke, removeSmoke,
     tileMats, wallGhost, doorMat, doorGhost, floorHeight: floorDef.height,

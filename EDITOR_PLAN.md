@@ -11,10 +11,11 @@ anything like that" `[stated]` (2026-08-01). No code yet — this is the plan.
 
 ## Questions for the designer
 
-Asked in-session on 2026-08-01. **Q1 is answered in direction**: the designer
-proposed the layer-stack model this plan is now built around (see Q1's entry —
-one explicit go still flips it to ratified). Q2 and Q3 remain open and the
-plan proceeds on the recommended defaults, tagged `[proposed]`.
+Asked in-session on 2026-08-01. **Q1 is closed**: the designer proposed the
+layer-stack model, directed a feasibility spike ahead of milestone work, and
+approved the built result ("this looks great!", 2026-08-01) — see the spike
+section. Q2 and Q3 remain open and the plan proceeds on the recommended
+defaults, tagged `[proposed]`.
 
 **Q1 — What does "multifloor in a single level" mean mechanically?** The
 stated scene is "a lobby with a lot of height, multifloor in what is really a
@@ -32,11 +33,11 @@ conduction, within-floor movement) run per layer unchanged. Walk-under —
 standing beneath the mezzanine — comes free, which the original per-tile
 elevation recommendation structurally could not do. The honest remaining
 cost is exactly where the designer pointed: cross-layer LOS and the camera
-(M2/M3). One trade to confirm with the go: layers are **full storeys** — no
+(M2/M3). One trade accepted with the model: layers are **full storeys** — no
 half-height daises, loading-dock steps, or ramps; if a sub-storey space ever
-matters, that is a new question, not a silent extension. Status: model
-`[proposed]` awaiting the explicit go; the quote above is the source it
-ratifies against.
+matters, that is a new question, not a silent extension. Status: `[ratified]`
+— proposed by the designer, embodied by the spike, approved on sight
+("this looks great!", 2026-08-01); decisions 4 and 6 carry the tags.
 
 **Q2 — Do different heights change combat math, or only geometry?**
 
@@ -77,9 +78,9 @@ work), cutting stamps first if the round needs to shrink.
 | 1 | The in-repo editor is the authoring tool; no external editor or importer | `[stated]` | designer, 2026-08-01: "i dont mind using ours if its easiest" after the PlayCanvas/Tiled comparison |
 | 2 | Levels stay grid + legend + ASCII + edge runs; no freeform geometry | `[stated]` | designer, 2026-08-01: "we dont need full flexibility… no organic curves" |
 | 3 | Verticality is required: tall single-level spaces with multifloor play | `[stated]` | designer, 2026-08-01: "a lobby with a lot of height, multifloor in what is really a single 'floor' level" |
-| 4 | Verticality model: stacked full-storey layers, each authored as an ordinary flat map, with one height setting per layer | `[proposed]` | designer-proposed, 2026-08-01: "full floors with one layer/height setting"; flips to ratified on the explicit go (Q1) |
+| 4 | Verticality model: stacked full-storey layers, each authored as an ordinary flat map, with one height setting per layer | `[ratified]` | designer-proposed 2026-08-01 ("full floors with one layer/height setting"), embodied by the spike, approved on sight ("this looks great!", 2026-08-01) |
 | 5 | Format: optional `"layers"` array, one entry per floor, bottom-up; a level without it is a single ground layer | `[proposed]` | every shipped level stays valid unchanged; see format section |
-| 6 | Stairs: one marker tile on the lower layer; the staircase — ramp geometry, the carved opening above, the connection — is generated | `[proposed]` | designer-proposed, 2026-08-01: "a procedurally generated staircase tile/space on each layer" |
+| 6 | Stairs: a marker run on the lower layer; the staircase — geometry, orientation, the connection — is generated, and the opening above is validated loudly rather than carved silently | `[ratified]` | designer-proposed 2026-08-01 ("a procedurally generated staircase tile/space on each layer"); shipped in the spike and approved with it |
 | 7 | Movement: within a layer as today; between layers only via stair portals; no hop/fall/jump in v1 | `[proposed]` | cheap reversible default; shoving someone off the balcony is a tempting later verb, not v1 |
 | 8 | Cross-layer combat is LOS + reach only; no high/low-ground stat modifier | `[proposed]` | Q2; keeps the `[stated]` "tactics stay as shipped" record intact (TODO.md) |
 | 9 | Editor QoL for v1: undo/redo, region stamps, actor brushes, save-to-disk | `[proposed]` | Q3; gap list itself confirmed by designer 2026-08-01 |
@@ -139,10 +140,48 @@ so the camera cuts away: layers above the active character's floor hide
 against the active layer with an explicit flip when selecting a unit on
 another floor.
 
+## The feasibility spike (landed 2026-08-01)
+
+Directed by the designer before any milestone work: "before doing the full
+editor i recommend we have one created by you just so we can tweak the look
+and ensure its even really doable as weve figured it, skips the easier part
+of combat changes, but at least we know some feasibility" `[stated]`
+(2026-08-01). Built and playable at `?level=spike-lobby` (with `#class=<id>`
+to skip the desk): a hand-authored two-storey atrium lobby - tall ground
+storey (height 2.6), mezzanine band with a walk-under office row beneath it,
+one generated 3-cell stair flight, railings as ordinary layer-1 partitions.
+
+What shipped: `src/floors.js` (storey parsing, stair-run generation with
+loud validation, the active-storey grid facade, cross-storey route
+planning - all pure, unit-tested), `baseY`/`root` threading through the
+tile renderer and scene builder, the covers-based cutaway, top-down layered
+click resolution, and the scripted climb in main.js. `stairway` is a tile
+type (`X`), so the flight is one marker run in the map. Flat levels take
+none of it: 654 unit tests plus the smoke/movement/camera e2e specs pass
+untouched, and every shipped level parses bit-identically.
+
+What the spike settled: the layer model IS doable as figured - per-storey
+parseLevel reuse held up exactly as predicted, walk-under works, the tall
+lobby reads. Two lessons worth carrying into M2: model props (.glb) parent
+outside the storey roots, so upper storeys are primitives-only until the
+layered builder owns model parenting; and the cutaway's covering test needs
+explicit bounds (out-of-map reads as 'wall', which silently hid a smaller
+upper storey everywhere). Deliberately NOT in the spike, per the directive:
+combat/LOS across storeys (M3), actors above ground (parseFloors refuses
+them loudly), doors/props on upper storeys, the editor (M4).
+
+Look-tweak dials for the designer, all cheap: `STOREY_H` and per-layer
+`height` (floors.js / level JSON), stair steps-per-cell and materials
+(tile-renderer.js `renderStair`), railing height (the partition
+`EDGE_HEIGHT`), slab edge trim (none yet - the bare mezzanine lip is the
+most visible missing polish), and the cutaway rule itself (scene.js
+`updateCutaway`).
+
 ## Milestones
 
 Each lands green (unit + e2e) before the next starts. M0 is independent of
-everything and can ship while the Q1 go and Q2/Q3 are pending.
+everything and can ship while the Q1 go and Q2/Q3 are pending. The spike
+above pre-paid parts of M1/M2: what remains in them is listed as deltas.
 
 - **M0 — Editor quality of life** (`src/editor.js`, `serve.mjs`, `build.mjs`).
   Undo/redo (snapshot history of rows + edge sets; trivial at ≤40×40). Region
@@ -152,16 +191,17 @@ everything and can ship while the Q1 go and Q2/Q3 are pending.
   a dev-only `POST /api/level` in `serve.mjs` writing `levels/<id>.json`,
   with the registry regenerated from the directory so `src/data/levels.js`
   can't drift `[proposed]` — export-and-paste stays as the fallback path.
-- **M1 — Layers as data** (`levels/*.json` schema, `grid.js`,
-  `pathfinding.js`, unit tests). The `layers` block, per-layer parse, the
-  grid router, stair generation + validation, portal-edge pathfinding.
-  Single-layer levels bit-identical in behavior; the level lint learns the
-  new block.
-- **M2 — Layers rendered** (`tile-renderer.js`, `scene.js`, `occlusion.js`,
-  `controls.js`, `picking.js`, `actors.js`). Stacked rendering with underside
-  slabs, generated stair geometry, the cutaway camera, layer-aware picking,
-  actors traversing stairs with height interpolation. Prototype the cutaway
-  *first* — it is the plan's biggest unknown.
+- **M1 — Layers as data** (delta over the spike). The format, parse, stair
+  generation, facade and route planner shipped. Remaining: actors above the
+  ground storey (spawn height, per-storey blocking, wander), doors and
+  interactable props on upper storeys, the campaign lint learning layered
+  levels (dev levels are currently exempt by location).
+- **M2 — Layers rendered** (delta over the spike). Stacked rendering, stair
+  geometry, the covers-cutaway, layered picking and the climb shipped.
+  Remaining: model props parented under storey roots (the spike's
+  primitives-only constraint), slab edge/fascia polish, object picking that
+  respects hidden storeys, occlusion of a body under a *visible* balcony
+  edge at low camera angles, and whatever the look-tweak round asks for.
 - **M3 — Combat across layers** (`combat.js`, `tactics.js`, `aim-paint.js`).
   The cross-layer sightline primitive and everything that consumes it: aim
   wash on two floors, AI routing to stairs and picking targets it can

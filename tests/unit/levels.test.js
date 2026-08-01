@@ -489,7 +489,10 @@ for (const f of files) {
 
 test('every actor a shipped level places can be named by a registry', () => {
   for (const [levelId, level] of Object.entries(LEVELS)) {
-    const used = new Set(level.map.flatMap((r) => r.split('')));
+    // A layered level (src/floors.js) spreads its maps across storeys; the
+    // guarantee is the same - every placed char must survive a round trip.
+    const maps = level.map || (level.layers || []).flatMap((l) => l.map);
+    const used = new Set(maps.flatMap((r) => r.split('')));
     for (const [ch, id] of Object.entries(level.actors || {})) {
       if (!used.has(ch) || id === 'player') continue;
       assert.ok(

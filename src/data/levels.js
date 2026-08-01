@@ -7,6 +7,9 @@
 // lint could only check the files on disk, never the registry the game reads.
 import level1 from '../../levels/level1.json' with { type: 'json' };
 import level2 from '../../levels/level2.json' with { type: 'json' };
+// Dev levels live in levels/dev/: registered (reachable via ?level=<id>) but
+// outside the campaign chain and outside the campaign lint's exit rules.
+import spikeLobby from '../../levels/dev/spike-lobby.json' with { type: 'json' };
 
-export const LEVELS = { level1, level2 };
+export const LEVELS = { level1, level2, 'spike-lobby': spikeLobby };
 export const FIRST_LEVEL = 'level1';

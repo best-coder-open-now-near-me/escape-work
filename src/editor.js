@@ -534,7 +534,10 @@ export function startEditor(app, levelData, stashKey) {
     padding: '6px', borderRadius: '7px', cursor: 'auto',
   });
   select.innerHTML = `<option value="">load level…</option>` +
-    Object.entries(LEVELS).map(([id, l]) => `<option value="${id}">${l.name || id}</option>`).join('');
+    // Layered levels stay off the base list until the editor learns storeys
+    // (EDITOR_PLAN M4) - offering one here would just crash the load.
+    Object.entries(LEVELS).filter(([, l]) => !l.layers)
+      .map(([id, l]) => `<option value="${id}">${l.name || id}</option>`).join('');
   select.onchange = () => {
     if (LEVELS[select.value]) loadLevel(LEVELS[select.value]);
     select.value = '';

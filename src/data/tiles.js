@@ -155,6 +155,20 @@ export const TILE_TYPES = {
     color: [0.34, 0.22, 0.14],
     surface: 'coffee',
   },
+  // A staircase marker (layered levels, EDITOR_PLAN spike). One run of these
+  // on a storey generates the whole flight: geometry, the opening above, the
+  // connection pathfinding climbs. Solid on purpose - nobody strolls onto the
+  // ramp sideways; traversal is the scripted climb between the run's entry
+  // and its landing (src/floors.js). Short, so it never blocks sight.
+  stairway: {
+    char: 'X',
+    solid: true,
+    height: 0.2,
+    color: [0.56, 0.54, 0.6],
+    label: 'Stairway',
+    examine: 'Stairs. Apparently this office believes in upward mobility after all.',
+    stairs: true,
+  },
   cable: {
     char: '*',
     height: 0.2,
