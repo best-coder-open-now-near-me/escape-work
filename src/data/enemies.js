@@ -159,6 +159,19 @@ const KITS = {
       lifetimeTurns: 5,
       log: 'HR posts the role internally. Employees materialize, résumés in hand.',
     },
+    // Enemy-side triage (AI_PLAN M6, Q4 ratified): she patches the worst-off
+    // colleague she can reach, RATIONED - `uses` per fight, cooldown-paced -
+    // because M9 cut the player's heal ritual and the enemy side must not
+    // reintroduce it from the other direction. The numbers mirror the shape
+    // of her summon descriptor: everything the AI reads lives on the def.
+    support: {
+      heal: [4, 7],
+      uses: 2,
+      cooldownRounds: 1,
+      ap: 2,
+      range: 4,
+      log: 'HR approves emergency self-care. Attendance is mandatory.',
+    },
   },
 
   'security-guard': {

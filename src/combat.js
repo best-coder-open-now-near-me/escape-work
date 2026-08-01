@@ -33,8 +33,8 @@ import {
 } from './combat-plans.js';
 import {
   standTilePath as standTileRoute, standTileRoutes, scoreDestination,
-  pickTarget as pickBest, advanceRoute,
-  aiCrouchCovered, chooseBeat,
+  pickTarget as pickBest, advanceRoute, firingTileRoutes,
+  aiCrouchCovered, chooseBeat, lineWeights, aiSupportPlan,
 } from './combat-ai.js';
 import {
   enemyRingOk, ringsAtBodies, verbKind, toppleRings, partitionRings, breakRings,
@@ -829,7 +829,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       roundStart: () => {
         // A full pass through the order is one round: age summoner cooldowns
         // and the fire/smoke lifecycle a tick.
-        for (const e of engaged) if (e.summonCd > 0) e.summonCd -= 1;
+        for (const e of engaged) {
+          if (e.summonCd > 0) e.summonCd -= 1;
+          if (e.supportCd > 0) e.supportCd -= 1; // the triage ration's pacing (AI_PLAN M6)
+        }
         bout.rounds += 1;
         reactions.clear(); // everyone gets their reaction back (TACTICS_PLAN M2)
         callbacks.onRound?.();
@@ -4045,13 +4048,42 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const meleeLines = (unit) => unit.combat.attacks.filter((a) => !a.range);
   const rangedLines = (unit) => unit.combat.attacks.filter((a) => a.range);
 
+  // A weighted draw over the pool (AI_PLAN M6): a line whose status the
+  // target is not already wearing rolls at STATUS_WEIGHT, so the guard
+  // blinds the shooter on purpose sometimes. The weights are combat-ai's
+  // (pure, tested); the draw rolls the fight's own rng, so seeded bouts
+  // replay.
+  function pickLine(pool, target) {
+    const w = lineWeights(pool, (id) => hasStatus(statusesOf(target), id));
+    let total = 0;
+    for (const x of w) total += x;
+    let roll = rng() * total;
+    for (let i = 0; i < pool.length; i++) {
+      roll -= w[i];
+      if (roll <= 0) return pool[i];
+    }
+    return pool[pool.length - 1];
+  }
+
   function aiAttack(unit, target) {
     const melee = meleeLines(unit);
     const pool = melee.length ? melee : unit.combat.attacks;
-    const atk = pool[rand(0, pool.length - 1)];
+    const atk = pickLine(pool, target.member);
     unit.lunge(posOf(target).x, posOf(target).z);
     faceTarget(unit, target.actor.x, target.actor.z); // you face what you swing at
     if (target.member) unitStrikesMember(unit, target.member, atk);
+  }
+
+  // The triage beat's doing (AI_PLAN M6): clamp-add to the ally's pool and
+  // say so. No lunge - she reaches, the fight goes on.
+  function aiSupport(unit, plan, spec) {
+    const ally = plan.ally.ref;
+    const amt = rand(spec.heal[0], spec.heal[1]);
+    ally.hp = Math.min(ally.maxHp, ally.hp + amt);
+    faceTarget(unit, ally.x, ally.z);
+    fx.damageText(ally.x, ally.z, `+${amt}`, '#9fdf8a');
+    log(`${spec.log || `${unit.def.name} patches up a colleague.`} +${amt} to ${ally.def.name}.`);
+    refresh();
   }
 
   // The shot (AI_PLAN M5): the plan already ran the gauntlet - range, LOS,
@@ -4375,6 +4407,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       routes = standTileRoutes(unit.x, unit.z, target.actor.x, target.actor.z, world);
     }
     const ranged = !!(rls.length && routes.length);
+    // A support kit hangs toward the edge of the scrum too: the keep-away
+    // term biases WHICH swing tile she takes, never whether she advances -
+    // it is a weight over an already-admitted field, so no stall can enter.
+    const backline = ranged || !!(unit.def.support || unit.def.summon);
     const chosen = scoreDestination(
       routes,
       {
@@ -4394,7 +4430,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           tileDefAt: world.tileDefAt,
           stepOpen: world.stepOpen,
         }) : null,
-        nearestThreatDist: ranged ? (ax, az) => livingMembers()
+        nearestThreatDist: backline ? (ax, az) => livingMembers()
           .reduce((best_, m) => {
             const p = posOf(m);
             return Math.min(best_, Math.hypot(p.x - ax, p.z - az));
@@ -4580,6 +4616,21 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const sm = summonSpec(unit.def.summon);
     const summonReady = !!sm && (unit.summonCd || 0) <= 0 && acting.ap >= sm.ap
       && resolveSummon(unit, 'enemy', sm) > 0;
+    // Triage before reinforcement (AI_PLAN M6): rationed by uses, paced by
+    // cooldown, aimed at the worst-off colleague in range - self included.
+    // Everything it reads lives on the def, the summon descriptor's pattern.
+    const sup = unit.def.support || null;
+    const supReady = !!sup && (unit.supportCd || 0) <= 0
+      && (unit.supportUsed || 0) < (sup.uses ?? Infinity) && acting.ap >= sup.ap;
+    const supPlan = supReady ? aiSupportPlan(unit.x, unit.z, sup,
+      engaged.filter((e) => e.alive).map((e) => ({
+        x: e.x,
+        z: e.z,
+        hp: e.hp,
+        maxHp: e.maxHp,
+        expiring: (e.summonTurns ?? Infinity) <= 1,
+        ref: e,
+      }))) : null;
     const toppleAp = ACTIONS.shove.ap;
     // Furniture onto somebody, or failing that a partition onto somebody -
     // one beat, two aims (AI_PLAN M4 closed TACTICS_PLAN M6's "AI does not
@@ -4602,6 +4653,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       inReach: canReach(unit, target),
       hasAttack: unit.combat.attacks.length > 0,
       attackAp: unit.combat.attackAp,
+      support: sup ? { ap: sup.ap, ready: !!supPlan } : null,
       summon: sm ? { ap: sm.ap, ready: summonReady } : null,
       toppleAp,
       canTopple: !!tp,
@@ -4644,6 +4696,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const refused = (acting.refused ??= new Set());
     const { beat } = chooseBeat(beatState, refused);
     bout.beats[beat] = (bout.beats[beat] || 0) + 1;
+    if (beat === 'support') {
+      unit.supportCd = sup.cooldownRounds || 0;
+      unit.supportUsed = (unit.supportUsed || 0) + 1;
+      acting.ap = roundAp(acting.ap - sup.ap);
+      aiSupport(unit, supPlan, sup);
+      acting.wait = 0.6;
+      return;
+    }
     if (beat === 'summon') {
       unit.summonCd = sm.cooldownRounds || 0;
       acting.ap = roundAp(acting.ap - sm.ap);

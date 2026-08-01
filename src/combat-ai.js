@@ -40,10 +40,43 @@ export const AI = {
   CROWD_COST: 0.75, // per tile-unit the firing tile sits inside KEEP_AWAY
   SHIELD_VALUE: 1.0, // a firing tile with a shieldable face toward the target (entrench potential)
   RANGE_SLACK: 0.5, // stand this far inside max range, so drift can't break the shot
+  // --- attack lines and support (AI_PLAN M6) ---
+  STATUS_WEIGHT: 2, // an `applies` line the target doesn't wear is this much likelier
+  HEAL_AT: 0.5, // heal an ally under this HP fraction
 };
 
 // Score ties are decided by the tie-break chain, not float luck.
 const EPS = 1e-9;
+
+// The attack-line weights (AI_PLAN M6): a line whose status the target is
+// not already wearing is worth more - the guard blinds the shooter on
+// purpose, sometimes - at a MILD weight, so statuses season the picks
+// rather than becoming a lock loop. `wearing(id)` is the caller's status
+// test. The draw itself stays the caller's (it is resolution, so it rolls
+// through the fight's seeded rng); this is only the shape of the die.
+export function lineWeights(pool, wearing) {
+  return pool.map((a) => (a.applies && !wearing(a.applies) ? AI.STATUS_WEIGHT : 1));
+}
+
+// Who a support unit patches this turn (AI_PLAN M6): the worst-off ally
+// under the heal threshold, within the descriptor's range - self included,
+// mirroring the player's triage ("hr heal is for anyone", POWERS_PLAN 19).
+// Allies arrive as plain { x, z, hp, maxHp, expiring, ref }; a temp about
+// to despawn is skipped (healing a body that vanishes next round reads as
+// AI stupidity, not mercy).
+export function aiSupportPlan(bx, bz, spec, allies, { healAt = AI.HEAL_AT } = {}) {
+  if (!spec) return null;
+  let best = null;
+  for (const a of allies) {
+    if (a.expiring) continue;
+    if (!(a.maxHp > 0)) continue;
+    const frac = a.hp / a.maxHp;
+    if (frac >= healAt) continue;
+    if (dist(bx, bz, a.x, a.z) > (spec.range ?? Infinity)) continue;
+    if (!best || frac < best.frac) best = { ally: a, frac };
+  }
+  return best;
+}
 
 // The route to a tile the unit could stand on and swing from: the shortest path
 // to any of the target's eight neighbours, or null if none is reachable. Shared

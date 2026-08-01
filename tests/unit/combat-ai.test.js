@@ -401,3 +401,31 @@ test('the turn terminates: every DECIDE spends, refuses, or ends', () => {
     refused.add(beat);
   }
 });
+
+// --- support and the line weights (AI_PLAN M6) -------------------------------
+
+test('triage outranks reinforcement, and rations like everything else', () => {
+  const both = rich({ support: { ap: 2, ready: true }, summon: { ap: 3, ready: true } });
+  assert.equal(chooseBeat(both).beat, 'support');
+  assert.equal(chooseBeat(rich({ support: { ap: 2, ready: false }, summon: { ap: 3, ready: true } })).beat, 'summon');
+  assert.equal(chooseBeat(rich({ ap: 1, support: { ap: 2, ready: true } })).beat, 'crouch');
+});
+
+test('the worst-off ally in range gets the heal; expiring temps do not', async () => {
+  const { aiSupportPlan, lineWeights } = await import('../../src/combat-ai.js');
+  const spec = { heal: [4, 7], range: 4 };
+  const hurt = { x: 1, z: 0, hp: 5, maxHp: 20, ref: 'hurt' };
+  const worse = { x: 2, z: 0, hp: 2, maxHp: 20, ref: 'worse' };
+  const fine = { x: 0, z: 1, hp: 19, maxHp: 20, ref: 'fine' };
+  const ghost = { x: 1, z: 1, hp: 1, maxHp: 20, expiring: true, ref: 'ghost' };
+  const far = { x: 9, z: 9, hp: 1, maxHp: 20, ref: 'far' };
+  assert.equal(aiSupportPlan(0, 0, spec, [hurt, worse, fine, ghost, far]).ally.ref, 'worse');
+  // Nobody under the threshold in range: no plan, the ladder moves on.
+  assert.equal(aiSupportPlan(0, 0, spec, [fine, far]), null);
+
+  // The line weights: a status the target lacks doubles the line's chances;
+  // one they already wear rolls flat.
+  const pool = [{ min: 1, max: 2 }, { min: 1, max: 2, applies: 'blinded' }];
+  assert.deepEqual(lineWeights(pool, () => false), [1, AI.STATUS_WEIGHT]);
+  assert.deepEqual(lineWeights(pool, (id) => id === 'blinded'), [1, 1]);
+});
