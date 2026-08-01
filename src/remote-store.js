@@ -17,6 +17,14 @@
 
 const CONFIG_KEY = 'escape-work.remote';
 const DEVICE_KEY = 'escape-work.device';
+// The game's own project (designer, 2026-08-01) - shipped so nobody types a
+// URL. The anon key is DESIGNED to ship in clients (row-level security is
+// the fence); it stays blank here until the designer provides it, and until
+// then the store is inert unless localStorage supplies one.
+export const SHIPPED_REMOTE = {
+  url: 'https://ijckmyywjtzdnbrkzqah.supabase.co',
+  anonKey: '',
+};
 export const SAVE_KEY_STORAGE = 'escape-work.save-key';
 const TABLE = 'saves';
 
@@ -35,19 +43,27 @@ export async function saveKeyIdentity(key) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Config JSON -> { url, anonKey } or null. Tolerates a trailing slash on the
-// url; rejects anything that lacks either field rather than half-working.
-export function parseRemoteConfig(json) {
-  if (!json) return null;
-  try {
-    const c = typeof json === 'string' ? JSON.parse(json) : json;
-    if (!c || typeof c.url !== 'string' || typeof c.anonKey !== 'string') return null;
-    const url = c.url.replace(/\/+$/, '');
-    if (!/^https?:\/\//.test(url) || !c.anonKey.trim()) return null;
-    return { url, anonKey: c.anonKey.trim() };
-  } catch {
-    return null;
+// Config JSON (+ optional shipped defaults) -> { url, anonKey } or null.
+// Stored fields win over defaults field-by-field, so a browser can supply
+// just the anon key against the shipped URL. Tolerates a trailing slash AND
+// a pasted "/rest/v1" suffix - the client appends that path itself, and the
+// dashboard's copy button hands people exactly that form. Anything still
+// missing a piece is null rather than half-working.
+export function parseRemoteConfig(json, defaults = null) {
+  let c = null;
+  if (json) {
+    try {
+      c = typeof json === 'string' ? JSON.parse(json) : json;
+    } catch {
+      c = null; // unreadable stored config reads as absent, not as a veto
+    }
   }
+  if (!c && !defaults) return null;
+  const rawUrl = (typeof c?.url === 'string' && c.url) || defaults?.url || '';
+  const anonKey = ((typeof c?.anonKey === 'string' && c.anonKey) || defaults?.anonKey || '').trim();
+  const url = rawUrl.replace(/\/+$/, '').replace(/\/rest\/v1$/, '').replace(/\/+$/, '');
+  if (!/^https?:\/\//.test(url) || !anonKey) return null;
+  return { url, anonKey };
 }
 
 // The store. `config` from parseRemoteConfig (null -> inert). `identity` is
@@ -134,7 +150,7 @@ export function createRemoteStore({ config = null, identity = '', fetchFn = null
 export function loadRemoteStore(storage = null, fetchFn = null, onTrouble = null) {
   try {
     const st = storage || globalThis.localStorage;
-    const config = parseRemoteConfig(st.getItem(CONFIG_KEY));
+    const config = parseRemoteConfig(st.getItem(CONFIG_KEY), SHIPPED_REMOTE);
     if (!config) return createRemoteStore();
     const saveKey = (st.getItem(SAVE_KEY_STORAGE) || '').trim();
     let identity;

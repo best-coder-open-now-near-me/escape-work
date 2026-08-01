@@ -139,3 +139,22 @@ test('trouble is classified: paused (540), rejected (4xx), unreachable', async (
   await fine.pull();
   assert.equal(kinds.length, 4); // a healthy call reports nothing
 });
+
+test('shipped defaults merge under stored config, field by field', () => {
+  const shipped = { url: 'https://game.supabase.co', anonKey: '' };
+  // Key-only stored config rides the shipped URL - the intended setup step.
+  assert.deepEqual(parseRemoteConfig('{"anonKey":"k"}', shipped),
+    { url: 'https://game.supabase.co', anonKey: 'k' });
+  // No key anywhere stays inert; complete defaults alone are enough.
+  assert.equal(parseRemoteConfig(null, shipped), null);
+  assert.deepEqual(parseRemoteConfig(null, { url: 'https://game.supabase.co', anonKey: 'baked' }),
+    { url: 'https://game.supabase.co', anonKey: 'baked' });
+  // Corrupt stored JSON reads as absent, not as a veto of the defaults.
+  assert.deepEqual(parseRemoteConfig('not json', { url: 'https://g.co', anonKey: 'baked' }),
+    { url: 'https://g.co', anonKey: 'baked' });
+});
+
+test('a pasted /rest/v1 suffix is stripped from the url', () => {
+  assert.deepEqual(parseRemoteConfig('{"url":"https://x.supabase.co/rest/v1/","anonKey":"k"}'),
+    { url: 'https://x.supabase.co', anonKey: 'k' });
+});

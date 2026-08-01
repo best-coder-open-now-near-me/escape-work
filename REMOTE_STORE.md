@@ -49,17 +49,17 @@ runs identically with it unconfigured.
      for all to anon using (true) with check (true);
    ```
 
-2. In the browser you play in (dev console, once):
+2. The project URL is already shipped in the game (`SHIPPED_REMOTE`,
+   src/remote-store.js — the designer's project, 2026-08-01). Until the anon
+   key is baked beside it, supply the key once per browser (dev console):
 
    ```js
-   localStorage.setItem('escape-work.remote', JSON.stringify({
-     url: 'https://<project-ref>.supabase.co',
-     anonKey: '<the project’s anon/public key>',
-   }));
+   localStorage.setItem('escape-work.remote', JSON.stringify({ anonKey: '<anon/public key>' }));
    ```
 
-   Project URL and anon key live in the dashboard under Settings → API. The
-   anon key is designed to ship in clients; row-level security is the fence.
+   The key lives in the dashboard under Settings → API ("anon public"). It is
+   designed to ship in clients — row-level security is the fence — so once
+   it's committed into `SHIPPED_REMOTE.anonKey`, nobody configures anything.
 
 ## Later, when wanted
 
