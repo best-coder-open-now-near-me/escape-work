@@ -73,6 +73,16 @@
 // an object layer beside the ASCII grid). Treat a free char as a spent
 // resource, not a formality.
 //
+// UPDATE (the sneak plants): 'G' and 'X' were the last two genuinely free
+// characters - free of the tile registry AND of the actor legends, which is
+// the check that matters and which the count above did not make. The office
+// ficus and the lobby palm spent them. What remains is '@' (the player's own)
+// and the backslash, and NOTHING ELSE: the next prop of any kind cannot be
+// registered without first retiring a tile type or decoupling the map from
+// single characters. The levels lint (tests/unit/levels.test.js) is what
+// catches an actor/tile collision - it caught this pair mid-change - so trust
+// it over any hand count.
+//
 // A corollary, for whoever allocates the next one: give the JSON-awkward
 // characters to props nothing paints. The snack machine took '$' from
 // 'rug-round' for exactly this reason - the machine is painted on two floors
@@ -499,6 +509,45 @@ export const TILE_TYPES = {
     char: '7', category: 'decor', solid: true,
     height: 0.54, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/pottedPlant', label: 'Potted Plant',
+    examine: 'Somebody waters this. Nobody admits to it.',
+  },
+  // --- the plants you can hide behind (SNEAK_PLAN) ---------------------------
+  // Concealment is not a new field: a SOLID prop below SIGHT_BLOCK_HEIGHT is
+  // shot over by a standing shot and blocks a CROUCH-height line, which is
+  // exactly what a sneaking body is (grid.sightOpenCellLow). The desk rule,
+  // wearing leaves. So the design question here is only ever "is this plant
+  // big enough that ducking behind it should work?" - and the honest answer
+  // is a matter of the model's own size, which is why the knee-high
+  // `plant-small`/`plant-tiny` stay non-solid and hide nobody.
+  //
+  // 0.62 is deliberately just under the 0.75 threshold: tall enough to read
+  // as cover, short enough that a thrown stapler still sails over it. A plant
+  // that blocked shots outright would be a wall with leaves on, and the
+  // office already has walls.
+  ficus: {
+    char: 'G', category: 'decor', solid: true,
+    height: 0.62, scale: 1.0, color: [0.34, 0.6, 0.32],
+    model: 'furniture/kit/pottedPlant', label: 'Office Ficus',
+    examine: 'Big enough to hide behind, if you are the kind of person who would.',
+    // Sprite cards standing in the pot (tile-renderer addFoliage).
+    foliage: {
+      sprites: ['bush', 'bush2', 'rosette'],
+      cards: 4, size: 0.8, lift: 0.44, spread: 0.12, splay: 32,
+      tint: [0.42, 0.74, 0.36],
+    },
+  },
+  // The same trick with a spikier silhouette, so a row of plants is not a row
+  // of one plant. Same rule, same height band.
+  palm: {
+    char: 'X', category: 'decor', solid: true,
+    height: 0.62, scale: 1.0, color: [0.3, 0.55, 0.34],
+    model: 'furniture/kit/pottedPlant', label: 'Lobby Palm',
+    examine: 'Plastic, probably. It has not changed since the merger.',
+    foliage: {
+      sprites: ['tuft', 'leaf', 'tuft'],
+      cards: 4, size: 0.88, lift: 0.48, spread: 0.09, splay: 24,
+      tint: [0.36, 0.68, 0.42],
+    },
   },
   'plant-small': {
     char: '8', category: 'decor',
