@@ -84,6 +84,56 @@ test('the desk lane hides a sneak; the open corridor busts it', async ({ page })
   expect(await sneakState(page)).toBe(null); // the sneak died with the secret
 });
 
+// The Manager at (3,1) gazes down his long east corridor; the player starts
+// on his blind side. Sneak up, strike: the fight opens with him SURPRISED
+// even at arm's length - the sight rule replacing the distance proxy (D6).
+const AMBUSH_LAB = {
+  name: 'Ambush Lab',
+  tiles: { '#': 'wall', '.': 'floor' },
+  actors: { '@': 'player', M: 'manager' },
+  map: [
+    '##########',
+    '#..M.....#',
+    '#@.......#',
+    '##########',
+  ],
+};
+
+const clickManager = async (page) => {
+  const p = await page.evaluate(() => {
+    const en = window.__game.enemies.find((e) => e.alive);
+    return window.__game.project3(en.px ?? en.x, 0.9, en.pz ?? en.z);
+  });
+  await page.mouse.click(p.x, p.y);
+};
+
+test('an unseen strike opens the fight with the ambush (M4)', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, AMBUSH_LAB, 'office-drone');
+  await page.evaluate(() => window.__game.debugStillEnemies());
+  await page.keyboard.press('h');
+  expect(await sneakState(page)).toEqual({ mode: 'solo' });
+
+  // First click walks to his blind-side elbow. Proximity starts NOTHING
+  // while unseen - standing at somebody's shoulder is the point (D1).
+  await clickManager(page);
+  await expect.poll(() => page.evaluate(() => window.__game.playerMoving),
+    { timeout: 60_000 }).toBe(false);
+  expect(await inCombat(page)).toBe(false);
+  expect(await sneakState(page)).toEqual({ mode: 'solo' });
+
+  // Second click swings: the fight opens, and he is SURPRISED at arm's
+  // length - the ordinary distance rule never surprises an adjacent enemy,
+  // so this status IS the sneak rule firing.
+  await clickManager(page);
+  await expect.poll(() => page.evaluate(() => window.__game.inCombat),
+    { timeout: 60_000 }).toBe(true);
+  const en = await page.evaluate(() => window.__combat.enemies[0]);
+  expect(en.statuses.map((s) => s.id)).toContain('surprised');
+  // And the ambusher leads: the opener's own initiative rule.
+  expect(await page.evaluate(() => window.__combat.phase)).toBe('player');
+});
+
 test('rummaging ends the sneak without a fight (D10)', async ({ page }) => {
   test.setTimeout(300_000);
   await bootLab(page);

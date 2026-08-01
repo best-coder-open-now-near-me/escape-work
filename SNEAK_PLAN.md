@@ -162,7 +162,12 @@ like a crouch). No SAVE_VERSION bump.
    inside a cone are refused - the group stops blundering through the
    watch. e2e: leader skirts a cone, followers detour around it.
 6. **Talents and polish.** The three registry talents wired through their
-   accessors; the eye readout; log lines; editor note for facing.
+   accessors; log lines; editor note for facing. The planned seen/unseen
+   eye readout was CUT in implementation: under D3, "seen" and "the fight
+   has already started" are the same instant, so the readout can only ever
+   say "hidden" - the cones are the affordance, and the sneaking status
+   chip on the sheet is the mode indicator. Revisit only if v2's warning
+   beat (declined for v1) ever lands.
 
 ## Testing
 

@@ -1254,8 +1254,18 @@ function startGame(level) {
     const a = armedOoc && ACTIONS[armedOoc];
     if (a && (a.type === 'attack' || a.type === 'shove' || a.type === 'purge')) {
       engageWithAction(en, armedOoc);
+      return;
     }
-    else confront(en);
+    // A sneaking click on a coworker in reach IS the ambush strike (SNEAK
+    // M4): the ordinary unarmed path starts fights by walking INTO people
+    // (the adjacency trigger), and a sneaker deliberately never triggers on
+    // proximity (D1) - so the click that would have bumped them swings
+    // instead, and the fight opens on the ambusher's terms.
+    if (sneak && playerReaches(en)) {
+      engageWithAction(en, equippedAction(sheet));
+      return;
+    }
+    confront(en);
   }
   // Act on the interactable ENTITY under the cursor. Returns true if handled.
   function dispatchHit(hit) {
@@ -1783,6 +1793,25 @@ function startGame(level) {
       ? 'The whole department goes quiet.'
       : `${lead.sheet.name} slips low. The others hold here.`);
   }
+  // Group sneak's followers price watched ground like a hazard (SNEAK M5).
+  // The cheap wedge test only (range + angle, no trace): a follower that
+  // routes around ground that MIGHT see it beats one that path-lawyers the
+  // desk line and clips a cone with its shoulder.
+  const inAnyCone = (x, z) => {
+    if (!sneak) return false;
+    const opts = sneakSightOpts();
+    const cosLim = Math.cos(opts.halfAngle * (Math.PI / 180));
+    return enemies.some((en) => {
+      if (!en.alive || !en.entity) return false;
+      const w = watcherOf(en);
+      const dx = x - w.x;
+      const dz = z - w.z;
+      const d = Math.hypot(dx, dz);
+      if (d > opts.range) return false;
+      if (d < 1e-6) return true;
+      return (dx * w.facing.x + dz * w.facing.z) / d >= cosLim;
+    });
+  };
   // The sweep (M3): every body against every cone, on the follower cadence.
   // First seen body busts the sneak and starts the fight with the spotter as
   // primary - exactly the bump-into-them opener, minus the bumping.
@@ -1836,6 +1865,17 @@ function startGame(level) {
 
   function beginCombat({ engaged, primary, opening = null }) {
     if (!sheet || inCombat || gameOver || !player.entity) return;
+    // A fight begun while sneaking judges surprise by SIGHT (SNEAK M4/D6):
+    // capture who saw the initiator BEFORE the sneak state is cleared.
+    let sneakOpened = null;
+    if (sneak) {
+      const opts = sneakSightOpts();
+      const p = player.entity.getPosition();
+      sneakOpened = {
+        saw: new Set(enemies.filter((en) => en.alive && en.entity
+          && seesBody(watcherOf(en), { x: p.x, z: p.z }, opts))),
+      };
+    }
     // However the fight found you, the sneak is over (M3) - quietly: the
     // opener's own line says what happened.
     endSneak(null);
@@ -1865,6 +1905,7 @@ function startGame(level) {
       party,
       engaged,
       opening,
+      sneakOpened,
       // A crouch taken before the fight rides into it (TACTICS_PLAN M6 OOC):
       // combat owns it from here - the status chip is already on the sheet.
       preCrouch: (() => { const c = oocCrouch; oocCrouch = null; return c; })(),
@@ -3392,7 +3433,13 @@ function startGame(level) {
   function memberSpeed(m) {
     let s = BASE_SPEED
       * (SURFACES[runtime.surfaceAt(m.actor.x, m.actor.z)]?.slow || 1)
-      * (statusFx(m.sheet).speedMult ?? 1);
+      // Quiet Shoes (SNEAK M6): the sneak penalty vanishes for its carrier.
+      // Coarse on purpose: while sneaking, the talent restores FULL status
+      // speed - a gummed sneaker with these shoes also walks off the gum for
+      // the duration, an accepted sliver for one line instead of un-merging
+      // the status view.
+      * (m.sheet.talent?.effects?.sneakSpeed && hasStatus(m.sheet, 'sneaking')
+        ? 1 : (statusFx(m.sheet).speedMult ?? 1));
     const lead = partyLeader(party);
     if (m !== lead && lead.actor
       && Math.max(Math.abs(m.actor.x - lead.actor.x), Math.abs(m.actor.z - lead.actor.z)) > FOLLOW_NEAR + 1) {
@@ -3445,13 +3492,15 @@ function startGame(level) {
         const sz = lead.actor.z + dz;
         if (!open(sx, sz) || claimed.has(sx + ',' + sz)) continue;
         if (effectiveSurfDamage(sx, sz, m.sheet) > 0) continue; // no parking in fire
+        if (inAnyCone(sx, sz)) continue; // and no parking in a watch (SNEAK M5)
         if (!spot || Math.hypot(sx - m.actor.x, sz - m.actor.z) < Math.hypot(spot[0] - m.actor.x, spot[1] - m.actor.z)) {
           spot = [sx, sz];
         }
       }
       if (!spot) continue;
       claimed.add(spot[0] + ',' + spot[1]);
-      const p = findPath(open, m.actor.x, m.actor.z, spot[0], spot[1], hazardCostFor(m.sheet), grid.stepOpen);
+      const p = findPath(open, m.actor.x, m.actor.z, spot[0], spot[1],
+        (x, z) => hazardCostFor(m.sheet)(x, z) + (inAnyCone(x, z) ? 6 : 0), grid.stepOpen);
       if (!p || p.length < 2) continue;
       // A loose spot in the formation tile, not its dead centre - the party
       // used to park on a perfect grid ring around the leader (the one body
@@ -3462,7 +3511,11 @@ function startGame(level) {
         spot[1] + (Math.random() - 0.5) * 0.7);
       const pos = m.actor.entity.getPosition();
       const spliced = [[pos.x, pos.z], ...p.slice(1)];
-      const base = (x, z) => open(x, z) && effectiveSurfDamage(x, z, m.sheet) <= 0;
+      // Watched cells are walls to the smoother while sneaking, exactly the
+      // hazard rule: never straighten across a cone the route detoured
+      // around (the route's own cells stay open through routeOpen).
+      const base = (x, z) => open(x, z) && effectiveSurfDamage(x, z, m.sheet) <= 0
+        && !inAnyCone(x, z);
       const s = smoothPath(routeOpen(base, spliced), spliced, grid.edgeOpen);
       m.actor.setPath(s);
     }

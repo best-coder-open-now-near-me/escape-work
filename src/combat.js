@@ -70,7 +70,7 @@ const immunityLine = (id, name) => {
   return def?.log ? def.log.replace('{name}', name) : `${def?.name || 'An immunity'} holds.`;
 };
 
-export function startCombat({ app, party, engaged, world, fx, callbacks, opening = null, allies = [], preCrouch = null, rng = Math.random }) {
+export function startCombat({ app, party, engaged, world, fx, callbacks, opening = null, allies = [], preCrouch = null, sneakOpened = null, rng = Math.random }) {
   // Per-member turn state: every party member fights with their own AP pool,
   // deflect stance and limited-use counters. `active` is whose action bar,
   // previews and clicks are live - with one member that is simply "you";
@@ -250,10 +250,31 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
 
   // Enemies pulled in from a distance are surprised - they spend their first
   // turn realizing what's happening, so group openings don't alpha-strike you.
+  // A fight begun FROM SNEAK judges surprise by SIGHT instead (SNEAK_PLAN
+  // D6): whoever had no line to the initiator - facing away, behind the desk
+  // row, out of the cone - loses turn one however close they stand, and the
+  // distance proxy stays untouched for ordinary fights. `sneakOpened.saw` is
+  // main.js's capture of who saw the initiator at the moment the sneak broke.
   for (const en of engaged) {
+    if (sneakOpened) {
+      if (!sneakOpened.saw.has(en)) applyStatus(en, 'surprised');
+      continue;
+    }
     const t = pickTarget(en);
     if (!t || cheb(en.x, en.z, t.actor.x, t.actor.z) > SURPRISE_RADIUS) applyStatus(en, 'surprised');
   }
+  // Disgruntled (SNEAK M4): the opening strike of a sneak-opened fight, and
+  // only that strike, carries the ambush bonus - consumed by the FIRST roll
+  // that damages a coworker, whoever it lands on.
+  let sneakAmbushArmed = !!sneakOpened;
+  const ambushDmg = (dmg) => {
+    if (!sneakAmbushArmed) return dmg;
+    sneakAmbushArmed = false;
+    const b = talentFxOf(active)?.ambushDamage || 0;
+    if (!b) return dmg;
+    log('They never saw it coming.');
+    return Math.round(dmg * (1 + b));
+  };
   // A bystander outside the engagement radius who gets attacked anyway joins
   // the fight - surprised, so they lose the turn they spend taking offense.
   // Without this they'd soak thrown damage forever without ever hitting back.
@@ -1963,6 +1984,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (hasDice) {
       dmg = rand(a.min, a.max) + damageBonus(active.sheet); // carried staplers count
       if (a.ammoCost) dmg += talentFxOf(active).paperDamageBonus || 0;
+      dmg = ambushDmg(dmg);
       died = en.takeDamage(dmg);
       // Anything that arrived from over there lands as a projectile hit, not a
       // punch: light debris thrown away from the shooter.
@@ -2906,7 +2928,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         }
         continue;
       }
-      const dmg = rand(a.min, a.max) + damageBonus(active.sheet);
+      const dmg = ambushDmg(rand(a.min, a.max) + damageBonus(active.sheet));
       const died = en.takeDamage(dmg);
       hitFx(en, 'paper', active);
       if (died) deathFx(en);
