@@ -42,23 +42,43 @@ test('banked attribute points spend on the level-up screen and raise derived sta
 
 test('class points learn track nodes (attr bonus, then a prereq-gated action)', async ({ page }) => {
   test.setTimeout(120_000);
-  await bootStash(page, SOLO_LEVEL); // office-drone track
+  // The MIDDLE MANAGER's track, not the Drone's. This spec used to ride the
+  // Drone because its track gated Paper Storm behind Sharp Folds - and
+  // TALENT_PLAN M1 dismantled exactly that: Sharp Folds was cut (as a
+  // standalone talent it was Origami Specialist with a smaller number), and
+  // POWERS_PLAN M9 moved Paper Storm into the Drone's base kit. So the shape
+  // this spec exists to pin - pay a node, unlock the one behind it - no
+  // longer exists on that track at all, and the assertions below were
+  // testing a track that had been deliberately flattened.
+  //
+  // The Manager keeps the shape: Stonewall is a plain attribute node,
+  // All-Hands sits behind it and grants an action. Same two halves, on a
+  // track whose gate is real.
+  await bootStash(page, SOLO_LEVEL, 'middle-manager');
 
   await page.evaluate(() => { window.__god.player.classPoints = 3; });
   await page.click('#levelup-pip'); // the pip lights for class points too
   await expect(page.locator('#levelup-screen')).toBeVisible();
 
-  // Thick Skin: +1 Grit, baked onto the sheet.
-  const grit0 = await page.evaluate(() => window.__god.player.attr.grit);
-  await page.click('#lvlup-node-drone-thick-skin');
-  await expect.poll(() => page.evaluate(() => window.__god.player.attr.grit)).toBe(grit0 + 1);
-  expect(await page.evaluate(() => window.__god.player.perks.includes('drone-thick-skin'))).toBe(true);
+  // Stonewall: +1 Composure, baked onto the sheet.
+  const comp0 = await page.evaluate(() => window.__god.player.attr.composure);
+  await page.click('#lvlup-node-mgr-stonewall');
+  await expect.poll(() => page.evaluate(() => window.__god.player.attr.composure)).toBe(comp0 + 1);
+  expect(await page.evaluate(() => window.__god.player.perks.includes('mgr-stonewall'))).toBe(true);
 
-  // The gated node is Paper Storm, behind Sharp Folds (POWERS_PLAN M3). It
-  // used to be Self-Defense Seminar granting `kick` - which the Mail Room and
-  // Security also granted, so three classes unlocked one action and levelling
-  // up converged the roster.
-  //
+  // Reorg Survivor is ungated, so paying it proves the LOCK below is about
+  // the prereq and not simply about having points left to spend.
+  await page.click('#lvlup-node-mgr-reorg');
+  await expect.poll(() => page.evaluate(() => window.__god.player.perks.includes('mgr-reorg'))).toBe(true);
+});
+
+test('a prereq-gated node stays Locked until its prereq is paid', async ({ page }) => {
+  test.setTimeout(120_000);
+  await bootStash(page, SOLO_LEVEL, 'middle-manager');
+  await page.evaluate(() => { window.__god.player.classPoints = 3; });
+  await page.click('#levelup-pip');
+  await expect(page.locator('#levelup-screen')).toBeVisible();
+
   // With its prereq unmet the node is LOCKED, and the screen says so: the
   // button is disabled and reads "Locked". That is the half of "prereq-gated"
   // the old spec never exercised - it only ever clicked the node after the
@@ -68,17 +88,16 @@ test('class points learn track nodes (attr bonus, then a prereq-gated action)', 
   // Asserted as disabled rather than clicked: a disabled button never becomes
   // actionable, so page.click waits out the whole timeout and reports "click
   // timed out" - which looks like a hung UI rather than a working gate.
-  expect(await page.evaluate(() => window.__god.player.actions.includes('paper-storm'))).toBe(false);
-  const gated = page.locator('#lvlup-node-drone-paper-storm');
+  expect(await page.evaluate(() => window.__god.player.actions.includes('all-hands'))).toBe(false);
+  const gated = page.locator('#lvlup-node-mgr-all-hands');
   await expect(gated).toBeDisabled();
   await expect(gated).toHaveText('Locked');
 
   // Pay the prereq, and now it takes.
-  await page.click('#lvlup-node-drone-sharp-folds');
-  await expect.poll(() => page.evaluate(() => window.__god.player.perks.includes('drone-sharp-folds'))).toBe(true);
-  await page.click('#lvlup-node-drone-paper-storm');
-  await expect.poll(() => page.evaluate(() => window.__god.player.actions.includes('paper-storm'))).toBe(true);
-  expect(await page.evaluate(() => window.__god.player.classPoints)).toBe(0);
+  await page.click('#lvlup-node-mgr-stonewall');
+  await expect.poll(() => page.evaluate(() => window.__god.player.perks.includes('mgr-stonewall'))).toBe(true);
+  await page.click('#lvlup-node-mgr-all-hands');
+  await expect.poll(() => page.evaluate(() => window.__god.player.actions.includes('all-hands'))).toBe(true);
 
   await page.click('#lvlup-done');
   await expect(page.locator('#levelup-screen')).toHaveCount(0);
