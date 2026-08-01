@@ -9,6 +9,7 @@ test.slow();
 
 test('one of the six is played as written - no form to decline', async ({ page }) => {
   await page.goto('/');
+  await page.click('#level-pick-level1'); // the floor-select desk comes first
   await expect(page.locator('#resume-card')).toBeVisible();
 
   // Hire the first candidate on the desk. Naming a class would mean paging the
@@ -60,6 +61,7 @@ test('one of the six is played as written - no form to decline', async ({ page }
 
 test('the blank card makes somebody, on a body nobody else wears', async ({ page }) => {
   await page.goto('/');
+  await page.click('#level-pick-level1'); // the floor-select desk comes first
   await expect(page.locator('#resume-card')).toBeVisible();
 
   // The custom door sits ON the desk alongside the six rather than behind them.
@@ -103,6 +105,7 @@ test('the blank card makes somebody, on a body nobody else wears', async ({ page
 
 test('backing out of the card returns to the desk instead of starting the run', async ({ page }) => {
   await page.goto('/');
+  await page.click('#level-pick-level1'); // the floor-select desk comes first
   await expect(page.locator('#resume-card')).toBeVisible();
   await page.click('#pick-office-drone');
   await expect(page.locator('#creation-badge')).toBeVisible();

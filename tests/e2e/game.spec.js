@@ -17,6 +17,7 @@ test('the class carousel browses every resume and hires one', async ({ page }) =
   // other model-heavy specs - the work is inherently linear in class count.
   test.setTimeout(300_000);
   await page.goto('/');
+  await page.click('#level-pick-level1'); // the floor-select desk comes first
   // One resume at a time, straight from the class registry; arrows browse.
   await expect(page.locator('#resume-card')).toBeVisible();
   await expect(page.locator('#resume-card')).toContainText('Office Drone');

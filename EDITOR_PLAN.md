@@ -183,6 +183,12 @@ Each lands green (unit + e2e) before the next starts. M0 is independent of
 everything and can ship while the Q1 go and Q2/Q3 are pending. The spike
 above pre-paid parts of M1/M2: what remains in them is listed as deltas.
 
+- **M0.1 — Floor-select desk (landed 2026-08-01).** A plain fresh boot now
+  picks a level before a character ("lets add a pre character selection menu
+  with level selection" `[stated]`, 2026-08-01). Saved runs get Continue on
+  top; only the campaign's first floor writes progress; `#class=`, `#editor`,
+  `?level=` and playtest stashes skip the desk, so the e2e fast paths and the
+  editor round-trip stay untouched.
 - **M0 — Editor quality of life** (`src/editor.js`, `serve.mjs`, `build.mjs`).
   Undo/redo (snapshot history of rows + edge sets; trivial at ≤40×40). Region
   select / copy / stamp for the repeated-cubicle workflow. Brushes for NPCs,

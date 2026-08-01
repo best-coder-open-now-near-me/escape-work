@@ -122,12 +122,76 @@ try {
 
 const clearProgress = () => localStorage.removeItem(PROGRESS_KEY);
 
+// The floor-select desk: a plain fresh visit picks a level BEFORE a character
+// (designer, 2026-08-01: "lets add a pre character selection menu with level
+// selection"). Express lanes skip it - #class= boots (the e2e suite's fast
+// path), #editor, ?level=, and editor playtest stashes all already said which
+// level they mean. A saved campaign shows Continue on top; picking any floor
+// instead starts fresh, and only the campaign's first floor writes progress.
+function showLevelMenu() {
+  const overlay = document.createElement('div');
+  overlay.id = 'level-menu';
+  Object.assign(overlay.style, {
+    position: 'fixed', inset: '0', zIndex: 60, display: 'flex',
+    alignItems: 'center', justifyContent: 'center',
+    background: 'rgba(4, 5, 12, 0.86)',
+  });
+  const panel = document.createElement('div');
+  Object.assign(panel.style, {
+    background: '#171923', border: '1px solid #33364a', borderRadius: '12px',
+    padding: '22px 26px', minWidth: '340px', color: '#d7d9e4',
+    fontFamily: 'Georgia, serif', boxShadow: '0 18px 60px rgba(0,0,0,0.55)',
+  });
+  panel.innerHTML = '<div style="font-size:20px; margin-bottom:4px;">Escape Work</div>'
+    + '<div style="font-size:13px; opacity:0.65; margin-bottom:14px;">Pick a floor to report to.</div>';
+  const button = (id, label, sub, onPick) => {
+    const b = document.createElement('button');
+    b.id = id;
+    Object.assign(b.style, {
+      display: 'block', width: '100%', textAlign: 'left', margin: '6px 0',
+      padding: '10px 12px', background: '#20233199', color: '#d7d9e4',
+      border: '1px solid #3a3d52', borderRadius: '9px', cursor: 'pointer',
+      fontFamily: 'inherit', fontSize: '15px',
+    });
+    b.innerHTML = label + (sub ? `<span style="display:block; font-size:12px; opacity:0.6;">${sub}</span>` : '');
+    b.onmouseenter = () => { b.style.background = '#2a2e42'; };
+    b.onmouseleave = () => { b.style.background = '#20233199'; };
+    b.onclick = onPick;
+    panel.appendChild(b);
+    return b;
+  };
+  const boot = (fn) => { overlay.remove(); fn(); };
+  if (restoredProgress) {
+    button('level-continue', 'Continue the run',
+      `${LEVELS[restoredProgress.levelId]?.name || restoredProgress.levelId} — your party, mid-escape`,
+      () => boot(() => startGame(activeLevel)));
+  }
+  for (const [id, level] of Object.entries(LEVELS)) {
+    button(`level-pick-${id}`, level.name || id,
+      id === FIRST_LEVEL ? 'Start a fresh run' : (level.layers ? 'Dev — layered spike' : 'Standalone visit'),
+      () => boot(() => {
+        activeLevel = LEVELS[id];
+        activeLevelId = id;
+        // Fresh start: a restored party must not walk into a hand-picked
+        // floor. Off the campaign's first floor nothing writes progress -
+        // the ?level= posture, chosen by click instead of URL.
+        restoredProgress = null;
+        playtesting = id !== FIRST_LEVEL;
+        startGame(activeLevel);
+      }));
+  }
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+}
+
 if (location.hash.includes('editor')) {
   // The editor speaks single-storey levels; hand it the ground storey of a
   // layered one rather than crashing on level.layers.
   startEditor(app, activeLevel.layers
     ? { ...activeLevel, ...activeLevel.layers[0], layers: undefined }
     : activeLevel, STASH_KEY);
+} else if (!playtesting && !location.hash.includes('class=')) {
+  showLevelMenu();
 } else {
   startGame(activeLevel);
 }
