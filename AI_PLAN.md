@@ -105,6 +105,39 @@ difficulty setting today. My recommendation is **A**.
 - **C: behavior modes** (docile AI on easy, full ladder on hard). Most
   expensive, and a permanent tax: every future beat needs a per-mode answer.
 
+## Brief for the implementing agent
+
+This plan will be executed by someone who was not in the room. The rules
+of engagement, so the doc is enough:
+
+- **Read first:** `CLAUDE.md` (the process — tags are load-bearing),
+  `ARCHITECTURE.md` (the carve), `src/combat-ai.js` end to end (168
+  lines — it is the module this plan grows), the AI arm of `combat.js`
+  (`:4297-4381`), and `tests/unit/combat-ai.test.js` (the contract you
+  are extending).
+- **The tags bind you.** `[proposed]` decisions here are guesses awaiting
+  the designer — implement them as defaults, keep them cheap to reverse,
+  and if the designer's answers to the questions above have landed by
+  the time you start, those answers WIN over this doc's recommendations.
+  Flip tags in this doc as answers arrive (the ratification loop).
+- **Three invariants outrank any milestone's feature:** termination
+  (every DECIDE spends, refuses, or ends — the two shipped stall bugs
+  were both violations), purity (`combat-ai.js` and `combat-plans.js`
+  take values and callbacks, never the world object, never PlayCanvas),
+  and symmetry (every beat at the player's price through the shared
+  resolution paths — reuse `unitStrikesMember`/`dropOnto`/`pushTo`,
+  never reimplement a roll).
+- **Do not touch:** the driver's guard order (`combat.js:4297`), the
+  degenerate self-path (`combat-ai.js:34`), the engageability tier in
+  targeting, `provokedBy`'s set-diff shape, or the one-unit-at-a-time
+  driver (`[stated]`, `INITIATIVE_PLAN.md` #3). Where a milestone
+  *deliberately* rewrites a test (the wounded tiebreak), it says so;
+  everything else in the existing suite is a regression gate.
+- **Each milestone is one PR** that keeps `npm test` and the e2e suite
+  green, quotes the milestone-1 bout numbers in its description, and
+  updates this doc's milestone entry with an "as landed" note — the
+  house pattern in `TACTICS_PLAN.md`.
+
 ## What "difficulty" means here (scope)
 
 Two levers are deliberately **not** this plan's:
@@ -439,6 +472,180 @@ six more doing-arms, that special case becomes the rule:
   turn without special cases — the plan-then-do gap inside one frame is
   the only staleness window, and it is zero frames wide.
 
+## The data
+
+Everything tunable in one block, everything per-enemy on the def. Numbers
+are first drafts, deferred to playtest like every prior plan's — the block
+existing is the decision; the values are dials.
+
+### The `AI` tunables block (`src/combat-ai.js`, beside the rules that read it)
+
+```js
+export const AI = {
+  // --- target scoring (milestone 2) ---
+  FOCUS_DEFAULT: 0.5, // a def without `focus`: half-disciplined
+  W_NEAR: 1.0,        // proximity term
+  W_KILL: 2.0,        // kill-securability term (scaled by focus)
+  W_FRAIL: 1.0,       // fragility term (scaled by focus)
+  STICKINESS: 0.25,   // bonus to the CURRENT target - anti-flip-flop hysteresis
+  // --- destination scoring (milestone 3) ---
+  W_PATH: 1.0,        // per tile-unit of route cost - the baseline everything trades against
+  FLANK_VALUE: 1.5,   // arriving in a pincer position
+  BACKSTAB_VALUE: 1.0,// arriving in the target's rear arc
+  OA_COST: 2.0,       // per opportunity attack the route would eat
+  HAZARD_COST: 1.5,   // per damaging surface tile entered
+  SLIP_COST: 1.0,     // per slippery tile entered (expected turn loss)
+  // --- ranged (milestone 5) ---
+  KEEP_AWAY: 2.5,     // a shooter wants at least this distance from the nearest threat
+  CROWD_COST: 0.75,   // per tile-unit the firing tile sits inside KEEP_AWAY
+  SHIELD_VALUE: 1.0,  // a firing tile with a shieldable face toward the target (entrench potential)
+  // --- attack lines (milestones 5-6) ---
+  STATUS_WEIGHT: 2,   // an `applies` line the target doesn't wear is this much likelier
+  // --- support (milestone 6) ---
+  HEAL_AT: 0.5,       // heal an ally under this HP fraction
+};
+```
+
+### `data/enemies.js` vocabulary (documented in the header, like `aggression` and `reach`)
+
+- **`focus`** (0..1, default `AI.FOCUS_DEFAULT`) — targeting discipline.
+  First-draft values `[proposed]`: Manager 0.2 (harasses whoever is
+  closest — pettiness, not strategy), Executive 0.9 (picks the kill and
+  works it), Security Guard 0.5 (steady; `STICKINESS` does his character
+  work), HR 0.4.
+- **A ranged attack entry** — an `attacks` element with `range` (and the
+  usual min/max/log/missLog/applies). `range` present = ranged line: only
+  fired out of reach, gated on LOS and a clear `shotOutcome`, bills
+  `attackAp` like any line. Q1's candidate `[proposed]`: the Executive,
+  one entry, `range: 5` (the throw-range precedent), e.g. *"The Executive
+  sets a hard deadline from across the room."* Flavor is the designer's
+  call; the mechanics are not affected by whose entry it is.
+- **`support`** on a def — the summon-descriptor pattern exactly
+  (`data/enemies.js:134` is the template): numbers on the def, paced by
+  the same clocks. `[proposed]` for HR:
+  `support: { heal: [4, 7], uses: 2, ap: 2, range: 4, log: 'HR approves
+  emergency self-care.' }`. `uses` is the ration (M9's lesson written
+  into the enemy side); `range` is aim distance — v1 support does NOT
+  walk to heal (the summoner already stands amid her temps; a healer
+  that repositions to heal is a v2 behavior, noted in risks).
+- **Plumbing note:** these are read off `unit.def` at plan-gathering
+  time, exactly as `summon` and `aggression` already are — they do NOT
+  route through `unitCombat` (see footgun 1 for which fields do).
+
+## The scored choices, specified
+
+Signatures and formulas the executor can implement against. All pure, all
+in `combat-ai.js`, world facts arriving as values or callbacks — the
+module's existing discipline. Scores are deterministic (no rng);
+tie-breaks are candidate order.
+
+### Target (replaces `pickTarget`'s comparison; keeps its name and shape)
+
+```
+pickTarget(ux, uz, candidates, canEngage, opts = {})
+  // opts: { focus = AI.FOCUS_DEFAULT, current = null, expSwings = null }
+```
+
+Engageability stays a hard TIER, never a weight — the M3 anti-stall lesson:
+an engageable member always outranks an unengageable one. Within a tier:
+
+```
+near  = 1 / (1 + cheb(u, m))
+kill  = 1 / expSwings(m)          // ceil(m.sheet.hp / mean damage of our lines); soak ignored v1
+frail = 1 - m.sheet.hp / m.sheet.maxHp
+score = AI.W_NEAR * near
+      + focus * (AI.W_KILL * kill + AI.W_FRAIL * frail)
+      + (m === current ? AI.STICKINESS : 0)
+```
+
+`current` is the unit's target from its previous beat this fight (a
+transient on the unit, like `summonCd`). The old wounded-tiebreak behavior
+is the `frail` term at `focus = 0.5`; the old rule entirely is `focus = 0`.
+
+### Destination (inside the `advance` beat; kit picks the candidate set)
+
+```
+scoreDestination(unit, target, routes, q)
+  // q: { threats, allies, facingOf, surfDamageAt, slipChanceAt, shieldFaceAt, nearestThreatDist }
+```
+
+- **Melee candidates:** the ≤8 swing-tile routes `standTilePath` already
+  runs — no new pathfinding, and the degenerate self-path keeps its
+  absolute priority (footgun 7).
+- **Ranged candidates:** tiles within `range` with LOS to the target —
+  reuse the aim geometry (`powers.aimRangeOf`/`rangeTiles`) with roles
+  reversed, cap to the nearest ~12 by `cheb` BEFORE routing so the A*
+  fan stays bounded by the same budget the melee fan already pays.
+
+```
+score = - AI.W_PATH * routeCost
+        + AI.FLANK_VALUE    * (arriving yields isFlanked(unit@dest, target, allies))
+        + AI.BACKSTAB_VALUE * (isBackstab(unit@dest, target, facingOf(target)))
+        - AI.OA_COST        * provokedBy(threats, legs of route).length
+        - Σ entered tiles: AI.HAZARD_COST·(surfDamageAt > 0) + AI.SLIP_COST·slipChanceAt
+        + ranged only: AI.SHIELD_VALUE * shieldFaceAt(dest, toward target)
+        - ranged only: AI.CROWD_COST * max(0, AI.KEEP_AWAY - nearestThreatDist(dest))
+```
+
+Score at the APPROACH POINT the mover will actually stand on (`approach`),
+not the tile centre — `dirOctant` flips sectors near tile midlines, and a
+flank scored at the centre can evaporate at the real arrival spot.
+
+### Attack line (milestone 5 makes it context-aware; 6 adds status weight)
+
+```
+pool   = in reach ? lines without `range`
+       : lines with range ≥ dist AND LOS AND shotOutcome clear
+weight = 1 + (a.applies && !hasStatus(target, a.applies) ? AI.STATUS_WEIGHT - 1 : 0)
+pick   = weighted draw through `rng`   // resolution, so rng is correct here; seeded runs stay reproducible
+```
+
+### The new plans (`combat-plans.js`, beside `aiTopplePlan`)
+
+- `aiShovePlan(bx, bz, world, victimAt, { hazardAt, disengage })` — for
+  each `AROUND` victim, push directly away from the shover
+  (`displacePlan` with the octant through the victim). Accept when the
+  plan is a SLAM (`blocked`) or the landing is a hazard
+  (`hazardAt(tx, tz)`); with `disengage` (ranged kit, threat adjacent),
+  also accept the plain step-back. Returns `{ victim, plan }` or null.
+- `aiPullPlan(unit, members, crouchOf, world)` — members within
+  `REACH.PULL` holding a live crouch whose shielded face lies between
+  the bodies; delegates to `pullPlan` with the puller excluded from the
+  cover faces (the `pullCrouchOf` precedent, `combat.js:2477`). First
+  qualifying member wins (they are rare).
+- `aiBreakPlan(unit, world, towardTarget)` — gated on "no member is
+  engageable at all". Adjacent breakable prop, partition edge
+  (`edgeHpBetween`), or closed door on the face toward the nearest
+  member (`dirOctant`). Returns what to batter or which door to open.
+  v1 is deliberately adjacent-only; cost-aware pathfinding THROUGH
+  breakables (route cost += panel HP) is the v2 refinement, noted so
+  nobody builds it by accident.
+- `entrenchPlan` — ranged kit: in range + LOS + not crouched +
+  `aiCrouchCovered` HERE + AP ≥ coverAp + attackAp.
+- `shootPlan` — dist ≤ range, LOS, `shotOutcome` clear (passed in as a
+  leaf fact — combat owns bodies), a ranged line affordable.
+- `supportPlan(unit, allies, spec)` — allies (self included, the triage
+  mirror) with `hp/maxHp < AI.HEAL_AT`, within `spec.range`, skipping
+  summons with ≤1 lifetime turn left; ration and cooldown live on the
+  unit like `summonCd`. Lowest HP fraction wins.
+
+## The doing arms, specified
+
+Each arm in `combat.js`, following the summon/topple template: spend →
+perform (REUSING the shared resolution — footgun 6) → log → FX → wait.
+Log lines below are `[proposed]` flavor; the mechanics columns are the
+spec. All prices are the player's own (A9).
+
+| Beat | Spends | Performs via | Log shape | Wait |
+| --- | --- | --- | --- | --- |
+| `support` | `support.ap` | clamp-add to unit hp; `fx.damageText` green | "HR approves emergency self-care. +5." | 0.6 |
+| `pull` | `ACTIONS.pull.ap` | the pull core: `pushTo` + shared Grit save (`dropOnto`'s price from the far side) — extract the player click's perform half so both sides share it | "The Manager hauls you over your own desk." | 0.85 |
+| `shove` | `ACTIONS.shove.ap` | the shove perform (slam damage / hazard billing already shared) | "The Executive walks you back into the copier." | 0.6 |
+| `topple` (partition aim) | `ACTIONS.shove.ap` | `toppleEdge` + `dropOnto` | existing topple line, partition flavor | 0.85 |
+| `break` / door-open | `attackAp` / door AP | `performBreak`'s core vs the pool; the door via `world.doorsBeside`'s own price | "Security has a key. Of course he does." | 0.85 / 0.5 |
+| `entrench` | `ACTIONS['take-cover'].ap` | `crouchHere` (the AI crouch already calls it) | existing crouch line | 0.5 |
+| `shoot` | `attackAp` | a ranged twin of `unitStrikesMember`: same assembler, same statuses, plus `shotOutcome` resolution (redirects included) | the def's ranged line | 0.85 |
+
 ## Implementation notes — footguns
 
 The traps, from reading the code paths each milestone lands on. Each is
@@ -446,12 +653,17 @@ cheap to dodge on the way in and expensive to debug after.
 
 1. **`unitCombat` is a whitelist, and it eats new fields silently.** It
    copies exactly `{name, model, maxHp, ap, attackAp, attacks, xp, loot,
-   accuracy, dodge, reach}` (`stats.js:374`). `focus` and `support` must
-   be added there or class-backed units (enemy HR, every summon) lose
-   them without an error — and with `??`, not `||`, or `focus: 0`
-   (deliberately undisciplined) silently becomes the default. `reach`
-   already had to learn this exact lesson. Per-attack fields (`range` on
-   an attack entry) ride free — `attacks` passes through whole.
+   accuracy, dodge, reach}` (`stats.js:374`). The RIGHT path for the new
+   behavior fields is the one `summon` and `aggression` already use:
+   read them off `unit.def` at plan-gathering time (`combat.js:4324`
+   reads `unit.def.summon`), which works for registry enemies and
+   class-backed units alike because both end up with a full merged def.
+   Route a field through `unit.combat` ONLY if it is a combat stat —
+   and then it must be added to the whitelist with `??`, not `||`, or
+   `focus: 0` (deliberately undisciplined) silently becomes the default;
+   `reach` already had to learn this exact lesson. Per-attack fields
+   (`range` on an attack entry) ride free — `attacks` passes through
+   whole.
 2. **`pickTarget` runs EAGERLY during `startCombat`** — the surprise
    sweep calls it before any turn exists (`combat.js:263`). Scoring must
    not read turn state (`acting`, waits, budgets), and every accessor it
@@ -533,63 +745,151 @@ cheap to dodge on the way in and expensive to debug after.
     `lifetimeTurns` end (healing a body that despawns next round reads
     as AI stupidity) and re-validates the ally still stands at DOING
     time.
-15. **The believability floor is a feature.** Larian weights its AI
-    *away* from optimal toward legible ("damaging allies looks pretty
-    stupid"). When a scored choice ties, prefer the one whose log line
-    explains itself — the aggression dots, the log, and the FX are the
-    difficulty the player actually perceives, and an AI that reads as
-    smart is worth more than one that is smart invisibly.
+15. **The believability floor is a feature.** Larian tunes its scorer
+    away from raw optimality toward legible play — the base archetype
+    file's own comments say "Damaging allies looks pretty stupid"
+    (verified as file content; see the reference section). When a scored
+    choice ties, prefer the one whose log line explains itself — the
+    aggression dots, the log, and the FX are the difficulty the player
+    actually perceives, and this game's own OA lesson applies: a rule
+    the player can't read gets filed as a bug.
 
 ## Milestones (each a PR that keeps `npm test` + e2e green)
 
-1. **The measuring stick.** A seeded scripted bout — the dev spike level,
-   fixed party, `rng` seeded (it already reproduces slips) — with a
-   per-side damage/rounds tally on the `__combat` test handle. Cheap: one
-   spec and a counter. Every later milestone quotes its before/after
-   numbers in the PR, so "harder" is a measurement, not a vibe.
-   `[proposed]` — if it turns out flaky or slow it demotes to a manual
-   god-mode readout without blocking anything.
-2. **Target scoring (A3).** `scoreTarget` + `focus` vocabulary + the
-   per-def values for the shipped four. Unit tests pin the blend ("a
-   finishable target outranks a nearer hale one", "a low-focus enemy
-   stays on proximity"); the e2e tactics spec gains one bout asserting
-   focus-fire actually concentrates damage. The current wounded-tiebreak
-   test is *rewritten* to the new rule, deliberately — it encodes the old
-   design.
-3. **Stand-tile scoring (A2's second half).** `scoreStandTile` wired into
-   the advance: flank-seeking, OA-avoiding, hazard-avoiding approach.
-   Unit tests per term; the existing "engageable outranks near" and
-   anti-stall tests must pass unchanged — scoring refines the choice
-   among tiles the old rule already admitted, it never re-admits a
-   stall.
-4. **The cover-denial beats (A4, Q3).** Shove-at-bodies (slam and hazard
-   landings only), partition topple, break-when-sealed plus the door-open
-   arm (A10), Pull Over — in the ladder positions the state machine
-   fixes, each behind its plan, each at the player's price. The refused-
-   set tail generalizes `afterFailedAdvance` in this milestone, since it
-   is the first with enough arms to need it. The M8 deferral notes in
-   `TACTICS_PLAN.md` get their follow-up citation. e2e: a member crouched
-   against a partition gets pulled over it; a sealed corridor gets
-   battered through.
-5. **The ranged enemy (A5, Q1).** The loadout on the chosen def, the
-   `shoot` beat (range + LOS + the full `shotOutcome` gauntlet, checked
-   in the plan), the firing-tile destination rule for `advance`, the
-   `entrench` beat (crouch survives attacking `[ratified]`, so an
-   entrenched shooter is the fight the cover game was built for) — and
-   the context-aware attack picker, which lands HERE, not in 6, because
-   a `range` entry in a uniform-random `attacks` array misfires from day
-   one (footgun 9). This is the milestone that makes the player's own
-   crouch, human shields and Pull Over matter.
-6. **Support AI (A6, Q4).** HR heals her wounded (rationed), stands behind
-   her summons; summon timing stays her opening beat. The attack picker
-   (context-aware since 5) gains status weighting: prefer an `applies`
-   line the target doesn't already wear, at a mild weight — enough that
-   the guard blinds the shooter on purpose sometimes, not so much that
-   statuses become a lock loop.
-7. **The tuning pass.** One block of weights, the milestone-1 bout numbers
-   before/after per change, and the cross-cutting balance look every plan
-   defers to playtest. If a difficulty selector is ever ratified (Q5),
-   this block is where it plugs in.
+Each milestone below carries its scope, the files it touches, its named
+tests, and its acceptance line — written for an executor who has this doc
+and the codebase, nothing else.
+
+1. **The measuring stick.**
+   - *Scope:* a seeded scripted bout with a per-side tally, so every later
+     PR quotes before/after numbers instead of vibes.
+   - *The protocol:* a dev level (reuse `levels/dev/spike-lobby.json` or a
+     purpose-built `sparring.json` sibling); a fixed party via god mode; a
+     `?seed=` dev query param `main.js` reads and threads into the fight's
+     `rng` `[proposed]` (the rng is already injectable — seeded runs
+     reproduce slips); the PASSIVE-PARTY bout (the party ends every turn
+     via the god handle) as the primary metric — it measures pure AI
+     damage output per round with zero player-skill noise. Reload the
+     level between bouts (footgun 13 — break pools persist).
+   - *The tally:* a `bout` getter on `window.__combat`: `{ rounds,
+     dmgDealt, dmgTaken, beats: {attack: n, advance: n, …}, oaCount }`.
+     The beats histogram is the regression tripwire — a change that
+     zeroes `attack` broke gating, whatever the damage numbers say.
+   - *Files:* `main.js` (seed param), `combat.js` (tally, ~20 lines),
+     one e2e spec, possibly one dev level JSON.
+   - *Acceptance:* two runs with the same seed produce identical
+     tallies; the PR records the baseline numbers for level 1 and 2.
+     `[proposed]` — if e2e bouts prove flaky, the tally stays and the
+     spec demotes to a manual god-mode readout without blocking 2–7.
+2. **Target scoring (A3).**
+   - *Scope:* the `pickTarget` blend from "The scored choices", `focus`
+     vocabulary + the four per-def values, the `current`-target
+     transient, `AI` block entries.
+   - *Files:* `combat-ai.js` (the rule + `AI`), `combat.js` (pass
+     `focus`/`current`/`expSwings` leaf facts), `data/enemies.js`
+     (fields + header doc).
+   - *Unit tests (combat-ai.test.js):* "an engageable member outranks a
+     nearer one behind a wall" (unchanged, the tier survives); "a
+     finishable target outranks a nearer hale one at focus 1"; "focus 0
+     is the old rule: nearest, wounded tiebreak"; "stickiness holds the
+     current target against a marginally better score"; "tie-break is
+     stable order". The current wounded-tiebreak test is REWRITTEN (it
+     encodes the old design — deliberate, per `CLAUDE.md` the shipped
+     game embodied it, and this plan supersedes it).
+   - *e2e:* one bout asserting concentration — with two members at equal
+     distance, the Executive's damage lands on one of them ≥80% by
+     round 3 (seeded, forceHit).
+   - *Acceptance:* milestone-1 tally shows dmgDealt flat or up, spread
+     (dmg split across members) down.
+3. **Destination scoring (A2's second half).**
+   - *Scope:* `scoreDestination` over the existing swing-tile routes:
+     flank-seeking, OA-avoiding, hazard-avoiding approach. Melee only
+     (the ranged candidate set arrives in 5).
+   - *Files:* `combat-ai.js`; `combat.js` threads the leaf facts
+     (threats with reach, allies, `facingOf`, surface queries — all
+     exist on or near the `world` facade).
+   - *Unit tests:* one per term — "a flanking arrival outranks a shorter
+     route at equal cost"; "a route through fire loses to a dry detour
+     worth ≤ its weight"; "a route eating an OA loses unless it buys a
+     kill-adjacent arrival"; "the degenerate self-path always wins"
+     (the sacred pacing-bug case, restated against scoring); "scores
+     are computed at the approach point, not the tile centre" (regression
+     for the octant-flip trap).
+   - *e2e:* the flank bout — a second enemy positioned opposite; the
+     advancing enemy arrives on the far side and the hit log reads the
+     pincer bonus.
+   - *Acceptance:* anti-stall suite untouched and green; tally shows
+     oaCount (enemies' own provokes) down.
+4. **The cover-denial beats (A4, Q3) + the refused-set tail.**
+   - *Scope:* `aiShovePlan` / `aiPullPlan` / `aiBreakPlan` (+ door-open),
+     partition aim added to the topple beat, the four doing arms, and
+     the generalized failure tail (this is the first milestone with
+     enough arms to need it — `afterFailedAdvance` becomes its first
+     instance).
+   - *Files:* `combat-plans.js` (plans), `combat-ai.js` (ladder arms +
+     refused set), `combat.js` (doing arms, plan gathering), log lines.
+   - *Unit tests (combat-plans.test.js):* "a shove that only moves
+     someone is refused; a slam is taken; a hazard landing is taken";
+     "the disengage variant accepts a step-back only for the ranged
+     kit"; "aiPullPlan excludes the puller's own body from the cover
+     faces"; "aiBreakPlan gates on nobody-engageable and refuses when a
+     route exists". *(combat-ai.test.js):* the ladder-order tests extend
+     to twelve arms; the termination test enumerates the refused-set
+     lattice.
+   - *e2e:* a member crouched behind a partition gets pulled over it
+     (log + position assert); a party sealed behind a battered partition
+     watches it come down within N rounds; an enemy sealed by a closed
+     door opens it and joins.
+   - *Acceptance:* `TACTICS_PLAN.md` M8's deferral notes get a
+     follow-up citation pointing here; tally: dmgDealt up in
+     cover-heavy layouts.
+5. **The ranged enemy (A5, Q1).**
+   - *Scope:* the ranged attack entry on the chosen def, the
+     context-aware line picker (HERE, not 6 — footgun 9), `shootPlan` /
+     `entrenchPlan` and their arms, the ranged candidate set for
+     `advance`, the enemy-side `shotOutcome` reading with the symmetric
+     redirect refusal (footgun 10).
+   - *Files:* `data/enemies.js`, `combat-plans.js`, `combat-ai.js`,
+     `combat.js` (the ranged strike twin of `unitStrikesMember`).
+   - *Pre-req:* fix the ranged walk-in bug (`TODO.md` Phase 1) first or
+     with this — the AI reuses the corrected question ("any tile within
+     range with LOS"), not the melee-shaped one.
+   - *Unit tests:* "in reach, the melee line pool wins; at distance,
+     only ranged lines with LOS qualify"; "a refused shotOutcome removes
+     the line from the pool"; "entrench precedes shoot and gates on
+     affording both"; "the firing-tile score prefers a shielded face and
+     respects KEEP_AWAY".
+   - *e2e:* the entrenched-shooter bout — the armed enemy crouches
+     behind a desk and shoots over it two rounds running (crouch
+     survives attacking, `[ratified]`); the player pulls him over it —
+     the counter the system promised.
+   - *Acceptance:* the player-side crouch is observably worth taking
+     (bout with a crouched vs standing passive party shows the damage
+     gap).
+6. **Support AI (A6, Q4).**
+   - *Scope:* `supportPlan` + the arm, HR's `support` descriptor, the
+     status weight on the line picker, summoner spacing (her destination
+     score gains a stand-behind-the-temps term — reuse `KEEP_AWAY` with
+     her summons as the screen).
+   - *Unit tests:* "an ally under HEAL_AT within range is healed;
+     lowest fraction first"; "an expiring summon is not worth a heal";
+     "the ration exhausts and the arm stops gating on"; "an `applies`
+     line the target already wears loses its extra weight".
+   - *e2e:* the healer bout — HR tops up a wounded Manager and the log
+     says so; killing HR first ends the topping-up (the objective the
+     beat exists to create).
+   - *Acceptance:* fights against HR groups run longer in the tally;
+     Q4's fallback (B) is one def field away if they DRAG.
+7. **The tuning pass.**
+   - *Scope:* no new systems. The `AI` block swept against milestone-1
+     bouts on both shipped levels; per-def `focus`/support values
+     against fight feel; the PR records every dial moved and its
+     before/after tally. If a difficulty selector is ever ratified (Q5),
+     this block is where it plugs in — and the reference section's
+     per-difficulty loadout mechanism (`SkillAIParams` flags) is the
+     shape to copy for "this attack entry only above depth N", which
+     the legend's per-placement levels (`CHARACTER_PLAN.md` #15) could
+     express with no new machinery.
 
 Order rationale: 2–4 sharpen the game the AI already plays (melee), 5–6
 widen it, 7 tunes it. 1 exists so 2–7 can prove they did anything. Milestones
