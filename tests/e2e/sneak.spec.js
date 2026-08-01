@@ -134,6 +134,42 @@ test('an unseen strike opens the fight with the ambush (M4)', async ({ page }) =
   expect(await page.evaluate(() => window.__combat.phase)).toBe('player');
 });
 
+// The same lab, with the desk row swapped for office plants: concealment is
+// a property of the RULE (a solid under the sight height), not of desks, so
+// a ficus row has to hide a sneak exactly as the furniture did.
+const PLANT_LAB = {
+  ...WATCH_LAB,
+  name: 'Plant Lab',
+  tiles: { '#': 'wall', '.': 'floor', G: 'ficus' },
+  map: [
+    '##########',
+    '#M.......#',
+    '#.GGGGG..#',
+    '#@.......#',
+    '##########',
+  ],
+};
+
+test('a row of office plants conceals a sneak the way a desk row does', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, PLANT_LAB, 'office-drone');
+  await page.evaluate(() => window.__game.debugStillEnemies());
+  await page.keyboard.press('h');
+  expect(await sneakState(page)).toEqual({ mode: 'solo' });
+
+  // Behind the plants: unseen, no fight.
+  expect(await clickWorld(page, 6, 3)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__game.playerMoving),
+    { timeout: 30_000 }).toBe(false);
+  expect(await page.evaluate(() => window.__game.leaderSeen)).toBe(false);
+  expect(await inCombat(page)).toBe(false);
+
+  // Step out past their end into the watched corridor: spotted.
+  expect(await clickWorld(page, 7, 1)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__game.inCombat),
+    { timeout: 30_000 }).toBe(true);
+});
+
 test('rummaging ends the sneak without a fight (D10)', async ({ page }) => {
   test.setTimeout(300_000);
   await bootLab(page);

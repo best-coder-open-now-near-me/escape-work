@@ -249,6 +249,53 @@ export function applyCameraPostFx(app, cameraEntity) {
   return frame;
 }
 
+// A CUTOUT SPRITE material: a PNG's alpha decides the silhouette, its colour
+// is thrown away and replaced by a flat tint. The game's first textured
+// material, and deliberately the narrowest possible door for one: the art
+// direction is flat toon colour, so a photographic leaf texture would look
+// imported. Kenney's foliage sprites are white silhouettes, which is exactly
+// the input this wants - shape from the alpha, colour from the palette.
+//
+// alphaTest rather than blending: a blended card needs back-to-front sorting
+// against every other transparent thing in the scene (the aim wash, the
+// pools, the wall ghosts), and foliage read through foliage is the classic
+// way that goes wrong. A cutout writes depth like solid geometry and sorts
+// itself for free. The cost is hard-edged alpha, which at this sprite
+// resolution is what the flat look wants anyway.
+//
+// Materials are cached per url+tint: a level plants a lot of the same shrub,
+// and each distinct material is a shader.
+const spriteMats = new Map();
+export function makeSpriteMaterial(app, url, rgb, { alphaTest = 0.35 } = {}) {
+  const key = `${url}|${rgb.join(',')}`;
+  const hit = spriteMats.get(key);
+  if (hit) return hit;
+  const m = new pc.StandardMaterial();
+  // The tint IS the colour: emissive carries most of it so the flat toon
+  // ramp cannot band a leaf into stripes, the way the surface decals do.
+  m.diffuse = new pc.Color(rgb[0] * 0.55, rgb[1] * 0.55, rgb[2] * 0.55);
+  m.emissive = new pc.Color(rgb[0] * 0.5, rgb[1] * 0.5, rgb[2] * 0.5);
+  m.gloss = 0.2;
+  m.alphaTest = alphaTest;
+  m.cull = pc.CULLFACE_NONE; // a card is seen from both sides
+  let asset = app.assets.find(url);
+  if (!asset) {
+    asset = new pc.Asset(url, 'texture', { url });
+    asset.on('error', (err) => console.warn('sprite load failed:', url, err));
+    app.assets.add(asset);
+  }
+  const bind = () => {
+    // The PNG is a white silhouette: its RGB is uniform, so only the ALPHA
+    // is wanted. Bound as the opacity map alone, leaving diffuse to the tint.
+    m.opacityMap = asset.resource;
+    m.opacityMapChannel = 'a';
+    m.update();
+  };
+  if (asset.resource) bind(); else { asset.ready(bind); app.assets.load(asset); }
+  toonifyMaterial(m);
+  return m;
+}
+
 export function makeMaterial(rgb, { opacity = 1, gloss = null, emissive = null } = {}) {
   const m = new pc.StandardMaterial();
   m.diffuse = new pc.Color(rgb[0], rgb[1], rgb[2]);

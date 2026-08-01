@@ -78,4 +78,25 @@ test('loading a shipped level and exporting it keeps its companions', async ({ p
       .filter(([c]) => used.has(c)).map(([, id]) => id).sort();
   };
   expect(placed(out)).toEqual(placed(level1));
+
+  // Map characters are allocated PER LEVEL now, so the export must still be
+  // the same level: every cell has to mean what it meant in the source file.
+  // Compared through the LEGENDS rather than as raw text, because a character
+  // is no longer a global name - what has to survive is the tile under each
+  // cell, not the letter standing for it.
+  const meaning = (level) => level.map.map((row) => row.split('').map((c) => {
+    if (c === ' ') return null;
+    return level.actors?.[c] ? `actor:${level.actors[c]}` : (level.tiles?.[c] || 'floor');
+  }));
+  expect(meaning(out), 'every cell means what it meant in the source file')
+    .toEqual(meaning(level1));
+
+  // And the legend names ONLY what the level uses - the point of the change:
+  // it used to carry the entire tile registry, which is what made a character
+  // a scarce global resource. Floor rides along for the cells under actors.
+  const usedChars = new Set(out.map.flatMap((r) => r.split('')));
+  for (const c of Object.keys(out.tiles)) {
+    expect(usedChars.has(c) || out.tiles[c] === 'floor',
+      `exported legend entry "${c}" (${out.tiles[c]}) is actually used`).toBe(true);
+  }
 });

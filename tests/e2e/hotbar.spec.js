@@ -101,12 +101,12 @@ test('right-click a slot to reassign it; assigning swaps rather than duplicates'
   // Right-click the leftmost slot: the menu lists every power the character has.
   await page.click('#hotbar-act-attack', { button: 'right' });
   await expect(page.locator('#context-menu')).toBeVisible();
-  await expect(page.locator('#context-menu')).toContainText('Paper Storm');
+  await expect(page.locator('#context-menu')).toContainText('TPS Form Storm');
   await expect(page.locator('#context-menu')).toContainText('Shove');
 
-  // Assign Paper Storm there. It was already on the bar, so the two SWAP -
+  // Assign TPS Form Storm there. It was already on the bar, so the two SWAP -
   // a power can never be in two slots at once.
-  await page.click('#context-menu >> text=Paper Storm');
+  await page.click('#context-menu >> text=TPS Form Storm');
   await expect.poll(async () => (await slots(page)).map((s) => s.id)).toEqual([
     'hotbar-act-paper-storm',
     'hotbar-act-shove',
@@ -121,7 +121,7 @@ test('right-click a slot to reassign it; assigning swaps rather than duplicates'
   ]);
 
   // The layout rides on the SHEET, so pressing key 1 now arms what is in slot 1.
-  // (Paper Storm is combat-only out here, so it refuses and says why - which is
+  // (TPS Form Storm is combat-only out here, so it refuses and says why - which is
   // proof the press landed on the zone and not on the email that used to be
   // there. The refusal is the zone's, not a heal's: the message names swinging
   // rather than pockets.)

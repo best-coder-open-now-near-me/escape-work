@@ -66,6 +66,24 @@ test('blocksSight is a height rule, with tall as the structural override (M6a)',
   assert.equal(blocksSight(null), false);
 });
 
+test('the big plants conceal a crouch without blocking a shot (SNEAK)', () => {
+  // The whole concealment claim, pinned on the data rather than on prose:
+  // a plant you can duck behind is a SOLID under the sight height - shot
+  // over like a desk, opaque to the crouch-height trace a sneaking body is
+  // read at. Break either half and sneaking silently changes.
+  for (const id of ['ficus', 'palm', 'potted-plant']) {
+    const def = TILE_TYPES[id];
+    assert.equal(def.solid, true, `${id} must be solid to conceal`);
+    assert.ok(def.height < SIGHT_BLOCK_HEIGHT, `${id} must stay shootable-over`);
+    assert.equal(blocksSight(def), false, `${id} must not block a standing line`);
+  }
+  // ...and the knee-high sprigs conceal nobody, which is the same rule
+  // refusing to lie: they are not solid, so a crouch-height line crosses them.
+  for (const id of ['plant-small', 'plant-tiny']) {
+    assert.ok(!TILE_TYPES[id].solid, `${id} is too small to hide behind`);
+  }
+});
+
 test('sightOpenCell: short solids are shot over, tall ones and the void are not', () => {
   const g = parseLevel({
     name: 't',

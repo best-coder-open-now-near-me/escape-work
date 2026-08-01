@@ -169,6 +169,24 @@ like a crouch). No SAVE_VERSION bump.
    chip on the sheet is the mode indicator. Revisit only if v2's warning
    beat (declined for v1) ever lands.
 
+## What the office gives you to hide behind
+
+Concealment is not its own field: a SOLID prop under `SIGHT_BLOCK_HEIGHT`
+(0.75) is shot over by a standing shot and opaque to the crouch-height line
+a sneaking body is read at (D2). So the desks, cabinets, couches and
+partitions the office already had became concealment the moment M1 landed.
+
+Big potted plants join them (designer, 2026-08-01: "we could use potted
+plants for sneak coverage too"): `ficus` and `palm` at height 0.62 - tall
+enough to duck behind, short enough that a thrown stapler still sails over.
+Both are the existing `pottedPlant.glb` wearing Kenney foliage sprites as
+splayed alpha-cut cards (`shading.makeSpriteMaterial`, `tile-renderer`
+`addFoliage`), which is what makes them read as something a person fits
+behind rather than desk-shaped scenery. The knee-high `plant-small` and
+`plant-tiny` stay non-solid and hide nobody - the same rule declining to
+lie about a sprig. Pinned by unit test (the data contract) and e2e (a plant
+row conceals a sneak exactly as a desk row does).
+
 ## Testing
 
 - **Unit**: the seesBody table (angles at the sector boundary, each
