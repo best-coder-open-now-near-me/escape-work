@@ -25,6 +25,17 @@ its own terms rather than the MIT grant.
   the repo ready to register, the only limit being that a level's map is one
   character per cell so each type needs a free char.
 
+- **Foliage Sprites (1.0)** by **Kenney** — https://www.kenney.nl. License: CC0.
+  Five of the fifty sprites live in `foliage/` as the leaf silhouettes the
+  big office plants are built from (`ficus`, `palm` in `src/data/tiles.js`):
+  `bush`/`bush2` (sprite_0091/0090), `rosette` (0084), `leaf` (0089),
+  `tuft` (0063). Each was cropped to its alpha bounds and downscaled from
+  1024px to 256px - the source is mostly empty margin, and these render a
+  foot tall. Only the ALPHA is used: the sprites are white silhouettes, and
+  `shading.makeSpriteMaterial` fills the shape with a flat palette colour,
+  so nothing photographic enters the toon look. These are the only textured
+  assets in the game.
+
 ## Characters
 - **Mini Characters (1.0)** by **Kenney** — https://www.kenney.nl. License: CC0.
   Shipped as GLB, used as-is (+ shared `characters/Textures/`). All twelve
