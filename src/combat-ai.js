@@ -35,6 +35,11 @@ export const AI = {
   OA_COST: 2.0, // per opportunity attack the route would eat
   HAZARD_COST: 1.5, // per damaging surface tile entered
   SLIP_COST: 1.0, // per unit of slip chance crossed (expected turn loss)
+  // --- the ranged kit (AI_PLAN M5) ---
+  KEEP_AWAY: 2.5, // a shooter wants at least this distance from the nearest threat
+  CROWD_COST: 0.75, // per tile-unit the firing tile sits inside KEEP_AWAY
+  SHIELD_VALUE: 1.0, // a firing tile with a shieldable face toward the target (entrench potential)
+  RANGE_SLACK: 0.5, // stand this far inside max range, so drift can't break the shot
 };
 
 // Score ties are decided by the tie-break chain, not float luck.
@@ -90,6 +95,37 @@ export function standTileRoutes(ux, uz, tx, tz, { isWalkable, findEnemyPath }) {
   return out;
 }
 
+// The ranged kit's candidate destinations (AI_PLAN M5): tiles within the
+// line's range of the target WITH a line of sight - the right question, where
+// the melee field asks for swing tiles. Capped to the nearest few by cheb
+// BEFORE routing, so the A* fan stays bounded by the same budget the melee
+// fan pays (the engageMemo lesson: routing is the expensive half). The
+// self-tile short-circuit mirrors the swing field's: already standing on a
+// firing tile is the answer, not a candidate.
+export function firingTileRoutes(ux, uz, tx, tz, range, { isWalkable, findEnemyPath, hasLos }, cap = 12) {
+  const reach = range - AI.RANGE_SLACK;
+  const R = Math.ceil(reach);
+  const cands = [];
+  for (let dx = -R; dx <= R; dx++) {
+    for (let dz = -R; dz <= R; dz++) {
+      const gx = tx + dx;
+      const gz = tz + dz;
+      if (dist(gx, gz, tx, tz) > reach) continue;
+      if (!isWalkable(gx, gz) && !(gx === ux && gz === uz)) continue;
+      if (!hasLos(gx, gz, tx, tz)) continue;
+      if (gx === ux && gz === uz) return [[[ux, uz], [ux, uz]]];
+      cands.push([gx, gz, cheb(ux, uz, gx, gz)]);
+    }
+  }
+  cands.sort((a, b) => a[2] - b[2]);
+  const out = [];
+  for (const [gx, gz] of cands.slice(0, cap)) {
+    const p = findEnemyPath(ux, uz, gx, gz);
+    if (p && p.length > 1) out.push(p);
+  }
+  return out;
+}
+
 // Which of those routes to actually walk (AI_PLAN M3). The old rule was
 // "shortest"; the score keeps path cost as the baseline and trades it
 // against what the ARRIVAL buys and what the WALK costs beyond AP:
@@ -111,6 +147,7 @@ export function scoreDestination(routes, q = {}) {
   const {
     target, approach = null, allies = [], facing = null, threats = [],
     edgeOpen = null, surfDamageAt = null, slipChanceAt = null,
+    shieldFaceAt = null, nearestThreatDist = null,
   } = q;
   let best = null;
   for (const r of routes) {
@@ -142,11 +179,19 @@ export function scoreDestination(routes, q = {}) {
         if (slipChanceAt) hazard += AI.SLIP_COST * slipChanceAt(cx, cz);
       }
     }
+    // The ranged kit's two extra terms (AI_PLAN M5): a destination whose tile
+    // has a shieldable face toward the target is a future entrenchment, and
+    // one inside KEEP_AWAY of a threat invites the melee response.
+    const shielded = shieldFaceAt ? shieldFaceAt(gx, gz) : false;
+    const crowded = nearestThreatDist
+      ? Math.max(0, AI.KEEP_AWAY - nearestThreatDist(ax, az)) : 0;
     const score = -AI.W_PATH * cost
       + (flanked ? AI.FLANK_VALUE : 0)
       + (behind ? AI.BACKSTAB_VALUE : 0)
       - AI.OA_COST * oas
-      - hazard;
+      - hazard
+      + (shielded ? AI.SHIELD_VALUE : 0)
+      - AI.CROWD_COST * crowded;
     if (!best || score > best.score + EPS) best = { route: r, score };
   }
   return best ? best.route : null;

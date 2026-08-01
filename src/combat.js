@@ -4038,11 +4038,34 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // summons are player-controlled members - resolveSummon), and pickTarget only
   // ever returns a party-side member, so the hit always lands on a member's
   // sheet (deflect, gum, and the downed/handoff/party-wipe rules).
+  // The attack pools, split the day one entry grew `range` (AI_PLAN M5,
+  // footgun 9): melee lines swing in reach, the ranged line fires at
+  // distance. In reach the melee pool wins outright; a def with ONLY ranged
+  // lines falls back to point-blank fire rather than standing there.
+  const meleeLines = (unit) => unit.combat.attacks.filter((a) => !a.range);
+  const rangedLines = (unit) => unit.combat.attacks.filter((a) => a.range);
+
   function aiAttack(unit, target) {
-    const atk = unit.combat.attacks[rand(0, unit.combat.attacks.length - 1)];
+    const melee = meleeLines(unit);
+    const pool = melee.length ? melee : unit.combat.attacks;
+    const atk = pool[rand(0, pool.length - 1)];
     unit.lunge(posOf(target).x, posOf(target).z);
     faceTarget(unit, target.actor.x, target.actor.z); // you face what you swing at
     if (target.member) unitStrikesMember(unit, target.member, atk);
+  }
+
+  // The shot (AI_PLAN M5): the plan already ran the gauntlet - range, LOS,
+  // shotOutcome - so this is resolution only. A redirect strikes the human
+  // shield with the same line ("a human shield takes the blocked hit",
+  // TACTICS_PLAN M6 ratified); everything else lands through
+  // unitStrikesMember, the one member-strike sink, so cover's to-hit term,
+  // soak, statuses and the downed rules all apply unchanged.
+  function aiShoot(unit, target, sp) {
+    const victim = sp.so.redirected ? sp.so.target : target.member;
+    faceTarget(unit, bodyOf(victim).x, bodyOf(victim).z);
+    fx.projectile(posOf(unit), posOf(victim), 'shot');
+    if (sp.so.redirected) log(`${victim.sheet.name} is in the way. The shot is theirs now.`);
+    unitStrikesMember(unit, victim, sp.line);
   }
 
   // One AI unit's swing at a member: the roll, the Composure soak, the Deflect
@@ -4337,8 +4360,23 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // shortest-route test - the two agree on EXISTENCE, which is all the
     // anti-stall contract needs.
     const tb = posOf(target);
+    // The destination rule is the kit's (AI_PLAN M5): a shooter walks the
+    // scored FIRING tile - in range, with a line, ideally shielded and out
+    // of the party's reach - and falls back to the melee swing field when no
+    // firing tile is routable (sealed LOS, say). Melee kits never consult
+    // the firing field at all.
+    const rls = rangedLines(unit);
+    let routes = null;
+    if (rls.length) {
+      const rmax = Math.max(...rls.map((a) => a.range));
+      routes = firingTileRoutes(unit.x, unit.z, target.actor.x, target.actor.z, rmax, world);
+    }
+    if (!routes || !routes.length) {
+      routes = standTileRoutes(unit.x, unit.z, target.actor.x, target.actor.z, world);
+    }
+    const ranged = !!(rls.length && routes.length);
     const chosen = scoreDestination(
-      standTileRoutes(unit.x, unit.z, target.actor.x, target.actor.z, world),
+      routes,
       {
         target: { x: tb.x, z: tb.z },
         approach: world.approach,
@@ -4349,6 +4387,18 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         edgeOpen: world.stepOpen,
         surfDamageAt: world.enemySurfDamage,
         slipChanceAt: world.slipChanceAt,
+        // The ranged kit's terms: a shieldable face toward the target is a
+        // future entrenchment; a spot inside the party's reach invites the
+        // melee answer. Null for melee kits - the terms simply vanish.
+        shieldFaceAt: ranged ? (gx, gz) => aiCrouchCovered(gx, gz, tb.x, tb.z, {
+          tileDefAt: world.tileDefAt,
+          stepOpen: world.stepOpen,
+        }) : null,
+        nearestThreatDist: ranged ? (ax, az) => livingMembers()
+          .reduce((best_, m) => {
+            const p = posOf(m);
+            return Math.min(best_, Math.hypot(p.x - ax, p.z - az));
+          }, Infinity) : null,
       },
     );
     const best = advanceRoute(unit, target, chosen, world);
@@ -4564,9 +4614,33 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       canCrouch: true, // tryAiCrouch runs its own (world-shaped) test
       coverAp: ACTIONS['take-cover'].ap,
     };
-    // The per-turn refused set - the generalized failure tail (AI_PLAN M4).
-    // An arm whose doing spends nothing masks itself off and DECIDE re-runs;
-    // every iteration spends, refuses, or ends, so the turn terminates.
+    // The ranged kit (AI_PLAN M5): a line the unit could fire RIGHT NOW -
+    // range, line of sight, and a clear shotOutcome. A redirect into a
+    // MEMBER human shield fires (the shield takes the blocked hit,
+    // TACTICS_PLAN M6 ratified); a redirect into the unit's own colleague
+    // refuses, mirroring the player's member-shield refusal - milestone 5
+    // does not ship friendly fire.
+    let shootable = null;
+    if (!beatState.inReach && beatState.hasAttack) {
+      const rls = rangedLines(unit);
+      if (rls.length) {
+        const b = posOf(unit);
+        const t = posOf(target);
+        const d = Math.hypot(b.x - t.x, b.z - t.z);
+        const line = rls.find((a) => d <= a.range
+          && world.hasLos(unit.x, unit.z, target.actor.x, target.actor.z));
+        if (line) {
+          const so = shotOutcome(unit, target.member);
+          if (so.target && (!so.redirected || so.target.sheet)) shootable = { line, so };
+        }
+      }
+    }
+    beatState.canShoot = !!shootable;
+    // Entrench (crouch-then-shoot): worth it only when a shot exists, the
+    // unit is not already tucked in, and something HERE actually shields it
+    // from its target - tryAiCrouch runs that exact test. Attacking does not
+    // break the crouch [ratified], which is what makes this a beat at all.
+    beatState.canEntrench = !!shootable && !crouched.has(unit);
     const refused = (acting.refused ??= new Set());
     const { beat } = chooseBeat(beatState, refused);
     bout.beats[beat] = (bout.beats[beat] || 0) + 1;
@@ -4622,6 +4696,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       aiAttack(unit, target);
       acting.ap = roundAp(acting.ap - unit.combat.attackAp);
       acting.wait = 0.85; // outlast the swing animation so hits read one at a time
+      return;
+    }
+    if (beat === 'entrench') {
+      // The same turtle test the crouch beat runs - a shieldless spot refuses
+      // and the ladder falls through to the plain shot.
+      if (tryAiCrouch(unit, target)) { acting.wait = 0.5; return; }
+      refused.add('entrench');
+      acting.wait = 0.05;
+      return;
+    }
+    if (beat === 'shoot') {
+      aiShoot(unit, target, shootable);
+      acting.ap = roundAp(acting.ap - unit.combat.attackAp);
+      acting.wait = 0.85;
       return;
     }
     if (beat === 'advance') {

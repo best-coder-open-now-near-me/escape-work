@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   standTilePath, pickTarget, advanceRoute, aiCrouchCovered, chooseBeat,
-  AI, standTileRoutes, scoreDestination,
+  AI, standTileRoutes, scoreDestination, firingTileRoutes,
 } from '../../src/combat-ai.js';
 import { REACH } from '../../src/stats.js';
 
@@ -166,6 +166,47 @@ test('positions are judged at the approach point, not the tile centre', () => {
   // octant goes cardinal, and the east ally is suddenly dead opposite.
   const approach = (gx, gz) => (gx === 4 && gz === 4 ? [4.6, 4.9] : [gx, gz]);
   assert.equal(scoreDestination([south, diag], { target, allies, approach }), diag);
+});
+
+// --- the ranged kit (AI_PLAN M5) --------------------------------------------
+
+test('firing tiles want range AND a line of sight, and the fan is capped', () => {
+  const w = routeWorld({ hasLos: () => true });
+  const routes = firingTileRoutes(0, 0, 4, 0, 3, w);
+  assert.ok(routes.length > 0 && routes.length <= 12);
+  for (const r of routes) {
+    const [gx, gz] = r[r.length - 1];
+    assert.ok(Math.hypot(gx - 4, gz - 0) <= 3 - AI.RANGE_SLACK + 1e-9);
+  }
+  // No line anywhere means no firing field - the caller falls back to the
+  // melee swing field rather than standing still.
+  assert.equal(firingTileRoutes(0, 0, 4, 0, 3, routeWorld({ hasLos: () => false })).length, 0);
+  // Already standing on a firing tile: the answer, not a candidate.
+  assert.deepEqual(firingTileRoutes(3, 0, 4, 0, 3, w), [[[3, 0], [3, 0]]]);
+});
+
+test('the entrenched shot: crouch first, but only when both are affordable', () => {
+  assert.equal(chooseBeat(rich({ inReach: false, canShoot: true, canEntrench: true })).beat, 'entrench');
+  // coverAp 1 + attackAp 2 = 3 > 2 AP: the crouch would cost the shot - just shoot.
+  assert.equal(chooseBeat(rich({ inReach: false, canShoot: true, canEntrench: true, ap: 2 })).beat, 'shoot');
+  assert.equal(chooseBeat(rich({ inReach: false, canShoot: true })).beat, 'shoot');
+  // In reach the swing wins outright - no point-blank ambiguity.
+  assert.equal(chooseBeat(rich({ canShoot: true })).beat, 'attack');
+  // And a standing shot outranks closing the distance.
+  assert.equal(chooseBeat(rich({ inReach: false, canShoot: true, moveBudget: 10 })).beat, 'shoot');
+});
+
+test('a shooter prefers a shielded firing tile and keeps its distance', () => {
+  const open = [[0, 0], [2, 0]];
+  const desk = [[0, 0], [2, 1]]; // slightly dearer, but crouchable
+  const shieldFaceAt = (x, z) => x === 2 && z === 1;
+  assert.equal(scoreDestination([open, desk], { shieldFaceAt }), desk);
+  // A tile inside the party's reach invites the melee answer: with a threat
+  // at (2.5, 0), the equal-cost tile away from it wins.
+  const near = [[0, 0], [2, 0]];
+  const far = [[0, 0], [0, 2]];
+  const nearestThreatDist = (ax, az) => Math.hypot(ax - 2.5, az - 0);
+  assert.equal(scoreDestination([near, far], { nearestThreatDist }), far);
 });
 
 // --- the advance -------------------------------------------------------------

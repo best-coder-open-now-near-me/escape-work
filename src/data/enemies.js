@@ -17,6 +17,11 @@
 // game works.
 import { fromClass } from './classes.js';
 
+// An attack entry with `range` is a RANGED line (AI_PLAN M5): the AI fires
+// it only out of reach, gated on line of sight and a clear shot (the crouch
+// game's shotOutcome - object shields refuse it, human shields take it), at
+// the same attackAp as any line. Entries without `range` are the melee pool.
+//
 // id -> either a standalone stat block, or `{ classId, ...overrides }` for a
 // coworker who IS one of the playable classes. The Security Guard and the HR
 // Representative are those: each is the same job as a class, so each names it
@@ -90,6 +95,11 @@ const KITS = {
     ],
     attacks: [
       { min: 3, max: 5, log: 'The Executive restructures your reporting line.' },
+      // The ranged line (AI_PLAN M5, the ratified Q1 pick): the first enemy
+      // in the game that shoots, which is what makes the PLAYER's crouch,
+      // human shields and Pull Over finally matter. Range matches the throw
+      // precedent; no ammo - an executive never runs out of deadlines.
+      { min: 2, max: 4, range: 5, log: 'The Executive sets a hard deadline from across the room.', missLog: 'The deadline sails past. It was aspirational.' },
       // A reorg, delivered as a question. The action bar comes back in a
       // different order for a couple of turns (statuses: `confused`).
       { min: 2, max: 4, log: 'The Executive asks what it is you even do here.', applies: 'confused', appliesLog: 'Good question. Your whole remit swims for a moment.' },
