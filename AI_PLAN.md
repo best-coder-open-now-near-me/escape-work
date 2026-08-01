@@ -23,10 +23,14 @@ click, the hover and the AI" agree.
 
 ## Questions for the designer
 
-Per `CLAUDE.md`: autonomous session, so nothing blocked on these — every
-answer below is guessed and tagged `[proposed]` in the decisions table, and
-the plan says what changes if the real answer differs. They are ordered by how
-much of the plan's shape they move.
+**All five answered** `[ratified]` (designer, 2026-08-01: "all of the
+recommended answers are good") — every recommendation below is now the
+decision: Q1-A (arm an existing enemy), Q2-B (scored targeting with the
+per-def `focus` knob), Q3-A (all four cover-denial beats), Q4-A (HR heals,
+rationed), Q5-A (no difficulty selector in v1). The tags are flipped in the
+decisions table; the questions stay below as the record of the options and
+consequences that were weighed. They are ordered by how much of the plan's
+shape they move.
 
 **Q1 — Ranged enemies: arm one now?** No shipped enemy has a ranged attack,
 so the entire defensive half of the cover game — your crouch, human shields,
@@ -115,11 +119,13 @@ of engagement, so the doc is enough:
   lines — it is the module this plan grows), the AI arm of `combat.js`
   (`:4297-4381`), and `tests/unit/combat-ai.test.js` (the contract you
   are extending).
-- **The tags bind you.** `[proposed]` decisions here are guesses awaiting
-  the designer — implement them as defaults, keep them cheap to reverse,
-  and if the designer's answers to the questions above have landed by
-  the time you start, those answers WIN over this doc's recommendations.
-  Flip tags in this doc as answers arrive (the ratification loop).
+- **The tags bind you.** The five headline questions are answered — A3,
+  A4, A5, A6, A7 are `[ratified]` (designer, 2026-08-01) and are the
+  design, not suggestions. What remains `[proposed]` (A1, A2, A8, A9,
+  A10, the tunable values, the log flavor, which enemy carries the
+  ranged entry) are implementation defaults: implement them as written,
+  keep them cheap to reverse, and flip tags in this doc as any further
+  designer verdicts arrive (the ratification loop).
 - **Three invariants outrank any milestone's feature:** termination
   (every DECIDE spends, refuses, or ends — the two shipped stall bugs
   were both violations), purity (`combat-ai.js` and `combat-plans.js`
@@ -321,11 +327,11 @@ Four lessons, each reflected in a decision above:
 | --- | --- | --- | --- |
 | A1 | **Difficulty comes from decisions, not numbers.** This plan changes zero stat magnitudes; `scaleEnemy` and playtest keep the dials | `[proposed]` | Stands in for: "is 'upgrade difficulty' about brains or stats?" If the real answer is stats, this plan collapses to a tuning pass on `ENEMY_SCALING` and the questions above are moot |
 | A2 | **The ladder stays; scoring lives inside beats.** `chooseBeat` keeps its fixed, tested priority order; intelligence goes into *which target*, *which tile*, *which verb instance* — each a pure scored choice behind the beat | `[proposed]` | The alternative — a DOS2-style utility scorer ranking all actions — is the genre's endgame but trades away the one thing the ladder has proven: every beat is unit-testable and every fight is explainable. Revisit if the ladder's arm count stops being legible |
-| A3 | **Target scoring with a per-def `focus` knob** (Q2-B): score = engageability, then a weighted blend of proximity, kill-securability (fewest expected swings to down), and fragility; `focus` in the enemy def picks the blend | `[proposed]` | Q2. If the answer is A, the knob collapses to one shared weight set; if C, milestone 2 shrinks to keeping the current rule under the new seam |
-| A4 | **The AI gets all four cover-denial verbs at player prices** (Q3-A): shove-at-bodies (for a melee unit: slam/hazard landings only — never a free step-back), partition topple, break-down when sealed off, Pull Over on a crouched member. One carve-out: a RANGED unit may shove to disengage — the game's own doctrine that shove is the safe way to break contact (`TACTICS_PLAN.md` #9) applied from the other side | `[proposed]` | Q3. Supersedes M8's deferral the way that deferral said it would be. Decision #11 (`TACTICS_PLAN.md`) is the standing doctrine; the shared plan functions make each beat mostly wiring |
-| A5 | **One existing enemy gets a ranged loadout** (Q1-A), and the AI gets shoot / reposition-for-LOS / crouch-and-shoot beats | `[proposed]` | Q1. If B, same beats land against a new def; if C, milestone 5 drops and the crouch redirect stack stays dormant |
-| A6 | **Enemy HR heals, rationed; summoners keep distance** (Q4-A) | `[proposed]` | Q4. The ration (uses-per-fight, like the player's triage) is what keeps this from being the heal-ritual M9 just killed |
-| A7 | **No difficulty selector in v1**; every new magnitude lives in one `AI` tunables block | `[proposed]` | Q5. The block is what makes any later selector cheap — one multiplier, not a scavenger hunt |
+| A3 | **Target scoring with a per-def `focus` knob** (Q2-B): score = engageability, then a weighted blend of proximity, kill-securability (fewest expected swings to down), and fragility; `focus` in the enemy def picks the blend | `[ratified]` | Q2 answered B (designer, 2026-08-01, "all of the recommended answers are good") |
+| A4 | **The AI gets all four cover-denial verbs at player prices** (Q3-A): shove-at-bodies (for a melee unit: slam/hazard landings only — never a free step-back), partition topple, break-down when sealed off, Pull Over on a crouched member. One carve-out: a RANGED unit may shove to disengage — the game's own doctrine that shove is the safe way to break contact (`TACTICS_PLAN.md` #9) applied from the other side | `[ratified]` | Q3 answered A (designer, 2026-08-01). Supersedes M8's deferral the way that deferral said it would be; decision #11 (`TACTICS_PLAN.md`) is the standing doctrine |
+| A5 | **One existing enemy gets a ranged loadout** (Q1-A), and the AI gets shoot / reposition-for-LOS / crouch-and-shoot beats | `[ratified]` | Q1 answered A (designer, 2026-08-01). WHICH enemy carries it stays `[proposed]` (the Executive, per the data section) — flavor is the designer's whenever they want it |
+| A6 | **Enemy HR heals, rationed; summoners keep distance** (Q4-A) | `[ratified]` | Q4 answered A (designer, 2026-08-01). The ration (uses-per-fight, like the player's triage) is what keeps this from being the heal-ritual M9 just killed |
+| A7 | **No difficulty selector in v1**; every new magnitude lives in one `AI` tunables block | `[ratified]` | Q5 answered A (designer, 2026-08-01). The block is what makes any later selector cheap — one multiplier, not a scavenger hunt |
 | A8 | **Per-enemy personality is data; the brain is systems.** New per-def vocabulary (`focus`, a ranged attack entry, support flags) is documented in `data/enemies.js` like `aggression` and `reach` already are; `combat-ai.js` owns every rule that reads it | `[proposed]` | The `ARCHITECTURE.md` rule applied to AI. `aggression` (green/yellow/red) is the precedent: disposition already lives on the def |
 | A9 | **The AI never cheats.** Same AP prices (the topple precedent: "both sides push for the same", `combat-ai.js:141`), same rolls (M1's shared assembler), same information (it reacts to what combat shows it) | `[proposed]` | Difficulty that comes from fairness reads as the enemy being good; difficulty from cheating reads as the game being unfair. Every reference lesson supports it |
 | A10 | **Sealed-off enemies break through instead of turtling** — when no route to any target exists, a unit with a breakable barrier on the way batters it (`breakPlan`), and a unit sealed by a CLOSED DOOR opens it at the player's own door price rather than farming crouches forever | `[proposed]` | Also the honest fix for the class of fights the closed-door deadlock belonged to: an unreachable enemy is now a *delayed* enemy, not a stalemate. Doors have no break pool (they are not in the wall sets, by construction), so without the open arm, closing a door on an enemy mid-fight turns it into a piñata |
