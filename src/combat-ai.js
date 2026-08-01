@@ -15,6 +15,22 @@ import { cheb, posOf, reachOfUnit, AROUND, ORTHO } from './combat-geometry.js';
 import { inReach, dist, shieldedFaces, facesShieldFrom } from './tactics.js';
 import { blocksSight } from './data/tiles.js';
 
+// The AI's tunables, one block (AI_PLAN A7): every magnitude a difficulty
+// pass - or someday a selector - would turn lives here, beside the rules
+// that read it. Numbers are first drafts, deferred to playtest like every
+// constants block before it.
+export const AI = {
+  // --- target scoring (AI_PLAN M2) ---
+  FOCUS_DEFAULT: 0.5, // a def without `focus`: half-disciplined
+  W_NEAR: 1.0, // proximity term
+  W_KILL: 2.0, // kill-securability term (scaled by focus)
+  W_FRAIL: 1.0, // fragility term (scaled by focus)
+  STICKINESS: 0.25, // bonus to the CURRENT target - anti-flip-flop hysteresis
+};
+
+// Score ties are decided by the tie-break chain, not float luck.
+const EPS = 1e-9;
+
 // The route to a tile the unit could stand on and swing from: the shortest path
 // to any of the target's eight neighbours, or null if none is reachable. Shared
 // by pickTarget and the advance so the two can never disagree about who is
@@ -44,26 +60,50 @@ export function standTilePath(ux, uz, tx, tz, { isWalkable, findEnemyPath }) {
   return best;
 }
 
-// Nearest living member - but ENGAGEABLE first. Once a partition blocks a swing
-// (TACTICS_PLAN M3), the closest member by distance can be one the unit can
-// neither reach nor walk to: on the far side of a cubicle wall with the way
-// round sealed. Targeting them means walking to the wall and swinging at
-// nothing, every turn, forever. So a member the unit can actually fight
-// outranks a nearer one it cannot, and distance only breaks ties within each
-// group - with the WOUNDED one taking the tie after that.
+// Which member to fight - ENGAGEABLE first, always. Once a partition blocks
+// a swing (TACTICS_PLAN M3), the closest member by distance can be one the
+// unit can neither reach nor walk to: on the far side of a cubicle wall with
+// the way round sealed. Targeting them means walking to the wall and swinging
+// at nothing, every turn, forever. So engageability stays a hard TIER - a
+// member the unit can actually fight outranks any it cannot, whatever the
+// scores say.
+//
+// Within a tier the choice is a score (AI_PLAN M2), not a distance:
+//
+//   near  - proximity, the old rule's whole opinion
+//   kill  - can we actually FINISH them soon (fewest expected swings)
+//   frail - how far someone already got with them
+//
+// `focus` (the def's discipline knob, 0..1) scales the two hunter terms, so
+// a Manager at 0.2 mostly harasses whoever is closest while an Executive at
+// 0.9 picks the kill and works it. STICKINESS is hysteresis: the current
+// target keeps a small edge, so a scatterbrained flip-flop between two
+// near-equal marks costs more than it wins. At focus 0 the formula IS the
+// old rule - nearest, with the tie-break chain below giving the wounded the
+// tie - which is what the old tests now pin by name.
 //
 // `candidates` is the living player side; `canEngage(m)` is the caller's
-// (memoized) reach-or-route test.
-export function pickTarget(ux, uz, candidates, canEngage) {
+// (memoized) reach-or-route test; `expSwings(m)` is the caller's estimate of
+// swings-to-down (combat owns the attack lines); `current` is the unit's
+// standing mark, if any. Scores are deterministic - no rng anywhere in a
+// choice - and full ties fall to candidate order, so a seeded fight replays.
+export function pickTarget(ux, uz, candidates, canEngage, opts = {}) {
+  const { focus = AI.FOCUS_DEFAULT, current = null, expSwings = null } = opts;
   let best = null;
   for (const m of candidates) {
-    const d = cheb(ux, uz, m.actor.x, m.actor.z);
     const engageable = canEngage(m);
+    const near = 1 / (1 + cheb(ux, uz, m.actor.x, m.actor.z));
+    const kill = expSwings ? 1 / Math.max(1, expSwings(m)) : 0;
+    const frail = m.sheet.maxHp > 0 ? 1 - m.sheet.hp / m.sheet.maxHp : 0;
+    const score = AI.W_NEAR * near
+      + focus * (AI.W_KILL * kill + AI.W_FRAIL * frail)
+      + (current && m === current ? AI.STICKINESS : 0);
     const better = !best
       || (engageable && !best.engageable)
       || (engageable === best.engageable
-        && (d < best.d || (d === best.d && m.sheet.hp < best.m.sheet.hp)));
-    if (better) best = { m, d, engageable };
+        && (score > best.score + EPS
+          || (Math.abs(score - best.score) <= EPS && m.sheet.hp < best.m.sheet.hp)));
+    if (better) best = { m, score, engageable };
   }
   return best ? { actor: best.m.actor, member: best.m } : null;
 }

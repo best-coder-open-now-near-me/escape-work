@@ -9,6 +9,12 @@
 //   'green'  - no intention of initiating; only fights if provoked
 //   'yellow' - will talk first, then maybe escalate
 //   'red'    - straight to battle
+//
+// `focus` (0..1, default combat-ai.AI.FOCUS_DEFAULT) is targeting discipline
+// once the fight is on (AI_PLAN M2): 0 harasses whoever is closest, 1 picks
+// the member it can actually finish and works them. Personality data, read
+// by one shared rule - like `aggression`, it says who they are, not how the
+// game works.
 import { fromClass } from './classes.js';
 
 // id -> either a standalone stat block, or `{ classId, ...overrides }` for a
@@ -41,6 +47,7 @@ const KITS = {
     attackAp: 3, // AP one swing costs them in combat
     xp: 8,
     aggression: 'red', // straight to battle
+    focus: 0.2, // harasses whoever is closest - pettiness, not strategy
     examine: 'The Manager: radiates unread-email energy.',
     loot: [
       { item: 'performance-review', chance: 1 },
@@ -70,6 +77,7 @@ const KITS = {
     xp: 10,
     accuracy: 0.05, // sharper aim than the base coworkers (HIT_PLAN)
     aggression: 'red', // descended from the floors above; negotiation is beneath him
+    focus: 0.9, // picks the kill and works it - restructuring is a discipline
     examine: 'An Executive, down from the floors above. The air pressure changes around him.',
     loot: [
       { item: 'performance-review', chance: 1 },
@@ -108,6 +116,7 @@ const KITS = {
     attackAp: 3,
     xp: 6,
     aggression: 'yellow', // wants a "culture-fit conversation" before the knives
+    focus: 0.4, // a people person - spreads the attention around, mostly
     examine: 'HR: smiles warmly. Never stops taking notes.',
     loot: [
       { item: 'hr-pamphlet', chance: 1 },
@@ -170,6 +179,7 @@ const KITS = {
     // Badge first, force second: he wants to see your lanyard before anything
     // escalates, which is exactly what 'yellow' means.
     aggression: 'yellow',
+    focus: 0.5, // steady, procedural; STICKINESS does his character work
     examine: 'Security. Knows the badge policy by heart. Has never once been asked about it.',
     loot: [
       { item: 'laminated-lanyard', chance: 1 },

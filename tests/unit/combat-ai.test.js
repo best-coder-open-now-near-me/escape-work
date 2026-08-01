@@ -9,10 +9,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   standTilePath, pickTarget, advanceRoute, aiCrouchCovered, chooseBeat, afterFailedAdvance,
+  AI,
 } from '../../src/combat-ai.js';
 import { REACH } from '../../src/stats.js';
 
-const member = (x, z, hp = 10) => ({ sheet: { hp }, actor: { x, z } });
+const member = (x, z, hp = 10, maxHp = 10) => ({ sheet: { hp, maxHp }, actor: { x, z } });
 const unit = (x, z) => ({ x, z, combat: { reach: REACH.DEFAULT } });
 
 // --- standing and routing ----------------------------------------------------
@@ -63,14 +64,56 @@ test('an engageable member outranks a nearer one behind a wall', () => {
   assert.equal(t.member, far);
 });
 
-test('within a group, distance decides and the wounded break the tie', () => {
+test('focus 0 is the old rule: nearest, wounded tiebreak (AI_PLAN M2)', () => {
   const a = member(3, 0, 10);
   const b = member(1, 0, 10);
-  assert.equal(pickTarget(0, 0, [a, b], () => true).member, b);
+  assert.equal(pickTarget(0, 0, [a, b], () => true, { focus: 0 }).member, b);
 
+  // Equal distance, one of them already hurt: the wounded one takes the tie -
+  // the shipped rule this scoring replaced, preserved at the knob's floor.
   const hale = member(2, 0, 10);
   const hurt = member(0, 2, 3);
-  assert.equal(pickTarget(0, 0, [hale, hurt], () => true).member, hurt);
+  assert.equal(pickTarget(0, 0, [hale, hurt], () => true, { focus: 0 }).member, hurt);
+});
+
+test('at focus 1 a finishable target outranks a nearer hale one', () => {
+  const near = member(1, 0, 20, 20); // adjacent, untouched
+  const far = member(3, 0, 3, 20); // three swings away, one swing from down
+  const expSwings = (m) => Math.ceil(m.sheet.hp / 3);
+  const t = pickTarget(0, 0, [near, far], () => true, { focus: 1, expSwings });
+  assert.equal(t.member, far);
+});
+
+test('stickiness holds the current target against a marginally nearer one', () => {
+  const mark = member(2, 0, 10);
+  const closer = member(1, 0, 10);
+  // With no standing mark, proximity wins...
+  assert.equal(pickTarget(0, 0, [mark, closer], () => true, { focus: 0 }).member, closer);
+  // ...but the mark's hysteresis outweighs the one-tile difference, so the
+  // unit does not flip-flop between near-equal members every turn.
+  assert.equal(
+    pickTarget(0, 0, [mark, closer], () => true, { focus: 0, current: mark }).member,
+    mark,
+  );
+  assert.ok(AI.STICKINESS > 0); // the test above is vacuous if the knob hits 0
+});
+
+test('full ties fall to candidate order, so a seeded fight replays', () => {
+  const first = member(2, 0, 10);
+  const second = member(0, 2, 10);
+  assert.equal(pickTarget(0, 0, [first, second], () => true).member, first);
+});
+
+test('engageability is a tier no score can buy past', () => {
+  // A one-swing kill on the far side of a sealed wall still loses to a
+  // reachable full-health member: walking to the wall and swinging at
+  // nothing is the stall the M3 lesson exists to prevent.
+  const sealed = member(1, 0, 1, 20);
+  const open = member(4, 0, 20, 20);
+  const t = pickTarget(0, 0, [sealed, open], (m) => m === open, {
+    focus: 1, expSwings: (m) => Math.ceil(m.sheet.hp / 3),
+  });
+  assert.equal(t.member, open);
 });
 
 test('no candidates means no target - which is how a party wipe reads', () => {

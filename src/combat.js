@@ -247,14 +247,32 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return val;
   }
 
-  // Nearest living member - but ENGAGEABLE first. Once a partition blocks a
-  // swing (M3), the closest member by distance can be one the unit can neither
-  // reach nor walk to: on the far side of a cubicle wall with the way round
-  // sealed. Targeting them means walking to the wall and swinging at nothing,
-  // every turn, forever. So a member the unit can actually fight outranks a
-  // nearer one it cannot, and distance only breaks ties within each group.
+  // Which member this unit fights (combat-ai.pickTarget): engageable first,
+  // then the scored blend - proximity, kill-securability, fragility - shaped
+  // by the def's `focus` and held steady by stickiness on the standing mark
+  // (AI_PLAN M2). Combat supplies the leaf facts; the rule lives in the pure
+  // module.
+  //
+  // Everything here must be safe EAGERLY: pickTarget runs during the
+  // startCombat surprise sweep, before any turn exists - which is why these
+  // are declared before it and read no turn state.
+  const aiTargets = new Map(); // unit -> the member it last committed to
+  // Swings-to-down, on the unit's own lines: mean damage across its attack
+  // entries vs the member's current HP. Soak and deflect deliberately ignored
+  // (AI_PLAN M2) - this is a target-picking estimate, not a damage promise,
+  // and reading a sheet's stance into it would make the choice twitchy.
+  const expectedSwings = (unit, m) => {
+    const lines = unit.combat.attacks;
+    if (!lines.length) return Infinity;
+    const avg = lines.reduce((s, a) => s + (a.min + a.max) / 2, 0) / lines.length;
+    return Math.ceil(Math.max(1, m.sheet.hp) / Math.max(1, avg));
+  };
   const pickTarget = (unit) =>
-    pickBest(unit.x, unit.z, livingMembers(), (m) => canEngage(unit, m));
+    pickBest(unit.x, unit.z, livingMembers(), (m) => canEngage(unit, m), {
+      focus: unit.def.focus,
+      current: aiTargets.get(unit) || null,
+      expSwings: (m) => expectedSwings(unit, m),
+    });
 
   // Enemies pulled in from a distance are surprised - they spend their first
   // turn realizing what's happening, so group openings don't alpha-strike you.
@@ -4323,6 +4341,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     const target = pickTarget(unit);
     if (!target) { defeat(); return; } // no living player-side target = party wipe
+    aiTargets.set(unit, target.member); // the standing mark stickiness holds to
     // A summoner reinforces before it wades in: off cooldown, able to afford
     // the post, and under its live cap (resolveSummon returns 0 when full, so a
     // maxed HR just fights). Posting the req is the whole beat. Enemy-side only
