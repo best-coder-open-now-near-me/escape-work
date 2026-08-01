@@ -21,9 +21,19 @@ const pc = new Proxy({}, { get: (_, k) => window.pc[k] });
 // Above the floor top (0.1) and the surface decals (0.12), below the preview
 // lines and rings (0.14): the wash sits under every affordance drawn on it.
 const PAINT_Y = 0.13;
-// A whisker under full tile size, so the wash reads as tiles of reach rather
-// than one amorphous puddle - the seams are the grid the aim thinks in.
+// A whisker under full tile size. The seams used to be justified as "the
+// grid the aim thinks in" - but since DEGRID M5 the aim thinks in a circle
+// from the body, so the chips are jittered (below) to read as a scattered
+// wash rather than graph paper. Look is `[proposed]` pending designer eyes
+// (DEGRID_PLAN M6).
 const QUAD = 0.94;
+
+// Deterministic per-cell hash (tile-renderer's house pattern): the jitter
+// must not swim between frames or differ between two shows of the same aim.
+const hash01 = (x, z, salt) => {
+  const n = Math.sin(x * 127.1 + z * 311.7 + salt * 74.7) * 43758.5453;
+  return n - Math.floor(n);
+};
 
 export function createAimPaint(app) {
   const holder = new pc.Entity('aim-paint');
@@ -49,7 +59,16 @@ export function createAimPaint(app) {
       pool.push(e);
     }
     e.enabled = true;
-    e.setLocalPosition(x, PAINT_Y, z);
+    // Nudged, turned and sized a hair per cell so the wash's edge stops
+    // tracing the grid. Small enough that the e2e debug read (Math.round of
+    // the position) still names the right tile.
+    e.setLocalPosition(
+      x + (hash01(x, z, 1) - 0.5) * 0.06,
+      PAINT_Y,
+      z + (hash01(x, z, 2) - 0.5) * 0.06);
+    e.setLocalEulerAngles(0, (hash01(x, z, 3) - 0.5) * 18, 0);
+    const s = QUAD * (0.9 + hash01(x, z, 4) * 0.08);
+    e.setLocalScale(s, 1, s);
     used += 1;
   }
 

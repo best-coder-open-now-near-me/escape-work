@@ -254,6 +254,17 @@ export function parseLevel(level) {
     const d = doorBetween(x, z, nx, nz);
     return !d || d.open;
   };
+  // CROUCH-height sight (SNEAK_PLAN D2): a sneaking body is crouch-high, so
+  // the furniture that shields a crouch also hides a sneak. Cells: anything
+  // solid or cover-grade blocks (the microwave a shot sails over still hides
+  // whoever ducks behind it). Edges: partitions AND closed doors - which is
+  // exactly the movement edge rule, aliased so the sight callers say what
+  // they mean rather than borrowing movement's name.
+  const sightOpenCellLow = (x, z) => {
+    const d = defAt(x, z);
+    return !d?.solid && !d?.cover;
+  };
+  const sightOpenLow = edgeOpen;
   // Full edge legality for a (possibly diagonal) single step. Cell solidity is
   // NOT checked here - callers layer terrain/enemies on top. A diagonal step
   // must clear all four edges around the crossed corner, so nobody slips past
@@ -319,7 +330,7 @@ export function parseLevel(level) {
 
   return {
     name: level.name || '', width, height,
-    typeAt, defAt, terrainOpen, sightOpenCell, surfaceAt, isElectrified, setType,
+    typeAt, defAt, terrainOpen, sightOpenCell, sightOpenCellLow, sightOpenLow, surfaceAt, isElectrified, setType,
     propHpAt, damageProp, edgeHpBetween, damageEdge,
     hWalls, vWalls, edgeOpen, stepOpen, sightOpen, wallEdgeBetween, removeEdgeBetween,
     doors, doorBetween, setDoorOpen,

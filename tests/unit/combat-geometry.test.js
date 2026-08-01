@@ -105,6 +105,20 @@ test('verbReaches asks the armed verb\'s OWN range, not a borrowed one', () => {
   assert.equal(verbReaches('attack', me, en, 3, 0, open), true);
 });
 
+test('verbReaches measures a circle from the unrounded stand point (DEGRID D4/D6)', () => {
+  const me = unit(0, 0, REACH.DEFAULT);
+  const en = at(5, 0);
+  // THROW_RANGE is 5. From (0.4, 0) the true distance is 4.6 - live; the old
+  // rule rounded to tile (0,0) first, so legality flipped only at the tile
+  // boundary instead of exactly at the range circle.
+  assert.equal(verbReaches('paper-ball', me, en, 0.4, 0, open), true);
+  assert.equal(verbReaches('paper-ball', me, en, -0.2, 0, open), false);
+  // A diagonal at the old cheb square's corner is OUT of the circle: cheb
+  // said (5,5) was range 5 from the origin; hypot says 7.07.
+  const corner = at(5, 5);
+  assert.equal(verbReaches('paper-ball', me, corner, 0, 0, open), false);
+});
+
 test('swingPointAt returns a stand point only when the swing would be LEGAL', () => {
   const me = unit(0, 0, REACH.DEFAULT);
   const en = at(3, 0);

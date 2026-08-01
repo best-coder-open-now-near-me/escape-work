@@ -100,15 +100,53 @@ export function segmentClear(isWalkable, ax, az, bx, bz, edgeOpen = null) {
 
 // A character has width: check the centreline plus two offset lines.
 export const BODY_RADIUS = 0.3;
+
+// The offset lines probe at a hair UNDER the body radius. clampToClearance
+// parks bodies at exactly BODY_RADIUS from a blocked boundary, so a probe at
+// exactly that radius lies ON the boundary - and segmentClear's floor resolves
+// an exact boundary coordinate INTO the blocked cell. A body touching a wall
+// is legal; the test must not treat touching as clipping, or every character
+// who last stopped against a wall loses all smoothing on their next walk.
+const PROBE_RADIUS = BODY_RADIUS - 0.02;
+
+// Cells the body ALREADY legally overlaps while standing at (px, pz): every
+// cell whose square comes within `r` of the point. At most four. The corridor
+// forgives these for its probe lines - the game itself put the body there
+// (approachPoint deliberately leans a stand point over the target's blocked
+// tile), so clipping them at the span's ends is the stance, not a new
+// violation. The CENTRELINE never gets this forgiveness: it is the travel
+// path, and it must genuinely cross only open ground and open edges.
+function overlappedCells(px, pz, r) {
+  const out = new Set();
+  for (let cx = Math.round(px - r); cx <= Math.round(px + r); cx++) {
+    for (let cz = Math.round(pz - r); cz <= Math.round(pz + r); cz++) {
+      const nx = Math.max(cx - 0.5, Math.min(cx + 0.5, px));
+      const nz = Math.max(cz - 0.5, Math.min(cz + 0.5, pz));
+      if (Math.hypot(nx - px, nz - pz) <= r) out.add(cx + ',' + cz);
+    }
+  }
+  return out;
+}
+
 function walkableCorridor(isWalkable, ax, az, bx, bz, edgeOpen) {
   const dx = bx - ax;
   const dz = bz - az;
   const len = Math.hypot(dx, dz) || 1;
-  const ox = (-dz / len) * BODY_RADIUS;
-  const oz = (dx / len) * BODY_RADIUS;
-  return segmentClear(isWalkable, ax, az, bx, bz, edgeOpen)
-    && segmentClear(isWalkable, ax + ox, az + oz, bx + ox, bz + oz, edgeOpen)
-    && segmentClear(isWalkable, ax - ox, az - oz, bx - ox, bz - oz, edgeOpen);
+  const ox = (-dz / len) * PROBE_RADIUS;
+  const oz = (dx / len) * PROBE_RADIUS;
+  // The travel path itself: strict.
+  if (!segmentClear(isWalkable, ax, az, bx, bz, edgeOpen)) return false;
+  // The width probes: forgiven the cells (and edges wholly between such
+  // cells) that the body legally overlaps at either endpoint.
+  const exempt = overlappedCells(ax, az, BODY_RADIUS + 0.05);
+  for (const c of overlappedCells(bx, bz, BODY_RADIUS + 0.05)) exempt.add(c);
+  const open = (x, z) => isWalkable(x, z) || exempt.has(x + ',' + z);
+  const eOpen = edgeOpen
+    ? (x, z, nx, nz) => edgeOpen(x, z, nx, nz)
+      || (exempt.has(x + ',' + z) && exempt.has(nx + ',' + nz))
+    : null;
+  return segmentClear(open, ax + ox, az + oz, bx + ox, bz + oz, eOpen)
+    && segmentClear(open, ax - ox, az - oz, bx - ox, bz - oz, eOpen);
 }
 
 // Standing spots are free points, not tile centres - but a body must stay
@@ -233,9 +271,137 @@ export function truncateByBudget(path, budget, rate) {
   return { points: out, cost, done: true, tail: null };
 }
 
+// The smoothing walkability for a just-planned route: the base rule, plus
+// the cells the route itself steps on. The router prices hazard cells
+// (extraCost) rather than blocking them, so a route legally crosses a spill
+// when the detour costs more - and a smoother that treats those same cells
+// as walls can never straighten across ground the route deliberately chose,
+// which un-smooths every walk near a surface into tile-centre stair-steps.
+// Cells the route AVOIDED stay exactly as blocked as `base` says: the union
+// only ever opens ground the router already accepted, so a straight line
+// still refuses to cut through the fire the Dijkstra paid to go around.
+// Vertices are rounded, so the spliced body point exempts the mover's own
+// tile - a walker standing IN a spill can smooth its way out.
+export function routeOpen(base, path) {
+  const chosen = new Set((path || []).map(([x, z]) => Math.round(x) + ',' + Math.round(z)));
+  return (x, z) => base(x, z) || chosen.has(x + ',' + z);
+}
+
+// Would a body legally STAND at (px, pz)? clampToClearance is the rule that
+// places every stand point; a point it would not move is a point the body may
+// occupy. The tightening pass below uses this as its hard stop, so a moved
+// bend can hug a corner down to exactly body radius and never into it.
+function standsClear(isWalkable, edgeOpen, px, pz) {
+  const [cx, cz] = clampToClearance(isWalkable, edgeOpen, px, pz);
+  return Math.hypot(cx - px, cz - pz) < 1e-3;
+}
+
+// Pull each interior bend toward the straight line between its neighbours,
+// as far as the body-radius corridor allows (DEGRID M7). String pulling can
+// only DROP vertices, never move them - so every bend it keeps sits on a raw
+// route vertex, a tile centre half a tile off the wall it turns around, and
+// walks read as aiming at waypoints instead of hugging the corner. Sliding
+// the bend toward its neighbours' chord shortens the path until the capsule
+// touches the obstacle: the bend converges onto the corner at exact
+// clearance, which is the shape a navmesh funnel would have produced.
+//
+// The corridor's endpoint forgiveness (walkableCorridor) is for stand points
+// the game itself placed; a vertex this pass MOVES earns no such grace, so
+// every candidate must also be a spot a body could legally stand
+// (standsClear). A few rounds propagate the slack along the path.
+const TIGHTEN_ROUNDS = 3;
+function tightenPath(isWalkable, path, edgeOpen) {
+  if (path.length <= 2) return path;
+  const out = path.map((p) => [p[0], p[1]]);
+  for (let r = 0; r < TIGHTEN_ROUNDS; r++) {
+    let moved = false;
+    for (let i = 1; i < out.length - 1; i++) {
+      const a = out[i - 1];
+      const b = out[i];
+      const c = out[i + 1];
+      const mx = (a[0] + c[0]) / 2;
+      const mz = (a[1] + c[1]) / 2;
+      if (Math.hypot(mx - b[0], mz - b[1]) < 1e-3) continue;
+      // Binary search along bend -> chord midpoint for the deepest legal pull.
+      let lo = 0;
+      let hi = 1;
+      for (let k = 0; k < 8; k++) {
+        const t = (lo + hi) / 2;
+        const px = b[0] + (mx - b[0]) * t;
+        const pz = b[1] + (mz - b[1]) * t;
+        if (standsClear(isWalkable, edgeOpen, px, pz)
+          && walkableCorridor(isWalkable, a[0], a[1], px, pz, edgeOpen)
+          && walkableCorridor(isWalkable, px, pz, c[0], c[1], edgeOpen)) lo = t;
+        else hi = t;
+      }
+      if (lo > 1e-3) {
+        b[0] += (mx - b[0]) * lo;
+        b[1] += (mz - b[1]) * lo;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
+  return out;
+}
+
+// Round each bend into a short validated arc (DEGRID M7), so the walk curves
+// through corners instead of turning on a point. The arc is a quadratic
+// bezier between two lead-in points on the legs; it bows AWAY from the
+// obstacle the tightened bend hugs (the curve stays between the sharp corner
+// and its chord), but every chord is still corridor-checked and the sharp
+// bend kept whenever the room genuinely is that tight.
+const BEND_RADIUS = 0.4;
+const BEND_STEPS = 3;
+function roundBends(isWalkable, path, edgeOpen) {
+  if (path.length <= 2) return path;
+  const out = [path[0]];
+  for (let i = 1; i < path.length - 1; i++) {
+    const a = out[out.length - 1];
+    const b = path[i];
+    const c = path[i + 1];
+    const ab = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const bc = Math.hypot(c[0] - b[0], c[1] - b[1]);
+    const d = Math.min(BEND_RADIUS, ab / 2, bc / 2);
+    if (d < 0.05) { out.push(b); continue; }
+    const p1 = [b[0] - ((b[0] - a[0]) / ab) * d, b[1] - ((b[1] - a[1]) / ab) * d];
+    const p2 = [b[0] + ((c[0] - b[0]) / bc) * d, b[1] + ((c[1] - b[1]) / bc) * d];
+    const arc = [p1];
+    for (let s = 1; s < BEND_STEPS; s++) {
+      const t = s / BEND_STEPS;
+      const u = 1 - t;
+      arc.push([
+        u * u * p1[0] + 2 * u * t * b[0] + t * t * p2[0],
+        u * u * p1[1] + 2 * u * t * b[1] + t * t * p2[1],
+      ]);
+    }
+    arc.push(p2);
+    // Every sample must be a spot a body may legally STAND - the tightened
+    // bend earned its clearance through clampToClearance, and the curve
+    // through it may not spend what the bend banked. Clamping (rather than
+    // rejecting) keeps the curve when it merely grazes; the corridor checks
+    // below still throw the whole arc away if clamping bent it into a wall.
+    for (const p of arc) {
+      const [qx, qz] = clampToClearance(isWalkable, edgeOpen, p[0], p[1]);
+      p[0] = qx;
+      p[1] = qz;
+    }
+    let ok = walkableCorridor(isWalkable, a[0], a[1], p1[0], p1[1], edgeOpen);
+    for (let s = 1; ok && s < arc.length; s++) {
+      ok = walkableCorridor(isWalkable, arc[s - 1][0], arc[s - 1][1], arc[s][0], arc[s][1], edgeOpen);
+    }
+    if (ok) out.push(...arc);
+    else out.push(b); // too tight to round - the sharp turn is the truth
+  }
+  out.push(path[path.length - 1]);
+  return out;
+}
+
 // "String pulling": collapse a tile-by-tile path into the fewest straight
-// runs with clear line of sight, so movement flows at any angle instead of
-// stair-stepping tile centres.
+// runs with clear line of sight - then pull the surviving bends onto the
+// corners they round (tightenPath) and curve through them (roundBends), so
+// movement flows at any angle, hugs walls at body radius, and never reads
+// as aiming at waypoints.
 export function smoothPath(isWalkable, path, edgeOpen = null) {
   if (!path || path.length <= 2) return path;
   const out = [path[0]];
@@ -246,7 +412,7 @@ export function smoothPath(isWalkable, path, edgeOpen = null) {
     out.push(path[j]);
     i = j;
   }
-  return out;
+  return roundBends(isWalkable, tightenPath(isWalkable, out, edgeOpen), edgeOpen);
 }
 
 // The cheapest route to a tile a RANGED attack could fire at (tx, tz) from, or

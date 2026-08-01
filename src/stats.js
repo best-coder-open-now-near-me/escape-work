@@ -117,6 +117,20 @@ export const MOVE = {
   COST_PER_TILE: 0.5, // AP per tile of clean floor (was an implicit 1.0)
 };
 
+// --- sneaking (SNEAK_PLAN) ---------------------------------------------------
+// The cone every coworker watches through, and what sneaking costs. All
+// first drafts, deferred to playtest like every other magnitude (SNEAK_PLAN
+// question 1). The cone shape follows DOS2's reported ~90-degree base;
+// SPEED_MULT is its reported -30% sneak penalty; AMBUSH_DMG is Guerrilla's
+// confirmed +40% - sources in SNEAK_PLAN's inspirations section.
+export const STEALTH = {
+  CONE_HALF_ANGLE: 45, // degrees either side of the watcher's facing
+  CONE_RANGE: 6,       // true-distance tiles, body to body
+  SPEED_MULT: 0.7,     // sneaking movement speed multiplier
+  AMBUSH_DMG: 0.4,     // Disgruntled: bonus on a sneak-opened fight's first strike
+  CONE_SHRINK: 15,     // Forgettable Face: degrees off every cone's half-angle
+};
+
 // --- reach (TACTICS_PLAN "Revision - reach is a DISTANCE") -------------------
 // Melee reach is a DISTANCE between continuous positions, not tile adjacency.
 // The engine has always placed bodies continuously - `GridActor.x` is the

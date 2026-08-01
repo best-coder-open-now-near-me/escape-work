@@ -520,7 +520,7 @@ test('aimRangeOf mirrors each verb\'s own range rule', () => {
   assert.equal(aimRangeOf({ type: 'attack', ap: 1 }), null); // melee: the reach ring is the affordance
   assert.deepEqual(aimRangeOf({ type: 'attack', range: 5 }), { r: 5 });
   assert.deepEqual(aimRangeOf({ type: 'attack', cone: { range: 4, halfAngle: 30 } }),
-    { r: 4, euclid: true });
+    { r: 4 });
   assert.deepEqual(aimRangeOf({ type: 'zone' }), { r: zoneRangeOf({ type: 'zone' }) });
   assert.equal(aimRangeOf({ type: 'mobility', mode: 'dash', distance: 5 }), null); // trail previews a dash
   assert.deepEqual(aimRangeOf({ type: 'mobility', mode: 'swap', range: 6 }), { r: 6 });
@@ -529,19 +529,23 @@ test('aimRangeOf mirrors each verb\'s own range rule', () => {
   assert.equal(aimRangeOf({ type: 'control' }), null); // touch control walks you in
 });
 
-test('rangeTiles paints the Chebyshev square, minus what canSee refuses', () => {
+test('rangeTiles paints the true-radius disc, minus what canSee refuses', () => {
+  // One metric since DEGRID D4: every targeted range is a circle, so the
+  // cheb square (and the euclid flag that opted out of it) is gone.
   const all = rangeTiles(0, 0, 2, () => true);
-  assert.equal(all.length, 25); // 5x5, origin included - the ground under your feet is yours
+  assert.equal(all.length, 13); // r=2 disc on tile centres, origin included
   const seen = rangeTiles(0, 0, 2, (x) => x >= 0);
-  assert.equal(seen.length, 15);
+  assert.equal(seen.length, 9);
   assert.ok(seen.every(([x]) => x >= 0), 'a refused tile never paints');
 });
 
-test('rangeTiles euclid trims the corners a true radius cannot reach', () => {
-  const disc = rangeTiles(0, 0, 2, () => true, true);
-  assert.equal(disc.length, 13); // r=2 disc on tile centres
+test('rangeTiles measures from a continuous body, not a tile centre', () => {
+  // The wash follows the model: a body at x=0.4 owns (2,0) (1.6 away) and has
+  // lost (-2,0) (2.4 away) - the disc slides with the stance.
+  const disc = rangeTiles(0.4, 0, 2, () => true);
   assert.ok(disc.some(([x, z]) => x === 2 && z === 0));
-  assert.ok(!disc.some(([x, z]) => x === 2 && z === 2), 'hypot(2,2) is out of a cone\'s range');
+  assert.ok(!disc.some(([x, z]) => x === -2 && z === 0));
+  assert.ok(!disc.some(([x, z]) => x === 2 && z === 2), 'hypot stays out of range');
 });
 
 // --- destructible cover & Pull Over (TACTICS_PLAN M8) -------------------------

@@ -15,11 +15,12 @@ import { CLASSES } from './data/classes.js';
 import { ACTIONS, arrivalLine } from './data/actions.js';
 import { parseLevel } from './grid.js';
 import { parseFloors, layeredGrid, planCrossLayerRoute } from './floors.js';
-import { findPath, smoothPath, segmentClear, clampToClearance, approachPoint, routeToFiringPosition, DIRS8 } from './pathfinding.js';
+import { findPath, smoothPath, routeOpen, segmentClear, clampToClearance, approachPoint, routeToFiringPosition, DIRS8 } from './pathfinding.js';
+import { seesBody, coneBoundary, deriveFacing } from './stealth.js';
 import {
   createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, grantTalent, classTrack,
   scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
-  orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, lookOf, stairwellHeal, REACH,
+  orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, lookOf, stairwellHeal, REACH, STEALTH,
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
@@ -547,7 +548,17 @@ function startGame(level) {
   for (const en of enemies) {
     placeModel(app, `assets/characters/${en.def.model}.glb`, en.x, en.z, {
       lift, rotY: -90, animate: true,
-      onReady: (e) => { dressUp(e, en, en.def.look, en.def.model); picking.register(e, 'enemy', en); },
+      onReady: (e) => {
+        dressUp(e, en, en.def.look, en.def.model);
+        picking.register(e, 'enemy', en);
+        // A coworker who has never moved looks down their longest corridor,
+        // not wherever the .glb happened to face (SNEAK_PLAN D7) - their
+        // watch cone is only as sensible as this gaze. Wanderers overwrite
+        // it the moment they amble.
+        const f = deriveFacing(grid.terrainOpen, en.x, en.z);
+        en.yaw = en.targetYaw = Math.atan2(f.x, f.z) * (180 / Math.PI);
+        e.setEulerAngles(0, en.yaw, 0);
+      },
     });
   }
   for (const npc of npcs) {
@@ -885,10 +896,23 @@ function startGame(level) {
   // Smooth a raw tile path into any-angle runs, starting from where the
   // walker's body actually stands - not their tile centre, which they may be
   // nowhere near after a free-point stop. Defaults to the leader.
-  function smoothFromBody(p, actor = player) {
+  //
+  // The smoothing walkability is the hazard-averse base UNION the cells the
+  // route itself steps on (routeOpen): the router only ever SURCHARGES a
+  // surface (hazardCost), so a route legally crosses one when the detour is
+  // dearer - and refusing to straighten across ground the route chose is what
+  // used to un-smooth every walk near a spill into tile-centre stair-steps.
+  // Cells the route avoided stay blocked, so a straight line still cannot cut
+  // through the fire the Dijkstra paid to go around. `extraClear` narrows the
+  // base further for callers with their own blockers (combat's teammate rule)
+  // or their own sheet (the walker's talents, not the leader's).
+  function smoothFromBody(p, actor = player, extraClear = null) {
     const pos = actor.entity?.getPosition();
     if (pos) p = [[pos.x, pos.z], ...p.slice(1)];
-    return smoothPath(clearOfHazards, p, grid.edgeOpen);
+    const base = extraClear
+      ? (x, z) => isWalkable(x, z) && extraClear(x, z)
+      : clearOfHazards;
+    return smoothPath(routeOpen(base, p), p, grid.edgeOpen);
   }
   // Where the body may actually stand: the exact clicked point, pulled in
   // from walls/partitions so the model never clips them.
@@ -935,8 +959,15 @@ function startGame(level) {
   function approachAndDo(x, z, run) {
     if (!sheet || inCombat || gameOver || climbAnim) return;
     clearOocCrouch();
-    if (Math.abs(player.x - x) <= 1 && Math.abs(player.z - z) <= 1) {
+    // Rummaging, talking, shopping, looting: seeing to it ends the sneak
+    // (SNEAK_PLAN D10). Doors stay exempt - they go through their own path,
+    // and a sneak that ends at every door is no sneak in an office.
+    const act = () => {
+      if (sneak) endSneak('No staying quiet through this.');
       run();
+    };
+    if (Math.abs(player.x - x) <= 1 && Math.abs(player.z - z) <= 1) {
+      act();
       return;
     }
     let best = null;
@@ -948,7 +979,7 @@ function startGame(level) {
       if (p && (!best || p.length < best.length)) best = p;
     }
     if (!best || best.length < 2) return;
-    pendingAction = { x, z, run };
+    pendingAction = { x, z, run: act };
     const [gx, gz] = best[best.length - 1];
     best[best.length - 1] = approachTo(gx, gz, x, z);
     const s = smoothFromBody(best);
@@ -1093,7 +1124,11 @@ function startGame(level) {
       fromX: Math.round(player.x),
       fromZ: Math.round(player.z),
       isWalkable,
-      hasLos: (ax, az, bx, bz) => hasLos({ x: ax, z: az }, { x: bx, z: bz }),
+      // Under-promise the CIRCLE the arrival re-check measures (DEGRID D4):
+      // a corner tile inside the old cheb square but outside the radius would
+      // be walked to and then refused.
+      hasLos: (ax, az, bx, bz) => Math.hypot(ax - bx, az - bz) <= range
+        && hasLos({ x: ax, z: az }, { x: bx, z: bz }),
       findPath: (ax, az) => findPath(isWalkable, player.x, player.z, ax, az, hazardCost, grid.stepOpen),
     });
   }
@@ -1107,7 +1142,7 @@ function startGame(level) {
     return enemies.filter((en) => {
       if (!en.alive || !en.entity) return false;
       const bp = en.entity.getPosition();
-      return test(bp.x, bp.z, 0.5) && hasLos(player, en);
+      return test(bp.x, bp.z, 0.5) && hasLos(leadBody(), { x: bp.x, z: bp.z });
     });
   }
 
@@ -1174,6 +1209,17 @@ function startGame(level) {
   // where being briefly hazed must not decide who is in the fight.
   const canTakePart = (a, b) =>
     segmentClear(grid.sightOpenCell, a.x, a.z, b.x, b.z, grid.sightOpen);
+  // The leader's continuous body. Targeted ranges and sight measure from HERE
+  // (DEGRID D4/D6) - `player.x/z` are the logical tile, up to half a tile
+  // from where the model visibly stands.
+  const leadBody = () => {
+    const p = player?.entity?.getPosition();
+    return p ? { x: p.x, z: p.z } : { x: player.x, z: player.z };
+  };
+  const enemyBody = (en) => {
+    const p = en?.entity?.getPosition();
+    return p ? { x: p.x, z: p.z } : { x: en.x, z: en.z };
+  };
   // The shared rule (stats.js), bound to the leader. A declaration, not a
   // const: the hotbar builder reads it and runs from paths that fire before
   // this point in the closure body.
@@ -1223,7 +1269,10 @@ function startGame(level) {
       // Range, a line, and ammo only where the shot bills for it. A ranged
       // WEAPON also passes if it can walk into range, the way a melee swing
       // passes on a route it hasn't taken yet - combat's opener walks it in.
-      const shot = cheb(player, en) <= range && hasLos(player, en);
+      // A range is a circle between the BODIES (DEGRID D4/D6).
+      const lb = leadBody();
+      const eb = enemyBody(en);
+      const shot = Math.hypot(lb.x - eb.x, lb.z - eb.z) <= range && hasLos(lb, eb);
       if (a.ammoCost) return shot && (sheet?.paper || 0) >= throwAmmoCost(id);
       // A weapon walks in to a FIRING position, not to their elbow - asking
       // canApproach here refused shots that were plainly on. This still refuses
@@ -1321,8 +1370,18 @@ function startGame(level) {
     const a = armedOoc && ACTIONS[armedOoc];
     if (a && (a.type === 'attack' || a.type === 'shove' || a.type === 'purge')) {
       engageWithAction(en, armedOoc);
+      return;
     }
-    else confront(en);
+    // A sneaking click on a coworker in reach IS the ambush strike (SNEAK
+    // M4): the ordinary unarmed path starts fights by walking INTO people
+    // (the adjacency trigger), and a sneaker deliberately never triggers on
+    // proximity (D1) - so the click that would have bumped them swings
+    // instead, and the fight opens on the ambusher's terms.
+    if (sneak && playerReaches(en)) {
+      engageWithAction(en, equippedAction(sheet));
+      return;
+    }
+    confront(en);
   }
   // Act on the interactable ENTITY under the cursor. Returns true if handled.
   function dispatchHit(hit) {
@@ -1715,8 +1774,9 @@ function startGame(level) {
   // AP pool to spend out here and no per-fight `uses` to ration, so those
   // fields simply are not supplied.
   const summonDropProblem = (a, tx, tz) => summonSpotProblem(a, {
-    dist: cheb(player, { x: tx, z: tz }),
-    los: hasLos(player, { x: tx, z: tz }),
+    // The drop range is a circle from the poster's body; the SPOT is a tile.
+    dist: Math.hypot(leadBody().x - tx, leadBody().z - tz),
+    los: hasLos(leadBody(), { x: tx, z: tz }),
     hasRoomToStand: freeTilesNear(tx, tz, 1, 0).length > 0,
     room: roomFor(a),
   });
@@ -1750,6 +1810,10 @@ function startGame(level) {
   function adjacentEnemyToParty() {
     for (const m of party?.members || []) {
       if (!m.actor?.entity || m.sheet.hp <= 0) continue;
+      // A sneaking body starts fights by being SEEN (the sweep), not by
+      // proximity - standing unseen at somebody's shoulder is the whole
+      // assassin fantasy (SNEAK_PLAN D1).
+      if (hasStatus(m.sheet, 'sneaking')) continue;
       const en = enemies.find((e) =>
         e.alive && Math.abs(m.actor.x - e.x) <= 1 && Math.abs(m.actor.z - e.z) <= 1
         // Adjacency THROUGH a sealed doorway is not adjacency. Chebyshev alone
@@ -1775,8 +1839,162 @@ function startGame(level) {
   // `primary` the coworker who triggered it (drives the flavor line + facing),
   // `opening` an optional { actionId, target } fired as the first move when the
   // fight is kicked off from the persistent hotbar.
+  // --- sneaking (SNEAK_PLAN M2/M3) -------------------------------------------
+  // A held MODE, not a verb: 'solo' sneaks the steered leader and parks the
+  // followers where they stand; 'group' sneaks everyone (D4 - the pair BG3
+  // ships). Detection is the deterministic cone (stealth.seesBody); spotted
+  // means the fight starts (D3). THE RENDERED CONE IS THE RULE: the sweep and
+  // the drawing read the same predicate with the same options.
+  let sneak = null; // null | { mode: 'solo' | 'group' }
+  const sneakingMembers = () => {
+    if (!sneak || !party) return [];
+    const lead = partyLeader(party);
+    return party.members.filter((m) => m.actor?.entity && m.sheet.hp > 0
+      && (sneak.mode === 'group' || m === lead));
+  };
+  const sneakSightOpts = () => ({
+    // Forgettable Face (SNEAK M6): the steered sheet's talent narrows every
+    // cone watching the party.
+    halfAngle: Math.max(10,
+      STEALTH.CONE_HALF_ANGLE - (sheet?.talent?.effects?.coneShrink || 0)),
+    range: STEALTH.CONE_RANGE,
+    sightClearLow: (x, z) => grid.sightOpenCellLow(x, z) && !runtime.isSmoke(x, z),
+    edgeOpenLow: grid.sightOpenLow,
+  });
+  // The watcher's eyes: continuous body, facing = the VISUAL yaw. Unusual on
+  // purpose - facing rules elsewhere refuse the eased tween (TACTICS #5), but
+  // the cone is drawn from the model and D2 says the cone you can see is the
+  // rule, so here the tween IS the truth the player reads.
+  const watcherOf = (en) => {
+    const p = en.entity.getPosition();
+    const r = en.yaw * (Math.PI / 180);
+    return { x: p.x, z: p.z, facing: { x: Math.sin(r), z: Math.cos(r) } };
+  };
+  const bodyOfMember = (m) => {
+    const p = m.actor.entity.getPosition();
+    return { x: p.x, z: p.z };
+  };
+  const anyWatcherSees = (body, opts = sneakSightOpts()) =>
+    enemies.some((en) => en.alive && en.entity && seesBody(watcherOf(en), body, opts));
+  function endSneak(line = null) {
+    if (!sneak) return;
+    sneak = null;
+    for (const m of party?.members || []) {
+      removeStatus(m.sheet, 'sneaking');
+      // The pose belongs to the sneak unless a held crouch owns it.
+      if (m.actor && !(m.sheet === sheet && oocCrouch)) m.actor.crouched = false;
+    }
+    if (line) ui.say(line);
+  }
+  function toggleSneak(mode) {
+    if (!sheet || inCombat || gameOver || modalOpen()) return;
+    if (sneak) { endSneak('You straighten up.'); return; }
+    const lead = partyLeader(party);
+    const would = party.members.filter((m) => m.actor?.entity && m.sheet.hp > 0
+      && (mode === 'group' || m === lead));
+    // D8 (DOS2-confirmed): no slipping into a sneak somebody is watching.
+    if (would.some((m) => anyWatcherSees(bodyOfMember(m)))) {
+      ui.say('Someone is watching. Break their line of sight first.');
+      return;
+    }
+    sneak = { mode };
+    for (const m of would) {
+      applyStatus(m.sheet, 'sneaking');
+      m.actor.crouched = true;
+    }
+    if (mode === 'solo') {
+      for (const m of party.members) if (!would.includes(m)) m.actor?.clearPath();
+    }
+    ui.say(mode === 'group'
+      ? 'The whole department goes quiet.'
+      : `${lead.sheet.name} slips low. The others hold here.`);
+  }
+  // Group sneak's followers price watched ground like a hazard (SNEAK M5).
+  // The cheap wedge test only (range + angle, no trace): a follower that
+  // routes around ground that MIGHT see it beats one that path-lawyers the
+  // desk line and clips a cone with its shoulder.
+  const inAnyCone = (x, z) => {
+    if (!sneak) return false;
+    const opts = sneakSightOpts();
+    const cosLim = Math.cos(opts.halfAngle * (Math.PI / 180));
+    return enemies.some((en) => {
+      if (!en.alive || !en.entity) return false;
+      const w = watcherOf(en);
+      const dx = x - w.x;
+      const dz = z - w.z;
+      const d = Math.hypot(dx, dz);
+      if (d > opts.range) return false;
+      if (d < 1e-6) return true;
+      return (dx * w.facing.x + dz * w.facing.z) / d >= cosLim;
+    });
+  };
+  // The sweep (M3): every body against every cone, on the follower cadence.
+  // First seen body busts the sneak and starts the fight with the spotter as
+  // primary - exactly the bump-into-them opener, minus the bumping.
+  let sneakSweepT = 0;
+  function sneakSweep() {
+    const opts = sneakSightOpts();
+    for (const en of enemies) {
+      if (!en.alive || !en.entity) continue;
+      const w = watcherOf(en);
+      for (const m of sneakingMembers()) {
+        if (!seesBody(w, bodyOfMember(m), opts)) continue;
+        const who = m.sheet.name;
+        endSneak(null);
+        ui.say(`${en.def.name} spots ${who}!`);
+        const engaged = enemies.filter((e) => e.alive
+          && Math.max(Math.abs(e.x - m.actor.x), Math.abs(e.z - m.actor.z)) <= ENGAGE_RADIUS
+          && canTakePart(m.actor, e));
+        if (!engaged.includes(en)) engaged.push(en);
+        beginCombat({ engaged, primary: en });
+        return;
+      }
+    }
+  }
+  // The cones, drawn only while sneaking (both references confirmed) -
+  // immediate-mode lines like every combat affordance, from coneBoundary's
+  // rays, which run the SAME crouch-height trace the sweep does: a cone
+  // visibly stops at the desk it cannot see over.
+  const CONE_COLOR = () => new pc.Color(0.92, 0.28, 0.2, 0.55);
+  function drawSneakCones() {
+    const opts = sneakSightOpts();
+    const y = 0.15;
+    for (const en of enemies) {
+      if (!en.alive || !en.entity) continue;
+      const w = watcherOf(en);
+      const pts = coneBoundary(w, opts);
+      const eye = new pc.Vec3(w.x, y, w.z);
+      let prev = eye;
+      for (const [px, pz] of pts) {
+        const v = new pc.Vec3(px, y, pz);
+        app.drawLine(prev, v, CONE_COLOR());
+        prev = v;
+      }
+      app.drawLine(prev, eye, CONE_COLOR());
+      // A few interior rays so the wedge reads as a watched AREA, not an
+      // outline that could pass for a wall.
+      for (let i = 2; i < pts.length - 1; i += 4) {
+        app.drawLine(eye, new pc.Vec3(pts[i][0], y, pts[i][1]), CONE_COLOR());
+      }
+    }
+  }
+
   function beginCombat({ engaged, primary, opening = null }) {
     if (!sheet || inCombat || gameOver || !player.entity) return;
+    // A fight begun while sneaking judges surprise by SIGHT (SNEAK M4/D6):
+    // capture who saw the initiator BEFORE the sneak state is cleared.
+    let sneakOpened = null;
+    if (sneak) {
+      const opts = sneakSightOpts();
+      const p = player.entity.getPosition();
+      sneakOpened = {
+        saw: new Set(enemies.filter((en) => en.alive && en.entity
+          && seesBody(watcherOf(en), { x: p.x, z: p.z }, opts))),
+      };
+    }
+    // However the fight found you, the sneak is over (M3) - quietly: the
+    // opener's own line says what happened.
+    endSneak(null);
     for (const m of party.members) m.actor?.clearPath(); // followers freeze too
     for (const e of enemies) e.clearPath(); // freeze any in-flight wander
     pendingAction = null;
@@ -1803,6 +2021,7 @@ function startGame(level) {
       party,
       engaged,
       opening,
+      sneakOpened,
       // A crouch taken before the fight rides into it (TACTICS_PLAN M6 OOC):
       // combat owns it from here - the status chip is already on the sheet.
       preCrouch: (() => { const c = oocCrouch; oocCrouch = null; return c; })(),
@@ -1835,16 +2054,29 @@ function startGame(level) {
         findEnemyPath: (sx, sz, tx, tz) => findPath(
           (x, z) => isWalkable(x, z) && !partyAt(x, z) && !summonAt(x, z),
           sx, sz, tx, tz, enemyHazardCost, grid.stepOpen),
-        // Any-angle smoothing for combat walks. The party variant starts
-        // from the acting member's body; the enemy variant treats the enemy's
-        // own tile as open (they're standing on it) and starts from their body.
-        smooth: (p, actor) => smoothFromBody(p, actor),
+        // Any-angle smoothing for combat walks, each mirroring ITS router's
+        // world - a smoother that disagrees with the route it was handed
+        // degrades to raw tile centres (or worse, straightens through a tile
+        // the route detoured around). The party variant blocks the same
+        // teammates findPath blocked and fears the WALKER's hazards, not the
+        // leader's; the enemy variant blocks the party members and summons
+        // findEnemyPath routed around. Both splice the body and both let the
+        // route's own cells through (routeOpen, which also covers the mover's
+        // own start tile - a body standing in a spill can smooth its way out).
+        smooth: (p, actor) => {
+          const walker = party.members.find((m) => m.actor === actor)
+            || summons.find((s) => s.actor === actor);
+          const ms = walker?.sheet || sheet;
+          const blocked = (x, z) => [...party.members, ...summons].some((m) =>
+            m.actor && m.actor !== actor && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z);
+          return smoothFromBody(p, actor,
+            (x, z) => !blocked(x, z) && effectiveSurfDamage(x, z, ms) <= 0);
+        },
         smoothEnemy: (en, p) => {
           const pos = en.entity?.getPosition();
           if (pos) p = [[pos.x, pos.z], ...p.slice(1)];
-          return smoothPath(
-            (x, z) => (x === en.x && z === en.z ? grid.terrainOpen(x, z) : enemyClearOfHazards(x, z)),
-            p, grid.edgeOpen);
+          const base = (x, z) => enemyClearOfHazards(x, z) && !partyAt(x, z) && !summonAt(x, z);
+          return smoothPath(routeOpen(base, p), p, grid.edgeOpen);
         },
         clampPoint,
         approach: approachTo,
@@ -2027,7 +2259,7 @@ function startGame(level) {
   // Hotbar trigger: an armed attack, aimed at a coworker, opens combat with
   // that move. The clicked target joins even if it's beyond the engage radius
   // (a thrown opener can reach further than the auto-engage does).
-  function engageWithAction(en, actionId) {
+  function engageWithAction(en, actionId, point = null) {
     if (!sheet || inCombat || gameOver || !en?.alive) return;
     // Pre-flight the opener before any fight begins: an armed misclick on a
     // coworker nobody can actually reach (sealed behind walls and closed
@@ -2040,10 +2272,16 @@ function startGame(level) {
         return;
       }
     } else if (a.cone) {
-      // A cone fires from where you STAND: its reach is cone.range with a
-      // clear line, not arm's length. Falling through to the melee test below
-      // refused a wedge that plainly covered them, and then walked you in.
-      if (cheb(player, en) > a.cone.range || !hasLos(player, en)) {
+      // A cone fires from where you STAND, and its gate IS the wedge - the
+      // same coneFrom the preview drew and the resolution will run, aimed at
+      // the CLICK point when one came through (the armed ground click) and at
+      // the target's body otherwise. The old gate here was a third geometry
+      // (cheb square + tile-to-tile line) that could refuse a body the
+      // preview's wedge plainly clipped (DEGRID M5).
+      const lb = leadBody();
+      const eb = enemyBody(en);
+      const test = coneFrom(a, lb, point ? point.x : eb.x, point ? point.z : eb.z);
+      if (!test || !(test(eb.x, eb.z, 0.5) && hasLos(lb, eb))) {
         ui.say(`They are not in the way of that ${a.label.toLowerCase()}.`);
         return;
       }
@@ -2064,7 +2302,9 @@ function startGame(level) {
       e.alive && Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= ENGAGE_RADIUS
       && canTakePart(player, e)); // same rule as checkCombatTrigger - see there
     if (!engaged.includes(en)) engaged.push(en);
-    beginCombat({ engaged, primary: en, opening: { actionId, target: en } });
+    // The aimed point rides into the fight: the opener must fire the wedge
+    // the player SAW, not one re-aimed at the target's tile centre.
+    beginCombat({ engaged, primary: en, opening: { actionId, target: en, point } });
   }
 
   // A cone fired at an EMPTY wedge, with no fight on. It fires anyway
@@ -2076,13 +2316,13 @@ function startGame(level) {
   function fireOocCone(a, test, tx, tz) {
     player.lunge(tx, tz); // the fan of envelopes, aimed where you pointed
     if (a.leaves) {
-      const R = Math.ceil(a.cone.range);
+      const R = Math.ceil(a.cone.range) + 1;
       for (let z = Math.floor(player.z) - R; z <= Math.ceil(player.z) + R; z++) {
         for (let x = Math.floor(player.x) - R; x <= Math.ceil(player.x) + R; x++) {
           if (!test(x, z)) continue;
           // No carpeting a tile a teammate is standing on - combat's own rule.
           if (partyAt(x, z)) continue;
-          if (!hasLos(player, { x, z })) continue;
+          if (!hasLos(leadBody(), { x, z })) continue;
           leaveSurfaceAt(x, z, a.leaves, a.leavesTurns || 0);
         }
       }
@@ -2724,14 +2964,16 @@ function startGame(level) {
       // could not fire at the floor.
       if (armedOoc && ACTIONS[armedOoc].cone && point) {
         const a = ACTIONS[armedOoc];
-        const test = coneFrom(a, { x: player.x, z: player.z }, point.x, point.z);
+        // From the BODY, like the preview and the in-combat wedge - one
+        // geometry for the whole click (DEGRID M5).
+        const test = coneFrom(a, leadBody(), point.x, point.z);
         if (!test) { ui.say('Aim somewhere.'); return; } // the cursor is on you
         const caught = coneCatches(test);
         if (caught.length) {
           // The nearest one is the primary; the rest join through the engage
           // radius exactly as they would for any other opener.
           caught.sort((p, q) => cheb(player, p) - cheb(player, q));
-          engageWithAction(caught[0], armedOoc);
+          engageWithAction(caught[0], armedOoc, point);
           return;
         }
         fireOocCone(a, test, point.x, point.z);
@@ -3028,7 +3270,7 @@ function startGame(level) {
         if (!armedOoc || inCombat || !oocAim || !sheet) return null;
         const a = ACTIONS[armedOoc];
         if (!a.cone) return null;
-        const test = coneFrom(a, { x: player.x, z: player.z }, oocAim.x, oocAim.z);
+        const test = coneFrom(a, leadBody(), oocAim.x, oocAim.z);
         if (!test) return null;
         const caught = coneCatches(test);
         // The wedge is ALWAYS usable - an empty one fires too (fireOocCone),
@@ -3226,6 +3468,10 @@ function startGame(level) {
       e.preventDefault();
       if (inCombat) combat?.cycleSteer();
       else cycleLeader();
+    } else if ((e.key === 'h' || e.key === 'H') && sheet && !gameOver && !modalOpen()) {
+      // Hide, the pair both references ship (SNEAK_PLAN D4): h sneaks the
+      // character you steer and parks the rest; Shift+H sneaks the group.
+      if (!inCombat) toggleSneak(e.shiftKey ? 'group' : 'solo');
     } else if ((e.key === 'c' || e.key === 'C') && sheet && !gameOver && !modalOpen()) {
       // The read-only character sheet for whoever you're controlling.
       charSheet.toggle(charSheetVm(sheet));
@@ -3332,7 +3578,13 @@ function startGame(level) {
   function memberSpeed(m) {
     let s = BASE_SPEED
       * (SURFACES[runtime.surfaceAt(m.actor.x, m.actor.z)]?.slow || 1)
-      * (statusFx(m.sheet).speedMult ?? 1);
+      // Quiet Shoes (SNEAK M6): the sneak penalty vanishes for its carrier.
+      // Coarse on purpose: while sneaking, the talent restores FULL status
+      // speed - a gummed sneaker with these shoes also walks off the gum for
+      // the duration, an accepted sliver for one line instead of un-merging
+      // the status view.
+      * (m.sheet.talent?.effects?.sneakSpeed && hasStatus(m.sheet, 'sneaking')
+        ? 1 : (statusFx(m.sheet).speedMult ?? 1));
     const lead = partyLeader(party);
     if (m !== lead && lead.actor
       && Math.max(Math.abs(m.actor.x - lead.actor.x), Math.abs(m.actor.z - lead.actor.z)) > FOLLOW_NEAR + 1) {
@@ -3348,6 +3600,9 @@ function startGame(level) {
   function updateFollowers(dt) {
     const lead = partyLeader(party);
     if (!lead.actor?.entity) return;
+    // Solo sneak parks the party where it stands (SNEAK_PLAN D4): the
+    // scout slips ahead alone and the others hold this spot.
+    if (sneak?.mode === 'solo') return;
     // Where everybody on your side already IS, or is already walking to. The
     // parking spots below are picked with `isWalkable`, which is deliberately
     // pass-through for the party (so a follower can route THROUGH a teammate) -
@@ -3382,18 +3637,31 @@ function startGame(level) {
         const sz = lead.actor.z + dz;
         if (!open(sx, sz) || claimed.has(sx + ',' + sz)) continue;
         if (effectiveSurfDamage(sx, sz, m.sheet) > 0) continue; // no parking in fire
+        if (inAnyCone(sx, sz)) continue; // and no parking in a watch (SNEAK M5)
         if (!spot || Math.hypot(sx - m.actor.x, sz - m.actor.z) < Math.hypot(spot[0] - m.actor.x, spot[1] - m.actor.z)) {
           spot = [sx, sz];
         }
       }
       if (!spot) continue;
       claimed.add(spot[0] + ',' + spot[1]);
-      const p = findPath(open, m.actor.x, m.actor.z, spot[0], spot[1], hazardCostFor(m.sheet), grid.stepOpen);
+      const p = findPath(open, m.actor.x, m.actor.z, spot[0], spot[1],
+        (x, z) => hazardCostFor(m.sheet)(x, z) + (inAnyCone(x, z) ? 6 : 0), grid.stepOpen);
       if (!p || p.length < 2) continue;
-      p[p.length - 1] = clampPoint(spot[0], spot[1]);
+      // A loose spot in the formation tile, not its dead centre - the party
+      // used to park on a perfect grid ring around the leader (the one body
+      // cluster on screen that still LOOKED tiled) while wanderers already
+      // ambled to scattered points. Same jitter as theirs.
+      p[p.length - 1] = clampPoint(
+        spot[0] + (Math.random() - 0.5) * 0.7,
+        spot[1] + (Math.random() - 0.5) * 0.7);
       const pos = m.actor.entity.getPosition();
-      const s = smoothPath((x, z) => open(x, z) && effectiveSurfDamage(x, z, m.sheet) <= 0,
-        [[pos.x, pos.z], ...p.slice(1)], grid.edgeOpen);
+      const spliced = [[pos.x, pos.z], ...p.slice(1)];
+      // Watched cells are walls to the smoother while sneaking, exactly the
+      // hazard rule: never straighten across a cone the route detoured
+      // around (the route's own cells stay open through routeOpen).
+      const base = (x, z) => open(x, z) && effectiveSurfDamage(x, z, m.sheet) <= 0
+        && !inAnyCone(x, z);
+      const s = smoothPath(routeOpen(base, spliced), spliced, grid.edgeOpen);
       m.actor.setPath(s);
     }
   }
@@ -3407,6 +3675,14 @@ function startGame(level) {
         m.actor.update(dt, (x, z, done, changed) => onMemberStep(m, x, z, done, changed));
       }
       if (sheet && !inCombat && !gameOver) updateFollowers(dt);
+      if (sneak && !inCombat && !gameOver) {
+        sneakSweepT -= dt;
+        if (sneakSweepT <= 0) {
+          sneakSweepT = 0.25;
+          sneakSweep();
+        }
+        if (sneak) drawSneakCones(); // the sweep may just have ended it
+      }
     } else {
       player.update(dt); // idling on the spawn tile behind the class picker
     }
@@ -3459,9 +3735,14 @@ function startGame(level) {
           : enemyClearOfHazards(x, z) && !partyAt(x, z));
         const p = findPath(open, en.x, en.z, tx, tz, null, grid.stepOpen);
         if (!p || p.length < 2) return null;
+        // The wanderer rests at last amble's loose point, not its tile centre
+        // - smooth from the BODY like every other feeder, or the first step of
+        // each amble snaps back toward the centre (setPath's precondition).
+        const pos = en.entity?.getPosition();
+        if (pos) p[0] = [pos.x, pos.z];
         // amble to a loose spot in the tile, not its dead centre
         p[p.length - 1] = clampPoint(tx + (Math.random() - 0.5) * 0.7, tz + (Math.random() - 0.5) * 0.7);
-        return smoothPath(open, p, grid.edgeOpen);
+        return smoothPath(routeOpen(open, p), p, grid.edgeOpen);
       },
     };
     let anyoneMoved = false;
@@ -3752,6 +4033,14 @@ function startGame(level) {
     // than guess a duration, which under software GL is reliably either too
     // short or wasteful on different runs.
     get playerMoving() { return !!player?.moving || legQueue.length > 0 || !!climbAnim; },
+    // Sneak state for the suite: the mode, and whether any watcher currently
+    // sees the leader's body - the same predicate the sweep runs.
+    get sneak() { return sneak ? { mode: sneak.mode } : null; },
+    get leaderSeen() {
+      if (!player?.entity) return false;
+      const p = player.entity.getPosition();
+      return anyWatcherSees({ x: p.x, z: p.z });
+    },
     get playerPos() {
       const p = player.entity?.getPosition();
       return p ? { x: p.x, z: p.z } : { x: player.x, z: player.z };
@@ -3857,6 +4146,13 @@ function startGame(level) {
       en.clearPath();
       en.pushTo(x, z);
       return true;
+    },
+    // For the sneak specs: a wandering watcher's cone drifts, and a spec
+    // about DETECTION must not flake on where an amble happened to point a
+    // gaze. Maxing the existing timer stills them without a special case in
+    // the wander brain itself.
+    debugStillEnemies: () => {
+      for (const en of enemies) en.wanderTimer = Infinity;
     },
     get enemies() {
       return enemies.map((e) => {

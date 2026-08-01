@@ -202,7 +202,11 @@ above pre-paid parts of M1/M2: what remains in them is listed as deltas.
   primitives-only constraint), slab edge/fascia polish, object picking that
   respects hidden storeys, occlusion of a body under a *visible* balcony
   edge at low camera angles, and whatever the look-tweak round asks for.
-- **M3 — Combat across layers** (`combat.js`, `tactics.js`, `aim-paint.js`).
+- **M3 — Combat across layers** (`combat.js`, `tactics.js`, `aim-paint.js`,
+  `stealth.js`). SNEAK's watcher cones are 2D today: a ground-floor coworker
+  would "see" a leader on the mezzanine straight through the slab. Harmless
+  while actors stay ground-only (parseFloors enforces it), but the watcher
+  predicate joins the cross-storey sightline work here.
   The cross-layer sightline primitive and everything that consumes it: aim
   wash on two floors, AI routing to stairs and picking targets it can
   actually see. High/low-ground modifiers only if Q2 ratifies them — the

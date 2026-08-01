@@ -15,7 +15,7 @@ import { truncateByBudget, routeToFiringPosition, trimToFirst } from './pathfind
 import { pronounsOf, capitalize, verb } from './creation.js';
 import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, gritSaveChance, MOVE, REACH } from './stats.js';
 import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
-import { toHitTerms, provokedBy, positionMods, inReach, dist, crouchShields, hasCover, shieldedFaces, TACTICS } from './tactics.js';
+import { toHitTerms, provokedBy, positionMods, inReach, dist, dirOctant, shieldedFaces, TACTICS } from './tactics.js';
 import {
   buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, aimsAtAnyone, isPurge, coneFrom, conePolyline, aimRangeOf, rangeTiles, isBreakable, aimsAtProps, isPull,
 } from './powers.js';
@@ -70,7 +70,7 @@ const immunityLine = (id, name) => {
   return def?.log ? def.log.replace('{name}', name) : `${def?.name || 'An immunity'} holds.`;
 };
 
-export function startCombat({ app, party, engaged, world, fx, callbacks, opening = null, allies = [], preCrouch = null, rng = Math.random }) {
+export function startCombat({ app, party, engaged, world, fx, callbacks, opening = null, allies = [], preCrouch = null, sneakOpened = null, rng = Math.random }) {
   // Per-member turn state: every party member fights with their own AP pool,
   // deflect stance and limited-use counters. `active` is whose action bar,
   // previews and clicks are live - with one member that is simply "you";
@@ -250,10 +250,31 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
 
   // Enemies pulled in from a distance are surprised - they spend their first
   // turn realizing what's happening, so group openings don't alpha-strike you.
+  // A fight begun FROM SNEAK judges surprise by SIGHT instead (SNEAK_PLAN
+  // D6): whoever had no line to the initiator - facing away, behind the desk
+  // row, out of the cone - loses turn one however close they stand, and the
+  // distance proxy stays untouched for ordinary fights. `sneakOpened.saw` is
+  // main.js's capture of who saw the initiator at the moment the sneak broke.
   for (const en of engaged) {
+    if (sneakOpened) {
+      if (!sneakOpened.saw.has(en)) applyStatus(en, 'surprised');
+      continue;
+    }
     const t = pickTarget(en);
     if (!t || cheb(en.x, en.z, t.actor.x, t.actor.z) > SURPRISE_RADIUS) applyStatus(en, 'surprised');
   }
+  // Disgruntled (SNEAK M4): the opening strike of a sneak-opened fight, and
+  // only that strike, carries the ambush bonus - consumed by the FIRST roll
+  // that damages a coworker, whoever it lands on.
+  let sneakAmbushArmed = !!sneakOpened;
+  const ambushDmg = (dmg) => {
+    if (!sneakAmbushArmed) return dmg;
+    sneakAmbushArmed = false;
+    const b = talentFxOf(active)?.ambushDamage || 0;
+    if (!b) return dmg;
+    log('They never saw it coming.');
+    return Math.round(dmg * (1 + b));
+  };
   // A bystander outside the engagement radius who gets attacked anyway joins
   // the fight - surprised, so they lose the turn they spend taking offense.
   // Without this they'd soak thrown damage forever without ever hitting back.
@@ -376,20 +397,50 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // from where the swing will actually happen: cover, flank and the
   // melee/ranged split all move with the attacker, and a percentage computed
   // from the tile being LEFT is a lie about the attack being promised.
+  // Targeted ranges and sight measure body to body (DEGRID D4/D6): a range is
+  // a true-distance circle from where the model actually stands, and a line
+  // is traced between the stances - not between the tile centres their
+  // positions round to. Tiles remain the far end only when the target IS a
+  // tile (a zone's aim cell, a summon's drop spot).
+  const bodyDist = (u, v) => {
+    const a = posOf(u);
+    const b = posOf(v);
+    return dist(a.x, a.z, b.x, b.z);
+  };
+  const bodyLos = (u, v) => {
+    const a = posOf(u);
+    const b = posOf(v);
+    return world.hasLos(a.x, a.z, b.x, b.z);
+  };
+  const distToTile = (u, tx, tz) => {
+    const a = posOf(u);
+    return dist(a.x, a.z, tx, tz);
+  };
+  const losToTile = (u, tx, tz) => {
+    const a = posOf(u);
+    return world.hasLos(a.x, a.z, tx, tz);
+  };
   const attackMods = (attacker, defender, plan = null) => {
     // Position is a per-PAIR term - it depends on where the other one stands,
     // so it is computed at roll time and never cached on a unit.
-    const A = plan ? { x: Math.round(plan.x), z: Math.round(plan.z) } : bodyOf(attacker);
-    const D = bodyOf(defender);
+    //
+    // The BODIES, not their rounded tiles (DEGRID M4): cover, flank and
+    // backstab used to flip when a body drifted across a tile's invisible
+    // midline; the octants now bucket the real angle between the stances
+    // (tactics.dirOctant), so they flip where the model visibly changes
+    // sides. The cover FACES still belong to the defender's tile - the
+    // furniture is genuinely grid-shaped (positionMods rounds internally).
+    const A = plan ? { x: plan.x, z: plan.z } : posOf(attacker);
+    const D = posOf(defender);
     const dp = plan ? posOf(defender) : null;
-    // The attacker's own side, minus itself: a pincer needs a second body.
+    // The attacker's own side, minus itself: a pincer needs a second body -
+    // each carrying its own reach, because "in its face" is now the same
+    // reach test every other melee rule reads.
     const allies = (attacker.sheet ? members : engaged)
       .filter((u) => u !== attacker && standing(u))
-      .map((u) => ({ x: bodyOf(u).x, z: bodyOf(u).z }));
+      .map((u) => ({ x: posOf(u).x, z: posOf(u).z, reach: reachOfUnit(u) }));
     const pos = positionMods(A.x, A.z, D.x, D.z, {
-      // Cover/flank/backstab geometry stays on TILE octants - a cover face and
-      // a pincer are genuinely grid-shaped. Only the melee/ranged SPLIT moves
-      // to real distance, and it reads reach without the line test so turning
+      // The melee/ranged SPLIT reads reach without the line test so turning
       // walls on (M3) can't silently change who gets cover.
       melee: plan
         ? inReach(plan.x, plan.z, dp.x, dp.z, reachOfUnit(attacker))
@@ -651,13 +702,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function shotOutcome(attacker, defender) {
     const s = crouchStateOf(defender);
     if (!s) return { target: defender };
-    const A = bodyOf(attacker);
-    const D = bodyOf(defender);
+    // Direction between the BODIES (DEGRID M4); the face-neighbour queries
+    // stay on the defender's tile, where the faces live.
+    const A = posOf(attacker);
+    const D = posOf(defender);
+    const Dt = bodyOf(defender);
     // Re-asked without the SHOOTER counting as cover (see crouchFacesOf).
     const face = shieldingFaceFrom(crouchFacesOf(defender, attacker), A.x, A.z, D.x, D.z);
     if (!face) return { target: defender };
     // A BODY on that face eats the shot; furniture and partitions refuse it.
-    const holder = unitStandingAt(D.x + face[0], D.z + face[1]);
+    const holder = unitStandingAt(Dt.x + face[0], Dt.z + face[1]);
     if (holder && holder !== defender && standing(holder)) {
       return { target: holder, redirected: true };
     }
@@ -666,9 +720,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // The shielded face pointing at the attacker, or null. A diagonal attacker
   // is blocked by either of the two faces their way; when both are shielded
   // the x face answers first, which only matters for naming the blocker.
+  // Continuous or tile inputs both work - dirOctant buckets the angle.
   function shieldingFaceFrom(faces, ax, az, dx, dz) {
-    const sx = Math.sign(ax - dx);
-    const sz = Math.sign(az - dz);
+    const { x: sx, z: sz } = dirOctant(ax, az, dx, dz);
     if (sx === 0 && sz === 0) return null;
     return (faces || []).find(([ox, oz]) =>
       (sx !== 0 && ox === sx && oz === 0) || (sz !== 0 && oz === sz && ox === 0)) || null;
@@ -971,8 +1025,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         target = so.target;
         shieldNote = ` vs ${nameOf(so.target)} (human shield)`;
       }
-      const far = cheb(active.actor.x, active.actor.z, en.x, en.z) > range;
-      const noLine = !world.hasLos(active.actor.x, active.actor.z, en.x, en.z);
+      const far = bodyDist(active, en) > range;
+      const noLine = !bodyLos(active, en);
       if (far || noLine) {
         // A throw refuses where it stands (the click's own rule) - say so
         // instead of quoting odds for a throw that will not happen.
@@ -1090,11 +1144,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function showZonePreview(point, sx, sy) {
     preview = null;
     const a = ACTIONS[armed];
-    const tx = Math.round(point.x);
-    const tz = Math.round(point.z);
+    // The zone lands where you POINT (DEGRID M6): the disc of covered cells
+    // is centred on the exact aim point, so the preview prices that point,
+    // not the tile it rounds to.
+    const tx = point.x;
+    const tz = point.z;
     const problem = zoneProblem(a, {
-      dist: cheb(active.actor.x, active.actor.z, tx, tz),
-      los: world.hasLos(active.actor.x, active.actor.z, tx, tz),
+      dist: distToTile(active, tx, tz),
+      los: losToTile(active, tx, tz),
       ap: active.ap,
       usesLeft: a.uses ? active.usesLeft[armed] ?? 0 : null,
     });
@@ -1320,13 +1377,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         const en = world.liveEnemies().find((e) => e.x === x && e.z === z);
         return !!en && !verbReaches(armed, en, body.x, body.z);
       };
+      // Painted, ranged and sighted from the BODY (DEGRID D4/D6): the wash
+      // must promise exactly what the gates measure, and they measure from
+      // where the model stands. The key still uses the tile - a sub-tile
+      // shuffle should not repaint the world.
       aimPaint.show(`${armed}:${ax},${az}:${paintEpoch}`, () => rangeTiles(
-        ax, az, spec.r,
+        body.x, body.z, spec.r,
         // Paintable ground: open floor the aimer can SEE. Solid cells stay
         // unpainted - they read as objects standing in the wash, and the
         // shadow they cast behind themselves is the whole lesson.
-        (x, z) => world.terrainOpen(x, z) && world.hasLos(ax, az, x, z) && !walkOnly(x, z),
-        spec.euclid,
+        (x, z) => world.terrainOpen(x, z) && world.hasLos(body.x, body.z, x, z) && !walkOnly(x, z),
       ));
     }
     if (phase !== 'player') return;
@@ -1372,11 +1432,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // surface. Red on the aim point alone when the placement itself is refused.
     if (isZone(a)) {
       if (!armed || !aimPoint) return;
-      const tx = Math.round(aimPoint.x);
-      const tz = Math.round(aimPoint.z);
+      // The exact aim point - the rings must show the same disc the click
+      // lays (DEGRID M6).
+      const tx = aimPoint.x;
+      const tz = aimPoint.z;
       const problem = zoneProblem(a, {
-        dist: cheb(active.actor.x, active.actor.z, tx, tz),
-        los: world.hasLos(active.actor.x, active.actor.z, tx, tz),
+        dist: distToTile(active, tx, tz),
+        los: losToTile(active, tx, tz),
         ap: active.ap,
         usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
       });
@@ -1464,7 +1526,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         // Test the BODY (where the ring is drawn), not the tile centre, so the
         // ring and the rule agree about what the cone catches.
         const hit = test && test(pos.x, pos.z, TARGET_R)
-          && world.hasLos(active.actor.x, active.actor.z, en.x, en.z);
+          && bodyLos(active, en);
         drawRing(pos.x, pos.z, TARGET_R, hit && active.ap >= a.ap ? PREVIEW_OK : PREVIEW_FAR);
       }
       return;
@@ -1570,14 +1632,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         ap: active.ap,
         ammoOk: !a.ammoCost || active.sheet.paper >= ammoCostOf(id),
         range,
-        dist: cheb(active.actor.x, active.actor.z, en.x, en.z),
-        los: world.hasLos(active.actor.x, active.actor.z, en.x, en.z),
+        dist: bodyDist(active, en),
+        los: bodyLos(active, en),
         get shoveReach() { return canReach(active, en, REACH.SHOVE); },
         get pullOk() { return !!pullPlanFor(en); },
         get controlRefused() {
           return controlProblem(a, {
-            dist: cheb(active.actor.x, active.actor.z, en.x, en.z),
-            los: world.hasLos(active.actor.x, active.actor.z, en.x, en.z),
+            dist: bodyDist(active, en),
+            los: bodyLos(active, en),
             ap: active.ap,
             usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
             alive: en.alive,
@@ -1886,9 +1948,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       let flight = 'shot'; // fired: a small pellet, flat and quick
       if (id === 'paper-airplane') flight = 'plane';
       else if (a.ammoCost) flight = 'ball';
-      fx.projectile({ x: active.actor.x, z: active.actor.z }, { x: en.x, z: en.z }, flight);
+      // Body to body, like hitFx: the shot departs the shooter's actual
+      // stance and lands on the target's, not on their tile centres - the
+      // walk-up just stopped at a trimmed free point, and a ball spawning
+      // half a tile beside the model gives the grid away.
+      fx.projectile(posOf(active), posOf(en), flight);
     } else {
-      active.actor.lunge(en.x, en.z);
+      active.actor.lunge(posOf(en).x, posOf(en).z);
     }
     faceTarget(active, en.x, en.z); // you face what you swing at
     active.ap = roundAp(active.ap - a.ap);
@@ -1918,6 +1984,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (hasDice) {
       dmg = rand(a.min, a.max) + damageBonus(active.sheet); // carried staplers count
       if (a.ammoCost) dmg += talentFxOf(active).paperDamageBonus || 0;
+      dmg = ambushDmg(dmg);
       died = en.takeDamage(dmg);
       // Anything that arrived from over there lands as a projectile hit, not a
       // punch: light debris thrown away from the shooter.
@@ -2019,7 +2086,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (died) callbacks.onEnemyKilled(en);
       return { slammed: true, died, msg };
     }
-    en.pushTo(tx, tz);
+    // Land carried PAST the centre along the push - momentum, not a snap to
+    // grid. Deterministic (no rng draw: the rest point feeds cover octants
+    // and body-to-body sight, so it must replay under a seed), and clamped
+    // so the body still rounds home to the tile the plan chose.
+    const pd = Math.hypot(dx, dz) || 1;
+    const [lpx, lpz] = world.clampPoint(tx + (dx / pd) * 0.22, tz + (dz / pd) * 0.22);
+    en.pushTo(tx, tz, lpx, lpz);
     const dmg = world.enemySurfDamage(tx, tz);
     if (dmg > 0) {
       const live = world.isElectrified && world.isElectrified(tx, tz);
@@ -2206,7 +2279,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     active.ap = roundAp(active.ap - a.ap);
     if (a.uses) active.usesLeft[id] -= 1;
     if (rangeOf(id)) {
-      fx.projectile({ x: active.actor.x, z: active.actor.z }, { x: px, z: pz },
+      // The prop's break point is real geometry (a tile centre or an edge
+      // midpoint); only the ORIGIN moves to the body.
+      fx.projectile(posOf(active), { x: px, z: pz },
         a.ammoCost ? 'ball' : 'shot');
     } else {
       active.actor.lunge(px, pz);
@@ -2424,12 +2499,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const a = ACTIONS[id];
     const [lx, lz] = plan.landing;
     const what = crouchLabel(plan.s);
-    active.actor.lunge(en.x, en.z);
+    active.actor.lunge(posOf(en).x, posOf(en).z);
     faceTarget(active, en.x, en.z);
     // The crouch dies in your fist, quietly - the haul is the story. pushTo
     // is forced movement: no provoke, no per-tile hooks, the shove's seam.
+    // The hauled body rests pulled toward YOU, not on the tile's dead centre
+    // - deterministic, and inside the landing tile.
     breakCrouch(en, true);
-    en.pushTo(lx, lz);
+    const pp = posOf(active);
+    const hd = Math.hypot(pp.x - lx, pp.z - lz) || 1;
+    const [hpx, hpz] = world.clampPoint(
+      lx + ((pp.x - lx) / hd) * 0.25,
+      lz + ((pp.z - lz) / hd) * 0.25);
+    en.pushTo(lx, lz, hpx, hpz);
     let msg = `You haul ${en.def.name} over the ${what}.`;
     // The same save everything manhandled rolls (stats.gritSaveChance), with
     // the same forceHit pin for the specs: true = the haul fully lands.
@@ -2524,8 +2606,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function performSwap(id, m) {
     const a = ACTIONS[id];
     const problem = mobilityProblem(a, {
-      dist: cheb(active.actor.x, active.actor.z, m.actor.x, m.actor.z),
-      los: world.hasLos(active.actor.x, active.actor.z, m.actor.x, m.actor.z),
+      dist: bodyDist(active, m),
+      los: bodyLos(active, m),
       ap: active.ap,
       usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
       allyHp: m.sheet.hp,
@@ -2534,6 +2616,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (m === active) { log('You are already there.'); return; }
     const mine = { x: active.actor.x, z: active.actor.z };
     const theirs = { x: m.actor.x, z: m.actor.z };
+    // Trade PLACES, not tile centres: each body takes the other's actual
+    // rest point, so the free-point stances both had survive the trick.
+    const myRest = posOf(active);
+    const theirRest = posOf(m);
     active.ap = roundAp(active.ap - a.ap);
     if (a.uses) active.usesLeft[id] -= 1;
     // pushTo is the existing "move a body without it counting as a walk" call
@@ -2545,8 +2631,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // the same beat as the trade instead of a surprise line later.
     breakCrouch(active);
     breakCrouch(m);
-    active.actor.pushTo(theirs.x, theirs.z);
-    m.actor.pushTo(mine.x, mine.z);
+    active.actor.pushTo(theirs.x, theirs.z, theirRest.x, theirRest.z);
+    m.actor.pushTo(mine.x, mine.z, myRest.x, myRest.z);
     log(`${a.log} You and ${m.sheet.name} trade places.`);
     armed = null;
     refresh();
@@ -2566,7 +2652,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // The zone's covered tiles - the geometry in combat-geometry.js, the
   // occupancy question answered here because only combat knows who is standing
   // where.
-  const zoneCells = (a, tx, tz) => zoneCellsFor(a, active.actor, tx, tz, {
+  // Sighted from the aimer's BODY - the same origin the aim range measures
+  // from, so a cell the wash paints is a cell the drop covers.
+  const zoneCells = (a, tx, tz) => zoneCellsFor(a, posOf(active), tx, tz, {
     canTakeSurface: world.canTakeSurface,
     hasLos: world.hasLos,
     occupied: (x, z) => members.some((m) => m.sheet.hp > 0 && m.actor?.x === x && m.actor?.z === z)
@@ -2576,8 +2664,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function performZone(id, tx, tz) {
     const a = ACTIONS[id];
     const problem = zoneProblem(a, {
-      dist: cheb(active.actor.x, active.actor.z, tx, tz),
-      los: world.hasLos(active.actor.x, active.actor.z, tx, tz),
+      dist: distToTile(active, tx, tz),
+      los: losToTile(active, tx, tz),
       ap: active.ap,
       usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
     });
@@ -2612,8 +2700,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const a = ACTIONS[id];
     const ranged = controlIsRanged(a);
     const problem = controlProblem(a, {
-      dist: cheb(active.actor.x, active.actor.z, en.x, en.z),
-      los: world.hasLos(active.actor.x, active.actor.z, en.x, en.z),
+      dist: bodyDist(active, en),
+      los: bodyLos(active, en),
       inReach: canReach(active, en),
       ap: active.ap,
       usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
@@ -2626,9 +2714,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     active.ap = roundAp(active.ap - a.ap);
     if (a.uses) active.usesLeft[id] -= 1;
     if (ranged) {
-      fx.projectile({ x: active.actor.x, z: active.actor.z }, { x: en.x, z: en.z }, 'ball');
+      fx.projectile(posOf(active), posOf(en), 'ball');
     } else {
-      active.actor.lunge(en.x, en.z);
+      active.actor.lunge(posOf(en).x, posOf(en).z);
     }
     faceTarget(active, en.x, en.z);
     if (!rollAgainst(active, en)) {
@@ -2721,10 +2809,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
 
   // Distance and line to an ally, in the units buffProblem expects.
   const buffReach = (m) => ({
-    dist: cheb(active.actor.x, active.actor.z, m.actor.x, m.actor.z),
+    dist: bodyDist(active, m),
     // Aiming at yourself never needs a line to yourself - and hasLos on your
     // own tile is a degenerate trace that has no reason to be asked.
-    los: m === active || world.hasLos(active.actor.x, active.actor.z, m.actor.x, m.actor.z),
+    los: m === active || bodyLos(active, m),
   });
 
   // Commit a buff on an ally. No hit roll: you do not miss a colleague you are
@@ -2814,9 +2902,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // Same body-radius test the ring previewed - what you saw is what lands.
       const bp = en.entity ? en.entity.getPosition() : { x: en.x, z: en.z };
       if (!test(bp.x, bp.z, TARGET_R)) continue;
-      if (!world.hasLos(active.actor.x, active.actor.z, en.x, en.z)) continue;
+      if (!bodyLos(active, en)) continue;
       joinCombat(en); // a bystander caught in the mail joins the fight
-      fx.projectile({ x: active.actor.x, z: active.actor.z }, { x: en.x, z: en.z }, 'plane');
+      fx.projectile(posOf(active), { x: bp.x, z: bp.z }, 'plane');
       // Roll per target. A dodged envelope flies but doesn't land; the wedge's
       // `leaves` surface still carpets below (HIT_PLAN #4). A surprised target
       // is easier to catch.
@@ -2840,7 +2928,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         }
         continue;
       }
-      const dmg = rand(a.min, a.max) + damageBonus(active.sheet);
+      const dmg = ambushDmg(rand(a.min, a.max) + damageBonus(active.sheet));
       const died = en.takeDamage(dmg);
       hitFx(en, 'paper', active);
       if (died) deathFx(en);
@@ -2855,7 +2943,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           if (!test(x, z)) continue;
           // No carpeting a tile a party member is standing on.
           if (members.some((m) => m.sheet.hp > 0 && m.actor?.x === x && m.actor?.z === z)) continue;
-          if (!world.hasLos(active.actor.x, active.actor.z, x, z)) continue;
+          if (!losToTile(active, x, z)) continue;
           world.leaveSurface(x, z, a.leaves, a.leavesTurns || 0);
         }
       }
@@ -2927,7 +3015,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Take Cover clicked on a coworker: they are the shield ("any character
     // as cover" - crouching behind your enemy is legal, if bold).
     if (kind === 'cover') { performTakeCover(en.x, en.z); return; }
-    if (kind === 'cone') { fireCone(en.x, en.z); return; }
+    if (kind === 'cone') { fireCone(posOf(en).x, posOf(en).z); return; }
     // Placing a summon on top of a coworker: the tile is taken, so they report
     // to the free ground ringing outward from it. Aiming at the enemy you want
     // them to swarm is a reasonable thing to click.
@@ -2936,7 +3024,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // under THEM - so it resolves on their tile rather than refusing. Their own
     // tile is excluded from the footprint (zoneCells), so what lands is the
     // ring around their feet.
-    if (kind === 'zone') { performZone(armed, en.x, en.z); return; }
+    if (kind === 'zone') { performZone(armed, posOf(en).x, posOf(en).z); return; }
     // A RANGED control (a cone, or one carrying `range`) resolves from where
     // you stand. A touch-range one classifies as 'melee' and falls through to
     // the walk-up below rather than getting its own copy of it - and `strike`
@@ -2968,7 +3056,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
       joinCombat(en); // shoving a bystander is also an opinion they'll return
       active.ap = roundAp(active.ap - a.ap);
-      active.actor.lunge(en.x, en.z);
+      active.actor.lunge(posOf(en).x, posOf(en).z);
       faceTarget(active, en.x, en.z);
       log(displaceBody(en, Math.sign(en.x - active.actor.x), Math.sign(en.z - active.actor.z)).msg);
       armed = null;
@@ -2988,8 +3076,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const range = rangeOf(armed);
     if (kind === 'ranged') {
       const thrown = !!a.ammoCost; // a wad and a staple miss differently
-      const far = cheb(active.actor.x, active.actor.z, en.x, en.z) > range;
-      const blocked = !world.hasLos(active.actor.x, active.actor.z, en.x, en.z);
+      const far = bodyDist(active, en) > range;
+      const blocked = !bodyLos(active, en);
       // What the shot would ACTUALLY do from here (TACTICS_PLAN M6): a crouch
       // behind furniture refuses it outright - free, like every other
       // refusal - and a human shield takes it instead. Shooting THROUGH one
@@ -3199,7 +3287,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       fromX: active.actor.x,
       fromZ: active.actor.z,
       isWalkable: (x, z) => world.isWalkable(x, z),
-      hasLos: (x, z, tx, tz) => world.hasLos(x, z, tx, tz) && angleClear(x, z),
+      // Candidates are tiles (planning is legitimately tile-shaped), but the
+      // filter must under-promise the CIRCLE the arrival check measures
+      // (verbReaches, body to body): a corner tile inside the old cheb square
+      // but outside the radius would be walked to and then refused.
+      hasLos: (x, z, tx, tz) => dist(x, z, tx, tz) <= range
+        && world.hasLos(x, z, tx, tz) && angleClear(x, z),
       findPath: (x, z) => world.findPath(active.actor.x, active.actor.z, x, z, active.actor),
     });
   };
@@ -3246,7 +3339,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // A summon is placed at the clicked tile (the whole point of arming it).
       if (a.type === 'summon') { placeSummon(tile.x, tile.z); return; }
       // A zone lands where you clicked - ground, and only ground.
-      if (isZone(a)) { performZone(armed, tile.x, tile.z); return; }
+      if (isZone(a)) {
+        // The exact clicked point when the pick has one - the zone's disc is
+        // centred where the player aimed (DEGRID M6).
+        performZone(armed, point ? point.x : tile.x, point ? point.z : tile.z);
+        return;
+      }
       // A buff aimed at the ground resolves to whoever is STANDING there -
       // yourself included. This branch sits above the purge self-cast below
       // deliberately: Remote Restart is a `buff` that happens to purge, and
@@ -3536,8 +3634,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const summonSpotProblem = (a, tx, tz) => spotProblem(a, {
     ap: active.ap,
     usesLeft: active.usesLeft[armed],
-    dist: cheb(active.actor.x, active.actor.z, tx, tz),
-    los: world.hasLos(active.actor.x, active.actor.z, tx, tz),
+    dist: distToTile(active, tx, tz),
+    los: losToTile(active, tx, tz),
     hasRoomToStand: world.summonSpots(tx, tz, 1).length > 0,
   });
   function placeSummon(tx, tz) {
@@ -3760,7 +3858,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // sheet (deflect, gum, and the downed/handoff/party-wipe rules).
   function aiAttack(unit, target) {
     const atk = unit.combat.attacks[rand(0, unit.combat.attacks.length - 1)];
-    unit.lunge(target.actor.x, target.actor.z);
+    unit.lunge(posOf(target).x, posOf(target).z);
     faceTarget(unit, target.actor.x, target.actor.z); // you face what you swing at
     if (target.member) unitStrikesMember(unit, target.member, atk);
   }
@@ -3966,9 +4064,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (ACTIONS[actionId]?.mode !== 'watch') continue;
       const w = posOf(watcher);
       const sameSide = !!watcher.sheet === !!mover.sheet;
+      // The watch circle is a true radius from the watcher's BODY to the
+      // mover's - the same continuous metric the opportunity sweep two lines
+      // down reads, so the two reaction systems can no longer disagree about
+      // one movement (DEGRID M5; watch radius is a targeted range, D4).
       if (!watchTriggers(ACTIONS[actionId], {
-        dist: cheb(Math.round(w.x), Math.round(w.z), x, z),
-        los: world.hasLos(Math.round(w.x), Math.round(w.z), x, z),
+        dist: dist(w.x, w.z, to.x, to.z),
+        los: world.hasLos(w.x, w.z, to.x, to.z),
         hasReaction: canReact(watcher),
         sameSide,
         moverStanding: standing(mover),
@@ -4004,7 +4106,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // A party-side body catches a fleeing enemy.
       const a = ACTIONS[equippedAction(attacker.sheet)];
       if (!a) return; // no basic swing to make (shouldn't happen - punch is the floor)
-      attacker.actor.lunge(defender.x, defender.z);
+      attacker.actor.lunge(posOf(defender).x, posOf(defender).z);
       faceTarget(attacker, defender.x, defender.z);
       if (!rollAgainst(attacker, defender)) {
         hitFx(defender, 'whiff');
@@ -4031,7 +4133,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // `attacks` at all - see stats.js).
     if (!attacker.combat.attacks.length) return;
     const base = attacker.combat.attacks[rand(0, attacker.combat.attacks.length - 1)];
-    attacker.lunge(defender.actor.x, defender.actor.z);
+    attacker.lunge(posOf(defender).x, posOf(defender).z);
     unitStrikesMember(attacker, defender, {
       ...base,
       log: `${attacker.def.name} catches ${defender.sheet.name} pulling away.`,
@@ -4241,7 +4343,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (beat === 'summon') {
       unit.summonCd = sm.cooldownRounds || 0;
       acting.ap = roundAp(acting.ap - sm.ap);
-      unit.lunge(target.actor.x, target.actor.z);
+      unit.lunge(posOf(target).x, posOf(target).z);
       log(sm.log || `${unit.def.name} calls in reinforcements.`);
       acting.wait = 0.6;
       refresh();
@@ -4478,7 +4580,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (phase === 'player') {
       armed = opening.actionId;
       refresh();
-      handleEnemyClick(opening.target);
+      // A cone opener fires the wedge the player AIMED outside the fight -
+      // the click point rides in through `opening` - rather than one
+      // re-pointed at the primary target (DEGRID M5's one-geometry rule).
+      if (ACTIONS[opening.actionId].cone && opening.point) {
+        fireCone(opening.point.x, opening.point.z);
+      } else {
+        handleEnemyClick(opening.target);
+      }
     }
   } else {
     logInitiative();

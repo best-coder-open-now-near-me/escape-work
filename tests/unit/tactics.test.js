@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   toHitTerms, cheb, threatens, provokedBy, hasCover, isFlanked, isBackstab, positionMods,
-  dist, reachOpen, inReach, crouchShields, shieldedFaces, facesShieldFrom,
+  dist, reachOpen, inReach, dirOctant, shieldedFaces, facesShieldFrom,
 } from '../../src/tactics.js';
 import { HIT, REACH, hitChance } from '../../src/stats.js';
 
@@ -476,27 +476,46 @@ test('a longer reach does not buy a swing through a wall', () => {
   assert.equal(inReach(0, 0, 1, 0, 5, wall), false);
 });
 
-// --- take cover (TACTICS_PLAN M6) ---------------------------------------------
+// --- the octant threshold on continuous bodies (DEGRID M4) -------------------
+// The threshold stays; the inputs stop being tile centres (designer,
+// 2026-07-31: "not really tiled if the initial point isnt tile centered").
 
-test('crouchShields: the shield must sit on a face pointing attackward', () => {
-  // Defender at (5,5), shield cell WEST of them at (4,5).
-  assert.equal(crouchShields(2, 5, 5, 5, 4, 5), true, 'shot from due west is blocked');
-  assert.equal(crouchShields(8, 5, 5, 5, 4, 5), false, 'from due east the shield is behind them');
-  assert.equal(crouchShields(5, 1, 5, 5, 4, 5), false, 'from due north the west shield does nothing');
+test('dirOctant agrees with the old tile signs for every near pair', () => {
+  for (const [vx, vz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+    const o = dirOctant(5 + vx, 5 + vz, 5, 5);
+    assert.deepEqual({ x: o.x, z: o.z }, { x: vx, z: vz }, `octant of (${vx},${vz})`);
+  }
+  assert.deepEqual(dirOctant(5, 5, 5, 5), { x: 0, z: 0 }, 'standing on them: no angle');
 });
 
-test('crouchShields: a diagonal attacker is blocked by either pointing face', () => {
-  // Shield west of the defender; attacker to the northwest favours both axes.
-  assert.equal(crouchShields(2, 2, 5, 5, 4, 5), true, 'northwest shot clipped by the west shield');
-  assert.equal(crouchShields(2, 8, 5, 5, 4, 5), true, 'southwest too - either face is enough');
-  assert.equal(crouchShields(8, 2, 5, 5, 4, 5), false, 'northeast never touches the west face');
+test('cover does not flip when a body drifts across a tile midline', () => {
+  // Defender behind an east partition, shooter due east 4 tiles out. The
+  // shooter's body drifting from z=5.3 to z=4.7 crosses the tile midline -
+  // the old tile-int signs flipped the octant there (and with it the cover
+  // verdict); the bucketed angle barely moves and must not.
+  const eastWall = wallOnFace(6, 5);
+  assert.equal(hasCover(9.0, 5.3, 5.1, 5.0, eastWall), true);
+  assert.equal(hasCover(9.0, 4.7, 5.1, 5.0, eastWall), true);
 });
 
-test('crouchShields: only the committed cell shields - not other adjacency', () => {
-  // A shield DIAGONAL to the defender sits on no face and blocks nothing.
-  assert.equal(crouchShields(2, 2, 5, 5, 4, 4), false);
-  // Standing on top of the defender: no angle at all.
-  assert.equal(crouchShields(5, 5, 5, 5, 4, 5), false);
+test('cover flips where the model visibly rounds the corner', () => {
+  // Same east partition. A shooter walking a wide arc to the north: once the
+  // angle passes the 22.5-degree sector line the octant goes diagonal, and
+  // past 67.5 degrees it reads due north - where the east face stops
+  // shielding.
+  const eastWall = wallOnFace(6, 5);
+  assert.equal(hasCover(9.0, 5.0, 5, 5, eastWall), true, 'due east: covered');
+  assert.equal(hasCover(7.0, 2.0, 5, 5, eastWall), true, 'north-east diagonal: the east face still points their way');
+  assert.equal(hasCover(5.4, 1.0, 5, 5, eastWall), false, 'nearly due north: the east face is no longer between them');
+});
+
+test('a shallow drift does not hand out perpendicular cover', () => {
+  // The old Math.sign on continuous deltas read ANY sideways drift as a
+  // diagonal, so a north partition shielded against an essentially eastward
+  // shot. The sector bucket keeps a shallow angle cardinal.
+  const northWall = wallOnFace(5, 4);
+  assert.equal(hasCover(9.0, 4.8, 5, 5, northWall), false, 'an eastward shot with 0.2 drift is not a north-face shot');
+  assert.equal(hasCover(5.2, 1.0, 5, 5, northWall), true, 'a genuinely northern shooter still is');
 });
 
 // --- the crouch as a POSITION (TACTICS_PLAN M6, revised 2026-07-31) ---------
