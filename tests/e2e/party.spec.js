@@ -216,6 +216,7 @@ test('a legacy single-sheet save loads as a one-member party', async ({ page }) 
     }));
   });
   await page.reload();
+  await page.click('#level-continue'); // the floor-select desk offers the saved run
   await page.waitForFunction(() => window.__game && window.__game.stats, null, { timeout: 90_000 });
   const party = await page.evaluate(() => window.__game.party);
   expect(party.length).toBe(1);

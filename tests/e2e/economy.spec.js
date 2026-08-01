@@ -132,6 +132,7 @@ test('the mail room companion buys the junk a machine will not touch', async ({ 
     }));
   });
   await page.goto('/');
+  await page.click('#level-continue'); // the floor-select desk offers the saved run
   await page.waitForFunction(() => window.__game && window.__game.stats);
   await page.evaluate(() => window.__game.zoomOut());
   await page.waitForTimeout(700);

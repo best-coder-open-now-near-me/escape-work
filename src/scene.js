@@ -48,8 +48,8 @@ export function createApp(canvas) {
 // (optional) is the object-picker registrar (src/picking.js): doors and
 // interactable props register their holder entities so a click on the tall
 // mesh resolves to the object, not the floor behind it.
-export function buildLevel(app, grid, { picking = null } = {}) {
-  const r = createTileRenderer(app);
+export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 } = {}) {
+  const r = createTileRenderer(app, { root, baseY });
   const walls = [];
   const surfaceVisuals = new Map(); // "x,z" -> entity
   const propVisuals = new Map();
@@ -67,6 +67,9 @@ export function buildLevel(app, grid, { picking = null } = {}) {
       // and hover-highlightable: register their holder for object picking. Model
       // props (desks) load async, so catch them via onAsync too.
       const def = TILE_TYPES[type];
+      // A stair cell's flight is drawn by the layered builder below, which
+      // knows the run's direction and rise; here it is just floor under it.
+      if (def.stairs) continue;
       const interactive = !!def && (def.loot || def.shop || def.ignitable || def.explosive);
       const res = r.renderMarker(x, z, type, {
         electrified: grid.isElectrified(x, z),
@@ -86,7 +89,7 @@ export function buildLevel(app, grid, { picking = null } = {}) {
       // `top` is the world Y of the wall's top face - the fade test needs it to
       // know whether the sightline clears this wall (see occlusion.js). A solid
       // tile's box is centred at def.height / 2 and def.height tall.
-      if (res.kind === 'wall') walls.push({ entity: res.entities[0], x, z, top: def.height, faded: false });
+      if (res.kind === 'wall') walls.push({ entity: res.entities[0], x, z, top: baseY + def.height, faded: false });
       else if (res.kind === 'surface') surfaceVisuals.set(x + ',' + z, res.entities[0]);
       else if (res.kind === 'prop') {
         propVisuals.set(x + ',' + z, res.entities[0]);
@@ -101,8 +104,8 @@ export function buildLevel(app, grid, { picking = null } = {}) {
   const addEdgeWall = (k, orient) => {
     const [x, z] = k.split(',').map(Number);
     const entry = orient === 'h'
-      ? { entity: r.renderEdgeWall(x, z, 'h'), x, z: z - 0.5, top: r.edgeWallTop, faded: false }
-      : { entity: r.renderEdgeWall(x, z, 'v'), x: x - 0.5, z, top: r.edgeWallTop, faded: false };
+      ? { entity: r.renderEdgeWall(x, z, 'h'), x, z: z - 0.5, top: baseY + r.edgeWallTop, faded: false }
+      : { entity: r.renderEdgeWall(x, z, 'v'), x: x - 0.5, z, top: baseY + r.edgeWallTop, faded: false };
     walls.push(entry);
     edgeWallVisuals.set(orient + ':' + k, entry);
   };
@@ -138,7 +141,7 @@ export function buildLevel(app, grid, { picking = null } = {}) {
       entity: panel,
       x: orient === 'v' ? x - 0.5 : x,
       z: orient === 'h' ? z - 0.5 : z,
-      top: r.doorTop,
+      top: baseY + r.doorTop,
       faded: false,
       solidMat: r.doorMat,
       ghostMat: r.doorGhost,
@@ -157,7 +160,9 @@ export function buildLevel(app, grid, { picking = null } = {}) {
     const cam = cameraEntity.getPosition();
     // The character's feet sit on the floor's top face; the sightline is
     // anchored there, so a wall counts when it covers any part of the body.
-    const feet = { x: playerPos.x, y: r.floorHeight / 2, z: playerPos.z };
+    // The entity's own Y IS that height - on a flat level it equals the old
+    // floorHeight / 2 constant, and on a layered one it carries the storey.
+    const feet = { x: playerPos.x, y: playerPos.y, z: playerPos.z };
     for (const w of walls) {
       const shouldFade = occludes(w, cam, feet);
       if (shouldFade !== w.faded) {
@@ -253,11 +258,80 @@ export function buildLevel(app, grid, { picking = null } = {}) {
   }
 
   return {
-    walls, updateWallFade, animateSurfaces: r.animate,
+    walls, updateWallFade, animateSurfaces: r.animate, renderStair: r.renderStair,
     addFlame: r.addFlame, explosionFlash: r.explosionFlash,
     addSmoke: r.addSmoke, removeSmoke: r.removeSmoke,
     hideSurfaceVisual, addSurfaceVisual, removePropVisual, refreshTile,
     refreshDoor: renderDoorAt, removeEdgeWall, markPropDamaged, markEdgeDamaged,
     floorHeight: r.floorHeight,
   };
+}
+
+// A layered level's scene (EDITOR_PLAN feasibility spike): one buildLevel per
+// storey, each under its own root entity at its own base height, plus the
+// generated stair flights. Returns the same surface main.js reads off a flat
+// scene, with per-cell hooks dispatched to the ACTIVE storey (the leader's),
+// and two extras: `updateCutaway` and `layerVisible`.
+export function buildLayeredLevel(app, floors, { picking = null } = {}) {
+  const roots = [];
+  const scenes = [];
+  floors.layers.forEach((g, i) => {
+    const root = new pc.Entity('storey-' + i);
+    app.root.addChild(root);
+    roots.push(root);
+    scenes.push(buildLevel(app, g, { picking, root, baseY: floors.baseY[i] }));
+  });
+  // Stair flights render through the LOWER storey's renderer, so a hidden
+  // upper floor still leaves the way up standing in the world. Every slice
+  // registers with the object picker: the flight RISES, so a click on its
+  // upper half projects onto a ground plane somewhere behind it - the ray
+  // must hit the boxes themselves, or clicks sail straight through the
+  // stairs (the spike playtest's first finding, designer 2026-08-01).
+  for (const s of floors.stairs) {
+    const rise = floors.baseY[s.upper] - floors.baseY[s.layer];
+    s.cells.forEach((c, idx) => {
+      const slices = scenes[s.layer].renderStair(c.x, c.z, s.dir.dx, s.dir.dz, rise, idx, s.cells.length);
+      if (picking) for (const e of slices) picking.register(e, 'stair', s);
+    });
+  }
+  let active = 0;
+  const activeScene = () => scenes[active];
+  const facade = {
+    // The cutaway: a storey above the leader hides only while it actually
+    // covers them (`covers(l)`) - out in the atrium the whole multi-storey
+    // space reads; duck under the mezzanine and its floor gets out of the
+    // way. X-COM hides everything above, BG3 peels on occlusion; this is the
+    // cheapest rule that keeps the tall-lobby look, and it is the spike's
+    // main "tweak the look" dial.
+    updateCutaway(activeLayer, covers) {
+      active = activeLayer;
+      roots.forEach((r, i) => { r.enabled = i <= activeLayer || !covers(i); });
+    },
+    layerVisible: (l) => roots[l].enabled,
+    // A scripted climb pins both of its storeys visible for the whole ride;
+    // the per-frame covering test stands down until the landing (the spike
+    // playtest's second finding: re-judging "covered" mid-flight popped the
+    // upper floor out and back as the body crossed the slab's edge).
+    holdForClimb(a, b) {
+      roots[a].enabled = true;
+      roots[b].enabled = true;
+    },
+    // The fade list the flat destructure reads; layered fading runs per
+    // visible storey through updateWallFade below.
+    walls: scenes[0].walls,
+    updateWallFade(cameraEntity, playerPos) {
+      for (let i = 0; i < scenes.length; i++) {
+        if (roots[i].enabled) scenes[i].updateWallFade(cameraEntity, playerPos);
+      }
+    },
+    animateSurfaces(dt) { for (const s of scenes) s.animateSurfaces(dt); },
+    floorHeight: scenes[0].floorHeight,
+  };
+  // Cell-keyed runtime hooks follow the leader's storey, like the grid facade.
+  for (const m of ['addFlame', 'explosionFlash', 'addSmoke', 'removeSmoke', 'hideSurfaceVisual',
+    'addSurfaceVisual', 'removePropVisual', 'refreshTile', 'refreshDoor', 'removeEdgeWall',
+    'markPropDamaged', 'markEdgeDamaged']) {
+    facade[m] = (...args) => activeScene()[m](...args);
+  }
+  return facade;
 }
