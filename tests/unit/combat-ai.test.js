@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   standTilePath, pickTarget, advanceRoute, aiCrouchCovered, chooseBeat, afterFailedAdvance,
-  AI,
+  AI, standTileRoutes, scoreDestination,
 } from '../../src/combat-ai.js';
 import { REACH } from '../../src/stats.js';
 
@@ -118,6 +118,54 @@ test('engageability is a tier no score can buy past', () => {
 
 test('no candidates means no target - which is how a party wipe reads', () => {
   assert.equal(pickTarget(0, 0, [], () => true), null);
+});
+
+// --- destination scoring (AI_PLAN M3) ---------------------------------------
+
+test('standTileRoutes returns the whole field - and the self-path alone', () => {
+  assert.equal(standTileRoutes(0, 0, 5, 5, routeWorld()).length, 8);
+  // Already on a swing tile: not a field to score, THE answer - the pacing
+  // bug's fix keeps absolute priority over any scored alternative.
+  assert.deepEqual(standTileRoutes(4, 5, 5, 5, routeWorld()), [[[4, 5], [4, 5]]]);
+});
+
+test('a flanking arrival outranks a shorter route', () => {
+  const target = { x: 5, z: 5 };
+  const shortest = [[5, 7], [5, 6]]; // cost 1, arrives south - no pincer
+  const flank = [[5, 7], [4, 6]]; // cost 1.41, arrives SW - opposite the NE ally
+  const allies = [{ x: 6, z: 4, reach: 1.5 }];
+  assert.equal(scoreDestination([shortest, flank], { target, allies }), flank);
+  // Without the ally there is nothing to buy: the cheap route wins.
+  assert.equal(scoreDestination([shortest, flank], { target }), shortest);
+});
+
+test('a route that eats an opportunity attack loses to an equal-cost detour', () => {
+  const threats = [{ x: 0, z: 2, reach: 1.5 }];
+  const through = [[0, 0], [0, 1], [3, 1]]; // enters the watcher's reach, then leaves
+  const around = [[0, 0], [2, 0], [4, 0]]; // same total cost, never inside
+  assert.equal(scoreDestination([through, around], { threats }), around);
+});
+
+test('a route through a hazard loses to a dry detour worth less than its weight', () => {
+  const surfDamageAt = (x, z) => (x === 1 && z === 0 ? 3 : 0);
+  const wet = [[0, 0], [1, 0], [2, 0]]; // cost 2, through the spill
+  const dry = [[0, 0], [1, 1], [2, 0]]; // cost 2.83, around it
+  assert.equal(scoreDestination([wet, dry], { surfDamageAt }), dry);
+  // No spill, no detour: the cheap route wins again.
+  assert.equal(scoreDestination([wet, dry], {}), wet);
+});
+
+test('positions are judged at the approach point, not the tile centre', () => {
+  const target = { x: 5, z: 5 };
+  const allies = [{ x: 6, z: 5, reach: 1.5 }];
+  const diag = [[3, 3], [4, 4]]; // tile centre reads diagonal - no pincer with an east ally
+  const south = [[3, 3], [3, 4]]; // cheaper, first in the field
+  // Without the approach point, nothing flanks and cheap wins...
+  assert.equal(scoreDestination([south, diag], { target, allies }), south);
+  // ...but the real arrival spot drifts toward the target's west face, the
+  // octant goes cardinal, and the east ally is suddenly dead opposite.
+  const approach = (gx, gz) => (gx === 4 && gz === 4 ? [4.6, 4.9] : [gx, gz]);
+  assert.equal(scoreDestination([south, diag], { target, allies, approach }), diag);
 });
 
 // --- the advance -------------------------------------------------------------

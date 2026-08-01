@@ -30,7 +30,8 @@ import {
   pullPlan as pullplanFor, displacePlan,
 } from './combat-plans.js';
 import {
-  standTilePath as standTileRoute, pickTarget as pickBest, advanceRoute,
+  standTilePath as standTileRoute, standTileRoutes, scoreDestination,
+  pickTarget as pickBest, advanceRoute,
   aiCrouchCovered, chooseBeat, afterFailedAdvance,
 } from './combat-ai.js';
 import {
@@ -4175,7 +4176,28 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // hop-pause-hop. Surface damage lands per tile entered via the actor's
   // onTile hook. Returns the AP actually spent (0 = couldn't move).
   function aiAdvance(unit, budget, target) {
-    const best = advanceRoute(unit, target, standTilePath(unit, target), world);
+    // The whole field of swing-stand routes, scored (AI_PLAN M3): path cost
+    // traded against a flanking or rear-arc arrival, the opportunity attacks
+    // the walk would eat, and the floor's hazards. Combat gathers the leaf
+    // facts; the rule is combat-ai's. canEngage keeps reading the cheap
+    // shortest-route test - the two agree on EXISTENCE, which is all the
+    // anti-stall contract needs.
+    const tb = posOf(target);
+    const chosen = scoreDestination(
+      standTileRoutes(unit.x, unit.z, target.actor.x, target.actor.z, world),
+      {
+        target: { x: tb.x, z: tb.z },
+        approach: world.approach,
+        allies: engaged.filter((e) => e.alive && e !== unit)
+          .map((e) => { const p = posOf(e); return { x: p.x, z: p.z, reach: reachOfUnit(e) }; }),
+        facing: facings.get(target.member) || null,
+        threats: threatsAgainst(unit),
+        edgeOpen: world.stepOpen,
+        surfDamageAt: world.enemySurfDamage,
+        slipChanceAt: world.slipChanceAt,
+      },
+    );
+    const best = advanceRoute(unit, target, chosen, world);
     if (!best) return 0;
     const s = world.smoothEnemy(unit, best);
     // AI units pay the same surface movement tax the player does, plus their

@@ -12,7 +12,9 @@
 // The world arrives as small query callbacks, as everywhere else in the carve.
 
 import { cheb, posOf, reachOfUnit, AROUND, ORTHO } from './combat-geometry.js';
-import { inReach, dist, shieldedFaces, facesShieldFrom } from './tactics.js';
+import {
+  inReach, dist, shieldedFaces, facesShieldFrom, isFlanked, isBackstab, provokedBy,
+} from './tactics.js';
 import { blocksSight } from './data/tiles.js';
 
 // The AI's tunables, one block (AI_PLAN A7): every magnitude a difficulty
@@ -26,6 +28,13 @@ export const AI = {
   W_KILL: 2.0, // kill-securability term (scaled by focus)
   W_FRAIL: 1.0, // fragility term (scaled by focus)
   STICKINESS: 0.25, // bonus to the CURRENT target - anti-flip-flop hysteresis
+  // --- destination scoring (AI_PLAN M3) ---
+  W_PATH: 1.0, // per tile-unit of route cost - the baseline everything trades against
+  FLANK_VALUE: 1.5, // arriving in a pincer position
+  BACKSTAB_VALUE: 1.0, // arriving in the target's rear arc
+  OA_COST: 2.0, // per opportunity attack the route would eat
+  HAZARD_COST: 1.5, // per damaging surface tile entered
+  SLIP_COST: 1.0, // per unit of slip chance crossed (expected turn loss)
 };
 
 // Score ties are decided by the tie-break chain, not float luck.
@@ -58,6 +67,89 @@ export function standTilePath(ux, uz, tx, tz, { isWalkable, findEnemyPath }) {
     if (p && p.length > 1 && (!best || p.length < best.length)) best = p;
   }
   return best;
+}
+
+// Every swing-stand route, not just the shortest (AI_PLAN M3): the
+// destination score needs the whole field of candidates before it can trade
+// path cost against a flanking arrival. Same contract as standTilePath
+// otherwise - and the degenerate self-path keeps its ABSOLUTE priority:
+// already standing on a swing tile is not a choice to score, it is the
+// pacing bug's fix, so it returns alone, a field of one.
+export function standTileRoutes(ux, uz, tx, tz, { isWalkable, findEnemyPath }) {
+  for (const [dx, dz] of AROUND) {
+    if (ux === tx + dx && uz === tz + dz) return [[[ux, uz], [ux, uz]]];
+  }
+  const out = [];
+  for (const [dx, dz] of AROUND) {
+    const gx = tx + dx;
+    const gz = tz + dz;
+    if (!isWalkable(gx, gz)) continue;
+    const p = findEnemyPath(ux, uz, gx, gz);
+    if (p && p.length > 1) out.push(p);
+  }
+  return out;
+}
+
+// Which of those routes to actually walk (AI_PLAN M3). The old rule was
+// "shortest"; the score keeps path cost as the baseline and trades it
+// against what the ARRIVAL buys and what the WALK costs beyond AP:
+//
+//   + a pincer arrival (isFlanked with the roles reversed)
+//   + an arrival in the target's rear arc (isBackstab)
+//   - each opportunity attack the route would eat (provokedBy, leg by leg -
+//     the same radius-crossing rule the walk will actually be charged by)
+//   - each hazard tile entered, and slip chance crossed
+//
+// Positions are judged at the APPROACH POINT the mover will stand on, not
+// the tile centre: dirOctant flips sectors near tile midlines, and a flank
+// scored at the centre can evaporate at the real arrival spot.
+//
+// Weights, not vetoes - eating one free swing to reach the kill can be
+// right, and the tuning block owns the exchange rates. Deterministic: ties
+// fall to route order, which follows AROUND's fixed order.
+export function scoreDestination(routes, q = {}) {
+  const {
+    target, approach = null, allies = [], facing = null, threats = [],
+    edgeOpen = null, surfDamageAt = null, slipChanceAt = null,
+  } = q;
+  let best = null;
+  for (const r of routes) {
+    let cost = 0;
+    for (let k = 1; k < r.length; k++) {
+      cost += dist(r[k - 1][0], r[k - 1][1], r[k][0], r[k][1]);
+    }
+    const [gx, gz] = r[r.length - 1];
+    const [ax, az] = approach && target ? approach(gx, gz, target.x, target.z) : [gx, gz];
+    const flanked = target ? isFlanked(ax, az, target.x, target.z, allies, edgeOpen) : false;
+    const behind = target ? isBackstab(ax, az, target.x, target.z, facing) : false;
+    let oas = 0;
+    const provoked = new Set();
+    for (let k = 1; k < r.length; k++) {
+      for (const t of provokedBy(threats, r[k - 1][0], r[k - 1][1], r[k][0], r[k][1], edgeOpen)) {
+        if (!provoked.has(t)) { provoked.add(t); oas += 1; }
+      }
+    }
+    let hazard = 0;
+    if (surfDamageAt || slipChanceAt) {
+      const entered = new Set([`${Math.round(r[0][0])},${Math.round(r[0][1])}`]);
+      for (let k = 1; k < r.length; k++) {
+        const cx = Math.round(r[k][0]);
+        const cz = Math.round(r[k][1]);
+        const key = `${cx},${cz}`;
+        if (entered.has(key)) continue;
+        entered.add(key);
+        if (surfDamageAt && surfDamageAt(cx, cz) > 0) hazard += AI.HAZARD_COST;
+        if (slipChanceAt) hazard += AI.SLIP_COST * slipChanceAt(cx, cz);
+      }
+    }
+    const score = -AI.W_PATH * cost
+      + (flanked ? AI.FLANK_VALUE : 0)
+      + (behind ? AI.BACKSTAB_VALUE : 0)
+      - AI.OA_COST * oas
+      - hazard;
+    if (!best || score > best.score + EPS) best = { route: r, score };
+  }
+  return best ? best.route : null;
 }
 
 // Which member to fight - ENGAGEABLE first, always. Once a partition blocks
