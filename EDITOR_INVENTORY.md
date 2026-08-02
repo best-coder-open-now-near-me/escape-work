@@ -26,9 +26,23 @@ first. All six change the *shape* of the work, not just its order. Everything in
 the inventory below that depends on an answer is tagged `[proposed]` and names
 the question it stands in for.
 
-**Q1 — What is the editor for this round: a safe painter, or an instrument that
-shows you the fight?** The inventory splits cleanly into two products with very
-different costs.
+They are numbered **IQ1–IQ6** — an earlier draft numbered them Q1–Q6, which
+collided with `EDITOR_PLAN.md`'s own Q1–Q3 and cost the designer an answer to
+the wrong question. The two docs' numbering is deliberately disjoint now.
+
+**Status, 2026-08-02:** IQ1, IQ3 and IQ4 are `[ratified]`. IQ6 is partly
+answered — the designer's pipeline is now `[stated]` ("outputting to json and
+uploading to the git") and one premise was corrected, leaving a single narrow
+question (where the editor is run). IQ2 is still open: it was misread as
+EDITOR_PLAN's Q2, which is now closed on its own terms — see that doc. IQ5 has
+not been answered.
+
+---
+
+**IQ1 — What is the editor for this round: a safe painter, or an instrument that
+shows you the fight?** — **ANSWERED: A**, `[ratified]` (designer, 2026-08-02:
+"painter"). The inventory splits cleanly into two products with very different
+costs.
 
 - **A. Safety and closure (recommended).** Undo, autosave, live validation,
   actor brushes, the allocator reset, a metadata strip, save-to-disk.
@@ -48,8 +62,16 @@ different costs.
 I recommend A, and sequencing B *after* layer authoring — a cone or a cover tick
 drawn per storey is a different drawing problem than one drawn flat.
 
-**Q2 — Verticality is `[stated]` and the editor cannot author it. What happens
-between now and M4?**
+*Consequence of the answer:* section I (Seeing the fight) is out of this round
+entirely and sequences after M4. The proposed sequence at the end of this doc
+becomes the plan for the round.
+
+**IQ2 — Verticality is `[stated]` and the editor cannot author it. What happens
+between now and M4?** — **STILL OPEN.** This is the question that got misread:
+the answer given on 2026-08-02 quoted `EDITOR_PLAN.md`'s Q2 (whether height
+changes combat math) and approved its option A, which is now `[ratified]`
+there as decision 8. That is a different question and it does not settle this
+one. Re-asked below unchanged.
 
 - **A. Refuse and document (recommended).** Make opening a layered level refuse
   with a message — today it flattens the level and Export deletes the upper
@@ -65,7 +87,13 @@ between now and M4?**
 Two brushes (void, and an un-hidden `stairway`) are XS each and are M4
 prerequisites either way.
 
-**Q3 — Who owns a map character: the level, or the registry?** The editor
+**IQ3 — Who owns a map character: the level, or the registry?** — **ANSWERED:
+A**, `[ratified]` by explicit deferral (designer, 2026-08-02: "i dont know the
+difference, ill defer to your judgement"). Recorded as ratified rather than
+proposed because the deferral was explicit, but flagged: the designer did not
+evaluate the trade, so if the lost property in A — being able to read any map by
+eye across files, because `#` always means wall — turns out to matter in
+practice, this is the first decision to re-open. The editor
 allocates characters per level; the shipped-level lint demands the registry's
 canonical character. They disagree, and an export can land on the wrong side.
 
@@ -85,8 +113,20 @@ canonical character. They disagree, and an export can land on the wrong side.
 The editor's design, the format and `grid.js` all already say per-level. Only
 the lint disagrees.
 
-**Q4 — Does a placement get to carry properties, or is one character per cell
-the whole truth?** This is an office game whose content is furniture, and every
+**IQ4 — Does a placement get to carry properties, or is one character per cell
+the whole truth?** — **ANSWERED: A, at four orientations**, `[ratified]`
+(designer, 2026-08-02: "4 different rotation can be set"). Read as: rotation is
+a thing the author *sets* on a placement — which is A, not B, where you would
+instead paint a different tile type — and it is quantised to 90° steps rather
+than free. B was in any case barely available: four rotations of ten props costs
+40 of ~86 characters and the pool is already saturated (A5).
+
+*Consequence the designer should know:* the ASCII map stops being the complete
+picture of a level. A reader of the JSON will see `D` and have to look at a
+`props` array to learn which way that desk faces. That is the price of A and it
+is not reversible cheaply once levels use it.
+
+This is an office game whose content is furniture, and every
 desk in it faces the same way: `rotY` is a property of the tile *type*
 (`src/data/tiles.js`), not the placement.
 
@@ -98,19 +138,22 @@ desk in it faces the same way: `rotY` is a property of the tile *type*
   *Consequence:* data-only, no format change; four rotations of ten props costs
   40 of a level's ~86 characters and 40 more palette buttons — and the pool is
   already saturated (see A5).
-- **C. Stay as is (recommended for now)** and make the limit visible — outline a
-  prop's real mesh footprint on hover so the overhang/collision mismatch is at
-  least honest. *Consequence:* cheapest; the boardroom table and the reception
-  desk stay unauthorable, and the furniture keeps facing one way.
+- **C. Stay as is** and make the limit visible — outline a prop's real mesh
+  footprint on hover so the overhang/collision mismatch is at least honest.
+  *Consequence:* cheapest; the boardroom table and the reception desk stay
+  unauthorable, and the furniture keeps facing one way.
 
-I recommend C now and A if the answer to "does furniture need to face different
-ways" is yes — which in an office game I suspect it is. Decision 2 (`[stated]`,
+I recommended C now and A if furniture needs to face different ways; the
+designer went straight to A. Note that A answers *rotation* only — H4 (a prop
+that spans more than one cell, the boardroom table) is a separate limit that A
+does not lift, and C's hover-outline is still the cheapest honest fix for it.
+Decision 2 (`[stated]`,
 "we dont need full flexibility, we dont have organic curves to construct or
 anything like that") settles that the *grid* stays; it says nothing about one
 character per cell, so this is genuinely open. The same answer decides whether
 an actor can stand on a carpet tile (H2).
 
-**Q5 — What should Playtest boot with?** Today it boots the résumé desk and
+**IQ5 — What should Playtest boot with?** Today it boots the résumé desk and
 makes you create a character again, so a depth-4 floor is always tested by a
 fresh level-1 solo character with no gear and no cash.
 
@@ -127,20 +170,76 @@ fresh level-1 solo character with no gear and no cash.
 
 I'd take B now and C when balance work starts.
 
-**Q6 — Does save-to-disk ship, and in which form?** (EDITOR_PLAN decision 10 is
+**IQ6 — Does save-to-disk ship, and in which form?** (EDITOR_PLAN decision 10 is
 `[proposed]`.) Today getting a level into the game is Copy → paste into
 `levels/` → hand-edit `src/data/levels.js` → rebuild.
+
+**Partially answered 2026-08-02, and one premise corrected.** The designer's
+workflow is now on the record `[stated]`: "were just outputting to json and
+uploading to the git" — the export → file → commit loop *is* the intended
+pipeline, not a stopgap. That settles what save-to-disk has to serve.
+
+The premise to correct: *"we dont have the backend infra i dnt think."* Option A
+needs no backend and nothing hosted. `serve.mjs` is the local dev server already
+run by `npm run serve` on the designer's own machine; the endpoint would write
+into their own working copy, and `build.mjs` never bundles it, so nothing about
+it reaches itch.io or any server. **But the instinct behind the doubt points at
+a real question, which is D below and is the one still open.**
 
 - **A. Dev-server endpoint** — `POST /api/level` in `serve.mjs` writing
   `levels/<id>.json` plus a regenerated registry. *Consequence:* the paste and
   the hand-registration both disappear and the registry cannot drift from the
-  directory; `serve.mjs` gains its first write route, dev-only.
-- **B. Editable paste-back (recommended first).** Make the export textarea
-  writable with a "Load this JSON" button. *Consequence:* ~10 lines, no server
-  change, and it closes the loop today — currently the only way back into the
-  editor is the single-slot playtest stash. It does not remove the paste step.
+  directory. No hosting, no service, dev-only. **Only works if the editor is
+  being run from a local `npm run serve`** — see D.
+- **B. Editable paste-back.** Make the export textarea writable with a "Load
+  this JSON" button. *Consequence:* ~10 lines, no server change; it lets a level
+  come back *into* the editor, which today is impossible except through the
+  single-slot playtest stash. It does not remove the paste step.
 - **C. Neither.** *Consequence:* every iteration on an exported level costs the
   full four-step round trip.
+- **D. Download button (new, and now the recommendation).** A "Download
+  `<id>.json`" button beside Export: a `Blob` plus an `<a download>`, which is
+  pure browser API — no server, no backend, works identically in the local build
+  and the deployed preview. *Consequence:* the file lands in Downloads ready to
+  move into `levels/` and commit, which is exactly the stated workflow, and the
+  Copy-and-paste-into-an-editor step disappears. Roughly XS.
+
+**On Supabase** (designer, 2026-08-02: "if we can use the supabase" / "oh yeah
+we have supabase now"). It exists and works — `src/remote-store.js`,
+`REMOTE_STORE.md`, chosen by the designer on 2026-08-01. It is the right tool
+for one editor problem and the wrong tool for this one, and the two are worth
+keeping apart:
+
+- **It cannot serve this question.** The stated workflow is JSON → git, and
+  Supabase cannot put a file in git. More decisively, `src/data/levels.js:8-12`
+  imports every level as a *static ESM import resolved at build time*
+  (`import level1 from '../../levels/level1.json' with { type: 'json' }`). A
+  level sitting in a Postgres row is not a level in the campaign, and cannot
+  become one without a code change and a rebuild — which is the exact step
+  save-to-disk exists to remove. Routing the git pipeline through a database
+  makes it longer, not shorter.
+- **It is exactly the answer to K4** — level *sharing*, the gap where a player
+  paints a floor and the tool's only advice ("paste into `levels/`") is
+  meaningless to them. That is a real feature and Supabase is the natural
+  mechanism. It is a different feature from IQ6, with its own cost: the store is
+  deliberately one `saves` table behind two RPCs with no direct anon access
+  (`REMOTE_STORE.md:47-61`), scoped to what the designer asked for — "i wanted
+  the base minimum" (2026-08-01). Levels mean a second table and new RPCs.
+
+So: Supabase is now a live option for K4, and K4 should be re-asked on its own
+terms rather than folded in here. It does not change the recommendation below.
+
+**Recommendation: D, plus B.** Together they are under twenty lines, need no
+infrastructure of any kind, and close both directions of the loop — a level out
+as a file, and a file back in. A stays worth doing *only* if the answer to D's
+question is "locally", and even then it is an optimisation of a loop D already
+makes cheap.
+
+**The question that is actually still open: where do you run the editor?**
+If it is `npm run serve` on your machine, A is available and would remove the
+`src/data/levels.js` hand-edit too. If you paint levels in the deployed preview
+build in a browser tab, A is genuinely unavailable to you and D is the whole
+answer. One word settles it.
 
 Flag on B: decision 1 is `[stated]` — no external editor or importer ("i dont
 mind using ours if its easiest"). That reads as being about Tiled/LDtk rather
@@ -193,8 +292,8 @@ says nothing.
 | **A3** | `Reset` and `Exit editor` each wipe the stash and reload on one unconfirmed click, styled identically to `Export` beside them (`editor.js:595-609`). Separately, the in-game menu's `menu-restart` (`main.js:4078-4085`) calls `clearProgress()` **ungated** — deleting the campaign save *and* its Supabase row (`main.js:139-142`) *and* the stashed level. Its two sibling sites are both gated (`main.js:894`, `:2919`). | Three buttons discard unsaved work with no confirmation; one of them also destroys a campaign run the author was not editing. TODO.md:335 records this bug as two sites; the third was missed. | Gate `menu-restart` on `!playtesting` and split its label while playtesting ("Restart this level"). Confirm Reset/Exit, style them as a secondary group, and add a `beforeunload` guard keyed off a dirty flag. | S |
 | **A4** | `reservedChars`, `tileByChar` and `charByType` are created once per `startEditor` (`editor.js:73-75`) and never cleared; `charOfType` returns a cached allocation without re-testing reservations (`:76-86`). `loadLevel` adds newly-loaded tier characters to `reservedChars` (`:323`) but removes nothing. | Two symptoms, one root cause. (a) A level's export depends on which levels you opened first in that browser session. (b) `ficus` prefers `'G'` (`data/tiles.js:541`) and `levels/level2.json:37` uses `'G'` for `manager@3` — so a painted plant can export as an enemy spawn. | Rebuild the three maps at the top of `loadLevel` and re-seed `charOfType('floor')` before the tier scan. One fix closes both, and removes one of the two triggers of A6. | XS |
 | **A5** | 87 paintable tile types against exactly **86** usable pool characters (measured: pool is codes 33–126 less `\`, less `' '`, less `'@'`, less the 6 actor characters). On exhaustion `charOfType` returns the floor character and the comment promises `// pool exhausted: paint floor, say so below` (`editor.js:82`) — nothing says so, anywhere. | The 87th distinct type in one level silently paints floor, and `toJson`'s `used` set never learns the type existed, so the export contains floor too. The bound is crossed *today*, not hypothetically. | Refuse the paint and `toast()` the type name rather than substituting floor. Correct the two comment blocks (`editor.js:57-59`, `data/tiles.js:78-81`) to the measured number and add a unit test asserting paintable types ≤ pool size. | S |
-| **A6** | `stairway` (`data/tiles.js:170-180`) is the **only** non-`runtimeOnly` tile type with no preferred `char`, so it gets a brush in the `basics` row and exports under a pool character — which `tests/unit/levels.test.js:417` rejects (`TILE_TYPES[type].char === ch` against `undefined`). In a flat level it is also an invisible wall: the editor draws a slab, the game draws nothing. | A live brush produces a level CI refuses and a playtest the author cannot see. | Hide it from the palette until M4 (same mechanism as `runtimeOnly`, `editor.js:521`), then re-enable with live run validation mirroring `floors.js:52-127`. Whether the lint or the allocator yields is **Q3**. | XS |
-| **A7** | `main.js:271-273` flattens a layered level to its ground storey before handing it to `startEditor`; `editor.js` has no layer state and `toJson` never emits `layers`. Reachable via `?level=spike-lobby#editor`. | Opening the spike lobby and exporting it deletes the mezzanine, the stairs and the ground storey's `height`. Silently. | An XS refusal guard now (see **Q2A**); real authoring is M4. | XS |
+| **A6** | `stairway` (`data/tiles.js:170-180`) is the **only** non-`runtimeOnly` tile type with no preferred `char`, so it gets a brush in the `basics` row and exports under a pool character — which `tests/unit/levels.test.js:417` rejects (`TILE_TYPES[type].char === ch` against `undefined`). In a flat level it is also an invisible wall: the editor draws a slab, the game draws nothing. | A live brush produces a level CI refuses and a playtest the author cannot see. | Hide it from the palette until M4 (same mechanism as `runtimeOnly`, `editor.js:521`), then re-enable with live run validation mirroring `floors.js:52-127`. Whether the lint or the allocator yields is **IQ3**. | XS |
+| **A7** | `main.js:271-273` flattens a layered level to its ground storey before handing it to `startEditor`; `editor.js` has no layer state and `toJson` never emits `layers`. Reachable via `?level=spike-lobby#editor`. | Opening the spike lobby and exporting it deletes the mezzanine, the stairs and the ground storey's `height`. Silently. | An XS refusal guard now (see **IQ2A**); real authoring is M4. | XS |
 | **A8** | `resize` shrinks from the right and bottom only, popping rows and columns (`editor.js:400-422`) and filtering edge runs. Nothing checks what was in them. | `−col` can delete the player spawn, an enemy, or a companion with no warning — and with no undo (A1). | Warn when a trim would remove an actor or the spawn; make the trimmed content restorable via A1. | XS |
 | **A9** | `loadLevel`'s `canonical` ends `TILE_TYPES[type] ? charOfType(type) : charOfType('floor')` (`editor.js:336-338`). An unrecognised tile id becomes floor, silently, and the export writes floor. | A renamed type with no `TYPE_ALIASES` entry, or a level from a branch, loses content on load — structurally the same failure the actor path was already fixed for. | Count substitutions during `loadLevel` and report them once: "3 cells used an unknown tile type ('server-rack') and were set to floor". Same for the `actorChar(actor) ?? charOfType('floor')` fallback one line above. | XS |
 | **A10** | `computeElectrifiedSet` runs the real `parseLevel` on every paint and swallows every throw (`editor.js:115-126`), including the named errors `grid.js:103-115` raises for unknown tile types and bad actor legend values. | The parser is already telling the editor the level is broken, on every stroke, and the editor drops the message. | Keep the try/catch — mid-edit states genuinely can be unparsable — but capture the message and surface it in the status strip, clearing on the next successful parse. This is the same hook B1 needs. | XS |
@@ -213,7 +312,7 @@ that produces the file.
 | **B2** | Doors can be painted on the map boundary or between two solid cells. They render, they list, and nothing flags them. | A door to nowhere reads as a route on the map and is not one. | Part of the B1 chip: flag edges whose two sides are not both enterable. | S |
 | **B3** | Restored companions take the first walkable unoccupied DIRS8 neighbour of the spawn, falling back to the spawn tile itself (`main.js:4134-4139`); `PARTY_CAP = 3` (`party.js:14`). Nothing checks the spawn has two free neighbours. | A spawn in a tight corner stacks the party until the leader walks far enough to force a repath — a failure mode `main.js:4129-4133` documents in its own comment. | Part of the B1 chip: require ≥2 walkable neighbours at the spawn. | S |
 | **B4** | The `next` chain is a string per file. `FIRST_LEVEL` is imported by the lint and never asserted. Nothing catches a cycle, an orphan, a terminal floor that should not be terminal, or a `depth` that contradicts the chain. | A bad `FIRST_LEVEL` silently disables campaign saves entirely. A floor can be authored and registered and still be unreachable from floor 1. | Add a campaign-chain block to `tests/unit/levels.test.js`: walk `next` from `FIRST_LEVEL`, assert no cycle, exactly one terminal floor, every non-dev level reachable, `depth` non-decreasing. Strictness is worth a designer nod. | S |
-| **B5** | `tests/unit/levels.test.js:25` reads `levels/` non-recursively, so `levels/dev/` skips the exit, canonical-legend, declared-chars, run-bounds, `next` and `depth` checks. *(Correction to an earlier draft of this item: the dev level is **not** unvalidated — `tests/unit/floors.test.js:157-183` parses the real `spike-lobby.json` and exercises every stair validation including a spawn→mezzanine route.)* | The exemption is what lets `spike-lobby` legally declare `"X": "stairway"` against a type with no registry char — i.e. the exemption is currently load-bearing for A6. | Decide with **Q3**. If the lint relaxes, `levels/dev/` can come inside it. | S |
+| **B5** | `tests/unit/levels.test.js:25` reads `levels/` non-recursively, so `levels/dev/` skips the exit, canonical-legend, declared-chars, run-bounds, `next` and `depth` checks. *(Correction to an earlier draft of this item: the dev level is **not** unvalidated — `tests/unit/floors.test.js:157-183` parses the real `spike-lobby.json` and exercises every stair validation including a spawn→mezzanine route.)* | The exemption is what lets `spike-lobby` legally declare `"X": "stairway"` against a type with no registry char — i.e. the exemption is currently load-bearing for A6. | Decide with **IQ3**. If the lint relaxes, `levels/dev/` can come inside it. | S |
 
 ---
 
@@ -259,7 +358,7 @@ The whole vocabulary is one cell, or one edge, at a time.
 | **E5** | Right-click erases whatever the *brush* is about, not what is under the cursor (`editor.js:433-434`): with a tile brush, right-clicking a partition erases the cell and leaves the partition. There is no right-drag — only `leftHeld` gates dragging. | Erasing requires first selecting the right brush to erase with. | Make erase target-driven: if `nearestEdge(g)` carries a wall or door, erase that; otherwise erase the cell. Add `rightHeld` + `onRightDragTile` mirroring the left pair. Note this competes with E6 for the same button. | S |
 | **E6** | No brush can paint void: `charForBrush` can only return `'@'`, an enemy character, or a tile character, and `' '` is reserved (`editor.js:63-73`). Right-click erase paints floor; resize fills with floor. The load path *preserves* void (`:325`) and even manufactures it as ragged-row padding (`:342`). | Void is a first-class cell — it is the airspace the layer model is built on, and `spike-lobby` layer 1 already ships 90 void cells. You can destroy it and never restore it. Non-rectangular floor plans are hand-authoring only. | A void brush. The plumbing all works already: `parseLevel` handles `' '` (`grid.js:82-84`), `renderCell` early-returns on it (`:161`), `effectiveTypeAt` maps it to null (`:134`), `toJson` needs no legend entry, and the game skips null cells (`scene.js:61-62`). | XS |
 | **E7** | `levelName`, `levelNext` and `levelDepth` are declared, assigned once in `loadLevel`, re-emitted in `toJson` — and touched by no UI (six lines total in the file). | The editor never boots blank, so every export **inherits** the base level's identity: its name, its `depth`, and its campaign link. A new floor 3 exports as "Floor 1 — Cubicle Row" pointing at level2. | A metadata strip in the command row: name, depth, next (a select over `LEVELS`). Named in EDITOR_PLAN M0. | S |
-| **E8** | No blank level, no delete, no rename, no templates. `Reset` reloads the *boot* level rather than clearing the canvas — and because the reload falls through `main.js`'s cascade to campaign progress, Reset with a saved run on Floor 2 drops you into the editor on Floor 2. | There is no "new floor" action in a level editor. | A "New" action taking a size and a fill type; templates can wait for a designer view on which ones (**Q1**). | S |
+| **E8** | No blank level, no delete, no rename, no templates. `Reset` reloads the *boot* level rather than clearing the canvas — and because the reload falls through `main.js`'s cascade to campaign progress, Reset with a saved run on Floor 2 drops you into the editor on Floor 2. | There is no "new floor" action in a level editor. | A "New" action taking a size and a fill type; templates can wait for a designer view on which ones (**IQ1**). | S |
 | **E9** | Grid grows and shrinks from the right and bottom only (`editor.js:400-422`). | You cannot add a corridor to the north or west without repainting the map. | Anchor-aware resize: shift `rows` and re-key the four edge Sets when growing from top/left. The edge re-keying is the real work. | M |
 
 ---
@@ -292,16 +391,16 @@ signal exists on either.
 | ID | Today | Cost | Fix | Size |
 |---|---|---|---|---|
 | **H1** | The editor paints two of the format's four actor kinds. Player (`editor.js:552-556`) and enemies (`:557-561`) have brushes; **companions** (`it-support` `'N'`, `mail-room` `'V'`) do not, and there is no way to emit an `<id>@<level>` tiered reference. `charForBrush` structurally cannot return one (`:362-366`). *(The `NPCS` registry is currently empty (`data/npcs.js:16`), so the NPC half of this gap has no content behind it today.)* | A second recruitable coworker, or a tougher Manager on a shallow floor, means hand-editing JSON — the exact thing the editor exists to remove. Combines with A11: they are invisible *and* unpaintable. | Drive the brush loop and `enemyByChar` from `ACTOR_REGISTRIES`/`actorLegend()` rather than `ENEMY_TYPES`. Add a small tier stepper beside the actor brushes emitting `id@n`. Named in EDITOR_PLAN M0; the gap list is designer-confirmed. | M |
-| **H2** | `parseLevel` resolves an actor cell to `'floor'` (`grid.js:117`), and `computeCarpetZones` refuses to let plain floor inherit (`tile-renderer.js:682`). The editor mirrors this exactly. | An enemy standing in the meeting room punches a grey hole in the carpet — visible in `levels/level2.json` today. | Format question, not a paint question — see **Q4**. Cheapest no-format-change option: let cells `parseLevel` marked as actor-occupied inherit carpet like any other cell. | M |
-| **H3** | `rotY` is a property of the tile *type*, not the placement. | Every desk, sofa and cabinet on every floor faces the same direction. Cubicle bays cannot face each other; a reception desk cannot face the door. The escape hatch — a `desk-east` type — is a code change *and* costs a scarce map character (A5). | **Q4.** | M |
-| **H4** | Every prop occupies exactly one tile; a model's overhang blocks nothing. | The two set pieces an office CRPG most wants — a boardroom table and a reception counter — cannot be authored honestly. Repeating a tile gives N desks, each with its own loot roll. | **Q4.** Cheapest honest option: outline a model's real bounding box on hover so the mismatch is visible. | M |
-| **H5** | A level's id is the key in `LEVELS` (`data/levels.js:14`), derived from the filename by the lint (`tests/unit/levels.test.js:467-469`). The JSON carries no id, and the export modal never mentions the registration step. | Pasting an export into `levels/` as instructed fails `npm test` at exactly one assert, with no hint in the tool that a second step exists. | Say so in the export modal at minimum; **Q6A** removes the step entirely. | S |
+| **H2** | `parseLevel` resolves an actor cell to `'floor'` (`grid.js:117`), and `computeCarpetZones` refuses to let plain floor inherit (`tile-renderer.js:682`). The editor mirrors this exactly. | An enemy standing in the meeting room punches a grey hole in the carpet — visible in `levels/level2.json` today. | Format question, not a paint question — see **IQ4**. Cheapest no-format-change option: let cells `parseLevel` marked as actor-occupied inherit carpet like any other cell. | M |
+| **H3** | `rotY` is a property of the tile *type*, not the placement. | Every desk, sofa and cabinet on every floor faces the same direction. Cubicle bays cannot face each other; a reception desk cannot face the door. The escape hatch — a `desk-east` type — is a code change *and* costs a scarce map character (A5). | **IQ4.** | M |
+| **H4** | Every prop occupies exactly one tile; a model's overhang blocks nothing. | The two set pieces an office CRPG most wants — a boardroom table and a reception counter — cannot be authored honestly. Repeating a tile gives N desks, each with its own loot roll. | **IQ4.** Cheapest honest option: outline a model's real bounding box on hover so the mismatch is visible. | M |
+| **H5** | A level's id is the key in `LEVELS` (`data/levels.js:14`), derived from the filename by the lint (`tests/unit/levels.test.js:467-469`). The JSON carries no id, and the export modal never mentions the registration step. | Pasting an export into `levels/` as instructed fails `npm test` at exactly one assert, with no hint in the tool that a second step exists. | Say so in the export modal at minimum; **IQ6A** removes the step entirely. | S |
 
 ---
 
 ## I. Seeing the fight
 
-Everything here is `[proposed]` and rides on **Q1**. No designer has asked for
+Everything here is `[proposed]` and rides on **IQ1**. No designer has asked for
 any of it. All of it depends on C2's hover plumbing and a translucent draw layer
 the editor does not have — and all of it will be redrawn when storeys arrive,
 which is why I'd sequence it after M4.
@@ -324,10 +423,10 @@ which is why I'd sequence it after M4.
 
 | ID | Today | Cost | Fix | Size |
 |---|---|---|---|---|
-| **J1** | Playtest boots the résumé desk and requires creating a character. | The fast loop has a character-creation screen welded into it, and a depth-4 floor is always tested by a fresh level-1 solo character — so "is this fight fair" is unanswerable in the tool. | **Q5.** | S |
+| **J1** | Playtest boots the résumé desk and requires creating a character. | The fast loop has a character-creation screen welded into it, and a depth-4 floor is always tested by a fresh level-1 solo character — so "is this fight fair" is unanswerable in the tool. | **IQ5.** | S |
 | **J2** | The stash has no expiry and sits at the top of the boot cascade (`main.js:97-112`); `main.js:274` means the floor-select desk — and the Continue button on it — never renders while a stash exists. | Playtest a half-built floor on Monday, open the game Tuesday, and you get the half-built floor with your run intact but invisible behind it. The only documented way out (`menu-restart`) wipes the save (A3). | Give the playtest badge (`ui/screens.js:469-481`) a second action, "Leave playtest", removing only `STASH_KEY`. A few lines, and it closes the trap without touching boot priority. | XS |
 | **J3** | `playtesting` means three different things, so picking Floor 2 from the desk shows a "PLAYTEST — back to editor" badge. | A mode indicator that lies. | Split the flag. | XS |
-| **J4** | Nothing can unset `playtesting` for a stashed level, so the exit path always takes the standalone arm regardless of `next` (`editor.js:595-599`, `main.js:103-112`). | Depth carry-over and the next-floor transition can never be tested from the editor. | Depends on **Q5C**. | M |
+| **J4** | Nothing can unset `playtesting` for a stashed level, so the exit path always takes the standalone arm regardless of `next` (`editor.js:595-599`, `main.js:103-112`). | Depth carry-over and the next-floor transition can never be tested from the editor. | Depends on **IQ5C**. | M |
 | **J5** | The stash is a raw `toJson()` string — no id, no version, no metadata. A JSON-parseable but structurally invalid stash bricks the game *and* the editor with no in-app recovery. | Recovery means opening devtools and clearing localStorage by hand. | Stamp the stash with a version and a write time; refuse and clear a stash that fails a shape check, with a toast. | S |
 
 ---
@@ -336,10 +435,10 @@ which is why I'd sequence it after M4.
 
 | ID | Today | Cost | Fix | Size |
 |---|---|---|---|---|
-| **K1** | No save-to-disk. `serve.mjs` is GET-only; `build.mjs` has no dev/prod split. Getting a level in is Copy → paste into `levels/` → hand-edit `data/levels.js` → rebuild. | Four manual steps between painting and playing, two of which can silently fail (H5). | **Q6.** | M |
-| **K2** | No import: the export textarea is `readonly` (`editor.js:627`). | The only way back into the editor is the single-slot playtest stash. | **Q6B** — ~10 lines. | XS |
+| **K1** | No save-to-disk. `serve.mjs` is GET-only; `build.mjs` has no dev/prod split. Getting a level in is Copy → paste into `levels/` → hand-edit `data/levels.js` → rebuild. | Four manual steps between painting and playing, two of which can silently fail (H5). | **IQ6.** | M |
+| **K2** | No import: the export textarea is `readonly` (`editor.js:627`). | The only way back into the editor is the single-slot playtest stash. | **IQ6B** — ~10 lines. | XS |
 | **K3** | A load→export round trip is **semantically lossless** (verified by re-running the real `loadLevel`+`toJson` in node against both shipped files: map, walls, depth, next, every spawn and the tiered placement compare equal) but produces a whole-file diff from four sources: top-level key order, the actor legend growing to the whole registry, `"H 8 5"` re-spelling to `"H 8 5 1"`, and legend key order. `editor.js:456-457` and `:55-56` both claim otherwise. | A two-tile tweak reviews as a rewritten file. | Emit only the actor legend entries the map uses; match the source's key order. **Do not** "fix" the run spelling — the hand-authored files are internally inconsistent (level1's `walls` has explicit `1`s, its `doors` omits them), so normalising would break a currently-clean round trip. Note `JSON.stringify` hoists integer-like keys (`'9'` in level1), so no insertion order fully reproduces a hand-authored legend. Correct the two comments either way. | S |
-| **K4** | No sharing path. The export modal's advice ("paste into `levels/`") is repo-shaped, but the editor ships to itch.io players. | A player who paints a floor cannot do anything with it. | Out of scope for a repo-facing round; worth a designer view if the editor is meant to be a player feature at all. | L |
+| **K4** | No sharing path. The export modal's advice ("paste into `levels/`") is repo-shaped, but the editor ships to itch.io players. | A player who paints a floor cannot do anything with it. | **Now has a mechanism:** Supabase (`src/remote-store.js`) — designer-raised 2026-08-02. Cost is a second table plus RPCs against a store deliberately scoped to "the base minimum", and a `?level=` load path for rows. Worth its own question before it is worth code: **is the editor meant to be a player-facing feature at all, or a designer tool that happens to ship?** That answer, not the infrastructure, is what gates this. | L |
 | **K5** | The editor's two e2e specs do not run on a pull request. | The regression test guarding companion round-trip is outside the gate that would catch a regression. | Add them to the PR job. | XS |
 | **K6** | Every editor control except two brushes and the level dropdown is untested — including the Playtest button. | Any fix in this document ships covered by two specs that test carpet parity and companion survival. | Follows K7. | S |
 | **K7** | `src/editor.js` cannot be imported outside a browser: `const pc = window.pc;` at module scope (`editor.js:19`). Verified — `node -e "import('./src/editor.js')"` throws `ReferenceError: window is not defined`. So the char allocator, the canonicaliser and the exporter have zero unit tests. | `ARCHITECTURE.md:193-200` states the house remedy for exactly this ("A rules module that needs the world takes a HOST, not the world"), and the editor is the one significant module ignoring it. The three allocator bugs in section A were all found by *transcribing* the logic into a scratch file to run it. | Extract the pure half into `src/level-doc.js` — rows, edge sets, legend allocation, `load`/`paint`/`resize`/`toJson`, no PlayCanvas. `editor.js` keeps rendering, input and DOM. This is also the prerequisite for the shared `src/level-lint.js` B1 needs, since that must run in node *and* the browser. Note `REFACTOR_PLAN.md:135` lists `editor.js` among files that are "large but coherent… Not god files" and so excludes it from the carve — on *cohesion* grounds, which this finding does not dispute. The case here is testability, which that entry does not consider. Worth re-opening explicitly rather than silently overriding. | M |
@@ -364,8 +463,8 @@ with no workaround.
 
 | ID | Today | Cost | Fix | Size |
 |---|---|---|---|---|
-| **M1** | Layered levels can only be produced by hand-writing JSON. A7 is the destructive half; this is the constructive half and it is larger. | You stated you need tall multi-storey spaces; the spike proved the runtime supports them; there is currently no way for you to make a second one. | EDITOR_PLAN M4: layer tabs, add/remove, per-layer height, a stair marker brush with live validation, and an onion-skin of the layer below. **Q2** decides when. | L |
-| **M2** | The layer format is documented only inside `EDITOR_PLAN.md`'s prose. | Hand-authoring is the only path and the recipe is not written down as a recipe. Also undocumented: `height` on layer *i* is the rise **above** storey *i* (`floors.js:26-31`), not that storey's own ceiling. | A `levels/README.md`: the `layers` array, per-layer `height`, void-as-airspace, the stairway marker run, and the loud validations in `floors.js`. Cheap, and unblocks **Q2A** today. | S |
+| **M1** | Layered levels can only be produced by hand-writing JSON. A7 is the destructive half; this is the constructive half and it is larger. | You stated you need tall multi-storey spaces; the spike proved the runtime supports them; there is currently no way for you to make a second one. | EDITOR_PLAN M4: layer tabs, add/remove, per-layer height, a stair marker brush with live validation, and an onion-skin of the layer below. **IQ2** decides when. | L |
+| **M2** | The layer format is documented only inside `EDITOR_PLAN.md`'s prose. | Hand-authoring is the only path and the recipe is not written down as a recipe. Also undocumented: `height` on layer *i* is the rise **above** storey *i* (`floors.js:26-31`), not that storey's own ceiling. | A `levels/README.md`: the `layers` array, per-layer `height`, void-as-airspace, the stairway marker run, and the loud validations in `floors.js`. Cheap, and unblocks **IQ2A** today. | S |
 | **M3** | See A6 — `stairway` is paintable and should not be until layers are. | — | Hide it now, re-enable in M4. | XS |
 
 ---
@@ -399,14 +498,21 @@ lives in `EDITOR_PLAN.md`'s table and is inherited, not restated.
 | 1 | The in-repo editor is the authoring tool; the format stays grid + legend + ASCII + edge runs | `[stated]` | Inherited from EDITOR_PLAN decisions 1–2 (designer, 2026-08-01) |
 | 2 | Verticality is required; the layer-stack model with generated stairs is the answer | `[stated]` / `[ratified]` | Inherited from EDITOR_PLAN decisions 3, 4, 6 |
 | 3 | The QoL gap list — undo/redo, region stamps, actor brushes, save-to-disk — is real | `[stated]` | designer, 2026-08-01: "yes youre seeing the gaps i do". Confirms the *list*, not the scope; EDITOR_PLAN decision 9 (which of them is v1) remains `[proposed]` |
-| 4 | This document is an inventory, not a build order; its groupings carry no priority | `[proposed]` | The sequence below is a proposal against **Q1** |
-| 5 | Findings that are design questions are surfaced as questions, not decided here | `[proposed]` | Per CLAUDE.md. Applies to Q1–Q6 and to every item in section I |
+| 4 | This document is an inventory, not a build order; its groupings carry no priority | `[proposed]` | The sequence below is a proposal against **IQ1** |
+| 5 | Findings that are design questions are surfaced as questions, not decided here | `[proposed]` | Per CLAUDE.md. Applies to IQ1–IQ6 and to every item in section I |
 | 6 | Where a finding contradicts a comment in the code, the measured behaviour is recorded and the comment is treated as the defect | `[proposed]` | A5, K3, O3 — three comments currently describe behaviour the code does not have |
+| 7 | This round is the painter, not the instrument: safety, closure and correctness; no encounter-preview overlays | `[ratified]` | IQ1, designer 2026-08-02: "painter". Section I sequences after M4 |
+| 8 | A map character belongs to the level; the shipped-level lint relaxes to match `parseLevel` | `[ratified]` | IQ3, designer 2026-08-02: "i dont know the difference, ill defer to your judgement" — ratified by explicit deferral, with the caveat recorded at IQ3 |
+| 9 | A placement can carry a rotation: an optional `props` sibling array, quantised to four orientations | `[ratified]` | IQ4, designer 2026-08-02: "4 different rotation can be set". Lifts H3 only — H4 (multi-cell props) is untouched |
+| 10 | Cross-layer combat is LOS + reach only, no high/low-ground modifier | `[ratified]` | Inherited from EDITOR_PLAN decision 8, closed 2026-08-02. Recorded here only because it was answered in this doc's thread |
+| 11 | The authoring pipeline is export → JSON file → git; the editor's job is to produce that file, not to host levels | `[stated]` | designer, 2026-08-02: "were just outputting to json and uploading to the git". Rules Supabase out of IQ6 — `src/data/levels.js:8-12` resolves levels as build-time static imports, so a database row cannot be a campaign floor |
+| 12 | Supabase is a live option for level *sharing* (K4), which is a separate question from save-to-disk | `[proposed]` | designer-raised 2026-08-02 ("if we can use the supabase"). Gated on whether the editor is a player-facing feature at all — see K4 |
 
-## A proposed sequence — `[proposed]`, pending Q1
+## The sequence for this round — `[ratified]` in shape by IQ1, `[proposed]` in order
 
 Not a milestone plan; a reading of what is cheap, what unblocks what, and what
-is dangerous to leave. If **Q1** answers A, this is roughly what A means.
+is dangerous to leave. **IQ1 answered A ("painter"), so this is the round.** The
+ordering within it is still a proposal.
 
 **Round 1 — stop the bleeding (all XS, no design questions).** A4 (allocator
 reset — one fix, two bugs), A6/M3 (hide `stairway`), A7 (refuse layered levels),
@@ -423,13 +529,30 @@ D1 (palette filter + recents). C2 is the prerequisite for all of section I, so
 it earns its place twice.
 
 **Round 4 — close the loop.** K7 (the testable seam) → B1 (shared lint + status
-chip) → **Q6**'s answer (save-to-disk or paste-back) → E7 (metadata strip) → H1
+chip) → **IQ6**'s answer (save-to-disk or paste-back) → E7 (metadata strip) → H1
 (actor brushes). K7 first because B1 needs to run in both node and the browser.
 
 **Round 5 — the editing vocabulary.** O1 (batch the repaint) *before* E1/E2/E3,
 then the `createControls` extension, then rect/line/fill/eyedropper/stamp.
 
-Section I sequences after M4, per **Q1**. Sections G, K8, K9, N are independent
+**Round 6 — placement rotation (new, from IQ4).** The optional `props: [{x, z,
+rotY}]` array: `parseLevel` reads it as per-cell overrides, `tile-renderer`
+applies `rotY` at placement rather than from the type, the editor gets an R key
+cycling four orientations on the cell under the cursor, and `toJson` emits it.
+Sized M. Needs the F1 keyboard handler from Round 3, so it cannot lead. Worth
+one deliberate decision while building it: whether a rotated prop's *collision*
+rotates with its mesh, or stays the axis-aligned cell it is today — the honest
+answer is the cell, and the hover-outline from H4 is how the author sees the
+difference.
+
+**Folded into the rounds above by the 2026-08-02 answers.** IQ3's lint
+relaxation (`tests/unit/levels.test.js:413-419` → unique-within-level, not an
+actor's, names a real type) belongs in Round 1: it is a few lines, it removes
+A6's CI failure, and it lets `levels/dev/` come inside the campaign lint (B5).
+Note it does *not* make `stairway` safe to paint — that is the invisible-wall
+half, which still waits for M4.
+
+Section I sequences after M4, per **IQ1**. Sections G, K8, K9, N are independent
 and can slot anywhere.
 
 ## Risks and open questions (engineering)
@@ -446,16 +569,20 @@ and can slot anywhere.
   weigh the fact that the module cannot be imported outside a browser at all, so
   none of its pure logic can be unit tested. Re-open it on those grounds
   explicitly rather than quietly overriding it.
-- **A5 has no slack.** 87 paintable types against 86 characters means the next
-  tile type added to the registry makes the situation worse whichever way Q3 goes.
-  Whatever the answer, add the unit test that fails when the bound is crossed.
+- **A5 has no slack, and IQ3's answer does not create any.** 87 paintable types
+  against 86 characters. Relaxing the lint (IQ3 = A) fixes *which* character an
+  export may use; it does not add characters. The 87th distinct type in one level
+  still has nowhere to go. Add the unit test that fails when the bound is crossed,
+  and treat the real fix — the pool is per level, so the ceiling is only reached
+  by a level using 87 distinct types — as a separate question if a floor ever
+  approaches it.
 - **K3's diff noise cannot be fully fixed.** `JSON.stringify` hoists
   integer-like keys, so no insertion order reproduces a hand-authored legend
   containing `'9'`. Get it close and correct the comments; don't chase byte
   equality.
 - **Every overlay in section I gets redrawn at M4.** A cone or a cover tick
   drawn per storey is a different drawing problem than one drawn flat. This is
-  the single strongest argument for Q1A.
+  the single strongest argument for IQ1A, which is the answer given.
 - **The 40×40 ceiling is unmeasured.** O2's cost is verified structurally, not
   observed. Before defending or lowering the ceiling, build a furnished 40×40
   floor and look at it.
