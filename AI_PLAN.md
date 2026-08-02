@@ -988,10 +988,13 @@ first (a shooter that can't pick tiles shoots from bad ones).
 
 ### As landed (2026-08-01/02, milestones 1–6 in one pass)
 
-All six implementation milestones shipped on this branch, one commit each;
-unit suite green throughout (688 → 711), and the combat e2e specs
-(tactics, cover, topple, summons, smoke) green after the facade fix below.
-**Milestone 7 is open by design** — it wants a playtest, not a PR.
+All six implementation milestones shipped on this branch, one commit each.
+**Verification:** unit 688 → 711 green throughout; e2e 41 green across the
+combat surface after the facade fix below — smoke (6), tactics/cover/
+topple/summons (22, the positional and cover-denial systems the new beats
+lean on), charm/statuses/hit/ranged (13, the side-swap, the status
+weighting, the roll, the shot). **Milestone 7 is open by design** — it
+wants a playtest, not a PR.
 
 **The bug the first e2e run caught, and what it taught.** Milestones 1–6
 all passed unit tests and the smoke suite, and twelve specs across four
