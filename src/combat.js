@@ -200,6 +200,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // strictly better than killing anybody and would have been the correct play
   // every time.
   const hostilesRemain = () => engaged.some((e) => e.alive);
+  // Who is on the AI's OWN side right now (AI_PLAN M3/M6). `engaged` is not
+  // that list: a charmed coworker stays in it, alive, and deliberately keeps
+  // counting for `hostilesRemain` (charming the last enemy must not win the
+  // fight) - but for the duration they are fighting for the PLAYER. So the
+  // AI's ally-shaped questions - who completes my pincer, who do I patch up -
+  // ask this instead, or an enemy ends up healing the colleague currently
+  // swinging at it. Side is live state, never registry (AI_PLAN footgun 5).
+  const aiAllies = () => engaged.filter((e) => e.alive && !hasStatus(statusesOf(e), 'charmed'));
   // The party proper: not summons, and not anyone merely BORROWED. A charmed
   // coworker standing while your whole roster is face down is not a party that
   // is still going - the run has ended, you are just driving somebody else for
@@ -4423,7 +4431,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       {
         target: { x: tb.x, z: tb.z },
         approach: world.approach,
-        allies: engaged.filter((e) => e.alive && e !== unit)
+        allies: aiAllies().filter((e) => e !== unit)
           .map((e) => { const p = posOf(e); return { x: p.x, z: p.z, reach: reachOfUnit(e) }; }),
         facing: facings.get(target.member) || null,
         threats: threatsAgainst(unit),
@@ -4630,7 +4638,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const supReady = !!sup && (unit.supportCd || 0) <= 0
       && (unit.supportUsed || 0) < (sup.uses ?? Infinity) && acting.ap >= sup.ap;
     const supPlan = supReady ? aiSupportPlan(unit.x, unit.z, sup,
-      engaged.filter((e) => e.alive).map((e) => ({
+      aiAllies().map((e) => ({
         x: e.x,
         z: e.z,
         hp: e.hp,

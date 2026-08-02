@@ -1028,7 +1028,16 @@ Deviations and honest notes, recorded here per the house pattern:
   break beat covers the partition half. The AI shove does not chain a
   prop-topple the way the player's `displaceBody` can `[proposed]` - the
   slam is flat damage, no cascade, cheap to add later.
-- **M5:** as specified. The known approximation: a blocked `shotOutcome`
+- **M5:** as specified. **Cost worth knowing:** the firing field scans a
+  `(2R+1)²` box around the target with a `hasLos` trace per tile — 121
+  traces at range 5 — before routing the nearest 12. It runs once per
+  advance beat (not per frame: the driver returns early while a unit is
+  `moving`), and the A* fan stays capped at the melee field's budget,
+  which was the expensive half the engageMemo was built for. If a deep
+  floor of shooters ever reads as a pause, the scan is where to look
+  first, and the cheap fix is a smaller `cap` plus a coarser candidate
+  ring rather than a memo (the answer changes as bodies move).
+  The known approximation: a blocked `shotOutcome`
   (object shield) does not steer the firing-tile search toward a flanking
   angle - the shooter repositions by LOS/shield/keep-away and re-plans next
   turn. The player-side ranged walk-in bug (`TODO.md` Phase 1) was NOT
@@ -1040,9 +1049,13 @@ Deviations and honest notes, recorded here per the house pattern:
   whether to advance. Known approximation, recorded in the shove perform
   too: a member forced onto a hazard is billed the shared surface number -
   personal hazard immunities (talent-shaped, main.js's walking model) are
-  not consulted on forced landings. And `allies` for the pincer term reads
-  `engaged` minus the actor, so a CHARMED colleague still counts toward an
-  AI pincer - wrong for the charm's duration, bounded, noted.
+  not consulted on forced landings. The charm case was caught and FIXED
+  rather than noted: `engaged` keeps a charmed coworker (deliberately —
+  charming the last enemy must not win the fight), but for the duration
+  they fight for the player, so both AI ally-shaped questions — who
+  completes my pincer, who do I patch up — go through an `aiAllies()`
+  side test instead. Without it an enemy heals the colleague currently
+  swinging at it, which is footgun 5 in the flesh.
 
 ## Testing
 
