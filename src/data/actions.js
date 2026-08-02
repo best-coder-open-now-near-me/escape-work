@@ -171,6 +171,12 @@ export const ACTIONS = {
 
   // --- IT Support ---------------------------------------------------------------
   reboot: {
+    // Two-sided by declaration (Q3-A, designer 2026-08-02): power-cycling
+    // somebody strips their statuses whoever they are, so this is the one verb
+    // whose `type` cannot say where it points. TODO.md settled the behaviour
+    // ("reboot targets anything - self, ally, enemy, and props"); this is that
+    // decision written where the engine reads it.
+    side: 'any',
     type: 'purge',
     ap: 2,
     label: 'Turn It Off And On Again',

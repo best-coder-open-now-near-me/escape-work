@@ -58,6 +58,13 @@ recommendation is **A**. `[ratified]` — **A** (designer, 2026-08-02).
   narrowing, and `bleed` must be documented as party-side-only before any power
   aims it at an enemy.
 
+**Done.** The AI walk hook now ticks it, spends the damage, and re-syncs the
+unit's speed when a wad lapses. One narrowing worth stating plainly, because the
+question could be read wider than the fix: the clock now AGES a status a
+coworker carries; it does not make them ACQUIRE one from the floor. An enemy
+walked through fire still never catches light — a different seam in the same
+handler, still open and recorded below.
+
 **Q3 — Which verbs are two-sided?**
 `handleEnemyClick`'s melee fall-through admits any verb that "carries a payload"
 (`a.purge || a.applies || Number.isFinite(a.amount)`). That predicate answers
@@ -216,7 +223,7 @@ start 5/22 → cycle 1: 7/22 → cycle 2: 9/22 → cycle 3: 11/22 → … → cy
 Out of combat, unlimited, on any character carrying the mug. Fix: make unequip the
 inverse — capture `maxHpBefore` and debit the same delta, floored at 1.
 
-**1.3 `combat.js:3369` — friendly verbs resolve on a coworker.**
+**1.3 `combat.js:3369` — friendly verbs resolve on a coworker. FIXED (Q3-A).**
 The melee fall-through's guard asks the wrong question:
 
 ```js
@@ -228,6 +235,14 @@ Three friendly verbs qualify: `performance-review` (`applies: 'commended'`),
 Arm one, click an enemy body, and the click walks you into melee, spends the AP
 *and* the use, rolls to hit, and delivers the buff — or the 10-point heal — to the
 enemy. Human Resources' entire base kit is two of these. See **Q3**.
+
+**Fixed.** The gate now asks the one owner — `verbSides(a, rangeOf(armed)).enemies`
+— instead of inferring the answer from "does it carry a payload", which was
+always a different question. A dice-less verb aimed at the right half is still
+admitted, which is what the old comment already claimed the gate was for.
+`reboot` declares `side: 'any'` in the registry (Q3-A's data override), so the
+one genuinely two-sided verb says so in data rather than earning a special case
+in systems code.
 
 **1.4 `combat.js:4257` — your own charmed ally opportunity-attacks you.**
 Commit `b224733` replaced `engaged` with `aiAllies()` in `aiAdvance` and
@@ -381,7 +396,10 @@ comments claim.
   fire only sets you alight in a fight. The gate outlived the reason for it: the
   world clock now ticks those statuses (this repo's own 2026-07-31 fix).
 - **`combat.js:4473` AI units take a surface's damage but never its status** — an
-  enemy walked through fire never burns.
+  enemy walked through fire never burns. *Still open, and deliberately: Q2-A gave
+  the enemy walk the step CLOCK, so a status a coworker carries now ages and
+  expires. What it still never does is ACQUIRE one from the floor — a different
+  seam, in the same handler.*
 - **`data/talents.js:146` `corner-office-traction` does literally nothing**; its
   only effect (`moveCost: 0.9`) is read by no code.
 - **`main.js:1007` a printer explosion damages party members but never player-team
@@ -446,7 +464,7 @@ has *already* lost a rule:
 
 | The rule | Copies | Drifted? |
 |---|---|---|
-| The shove resolver | `displaceBody` (`combat.js:2082`) vs `aiShoveMember` (`:2694`) | **yes** — AI copy lost the slam `stunned` and the prop topple |
+| The shove resolver | ~~`displaceBody` vs `aiShoveMember`~~ **MERGED (Q4-A)** — one resolver, a `victimView` adapter over the six accessors that actually differ | was: AI copy lost the slam `stunned` and the prop topple |
 | The pull resolver | `performPull` vs `aiPullMember` (`:2645`) | **yes** — AI copy lost hazard-landing damage |
 | The break-down resolver | `performBreak` vs `aiBreak` (`:2736`) | not yet — identical down to the label expression |
 | The partition shoulder | three sites (`combat.js:2296`, …) | one bypasses the world facade |
@@ -529,7 +547,7 @@ Other layer violations worth naming:
 half is the half that was already easy to test.**
 
 - **The AI's `perform` half has no coverage at any level.** `aiShoot`,
-  `tryAiCrouch`, `aiSupport`, `aiPullMember`, `aiShoveMember`, `aiBreak`,
+  `tryAiCrouch`, `aiSupport`, `aiPullMember`, `aiBreak`,
   `rangedLines`, `aiAllies`, the support ration and the refused-set lifecycle all
   live in `startCombat`'s closure. Re-introduce the `d8c6e6c` facade crash and
   **`npm test` stays 711/711 green**. Both bugs that shipped on this branch were in

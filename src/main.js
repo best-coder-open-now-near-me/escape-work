@@ -2260,6 +2260,15 @@ function startGame(level) {
         surfaceIdAt: (x, z) => runtime.surfaceAt(x, z),
         isElectrified: (x, z) => grid.isElectrified(x, z),
         enemySurfDamage: (x, z) => rawSurfDamage(x, z),
+        // What a tile costs THIS member, after their talents (Q1-A, designer
+        // 2026-08-02). The enemy model above consults none, which was right
+        // while only enemies were billed by it - but the AI's shove and pull
+        // land a MEMBER on a tile, and were reading it, so an IT Support in ESD
+        // Steel-Toes took full shock damage from a forced landing and none from
+        // walking onto the same tile. "The same tile means the same thing
+        // however you got there" is the rule the walking model already states;
+        // this is the seam that lets combat.js honour it.
+        memberSurfDamage: (s, x, z) => effectiveSurfDamage(x, z, s),
         slipChanceAt,
         stickGum,
         // Cone attacks carpet plain floor with a surface tile (Bulk Mail ->

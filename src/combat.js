@@ -14,7 +14,10 @@ import { throwablesFor as throwableIdsFor } from './hotbar-model.js';
 import { truncateByBudget, routeToFiringPosition, trimToFirst } from './pathfinding.js';
 import { pronounsOf, capitalize, verb } from './creation.js';
 import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, gritSaveChance, MOVE, REACH } from './stats.js';
-import { applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy, statusSeverity } from './statuses.js';
+import {
+  applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy,
+  statusSeverity, tickStep,
+} from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, dirOctant, shieldedFaces, TACTICS } from './tactics.js';
 import {
   buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, aimsAtAnyone, isPurge, coneFrom, conePolyline, aimRangeOf, rangeTiles, isBreakable, aimsAtProps, isPull,
@@ -2076,52 +2079,102 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   //
   // Returns { slammed, died, msg }; the caller logs. It does NOT spend AP or
   // clear `armed` - displacement is a consequence, not an action.
-  function displaceBody(en, dx, dz, { verb = 'shove', slamDmg = 2 } = {}) {
-    const push = displacePlan(en.x, en.z, dx, dz, {
+  // Who is being displaced, as ONE shape. A shove lands on a coworker or on a
+  // party member, and the two are structurally different - a coworker takes
+  // damage on itself, a member takes it on a sheet - which is the whole reason
+  // there used to be two resolvers (Q4-A, designer 2026-08-02). The rules are
+  // identical; only these six accessors differ.
+  function victimView(v) {
+    if (v && v.sheet) {                       // a party member
+      return {
+        member: true, ref: v, body: v.actor, name: v.sheet.name,
+        get x() { return v.actor.x; },
+        get z() { return v.actor.z; },
+        hurt: (d) => applyDamage(v.sheet, d),
+        // Q1-A: a forced landing honours the victim's own talents, exactly as
+        // walking onto the tile does. The enemy model consults none.
+        hazardAt: (x, z) => world.memberSurfDamage(v.sheet, x, z),
+        statusTarget: v.sheet,
+        onDeath: () => notifyMemberDown(),
+        dmgColor: undefined,
+      };
+    }
+    return {                                   // a coworker
+      member: false, ref: v, body: v, name: v.def.name,
+      get x() { return v.x; },
+      get z() { return v.z; },
+      hurt: (d) => v.takeDamage(d),
+      hazardAt: (x, z) => world.enemySurfDamage(x, z),
+      statusTarget: v,
+      onDeath: () => { deathFx(v); callbacks.onEnemyKilled(v); },
+      dmgColor: '#ffd76b',
+    };
+  }
+
+  // Put a body somewhere else, and resolve what it hits. ONE resolver for both
+  // sides (Q4-A): `aiShoveMember` used to be a hand-written parallel of this,
+  // its comment claiming parity, and it had already lost two of the three slam
+  // consequences - the `stunned` status and the topple of a prop the victim is
+  // slammed into. A coworker shoved into a filing cabinet wore both; a member
+  // shoved into the same cabinet wore neither.
+  //
+  // `by` is whoever is doing it - the acting member by default, an AI unit when
+  // the enemy side shoves - and it decides the narration's subject and who the
+  // impact FX are attributed to. Everything else is the same rule.
+  function displaceBody(target, dx, dz, { verb = 'shove', slamDmg = 2, by = active } = {}) {
+    const v = victimView(target);
+    const mine = by === active;                 // the player's own shove?
+    const Who = mine ? 'You' : by.def.name;
+    const says = (s) => (mine ? `You ${s}` : `${Who} ${s.replace(/^(\w+)/, (w) => `${w}s`)}`);
+    const push = displacePlan(v.x, v.z, dx, dz, {
       isWalkable: world.isWalkable,
       stepOpen: world.stepOpen,
-      occupied: (x, z) => members.some((m) =>
-        m.sheet.hp > 0 && m.actor && m.actor.x === x && m.actor.z === z),
+      occupied: (x, z) => !!unitStandingAt(x, z) && unitStandingAt(x, z) !== target,
     });
     if (!push) return { slammed: false, died: false, msg: '' };
     const { tx, tz } = push;
+    const bill = (d, x, z, big) => {
+      if (!mine) bout.dmgDealt += d;            // the AI tally counts its own damage
+      fx.damageText(x, z, `-${d}`, v.dmgColor, { big });
+    };
     if (push.blocked) {
       // The "something solid" they hit might be a bookcase (POWERS_PLAN M6).
       // Slamming somebody into a toppleable prop brings it down on them - the
       // shove already said "into something solid", and this is the rest of
       // that sentence. The topple's own damage and stun land on whoever is in
       // the LANDING tile, which the slammed body may or may not be.
-      const plan = topplePlan(en, tx, tz);
+      // The body knocking the prop over is the one being SLAMMED into it, not
+      // the one doing the shoving - `topplePlan` reads the pusher's position to
+      // decide which way the furniture goes.
+      const plan = topplePlan(v.ref, tx, tz);
       if (plan) {
-        const died0 = en.takeDamage(slamDmg);
-        hitFx(en, 'slam', active);
-        if (died0) deathFx(en);
-        if (slamDmg > 0) fx.damageText(en.x, en.z, `-${slamDmg}`, '#ffd76b', { big: died0 });
-        const msg = `You ${verb} ${en.def.name} into the ${plan.def.label || 'furniture'}. `
-          + `${slamDmg > 0 ? `-${slamDmg}. ` : ''}${topple(active, plan)}`;
-        if (died0) callbacks.onEnemyKilled(en);
+        const died0 = slamDmg > 0 ? v.hurt(slamDmg) : false;
+        hitFx(v.ref, 'slam', by);
+        if (slamDmg > 0) bill(slamDmg, v.x, v.z, died0);
+        const msg = `${says(`${verb} ${v.name}`)} into the ${plan.def.label || 'furniture'}. `
+          + `${slamDmg > 0 ? `-${slamDmg}. ` : ''}${topple(by, plan)}`;
+        if (died0) v.onDeath();
         return { slammed: true, died: died0, msg };
       }
-      const died = slamDmg > 0 ? en.takeDamage(slamDmg) : false;
-      hitFx(en, 'slam', active);
+      const died = slamDmg > 0 ? v.hurt(slamDmg) : false;
+      hitFx(v.ref, 'slam', by);
       fx.shake(0.06, 0.2); // a body meeting drywall
-      if (died) deathFx(en);
-      if (slamDmg > 0) fx.damageText(en.x, en.z, `-${slamDmg}`, '#ffd76b', { big: died });
+      if (slamDmg > 0) bill(slamDmg, v.x, v.z, died);
+      let msg = `${says(`${verb} ${v.name}`)} into something solid.${slamDmg > 0 ? ` -${slamDmg}.` : ''}`;
       // A slam into a wall knocks the wind out of them - stunned (they lose
       // their next turn). The knockdown DOS2 shoves are for.
-      let msg = `You ${verb} ${en.def.name} into something solid.${slamDmg > 0 ? ` -${slamDmg}.` : ''}`;
-      // The shove is the one UNRATIONED stun in the game (2 AP, no use
-      // limit), so it is the chain the anti-chain window exists to break -
-      // and the site where the player most needs to be told why the second
-      // slam didn't daze.
+      //
+      // The shove is the one UNRATIONED stun in the game (2 AP, no use limit),
+      // so it is the chain the anti-chain window exists to break - and the site
+      // where the victim most needs to be told why the second slam didn't daze.
       if (!died) {
-        const blocked = blockedBy(en, 'stunned');
-        if (applyStatus(en, 'stunned')) {
-          statusFxAt(en, 'stunned');
+        const blocked = blockedBy(v.statusTarget, 'stunned');
+        if (applyStatus(v.statusTarget, 'stunned')) {
+          statusFxAt(v.member ? v.body : v.ref, 'stunned');
           msg += ` They crumple - ${STATUSES.stunned.name}, they lose their next turn.`;
-        } else if (blocked) msg += ` ${immunityLine(blocked, en.def.name)}`;
+        } else if (blocked) msg += ` ${immunityLine(blocked, v.name)}`;
       }
-      if (died) callbacks.onEnemyKilled(en);
+      if (died) v.onDeath();
       return { slammed: true, died, msg };
     }
     // Land carried PAST the centre along the push - momentum, not a snap to
@@ -2130,23 +2183,22 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // so the body still rounds home to the tile the plan chose.
     const pd = Math.hypot(dx, dz) || 1;
     const [lpx, lpz] = world.clampPoint(tx + (dx / pd) * 0.22, tz + (dz / pd) * 0.22);
-    en.pushTo(tx, tz, lpx, lpz);
-    const dmg = world.enemySurfDamage(tx, tz);
+    v.body.pushTo(tx, tz, lpx, lpz);
+    const dmg = v.hazardAt(tx, tz);
     if (dmg > 0) {
       const live = world.isElectrified && world.isElectrified(tx, tz);
       const surf = world.surfaceIdAt(tx, tz);
-      const died = en.takeDamage(dmg);
+      const died = v.hurt(dmg);
       fx.impact(tx, tz, hazardKind(tx, tz), { y: 0.4 });
-      if (died) deathFx(en);
-      fx.damageText(tx, tz, `-${dmg}`, '#ffd76b', { big: died });
-      if (died) callbacks.onEnemyKilled(en);
+      bill(dmg, tx, tz, died);
+      if (died) v.onDeath();
       return {
         slammed: false,
         died,
-        msg: `You ${verb} ${en.def.name} into the ${live ? 'LIVE water' : surf || 'hazard'}! -${dmg}.`,
+        msg: `${says(`${verb} ${v.name}`)} into the ${live ? 'LIVE water' : surf || 'hazard'}! -${dmg}.`,
       };
     }
-    return { slammed: false, died: false, msg: `You ${verb} ${en.def.name} back a step.` };
+    return { slammed: false, died: false, msg: `${says(`${verb} ${v.name}`)} back a step.` };
   }
 
   // --- toppling (POWERS_PLAN M6) -------------------------------------------
@@ -2688,42 +2740,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // the surface damage is the shared hazard value, so a member's personal
   // hazard immunities (talent-shaped, main.js's walking model) are not
   // consulted on a FORCED landing.
-  function aiShoveMember(unit, plan) {
-    const m = plan.victim;
-    unit.lunge(m.actor.x, m.actor.z);
-    faceTarget(unit, m.actor.x, m.actor.z);
-    if (plan.blocked) {
-      const dmg = 2; // displaceBody's slamDmg, the shove's flat price
-      bout.dmgDealt += dmg;
-      const dead = applyDamage(m.sheet, dmg);
-      hitFx(m, 'slam', unit);
-      m.actor.flinch();
-      fx.damageText(m.actor.x, m.actor.z, `-${dmg}`, undefined, { big: dead });
-      log(`${unit.def.name} slams ${m.sheet.name} into something solid. -${dmg}.`);
-      if (dead) notifyMemberDown();
-      refresh();
-      return;
-    }
-    const [rx, rz] = world.clampPoint(plan.tx, plan.tz);
-    m.actor.pushTo(plan.tx, plan.tz, rx, rz);
-    let msg = `${unit.def.name} walks ${m.sheet.name} back a step.`;
-    const sdmg = world.enemySurfDamage(plan.tx, plan.tz);
-    if (sdmg > 0) {
-      bout.dmgDealt += sdmg;
-      const dead = applyDamage(m.sheet, sdmg);
-      fx.impact(plan.tx, plan.tz, hazardKind(plan.tx, plan.tz), { y: 0.35 });
-      fx.damageText(plan.tx, plan.tz, `-${sdmg}`, undefined, { big: dead });
-      msg = `${unit.def.name} shoves ${m.sheet.name} into the hazard. -${sdmg}.`;
-      if (dead) {
-        log(msg);
-        notifyMemberDown();
-        refresh();
-        return;
-      }
-    }
-    log(msg);
-    refresh();
-  }
 
   // A sealed unit battering its way through (AI_PLAN A10): performBreak's
   // core with the unit's own attack line as the dice and attackAp as the
@@ -3357,13 +3373,23 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // could not end. `takeDamage` now refuses non-finite amounts, but arriving
     // there at all means a verb was pointed at the wrong half of the board -
     // say so instead of walking them into a swing they never defined.
-    // A dice-less action IS admitted when it carries a payload to deliver -
-    // Reboot strips statuses and deals nothing, and performOn now resolves that
-    // as a pure effect. What stays refused is a verb with neither dice nor
-    // payload, which is a verb pointed at the wrong half of the board.
-    const carries = a.purge || a.applies || Number.isFinite(a.amount);
-    if (!isControl(a) && !carries
-      && !(Number.isFinite(a.min) && Number.isFinite(a.max))) {
+    // Does this verb point at THIS half of the board? One question, asked of
+    // the one owner (combat-targeting.verbSides), rather than inferred.
+    //
+    // It used to be inferred, from "does this verb carry a payload to deliver"
+    // (`a.purge || a.applies || Number.isFinite(a.amount)`). That answers a
+    // different question, and three friendly verbs answered it yes: Performance
+    // Review and Onboarding carry `applies`, Triage carries `amount: 10`. So
+    // arming any of them and clicking a coworker walked the member into melee,
+    // spent the AP and the use, rolled to hit, and delivered the buff - or the
+    // ten-point heal - to the ENEMY (REVIEW.md 2026-08-02 section 1.3). Human
+    // Resources' entire base kit is two of them.
+    //
+    // A dice-less verb is still admitted when it aims here: Reboot strips
+    // statuses and deals nothing, and `performOn` resolves that as a pure
+    // effect. What is refused now is a verb aimed at the OTHER half, which is
+    // what the old comment already said this gate was for.
+    if (!verbSides(a, rangeOf(armed)).enemies) {
       refuse(`${a.label} is not aimed at them.`);
       return;
     }
@@ -4476,10 +4502,33 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
             refresh();
           }
         }
+        // The STEP clock, on the enemy side (Q2-A, designer 2026-08-02). It
+        // had no caller here at all: ARCHITECTURE.md says "the step clock ticks
+        // per tile walked, wherever you are", and for half the actors on the
+        // floor it never ticked once. Gum on a coworker was permanent - the
+        // comment below used to say so outright - and `bleed`, the only other
+        // step-clocked status, would have dealt zero damage forever the day any
+        // power aimed it at a coworker. Same `tickStep`, same durations, both
+        // sides of the door.
+        if (unit.alive) {
+          const step = tickStep(unit);
+          if (step.damage > 0) {
+            const gone = unit.takeDamage(step.damage);
+            fx.damageText(x, z, `-${step.damage}`, '#ffd76b', { big: gone });
+            if (gone) {
+              deathFx(unit);
+              callbacks.onEnemyKilled(unit);
+              refresh();
+            }
+          }
+          if (step.expired.length) {
+            syncUnitSpeed(unit); // a lapsed gum wad gives its speed back
+            refresh();
+          }
+        }
         // gum wads stick to AI units too: it taxes their movement AP (via the
-        // status's moveCostMult) and grants traction. Like today, an AI unit's
-        // gum is for keeps - the status is applied once and never ticked, so it
-        // stays slowed and sure-footed for the rest of the fight.
+        // status's moveCostMult) and grants traction. It now WEARS OFF on the
+        // same step clock a member's does, rather than lasting the fight.
         if (unit.alive && !hasStatus(unit, 'gum') && world.stickGum(x, z)) {
           applyStatus(unit, 'gum');
           statusFxAt(unit, 'gum');
@@ -4751,7 +4800,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     if (beat === 'shove') {
       acting.ap = roundAp(acting.ap - shoveAp);
-      aiShoveMember(unit, shovep);
+      // ONE resolver, both sides (Q4-A). The AI's shove now wears the slam
+      // stun and the prop topple it had silently been missing. The lunge goes
+      // first, as it always did - the body has to wind up before it lands, and
+      // displaceBody moves the victim out from under the aim.
+      unit.lunge(shovep.victim.actor.x, shovep.victim.actor.z);
+      faceTarget(unit, shovep.victim.actor.x, shovep.victim.actor.z);
+      // `notifyMemberDown` is the victim view's own onDeath - not repeated here.
+      const res = displaceBody(shovep.victim, shovep.dx, shovep.dz, { by: unit });
+      if (res.msg) log(res.msg);
+      refresh();
       acting.wait = 0.6;
       return;
     }

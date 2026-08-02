@@ -69,12 +69,21 @@ const BODY_KINDS = new Set(['cone', 'control', 'shove', 'pull', 'ranged', 'melee
 // "does it carry a payload" at the click, by `aimsAtAlly` in the hover. Those
 // answers disagreed, which is how an HR buff came to resolve on a coworker
 // (REVIEW.md 2026-08-02 §1.3). Ask here instead.
+// `side` on the action entry is the DATA override, ratified as Q3-A (designer,
+// 2026-08-02): `'enemy' | 'ally' | 'any'`, defaulting from `type` when absent.
+// Content that points somewhere its type does not imply says so in the registry
+// rather than earning a special case in systems code - the one rule
+// (ARCHITECTURE.md). Reboot is the case that needs it: TODO.md settled that it
+// targets anything, and no `type` can express "both".
+const SIDES = { enemy: [false, true], ally: [true, false], any: [true, true] };
+
 export function verbSides(a, range = 0) {
   const kind = verbKind(a, range);
+  const declared = a && SIDES[a.side];
   return {
     kind,
-    allies: kind === 'ally' || aimsAtAlly(a),
-    enemies: BODY_KINDS.has(kind),
+    allies: declared ? declared[0] : (kind === 'ally' || aimsAtAlly(a)),
+    enemies: declared ? declared[1] : BODY_KINDS.has(kind),
     ground: kind === 'zone' || kind === 'summon' || kind === 'cover' || kind === 'mobility',
   };
 }
