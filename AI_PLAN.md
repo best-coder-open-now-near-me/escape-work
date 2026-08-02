@@ -971,12 +971,9 @@ and the codebase, nothing else.
      shape to copy for "this attack entry only above depth N", which
      the legend's per-placement levels (`CHARACTER_PLAN.md` #15) could
      express with no new machinery.
-   - *Also open, and cheap:* browser gates for the pull and door arms. Both
-     have unit coverage and both resisted deterministic staging (see
-     `tests/e2e/ai.spec.js`'s header note for the exact races). A dev hook
-     that opens a fight in place — the reverted `startFightNow`, or a god
-     lever that shuts a door — would make each a short spec. Worth doing
-     the next time either beat is touched, not before.
+   - *The browser gates are no longer outstanding.* Two god levers landed
+     and all three AI beats are now pinned in a browser — see the
+     verification note above.
    - *Why it did not land with 1–6:* this milestone's input is somebody
      playing the game. Every constant in the `AI` block is a first draft
      by the same standard the four prior combat plans set — "numbers are
@@ -995,12 +992,12 @@ first (a shooter that can't pick tiles shoots from bad ones).
 ### As landed (2026-08-01/02, milestones 1–6 in one pass)
 
 All six implementation milestones shipped on this branch, one commit each.
-**Verification:** unit 688 → 711 green throughout; e2e 41 green across the
+**Verification:** unit 688 → 712 green throughout; e2e 44 green across the
 combat surface after the facade fix below — smoke (6), tactics/cover/
 topple/summons (22, the positional and cover-denial systems the new beats
 lean on), charm/statuses/hit/ranged (13, the side-swap, the status
-weighting, the roll, the shot). **Milestone 7 is open by design** — it
-wants a playtest, not a PR.
+weighting, the roll, the shot), and the three new AI gates. **Milestone 7
+is open by design** — it wants a playtest, not a PR.
 
 **The bug the first e2e run caught, and what it taught.** Milestones 1–6
 all passed unit tests and the smoke suite, and twelve specs across four
@@ -1011,6 +1008,40 @@ driver, not a stall in the ladder — `aiShovePlan` was handed the bare
 on every DECIDE with a member standing adjacent. Recorded as footgun 16,
 because the class of mistake outlives this instance: a pure module's world
 argument is a contract that only a real fight can prove was met.
+
+**The gates, and the two levers that made them possible.** All three new
+beat families are pinned in a browser (`tests/e2e/ai.spec.js`): the
+Executive shoots from across the room rather than closing, a crouched
+member is hauled over their own cover, and a coworker sealed by a shut
+door works the handle. Each reads `__combat.bout.beats`, the histogram M1
+built for exactly this.
+
+Two `god.js` levers unblocked them, and the reason each is needed is worth
+recording because it is a property of the game, not of the tests:
+
+- **`__god.fight()`** opens combat *where the bodies stand*, through the
+  same `beginCombat` entry and the same engaged set (ENGAGE_RADIUS +
+  `canTakePart`) the real trigger uses — only the walk-in is skipped. A
+  walk-in ends wherever adjacency happens to fire, which destroys any
+  staged geometry before the fight begins. Deliberately NOT wired into the
+  `enterCombat` helper: that was tried once as `startFightNow` and reverted
+  because opening from where the player stands changes the geometry
+  existing specs assume.
+- **`__god.setDoor(key, open)`** makes the terrain edit with no walk, no
+  click and no AP. Shutting a door mid-fight is the only way a unit can BE
+  sealed by one, and the player doing it needs an exact-tile click that a
+  frame's drift turns back into an ordinary step.
+
+**A correction to this document's own record:** an earlier draft (and a
+comment written during M1) claimed initiative rolled off its own hardwired
+closure, so seeded runs could not pin turn order. That was stale —
+REVIEW.md's "the rng seam is misleading" finding had already been closed.
+Initiative rolls through `initRng` off the injected stream like every other
+roll, so `?seed=` reproduces a whole fight, turn order included. The gates
+use it, and `bootStash` now takes a `seed` option. What a seed does *not*
+pin is where the bodies are when a fight opens; that is what `fight()` is
+for, and conflating the two is what sent the first attempt at these gates
+chasing the wrong fix.
 
 **A second real bug the e2e work caught.** The AI's Pull Over wiring passed
 `bodyAt` without excluding the puller's own body — the player's wiring

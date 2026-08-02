@@ -77,31 +77,116 @@ test('the Executive shoots from across the room instead of closing', async ({ pa
   ).toBeGreaterThan(0);
 });
 
-// --- M4: what is NOT staged here, and why -----------------------------------
-//
-// Pull Over and the door arm both have unit coverage (combat-plans.test.js:
-// the pull walks its candidates and passes pullPlan's refusals up; the door
-// branch takes the shut door that shortens the distance, refuses one leading
-// away, refuses an open one). Neither is staged in a browser, and the reason
-// is the arena rather than the rule:
-//
-//   - THE PULL fires only against a target crouched with a barrier between
-//     the bodies. A corridor gives that geometry, but the Manager can win
-//     initiative and act BEFORE the crouch exists - and a sealed Manager
-//     batters the partition down, removing the very barrier the pull reaches
-//     over. Staging the crouch out of combat (preCrouch) trades that race for
-//     another: the fight triggers on adjacency mid-walk, so the crouch may
-//     never commit. An earlier revision of this file did see the beat fire in
-//     a browser - `bout.beats.pull` came back 1 - so the wiring is known to
-//     reach the board; what could not be made deterministic is the setup.
-//   - THE DOOR ARM needs somebody to shut a door mid-fight, and only the
-//     player can: the acting member must be parked on an exact tile beside
-//     the handle, clicking an edge midpoint that a frame's drift turns back
-//     into an ordinary step.
-//
-// So the residual risk is named rather than papered over: `world.openDoor` is
-// the one new facade binding with no browser proof, the same class of gap
-// that let the aiShovePlan crash ship (footgun 16). Both tells are
-// unmistakable in play - an enemy that stands in a doorway doing nothing, or
-// one that never reaches over a barrier it is standing at.
+// --- M4: Pull Over, from the other side of the desk --------------------------
 
+// A dead-end corridor with a partition across it. The player crouches on the
+// tile the panel shields; the Manager, on the far side, can neither swing
+// through it nor walk around - the only move that reaches over a barrier is
+// the one this milestone gave him.
+//
+// Both halves of the staging are levers, and both are load-bearing. `fight()`
+// opens combat where the bodies already stand, so the crouch is in place
+// before anyone acts - a walk-in would trigger the fight mid-path and the
+// crouch would never commit. The SEED pins initiative: a Manager who wins the
+// roll and acts first is sealed, takes the break beat, and batters down the
+// very partition the pull reaches over, which fails the test for a staging
+// reason rather than a rule one.
+const PULL_LAB = {
+  name: 'Pull Lab',
+  tiles: { '#': 'wall', '.': 'floor' },
+  actors: { '@': 'player', M: 'manager' },
+  walls: ['V 3 1 1'], // between (2,1) and (3,1)
+  // The Manager stands TWO tiles off, not one. Pull Over reaches REACH.PULL
+  // (2.5), so he can still haul from there - and at two tiles the player can
+  // walk to the crouch tile without adjacency opening the fight on its own,
+  // which is what lets `fight()` decide the moment instead. (3,1) stays empty
+  // so his route to a swing tile beside the player exists: that keeps him
+  // UNSEALED, so the break beat is never gathered and cannot take the
+  // partition down before the pull is tried.
+  map: [
+    '#######',
+    '#@..M.#',
+    '#######',
+  ],
+};
+
+test('a crouched member gets hauled over their own cover', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, PULL_LAB, 'security', { seed: 7 });
+
+  // Walk to the tile against the partition and tuck in, with no fight on.
+  await page.click('#hotbar-act-take-cover');
+  await stableProject(page, 2, 1).catch(() => {});
+  await clickWorld(page, 2, 1);
+  await expect.poll(() => page.evaluate(() => window.__game.playerTile.x),
+    { timeout: 60_000 }).toBe(2);
+
+  // Now open the fight where everybody stands.
+  expect(await page.evaluate(() => window.__god.fight()), 'the fight opened').toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__combat?.crouched?.length ?? 0),
+    { timeout: 30_000 }).toBe(1);
+  const crouch = await page.evaluate(() => window.__combat.crouched[0]);
+  expect([crouch.x, crouch.z], 'crouched on the tile the partition shields').toEqual([2, 1]);
+
+  await waitForPlayerTurn(page).catch(() => {});
+  await playRounds(page, 3);
+
+  const b = await beats(page);
+  expect(b.pull ?? 0,
+    `the Manager never pulled (${JSON.stringify(await combatState(page))})`,
+  ).toBeGreaterThan(0);
+});
+
+// --- M4/A10: a shut door is openable, not breakable --------------------------
+
+// Doors carry no HP pool by construction - they are deliberately not in the
+// wall sets - so a unit sealed behind one has nothing to batter. Shut it on
+// the Manager mid-fight and he has to work the handle, or the fight cannot
+// end: that is the pinata this arm exists to prevent. The lever shuts the
+// door because the player doing it needs an exact-tile click that a frame's
+// drift turns back into an ordinary step.
+const DOOR_LAB = {
+  name: 'Door Lab',
+  tiles: { '#': 'wall', '.': 'floor' },
+  actors: { '@': 'player', M: 'manager' },
+  doors: ['V 3 1'], // between (2,1) and (3,1)
+  // The Manager stands ON a side of the door (3,1). That is the arm's own
+  // precondition - `doorsBeside` answers for the tile you are standing on -
+  // and it is the honest shape anyway: a coworker shut in works the handle
+  // he is standing at, not one across the room.
+  map: [
+    '#######',
+    '#@.M..#',
+    '#######',
+  ],
+};
+
+test('an enemy sealed by a closed door opens it', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, DOOR_LAB, 'security', { seed: 11 });
+
+  // Doors author CLOSED; open it so the Manager can join a fight at all
+  // (canTakePart traces line of sight, and a shut door is the game's only
+  // true sight blocker), then open the fight where everybody stands.
+  const key = await page.evaluate(() => window.__god.doors[0].key);
+  expect(await page.evaluate((k) => window.__god.setDoor(k, true), key)).toBe(true);
+  // Open the fight and shut the door in the SAME tick. The engaged set is
+  // chosen with the door open (canTakePart traces sight, and a shut door is
+  // the only true blocker), and the seal has to land before anybody acts: the
+  // Manager can win initiative, and a Manager who gets a turn first simply
+  // walks through the doorway and the scenario never exists.
+  expect(await page.evaluate((k) => {
+    const opened = window.__god.fight();
+    window.__god.setDoor(k, false);
+    return opened;
+  }, key), 'the fight opened').toBe(true);
+  expect(await doorsOpen(page)).toBe(0);
+  expect(await page.evaluate(() => window.__combat.enemies.length),
+    'the Manager is in the fight').toBeGreaterThan(0);
+
+  await playRounds(page, 3);
+
+  expect(await doorsOpen(page),
+    `the Manager never opened the door (${JSON.stringify(await combatState(page))})`,
+  ).toBe(1);
+});
