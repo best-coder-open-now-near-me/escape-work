@@ -1,42 +1,297 @@
 # TODO — Escape Work
 
-The combined worklist: every open finding from `REVIEW.md` (verified still
-present against main @ `e8e53de`) plus the character-creation feature from
-`CHARACTER_PLAN.md`, which now lives in this repo rather than on an unmerged
-branch. Items reference REVIEW.md by `file:line` for full detail;
-line numbers are the review baseline and may be shifted slightly in
-`combat.js`.
+**THE QUEUE below owns every review finding.** If a finding from a code review
+is not ticked there, it is not done — no other section of this file, and no
+paragraph in REVIEW.md, overrides that. This rule exists because it was broken:
+the 2026-08-02 pass found 54 of its 227 findings already on the books from
+earlier passes, some twice over, because they had been recorded as prose in
+several places at once and each place assumed another had handled it.
 
-## The 20 remaining HIGH findings — 2026-08-02 review
+The `## Phase N` sections further down are the ORIGINAL worklist and are kept
+for the work that did not come from a review — chiefly the character-creation
+feature from `CHARACTER_PLAN.md`. Where a Phase item and a queue item are the
+same thing, the queue is authoritative; the Phase entry is history.
 
-Every `high` from the 2026-08-02 full-project pass that is still open, ordered
-by **leverage, not severity** — the list is already all one severity, so sorting
-it by severity again would say nothing. Each entry is: what breaks, where, and
-the shape of the fix.
+## The 20 remaining HIGH findings — superseded
 
-**Twenty-four were found; four are already closed** (§1.3 the armed HR buff,
-§1.7 Pull Over's missing rings, and the two `aiShoveMember` findings — the raw
-surface damage and the duplicated resolver — all landed 2026-08-02 as Q1-A/Q3-A/
-Q4-A). They are struck through at the bottom rather than deleted, so they are
-not re-found.
+Folded into THE QUEUE below, which covers all 227 standing findings rather than
+only the 24 high ones. Splitting the highs into their own list was how the other
+203 went back to being prose - the exact failure the queue exists to stop.
 
-Two standing notes on how to read this:
+## THE QUEUE — every standing finding, 2026-08-02 review
 
-- **These cluster.** Six findings died in three commits on 2026-08-02, because
-  several were the same structural problem reported from different angles. Do
-  not assume twenty entries means twenty separate sittings.
-- **Three carry no second verdict** (marked `[critic]`): they came from the
-  completeness and runtime critics, which arrived last. All three were
-  reproduced by RUNNING code, which is a stronger warrant than most of the
-  reviewed set, not a weaker one.
+One list, one place, checkboxes. It exists because the findings that keep being
+skipped are the ones that live in prose: this pass found that **54 of its 227
+findings were already on the books** here or in REVIEW.md from earlier passes,
+some of them twice over. A paragraph is not a queue. Anything below that is
+still unticked has not been done, whatever any narrative section elsewhere in
+this file says.
+
+How to read it:
+
+- `[x]` closed, with what closed it. Kept rather than deleted, so it is not
+  re-found by the next sweep and re-counted as new.
+- **`(carried)`** was already on the books BEFORE 2026-08-02. These are the
+  repeat offenders, and they are sorted to the TOP of each severity band for
+  exactly that reason — if a sweep is ever cut short, cut it from the bottom.
+- Findings the pass could not fully prove are marked in REVIEW.md as
+  `plausible`: reproduced as a code fact, never driven to the symptom. Treat
+  those as leads. Of eight refutations in this pass, six were right about the
+  code and wrong about the consequence.
+
+**227 standing** — 24 high / 105 medium / 98 low. **31 ticked.**
+
+
+### HIGH
+
+- [x] **Q001** `src/floors.js:147` [bug] **(carried)** layeredGrid's forwarded METHODS list omits sightOpenCellLow/sightOpenLow — reproduced as a TypeError<br>      ↳ DONE — forwarded, plus a derived contract test
+- [x] **Q002** `src/ui/hud.js:96` [bug] **(carried)** Player-typed names still go raw into `innerHTML` on four surfaces — and the save now round-trips through a shared cloud store<br>      ↳ DONE — esc() moved to chrome.js; 4 sites
+- [ ] **Q003** `src/combat.js:4530` [god-method] **(carried)** `combat.js update(dt)` is a 278-line per-frame god method holding eight unrelated responsibilities — the AI turn loop cannot be tested without a browser
+- [x] **Q004** `src/combat.js:2713` [soc] **(carried)** `aiShoveMember` bills a party member RAW surface damage via the enemy hazard model, silently voiding the talent immunities that main.js applies to the same tile<br>      ↳ DONE — world.memberSurfDamage (Q1-A)
+- [ ] **Q005** `tests/unit/combat-ai.test.js:1` [test-gap] **(carried)** Every AI *perform* half added by this branch lives in combat.js and has no test at any level - both AI bugs that shipped on this branch were in exactly that layer, and neither landed with a regression test
+- [x] **Q006** `src/combat-ai.js:157` [bug] A shooter already standing on a legal firing tile can never reposition or close, so a blocked shot burns its whole turn — every turn<br>      ↳ DONE — self-tile is a candidate, not a short-circuit
+- [x] **Q007** `src/combat-ai.js:97` [bug] standTilePath/standTileRoutes never test that a swing from the chosen tile is legal, so the AI's "engageable" tier admits members it provably cannot hit<br>      ↳ DONE — canSwingFrom threaded through
+- [x] **Q008** `src/combat-targeting.js:89` [bug] `ringsAtBodies` is a second verb classifier that omits `pull` — arming Pull Over draws no rings or reach circle at all, and two live-looking branches are dead<br>      ↳ DONE — derived from verbKind; the pull rings again
+- [x] **Q009** `src/combat.js:4633` [bug] HR's reinforcements spawn for free: `resolveSummon` is called as a readiness predicate, and the new `support` arm now outranks the beat that pays for it<br>      ↳ DONE — summonRoom asks; the summon beat acts
+- [x] **Q010** `src/combat.js:3369` [bug] An armed HR buff resolves on a coworker: clicking an enemy body with Performance Review armed spends the use and buffs the enemy<br>      ↳ DONE — the click asks verbSides(a, range).enemies
+- [x] **Q011** `src/combat.js:4257` [bug] `threatsAgainst` still reads `engaged` as "the enemy side", so your own charmed ally opportunity-attacks you<br>      ↳ DONE — reads aiAllies(), not raw engaged
+- [x] **Q012** `src/combat.js:3514` [bug] `walkActive` breaks the crouch before it decides the walk is degenerate, so a refused click costs you your cover for free<br>      ↳ DONE — breakCrouch moved beside beginMove
+- [x] **Q013** `src/combat.js:2591` [bug] Enemy Grit saves read `def.grit`, a field no registry entry defines — every enemy saves at the `?? 2` fallback<br>      ↳ DONE — grit passes through unitCombat from attr.grit
+- [x] **Q014** `src/combat.js:2280` [bug] The stun FX fires on a party member even when the anti-chain immunity window blocked the stun — the member victim branch is a hand-mirrored copy of the enemy branch that dropped its gate<br>      ↳ DONE — one landStun helper; three copies gone
+- [x] **Q015** `src/editor.js:301` [bug] Editor char allocations leak across loadLevel, so after loading level2 the ficus brush silently paints a tier-3 Manager<br>      ↳ DONE — char slate reset at loadLevel
+- [ ] **Q016** `src/main.js:3063` [bug] In combat the crosshair/glow promise a swing that the click turns into an in-place shuffle, because the pick ray hits an adjacent body over your own tile
+- [ ] **Q017** `src/main.js:252` [bug] Setting a cloud save key on a browser that already has a local save destroys the cloud run that key points at
+- [x] **Q018** `src/main.js:161` [bug] clearProgress() is the one unguarded localStorage write left; a throw eats the lose screen and the Restart-run escape<br>      ↳ DONE — wrapped; remote.clear stays outside the try
+- [x] **Q019** `src/main.js:2018` [bug] Sneaking survives the floor transition as a ghost status, and the next floor can never start a fight with you<br>      ↳ DONE — held-mode statuses stripped on serialize
+- [x] **Q020** `src/stats.js:806` [bug] Equip/unequip cycling a maxHp trinket ratchets HP back to full — a free, unlimited heal<br>      ↳ DONE — debitLostHp, floored at 1
+- [x] **Q021** `src/combat.js:2694` [duplication] aiShoveMember is a second shove resolver that has already dropped the wall-slam stun and the slam-into-a-prop topple<br>      ↳ DONE — merged into displaceBody behind victimView (Q4-A)
+- [ ] **Q022** `src/combat.js:1384` [god-method] `combat.js drawTargets()` is a 321-line renderer holding thirteen verb-specific drawing rules, a third verb-dispatch ladder, and mutable animation state
+- [x] **Q023** `src/ui/chrome.js:90` [test-gap] One module-scope `window.addEventListener` in ui/chrome.js locks 1,613 lines — the whole `ui/` layer plus the three host-callback modules the architecture holds up as exemplary — out of node unit testing<br>      ↳ DONE — bound on first use; 11 modules unlocked
+- [ ] **Q024** `tests/e2e/helpers.js:92` [test-gap] No e2e arena or spec ever fights an Executive or a Security Guard - so the enemy ranged kit, M5's headline feature, has zero end-to-end coverage
+
+### MEDIUM
+
+- [ ] **Q025** `src/pathfinding.js:394` [bug] **(carried)** roundBends' arc-rejection fallback emits an unvalidated leg — reproduced: a smoothed walk crosses a partition
+- [ ] **Q026** `/home/user/escape-work/ARCHITECTURE.md:114` [doc-drift] **(carried)** ARCHITECTURE.md's module map describes `combat-ai.js` as the old six-beat ladder; the shipped ladder has twelve arms
+- [ ] **Q027** `/home/user/escape-work/ARCHITECTURE.md:518` [doc-drift] **(carried)** ARCHITECTURE.md's debug-surface note claims damage and initiative roll `Math.random` and that a fight is never fully deterministic, and omits the new `bout` getter
+- [ ] **Q028** `/home/user/escape-work/TODO.md:823` [doc-drift] **(carried)** TODO.md Phase 8 is still headed "BLOCKED" with four checkboxes whose fixes are live in the code
+- [ ] **Q029** `/home/user/escape-work/TODO.md:363` [doc-drift] **(carried)** TODO.md's P1 "Enemy AI paces between two tiles" points at `combat.js:96` and calls the self-path exemption dead code, but the fix lives and is tested in `combat-ai.js`
+- [ ] **Q030** `src/combat.js:574` [duplication] **(carried)** `hazardKind`/`surfaceImpactKind` are still two hardcoded surface-id→FX maps in two layers, and this branch added a fifth call site to one of them
+- [ ] **Q031** `src/hotbar-model.js:35` [duplication] **(carried)** The universal-action list `['shove','take-cover','pull']` is written out verbatim in three places
+- [ ] **Q032** `src/main.js:2716` [duplication] **(carried)** Four hand-written per-tile step handlers across three layers, under a main.js section header that claims the rules are "written once"
+- [ ] **Q033** `src/portraits.js:77` [duplication] **(carried)** portraits.js holds a fourth copy of "tint a body" — the compounding in-place multiply the other three were rewritten to remove
+- [ ] **Q034** `src/tactics.js:259` [duplication] **(carried)** "Does this shielded face point at the attacker?" is implemented three times, and REVIEW.md records it as having one owner
+- [ ] **Q035** `src/combat.js:4530` [god-method] **(carried)** `update()` is a 278-line god frame-driver braiding six responsibilities, and it grew with the AI work
+- [ ] **Q036** `src/combat.js:3176` [god-method] **(carried)** `handleEnemyClick` is a 243-line dispatcher with nine inline verb arms, each re-implementing the same AP check, arming teardown and victory check
+- [ ] **Q037** `src/combat.js:76` [god-method] **(carried)** The two god closures measured: `startCombat` is 5,065 lines / 176 inner functions / 21 shared mutable variables, `startGame` 4,214 / 159 / 26 — and combat.js grew 493 lines on this branch
+- [ ] **Q038** `src/looting.js:292` [god-method] **(carried)** `looting.js lootEntries` is a 120-line function running five unrelated scans, three full grid sweeps and an inline flood fill — in a module kept out of node by a single renderer import
+- [ ] **Q039** `src/main.js:304` [god-method] **(carried)** `startGame` has grown to a 4,214-line closure with 88 inner functions and 141 closure variables
+- [ ] **Q040** `src/combat.js:3536` [inconsistency] **(carried)** `verbKind` has only two consumers while five more hand-written `a.type` ladders are live — the exact drift TODO.md Phase 5 says to watch for
+- [ ] **Q041** `src/combat-plans.js:54` [soc] **(carried)** Pure plan modules take a parameter literally named `world` that is combat's host facade, so the contract is duck-typed and unit tests structurally cannot check it
+- [ ] **Q042** `src/combat.js:76` [soc] **(carried)** `startCombat` is one 5,140-line closure - up ~440 lines on this branch - with `armed` mutated at 31 sites across eight subsystems
+- [ ] **Q043** `src/editor.js:516` [soc] **(carried)** `editor.js startEditor` is a 641-line god closure, and it hardcodes the tile-category list in system code — adding a category means editing the editor
+- [ ] **Q044** `src/tile-renderer.js:12` [test-gap] **(carried)** Four modules still read `const pc = window.pc` at module scope, the pattern already fixed in actors.js/models.js/shading.js
+- [ ] **Q045** `src/actors.js:68` [bug] A character whose .glb fails to load teleports to the world origin, because the magenta fallback holder has no child and `GridActor` drives `visual === entity`
+- [ ] **Q046** `src/combat-geometry.js:150` [bug] hasSwingSpot scans only the 8 neighbours, so a long-reach weapon is told it has no melee option
+- [ ] **Q047** `src/combat.js:2184` [bug] The ratified disengage shove was never wired up — `aiShovePlan`'s `disengage` flag has no production caller
+- [ ] **Q048** `src/combat.js:4389` [bug] The Executive's ranged line fires as an opportunity attack — footgun 9's context-aware picker was applied in `aiAttack` only
+- [x] **Q049** `src/combat.js:4632` [bug] The AI's summon readiness check SPAWNS, so HR fields two free reinforcements whenever the triage beat outranks it<br>      ↳ DONE — summonRoom asks; the summon beat acts
+- [x] **Q050** `src/combat.js:476` [bug] `attackMods` builds the attacker's pincer list from `engaged`, so a charmed coworker helps the enemy flank you<br>      ↳ DONE — pincer list reads aiAllies()
+- [x] **Q051** `src/combat.js:2279` [bug] A member's topple/crush stun plays its landing FX even when the anti-chain window refused it, and says nothing — the enemy branch twelve lines above does it correctly<br>      ↳ DONE — one landStun helper; three copies gone
+- [ ] **Q052** `src/combat.js:4424` [bug] `ranged` is computed after the melee fallback, so a shooter with no firing tile gets the ranged shield term applied to melee swing tiles — and it steers it onto a tile it cannot swing from
+- [ ] **Q053** `src/data/statuses.js:212` [bug] The `sneaking` status's `fx: { burst: 'none', aura: 'none', rate: 0 }` uses values fx.js does not know — sneaking characters trail particles continuously
+- [ ] **Q054** `src/data/talents.js:146` [bug] The `corner-office-traction` talent's only effect (`moveCost: 0.9`) is read by nothing — the talent does literally nothing
+- [x] **Q055** `src/dialogue.js:20` [bug] `nodeOptions` can filter a dialogue node down to zero options, and the dialogue panel has no other way out<br>      ↳ DONE — Leave applied after the filters
+- [ ] **Q056** `src/editor.js:82` [bug] The editor's char pool is one character short of the paintable registry; the 87th distinct tile type silently paints floor
+- [x] **Q057** `src/floors.js:147` [bug] layeredGrid's METHODS list drops sightOpenCellLow and sightOpenLow, so sneaking on a layered level throws<br>      ↳ DONE — forwarded, plus a derived contract test
+- [ ] **Q058** `src/floors.js:71` [bug] A single-cell stair run is assumed to run along z, so an east-west one-cell flight is refused with a misleading error
+- [ ] **Q059** `src/floors.js:170` [bug] planCrossLayerRoute only moves monotonically toward the destination storey, so an up-and-back-down route is refused
+- [ ] **Q060** `src/main.js:1870` [bug] switchLeader never releases the out-of-combat crouch, so `oocCrouch` and the `covered` chip end up on the wrong members
+- [ ] **Q061** `src/main.js:1870` [bug] switchLeader leaves the sneak on the old leader, making them permanently undetectable AND unable to trigger combat
+- [ ] **Q062** `src/main.js:1741` [bug] The `confused` reorg desyncs the hotbar: pressing a slot uses the shuffled layout, right-clicking it uses the unshuffled one
+- [ ] **Q063** `src/main.js:210` [bug] Picking "Start a fresh run" at the floor desk and then dying deletes the saved campaign the desk was still offering
+- [ ] **Q064** `src/main.js:1007` [bug] A printer explosion damages party members but never touches player-team summons standing beside it
+- [ ] **Q065** `src/main.js:1254` [bug] Layered walks splice the body's real position AFTER smoothing, so the first run is never corridor-checked
+- [ ] **Q066** `src/main.js:1870` [bug] switchLeader() is the one leader handoff that never clears the out-of-combat crouch, so 'covered' is removed from the wrong sheet and the real croucher stays crouched forever
+- [ ] **Q067** `src/main.js:274` [bug] The cloud "Continue the run" button swallows its write failure and never validates the row, so it can reload forever without ever booting the run
+- [ ] **Q068** `src/main.js:1865` [bug] Class points outlive the class track, so the fullscreen LEVEL UP modal reopens after every victory for the rest of the run
+- [ ] **Q069** `src/pathfinding.js:394` [bug] roundBends' arc-rejection fallback emits a leg it has just proved illegal, so a smoothed walk crosses a partition
+- [ ] **Q070** `src/picking.js:91` [bug] `picking.pick` ignores storey visibility, so a cutaway-hidden floor eats clicks aimed at the visible floor below it
+- [ ] **Q071** `src/scene.js:253` [bug] `refreshTile` and `buildLevel` silently drop every renderMarker result that is not wall/surface/prop, so toppled partitions and foliage are untrackable and stack
+- [ ] **Q072** `src/tile-renderer.js:238` [bug] `addPaper` shadows the storey `baseY`, so a paper drift on an upper storey renders on the ground floor
+- [ ] **Q073** `src/tile-renderer.js:367` [bug] `addFoliage` drops the storey `baseY` and parents to `app.root`, so upper-storey plants render at ground level and never hide with their storey
+- [ ] **Q074** `src/turn-order.js:99` [bug] turn-order's span-end walk lands the pointer ON a slot `replace` swapped out, when the swapped slot was the span's last
+- [ ] **Q075** `src/combat.js:2184` [dead-code] The ratified ranged-kit disengage shove is implemented and unit-tested but never wired — no caller passes `disengage`
+- [ ] **Q076** `src/data/items.js:373` [dead-code] Two of five loot tables are unreachable on the shipped campaign, and `night-thermos` is unobtainable in the whole game
+- [ ] **Q077** `/home/user/escape-work/ARCHITECTURE.md:444` [doc-drift] ARCHITECTURE.md still documents the pre-branch enemy targeting rule ("nearest living member, ties to the bloodied one")
+- [ ] **Q078** `/home/user/escape-work/src/main.js:141` [doc-drift] The `?seed=` comment added by AI M1 asserts an initiative-rng gap the code does not have, and credits the seed with slips it does not cover
+- [ ] **Q079** `src/data/enemies.js:7` [doc-drift] `aggression` is documented as fight-initiation behaviour but is only a dot colour; the documented `'green'` value is used by nobody
+- [ ] **Q080** `src/combat.js:2699` [duplication] `aiShoveMember` re-states the shove's slam damage as a bare literal `2`, 617 lines from the `slamDmg = 2` default it claims to match
+- [x] **Q081** `src/combat.js:2645` [duplication] aiPullMember drops the hazard-landing damage performPull applies, so an AI pull into live water or fire costs the member nothing<br>      ↳ DONE — billed through memberSurfDamage
+- [ ] **Q082** `src/combat.js:4696` [duplication] The AI's shoot gate hand-rolls range and asks line-of-sight of rounded tiles, bypassing combat.js's own bodyDist/bodyLos and combat-geometry.verbReaches
+- [ ] **Q083** `src/combat.js:505` [duplication] "What counts as a cover cell" is written four times across three modules
+- [ ] **Q084** `src/combat.js:2296` [duplication] "Put a shoulder into the partition" is resolved in three places, one of which does not go through the world facade
+- [ ] **Q085** `src/combat.js:2736` [duplication] performBreak and aiBreak are two copies of the break-down resolver, identical down to the label expression
+- [x] **Q086** `src/hover.js:242` [duplication] hover.js and combat.js each carry their own copy of the ring/face drawing primitives, the affordance palette and the cover-aim easing<br>      ↳ DONE — ground-marks.js, shared with hover.js
+- [ ] **Q087** `src/main.js:1140` [duplication] `approachAndDo` re-implements `bestApproachPath` line for line
+- [ ] **Q088** `src/main.js:2115` [duplication] The "who joins this fight" filter is written out three times
+- [ ] **Q089** `src/main.js:2511` [duplication] main.js reimplements combat-plans.topplePlan line for line as oocTopplePlanAt
+- [ ] **Q090** `src/main.js:3758` [duplication] main.js's memberSpeed re-derives walk speed instead of using step-rules.speedUnderStatus, and adds a surface term the other two callers do not have
+- [ ] **Q091** `src/main.js:2616` [duplication] The out-of-combat crouch is a full parallel implementation of combat's, refusal strings included
+- [ ] **Q092** `src/ui/screens.js:87` [duplication] The level-up screen re-derives the banked-points sum that `pendingPoints` owns — a fifth surface, on the screen where points are spent
+- [ ] **Q093** `src/god.js:109` [god-method] `god.js buildPanel` is a 595-line god closure with 23 inner functions and six shared mutable variables, and the e2e suite depends on its verbs
+- [ ] **Q094** `/home/user/escape-work/src/combat.js:2184` [inconsistency] AI_PLAN A4's ratified "a RANGED unit may shove to disengage" carve-out is never wired: the only production caller omits `disengage`
+- [ ] **Q095** `src/combat-ai.js:75` [inconsistency] HR's triage heal has no line-of-sight test and measures tiles, where the player's identical verb requires a clear line and body distance
+- [ ] **Q096** `src/combat-plans.js:76` [inconsistency] The AI's shove reaches further than the player's and works straight through a partition
+- [ ] **Q097** `src/combat-plans.js:159` [inconsistency] An action's `range` is measured Euclidean when shooting a body but Chebyshev when breaking a prop
+- [x] **Q098** `src/combat.js:476` [inconsistency] A charmed coworker still completes the AI's flanking bonus in `attackMods`, contradicting the branch's own `aiAllies` fix<br>      ↳ DONE — pincer list reads aiAllies()
+- [ ] **Q099** `src/combat.js:3217` [inconsistency] Take Cover clicked on any body always refuses, contradicting its own tooltip, its arm message and the click branch's comment
+- [ ] **Q100** `src/combat.js:3592` [inconsistency] Topple rings promise a diagonal prop the tile click then refuses, because the ring measures tile adjacency and the click measures body distance
+- [ ] **Q101** `src/combat.js:2038` [inconsistency] A purge aimed at a coworker with no statuses bills 2 AP and narrates success; the same verb aimed at a colleague refuses for free
+- [ ] **Q102** `src/combat.js:4473` [inconsistency] AI units take a surface's damage but never its status: an enemy walked through fire never burns, and one crossing a paper drift never bleeds
+- [ ] **Q103** `src/data/enemies.js:117` [inconsistency] Class-backed enemies inherit an `attr` block that only the charm path reads, so charming a Manager and charming a Guard produce wildly different characters
+- [ ] **Q104** `src/data/talents.js:157` [inconsistency] `statusImmune` is honoured by the status runtime but missing from `TALENT_EFFECT_KEYS`, so the lint rejects the migration the review already recommends
+- [ ] **Q105** `src/main.js:2857` [inconsistency] `applySurfaceOn` still refuses to apply turn-clock statuses out of combat, though the world clock now ticks them
+- [ ] **Q106** `src/main.js:2857` [inconsistency] A surface's turn-clock status is still gated on `inCombat`, so fire only sets you alight in a fight — the gate outlived the reason for it
+- [ ] **Q107** `src/party.js:50` [inconsistency] A member downed mid-fight earns no XP for the rest of that fight, contradicting the design's own "nobody lags"
+- [x] **Q108** `src/statuses.js:182` [inconsistency] The step clock has no caller for AI units or wandering coworkers, so a gum wad is permanent on them — ARCHITECTURE.md's "the step clock ticks per tile walked, wherever you are" is false for half the actors<br>      ↳ DONE — the AI walk hook ticks it (Q2-A)
+- [ ] **Q109** `src/floors.js:59` [soc] floors.js identifies stairs by the literal tile id 'stairway' although the tile def already carries a `stairs: true` flag
+- [ ] **Q110** `src/floors.js:59` [soc] `floors.js` finds stair runs by hardcoded tile id `'stairway'` while `tiles.js` declares a `stairs: true` flag for exactly that purpose
+- [ ] **Q111** `src/hover.js:202` [soc] Out of combat, an armed verb leaves every non-enemy target with no affordance at all — while the click still performs it
+- [ ] **Q112** `src/ui/hud.js:319` [soc] The hotbar computes the ammo-affordability rule itself, never surfaces the reason, and does not disable the slot its own header says is disabled
+- [ ] **Q113** `/home/user/escape-work/AI_PLAN.md:1018` [test-gap] AI_PLAN's "As landed" claims M2-M6 shipped "as specified" while every e2e spec those milestones name is absent
+- [ ] **Q114** `AI_PLAN.md:1013` [test-gap] None of the six e2e specs AI_PLAN names for M1-M6 shipped, and the combat.js half of every new beat has zero coverage — while the doc records the milestones "as specified"
+- [ ] **Q115** `playwright.config.js:6` [test-gap] playwright.config.js raises the per-test budget to 120 s but leaves expect.timeout at Playwright's 5 s default, which 52 of the 174 expect.poll sites rely on
+- [x] **Q116** `src/ui/chrome.js:90` [test-gap] `ui/chrome.js` touches `window` at module scope, so every module importing `ui.js` — including `dialogue.js` and its exported pure rule — cannot be imported under node<br>      ↳ DONE — bound on first use; 11 modules unlocked
+- [ ] **Q117** `tests/e2e/helpers.js:92` [test-gap] __combat.bout - the AI regression tripwire milestone 1 exists to provide - is read by no test, and the ?seed= lane that makes it reproducible is exercised by no test
+- [ ] **Q118** `tests/e2e/summons.spec.js:45` [test-gap] The HR summon-cap assertion passes vacuously: it sleeps 1500 ms and asserts <= 2 without ever establishing that HR got another turn
+- [ ] **Q119** `tests/unit/combat-ai.test.js:21` [test-gap] firingTileRoutes' self-tile walkability exemption is unasserted, because the test's fake world declares the unit's own tile walkable and the real one never does
+- [ ] **Q120** `tests/unit/combat-ai.test.js:139` [test-gap] AI.W_PATH - "the baseline everything trades against" - is pinned by no assertion; the three "the cheap route wins" checks pass on fixture array order
+- [ ] **Q121** `tests/unit/combat-ai.test.js:429` [test-gap] The lineWeights assertion compares the result against AI.STATUS_WEIGHT itself, so setting the knob to 1 disables the M6 status weighting with the suite still green
+- [ ] **Q122** `tests/unit/combat-ai.test.js:123` [test-gap] scoreDestination's backstab term and slip term are never exercised - no test passes `facing` or `slipChanceAt`, so both weights can be zeroed with the suite green
+- [ ] **Q123** `tests/unit/combat-ai.test.js:79` [test-gap] pickTarget's kill-securability and fragility terms mutually mask - neither is individually pinned, so the M2 kill term can be deleted with every test green
+- [ ] **Q124** `tests/unit/combat-ai.test.js:239` [test-gap] The advanceRoute "not adjacent means nothing to spend on" test is tautological - its `approach` stub ignores the target, so the adjacency guard is never reached
+- [ ] **Q125** `tests/unit/combat-plans.test.js:211` [test-gap] Five more branches of the new AI code survive mutation: the hazard and OA de-dup Sets, the firing-fan's nearest-first sort, aiEdgeTopplePlan's terrainOpen leg, and two aiSupportPlan guards
+- [ ] **Q126** `tests/unit/levels.test.js:201` [test-gap] No lint requires `leavesTurns` alongside `leaves`, so the permanent-terrain bug can recur silently
+- [ ] **Q127** `tests/unit/levels.test.js:435` [test-gap] The levels lint checks a tiered placement's char against the level's own tiles legend but not against the tile registry's canonical chars
+- [ ] **Q128** `tests/unit/levels.test.js:25` [test-gap] `levels/dev/*.json` is registered, playable from the floor-select menu, and covered by none of the eight per-file level lints
+- [ ] **Q129** `tests/unit/pathfinding.test.js:283` [test-gap] Test asserts only that rounded-bend VERTICES are legal, never the legs between them - which is the property roundBends actually breaks
+
+### LOW
+
+- [ ] **Q130** `src/combat.js:3834` [bug] **(carried)** `summonSpotProblem` never passes `room`, so the summon preview ignores the live cap and the click reports the wrong reason
+- [ ] **Q131** `src/combat.js:1808` [bug] **(carried)** `notifyMemberDown` advances the turn without re-binding `active`, so the HUD reflects a corpse through the enemies' turns
+- [ ] **Q132** `src/pathfinding.js:166` [bug] **(carried)** clampToClearance's diagonal-corner repulsion is still edge-blind: bodies overlap partition end posts by ~0.23 tile
+- [ ] **Q133** `src/pathfinding.js:16` [bug] **(carried)** findPath has no explored-node cap and hangs on an unbounded or non-integer target
+- [ ] **Q134** `src/stats.js:823` [bug] **(carried)** `stats.applyDamage` has no non-finite guard, while its actor-side twin `EnemyActor.takeDamage` does
+- [ ] **Q135** `src/statuses.js:113` [bug] **(carried)** `applyStatus` reads a missing `sev` as 0 while every other site reads it as 1, so a resisted re-apply weakens a pre-severity entry
+- [ ] **Q136** `src/looting.js:124` [dead-code] **(carried)** INV_CAP = Infinity leaves the overflow and "pockets full" branches in looting.js unreachable
+- [ ] **Q137** `/home/user/escape-work/AI_PLAN.md:458` [doc-drift] **(carried)** AI_PLAN's state machine and footgun 8 both say the stall backstop burns real AP; the shipped backstop burns nothing
+- [ ] **Q138** `/home/user/escape-work/AI_PLAN.md:9` [doc-drift] **(carried)** AI_PLAN.md still opens with "No code yet" while its own As-landed section reports six shipped milestones
+- [ ] **Q139** `/home/user/escape-work/ARCHITECTURE.md:110` [doc-drift] **(carried)** ARCHITECTURE.md's `combat-plans.js` entry lists "take cover" as one of its plans; the take-cover plan was deleted
+- [ ] **Q140** `/home/user/escape-work/REVIEW.md:187` [doc-drift] **(carried)** REVIEW.md says two modules are missing from the module map; seven are
+- [ ] **Q141** `/home/user/escape-work/STATUS_PLAN.md:85` [doc-drift] **(carried)** STATUS_PLAN decision 9 still calls charm "designed but not shipped"
+- [ ] **Q142** `src/data/companions.js:144` [doc-drift] **(carried)** The mail-room companion comment still names two actions that do not exist ('Return to Sender', 'the snack cart')
+- [ ] **Q143** `src/main.js:142` [doc-drift] **(carried)** The new `?seed=` comment states a falsehood about the code, and the real determinism gap (the stream is never reset per fight) is recorded nowhere
+- [ ] **Q144** `src/main.js:141` [doc-drift] **(carried)** This branch shipped a comment claiming the initiative rng is still unseeded and that member slips ride the seed - both are wrong, and the shipped code says the opposite two files over
+- [ ] **Q145** `src/main.js:141` [doc-drift] **(carried)** The new seed comment names initiative as the reason a seeded fight does not replay, but initiative already rolls off the injected rng
+- [ ] **Q146** `src/main.js:141` [doc-drift] **(carried)** The ?seed= comment names a rng gap that combat.js closed — initiative does roll off the injected stream
+- [ ] **Q147** `src/combat.js:574` [duplication] **(carried)** combat.js's hazardKind and main.js's surfaceImpactKind order fire and electrification oppositely, and both disagree with step-rules.surfaceEffect's stated precedence
+- [ ] **Q148** `src/main.js:1541` [duplication] **(carried)** attackOrConfront carries a hand-written a.type ladder that verbKind was made the single owner of
+- [ ] **Q149** `src/ui/hud.js:390` [duplication] **(carried)** `fmtAp` now exists twice — the party-bar fix added a second copy instead of consuming the existing one
+- [ ] **Q150** `src/combat.js:5066` [inconsistency] **(carried)** `spendAp` subtracts raw - a fourth site of the float-AP bug the other three were fixed for
+- [ ] **Q151** `src/ui/hud.js:482` [perf] **(carried)** `levelUpPip.refresh` writes `textContent` and `style` every frame while points are banked
+- [ ] **Q152** `src/ui/readouts.js:128` [perf] **(carried)** `setFocusBanner` tears down and rebuilds its DOM on every hover call
+- [ ] **Q153** `src/combat.js:1990` [soc] **(carried)** Content ids still special-cased in systems code: projectile model, impact kind, and the surface-to-FX map
+- [ ] **Q154** `src/combat.js:3834` [soc] **(carried)** Combat's summon ladder never supplies `room`, so the shared rule's headcount leg is skipped in a fight — and resolveSummon re-derives the cap math the module owns
+- [ ] **Q155** `src/combat.js:4829` [soc] **(carried)** The `window.__combat` / `__game` / `__god` debug surfaces are ~420 lines living inside the two god closures, and `__game.classes` hands out the live registry
+- [ ] **Q156** `tests/e2e/camera.spec.js:195` [test-gap] **(carried)** camera.spec.js still skips its steered-camera leg on a dice roll, although this branch shipped the seeded-initiative lever the review asked for
+- [ ] **Q157** `tests/e2e/hit.spec.js:44` [test-gap] **(carried)** Six e2e sleeps wait for "camera settle" while helpers.js exports stableProject, which polls that exact condition
+- [ ] **Q158** `tests/unit/actors.test.js:1` [test-gap] **(carried)** GridActor.update - the waypoint stepping and onTile tile-change detection that drives exits, surface damage and the AI's own notifyStep - has no test, though it runs headless with a six-method stub
+- [ ] **Q159** `src/combat.js:1785` [bug] `makeActive` writes an out-of-range `party.active` while a charmed coworker holds the floor
+- [ ] **Q160** `src/combat.js:631` [bug] `guardStandingAt` has no side test, so an enemy holding Hold the Line shields a party member and vice versa
+- [ ] **Q161** `src/combat.js:341` [bug] billMove rounds the free-AP deduction, so a 0.05-cost move never depletes the freeMoveAp allowance
+- [ ] **Q162** `src/creation.js:171` [bug] createCharacter banks a point per spend but spendAttrPoint silently refuses unknown attribute names, leaving free points on the sheet
+- [ ] **Q163** `src/editor.js:595` [bug] The editor's localStorage writes are unguarded, so in a storage-blocked browser "Exit editor" cannot exit
+- [ ] **Q164** `src/editor.js:400` [bug] Any editor resize button silently deletes every row/column past MAX_SIZE on a level larger than 40
+- [ ] **Q165** `src/main.js:1473` [bug] `examineTile` calls any tile with a body standing on it "a cubicle wall"
+- [ ] **Q166** `src/shading.js:294` [bug] `makeSpriteMaterial` has no failed-texture fallback, so a missing foliage PNG renders as a solid tinted rectangle
+- [ ] **Q167** `src/statuses.js:163` [bug] A status id that leaves the registry is immortal on an existing save: never ticked, never expired, invisible to both sweep options
+- [ ] **Q168** `src/statuses.js:107` [bug] `applyStatus` returns true for a non-finite duration and leaves an entry no clock can ever reach
+- [ ] **Q169** `src/combat-geometry.js:176` [dead-code] edgeShieldedTile is dead and encodes a cover rule the game no longer uses
+- [ ] **Q170** `src/combat.js:3568` [dead-code] The purge self-cast branch in `handleTileClick` is unreachable dead code
+- [ ] **Q171** `src/combat.js:3811` [dead-code] `commitInstant`'s heal arm and `INSTANT_CONFIRM`'s 'heal' entry are dead - no `type: 'heal'` action exists
+- [ ] **Q172** `src/data/actions.js:13` [dead-code] `type: 'heal'` is dead in three code sites and still documented as a live verb in the action registry header
+- [ ] **Q173** `src/data/surfaces.js:87` [dead-code] `GUM` in data/surfaces.js is now an unimported export whose numbers are hand-mirrored into the `gum` status
+- [ ] **Q174** `src/data/surfaces.js:87` [dead-code] `GUM` is exported from data/surfaces.js and read by nothing — a dead second source of truth for the gum numbers
+- [ ] **Q175** `src/stats.js:129` [dead-code] Three of the five `STEALTH` constants in stats.js are read by nothing; the real values live in data/statuses.js and data/talents.js
+- [ ] **Q176** `src/statuses.js:184` [dead-code] `clearStatuses`'s `clock` and `harmfulOnly` options have no production caller, and the doc above them describes a combat-end sweep that no longer exists
+- [ ] **Q177** `src/ui/creation.js:277` [dead-code] `ui/creation.js` imports `draftName` and never calls it — the summary re-derives the display name by hand
+- [ ] **Q178** `src/ui/hud.js:486` [dead-code] `createTacticalButton().setVisible` and `createLevelUpPip().setVisible` have no callers anywhere
+- [ ] **Q179** `.github/workflows/ci.yml:83` [doc-drift] CI's `[quick]` lever is inert on every branch, the exact defect the same file documents as forced-fixed for `[e2e]`
+- [ ] **Q180** `/home/user/escape-work/AI_PLAN.md:629` [doc-drift] AI_PLAN's architecture section places `entrenchPlan`, `shootPlan` and `supportPlan` in `combat-plans.js`; none of the three exists there
+- [ ] **Q181** `/home/user/escape-work/AI_PLAN.md:136` [doc-drift] AI_PLAN's file:line citations are stale throughout, including the "Do not touch" list and the Brief that milestone 7's executor is told to follow
+- [ ] **Q182** `/home/user/escape-work/AI_PLAN.md:202` [doc-drift] Three `[ratified]` tags in AI_PLAN cite nothing, and the twelve-arm ladder order — the doc's declared centerpiece — carries no tag at all
+- [ ] **Q183** `/home/user/escape-work/AI_PLAN.md:483` [doc-drift] AI_PLAN's published `AI` tunables block and scored-choice signatures do not match the shipped ones
+- [ ] **Q184** `/home/user/escape-work/POWERS_PLAN.md:735` [doc-drift] POWERS_PLAN's "Open after M9: the enemy HR Representative" still says the support-enemy option is blocked by risk 7; AI_PLAN M6 shipped it
+- [ ] **Q185** `/home/user/escape-work/src/data/enemies.js:3` [doc-drift] `data/enemies.js`'s header still says attack lines are "picked at random each enemy turn"
+- [ ] **Q186** `TODO.md:733` [doc-drift] TODO.md's open "Collapse the two action bars" item describes code that no longer exists, and contradicts the DONE item above it
+- [ ] **Q187** `src/combat.js:4343` [doc-drift] `bout.oaCount` counts both sides' opportunity attacks, not "enemies' own provokes" as M3's acceptance reads it
+- [ ] **Q188** `src/data/actions.js:13` [doc-drift] data/actions.js documents a `heal` action type nothing uses and omits four types that exist; three dead `heal` branches remain in code
+- [ ] **Q189** `src/data/statuses.js:193` [doc-drift] The take-cover status's doc block is stranded above `sneaking`, so `covered` is undocumented and `sneaking` wears two comments
+- [ ] **Q190** `src/main.js:1514` [doc-drift] `oocFriendlyOn`'s header promises it spends the action's `uses`; the body spends nothing
+- [ ] **Q191** `src/shop.js:17` [doc-drift] shop.js names `matches` and `half-sandwich` as the items worth nothing; both carry a `value` and one is stocked by a merchant
+- [ ] **Q192** `src/stats.js:423` [doc-drift] `weaponProc`'s doc comment sits above `moveCostOf`, so both functions are misdocumented
+- [ ] **Q193** `src/ui/hud.js:32` [doc-drift] The HUD status chip drops the remaining count its own comment and data/statuses.js both promise
+- [ ] **Q194** `src/ui/hud.js:490` [doc-drift] Two doc comments left stranded by the `ui/` split describe functions that live in other files
+- [ ] **Q195** `src/ui/panels.js:344` [doc-drift] The shop view's documented shape omits `id`, the field the sell button's own guard depends on
+- [ ] **Q196** `src/combat-geometry.js:25` [duplication] `cheb` is defined twice, in tactics.js and combat-geometry.js, both exported
+- [ ] **Q197** `src/combat-geometry.js:25` [duplication] cheb is defined and exported twice, from tactics.js and combat-geometry.js, with its own test in each suite
+- [ ] **Q198** `src/combat-geometry.js:37` [duplication] The four/eight-neighbour offset arrays are declared in seven places under five names
+- [x] **Q199** `src/combat.js:2699` [duplication] `aiShoveMember` duplicates `displaceBody`'s slam literal and silently drops the stun the player's identical slam applies<br>      ↳ DONE — merged into displaceBody behind victimView (Q4-A)
+- [ ] **Q200** `src/combat.js:761` [duplication] combat.js re-implements tactics.facesShieldFrom as a private shieldingFaceFrom
+- [ ] **Q201** `src/combat.js:2421` [duplication] "Name the thing covering you" exists three times, twice inside combat.js, with different formatting
+- [ ] **Q202** `src/combat.js:2171` [duplication] "Is a living member standing here?" is written six times inside combat.js in three shapes
+- [ ] **Q203** `src/main.js:3487` [duplication] `ORTHO4` is declared and then re-inlined as a literal 977 lines later
+- [ ] **Q204** `src/main.js:152` [duplication] mulberry32's mixer is now implemented twice — a new copy in main.js beside the existing one in combat.js
+- [ ] **Q205** `src/main.js:667` [duplication] "Whose sheet am I steering?" is written four ways in main.js, while the actor half has a single named owner
+- [ ] **Q206** `src/main.js:2472` [duplication] The "who joins this fight" filter is written three times in main.js, one of them commented as a copy
+- [ ] **Q207** `src/main.js:2495` [duplication] The cone's "don't carpet a teammate" guard is spelled two ways, and the out-of-combat one misses summons
+- [ ] **Q208** `src/main.js:1940` [duplication] liveSummonsOf exists in two modules counting two different populations
+- [ ] **Q209** `src/stealth.js:13` [duplication] `stealth.facingFromYaw` has no production importer, and main.js re-implements it inline in the one place that needs it
+- [ ] **Q210** `src/ui/screens.js:64` [duplication] The four attributes' labels and blurbs are written out three times across `ui/`, and only one copy derives its key list from `ATTR_KEYS`
+- [ ] **Q211** `src/combat.js:4444` [inconsistency] The destination scorer asks aiCrouchCovered without the bodyAt test the crouch beat supplies, so it scores tiles by a narrower cover rule than the one it will find on arrival
+- [ ] **Q212** `src/data/statuses.js:212` [inconsistency] `fx.burst: 'none'` is not in the runtime's vocabulary — it falls through to the loudest burst ('pop')
+- [ ] **Q213** `src/god.js:104` [inconsistency] God-mode pins write raw, bypassing the setter the edit path deliberately routes through
+- [ ] **Q214** `src/hotbar-model.js:89` [inconsistency] `combatOnlyReason` gives a factually wrong refusal for six verb types and returns "usable" for an unknown action id
+- [ ] **Q215** `src/main.js:2629` [inconsistency] Out-of-combat Take Cover accepts a tile a summon occupies; combat refuses the same tile
+- [ ] **Q216** `src/main.js:3486` [inconsistency] The shove aim ring promises a partition topple the click silently refuses
+- [ ] **Q217** `src/stats.js:517` [inconsistency] `take-cover` and `pull` land in the class-powers bucket, unlike the third universal verb `shove`
+- [ ] **Q218** `src/ui/hud.js:430` [inconsistency] The party-bar HP bar neither clamps nor divide-guards its width, while the profile card two hundred lines above does both
+- [ ] **Q219** `src/grid.js:159` [other] doorKeyBetween and wallEdgeOpen silently answer a diagonal pair with an x-axis edge instead of refusing it
+- [ ] **Q220** `src/looting.js:330` [soc] The Alt-overlay loot icon table is a hardcoded content list in systems code, and it has already drifted — break-room containers get the generic box
+- [ ] **Q221** `src/scene.js:172` [soc] `updateWallFade` restores un-ghosted walls to the hardcoded `tileMats.wall`, not the material the tile was drawn with
+- [ ] **Q222** `playwright.config.js:45` [test-gap] Playwright reuses an existing server on port 8173, so a locally-running stale build is tested and never rebuilt
+- [x] **Q223** `tests/unit/combat-ai.test.js:1` [test-gap] src/dialogue.js exports nodeOptions as a deliberately pure rule and has no unit test, because a top-level `import * as ui` makes the module unimportable under node<br>      ↳ DONE — dialogue.test.js, 6 tests
+- [x] **Q224** `tests/unit/floors.test.js:97` [test-gap] floors.test.js's facade test exercises 3 of 21 forwarded members, so the missing methods are unpinned<br>      ↳ DONE — the contract test derives the set from a real grid
+- [ ] **Q225** `tests/unit/hit.test.js:48` [test-gap] hit.test.js - the seeded roll->damage->status test - contains an assertion that cannot fail, a self-comparison, and a hand-copy of combat.js's private damage formula
+- [ ] **Q226** `tests/unit/levels.test.js:192` [test-gap] The orphaned-action lint counts any `ammoCost` action as reachable, ignoring `universal: false`
+- [ ] **Q227** `tests/unit/levels.test.js:207` [test-gap] The registry lint gained no checks for the two AI fields this branch added to enemies.js - `focus` and the `support` descriptor - although the same file lints the equivalent shape for tile topple damage
 
 ---
+
+### Fix notes for the high findings
+
+The detail behind the HIGH entries above - what breaks and the shape of the
+fix. Deliberately NOT checkboxes: it was a second worklist for a while, which
+is how a queue turns back into prose. Tick things in THE QUEUE; read the
+reasoning here. Numbering is the old tier order, not the Qnnn ids.
 
 ### Tier 1 — player-visible, and small
 
 The whole tier is a day's work and every item is reachable in ordinary play.
 
-- [ ] **1. HR's reinforcements spawn for free.** `combat.js:4633`.
+- **1. HR's reinforcements spawn for free.** `combat.js:4633`.
   `resolveSummon` *spawns* — it calls `world.spawnSummon`, pushes into
   `engaged`, inserts initiative slots — and it is called as a readiness
   predicate. Survivable until AI M6 put `support` above `summon` in the ladder;
@@ -46,13 +301,13 @@ The whole tier is a day's work and every item is reachable in ordinary play.
   `(d.cap ?? d.count) - liveSummonsOf(summoner) > 0` and nothing else; the
   spawning call stays inside the `beat === 'summon'` arm.
 
-- [ ] **2. Equip/unequip is a free unlimited heal.** `stats.js:806`.
+- **2. Equip/unequip is a free unlimited heal.** `stats.js:806`.
   `equipItem` credits the max-HP delta (`creditNewHp`); `unequipItem` only
   clamps. Reproduced end to end with the shipped `okayest-mug`: 5/22 → 17/22 in
   six cycles, out of combat, repeatable to full. Fix: make unequip the inverse —
   capture `maxHpBefore` and debit the same delta, floored at 1.
 
-- [ ] **3. Sneaking survives a floor transition and makes the next floor
+- **3. Sneaking survives a floor transition and makes the next floor
   uncontestable.** `main.js:2018` `[critic]`. `sneak` is closure state that dies
   with the level; the `sneaking` *status* is serialized into the campaign save.
   The next floor boots with `sneak === null` and the leader still wearing it —
@@ -60,7 +315,7 @@ The whole tier is a day's work and every item is reachable in ordinary play.
   suppresses fight triggers. Fix: strip held-mode statuses on serialize, the way
   `normalizeSheet` already drops a retired `rig`/`look`.
 
-- [ ] **4. A refused click costs you your cover for free.** `combat.js:3514`.
+- **4. A refused click costs you your cover for free.** `combat.js:3514`.
   `breakCrouch(active)` is the *first* statement in `walkActive`, which then
   returns null on a degenerate route — nothing walked, no AP spent, a refusal
   printed, and the crouch gone. The hover twin `previewWalk` deliberately does
@@ -68,7 +323,7 @@ The whole tier is a day's work and every item is reachable in ordinary play.
   click. Fix: move the break below the `points.length < 2 || cost < 0.05` guard,
   next to `beginMove` — which is what the comment above it already claims.
 
-- [ ] **5. Every enemy Grit save uses the fallback.** `combat.js:2591`. Both
+- **5. Every enemy Grit save uses the fallback.** `combat.js:2591`. Both
   AI-side saves read `en.def.grit`; no registry entry defines it, and the two
   class-backed enemies carry it as `attr.grit` (Guard 7, HR 5). So
   `gritSaveChance(2)` = 0.37 runs 100% of the time — the Guard fails a Pull Over
@@ -76,14 +331,14 @@ The whole tier is a day's work and every item is reachable in ordinary play.
   wrong path. Fix: a `grit` passthrough in `stats.unitCombat` beside
   `accuracy`/`dodge`/`reach`.
 
-- [ ] **6. Your own charmed ally opportunity-attacks you.** `combat.js:4257`.
+- **6. Your own charmed ally opportunity-attacks you.** `combat.js:4257`.
   `threatsAgainst` still derives the threatening side from raw `engaged`, which
   keeps a charmed coworker deliberately. The same one-line `aiAllies()`
   substitution `aiAdvance` and `aiSupportPlan` already got. **Same fix applies at
   `combat.js:476`**, where `attackMods` builds the attacker's pincer list from
   `engaged` — so a charmed coworker completes the *enemy's* flank.
 
-- [ ] **7. The stun FX fires when the stun was blocked.** `combat.js:2280`.
+- **7. The stun FX fires when the stun was blocked.** `combat.js:2280`.
   `dropOnto` writes the rule twice; the enemy branch gates `statusFxAt` on
   `applyStatus` and narrates the refusal, the member branch does neither. Inside
   a `training-credit` window the second stun is refused and the game plays the
@@ -96,7 +351,7 @@ The whole tier is a day's work and every item is reachable in ordinary play.
 Each buys back a whole class of future finding. Do these before the god-method
 work, not after.
 
-- [ ] **8. One line locks 1,613 lines out of node.** `ui/chrome.js:90` registers
+- **8. One line locks 1,613 lines out of node.** `ui/chrome.js:90` registers
   a resize listener at module scope. `ui.js` is the barrel every UI consumer
   imports, so the throw cascades to all of `ui/` **and** to `doors.js`,
   `dialogue.js` and `shopping.js` — the three modules TODO.md Phase 5 holds up
@@ -105,7 +360,7 @@ work, not after.
   merely unreachable. Fix: move the registration inside a `mountChrome()` behind
   a bound flag, exactly as `actionDock()` already defers its `createElement`.
 
-- [ ] **9. A world-facade contract test.** `combat-plans.js:54`. The pure modules
+- **9. A world-facade contract test.** `combat-plans.js:54`. The pure modules
   take a parameter literally named `world` that is combat's host facade —
   duck-typed, so a unit test structurally cannot check it. This is the class of
   **both** bugs this branch shipped (`aiShovePlan` handed a facade with no
@@ -113,14 +368,14 @@ work, not after.
   `main.js` passes as `world` from a headless fake and assert every key the pure
   modules destructure exists and is callable.
 
-- [ ] **10. Sneaking on a layered level throws.** `floors.js:147` `[critic]`.
+- **10. Sneaking on a layered level throws.** `floors.js:147` `[critic]`.
   `layeredGrid`'s forwarded `METHODS` list omits `sightOpenCellLow` and
   `sightOpenLow`, which the sneak cone sweep calls — reproduced as a live
   `TypeError`. The facade test (`floors.test.js:97`) exercises 3 of 21 forwarded
   members, so the omission was unpinned. Fix with item 9, or at minimum assert
   the full forwarded set.
 
-- [ ] **11. The enemy ranged kit has zero e2e coverage.** `tests/e2e/helpers.js:92`.
+- **11. The enemy ranged kit has zero e2e coverage.** `tests/e2e/helpers.js:92`.
   Of 44 arenas, 42 place `manager` and one places `hr`. `executive` — the game's
   only ranged enemy, the whole point of AI M5 — and `security-guard` appear in
   **no arena at all**. Break the enemy shot (delete the `hasLos` conjunct at
@@ -128,7 +383,7 @@ work, not after.
   `E: 'executive'`, and the entrenched-shooter bout AI_PLAN.md:943 already
   specifies.
 
-- [ ] **12. The AI's `perform` half has no test at any level.**
+- **12. The AI's `perform` half has no test at any level.**
   `tests/unit/combat-ai.test.js:1`. The branch split the AI into a pure decide
   half (well tested) and a doing half that stayed inside `startCombat`'s closure:
   `aiShoot`, `tryAiCrouch`, `aiSupport`, `aiPullMember`, `aiBreak`,
@@ -141,7 +396,7 @@ work, not after.
 These two are one defect from two directions. Fixing either alone leaves the
 fight stallable, so treat them as a single unit of work.
 
-- [ ] **13. The engageability tier admits members the unit cannot hit.**
+- **13. The engageability tier admits members the unit cannot hit.**
   `combat-ai.js:97` `[critic]`. `standTilePath`/`standTileRoutes` accept any
   walkable neighbour with a route and never ask whether a swing *from that
   neighbour* is legal (`inReach` + `stepOpen`). The player-side twin
@@ -150,7 +405,7 @@ fight stallable, so treat them as a single unit of work.
   "walks to the wall and swings at nothing, every turn, forever" is computed by
   a test blind to that case. Reproduced on a dead-end bay sealed by a partition.
 
-- [ ] **14. A blocked shooter burns every turn.** `combat-ai.js:157`.
+- **14. A blocked shooter burns every turn.** `combat-ai.js:157`.
   `firingTileRoutes` short-circuits to the degenerate self-route the moment the
   shooter's own tile is in range with LOS — an *absolute* priority borrowed from
   the melee field, where it is the pacing-bug fix. It does not transfer: a shot
@@ -166,13 +421,13 @@ fight stallable, so treat them as a single unit of work.
 dependencies the view block carries were mostly the verb-query surface; with one
 owner, the carve is tractable.
 
-- [ ] **15. `drawTargets` is a 321-line renderer.** `combat.js:1384`. Thirteen
+- **15. `drawTargets` is a 321-line renderer.** `combat.js:1384`. Thirteen
   verb-specific drawing rules and mutable animation state in one function. Its
   third verb-dispatch ladder is already collapsed onto `verbSides`; what remains
   is the split into one small `draw<Kind>Rings(...)` per arm, and moving
   `coverEase` into the frame driver where the other per-frame state lives.
 
-- [ ] **16. `update(dt)` is a 278-line per-frame god method.** `combat.js:4530`.
+- **16. `update(dt)` is a 278-line per-frame god method.** `combat.js:4530`.
   Eight unrelated responsibilities, including ~90 lines of AI plan-gathering.
   To assert "a summoner at 1 AP with a maxed roster falls through to the attack
   beat" a test must construct `acting`, `bout`, `crouched`, `facings`,
@@ -180,28 +435,28 @@ owner, the carve is tractable.
   facade. Fix: `gatherBeatState(unit, target)` as a pure function over injected
   leaf queries (this is item 17), leaving `update` as the frame pump.
 
-- [ ] **17. `gatherBeatState` extraction.** The ~60 lines inside `update` that
+- **17. `gatherBeatState` extraction.** The ~60 lines inside `update` that
   assemble `beatState` from 14 closure reads. Independent of 15 and 16 and worth
   doing first of the three — it is what makes the AI ladder testable, which is
   where both bugs this branch shipped actually lived.
 
 ### Tier 5 — real, but not on the critical path
 
-- [ ] **18. Setting a cloud save key destroys the run it points at.**
+- **18. Setting a cloud save key destroys the run it points at.**
   `main.js:252`. The key is documented as "how a run follows its owner across
   machines", but setting one never pulls; local always wins, and the next floor
   clear upserts over the cloud row. Either order of operations loses the other
   machine's run. Fix: pull under the NEW identity before deciding what to boot,
   and offer both saves as an explicit choice.
 
-- [ ] **19. Editor char allocations leak across `loadLevel`.** `editor.js:301`.
+- **19. Editor char allocations leak across `loadLevel`.** `editor.js:301`.
   `tileByChar`/`charByType` are allocated once per session and never reset, while
   `tierChars` is rebuilt per load and its reservation happens *after* a tile type
   may already own the char. Paint with `ficus` (char `G`), load `level2` (which
   declares `"G": "manager@3"`), and the brushes collide. Fix: reset both maps at
   the top of `loadLevel`, re-seeding `floor` first.
 
-- [ ] **20. `clearProgress()` is the last unguarded localStorage write.**
+- **20. `clearProgress()` is the last unguarded localStorage write.**
   `main.js:161`. Every other touch in the codebase is wrapped; this one runs
   after `gameOver = true` and before the lose screen, and again in the Restart-run
   action. In a storage-blocked browser the throw eats the lose screen and the
