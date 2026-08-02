@@ -971,6 +971,12 @@ and the codebase, nothing else.
      shape to copy for "this attack entry only above depth N", which
      the legend's per-placement levels (`CHARACTER_PLAN.md` #15) could
      express with no new machinery.
+   - *Also open, and cheap:* browser gates for the pull and door arms. Both
+     have unit coverage and both resisted deterministic staging (see
+     `tests/e2e/ai.spec.js`'s header note for the exact races). A dev hook
+     that opens a fight in place — the reverted `startFightNow`, or a god
+     lever that shuts a door — would make each a short spec. Worth doing
+     the next time either beat is touched, not before.
    - *Why it did not land with 1–6:* this milestone's input is somebody
      playing the game. Every constant in the `AI` block is a first draft
      by the same standard the four prior combat plans set — "numbers are
@@ -1005,6 +1011,15 @@ driver, not a stall in the ladder — `aiShovePlan` was handed the bare
 on every DECIDE with a member standing adjacent. Recorded as footgun 16,
 because the class of mistake outlives this instance: a pure module's world
 argument is a contract that only a real fight can prove was met.
+
+**A second real bug the e2e work caught.** The AI's Pull Over wiring passed
+`bodyAt` without excluding the puller's own body — the player's wiring
+excludes both puller and victim (`u !== active`, `u !== en`) and mine did
+not. A face shielded by a PARTITION can still have somebody standing on the
+neighbouring cell, and in a corridor that somebody is whoever walked up to
+reach over it, so the plan refused with "their cover is a person" for
+exactly the haul-over-a-wall the verb exists for. Fixed; footgun 16's lesson
+generalizes — the pure rule was right, the caller's contract was not.
 
 Deviations and honest notes, recorded here per the house pattern:
 

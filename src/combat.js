@@ -2198,7 +2198,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     {
       stepOpen: world.stepOpen,
       open: (x, z) => world.isWalkable(x, z) && !unitStandingAt(x, z),
-      bodyAt: (x, z) => !!unitStandingAt(x, z),
+      // The puller's own body is NOT "their cover is a person" - the same
+      // exclusion the player's wiring makes (`u !== active`), and it is not
+      // optional. A face shielded by a PARTITION can still have somebody
+      // standing on the neighbouring cell, and in a corridor that somebody is
+      // whoever walked up to reach over the barrier. Counting them refuses
+      // exactly the haul-over-a-wall the verb was written for.
+      bodyAt: (x, z) => {
+        const u = unitStandingAt(x, z);
+        return !!u && u !== unit && standing(u);
+      },
     },
   );
   const aiBreakPlanFor = (unit, target) => aiBreakPlanShared(
@@ -4682,7 +4691,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       canShove: !!shovep,
       breakAp,
       canBreak,
-      canCrouch: true, // tryAiCrouch runs its own (world-shaped) test
+      canCrouch: false, // filled in below, once inReach is known
       coverAp: ACTIONS['take-cover'].ap,
     };
     // The ranged kit (AI_PLAN M5): a line the unit could fire RIGHT NOW -
@@ -4707,11 +4716,26 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
     }
     beatState.canShoot = !!shootable;
-    // Entrench (crouch-then-shoot): worth it only when a shot exists, the
-    // unit is not already tucked in, and something HERE actually shields it
-    // from its target - tryAiCrouch runs that exact test. Attacking does not
-    // break the crouch [ratified], which is what makes this a beat at all.
-    beatState.canEntrench = !!shootable && !crouched.has(unit);
+    // The crouch's own geometry, asked ONCE and shared by the two arms that
+    // depend on it. Gating them on `true` and letting tryAiCrouch refuse
+    // worked, but it spent a DECIDE iteration discovering what a predicate
+    // could have said - and, worse, it logged the beat in the tally, which
+    // makes the histogram (M1's regression tripwire) claim crouches that
+    // never happened. The same legs tryAiCrouch walks: not already tucked
+    // in, not in melee reach (a swing beats cover), and something here
+    // actually shields us from the target.
+    const b = bodyOf(unit);
+    const tb2 = bodyOf(target);
+    beatState.canCrouch = !crouched.has(unit) && !beatState.inReach
+      && aiCrouchCovered(b.x, b.z, tb2.x, tb2.z, {
+        tileDefAt: world.tileDefAt,
+        stepOpen: world.stepOpen,
+        bodyAt: (x, z) => { const u = unitStandingAt(x, z); return !!u && u !== unit && standing(u); },
+      });
+    // Entrench (crouch-then-shoot): a shot in hand AND cover to take.
+    // Attacking does not break the crouch [ratified], which is what makes
+    // this a beat rather than a way to waste a turn.
+    beatState.canEntrench = !!shootable && beatState.canCrouch;
     const refused = (acting.refused ??= new Set());
     const { beat } = chooseBeat(beatState, refused);
     bout.beats[beat] = (bout.beats[beat] || 0) + 1;
