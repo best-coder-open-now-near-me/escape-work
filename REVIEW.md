@@ -89,9 +89,9 @@ findings**: 171 new, **51 already recorded** here or in TODO.md.
 
 Honest notes on the method, because the numbers mean less without them:
 
-- **99 of the 222 findings carry a second reviewer's verdict** — one briefed to
-  refute, not to agree. Result: 92 confirmed, 5 plausible-but-unproven,
-  **2 refuted**. The remainder carry their finder's own trace.
+- **182 of the 222 findings carry a second reviewer's verdict** — one briefed to
+  refute, not to agree. Result: 168 confirmed, 9 plausible-but-unproven,
+  **5 refuted**. The remainder carry their finder's own trace.
 - **The verification pass pruned the biggest claim in the pass.** It killed the
   only finding tagged *critical*: the charmed-coworker soft-lock is **not** a
   soft-lock (see §6). Its mechanism was right and its conclusion wrong — the
@@ -102,7 +102,16 @@ Honest notes on the method, because the numbers mean less without them:
   than reading it — §1.1, §1.2, §1.5, §1.7 and §1.12 — and are marked
   **[reproduced]**. That matters most for the items whose verify batch had not
   returned when this was written.
-- **A 2% refutation rate is a weak signal, not a strong one.** It says the
+- **What the five refutations killed**, so the pattern is visible rather than
+  buried: the critical soft-lock (§6); a `covered` doc-block claim whose
+  load-bearing half was simply false; a `screenToGround` per-frame allocation;
+  a claim that no lint guards the custom-rig wardrobe (**it does** — the finder
+  grepped `levels.test.js` and the lint lives in `creation.test.js:195-219`, all
+  that survives is a one-word wrong filename at `data/looks.js:20`); and the
+  route-beside drift row above. Four of the five were *right about the code and
+  wrong about the consequence* — which is this pass's characteristic error, and
+  the reason the plausible-marked items below should be treated as leads.
+- **A 3% refutation rate is a weak signal, not a strong one.** It says the
   finders were careful; it does not prove the verifiers were adversarial enough.
   Treat a `[traced]` medium or low here as a lead worth checking, not a fact.
 - **Three findings are recorded as unreachable-today** (§5.6–§5.8) rather than
@@ -316,10 +325,18 @@ already fixed once.
   because no shipped floor has the topology that needs it — `spike-lobby` is the
   only layered level and its storeys are not sealed this way.*
 - **`dialogue.js:20` `nodeOptions` can filter a node to zero options**, and the
-  dialogue panel has no other way out.
+  dialogue panel has no other way out. *Reproduced at module level — a node whose
+  only option is gated behind `hasShop` returns `[]`, because the
+  `|| [{label:'Leave'}]` fallback fires on a MISSING options array, before the
+  filters. Marked plausible rather than confirmed: the panel half was not driven
+  end to end.*
 - **`tile-renderer.js:238,367` upper-storey paper and foliage render on the ground
-  floor** — both drop the storey `baseY`; foliage also parents to `app.root`, so it
-  never hides with its storey.
+  floor** — both drop the storey `baseY` (`addPool` at `:208` correctly uses
+  `surfaceTop + baseY` and `parent`); foliage also parents to `app.root`, so it
+  never hides with its storey. *The paper half is confirmed. The foliage half is
+  marked plausible: its one call site (`:468`) sits inside a conditional the
+  re-tracer could not reach in a real game, so the code is wrong but the path may
+  be unreachable today.*
 - **`picking.js:91` ignores storey visibility**, so a cutaway-hidden floor eats
   clicks aimed at the visible floor below it.
 - **`actors.js:68` a character whose `.glb` fails to load teleports to the world
@@ -341,7 +358,7 @@ has *already* lost a rule:
 | The pull resolver | `performPull` vs `aiPullMember` (`:2645`) | **yes** — AI copy lost hazard-landing damage |
 | The break-down resolver | `performBreak` vs `aiBreak` (`:2736`) | not yet — identical down to the label expression |
 | The partition shoulder | three sites (`combat.js:2296`, …) | one bypasses the world facade |
-| "Route to a tile beside the target" | `routeBeside`, `bestApproachPath` (`main.js:1274`), `approachAndDo` (`:1140`) | **yes** — the third lacks both guards the others carry |
+| "Route to a tile beside the target" | `routeBeside` (`combat.js:3441`), `bestApproachPath` (`main.js:1274`), `standTilePath` (`combat-ai.js:97`) | not in effect — see note below |
 | The out-of-combat crouch | full parallel of combat's, refusal strings included (`main.js:2616`) | — |
 | `topplePlan` | `combat-plans.js` vs `oocTopplePlanAt` (`main.js:2511`) | line for line |
 | "Is a living member standing here?" | six sites inside `combat.js`, three shapes | — |
@@ -355,6 +372,20 @@ has *already* lost a rule:
 
 The `cheb` case is the tidiest illustration: `combat-geometry.js:19` *already
 imports* from `tactics.js`, so one line could re-export instead of redefining.
+
+**A correction on the route-beside row, because this pass got it wrong first.**
+It was reported as drifted — `bestApproachPath` lacking the self-path case, the
+`>= 2` filter and the swing-legality test the other two carry. The missing guards
+are real, but the drift is **inert**, and re-tracing showed why on both counts.
+The degenerate path is handled at the caller: `isWalkable` (`main.js:535`) admits
+the leader's own tile, so `findPath` returns the length-1 self path, and
+`confront` (`main.js:1322-1333`) gives that case its own arm
+(`if (best.length > 1) … else checkCombatTrigger()`). And the swing-legality test
+is not the out-of-combat contract — with nothing armed the click reaches
+`confront`, whose job is to walk over and start a fight, not to land a swing, and
+`adjacentEnemyToParty` gates on `canTakePart`/`sightOpenCell`, which partitions do
+not block since M6a. So the green ring is honest and the click does what it
+promises. Three copies of one rule, none of them currently wrong.
 
 ### 3. Separation of concerns and god methods
 
