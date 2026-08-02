@@ -234,6 +234,27 @@ test('aiPullPlan hauls the first crouched victim the pull rules accept', () => {
   assert.equal(aiPullPlan(puller, [victim], () => wrong, w), null);
 });
 
+test('a shut door beats battering, and only toward the target', () => {
+  const flat = { tileDefAt: () => ({ label: 'floor' }), edgeHpBetween: () => null };
+  // Closed door on the way to a target at (5,0): open it - a door carries no
+  // HP pool at all, so without this arm the unit would stand there forever.
+  const toward = aiBreakPlan(0, 0, 5, 0, {
+    ...flat,
+    doorsBeside: () => [{ key: 'h:1:0', ap: 1, open: false, to: [1, 0] }],
+  });
+  assert.deepEqual(toward, { kind: 'door', key: 'h:1:0', ap: 1, tx: 1, tz: 0 });
+  // A door leading AWAY is not a way through.
+  assert.equal(aiBreakPlan(0, 0, 5, 0, {
+    ...flat,
+    doorsBeside: () => [{ key: 'h:-1:0', ap: 1, open: false, to: [-1, 0] }],
+  }), null);
+  // An already-open door is not a plan either - the route is the answer.
+  assert.equal(aiBreakPlan(0, 0, 5, 0, {
+    ...flat,
+    doorsBeside: () => [{ key: 'h:1:0', ap: 1, open: true, to: [1, 0] }],
+  }), null);
+});
+
 test('a sealed unit finds the barrier on the way toward its target', () => {
   const cabinetAt = (x, z) => (x === 1 && z === 0 ? CABINET : { label: 'floor' });
   const prop = aiBreakPlan(0, 0, 5, 0, { tileDefAt: cabinetAt, edgeHpBetween: () => null });

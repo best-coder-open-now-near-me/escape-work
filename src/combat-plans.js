@@ -126,7 +126,26 @@ export function aiPullPlan(unit, candidates, crouchOf, world) {
 // demolition. v1 is deliberately adjacent-only, on the one or two faces the
 // target's octant names; pathing THROUGH breakables by pool HP is the
 // refinement AI_PLAN names and defers.
-export function aiBreakPlan(bx, bz, tx, tz, { tileDefAt, edgeHpBetween }) {
+export function aiBreakPlan(bx, bz, tx, tz, { tileDefAt, edgeHpBetween, doorsBeside = null }) {
+  // A shut door FIRST: it is not breakable at all (doors are deliberately not
+  // in the wall sets, so they carry no HP pool), it is the cheapest thing in
+  // reach, and it is the actual passage. Without this arm a unit sealed by a
+  // door somebody closed on it farms crouches forever while the fight cannot
+  // end - the piñata case A10 names. Take the shut door that most reduces the
+  // distance to the target; one that leads away is not a way through.
+  if (doorsBeside) {
+    let best = null;
+    for (const d of doorsBeside(bx, bz)) {
+      if (d.open) continue;
+      const [fx, fz] = d.to;
+      const gain = cheb(bx, bz, tx, tz) - cheb(fx, fz, tx, tz);
+      if (gain <= 0) continue;
+      if (!best || gain > best.gain) best = { d, gain };
+    }
+    if (best) {
+      return { kind: 'door', key: best.d.key, ap: best.d.ap, tx: best.d.to[0], tz: best.d.to[1] };
+    }
+  }
   const { x: sx, z: sz } = dirOctant(tx, tz, bx, bz); // from the unit toward the target
   const cands = [];
   if (sx) cands.push([bx + sx, bz]);

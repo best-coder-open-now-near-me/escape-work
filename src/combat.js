@@ -2202,7 +2202,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     },
   );
   const aiBreakPlanFor = (unit, target) => aiBreakPlanShared(
-    unit.x, unit.z, target.actor.x, target.actor.z, world);
+    unit.x, unit.z, target.actor.x, target.actor.z,
+    { ...world, doorsBeside: world.doorsBeside });
 
   // Put it over. `by` is whoever caused it (for the narration and the facing).
   function topple(by, plan) {
@@ -4656,11 +4657,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const shoveAp = ACTIONS.shove.ap;
     const shovep = acting.ap >= shoveAp ? aiShovePlanFor(unit) : null;
     // Sealed means NOBODY is engageable - while any route exists, walking it
-    // beats demolition, so the break plan is not even gathered.
-    const breakAp = unit.combat.attackAp;
+    // beats demolition, so the break plan is not even gathered. A shut door
+    // is priced at the door's own AP (the player's number, from the rule that
+    // charges it); battering carries the unit's swing price.
     const sealed = !canEngage(unit, target.member);
-    const brk = sealed && unit.combat.attacks.length > 0 && acting.ap >= breakAp
-      ? aiBreakPlanFor(unit, target) : null;
+    const brk = sealed && acting.ap > 0 ? aiBreakPlanFor(unit, target) : null;
+    const breakAp = brk?.kind === 'door' ? brk.ap : unit.combat.attackAp;
+    // Battering needs something to swing; opening a door needs only a hand.
+    const canBreak = !!brk && (brk.kind === 'door' || unit.combat.attacks.length > 0);
     const beatState = {
       ap: acting.ap,
       moveBudget: moveBudget(acting),
@@ -4677,7 +4681,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       shoveAp,
       canShove: !!shovep,
       breakAp,
-      canBreak: !!brk,
+      canBreak,
       canCrouch: true, // tryAiCrouch runs its own (world-shaped) test
       coverAp: ACTIONS['take-cover'].ap,
     };
@@ -4741,6 +4745,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         fx.impact(tp.tx, tp.tz, 'slam', { y: 0.3 });
         fx.shake(0.08, 0.2);
         log(`${unit.def.name} puts a shoulder into the partition. It goes over flat.${dropOnto(unit, tp.tx, tp.tz, PARTITION_TOPPLE.damage)}`);
+        engageMemo.clear(); // a retired edge changes routes mid-turn
       } else {
         unit.lunge(tp.x, tp.z);
         log(`${unit.def.name} puts a shoulder into the ${tp.def.label || 'furniture'}. ${topple(unit, tp)}`);
@@ -4763,8 +4768,23 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     if (beat === 'break') {
       acting.ap = roundAp(acting.ap - breakAp);
-      aiBreak(unit, brk);
-      acting.wait = 0.85;
+      if (brk.kind === 'door') {
+        unit.lunge(brk.tx, brk.tz);
+        faceTarget(unit, brk.tx, brk.tz);
+        world.openDoor(brk.key);
+        log(`${unit.def.name} opens the door. It was never locked.`);
+        acting.wait = 0.5;
+      } else {
+        aiBreak(unit, brk);
+        acting.wait = 0.85;
+      }
+      // The world just changed under the reachability memo, which is keyed on
+      // tiles and cleared per TURN because "within a turn the only thing
+      // moving is the unit itself". An opened door or a demolished barrier
+      // breaks that assumption - without this the unit stays "sealed" for the
+      // rest of its own turn and stands in the doorway it just opened.
+      engageMemo.clear();
+      refresh();
       return;
     }
     if (beat === 'attack') {

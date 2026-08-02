@@ -64,6 +64,17 @@ export function createDoors({
     return key && atDoor(key, getCombat()?.actingActor) ? key : null;
   };
 
+  // The terrain edit alone: no gating, no price, no narration. Combat owns
+  // the AP on its own side of the board - the player's active member pays
+  // through toggleDoor below, an AI unit pays from its own ledger - exactly
+  // as setType / toppleEdge / damageEdge already split the world edit from
+  // whoever is being charged for it (AI_PLAN A10).
+  function setDoorOpen(key, open) {
+    grid.setDoorOpen(key, open);
+    scene.refreshDoor(key);
+    onWorldChanged(); // every route in the level may have just changed
+  }
+
   function toggleDoor(key) {
     if (isGameOver()) return;
     // Doors used to be refused outright while in combat, with no comment - and
@@ -82,10 +93,7 @@ export function createDoors({
       }
     }
     const open = !grid.doors.get(key).open;
-    grid.setDoorOpen(key, open);
-    scene.refreshDoor(key);
-    // Every route in the level may have just changed - theirs and yours.
-    onWorldChanged();
+    setDoorOpen(key, open);
     ui.say(open ? 'The door swings open.' : 'You pull the door shut.');
     if (loot.labelsVisible) loot.showLabels();
   }
@@ -122,16 +130,29 @@ export function createDoors({
   // worth walking over to use had no affordance at all. The price rides along
   // rather than being re-declared in combat.js: one number, owned by the rule
   // that charges it.
+  // `key`, `open` and `to` ride along for the AI's sake (AI_PLAN A10): a
+  // sealed unit needs to know a door is SHUT and which side it leads to
+  // before it can decide that opening it beats standing there. The rings
+  // read only x/z/ap, so they are unaffected.
   function doorsBeside(x, z) {
     const out = [];
     for (const key of grid.doors.keys()) {
-      if (!doorSides(key).some(([sx, sz]) => sx === x && sz === z)) continue;
-      out.push({ ...doorMidpoint(key), ap: COMBAT_DOOR_AP });
+      const sides = doorSides(key);
+      if (!sides.some(([sx, sz]) => sx === x && sz === z)) continue;
+      const far = sides.find(([sx, sz]) => !(sx === x && sz === z)) || sides[0];
+      out.push({
+        ...doorMidpoint(key),
+        ap: COMBAT_DOOR_AP,
+        key,
+        open: !!grid.doors.get(key).open,
+        to: far,
+      });
     }
     return out;
   }
 
   return {
-    doorNearPoint, combatDoorAt, toggleDoor, approachDoor, overlayEntries, doorsBeside, atDoor,
+    doorNearPoint, combatDoorAt, toggleDoor, setDoorOpen, approachDoor,
+    overlayEntries, doorsBeside, atDoor,
   };
 }

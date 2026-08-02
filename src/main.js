@@ -2202,6 +2202,8 @@ function startGame(level) {
       world: {
         isWalkable,
         doorsBeside: (x, z) => doors.doorsBeside(x, z),
+        // The raw edit, for the side combat charges itself (AI_PLAN A10).
+        openDoor: (key) => doors.setDoorOpen(key, true),
         // The acting body's own route: allies BLOCK in combat (no ending a
         // move stacked on a teammate; sequenced moves can afford the detour)
         // and the costs are the walker's own talents, not the leader's.
