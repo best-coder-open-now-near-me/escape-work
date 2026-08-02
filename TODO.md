@@ -23,6 +23,58 @@ Answered directly by the project owner — recorded so they are not relitigated.
   turn (BG3 Dominate, not DOS2's AI-driven Charmed). See Phase 8.
 - Consumables cost 2 AP in combat; paper upgrading is out-of-combat only;
   `PAPER_CAP`/`INV_CAP` become real numbers rather than `Infinity`.
+- **No automatic healing.** Two rules struck 2026-08-02 `[stated]`: enemies do
+  not autoscale with floor depth ("things shouldnt autoscale thats absurd… by
+  floor i mean. thats just lazy" — see `PROGRESSION_PLAN.md` decisions 13–14),
+  and the party is not healed between floors ("i also never asked for auto
+  healing between floors"). Both were **presumptions, not asks** — the floor
+  curve was a plan doc's own recommendation, and `STAIRWELL_HEAL`
+  (`main.js:384`) never appears in any plan doc's decision table at all. Its
+  entire justification is a code comment.
+  - **`STAIRWELL_HEAL = 6`** (`main.js:384`, applied `:2901`) — the between-floors
+    heal. Struck.
+  - **`VICTORY_HEAL = 5`** (`main.js:383`, applied `:2358`) — the same species,
+    after each won fight, and *not* what the designer named. **Open question,
+    below** — do not remove it on the strength of the stairwell verdict.
+  - **The downed rule rides along and must not be struck by accident.**
+    `stairwellHeal` (`stats.js:49-50`) is `min(maxHp, max(hp, 0) + amount)`; the
+    `max(hp, 0)` is what carries a downed character to the landing and revives
+    them there. Deleting the heal deletes the revival, and a run that starts a
+    floor with a downed leader may have no way forward. **What replaces it is a
+    design question, not a mechanical one** — see "Open questions" below.
+
+### Open questions from the 2026-08-02 no-auto-healing verdict
+
+Both need the designer, and the first blocks the change from shipping.
+
+**H1 — A character is downed when the floor is cleared. What happens?** Today
+the stairwell heal revives them on the landing (`stats.js:49-50`). With the heal
+struck, something has to take its place.
+
+- **A. They stay downed into the next floor (recommended).** *Consequence:* the
+  honest reading of "no auto healing", and it makes downing a real cost that
+  follows you. Needs one guard: if the *leader* is downed with no living member,
+  that is a loss, not a soft-lock — check what `loseGame` does today before
+  shipping it.
+- **B. Downed revive at 1 HP, no other healing.** *Consequence:* keeps the run
+  moving and still deletes the +6; "carried to the landing" survives as fiction
+  without being a heal.
+- **C. Downed stay downed and are revivable only by an item or a power.**
+  *Consequence:* the most demanding, and the most interesting — it makes healing
+  something you *stock* (which `ECONOMY_PLAN.md:466` already budgets per floor)
+  rather than something the floor hands you. Costs a revive verb that does not
+  exist yet.
+
+I'd take B to ship the change safely and C as the real answer once a revive verb
+exists.
+
+**H2 — Does `VICTORY_HEAL = 5` go too?** It is the same kind of rule — an
+automatic top-up nobody asked for, after every won fight rather than every floor
+— but the designer named floors specifically, and striking both at once is a
+much larger difficulty swing than striking one. Recommend: **strike it too, but
+separately and after H1 lands**, so the two effects can be felt apart. If both
+go at once, healing becomes entirely item-driven overnight and
+`ECONOMY_PLAN.md`'s per-floor heal budget needs a pass in the same breath.
 
 ## E2e status in this environment (measured, with the method stated)
 
