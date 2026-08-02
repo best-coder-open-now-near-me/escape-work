@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   standTilePath, pickTarget, advanceRoute, aiCrouchCovered, chooseBeat,
-  AI, standTileRoutes, scoreDestination, firingTileRoutes,
+  AI, standTileRoutes, scoreDestination, firingTileRoutes, beatStateFrom,
 } from '../../src/combat-ai.js';
 import { REACH } from '../../src/stats.js';
 
@@ -501,4 +501,69 @@ test('a firing field never offers a tile that cannot fire while one can', () => 
     const [gx, gz] = r[r.length - 1];
     assert.ok(gx === 2 && gz === 0, `offered a tile that cannot fire: ${gx},${gz}`);
   }
+});
+
+// --- the ladder's input, assembled (REVIEW.md 2026-08-02 item 17) -------------
+
+test('a beat a unit cannot afford is not offered, however good the plan', () => {
+  // The gating rule, which used to be spelled out inline in the frame driver
+  // where nothing could reach it.
+  const s = beatStateFrom({
+    ap: 1,
+    costs: { topple: 2, pull: 2, shove: 2, break: 3, cover: 1 },
+    plans: { topple: {}, pull: {}, shove: {}, break: {} },
+  });
+  assert.equal(s.canTopple, false);
+  assert.equal(s.canPull, false);
+  assert.equal(s.canShove, false);
+  assert.equal(s.canBreak, false);
+  // ...and the ladder agrees. It falls to the crouch, which this unit CAN
+  // afford at 1 AP - a boxed-in unit that tucks in is a problem the player has
+  // to flank, and it outranks passing precisely because it is not nothing.
+  assert.equal(chooseBeat({ ...s, inReach: false, moveBudget: 0, moveCost: 1 }).beat, 'crouch');
+  // Take the crouch away too and there is genuinely nothing left.
+  assert.equal(chooseBeat({ ...s, inReach: false, moveBudget: 0, moveCost: 1, coverAp: 9 }).beat,
+    'pass');
+});
+
+test('an affordable beat with no plan is still not offered', () => {
+  const s = beatStateFrom({
+    ap: 99,
+    costs: { topple: 2, pull: 2, shove: 2, break: 3, cover: 1 },
+    plans: {},
+  });
+  assert.equal(s.canTopple, false);
+  assert.equal(s.canShove, false);
+});
+
+test('affordable AND planned is what makes a beat available', () => {
+  const s = beatStateFrom({
+    ap: 99,
+    costs: { topple: 2, pull: 2, shove: 2, break: 3, cover: 1 },
+    plans: { topple: { x: 1 }, shove: { victim: {} } },
+  });
+  assert.equal(s.canTopple, true);
+  assert.equal(s.canShove, true);
+  assert.equal(s.canPull, false, 'no pull plan was gathered');
+  assert.equal(chooseBeat(s).beat, 'topple', 'and topple outranks shove');
+});
+
+test('entrench needs a shot AND a unit not already tucked in', () => {
+  const base = { ap: 99, costs: { cover: 1 }, plans: {} };
+  assert.equal(beatStateFrom({ ...base, shootable: true }).canEntrench, true);
+  assert.equal(beatStateFrom({ ...base, shootable: true, alreadyCrouched: true }).canEntrench,
+    false, 'already in cover - crouching again buys nothing');
+  assert.equal(beatStateFrom({ ...base, shootable: false }).canEntrench,
+    false, 'nothing to entrench FOR');
+});
+
+test('support and summon carry their own readiness, not just their price', () => {
+  const s = beatStateFrom({
+    ap: 99, costs: {}, plans: {},
+    support: { ap: 2, ready: false },
+    summon: { ap: 3, ready: true },
+  });
+  assert.deepEqual(s.support, { ap: 2, ready: false });
+  assert.deepEqual(s.summon, { ap: 3, ready: true });
+  assert.equal(chooseBeat(s).beat, 'summon', 'triage is not ready; the summon is');
 });

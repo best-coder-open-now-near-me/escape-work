@@ -37,7 +37,7 @@ import {
 import {
   standTilePath as standTileRoute, standTileRoutes, scoreDestination,
   pickTarget as pickBest, advanceRoute, firingTileRoutes,
-  aiCrouchCovered, chooseBeat, lineWeights, aiSupportPlan,
+  aiCrouchCovered, chooseBeat, beatStateFrom, lineWeights, aiSupportPlan,
 } from './combat-ai.js';
 import {
   enemyRingOk, verbKind, verbSides, toppleRings, partitionRings, breakRings,
@@ -4793,7 +4793,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const sealed = !canEngage(unit, target.member);
     const brk = sealed && unit.combat.attacks.length > 0 && acting.ap >= breakAp
       ? aiBreakPlanFor(unit, target) : null;
-    const beatState = {
+    // The ladder's input, assembled by combat-ai.beatStateFrom - the AP gating
+    // and the shape are rules, and they now live somewhere a test can reach.
+    const beatState = beatStateFrom({
       ap: acting.ap,
       moveBudget: moveBudget(acting),
       moveCost: MOVE.COST_PER_TILE,
@@ -4802,17 +4804,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       attackAp: unit.combat.attackAp,
       support: sup ? { ap: sup.ap, ready: !!supPlan } : null,
       summon: sm ? { ap: sm.ap, ready: summonReady } : null,
-      toppleAp,
-      canTopple: !!tp,
-      pullAp,
-      canPull: !!pullp,
-      shoveAp,
-      canShove: !!shovep,
-      breakAp,
-      canBreak: !!brk,
-      canCrouch: true, // tryAiCrouch runs its own (world-shaped) test
-      coverAp: ACTIONS['take-cover'].ap,
-    };
+      costs: {
+        topple: toppleAp, pull: pullAp, shove: shoveAp, break: breakAp,
+        cover: ACTIONS['take-cover'].ap,
+      },
+      plans: { topple: tp, pull: pullp, shove: shovep, break: brk },
+      alreadyCrouched: crouched.has(unit),
+    });
     // The ranged kit (AI_PLAN M5): a line the unit could fire RIGHT NOW -
     // range, line of sight, and a clear shotOutcome. A redirect into a
     // MEMBER human shield fires (the shield takes the blocked hit,
@@ -4834,6 +4832,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         }
       }
     }
+    // Filled in after the fact, not by the assembly above: whether a shot
+    // exists depends on `inReach`, which the assembly is what computes.
     beatState.canShoot = !!shootable;
     // Entrench (crouch-then-shoot): worth it only when a shot exists, the
     // unit is not already tucked in, and something HERE actually shields it

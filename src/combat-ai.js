@@ -380,6 +380,53 @@ export function aiCrouchCovered(bx, bz, tx, tz, { tileDefAt, stepOpen, bodyAt = 
   return facesShieldFrom(faces, tx, tz, bx, bz);
 }
 
+// The ladder's INPUT, assembled from plain values. combat.js gathers the leaf
+// facts - it owns the bodies, the AP ledger and the plans - and this turns them
+// into the one object `chooseBeat` reads.
+//
+// It is here rather than inline in the frame driver because the assembly has
+// rules of its own, and they were invisible: every beat is gated on affording
+// it, and a plan is not even GATHERED when the unit cannot pay for the beat it
+// would feed. That "ask only if you could act on the answer" rule is the reason
+// a plan-gathering call with a side effect is dangerous - the free-summon bug
+// (REVIEW.md 2026-08-02 section 1.1) was exactly that - and until now there was
+// no seam at which to assert any of it.
+//
+// `costs` is the price of each beat; `plans` are the already-gathered plans
+// (null when unaffordable or unavailable). Nothing here calls the world.
+export function beatStateFrom({
+  ap = 0, moveBudget = 0, moveCost = 0,
+  inReach = false, hasAttack = false, attackAp = 0,
+  costs = {}, summon = null, support = null, plans = {},
+  shootable = false, alreadyCrouched = false,
+}) {
+  const afford = (c) => Number.isFinite(c) && ap >= c;
+  return {
+    ap,
+    moveBudget,
+    moveCost,
+    inReach,
+    hasAttack,
+    attackAp,
+    support: support ? { ap: support.ap, ready: !!support.ready } : null,
+    summon: summon ? { ap: summon.ap, ready: !!summon.ready } : null,
+    toppleAp: costs.topple,
+    canTopple: !!plans.topple && afford(costs.topple),
+    pullAp: costs.pull,
+    canPull: !!plans.pull && afford(costs.pull),
+    shoveAp: costs.shove,
+    canShove: !!plans.shove && afford(costs.shove),
+    breakAp: costs.break,
+    canBreak: !!plans.break && afford(costs.break),
+    canCrouch: true, // the crouch runs its own (world-shaped) test when taken
+    coverAp: costs.cover,
+    canShoot: !!shootable,
+    // Crouch-then-shoot is only worth a beat when a shot exists and the unit is
+    // not already tucked in - and the ladder prices it at BOTH halves.
+    canEntrench: !!shootable && !alreadyCrouched,
+  };
+}
+
 // Which beat this unit takes this turn. `s` is everything the decision reads,
 // as plain values:
 //
