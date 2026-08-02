@@ -962,6 +962,52 @@ widen it, 7 tunes it. 1 exists so 2–7 can prove they did anything. Milestones
 2, 3 and 4 are independent of 5 and 6 and could land in any order; 5 wants 3
 first (a shooter that can't pick tiles shoots from bad ones).
 
+### As landed (2026-08-01/02, milestones 1–6 in one pass)
+
+All six implementation milestones shipped on this branch, one commit each,
+unit suite green throughout (688 → 711) and the smoke e2e suite green at the
+end — including a full fight on the new ladder. Deviations and honest notes,
+recorded here per the house pattern:
+
+- **M1:** `?seed=` landed on the `?level` dev-lane pattern; the tally
+  (`__combat.bout`) counts rounds, AI damage landed (instrumented at the one
+  member-strike sink, so OAs and shots ride along), the chosen-beat
+  histogram, and reactions fired. The initiative-closure rng gap (REVIEW.md)
+  is documented AT the seed param rather than fixed - per-side totals are
+  order-noise-tolerant by design. The scripted-bout e2e spec did not ship;
+  the tally is read manually or by any later spec.
+- **M2:** as specified. The wounded-tiebreak behavior survives EXACTLY at
+  `focus: 0` and as the tie-break chain, both pinned by name in the tests.
+- **M3:** as specified, plus the footgun-15 note made real: hazard walks
+  read route waypoints, which findEnemyPath emits per-tile - synthetic
+  routes in tests must do the same.
+- **M4:** the refused-set tail subsumed `afterFailedAdvance` entirely (the
+  function is gone, its behavior arrives by ladder re-run - the failed
+  advance still crouches, now for a reason). The stall backstop became
+  `pass` → `advanceTurn`, which ends the turn without the old AP burn.
+  **The door-open arm is deferred with a named reason:** door keys never
+  cross the world facade (`doors.js` owns them main-side; combat sees only
+  midpoints via `doorsBeside`), so the arm needs a facade seam main.js must
+  grow first. The piñata case A10 names remains open until then - the
+  break beat covers the partition half. The AI shove does not chain a
+  prop-topple the way the player's `displaceBody` can `[proposed]` - the
+  slam is flat damage, no cascade, cheap to add later.
+- **M5:** as specified. The known approximation: a blocked `shotOutcome`
+  (object shield) does not steer the firing-tile search toward a flanking
+  angle - the shooter repositions by LOS/shield/keep-away and re-plans next
+  turn. The player-side ranged walk-in bug (`TODO.md` Phase 1) was NOT
+  imported: the AI asks its own right question (`firingTileRoutes`); the
+  player-side fix stays open, player-side.
+- **M6:** as specified, plus the summoner-spacing term generalized into a
+  `backline` bias (ranged OR support/summoner kits) - a weight over an
+  already-admitted destination field, so it biases WHICH swing tile, never
+  whether to advance. Known approximation, recorded in the shove perform
+  too: a member forced onto a hazard is billed the shared surface number -
+  personal hazard immunities (talent-shaped, main.js's walking model) are
+  not consulted on forced landings. And `allies` for the pincer term reads
+  `engaged` minus the actor, so a CHARMED colleague still counts toward an
+  AI pincer - wrong for the charm's duration, bounded, noted.
+
 ## Testing
 
 - **Unit (`tests/unit/combat-ai.test.js`)** — the pattern is set: every
