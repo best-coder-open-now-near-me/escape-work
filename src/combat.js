@@ -225,8 +225,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // path to any of the target's eight neighbours, or null if none is reachable.
   // Shared by pickTarget and aiAdvance so the two can never disagree about who
   // is engageable - if the target picker says yes, the mover must find a route.
+  // "Could this unit swing at that body from tile (gx, gz)?" - the AI's half of
+  // the question `combat-geometry.swingPointAt` has always answered for the
+  // player. Threaded into the stand-tile fields so engageability means what it
+  // says (REVIEW.md 2026-08-02 section 1.16).
+  const swingFieldFor = (unit, target) => ({
+    ...world,
+    canSwingFrom: (gx, gz) => !!swingPointFrom(unit, target.actor || target, gx, gz, world),
+  });
   const standTilePath = (unit, target) =>
-    standTileRoute(unit.x, unit.z, target.actor.x, target.actor.z, world);
+    standTileRoute(unit.x, unit.z, target.actor.x, target.actor.z, swingFieldFor(unit, target));
 
   // Can this unit actually FIGHT that member - reach it now, or walk to a tile
   // it could swing from?
@@ -744,11 +752,21 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // are covered, and why breaking THAT face opens the shot without disturbing
   // the others.
   function shotOutcome(attacker, defender) {
+    const a = posOf(attacker);
+    return shotOutcomeFrom(attacker, defender, a.x, a.z);
+  }
+
+  // The same question asked from a tile the shooter is NOT standing on yet -
+  // "if I walked there, would the shot land?". The ranged kit's destination
+  // search needs it: range and a sightline do not model an object shield or a
+  // colleague in the redirect, so a field built on those two alone offered
+  // tiles that cannot fire (REVIEW.md 2026-08-02 section 1.6).
+  function shotOutcomeFrom(attacker, defender, ax, az) {
     const s = crouchStateOf(defender);
     if (!s) return { target: defender };
     // Direction between the BODIES (DEGRID M4); the face-neighbour queries
     // stay on the defender's tile, where the faces live.
-    const A = posOf(attacker);
+    const A = { x: ax, z: az };
     const D = posOf(defender);
     const Dt = bodyOf(defender);
     // Re-asked without the SHOOTER counting as cover (see crouchFacesOf).
@@ -4497,10 +4515,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     let routes = null;
     if (rls.length) {
       const rmax = Math.max(...rls.map((a) => a.range));
-      routes = firingTileRoutes(unit.x, unit.z, target.actor.x, target.actor.z, rmax, world);
+      routes = firingTileRoutes(unit.x, unit.z, target.actor.x, target.actor.z, rmax, {
+        ...world,
+        // Would the shot actually FIRE from there - not just reach and see.
+        // A blocked outcome (an object shield, a colleague in the redirect) is
+        // the case the old field could not express, so the shooter stood still.
+        shotClearAt: (gx, gz) => {
+          const so = shotOutcomeFrom(unit, target.member, gx, gz);
+          return !!so.target && (!so.redirected || !!so.target.sheet);
+        },
+      });
     }
     if (!routes || !routes.length) {
-      routes = standTileRoutes(unit.x, unit.z, target.actor.x, target.actor.z, world);
+      routes = standTileRoutes(unit.x, unit.z, target.actor.x, target.actor.z,
+        swingFieldFor(unit, target));
     }
     const ranged = !!(rls.length && routes.length);
     // A support kit hangs toward the edge of the scrum too: the keep-away

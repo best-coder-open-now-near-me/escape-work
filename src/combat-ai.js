@@ -94,13 +94,29 @@ export function aiSupportPlan(bx, bz, spec, allies, { healAt = AI.HEAL_AT } = {}
 // degenerate path hands the advance its in-place shuffle branch, which closes
 // the last sub-tile gap. The same special case `routeBeside` carries on the
 // player side, for the same reason.
-export function standTilePath(ux, uz, tx, tz, { isWalkable, findEnemyPath }) {
+// `canSwingFrom(gx, gz)` is the caller's "would a swing from this tile actually
+// land" test - the AI's half of `combat-geometry.swingPointAt`, which the player
+// side has always asked. Optional only so the pure tests can drive the shape
+// without a world; combat.js always supplies it.
+//
+// Without it these helpers accepted ANY walkable neighbour with a route, and
+// `canEngage` is built on this - so the hard engageability TIER, which exists
+// precisely so a unit never "walks to the wall and swings at nothing, every
+// turn, forever", was decided by a test blind to that exact case. A member in a
+// dead-end bay sealed by a partition read as engageable (REVIEW.md 2026-08-02
+// section 1.16).
+export function standTilePath(ux, uz, tx, tz, { isWalkable, findEnemyPath, canSwingFrom = null }) {
+  const swingable = (gx, gz) => !canSwingFrom || canSwingFrom(gx, gz);
   let best = null;
   for (const [dx, dz] of AROUND) {
     const gx = tx + dx;
     const gz = tz + dz;
-    if (ux === gx && uz === gz) return [[gx, gz], [gx, gz]];
+    if (ux === gx && uz === gz) {
+      if (swingable(gx, gz)) return [[gx, gz], [gx, gz]];
+      continue; // standing beside them but unable to swing is not engagement
+    }
     if (!isWalkable(gx, gz)) continue;
+    if (!swingable(gx, gz)) continue;
     const p = findEnemyPath(ux, uz, gx, gz);
     if (p && p.length > 1 && (!best || p.length < best.length)) best = p;
   }
@@ -113,15 +129,17 @@ export function standTilePath(ux, uz, tx, tz, { isWalkable, findEnemyPath }) {
 // otherwise - and the degenerate self-path keeps its ABSOLUTE priority:
 // already standing on a swing tile is not a choice to score, it is the
 // pacing bug's fix, so it returns alone, a field of one.
-export function standTileRoutes(ux, uz, tx, tz, { isWalkable, findEnemyPath }) {
+export function standTileRoutes(ux, uz, tx, tz, { isWalkable, findEnemyPath, canSwingFrom = null }) {
+  const swingable = (gx, gz) => !canSwingFrom || canSwingFrom(gx, gz);
   for (const [dx, dz] of AROUND) {
-    if (ux === tx + dx && uz === tz + dz) return [[[ux, uz], [ux, uz]]];
+    if (ux === tx + dx && uz === tz + dz && swingable(ux, uz)) return [[[ux, uz], [ux, uz]]];
   }
   const out = [];
   for (const [dx, dz] of AROUND) {
     const gx = tx + dx;
     const gz = tz + dz;
     if (!isWalkable(gx, gz)) continue;
+    if (!swingable(gx, gz)) continue;
     const p = findEnemyPath(ux, uz, gx, gz);
     if (p && p.length > 1) out.push(p);
   }
@@ -143,24 +161,42 @@ export function standTileRoutes(ux, uz, tx, tz, { isWalkable, findEnemyPath }) {
 // the first helper to hear about it - a balcony shooter needs 3D sight and
 // storey-qualified tiles, and the gate belongs here rather than scattered
 // across the callers.
-export function firingTileRoutes(ux, uz, tx, tz, range, { isWalkable, findEnemyPath, hasLos }, cap = 12) {
+export function firingTileRoutes(ux, uz, tx, tz, range,
+  { isWalkable, findEnemyPath, hasLos, shotClearAt = null }, cap = 12) {
   const reach = range - AI.RANGE_SLACK;
   const R = Math.ceil(reach);
   const cands = [];
+  let here = null;
   for (let dx = -R; dx <= R; dx++) {
     for (let dz = -R; dz <= R; dz++) {
       const gx = tx + dx;
       const gz = tz + dz;
       if (dist(gx, gz, tx, tz) > reach) continue;
-      if (!isWalkable(gx, gz) && !(gx === ux && gz === uz)) continue;
+      const own = gx === ux && gz === uz;
+      if (!isWalkable(gx, gz) && !own) continue;
       if (!hasLos(gx, gz, tx, tz)) continue;
-      if (gx === ux && gz === uz) return [[[ux, uz], [ux, uz]]];
-      cands.push([gx, gz, cheb(ux, uz, gx, gz)]);
+      // Range and a sightline are not the whole question: a shot can still be
+      // refused by something the line test does not model - an object shield,
+      // or a colleague standing in the redirect. A tile that cannot actually
+      // FIRE is not a firing tile.
+      const clear = !shotClearAt || shotClearAt(gx, gz);
+      if (own) { here = clear; continue; }
+      cands.push([gx, gz, cheb(ux, uz, gx, gz), clear]);
     }
   }
-  cands.sort((a, b) => a[2] - b[2]);
+  // Standing where the shot works is the answer, not a candidate - the melee
+  // field's self-path priority, and for the same anti-shuffle reason. But ONLY
+  // when the shot works: this used to return the moment the unit's own tile had
+  // range and a line, so a shooter whose shot was refused for any other reason
+  // had no candidates at all, could not reposition, and burned every turn
+  // standing still (REVIEW.md 2026-08-02 section 1.6).
+  if (here === true) return [[[ux, uz], [ux, uz]]];
+  // Never walk to a tile that cannot fire while one that can is on the table.
+  const firing = cands.filter((c) => c[3]);
+  const field = firing.length ? firing : cands;
+  field.sort((a, b) => a[2] - b[2]);
   const out = [];
-  for (const [gx, gz] of cands.slice(0, cap)) {
+  for (const [gx, gz] of field.slice(0, cap)) {
     const p = findEnemyPath(ux, uz, gx, gz);
     if (p && p.length > 1) out.push(p);
   }

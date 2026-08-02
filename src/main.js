@@ -159,8 +159,15 @@ try {
 } catch { /* no URL machinery - unseeded like always */ }
 
 const clearProgress = () => {
-  localStorage.removeItem(PROGRESS_KEY);
-  remote.clear(); // the desk must not offer a ghost of an abandoned run
+  // Guarded like every other localStorage touch in the file. This was the last
+  // one that was not, and it runs after `gameOver = true` and before the lose
+  // screen - so in a storage-blocked browser (which BOOTS fine, because the
+  // boot read is guarded) the throw ate the lose screen and the Restart-run
+  // escape with it (REVIEW.md 2026-08-02 section 1.13).
+  try { localStorage.removeItem(PROGRESS_KEY); } catch { /* nowhere to remove from */ }
+  // Outside the try on purpose: a dead localStorage must not also skip the
+  // cloud delete, or the desk goes on offering a ghost of an abandoned run.
+  remote.clear();
 };
 
 // The floor-select desk: a plain fresh visit picks a level BEFORE a character

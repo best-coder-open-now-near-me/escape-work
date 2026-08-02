@@ -299,6 +299,17 @@ export function startEditor(app, levelData, stashKey) {
   }
 
   function loadLevel(data) {
+    // A load starts from a clean char slate. `tileByChar`/`charByType` were
+    // allocated once per SESSION and never reset, while `tierChars` is rebuilt
+    // per load - and a tiered placement reserves its char AFTER a tile type may
+    // already own it. So painting with `ficus` (char 'G') and then loading
+    // level2 (which declares `"G": "manager@3"`) left the two sharing a char,
+    // and the reservation that exists to prevent exactly that did nothing
+    // (REVIEW.md 2026-08-02 section 1.12). The round-trip guarantee is written
+    // against a clean slate; this is that slate.
+    for (const k of Object.keys(tileByChar)) delete tileByChar[k];
+    for (const k of Object.keys(charByType)) delete charByType[k];
+    charOfType('floor'); // re-seed the one type every map needs
     height = data.map.length;
     width = Math.max(...data.map.map((r) => r.length));
     // Level legends are per-file (any char can mean anything); the editor

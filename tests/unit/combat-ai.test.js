@@ -429,3 +429,76 @@ test('the worst-off ally in range gets the heal; expiring temps do not', async (
   assert.deepEqual(lineWeights(pool, () => false), [1, AI.STATUS_WEIGHT]);
   assert.deepEqual(lineWeights(pool, (id) => id === 'blinded'), [1, 1]);
 });
+
+// --- the anti-stall contract (REVIEW.md 2026-08-02 sections 1.6 / 1.16) -------
+
+test('a stand tile the unit cannot swing from is not an engagement', () => {
+  // The tier that exists so a unit never "walks to the wall and swings at
+  // nothing, every turn, forever" was computed by a test blind to exactly that:
+  // any walkable neighbour with a route counted, whether or not a swing from it
+  // could land. A member in a dead-end bay sealed by a partition read as
+  // engageable, so the AI would target them and shuffle at the wall.
+  const world = {
+    isWalkable: () => true,
+    findEnemyPath: (sx, sz, gx, gz) => [[sx, sz], [gx, gz]],
+  };
+  // Nothing can swing at them from anywhere: no route should come back.
+  assert.equal(standTilePath(0, 0, 5, 5, { ...world, canSwingFrom: () => false }), null);
+  // One legal swing tile: that is the one we get.
+  const only = standTilePath(0, 0, 5, 5,
+    { ...world, canSwingFrom: (gx, gz) => gx === 4 && gz === 5 });
+  assert.deepEqual(only[only.length - 1], [4, 5]);
+});
+
+test('standing beside them but unable to swing is not engagement either', () => {
+  // The degenerate self-path is the pacing-bug fix and keeps absolute priority -
+  // but only when a swing from where you stand would actually land.
+  const world = { isWalkable: () => true, findEnemyPath: () => null };
+  assert.equal(standTilePath(4, 5, 5, 5, { ...world, canSwingFrom: () => false }), null);
+  assert.deepEqual(standTilePath(4, 5, 5, 5, { ...world, canSwingFrom: () => true }),
+    [[4, 5], [4, 5]]);
+});
+
+test('a shooter whose shot is blocked from here does not stand still', () => {
+  // The mirror defect. firingTileRoutes returned the moment the unit's own tile
+  // had range and a line - so a shot refused for any OTHER reason (an object
+  // shield, a colleague in the redirect) left the shooter with no candidates,
+  // unable to reposition, burning every turn where it stood.
+  const world = {
+    isWalkable: () => true,
+    hasLos: () => true,
+    findEnemyPath: (sx, sz, gx, gz) => [[sx, sz], [gx, gz]],
+    // The shot works from anywhere EXCEPT where the shooter currently is.
+    shotClearAt: (gx, gz) => !(gx === 3 && gz === 0),
+  };
+  const routes = firingTileRoutes(3, 0, 0, 0, 5, world);
+  assert.ok(routes.length > 0, 'a blocked shooter must be offered somewhere to go');
+  assert.ok(!routes.some((r) => r.length === 2 && r[0][0] === 3 && r[0][1] === 0
+    && r[1][0] === 3 && r[1][1] === 0), 'and not the tile it is stuck on');
+});
+
+test('a shooter whose shot IS clear from here stays put', () => {
+  // The other half: the self-tile keeps its priority when it works, or the
+  // shooter would wander instead of firing.
+  const world = {
+    isWalkable: () => true,
+    hasLos: () => true,
+    findEnemyPath: (sx, sz, gx, gz) => [[sx, sz], [gx, gz]],
+    shotClearAt: () => true,
+  };
+  assert.deepEqual(firingTileRoutes(3, 0, 0, 0, 5, world), [[[3, 0], [3, 0]]]);
+});
+
+test('a firing field never offers a tile that cannot fire while one can', () => {
+  const world = {
+    isWalkable: () => true,
+    hasLos: () => true,
+    findEnemyPath: (sx, sz, gx, gz) => [[sx, sz], [gx, gz]],
+    shotClearAt: (gx, gz) => gx === 2 && gz === 0,
+  };
+  const routes = firingTileRoutes(5, 5, 0, 0, 4, world);
+  for (const r of routes) {
+    const [gx, gz] = r[r.length - 1];
+    assert.ok(gx === 2 && gz === 0, `offered a tile that cannot fire: ${gx},${gz}`);
+  }
+});
