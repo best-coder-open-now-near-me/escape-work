@@ -9,6 +9,12 @@ and external grid tools (Tiled/LDtk) and chose the in-repo one `[stated]`
 "we dont need full flexibility, we dont have organic curves to construct or
 anything like that" `[stated]` (2026-08-01). No code yet — this is the plan.
 
+`EDITOR_INVENTORY.md` is the companion gap list: a full audit of what the editor
+cannot do and what it does that loses work, sized and evidenced, with its own
+six questions for the designer. This doc stays the record for the editor's
+`[stated]`/`[ratified]` decisions and owns the milestones; the inventory feeds
+M0 and M4 and re-tags nothing here.
+
 ## Questions for the designer
 
 Asked in-session on 2026-08-01. **Q1 is closed**: the designer proposed the
