@@ -151,6 +151,10 @@ Four things concentrate the risk:
    ladders.** `verbKind` was made the one owner and has two consumers; the
    others have already drifted, and one of them (`ringsAtBodies`) silently omits
    `pull` — so arming Pull Over draws no affordance at all (§1.7).
+   **Two of the five are now collapsed** (`ringsAtBodies` is derived,
+   `drawTargets` dispatches on `verbSides`) — see §1.7. The remaining
+   hand-written ladders are `handleTileClick`'s, `handleEnemyClick`'s nine
+   inline arms, and `main.js`'s `attackOrConfront`.
 3. **The anti-stall contract is weaker than the code's own comments claim.**
    `combat-ai.js` documents at length why a unit must never target somebody it
    cannot fight — and then computes engageability with a test that cannot detect
@@ -259,6 +263,23 @@ have a `pull` arm, and so does `enemyRingOk`; neither is reachable, because
 promise — on the one verb whose whole geometry is "be on the far side". Two
 live-looking branches are dead. This is exactly the drift TODO.md Phase 5 says to
 watch for, and it has already happened.
+
+**FIXED, and the second classifier is gone with it.** `ringsAtBodies` is now
+*derived* — `BODY_KINDS.has(verbKind(a, range))` — so a body-facing verb cannot
+be added to one classifier and forgotten in the other. `drawTargets` dispatches
+its whole ladder (zone / summon / cover / ally / bodies) on one
+`verbSides(a, range)` call instead of re-deciding in a different order. Both
+dead branches are live again: the pull's ring and its `REACH.PULL` circle draw.
+Two arms were added to `verbKind` on the way, because "no arm matched, call it
+melee" was quietly classifying them: `stance` (never armed, but it should not
+be one line away from a target ring) and `mobility`, which splits by who it
+points at — a swap reaches for a teammate, a dash reaches for the floor.
+The `[proposed]` shape of Q3's answer landed here too: `verbSides` returns
+`{ allies, enemies, ground }` rather than a second kind, because the purge is
+genuinely two-sided and a single string cannot say so. Five new unit tests,
+one of which asserts the derivation property itself over every verb shape at
+two ranges, so the two cannot drift apart again. Verified by `demolition.spec`'s
+"Pull Over hauls a crouched coworker over their cover".
 
 **1.8 `combat.js:3514` — a refused click costs you your cover for free.**
 `breakCrouch(active)` is the *first* statement in `walkActive`, which then returns

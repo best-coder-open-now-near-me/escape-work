@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  enemyRingOk, ringsAtBodies, verbKind, toppleRings, partitionRings, breakRings,
+  enemyRingOk, ringsAtBodies, verbKind, verbSides, toppleRings, partitionRings, breakRings,
 } from '../../src/combat-targeting.js';
 
 // `min`/`max` are what make an attack a thing that can break furniture down
@@ -198,4 +198,73 @@ test('the shove keeps its own branch even holding a ranged weapon', () => {
   // A shove is anatomy, not equipment: it must not become a thrown verb
   // because the character happens to be carrying a staple gun.
   assert.equal(verbKind(SHOVE, 6), 'shove');
+});
+
+// --- one owner, no second ladder ---------------------------------------------
+
+test('every body-facing verb rings at bodies - Pull Over included', () => {
+  // The regression this collapse exists to close. `ringsAtBodies` was a SECOND
+  // hand-written ladder (attack || shove || isControl || isPurge) that omitted
+  // `pull`, and drawTargets gates the whole body pass on it - so arming Pull
+  // Over drew no ring, no reach circle, nothing, while enemyRingOk's pull arm
+  // sat live and unreachable (REVIEW.md 2026-08-02 section 1.7).
+  assert.equal(ringsAtBodies(PULL), true);
+  assert.equal(ringsAtBodies(SWING), true);
+  assert.equal(ringsAtBodies(SWING, 5), true);
+  assert.equal(ringsAtBodies(SHOVE), true);
+  assert.equal(ringsAtBodies(THROWN_CONTROL, 0), true);
+  assert.equal(ringsAtBodies(TOUCH_CONTROL, 0), true);
+  assert.equal(ringsAtBodies({ type: 'attack', ap: 2, cone: { arc: 60 } }), true);
+});
+
+test('ground and friend verbs do NOT ring at bodies', () => {
+  assert.equal(ringsAtBodies({ type: 'zone', ap: 2 }), false);
+  assert.equal(ringsAtBodies({ type: 'summon', ap: 2 }), false);
+  assert.equal(ringsAtBodies({ type: 'cover', ap: 1 }), false);
+  assert.equal(ringsAtBodies({ type: 'buff', ap: 2 }), false);
+  assert.equal(ringsAtBodies({ type: 'stance', ap: 1 }), false);
+  assert.equal(ringsAtBodies(null), false);
+});
+
+test('ringsAtBodies is DERIVED from verbKind, not a parallel opinion', () => {
+  // The property that keeps them from drifting again: for every shape of verb,
+  // the body gate agrees with the branch the classifier picked. If somebody
+  // adds a kind to one and forgets the other, this fails.
+  const BODY = new Set(['cone', 'control', 'shove', 'pull', 'ranged', 'melee']);
+  const shapes = [
+    SWING, THROW, SHOVE, PULL, THROWN_CONTROL, TOUCH_CONTROL, null,
+    { type: 'cover', ap: 1 }, { type: 'summon', ap: 2 }, { type: 'zone', ap: 2 },
+    { type: 'buff', ap: 2 }, { type: 'stance', ap: 1 }, { type: 'purge', ap: 2 },
+    { type: 'mobility', ap: 2, mode: 'dash' },
+    { type: 'attack', ap: 2, cone: { arc: 60 } },
+  ];
+  for (const a of shapes) {
+    for (const range of [0, 5]) {
+      assert.equal(ringsAtBodies(a, range), BODY.has(verbKind(a, range)),
+        `body gate disagrees with verbKind for ${JSON.stringify(a)} at range ${range}`);
+    }
+  }
+});
+
+test('sides() says which HALF of the board a verb points at', () => {
+  // The question the click was answering by proxy ("does it carry a payload"),
+  // which is how an HR buff came to resolve on a coworker (section 1.3).
+  const buff = { type: 'buff', ap: 2, applies: 'commended' };
+  assert.deepEqual(
+    { a: verbSides(buff).allies, e: verbSides(buff).enemies },
+    { a: true, e: false }, 'a buff points at friends only');
+  assert.deepEqual(
+    { a: verbSides(SWING).allies, e: verbSides(SWING).enemies },
+    { a: false, e: true }, 'a swing points at coworkers only');
+});
+
+test('a purge points at BOTH halves, and keeps its body branch', () => {
+  // TODO.md settled that reboot targets anything - self, ally, enemy, props -
+  // so a single-string kind cannot describe it. It stays body-facing AND
+  // ally-facing, which is why `sides` is a pair of booleans.
+  const purge = { type: 'purge', ap: 2, purge: true };
+  const s = verbSides(purge);
+  assert.equal(s.allies, true);
+  assert.equal(s.enemies, true);
+  assert.equal(ringsAtBodies(purge), true);
 });

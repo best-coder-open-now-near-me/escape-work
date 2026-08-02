@@ -37,7 +37,7 @@ import {
   aiCrouchCovered, chooseBeat, lineWeights, aiSupportPlan,
 } from './combat-ai.js';
 import {
-  enemyRingOk, ringsAtBodies, verbKind, toppleRings, partitionRings, breakRings,
+  enemyRingOk, verbKind, verbSides, toppleRings, partitionRings, breakRings,
 } from './combat-targeting.js';
 import { summonSpotProblem as spotProblem } from './summon-rules.js';
 import {
@@ -1461,10 +1461,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // (including when no verb previews at all).
     if (a?.type !== 'cover') coverEase = null;
     if (!id) return;
+    // ONE classifier for the whole pass (combat-targeting.verbSides). This
+    // ladder used to be hand-written here in a different order from
+    // `verbKind`'s, which is how `pull` came to be missing from the body gate
+    // while `enemyRingOk` carried a live pull arm nothing could reach.
+    const sides = verbSides(a, rangeOf(id));
     // A zone rings the tiles it would actually cover - the same list the click
     // paints (zoneCells), so a tile that shows a ring is a tile that gets the
     // surface. Red on the aim point alone when the placement itself is refused.
-    if (isZone(a)) {
+    if (sides.kind === 'zone') {
       if (!armed || !aimPoint) return;
       // The exact aim point - the rings must show the same disc the click
       // lays (DEGRID M6).
@@ -1483,7 +1488,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // A summon rings the tiles its employees would actually land on (green),
     // or the aimed tile alone in red when the spot is unusable - so "where do
     // they go?" is answered before the AP is spent.
-    if (a.type === 'summon') {
+    if (sides.kind === 'summon') {
       if (!armed || !aimPoint) return;
       const tx = Math.round(aimPoint.x);
       const tz = Math.round(aimPoint.z);
@@ -1499,7 +1504,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // which shots you are safe from - was chosen for you and never shown.
     // Now the ring is where you go and the bars are what covers you, so a
     // corner reads as a corner and you can see the open angle you are leaving.
-    if (a.type === 'cover') {
+    if (sides.kind === 'cover') {
       if (!armed || !aimPoint) { coverEase = null; return; }
       const tx = Math.round(aimPoint.x);
       const tz = Math.round(aimPoint.z);
@@ -1531,19 +1536,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // land on right now, red on the ones out of range, out of line, or who
     // would get nothing from it. Same rule the click runs (buffProblem), so a
     // green ring is a promise.
-    if (aimsAtAlly(a)) {
+    if (sides.allies) {
       if (!armed) return; // never auto-armed - only shown while deliberately aiming
       for (const m of friendlies()) {
         if (!m.actor?.entity) continue;
         const pos = m.actor.entity.getPosition();
         drawRing(pos.x, pos.z, TARGET_R, allyProblemFor(id, m) ? PREVIEW_FAR : PREVIEW_OK);
       }
-      // An ANY-target verb keeps going and rings the other half too. Returning
-      // here would ring only colleagues while the click still resolved on
-      // coworkers - the affordance describing half the verb.
-      if (!aimsAtAnyone(a)) return;
+      // An ANY-target verb keeps going and rings the other half too (the
+      // purge). Returning here would ring only colleagues while the click
+      // still resolved on coworkers - the affordance describing half the verb.
+      // The gate below is that test, so it does not need repeating here.
     }
-    if (!ringsAtBodies(a)) return;
+    if (!sides.enemies) return;
     if (a.cone) {
       const test = aimPoint && coneTest(a, aimPoint.x, aimPoint.z);
       if (test) {

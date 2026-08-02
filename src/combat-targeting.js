@@ -13,7 +13,10 @@
 // facts a given verb actually consults, and in what order. drawTargets keeps
 // the drawing.
 
-import { isControl, controlIsRanged, isPull, isPurge, isZone, aimsAtProps, isBreakable } from './powers.js';
+import {
+  isControl, controlIsRanged, isPull, isPurge, isZone, aimsAtProps, isBreakable,
+  isStance, isMobility, aimsAtAlly, aimsAtAnyone,
+} from './powers.js';
 import { ORTHO } from './combat-geometry.js';
 
 // WHICH branch a verb aimed at a body takes. One classifier, read by the rings
@@ -34,11 +37,46 @@ export function verbKind(a, range = 0) {
   if (a.cone) return 'cone';
   if (a.type === 'summon') return 'summon';
   if (isZone(a)) return 'zone';
+  // A stance is never armed (it is an instant self-cast behind a confirm
+  // click), but it has a name here so that "no arm matched, call it melee"
+  // can never quietly hand one a target ring.
+  if (isStance(a)) return 'stance';
+  // Mobility splits by who it points at: a swap reaches for a teammate, a dash
+  // reaches for the floor. Both used to fall through to 'melee', which was
+  // harmless only because `ringsAtBodies` refused them on a different test.
+  if (isMobility(a)) return aimsAtAlly(a) ? 'ally' : 'mobility';
+  // The friend-facing verbs - buffs, and the ally-mode mobility above. A PURGE
+  // is deliberately excluded: it aims at both halves of the board (Reboot
+  // power-cycles a colleague, a coworker or you), so it keeps its body-facing
+  // kind and `sides()` below is what says it also rings friends.
+  if (aimsAtAlly(a) && !aimsAtAnyone(a)) return 'ally';
   if (isControl(a) && controlIsRanged(a)) return 'control';
   if (a.type === 'shove') return 'shove';
   if (isPull(a)) return 'pull';
   if (range) return 'ranged';
   return 'melee';
+}
+
+// The kinds that put a ring on a BODY. Everything else rings ground, friends,
+// or nothing, and has its own branch before the body pass is reached.
+const BODY_KINDS = new Set(['cone', 'control', 'shove', 'pull', 'ranged', 'melee']);
+
+// Which SIDES a verb points at. One verb can point at both - that is what the
+// purge is - so this is a pair of booleans rather than a second kind.
+//
+// It exists because "does this verb point at this half of the board" was being
+// answered by proxy at every call site: by `a.type` ladders in the rings, by
+// "does it carry a payload" at the click, by `aimsAtAlly` in the hover. Those
+// answers disagreed, which is how an HR buff came to resolve on a coworker
+// (REVIEW.md 2026-08-02 §1.3). Ask here instead.
+export function verbSides(a, range = 0) {
+  const kind = verbKind(a, range);
+  return {
+    kind,
+    allies: kind === 'ally' || aimsAtAlly(a),
+    enemies: BODY_KINDS.has(kind),
+    ground: kind === 'zone' || kind === 'summon' || kind === 'cover' || kind === 'mobility',
+  };
 }
 
 // Is the ring for `en` green? `q` is the leaf facts, all already answered:
@@ -85,8 +123,16 @@ export function enemyRingOk(a, q) {
 // Which verbs ring anything at a BODY at all. Everything else (a zone, a
 // summon, a cover aim, a buff) rings ground or friends and is handled by its
 // own branch before this one is reached.
-export function ringsAtBodies(a) {
-  return a.type === 'attack' || a.type === 'shove' || isControl(a) || isPurge(a);
+//
+// This was a SECOND hand-written `a.type` ladder - `attack || shove ||
+// isControl || isPurge` - and it silently omitted `pull`. Because `drawTargets`
+// gates the whole body pass on it, arming Pull Over drew no ring, no reach
+// circle and no affordance of any kind, while `verbKind` and `enemyRingOk`
+// both carried live `pull` arms that could never be reached (REVIEW.md
+// 2026-08-02 §1.7). It is now derived from `verbKind`, so a new body-facing
+// verb cannot be added to one classifier and forgotten in the other.
+export function ringsAtBodies(a, range = 0) {
+  return BODY_KINDS.has(verbKind(a, range));
 }
 
 // The prop tiles a shove would ring: the eight neighbours, each with the plan
