@@ -6,7 +6,7 @@ import { statusList } from '../statuses.js';
 import { pendingPoints } from '../stats.js';
 import {
   PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, registerHudButton, layoutHudRail,
-  actionDock, refreshDockVisibility,
+  actionDock, refreshDockVisibility, esc,
 } from './chrome.js';
 
 // --- player status effects ----------------------------------------------------
@@ -93,7 +93,7 @@ export function updateStatsHud(sheet, portraitUrl = undefined) {
       </span>
       <span style="display:block; min-width:172px;">
         <span style="display:flex; justify-content:space-between; font-size:12px; opacity:.85;">
-          <b style="letter-spacing:.5px;">${sheet.name || ''}</b><span>Lv ${sheet.level}</span>
+          <b style="letter-spacing:.5px;">${esc(sheet.name)}</b><span>Lv ${sheet.level}</span>
         </span>
         <span style="display:block; position:relative; height:13px; margin:3px 0 2px;
           background:#241f28; border:1px solid #3a3a52; border-radius:7px; overflow:hidden;">
@@ -423,7 +423,7 @@ export function createPartyBar({ onSelect, onLevelUp, onFocus }) {
       });
       slot.innerHTML = `
         <div style="display:flex; justify-content:space-between; gap:8px;">
-          <span style="font-weight:${i === party.active ? '700' : '400'};">${s.name}</span>
+          <span style="font-weight:${i === party.active ? '700' : '400'};">${esc(s.name)}</span>
           <span style="opacity:.8">${down ? 'DOWN' : `${s.hp}/${s.maxHp}${ap}`}</span>
         </div>
         <div style="height:4px; margin-top:4px; background:#1a1a28; border-radius:2px;">

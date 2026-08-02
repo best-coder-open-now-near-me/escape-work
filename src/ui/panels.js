@@ -3,7 +3,8 @@
 // view-model and callbacks, and it renders and reports clicks. None of them
 // knows a rule.
 import { EQUIP_SLOTS, pendingPoints } from '../stats.js';
-import { PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, registerHudButton, layoutHudRail, railHooks } from './chrome.js';
+import { PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, registerHudButton, layoutHudRail, railHooks, esc,
+} from './chrome.js';
 
 // --- inventory panel ----------------------------------------------------------
 // The pockets. Toggled with I or the bag button. Rows come straight from the
@@ -252,7 +253,7 @@ export function createCharacterSheet({ onLevelUp } = {}) {
       : '<div style="opacity:.45;">None yet</div>';
     host.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
-        <div style="font-weight:700; color:#8adf76;">${vm.name}</div>
+        <div style="font-weight:700; color:#8adf76;">${esc(vm.name)}</div>
         <button id="charsheet-close" style="border:none; background:none; color:#aaa;
           font-size:15px; cursor:pointer; line-height:1;">✕</button></div>
       <div style="opacity:.7; font-size:12px; margin-bottom:8px;">${vm.className} · Level ${vm.level}</div>

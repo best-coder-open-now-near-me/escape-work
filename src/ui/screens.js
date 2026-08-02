@@ -2,7 +2,8 @@
 // lose overlays, the boot-time class picker, the game menu and the playtest
 // badge. Each owns the frame it is in, so they share the `overlay` shell and
 // its button below rather than each inventing one.
-import { BUTTON_CHROME } from './chrome.js';
+import { BUTTON_CHROME, esc,
+} from './chrome.js';
 import { TALENTS, STARTING_TALENT_BY_CLASS } from '../data/talents.js';
 
 // --- end-of-game overlays ----------------------------------------------------
@@ -28,8 +29,7 @@ function overlay(id, inner) {
 // rendered on the level-up card, the party bar and the résumé. Escaping at the
 // interpolation site means the rule holds wherever the string came from, rather
 // than depending on every future caller having sanitised it first.
-const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
-  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// (moved to chrome.js so every ui/ module can reach it - see the note there)
 
 const button = (id, label) =>
   `<button id="${id}" style="padding:10px 26px; border-radius:8px; border:1px solid #3a3a52;

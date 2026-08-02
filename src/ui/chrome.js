@@ -117,3 +117,17 @@ export function addVignette() {
   });
   document.body.appendChild(v);
 }
+
+// Escape a value before it is interpolated into an `innerHTML` template.
+//
+// It lives HERE, not in screens.js where it started, because every `ui/` module
+// imports chrome.js and none of them could reach it there - so the rule held on
+// the résumé and the level-up card and nowhere else, while a player-typed name
+// went in raw on four other surfaces (REVIEW.md, still open at the 2026-08-02
+// pass). `cleanName` only collapses whitespace and clamps length, so
+// `<svg onload=...>` fits inside NAME_MAX and survives to the HUD intact.
+//
+// Escaping at the INTERPOLATION site means the rule holds wherever the string
+// came from - which now includes a shared cloud store, not just this keyboard.
+export const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

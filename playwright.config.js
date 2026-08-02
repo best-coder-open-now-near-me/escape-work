@@ -16,8 +16,17 @@ export default defineConfig({
   maxFailures: process.env.CI ? 3 : 0,
   // NB: billing is runner WALL-CLOCK, so in-runner parallelism is free money -
   // but these tests are CPU-bound on software GL, and over-subscribing the
-  // runner's 4 vCPUs trades flakes (and re-runs) for the time it saves. Left at
-  // Playwright's default; raise deliberately, with a flake check.
+  // runner's 4 vCPUs trades flakes (and re-runs) for the time it saves.
+  //
+  // That warning was written before anyone measured it, and the measurement is
+  // in: Playwright's default (cores/2 = 2 on a 4-vCPU box) manufactures
+  // failures. A six-file run reported two cover.spec crouch failures that both
+  // pass solo, and a near-identical contention run earlier reported fourteen.
+  // Every one of them read as a regression and none were. One worker is the
+  // only configuration that produces a signal worth acting on here, and a red
+  // run you cannot trust costs far more than the wall-clock it saved.
+  // Raise it only with a flake check behind it.
+  workers: 1,
   // A retry turns a flake green, so make the flakes visible: 'list' prints
   // every retried test, and the HTML report lands in the CI artifact next to
   // the traces below. Without these, a failure on CI left nothing to debug -
