@@ -72,10 +72,10 @@ How to read it:
 ### MEDIUM
 
 - [x] **Q025** `src/pathfinding.js:394` [bug] **(carried)** roundBends' arc-rejection fallback emits an unvalidated leg — reproduced: a smoothed walk crosses a partition<br>      ↳ **NOT REPRODUCIBLE — closed as refuted, with the method.** The reasoning is sound in the abstract (`p1` lies on `a->b`, so a failed `a->p1` check condemns `a->b`, and the fallback pushed `b` regardless) but the case does not arise. Instrumented `roundBends` over 200k random 7x7 maps WITH partition edges in play: **18,974 arc rejections, 0** where the straight leg `a->b` was also illegal. Without edges the branch never fires at all. A guard was written, measured to change no outcome, and reverted rather than left as complexity in a hot path. What DID land is the test gap underneath it (Q0xx): `pathfinding.test.js` asserted only that rounded-bend VERTICES sit on open floor, never the legs between them — three tests now sample the segments.
-- [ ] **Q026** `/home/user/escape-work/ARCHITECTURE.md:114` [doc-drift] **(carried)** ARCHITECTURE.md's module map describes `combat-ai.js` as the old six-beat ladder; the shipped ladder has twelve arms
-- [ ] **Q027** `/home/user/escape-work/ARCHITECTURE.md:518` [doc-drift] **(carried)** ARCHITECTURE.md's debug-surface note claims damage and initiative roll `Math.random` and that a fight is never fully deterministic, and omits the new `bout` getter
-- [ ] **Q028** `/home/user/escape-work/TODO.md:823` [doc-drift] **(carried)** TODO.md Phase 8 is still headed "BLOCKED" with four checkboxes whose fixes are live in the code
-- [ ] **Q029** `/home/user/escape-work/TODO.md:363` [doc-drift] **(carried)** TODO.md's P1 "Enemy AI paces between two tiles" points at `combat.js:96` and calls the self-path exemption dead code, but the fix lives and is tested in `combat-ai.js`
+- [x] **Q026** `/home/user/escape-work/ARCHITECTURE.md:114` [doc-drift] **(carried)** ARCHITECTURE.md's module map describes `combat-ai.js` as the old six-beat ladder; the shipped ladder has twelve arms<br>      ↳ DONE — ARCHITECTURE.md now lists all twelve arms and names beatStateFrom
+- [x] **Q027** `/home/user/escape-work/ARCHITECTURE.md:518` [doc-drift] **(carried)** ARCHITECTURE.md's debug-surface note claims damage and initiative roll `Math.random` and that a fight is never fully deterministic, and omits the new `bout` getter<br>      ↳ DONE — ARCHITECTURE.md now says a seeded fight DOES replay, and documents `bout`
+- [x] **Q028** `/home/user/escape-work/TODO.md:823` [doc-drift] **(carried)** TODO.md Phase 8 is still headed "BLOCKED" with four checkboxes whose fixes are live in the code<br>      ↳ DONE — Phase 8 re-headed SHIPPED; five of six legs ticked, the death path left open
+- [x] **Q029** `/home/user/escape-work/TODO.md:363` [doc-drift] **(carried)** TODO.md's P1 "Enemy AI paces between two tiles" points at `combat.js:96` and calls the self-path exemption dead code, but the fix lives and is tested in `combat-ai.js`<br>      ↳ DONE — the P1 entry is ticked and corrected - the exemption is live and tested
 - [ ] **Q030** `src/combat.js:574` [duplication] **(carried)** `hazardKind`/`surfaceImpactKind` are still two hardcoded surface-id→FX maps in two layers, and this branch added a fifth call site to one of them
 - [ ] **Q031** `src/hotbar-model.js:35` [duplication] **(carried)** The universal-action list `['shove','take-cover','pull']` is written out verbatim in three places
 - [ ] **Q032** `src/main.js:2716` [duplication] **(carried)** Four hand-written per-tile step handlers across three layers, under a main.js section header that claims the rules are "written once"
@@ -833,18 +833,19 @@ killing anyone, and therefore the correct play every time.
       (`combat.js:819`).
 - [ ] Clear `moveStart` when a deliberate walk ends so dashes stop provoking
       opportunity attacks after any prior walk (`combat.js:1557`).
-- [ ] **Enemy AI paces between two tiles instead of attacking**
-      (`standTilePath`, `combat.js:96`). It can never select the tile the unit
-      is already standing on: `findEnemyPath` to the unit's own tile returns
-      null (`findPath` rejects a goal that fails `isWalkable`, and main.js's
-      `isWalkable` folds in `enemyAt`), and the `p.length > 1` filter would
-      drop the length-1 self-path anyway — so line 101's explicit
-      `!(unit.x === tx && unit.z === tz)` exemption is dead. Any unit that is
-      adjacent but not in reach is therefore always sent to a *different*
-      adjacent tile, and the same logic sends it back next turn. Verified
-      oscillating (3,2)→(3,3)→(3,2)… forever. The player-side twin
-      `routeBeside` (`combat.js:2094`) already fixes exactly this and carries a
-      comment describing the same symptom — port that special case.
+- [x] **Enemy AI paces between two tiles instead of attacking** — **FIXED, and
+      this entry was stale.** It cited `combat.js:96` and called the self-tile
+      exemption dead code. `standTilePath` moved to `combat-ai.js:97` when the
+      AI was carved out, the exemption is very much alive - it returns the
+      degenerate self-path `[[gx,gz],[gx,gz]]`, which is what hands the advance
+      its in-place shuffle branch - and `combat-ai.js` carries the pacing bug's
+      account in its own header. It is unit-tested (`combat-ai.test.js`, the
+      anti-stall block), which is why "port the `routeBeside` special case" was
+      already done by the time anyone read this.
+      **What IS still true nearby**, and is queued separately: the self-path
+      keeps absolute priority, and until 2026-08-02 it did so without asking
+      whether a swing from that tile could legally land - so the tier admitted
+      members the unit provably could not hit. That is now `canSwingFrom`.
 - [ ] **Ranged walk-in asks a melee question** (`combat.js:2020-2056`): the
       ranged-weapon path routes via `routeBeside(en)` (a tile *beside* the
       enemy) when the requirement is any tile within `range` with line of
@@ -1293,9 +1294,16 @@ Still open, and genuinely optional:
       `fx.FEET_Y`/`HEAD_Y`/`groundDecal`, `hover.HL`, `pathfinding.BODY_RADIUS`,
       `looting.INV_CAP`), `snack-machine` category.
 
-## Phase 8 — Charm / Dominate (BLOCKED — real blocker found, see below)
+## Phase 8 — Charm / Dominate — SHIPPED (one leg still open)
 
-Attempted and deliberately backed out rather than shipped half-working. What was
+**This section was stale and is corrected here.** It was headed BLOCKED with six
+unticked boxes long after charm shipped - `turns.replace` (`turn-order.js:311`)
+is the slot re-teaming the blocker below says does not exist, and five of the six
+legs are live in the code. Left in place rather than rewritten, because the
+account of what was learned is still worth reading; the boxes now say what is
+actually true.
+
+The account below describes the FIRST attempt, which was backed out. What was
 learned is worth more than the code was, so it is recorded precisely.
 
 **What turned out to be easy.** Charm needs no allegiance flag. Sides are
@@ -1315,21 +1323,33 @@ DELETES the coworker instead of handing them back. Both are worse than not
 having the feature.
 
 **What it actually needs, in order:**
-- [ ] `turn-order.js` grows slot removal, or slot re-teaming — moving a slot
+- [x] `turn-order.js` grows slot removal, or slot re-teaming — moving a slot
       between `player` and `enemy` while preserving its initiative roll, so a
       borrowed unit acts once per round on its own roll, on your side.
-- [ ] `expireSummon` splits: a summon is DESTROYED at the end of its lifetime,
-      a borrowed coworker is RETURNED. They share a clock and must not share an
+      **DONE** — `turns.replace` (`turn-order.js:311`), swapping the slot in
+      place so the same body acts at the same moment; only whose it is changes.
+- [x] `expireSummon` splits: a summon is DESTROYED at the end of its lifetime,
+      a borrowed coworker is RETURNED. **DONE** — `releaseCharm`
+      (`combat.js:170`), called from the lapse (`:4015`) and the fight's end
+      (`:1972`). They share a clock and must not share an
       ending. (Sharing `summonTurns` is otherwise right — one clock, nothing to
       keep in step.)
-- [ ] An enemy def is not a class block: it carries `attacks` (inline damage
+- [x] An enemy def is not a class block: it carries `attacks` (inline damage
       rolls the AI reads) where a sheet needs `actions` (ids the bar renders).
       A borrowed body was given the universal verbs (`punch`, `shove`), which is
       defensible — you are driving somebody you do not know — but it is a design
       decision that should be made deliberately rather than inherited from a
-      shape mismatch.
-- [ ] `livingParty` must exclude the borrowed, or a wiped party stays "alive"
-      while you drive somebody else's body.
-- [ ] Release on all three paths: lapse, victory, and death mid-session.
+      shape mismatch. **DONE, and made deliberately** — `charmUnit` synthesises
+      `actions: ['punch', 'shove']` with the reasoning written at the site.
+- [x] `livingParty` must exclude the borrowed, or a wiped party stays "alive"
+      while you drive somebody else's body. **DONE** — `!m.isSummon &&
+      !m.isCharmed`.
+- [ ] Release on all three paths: lapse, victory, and **death mid-session**.
+      Two of three are live (`combat.js:4015`, `:1972`); the DEATH path is the
+      one still missing, and it is the residual defect behind the finding this
+      review first mis-filed as a critical soft-lock. It is not a soft-lock -
+      the body stays clickable and re-killable and `victory()` fires normally -
+      but a toppled corpse that is secretly a full-HP hostile, drawing no target
+      ring, is a real medium. See THE QUEUE.
 - [ ] Edges to pin: charm the last living hostile; charm a unit that is itself
       a summon; charm a unit holding overwatch; save/load mid-charm.

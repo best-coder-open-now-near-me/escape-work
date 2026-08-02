@@ -112,9 +112,16 @@ src/
                      plan returns the shape the perform half needs or the
                      reason it refuses, never both                (pure)
   combat-ai.js       What an AI unit DECIDES: who to fight, where to stand,
-                     and `chooseBeat` - the ladder of beats a turn walks
-                     (reinforce, topple, swing, close, tuck in, pass)
-                     (pure logic)
+                     and `chooseBeat` - the ladder of beats a turn walks, in
+                     the order that IS the design: support, summon, pull,
+                     topple, shove, attack, entrench, shoot, advance, break,
+                     crouch, pass. Each beat outranks what it strictly beats
+                     (topple sits above shove because it is shove-plus;
+                     entrench must precede shoot or a shooter never crouches
+                     first). `beatStateFrom` assembles the ladder's input from
+                     plain values, so the AP gating is testable; a `refused`
+                     set masks a beat whose doing spent nothing, which is what
+                     makes a turn always terminate.        (pure logic)
   combat-targeting.js What the target rings PROMISE, and `verbKind` - the
                      ONE classifier saying which branch a body-aimed verb
                      takes. The rings and the click both dispatch on it, so
@@ -514,10 +521,13 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   carries deliberate LIVE setters god mode and the specs drive: `ap`,
   `defended`, `usesLeft` (edit in place, then `refresh()`), `applyStatus`,
   `summonAlly(archetypeId, n)`, and the determinism pins `forceHit` /
-  `forceProc` (`true` always, `false` never, `null` rolls honestly). NOTE
-  those pins cover the hit and proc rolls only - damage and initiative still
-  roll on `Math.random`, so a fight is never fully deterministic. Keep all of
-  it in sync when adding state. `window.__god` is the
+  `forceProc` (`true` always, `false` never, `null` rolls honestly), and
+  `bout` - the sparring tally (rounds, AI damage landed, the chosen-beat
+  histogram, reactions fired) that `?seed=` exists to make legible. A seeded
+  fight DOES replay: damage rolls through `rand`/`randWith(rng, ...)` and
+  initiative through `initRng`, both off the one injected stream, so a seed
+  reproduces a whole fight rather than most of one. Keep all of it in sync
+  when adding state. `window.__god` is the
   exception: it hands out LIVE references and mutators for the god-mode panel
   (god.js) to edit runtime state in place - including the party
   (`__god.party`, `switchTo`, `reviveMember`, `recruit`; the panel's Player
