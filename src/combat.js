@@ -4822,8 +4822,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // and the ladder falls through to the plain shot.
       if (tryAiCrouch(unit, target)) { acting.wait = 0.5; return; }
       refused.add('entrench');
-      acting.wait = 0.05;
-      return;
+      return; // nothing animated - fall to the shot immediately
     }
     if (beat === 'shoot') {
       aiShoot(unit, target, shootable);
@@ -4838,14 +4837,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // and let the ladder re-run - the crouch this used to special-case now
       // arrives by ladder order (AI_PLAN M4's generalized tail).
       refused.add('advance');
-      acting.wait = 0.1;
-      return;
+      return; // no animation happened - re-decide on the next frame, not later
     }
     if (beat === 'crouch') {
       if (tryAiCrouch(unit, target)) { acting.wait = 0.5; return; }
       refused.add('crouch');
-      acting.wait = 0.05;
-      return;
+      return; // nothing animated - fall through immediately
     }
     advanceTurn(); // the pass beat - out of AP or everything refused
   }
