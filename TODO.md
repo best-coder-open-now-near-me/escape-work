@@ -71,7 +71,7 @@ How to read it:
 
 ### MEDIUM
 
-- [ ] **Q025** `src/pathfinding.js:394` [bug] **(carried)** roundBends' arc-rejection fallback emits an unvalidated leg — reproduced: a smoothed walk crosses a partition
+- [x] **Q025** `src/pathfinding.js:394` [bug] **(carried)** roundBends' arc-rejection fallback emits an unvalidated leg — reproduced: a smoothed walk crosses a partition<br>      ↳ **NOT REPRODUCIBLE — closed as refuted, with the method.** The reasoning is sound in the abstract (`p1` lies on `a->b`, so a failed `a->p1` check condemns `a->b`, and the fallback pushed `b` regardless) but the case does not arise. Instrumented `roundBends` over 200k random 7x7 maps WITH partition edges in play: **18,974 arc rejections, 0** where the straight leg `a->b` was also illegal. Without edges the branch never fires at all. A guard was written, measured to change no outcome, and reverted rather than left as complexity in a hot path. What DID land is the test gap underneath it (Q0xx): `pathfinding.test.js` asserted only that rounded-bend VERTICES sit on open floor, never the legs between them — three tests now sample the segments.
 - [ ] **Q026** `/home/user/escape-work/ARCHITECTURE.md:114` [doc-drift] **(carried)** ARCHITECTURE.md's module map describes `combat-ai.js` as the old six-beat ladder; the shipped ladder has twelve arms
 - [ ] **Q027** `/home/user/escape-work/ARCHITECTURE.md:518` [doc-drift] **(carried)** ARCHITECTURE.md's debug-surface note claims damage and initiative roll `Math.random` and that a fight is never fully deterministic, and omits the new `bout` getter
 - [ ] **Q028** `/home/user/escape-work/TODO.md:823` [doc-drift] **(carried)** TODO.md Phase 8 is still headed "BLOCKED" with four checkboxes whose fixes are live in the code
@@ -175,7 +175,7 @@ How to read it:
 - [ ] **Q126** `tests/unit/levels.test.js:201` [test-gap] No lint requires `leavesTurns` alongside `leaves`, so the permanent-terrain bug can recur silently
 - [ ] **Q127** `tests/unit/levels.test.js:435` [test-gap] The levels lint checks a tiered placement's char against the level's own tiles legend but not against the tile registry's canonical chars
 - [ ] **Q128** `tests/unit/levels.test.js:25` [test-gap] `levels/dev/*.json` is registered, playable from the floor-select menu, and covered by none of the eight per-file level lints
-- [ ] **Q129** `tests/unit/pathfinding.test.js:283` [test-gap] Test asserts only that rounded-bend VERTICES are legal, never the legs between them - which is the property roundBends actually breaks
+- [x] **Q129** `tests/unit/pathfinding.test.js:283` [test-gap] Test asserts only that rounded-bend VERTICES are legal, never the legs between them - which is the property roundBends actually breaks<br>      ↳ DONE — three tests sample every LEG of a smoothed walk, not just its vertices
 
 ### LOW
 

@@ -479,3 +479,55 @@ test('trimToFirst honors a long range - a straw does not walk to the elbow', () 
   const near = trimToFirst(path, (x) => x <= 1.5);
   assert.ok(far[far.length - 1][0] > near[near.length - 1][0] + 4);
 });
+
+// --- the LEGS, not just the vertices ------------------------------------------
+// The corner test above walks the output's VERTICES and asserts each sits on
+// open floor. That is not the property the smoother has to hold: a walk is the
+// segments BETWEEN the points, and roundBends' rejection path could emit a leg
+// it had already proved illegal (`p1` lies on a->b, so a failed a->p1 check
+// condemns a->b, and the fallback pushed `b` regardless). Every vertex was
+// legal; the line between two of them crossed a partition.
+
+// Sample a segment densely and assert every sample is somewhere a body may be.
+const legClear = (walk, w, steps = 24) => {
+  for (let i = 1; i < walk.length; i++) {
+    const [ax, az] = walk[i - 1];
+    const [bx, bz] = walk[i];
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps;
+      const x = ax + (bx - ax) * t;
+      const z = az + (bz - az) * t;
+      if (!w(Math.round(x), Math.round(z))) {
+        return `leg ${i} (${ax},${az})->(${bx},${bz}) passes through (${Math.round(x)},${Math.round(z)})`;
+      }
+    }
+  }
+  return null;
+};
+
+test('every LEG of a smoothed walk stays inside the corridor, not just the vertices', () => {
+  // The same L-corridor the vertex test uses, walked as segments.
+  const w = (x, z) => (x === 1 && z >= 0 && z <= 2) || (z === 2 && x >= 1 && x <= 3);
+  const s = smoothPath(w, [[1, 0], [1, 1], [1, 2], [2, 2], [3, 2]]);
+  assert.equal(legClear(s, w), null);
+});
+
+test('a chain of tight bends never emits a leg through a wall', () => {
+  // A zig-zag: consecutive bends, so each arc moves the point the NEXT leg
+  // leaves from - which is the case that could strand the walk off the
+  // validated polyline. Every leg must still be clear.
+  const open = new Set(['1,1', '2,1', '2,2', '3,2', '3,3', '4,3']);
+  const w = (x, z) => open.has(`${x},${z}`);
+  const s = smoothPath(w, [[1, 1], [2, 1], [2, 2], [3, 2], [3, 3], [4, 3]]);
+  assert.equal(legClear(s, w), null);
+  assert.deepEqual(s[0], [1, 1]);
+  assert.deepEqual(s[s.length - 1], [4, 3]);
+});
+
+test('a corridor one tile wide is walked without leaving it', () => {
+  // The narrowest case: nothing to round into, so every bend must fall back to
+  // the sharp turn rather than a curve that clips the wall.
+  const w = (x, z) => (z === 1 && x >= 0 && x <= 3) || (x === 3 && z >= 1 && z <= 4);
+  const s = smoothPath(w, [[0, 1], [1, 1], [2, 1], [3, 1], [3, 2], [3, 3], [3, 4]]);
+  assert.equal(legClear(s, w), null);
+});
