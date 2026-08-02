@@ -135,6 +135,14 @@ export function standTileRoutes(ux, uz, tx, tz, { isWalkable, findEnemyPath }) {
 // fan pays (the engageMemo lesson: routing is the expensive half). The
 // self-tile short-circuit mirrors the swing field's: already standing on a
 // firing tile is the answer, not a candidate.
+//
+// SINGLE-STOREY, like every body-to-body rule in the game (AI_PLAN's
+// multi-storey section): the scan, the range and the `hasLos` call all
+// measure in the storey plane, which is exactly right while floors.js
+// refuses actors above the ground storey. When bodies go vertical this is
+// the first helper to hear about it - a balcony shooter needs 3D sight and
+// storey-qualified tiles, and the gate belongs here rather than scattered
+// across the callers.
 export function firingTileRoutes(ux, uz, tx, tz, range, { isWalkable, findEnemyPath, hasLos }, cap = 12) {
   const reach = range - AI.RANGE_SLACK;
   const R = Math.ceil(reach);

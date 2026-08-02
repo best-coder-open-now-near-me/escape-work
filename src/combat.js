@@ -2170,7 +2170,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // furniture topple always were.
   const aiEdgeToppleFor = (unit) => aiEdgeTopplePlanShared(unit.x, unit.z, world,
     (x, z) => !!memberAt(x, z));
-  const aiShovePlanFor = (unit) => aiShovePlanShared(unit.x, unit.z, world, memberAt, {
+  // displacePlan needs an `occupied` test the facade does not carry - the
+  // player's shove builds its own too (the two-combatants-stacked trap).
+  // Any standing body blocks the landing, both sides alike.
+  const aiShovePlanFor = (unit) => aiShovePlanShared(unit.x, unit.z, {
+    isWalkable: world.isWalkable,
+    stepOpen: world.stepOpen,
+    occupied: (x, z) => !!unitStandingAt(x, z),
+  }, memberAt, {
     hazardAt: (x, z) => world.enemySurfDamage(x, z) > 0 || world.slipChanceAt(x, z) > 0,
   });
   const aiPullPlanFor = (unit) => aiPullPlanShared(
