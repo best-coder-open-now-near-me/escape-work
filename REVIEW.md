@@ -84,14 +84,18 @@ Fourteen reviewers swept the repo along fixed axes — the new AI code, `combat.
 `main.js`, pure geometry, statuses/surfaces, stats/party/powers, UI,
 rendering/input, persistence/tools, data+levels, the test suite, duplication,
 SOC/god-methods, docs-vs-code — each required to quote real code at real lines and
-to check every claim against REVIEW.md and TODO.md before reporting it. **222
-findings**: 171 new, **51 already recorded** here or in TODO.md.
+to check every claim against REVIEW.md and TODO.md before reporting it. Two
+further passes then asked what the fourteen had missed — one reading the seams
+between their areas, one finding defects by *executing* the pure modules against
+the real registries and the shipped levels. **235 findings**: 184 new, **51
+already recorded** here or in TODO.md.
 
 Honest notes on the method, because the numbers mean less without them:
 
-- **182 of the 222 findings carry a second reviewer's verdict** — one briefed to
-  refute, not to agree. Result: 168 confirmed, 9 plausible-but-unproven,
-  **5 refuted**. The remainder carry their finder's own trace.
+- **222 of the 235 findings carry a second reviewer's verdict** — one briefed to
+  refute, not to agree. Result: 199 confirmed, 15 plausible-but-unproven,
+  **8 refuted**. The 13 without a verdict are the two critics' own findings,
+  which arrived last; every one of those was reproduced by running code.
 - **The verification pass pruned the biggest claim in the pass.** It killed the
   only finding tagged *critical*: the charmed-coworker soft-lock is **not** a
   soft-lock (see §6). Its mechanism was right and its conclusion wrong — the
@@ -102,6 +106,11 @@ Honest notes on the method, because the numbers mean less without them:
   than reading it — §1.1, §1.2, §1.5, §1.7 and §1.12 — and are marked
   **[reproduced]**. That matters most for the items whose verify batch had not
   returned when this was written.
+- **The completeness and runtime critics were worth their cost**, which is the
+  clearest evidence the fourteen-axis sweep was not exhaustive on its own: they
+  added 13 findings the others missed, including two of the highest in this
+  document (§1.15, §1.16) and the observation that §1.6 and §1.16 are the same
+  defect twice. Both critics worked by running code, not reading it.
 - **What the five refutations killed**, so the pattern is visible rather than
   buried: the critical soft-lock (§6); a `covered` doc-block claim whose
   load-bearing half was simply false; a `screenToGround` per-frame allocation;
@@ -132,7 +141,7 @@ while **every `perform` half of every new beat landed inside `startCombat`'s
 closure**, where nothing can reach it. Both bugs that shipped and were fixed on
 this branch were in that layer, and neither landed with a regression test.
 
-Three things concentrate the risk:
+Four things concentrate the risk:
 
 1. **A readiness check with a side effect.** `resolveSummon` *spawns*, and the
    new `support` beat now outranks the beat that pays for it — so HR fields two
@@ -142,7 +151,13 @@ Three things concentrate the risk:
    ladders.** `verbKind` was made the one owner and has two consumers; the
    others have already drifted, and one of them (`ringsAtBodies`) silently omits
    `pull` — so arming Pull Over draws no affordance at all (§1.7).
-3. **Duplication is the dominant maintenance defect, not god methods.** 30 new
+3. **The anti-stall contract is weaker than the code's own comments claim.**
+   `combat-ai.js` documents at length why a unit must never target somebody it
+   cannot fight — and then computes engageability with a test that cannot detect
+   that case (§1.16), while the ranged kit's own field short-circuits before it
+   can reposition off a blocked angle (§1.6). Both were found by running the
+   modules, not reading them.
+4. **Duplication is the dominant maintenance defect, not god methods.** 30 new
    duplication findings, of which the expensive ones are not stylistic: the AI's
    shove, pull and break are each a *second copy* of the player's resolver, and
    each has already lost a rule the original applies.
@@ -296,6 +311,31 @@ throw eats the lose screen and the restart escape with it.
 unpinned — the same class of contract gap as the `occupied` bug this branch
 already fixed once.
 
+**1.15 `main.js:2018` — sneaking survives the floor transition as a ghost, and the
+next floor can never start a fight. [reproduced]**
+`sneak` is closure state that dies with the level; the `sneaking` *status* lives
+on the sheet and is serialized into the campaign save. Take the stairs while
+sneaking and the next floor boots with `sneak === null` and the leader still
+wearing `sneaking` — which `endSneak` cannot clear (it early-returns on `!sneak`),
+and which no sweep can reach. The status suppresses fight triggers, so the floor
+becomes uncontestable. Fix: strip held-mode statuses on serialize, the way
+`normalizeSheet` already drops a retired `rig`/`look`, or re-derive `sneak` from
+the sheets at boot.
+
+**1.16 `combat-ai.js:97` — the AI's "engageable" tier admits members it provably
+cannot hit. [reproduced]**
+`standTilePath`/`standTileRoutes` accept any walkable neighbour of the target that
+has a route, and never ask whether a swing *from that neighbour* is legal
+(`inReach` + `stepOpen`). The player-side twin `combat-geometry.swingPointAt`
+does ask. `combat.js:256` builds `canEngage` from `standTilePath`, so the hard
+engageability TIER — the thing `pickTarget`'s own header says exists precisely so
+a unit never "walks to the wall and swings at nothing, every turn, forever" —
+is computed by a test that cannot detect that case. Reproduced against the real
+modules on a dead-end bay sealed by a partition run: the enemy prefers the sealed
+member over a reachable one. This is the same class of defect as §1.6, and
+together they say the anti-stall contract is weaker than `combat-ai.js`'s
+comments claim.
+
 #### Medium — a representative selection
 
 - **`combat.js:2645` `aiPullMember` drops the hazard-landing damage** `performPull`
@@ -346,6 +386,29 @@ already fixed once.
   refuses unknown attribute names**, leaving free points on the sheet.
 - **`editor.js:400` any resize button silently deletes every row/column past
   `MAX_SIZE`** on a level larger than 40.
+- **`main.js:1865` the fullscreen LEVEL UP modal reopens after every victory for
+  the rest of the run.** `openLevelUps` queues on `pendingPoints` (attr + class)
+  without asking whether a class point can still be *spent*. The Office Drone's
+  track is two 1-cost nodes, bought by level 3; the campaign's total enemy XP
+  (78, computed over both shipped levels) reaches level 4. From there the modal
+  is unspendable and unavoidable.
+- **`party.js:50` a member downed mid-fight earns no XP for the rest of it.**
+  `gainXpAll` filters on `m.sheet.hp > 0` and `awardKill` runs per kill *during*
+  combat; `onWin` then revives at 1 HP. So a companion dropped in round one is
+  skipped for every payout and falls permanently behind — against PARTY_PLAN
+  decision 5, whose stated rationale for the fan-out is "nobody lags".
+- **`turn-order.js:99` the span-end walk can land the pointer on a slot `replace`
+  swapped out.** `advancePastSpan` recomputes indices via `order.indexOf` and
+  skips the `-1` a replaced slot returns; if that slot was the span's highest,
+  `turnPtr = max + 1` lands on its replacement, which then takes an immediate
+  extra turn. Reachable when a charm lapses exactly as its span opens.
+- **`combat.js:341` `billMove` rounds the free-AP deduction**, so with the
+  `freeMoveAp` talent a 0.05-cost move is a fixed point: `roundAp(1 - 0.05)` is
+  1, the allowance never depletes, and nothing bills to real AP either.
+- **`.github/workflows/ci.yml:83` the `[quick]` CI lever is inert on every
+  branch** — it reads `github.event.head_commit.message`, which is null on a
+  `pull_request` event. The same file's header documents this exact defect as the
+  reason `[e2e]` was moved to the PR title; `[quick]` was left on the broken form.
 
 ### 2. Parallel and duplicate implementations
 
@@ -400,7 +463,7 @@ Measured, not estimated:
 | `combat.js` `handleEnemyClick` | 243 lines | 9 inline verb arms, each re-implementing the AP check and teardown |
 | `editor.js` `startEditor` | 641 lines | + hardcodes the tile-category list in system code |
 | `god.js` `buildPanel` | 595 lines | 23 inner fns; the e2e suite depends on its verbs |
-| `grid.js` `parseLevel` | 276 lines | named for parsing, actually constructs a five-subsystem mutable world |
+| `grid.js` `parseLevel` | 276 lines, returns 30 names | named for parsing, actually constructs a five-subsystem mutable world (size confirmed; the stale-electrification defect first claimed here was **refuted** — `computeElectrified` reads only `surfaceAt` and `wallEdgeOpen`, never `propDamage`) |
 | `looting.js` `lootEntries` | 120 lines | five unrelated scans, three grid sweeps, an inline flood fill |
 
 The concrete cost is stated best by the `update` finding: to assert "a summoner at
@@ -412,7 +475,14 @@ from 14 closure reads spread over 60 lines. There is no seam to call.
 Other layer violations worth naming:
 
 - **`combat.js:1828` `refresh()` — a repaint function owns the crouch rule's
-  lifecycle.** A view call is load-bearing for a game rule.
+  lifecycle.** A view call is load-bearing for a game rule, and the comment at
+  `:1673` calls `refresh()` "the OWNER of crouch revalidation" outright. *Kept as
+  a structural note only: the consequence originally claimed here — a member
+  refusing shots from behind a shield that no longer exists — was **refuted**.
+  `crouchStateOf` is called lazily at every site that matters (`shotOutcome`
+  opens with it at `:739`, `drawTargets` at `:1441`, the ring path at `:2551` and
+  `:3474`, the step path at `:4284`), so a stale crouch revalidates on use. The
+  ownership is misplaced; nothing currently goes wrong because of it.*
 - **`combat-plans.js:54` the pure modules take a parameter literally named
   `world`** that is combat's host facade — duck-typed, so a unit test structurally
   cannot check it. This is the footgun AI_PLAN recorded as #16 after it shipped a
@@ -555,21 +625,29 @@ compounding in-place multiply the other three were rewritten to remove.
 ### 7. Suggested priorities
 
 1. **§1.1 the free summon** — a live regression from this branch, and cheap.
-2. **§1.2 the equip/unequip heal** and **§1.3 friendly verbs on enemies** — both
+2. **§1.15 the sneaking ghost status** — it makes a whole floor uncontestable,
+   and the fix is one line in `serializeProgress`.
+3. **§1.2 the equip/unequip heal** and **§1.3 friendly verbs on enemies** — both
    reachable by a player in ordinary play, both a handful of lines.
-3. **§1.7 Pull Over's missing affordance** — and with it, delete `ringsAtBodies`
+4. **§1.6 and §1.16 together — the anti-stall contract.** They are the same
+   defect from two directions: the engageability tier never tests swing legality,
+   and the firing field short-circuits before it can reposition. Fixing either
+   alone leaves the fight stallable. `combat-geometry.swingPointAt` already
+   answers the first question on the player side.
+5. **§1.7 Pull Over's missing affordance** — and with it, delete `ringsAtBodies`
    so `verbKind` genuinely has one owner. Fixing the instance without collapsing
    the ladder leaves four more.
-4. **A world-facade contract test.** Build the object `main.js` passes as `world`
+6. **A world-facade contract test.** Build the object `main.js` passes as `world`
    from a headless fake and assert every key the pure modules destructure exists
    and is callable. That is the class of both bugs this branch shipped, and
-   §1.14's `floors.js` omission is a third instance waiting.
-5. **Move `ui/chrome.js`'s listener behind a mount call** — one line that unlocks
+   §1.14's `floors.js` omission is a third instance waiting — now reproduced as a
+   live `TypeError`, not merely inferred.
+7. **Move `ui/chrome.js`'s listener behind a mount call** — one line that unlocks
    1,613 lines for unit testing, including the three modules the architecture
    already claims are testable.
-6. **One arena with an Executive in it.** The branch's headline feature currently
+8. **One arena with an Executive in it.** The branch's headline feature currently
    cannot regress visibly.
-7. The duplication table in §2, worst-drifted first: the shove, then the pull,
+9. The duplication table in §2, worst-drifted first: the shove, then the pull,
    then the break.
 
 ---
