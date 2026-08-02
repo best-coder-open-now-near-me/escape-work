@@ -19,23 +19,6 @@ const beats = (page) => page.evaluate(() => window.__combat?.bout?.beats ?? {});
 const doorsOpen = (page) =>
   page.evaluate(() => window.__game.doors.filter((d) => d.open).length);
 
-// Work a door in combat. Two things make a bare ground click unreliable here:
-// the pick can land on the player's own body when they are standing right
-// beside the handle, and a floor point by a doorway deliberately stays a STEP
-// unless you are already at the door - so a click that arrives a frame early
-// walks you instead. Aim at the door mesh at handle height, and retry from
-// wherever the previous attempt left us.
-async function workDoor(page, mx, mz, want) {
-  for (let i = 0; i < 4; i++) {
-    if ((await doorsOpen(page)) === want) return true;
-    await refillAp(page);
-    const p = await page.evaluate(([x, z]) => window.__game.project3(x, 0.95, z), [mx, mz]);
-    if (p && p.x > 10 && p.x < 1270 && p.y > 10 && p.y < 790) await page.mouse.click(p.x, p.y);
-    await page.waitForTimeout(1200);
-  }
-  return (await doorsOpen(page)) === want;
-}
-
 // Hand the AI a few turns. Each end-turn runs every enemy's turn and returns
 // when control comes back, so the assertions below read a settled board.
 async function playRounds(page, n) {
