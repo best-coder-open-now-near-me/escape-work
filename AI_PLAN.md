@@ -811,7 +811,22 @@ cheap to dodge on the way in and expensive to debug after.
     and any new body-to-body test goes through the existing geometry
     helpers (never a raw `dist`/`cheb` inline), so the same-storey gate
     can land once, in `tactics.js`, when bodies go vertical.
-16. **The believability floor is a feature.** Larian tunes its scorer
+16. **A pure module's world argument is a CONTRACT, and unit tests cannot
+    check it.** This one shipped and cost twelve e2e specs: `aiShovePlan`
+    reaches `displacePlan`, which asks `occupied(x, z)` — a test the
+    `world` facade does not carry (combat's own shove builds it inline).
+    Passing the bare facade threw a TypeError on every DECIDE with a
+    member adjacent, freezing the enemy turn mid-frame with its AP
+    unspent. The unit tests passed throughout, because they hand-build a
+    world that HAS the test — which is the whole lesson: a pure module
+    documents what it needs, the caller must actually supply it, and only
+    a real fight proves the two met. When wiring a new plan into
+    `combat.js`, read the pure function's destructure list and check
+    every key against what the facade really exposes. The tell in play is
+    unmistakable and worth memorizing: `phase: 'ai'`, `moving: false`,
+    `wait` gone negative, AP unspent — that is a THROW inside the driver,
+    never a stall in the ladder.
+17. **The believability floor is a feature.** Larian tunes its scorer
     away from raw optimality toward legible play — the base archetype
     file's own comments say "Damaging allies looks pretty stupid"
     (verified as file content; see the reference section). When a scored
@@ -946,7 +961,7 @@ and the codebase, nothing else.
      beat exists to create).
    - *Acceptance:* fights against HR groups run longer in the tally;
      Q4's fallback (B) is one def field away if they DRAG.
-7. **The tuning pass.**
+7. **The tuning pass.** — **OPEN, and deliberately so.**
    - *Scope:* no new systems. The `AI` block swept against milestone-1
      bouts on both shipped levels; per-def `focus`/support values
      against fight feel; the PR records every dial moved and its
@@ -956,6 +971,15 @@ and the codebase, nothing else.
      shape to copy for "this attack entry only above depth N", which
      the legend's per-placement levels (`CHARACTER_PLAN.md` #15) could
      express with no new machinery.
+   - *Why it did not land with 1–6:* this milestone's input is somebody
+     playing the game. Every constant in the `AI` block is a first draft
+     by the same standard the four prior combat plans set — "numbers are
+     first drafts, deferred to playtest" — and inventing a tuning pass
+     without a played fight would be exactly the guess-wearing-a-
+     decision's-clothes this repo's process exists to prevent. The dials
+     are all in one block, the tally is on `__combat.bout`, and the six
+     shipped milestones are what makes the pass measurable. **It wants a
+     playtest, not a PR.**
 
 Order rationale: 2–4 sharpen the game the AI already plays (melee), 5–6
 widen it, 7 tunes it. 1 exists so 2–7 can prove they did anything. Milestones
@@ -964,10 +988,22 @@ first (a shooter that can't pick tiles shoots from bad ones).
 
 ### As landed (2026-08-01/02, milestones 1–6 in one pass)
 
-All six implementation milestones shipped on this branch, one commit each,
-unit suite green throughout (688 → 711) and the smoke e2e suite green at the
-end — including a full fight on the new ladder. Deviations and honest notes,
-recorded here per the house pattern:
+All six implementation milestones shipped on this branch, one commit each;
+unit suite green throughout (688 → 711), and the combat e2e specs
+(tactics, cover, topple, summons, smoke) green after the facade fix below.
+**Milestone 7 is open by design** — it wants a playtest, not a PR.
+
+**The bug the first e2e run caught, and what it taught.** Milestones 1–6
+all passed unit tests and the smoke suite, and twelve specs across four
+files still timed out identically: `phase: 'ai'`, `moving: false`, `wait`
+negative, AP unspent. That signature is a THROW inside the per-frame
+driver, not a stall in the ladder — `aiShovePlan` was handed the bare
+`world` facade, which carries no `occupied` test, so `displacePlan` threw
+on every DECIDE with a member standing adjacent. Recorded as footgun 16,
+because the class of mistake outlives this instance: a pure module's world
+argument is a contract that only a real fight can prove was met.
+
+Deviations and honest notes, recorded here per the house pattern:
 
 - **M1:** `?seed=` landed on the `?level` dev-lane pattern; the tally
   (`__combat.bout`) counts rounds, AI damage landed (instrumented at the one
