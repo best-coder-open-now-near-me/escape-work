@@ -6,6 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseFloors, layeredGrid, planCrossLayerRoute, STOREY_H } from '../../src/floors.js';
+import { parseLevel } from '../../src/grid.js';
 import spikeLobby from '../../levels/dev/spike-lobby.json' with { type: 'json' };
 
 // Ground: a 4x4 room with a 2-cell stair run at (3,1)-(3,2), entry (3,3).
@@ -181,4 +182,34 @@ test('spike-lobby: the under-balcony offices are walkable ground', () => {
   // layer model exists to deliver.
   assert.equal(f.layers[0].terrainOpen(6, 2), true);
   assert.equal(f.layers[1].typeAt(6, 2), 'floor');
+});
+
+// --- the facade contract ------------------------------------------------------
+
+test('the layered facade forwards EVERY function a real grid exposes', () => {
+  // The contract test the two shipped facade bugs both needed. `layeredGrid`
+  // hand-lists the methods it forwards, and the list had silently fallen behind
+  // grid.js: `sightOpenCellLow` and `sightOpenLow` were missing, so the sneak
+  // cone sweep threw a TypeError on any layered level (REVIEW.md 2026-08-02
+  // section 1.14). Deriving the expectation from a real grid means the next
+  // method added to grid.js fails here instead of in a playtest.
+  const flat = parseLevel({
+    name: 'flat', tiles: { '.': 'floor', '#': 'wall' }, actors: { '@': 'player' },
+    map: ['#####', '#.@.#', '#####'],
+  });
+  const g = layeredGrid(parseFloors(fixture()), { name: 'fixture' }, () => 0);
+  const fns = Object.keys(flat).filter((k) => typeof flat[k] === 'function');
+  const missing = fns.filter((k) => typeof g[k] !== 'function');
+  assert.deepEqual(missing, [],
+    `layeredGrid does not forward: ${missing.join(', ')} - add them to METHODS in floors.js`);
+});
+
+test('the forwarded methods actually reach the active storey', () => {
+  // Forwarding the NAME is not the contract; forwarding the CALL is. A facade
+  // that defined every key as undefined would pass the test above.
+  const g = layeredGrid(parseFloors(fixture()), { name: 'fixture' }, () => 0);
+  assert.equal(typeof g.typeAt(0, 0), 'string');
+  // The two that were missing, called for real - this is the sneak sweep's path.
+  assert.equal(typeof g.sightOpenCellLow(0, 0), 'boolean');
+  assert.equal(typeof g.sightOpenLow(0, 0, 1, 0), 'boolean');
 });

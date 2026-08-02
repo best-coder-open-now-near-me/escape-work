@@ -477,7 +477,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // The attacker's own side, minus itself: a pincer needs a second body -
     // each carrying its own reach, because "in its face" is now the same
     // reach test every other melee rule reads.
-    const allies = (attacker.sheet ? members : engaged)
+    // Same rule as `threatsAgainst`: an attacker's own side is the LIVE side,
+    // so a charmed coworker completes the player's pincer rather than the
+    // enemy's - it is swinging for the player this turn.
+    const allies = (attacker.sheet ? members : aiAllies())
       .filter((u) => u !== attacker && standing(u))
       .map((u) => ({ x: posOf(u).x, z: posOf(u).z, reach: reachOfUnit(u) }));
     const pos = positionMods(A.x, A.z, D.x, D.z, {
@@ -2281,6 +2284,29 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // falls. `forceHit` pins the save too (true = the drop fully lands = the
   // save fails), so the specs stay deterministic. Returns the narration
   // fragment, leading space included, or '' for empty carpet.
+  // Land a stun on anybody, and SAY what happened. One helper because the rule
+  // was written twice inside `dropOnto` and the two halves had already drifted:
+  // the coworker branch gated the burst on `applyStatus` and narrated the
+  // refusal through `immunityLine`, the member branch did neither. So a member
+  // stunned inside their own `training-credit` window got the burst played at
+  // them and no explanation, while a coworker in the same window got the honest
+  // line (REVIEW.md 2026-08-02 section 1.9). `aiPullMember` copied the member
+  // half verbatim, so the newest beat inherited the defect.
+  //
+  // Members carry a resist; coworkers do not. That is the only real difference,
+  // and it is the reason the two were written apart in the first place.
+  function landStun(victim, line) {
+    const target = victim.sheet || victim;
+    const name = victim.sheet ? victim.sheet.name : victim.def.name;
+    const resist = victim.sheet ? statusResist(victim.sheet) : 0;
+    const blocked = blockedBy(target, 'stunned');
+    if (applyStatus(target, 'stunned', {}, resist)) {
+      statusFxAt(victim, 'stunned');
+      return line;
+    }
+    return blocked ? ` ${immunityLine(blocked, name)}` : '';
+  }
+
   function dropOnto(by, lx, lz, range) {
     const victimUnit = world.liveEnemies().find((e) => e.x === lx && e.z === lz);
     const victimMember = members.find((m) => m.sheet.hp > 0 && m.actor
@@ -2289,7 +2315,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const saved = (grit) => (forceHit !== null ? !forceHit : rollHit(gritSaveChance(grit), rng));
     let msg = '';
     if (victimUnit) {
-      if (saved(victimUnit.def.grit ?? 2)) {
+      if (saved(victimUnit.combat.grit)) { // via unitCombat - the def carries it as attr.grit
         victimUnit.flinch?.();
         return ` ${victimUnit.def.name} dives clear.`;
       }
@@ -2305,11 +2331,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         // them and they get the same "they have had their daze" refusal, from
         // the same code. The pin is the failed save's own price and carries
         // no window - see `pinned` in data/statuses.js.
-        const blocked = blockedBy(victimUnit, 'stunned');
-        if (applyStatus(victimUnit, 'stunned')) {
-          statusFxAt(victimUnit, 'stunned');
-          msg += ' They go down under it.';
-        } else if (blocked) msg += ` ${immunityLine(blocked, victimUnit.def.name)}`;
+        msg += landStun(victimUnit, ' They go down under it.');
         if (applyStatus(victimUnit, 'pinned')) statusFxAt(victimUnit, 'pinned');
       } else {
         callbacks.onEnemyKilled(victimUnit);
@@ -2325,8 +2347,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       fx.damageText(lx, lz, `-${dmg}`, undefined, { big: dead });
       msg += ` It lands on ${victimMember.sheet.name}. -${dmg}.`;
       if (!dead) {
-        applyStatus(victimMember.sheet, 'stunned', {}, statusResist(victimMember.sheet));
-        statusFxAt(victimMember, 'stunned');
+        msg += landStun(victimMember, ' They go down under it.');
         if (applyStatus(victimMember.sheet, 'pinned')) statusFxAt(victimMember, 'pinned');
       } else {
         notifyMemberDown();
@@ -2637,7 +2658,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     let msg = `You haul ${en.def.name} over the ${what}.`;
     // The same save everything manhandled rolls (stats.gritSaveChance), with
     // the same forceHit pin for the specs: true = the haul fully lands.
-    const saved = forceHit !== null ? !forceHit : rollHit(gritSaveChance(en.def.grit ?? 2), rng);
+    const saved = forceHit !== null ? !forceHit : rollHit(gritSaveChance(en.combat.grit), rng);
     if (saved) {
       en.flinch?.();
       msg += ' They twist and land on their feet.';
@@ -2724,9 +2745,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         refresh();
         return;
       }
-      applyStatus(m.sheet, 'stunned', {}, statusResist(m.sheet));
-      statusFxAt(m, 'stunned');
+      msg += landStun(m, ' They come down dazed.');
       if (applyStatus(m.sheet, 'pinned')) statusFxAt(m, 'pinned');
+      // The hazard the landing tile carries, billed through the member model
+      // (Q1-A) - `performPull` applies it and this copy dropped it, so an AI
+      // pull into live water or fire cost the member nothing.
+      const sdmg = world.memberSurfDamage(m.sheet, lx, lz);
+      if (sdmg > 0) {
+        bout.dmgDealt += sdmg;
+        const gone = applyDamage(m.sheet, sdmg);
+        fx.impact(lx, lz, hazardKind(lx, lz), { y: 0.4 });
+        fx.damageText(lx, lz, `-${sdmg}`, undefined, { big: gone });
+        msg += ` The landing is ${world.isElectrified && world.isElectrified(lx, lz) ? 'LIVE' : 'a hazard'}. -${sdmg}.`;
+        if (gone) { log(msg); notifyMemberDown(); refresh(); return; }
+      }
     }
     log(msg);
     refresh();
@@ -3529,15 +3561,22 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // what puts the stop point on the line actually being walked; trimming the
   // raw tile route would put it back on the grid.
   function walkActive(rawPath, budget, endPoint = null, stopWhen = null) {
-    // Moving is the one thing a crouch does not survive (TACTICS_PLAN M6,
-    // designer default): the commitment ends the moment the walk begins, not
-    // when it lands somewhere else.
-    breakCrouch(active);
     if (endPoint) rawPath = [...rawPath.slice(0, -1), endPoint];
     let s = world.smooth(rawPath, active.actor);
     if (stopWhen) s = trimToFirst(s, stopWhen) || s;
     const { points, cost, done } = truncateByBudget(s, Math.max(0, budget), stepCost);
+    // Nothing to walk: no AP spent, the caller prints a refusal - and, now, no
+    // cover lost. `breakCrouch` used to be the FIRST statement here, so a click
+    // this function was going to refuse still stood the member up and took the
+    // `covered` status off them, for free. The hover twin `previewWalk`
+    // deliberately does not break the crouch, which made the same arithmetic
+    // safe to look at and destructive to click (REVIEW.md 2026-08-02 sec 1.8).
     if (points.length < 2 || cost < 0.05) return null;
+    // Moving is the one thing a crouch does not survive (TACTICS_PLAN M6,
+    // designer default): the commitment ends the moment the walk begins, not
+    // when it lands somewhere else. Which is here - beside `beginMove`, where
+    // the comment above always claimed it was.
+    breakCrouch(active);
     hidePreview();
     // Walking spends the AP a pending confirm was priced against, so the
     // confirm lapses here rather than committing later at a price this member
@@ -4044,9 +4083,24 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   //     (outside the cap, unsaved); combat owns them, despawned at fight's end.
   //   `at` is the player's chosen drop point ({x,z}); without one (enemy AI,
   //   the debug hook) they report beside the summoner as before.
-  function resolveSummon(summoner, team, d, at = null) {
+  // How many bodies this descriptor could post RIGHT NOW - the question half,
+  // with no spawning in it.
+  //
+  // It exists because `resolveSummon` was being called as a readiness predicate
+  // while it is in fact the act: it spawns, pushes into `engaged`, applies
+  // `surprised` and inserts initiative slots. That was survivable only while
+  // `summon` was the top arm of the AI ladder, so the beat that followed always
+  // paid for it. AI M6 inserted `support` above it, and the spawn became free
+  // whenever triage won the turn - two employees, no AP, no cooldown
+  // (REVIEW.md 2026-08-02 section 1.1). A plan-gathering call with side effects
+  // is a live hazard the moment a ladder can reorder.
+  function summonRoom(summoner, d) {
     const room = (d.cap ?? d.count) - liveSummonsOf(summoner);
-    const n = Math.min(d.count, Math.max(0, room));
+    return Math.min(d.count, Math.max(0, room));
+  }
+
+  function resolveSummon(summoner, team, d, at = null) {
+    const n = summonRoom(summoner, d);
     if (n <= 0) return 0;
     const spawned = world.spawnSummon(d.archetype, team, summoner, n, at) || [];
     for (const rec of spawned) {
@@ -4274,7 +4328,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Everyone on the far side of `mover` able to punish it right now. Each
   // carries its OWN reach: threat is whatever ground that unit could swing at,
   // so a long weapon zones further than a pair of fists.
-  const threatsAgainst = (mover) => (mover.sheet ? engaged : members)
+  // Who threatens this mover - the OTHER side, live. `engaged` is not that
+  // list: a charmed coworker stays in it on purpose (charming the last hostile
+  // must not win the fight) while fighting for the player, so reading it raw
+  // handed your own borrowed Guard a free swing at the member walking past him
+  // (REVIEW.md 2026-08-02 section 1.4). Commit b224733 made this substitution
+  // at the two sites inside `aiAdvance`/`aiSupportPlan` and missed this one.
+  // Side is live state, never registry (AI_PLAN footgun 5).
+  const threatsAgainst = (mover) => (mover.sheet ? aiAllies() : members)
     .filter((u) => canReact(u))
     .map((u) => {
       const p = posOf(u);
@@ -4673,7 +4734,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // needs its plan anyway to take it.
     const sm = summonSpec(unit.def.summon);
     const summonReady = !!sm && (unit.summonCd || 0) <= 0 && acting.ap >= sm.ap
-      && resolveSummon(unit, 'enemy', sm) > 0;
+      && summonRoom(unit, sm) > 0; // ASK; the summon beat is what acts
     // Triage before reinforcement (AI_PLAN M6): rationed by uses, paced by
     // cooldown, aimed at the worst-off colleague in range - self included.
     // Everything it reads lives on the def, the summon descriptor's pattern.
@@ -4766,7 +4827,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       unit.summonCd = sm.cooldownRounds || 0;
       acting.ap = roundAp(acting.ap - sm.ap);
       unit.lunge(posOf(target).x, posOf(target).z);
-      log(sm.log || `${unit.def.name} calls in reinforcements.`);
+      // The beat DOES the summon. It used to only narrate one: the spawn was a
+      // side effect of the readiness check above, so posting the req was free
+      // whenever a higher beat won the turn, and billed only when this arm
+      // happened to be the one taken.
+      const posted = resolveSummon(unit, 'enemy', sm);
+      log(posted > 0
+        ? (sm.log || `${unit.def.name} calls in reinforcements.`)
+        : `${unit.def.name} calls for backup. Nobody is free.`);
       acting.wait = 0.6;
       refresh();
       return;

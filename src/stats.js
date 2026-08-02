@@ -390,6 +390,13 @@ export function unitCombat(def) {
     // def outright rather than derived from equipment - a coworker with a long
     // handled thing sets `reach` and everyone else inherits the floor.
     reach: def.reach ?? REACH.DEFAULT,
+    // Grit, for the saves a manhandled body rolls (gritSaveChance). Read
+    // through the same passthrough as accuracy/dodge because an AI unit is not
+    // a sheet - and read from `attr`, which is where the data actually is: the
+    // save sites asked for a top-level `def.grit` that no registry entry has
+    // ever defined, so every enemy in the game saved at the `?? 2` fallback and
+    // the Guard's Grit 7 was silently discarded (REVIEW.md 2026-08-02 sec 1.5).
+    grit: def.grit ?? def.attr?.grit ?? 2,
   };
 }
 
@@ -690,6 +697,20 @@ export function spendAttrPoint(sheet, attr) {
 // is preserved, not free-healed), and only on a spend: this deliberately lives
 // OUTSIDE recomputeDerived, which also runs on save-load and creation, where
 // healing would be wrong.
+// Taking the trinket OFF gives back what putting it on credited. `recompute`
+// already clamps hp down when it EXCEEDS the new max, which is not the same
+// thing: a wounded character is under the max either way, so the clamp never
+// fired and the credit was kept. Equip, unequip, repeat, and the wound is paid
+// off two HP at a time - a free unlimited heal on any character carrying the
+// World's Okayest Employee mug (REVIEW.md 2026-08-02 section 1.2).
+//
+// Floored at 1: removing gear is not a way to die.
+function debitLostHp(sheet, maxHpBefore) {
+  if (sheet.maxHp < maxHpBefore) {
+    sheet.hp = Math.max(1, Math.min(sheet.hp, sheet.hp - (maxHpBefore - sheet.maxHp)));
+  }
+}
+
 function creditNewHp(sheet, maxHpBefore) {
   if (sheet.maxHp > maxHpBefore) {
     sheet.hp = Math.min(sheet.maxHp, sheet.hp + (sheet.maxHp - maxHpBefore));
@@ -814,9 +835,11 @@ export function unequipItem(sheet, slot, invCap = Infinity) {
   const id = sheet.equipped?.[slot];
   if (!id) return false;
   if ((sheet.inventory?.length || 0) >= invCap) return false; // no room - politely refuse
+  const maxHpBefore = sheet.maxHp;
   sheet.equipped[slot] = null;
   (sheet.inventory = sheet.inventory || []).push(id);
   recomputeDerived(sheet);
+  debitLostHp(sheet, maxHpBefore);
   return true;
 }
 

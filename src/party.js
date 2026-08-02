@@ -68,14 +68,38 @@ export function createCompanionSheet(def, id, level = 1) {
 // v1 (legacy): { levelId, sheet } - loads as a one-member party.
 // parseProgress reads by SHAPE, so every version above loads without a switch.
 
+// Statuses that are HELD by a live mode rather than counted down by a clock.
+// They only mean anything while the thing holding them exists, and the thing
+// holding them is closure state that dies with the level - so they must not
+// ride a floor transition.
+//
+// `sneaking` is the one that bit: taking the stairs while sneaking saved the
+// status, and the next floor booted with `sneak === null` and the leader still
+// wearing it. `endSneak` early-returns on `!sneak`, so nothing could clear it,
+// and it suppresses fight triggers - the floor could never be contested
+// (REVIEW.md 2026-08-02 section 1.15). `covered` is the same shape: the crouch
+// is a POSITION, revalidated against a world the new floor does not have.
+const HELD_STATUSES = ['sneaking', 'covered'];
+
 export function serializeProgress(party, levelId) {
   return {
     version: SAVE_VERSION,
     levelId,
-    party: party.members.map((m) => m.sheet),
+    party: party.members.map((m) => strippedForSave(m.sheet)),
     active: party.active,
     cash: party.cash || 0,
   };
+}
+
+// A copy of the sheet with the held-mode statuses dropped. A COPY, deliberately:
+// serializing must not reach into the live sheet and cancel a mode the player is
+// still in - the save happens mid-run, not at a stopping point.
+function strippedForSave(sheet) {
+  if (!sheet?.statuses) return sheet;
+  if (!HELD_STATUSES.some((id) => sheet.statuses[id])) return sheet;
+  const statuses = { ...sheet.statuses };
+  for (const id of HELD_STATUSES) delete statuses[id];
+  return { ...sheet, statuses };
 }
 
 // Backfill fields older saves may predate, so no math ever meets undefined.

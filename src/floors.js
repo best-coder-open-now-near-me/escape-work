@@ -144,7 +144,13 @@ export function layeredGrid(floors, level, getActive) {
     npcSpawns: floors.layers[0].npcSpawns,
     companionSpawns: floors.layers[0].companionSpawns,
   };
-  const METHODS = ['typeAt', 'defAt', 'terrainOpen', 'sightOpenCell', 'surfaceAt', 'isElectrified',
+  // Every function a single-storey grid exposes. Hand-maintained lists rot:
+  // this one silently omitted `sightOpenCellLow` and `sightOpenLow`, which the
+  // sneak cone sweep calls, so sneaking on a layered level threw a TypeError
+  // (REVIEW.md 2026-08-02 section 1.14). `floors.test.js` now derives the
+  // expected set from a real grid and fails on any future omission.
+  const METHODS = ['typeAt', 'defAt', 'terrainOpen', 'sightOpenCell', 'sightOpenCellLow',
+    'sightOpenLow', 'surfaceAt', 'isElectrified',
     'setType', 'propHpAt', 'damageProp', 'edgeHpBetween', 'damageEdge', 'edgeOpen', 'stepOpen',
     'sightOpen', 'wallEdgeBetween', 'removeEdgeBetween', 'doorBetween', 'setDoorOpen'];
   for (const m of METHODS) facade[m] = (...args) => g()[m](...args);

@@ -70,8 +70,26 @@ export const HUD_BUTTON_CHROME = {
 };
 
 export function registerHudButton(btn) {
+  bindRailLayout();
   hudRail.push(btn);
   layoutHudRail();
+}
+
+// The rail re-lays itself on resize. Bound on FIRST USE rather than at module
+// scope, because `window.addEventListener(...)` running at import time is what
+// kept this module - and everything downstream of it - out of node.
+//
+// `ui.js` is the barrel every UI consumer imports, so one import-time throw
+// cascaded to the whole `ui/` layer AND to doors.js, dialogue.js and
+// shopping.js: the three modules TODO.md Phase 5 holds up as successfully
+// carved onto host-callback seams, none of which could be unit-tested
+// (REVIEW.md 2026-08-02 section 4). Same lazy treatment `actionDock` already
+// gives its own `createElement`.
+let railBound = false;
+function bindRailLayout() {
+  if (railBound || typeof window === 'undefined') return;
+  railBound = true;
+  window.addEventListener('resize', layoutHudRail);
 }
 export function layoutHudRail() {
   const r = document.getElementById('stats')?.getBoundingClientRect();
@@ -87,7 +105,6 @@ export function layoutHudRail() {
   }
   for (const hook of railHooks) hook(r, bottom);
 }
-window.addEventListener('resize', layoutHudRail);
 
 // A soft radial vignette over the whole viewport - pure atmosphere, makes the
 // flat office glow feel a little more dungeon.
