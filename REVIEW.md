@@ -9,10 +9,17 @@ milestones 1–6). Measured on this branch before anything was written down:
 smoke case that exercises the new AI end to end. The branch works. Everything
 below is found *inside* a working game.
 
-### Questions for the designer
+### Questions for the designer — all four answered 2026-08-02
 
-Four, and only four — the rest of this document is engineering, not intent.
-Each names the question it stands in for and what changes if the answer differs.
+**All four came back A** `[ratified]` (designer, 2026-08-02: *"yes i meant the
+question 1 through 4. you can handle everything there."*), in answer to the
+recommendation list as written below. So: forced landings honour personal
+immunities (Q1-A), the enemy walk gets the same step clock the member walk has
+(Q2-A), a per-action `side` field defaulting from `type` and read by the click,
+the rings and the hover alike (Q3-A), and one shove resolver for both sides
+(Q4-A). The questions stay below as the record of what was weighed.
+
+Each names the question it stood in for and what changes if the answer differs.
 
 **Q1 — Does a FORCED landing honour a character's personal hazard immunities?**
 The AI's new shove and pull bill a member raw surface damage through the *enemy*
@@ -20,9 +27,9 @@ hazard model (`world.enemySurfDamage` → `rawSurfDamage`), which consults no
 talents. The same member walking onto the same tile under their own power goes
 through `effectiveSurfDamage`, which honours `shockImmune` / `paperCutImmune` /
 `surfaceDamageResist`. AI_PLAN M6 records this as a known approximation; it is
-now live in two beats. My recommendation is **A**.
+now live in two beats. My recommendation is **A**. `[ratified]` — **A** (designer, 2026-08-02).
 
-- **A (recommended): forced landings honour immunities.** One new facade entry
+- **A (RATIFIED): forced landings honour immunities.** One new facade entry
   (`memberSurfDamage(sheet, x, z)`) wired to `effectiveSurfDamage`, used by every
   forced-landing path. "The same tile means the same thing however you got there"
   is the rule the walking model already states.
@@ -40,9 +47,9 @@ written but three doc sites need correcting.
 No enemy path ticks it — not the AI walk hook, not the wanderer. `combat.js:4489`
 says so outright: "an AI unit's gum is for keeps". ARCHITECTURE.md says the
 opposite: "the step clock ticks per tile walked, wherever you are". My
-recommendation is **A**.
+recommendation is **A**. `[ratified]` — **A** (designer, 2026-08-02).
 
-- **A (recommended): give the enemy walk the same tick the member walk has.**
+- **A (RATIFIED): give the enemy walk the same tick the member walk has.**
   Makes the documented rule true, and makes `bleed` — the only other `clock: 'step'`
   status — usable on a coworker at all. Today a bleed applied to an enemy would
   deal zero damage forever, silently, because nothing will ever tick it.
@@ -58,9 +65,9 @@ recommendation is **A**.
 half of the board" — so Performance Review, Onboarding and Triage all resolve on
 a coworker (bug §1.3). The narrow fix is a side test, but the side test needs a
 list, and TODO.md already settled that **`reboot` targets anything** — self, ally,
-enemy, props. My recommendation is **A**.
+enemy, props. My recommendation is **A**. `[ratified]` — **A** (designer, 2026-08-02).
 
-- **A (recommended): a per-action `side` field** (`'enemy' | 'ally' | 'any'`),
+- **A (RATIFIED): a per-action `side` field** (`'enemy' | 'ally' | 'any'`),
   defaulting from `type`, read by the click, the rings and the hover alike.
   Content stays data; `reboot` declares `'any'` and keeps its settled behaviour.
 - **B: hardcode the three HR verbs as ally-only in the click.** One line, and the
@@ -70,9 +77,10 @@ enemy, props. My recommendation is **A**.
 `aiShoveMember` is a hand-written parallel of `displaceBody` and has already lost
 two of its three slam consequences: the `stunned` status and the topple of a prop
 the victim is slammed into. Its own comment claims parity. Decision #11's
-symmetry is the standing doctrine, which points at **A**.
+symmetry is the standing doctrine, which points at **A**. `[ratified]` — **A**
+(designer, 2026-08-02).
 
-- **A (recommended): one resolver, both sides** — give `displaceBody` a
+- **A (RATIFIED): one resolver, both sides** — give `displaceBody` a
   member-shaped victim path and delete the copy.
 - **B: the AI's shove is deliberately cheaper** (flat damage, no cascade — which
   is what AI_PLAN M4 tagged `[proposed]`). Then it should stop claiming parity in
