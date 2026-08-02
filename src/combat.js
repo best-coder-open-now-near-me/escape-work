@@ -45,6 +45,7 @@ import {
   canReach as canReachAt, reachSpecOf, actRangeOf, verbReaches as verbReachesAt,
   swingPointAt as swingPointFrom, hasSwingSpot as hasSwingSpotFor, zoneCellsFor,
 } from './combat-geometry.js';
+import { createGroundMarks } from './ground-marks.js';
 
 const pc = window.pc;
 // Inclusive integer roll. Takes its randomness as an ARGUMENT rather than
@@ -782,11 +783,28 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // target instead), so aiming can't be lost by a near-miss.
   function cancelArmed(quiet = false) {
     const was = armed || pendingConfirm;
+    disarm();
+    if (was && !quiet) log(`You lower the ${ACTIONS[was].label.toLowerCase()}.`);
+    return !!was;
+  }
+
+  // Stand the armed verb down - the STATE half of cancelArmed, with no
+  // narration, for the twenty-odd sites that reach here because a verb
+  // RESOLVED rather than because the player backed out.
+  //
+  // It exists because those sites each wrote the teardown by hand and drifted:
+  // all of them cleared `armed`, only four cleared `aimPoint`, only three
+  // cleared `pendingConfirm`. The three are one state - what the next click
+  // will do - and they have to fall together or a resolved cone leaves its aim
+  // point behind for the next verb to read. Both of the strays are
+  // behaviour-neutral to fold in here, which is why this is a carve and not a
+  // fix: every `aimPoint` read is already gated on `armed` (drawTargets:1475,
+  // 1494, 1510), and `pendingConfirm` is nulled before anything arms
+  // (`:3742`), so it is provably null wherever `armed` was set.
+  function disarm() {
     armed = null;
     pendingConfirm = null;
     aimPoint = null;
-    if (was && !quiet) log(`You lower the ${ACTIONS[was].label.toLowerCase()}.`);
-    return !!was;
   }
 
   // --- initiative order --------------------------------------------------------
@@ -866,8 +884,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         }
       },
       beforeAdvance: () => {
-        armed = null;
-        pendingConfirm = null;
+        disarm();
         pendingMelee = null;
         pendingCrouch = null;
         hidePreview();
@@ -927,18 +944,25 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     boxShadow: 'none', pointerEvents: 'none', display: 'none',
   });
   document.body.appendChild(costTag);
-  const PREVIEW_OK = new pc.Color(0.42, 0.78, 0.35);
-  const PREVIEW_FAR = new pc.Color(0.85, 0.28, 0.24);
-  // The reach ring: dim and cool, so it reads as information about YOU rather
-  // than a judgement about a target (TACTICS_PLAN revision M5). Drawn only
-  // while the cursor is actually over a coworker - "can I swing at THEM from
-  // here?" is a question you ask about a target, and burning it into every
-  // frame of your turn turned the answer into wallpaper nobody read.
-  const REACH_RING = new pc.Color(0.55, 0.62, 0.78);
-  // Yellow, the reserved cover colour (M7's mapping): the ring on a hovered
-  // take-cover shield. Only ever drawn on the HOVERED object - the designer's
-  // "there would just be rings everywhere if not".
-  const PREVIEW_COVER = new pc.Color(0.95, 0.8, 0.3);
+  // The floor marks and their palette, shared with hover.js (ground-marks.js)
+  // so the aim ring and the hover ring cannot drift apart. Local aliases keep
+  // the names the ~40 call sites below already use:
+  //   REACH_RING    - dim and cool, information about YOU rather than a
+  //                   judgement about a target (TACTICS_PLAN revision M5).
+  //                   Drawn only while the cursor is over a coworker.
+  //   PREVIEW_COVER - yellow, the reserved cover colour (M7's mapping), and
+  //                   only ever on the HOVERED object: the designer's "there
+  //                   would just be rings everywhere if not".
+  const marks = createGroundMarks(app, pc);
+  const PREVIEW_OK = marks.OK;
+  const PREVIEW_FAR = marks.FAR;
+  const REACH_RING = marks.REACH;
+  const PREVIEW_COVER = marks.COVER;
+  // Face bars are drawn while AIMING and again while the crouch HOLDS, off the
+  // same live face list the shot resolves against - so a wall that comes down
+  // goes dark on the next frame rather than lying until somebody shoots.
+  const drawRing = marks.ring;
+  const drawFaces = marks.faces;
   // The ground wash while a ranged verb is armed (TACTICS_PLAN M7): every tile
   // the aim can legally land on, line of sight included, painted translucent
   // blue. drawTargets drives it; `paintEpoch` names the world it was computed
@@ -1309,38 +1333,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     costTag.style.display = 'block';
   }
 
-  function drawRing(cx, cz, r, color, y = 0.14) {
-    const SEGS = 18;
-    let prev = null;
-    for (let i = 0; i <= SEGS; i++) {
-      const a = (i / SEGS) * Math.PI * 2;
-      const p = new pc.Vec3(cx + Math.cos(a) * r, y, cz + Math.sin(a) * r);
-      if (prev) app.drawLine(prev, p, color);
-      prev = p;
-    }
-  }
 
-  // The shielded faces of a tile, as bars laid on the floor along the tile's
-  // own edges. This is the affordance the crouch never had: the rule always
-  // knew which sides were covered and the player never did, so tucking into a
-  // corner told you "In Cover" and left you to guess which way was open
-  // (designer, 2026-07-31: "i have no indication of which partition is my
-  // actual cover"). Drawn while AIMING and again while the crouch HOLDS, off
-  // the same live face list the shot resolves against - so a wall that comes
-  // down goes dark on the next frame rather than lying until somebody shoots.
-  function drawFaces(cx, cz, faces, color, y = 0.15) {
-    const H = 0.42; // half the bar's length: a little short of the full edge
-    for (const [ox, oz] of faces) {
-      // The edge midpoint, then out along the perpendicular.
-      const mx = cx + ox * 0.5;
-      const mz = cz + oz * 0.5;
-      const px = oz; // perpendicular to the face
-      const pz = ox;
-      app.drawLine(
-        new pc.Vec3(mx - px * H, y, mz - pz * H),
-        new pc.Vec3(mx + px * H, y, mz + pz * H), color);
-    }
-  }
   // The faces that would shield a crouch on this tile - the aim's twin of
   // `crouchFacesOf`, which asks the same of a unit already standing somewhere.
   const crouchFacesAt = (tx, tz) => shieldedFaces(tx, tz, {
@@ -1783,8 +1776,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // that pointing at the real member who last held the floor (the post-combat
     // leader). The initiative tracker shows whose turn it actually is.
     if (!m.isSummon) party.active = members.indexOf(m);
-    armed = null;
-    pendingConfirm = null;
+    disarm();
     pendingMelee = null;
     pendingCrouch = null;
     hidePreview();
@@ -1963,7 +1955,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Footwork actions (the kick) need an un-gummed shoe.
     if (a.footwork && statusFx(active.sheet).noFootwork) {
       log('You wind up the kick... the gum disagrees. Pick something else.');
-      armed = null;
+      disarm();
       refresh();
       return;
     }
@@ -1973,7 +1965,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // uses left this fight" forever.
     if (a.uses && active.usesLeft[id] <= 0) {
       log(`No ${a.label.toLowerCase()} left this fight.`);
-      armed = null;
+      disarm();
       refresh();
       return;
     }
@@ -2007,7 +1999,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       hitFx(en, 'whiff');
       fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
       log(a.missLog || `${a.log} It misses.`);
-      armed = null;
+      disarm();
       refresh();
       return;
     }
@@ -2063,7 +2055,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     log(line);
     if (died) callbacks.onEnemyKilled(en);
-    armed = null; // back to movement mode after the swing
+    disarm(); // back to movement mode after the swing
     refresh();
     if (!hostilesRemain()) victory();
   }
@@ -2311,7 +2303,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     fx.impact(tx, tz, 'slam', { y: 0.3 });
     fx.shake(0.08, 0.2);
     log(`You put a shoulder into the partition. It goes over flat.${dropOnto(active, tx, tz, PARTITION_TOPPLE.damage)}`);
-    armed = null;
+    disarm();
     refresh();
     if (!hostilesRemain()) victory();
     return true;
@@ -2374,7 +2366,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     } else {
       log(`You lay into the ${label}. -${dmg}.${left <= dmg ? ' It is coming apart.' : ''}`);
     }
-    armed = null;
+    disarm();
     refresh(); // any crouch behind it revalidates here
     if (!hostilesRemain()) victory();
   }
@@ -2467,7 +2459,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const problem = coverSpotProblem(tx, tz);
     if (problem) { log(problem); return; }
     if (active.ap < a.ap) { log('Not enough AP.'); return; }
-    armed = null;
+    disarm();
     if (active.actor.x === tx && active.actor.z === tz) {
       // Your own tile. A click on a meaningfully different POINT within it is
       // a sub-tile shuffle - fine-tune the tuck, billed as the sliver of
@@ -2628,7 +2620,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
     }
     log(msg);
-    armed = null;
+    disarm();
     refresh();
     if (!hostilesRemain()) victory();
   }
@@ -2796,7 +2788,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     hidePreview();
     active.actor.setPath(points); // deliberately WITHOUT beginMove - see above
     log(done ? a.log : `${a.log} You run out of corridor.`);
-    armed = null;
+    disarm();
     refresh();
   }
 
@@ -2834,7 +2826,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     active.actor.pushTo(theirs.x, theirs.z, theirRest.x, theirRest.z);
     m.actor.pushTo(mine.x, mine.z, myRest.x, myRest.z);
     log(`${a.log} You and ${m.sheet.name} trade places.`);
-    armed = null;
+    disarm();
     refresh();
   }
 
@@ -2884,8 +2876,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // same click over carpet and over a cubicle row spends the same AP for
     // very different results, and silence would read as a dud.
     log(laid ? `${a.log} ${laid} tile${laid > 1 ? 's' : ''} covered.` : `${a.log} Nothing here will take it.`);
-    armed = null;
-    aimPoint = null;
+    disarm();
     refresh();
   }
 
@@ -2923,7 +2914,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       hitFx(en, 'whiff');
       fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
       log(a.missLog || `${a.log} It does not take.`);
-      armed = null;
+      disarm();
       refresh();
       return;
     }
@@ -2951,7 +2942,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (res.msg) line += ` ${res.msg}`;
     }
     log(line);
-    armed = null;
+    disarm();
     refresh();
     if (!hostilesRemain()) victory();
   }
@@ -3057,7 +3048,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       line += ` ${appliesLine(a, who)}`;
     }
     log(line);
-    armed = null;
+    disarm();
     refresh();
   }
 
@@ -3155,8 +3146,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       : (hits
         ? `${a.log} ${hits} hit${hits > 1 ? 's' : ''}. The paperwork settles everywhere.`
         : `${a.log} No casualties. Plenty of litter.`));
-    armed = null;
-    aimPoint = null;
+    disarm();
     refresh();
     if (!hostilesRemain()) victory();
   }
@@ -3202,7 +3192,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const refuse = (msg) => {
       lastClickOutcome = `refused:${msg}`;
       log(msg);
-      if (autoArmed) { armed = null; refresh(); }
+      if (autoArmed) { disarm(); refresh(); }
     };
     lastClickOutcome = 'acted'; // overwritten by refuse(); the gate stamped its own
     const a = ACTIONS[armed];
@@ -3245,7 +3235,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           active.actor.lunge(plan.x, plan.z);
           faceTarget(active, plan.x, plan.z);
           log(topple(active, plan));
-          armed = null;
+          disarm();
           refresh();
           if (!hostilesRemain()) victory();
           return;
@@ -3259,7 +3249,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       active.actor.lunge(posOf(en).x, posOf(en).z);
       faceTarget(active, en.x, en.z);
       log(displaceBody(en, Math.sign(en.x - active.actor.x), Math.sign(en.z - active.actor.z)).msg);
-      armed = null;
+      disarm();
       refresh();
       if (!hostilesRemain()) victory();
       return;
@@ -3347,7 +3337,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (shotWalk.done && verbReaches(armed, en, shotWalk.end[0], shotWalk.end[1])) {
         pendingMelee = { en, action: armed }; // fire on arrival
       } else {
-        armed = null;
+        disarm();
         log('You close the distance.');
         refresh();
       }
@@ -3411,7 +3401,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (walk.done && verbReaches(armed, en, walk.end[0], walk.end[1])) {
       pendingMelee = { en, action: armed }; // strike on arrival
     } else {
-      armed = null;
+      disarm();
       log('You close the distance.');
       refresh();
     }
@@ -3570,7 +3560,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         active.ap = roundAp(active.ap - a.ap);
         const hadBleed = hasStatus(active.sheet, 'bleed');
         clearStatuses(active.sheet);  // reboot wipes every status - Deflect, bleed, gum
-        armed = null;
+        disarm();
         log(hadBleed
           ? 'You turn yourself off and on again. The bleeding stops. So does everything else.'
           : 'You turn yourself off and on again. All effects cleared. Classic fix.');
@@ -3597,7 +3587,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           active.actor.lunge(tile.x, tile.z);
           faceTarget(active, tile.x, tile.z);
           log(topple(active, plan));
-          armed = null;
+          disarm();
           refresh();
           if (!hostilesRemain()) victory();
           return;
@@ -3849,8 +3839,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     active.actor.lunge(tx, tz);
     faceTarget(active, tx, tz); // you gesture at where you posted them
     log(`${a.log} ${arrivalLine(n)}`);
-    armed = null;
-    aimPoint = null;
+    disarm();
     refresh();
   }
   // End Turn ends the STEERED member's turn - under a shared turn the floor
@@ -4577,7 +4566,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           if (en.alive && arrived && !fireable) log(`No shot - ${en.def.name} is in cover.`);
           else if (en.alive && !arrived) log(`${en.def.name} is still out of reach.`);
           else if (en.alive) log(`Not enough AP left for ${ACTIONS[action].label}.`);
-          armed = null;
+          disarm();
           refresh();
         }
       }

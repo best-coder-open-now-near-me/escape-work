@@ -17,6 +17,7 @@
 // re-derived here (`armedTargetOk` is the click resolver's own test, not a
 // second copy of it).
 import { addHighlight, setHighlight } from './shading.js';
+import { createGroundMarks } from './ground-marks.js';
 
 const pc = window.pc;
 
@@ -43,12 +44,9 @@ const AGGRO = {
 
 // Ground rings. Immediate-mode lines last exactly one frame, so every one of
 // these has to be reissued on every frame it is meant to be visible.
-const RING_OK = new pc.Color(0.42, 0.78, 0.35);
-const RING_FAR = new pc.Color(0.85, 0.28, 0.24);
-// Yellow, the cover colour (TACTICS_PLAN M7's mapping) - the ring on a
-// hovered take-cover shield, in a fight or out of one.
-const RING_COVER = new pc.Color(0.95, 0.8, 0.3);
-const REACH_RING = new pc.Color(0.55, 0.62, 0.78);
+// OK / FAR / COVER / REACH come from ground-marks.js, shared with combat.js so
+// the hover ring and the aim ring cannot drift apart. The four below are
+// hover's own - it rings bodies, which combat never does.
 const RING_PARTY = new pc.Color(0.45, 0.9, 0.8);
 const RING_DOWN = new pc.Color(1.0, 0.82, 0.4);
 const RING_HOSTILE = new pc.Color(1.0, 0.28, 0.2);
@@ -75,6 +73,13 @@ const RING_FRIENDLY = new pc.Color(0.42, 0.85, 0.42);
 // still owns WHAT the cursor says; while a status is swaying the aim, vision
 // owns whether the OS draws it at all - it is drawing three of them itself.
 export function createHoverLayer({ app, canvas, picking, controls, ui, queries, vision = null }) {
+  // The shared floor marks (ground-marks.js). `ring`/`faces` were byte-identical
+  // copies of combat.js's; the palette was the same four colours under other
+  // names.
+  const marks = createGroundMarks(app, pc);
+  const { OK: RING_OK, FAR: RING_FAR, COVER: RING_COVER, REACH: REACH_RING } = marks;
+  const ring = marks.ring;
+  const faces = marks.faces;
   // --- highlight shells -----------------------------------------------------
   // BG3-style inverted-hull glow, one shell per interactable, built lazily and
   // cached against the holder so a repeat hover costs nothing.
@@ -229,26 +234,6 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
   // A tile's shielded faces, as bars along the tile's own edges. The twin of
   // combat's `drawFaces`; both take the face list the cover rule produced, so
   // neither can draw a side the rule would not honour.
-  function faces(cx, cz, list, color, y = 0.15) {
-    const H = 0.42;
-    for (const [ox, oz] of list || []) {
-      const mx = cx + ox * 0.5;
-      const mz = cz + oz * 0.5;
-      app.drawLine(
-        new pc.Vec3(mx - oz * H, y, mz - ox * H),
-        new pc.Vec3(mx + oz * H, y, mz + ox * H), color);
-    }
-  }
-  function ring(cx, cz, r, color, y = 0.14) {
-    const SEGS = 18;
-    let prev = null;
-    for (let i = 0; i <= SEGS; i++) {
-      const a = (i / SEGS) * Math.PI * 2;
-      const p = new pc.Vec3(cx + Math.cos(a) * r, y, cz + Math.sin(a) * r);
-      if (prev) app.drawLine(prev, p, color);
-      prev = p;
-    }
-  }
 
   return {
     // --- what the cursor is on --------------------------------------------
