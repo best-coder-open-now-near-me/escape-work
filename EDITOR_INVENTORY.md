@@ -30,12 +30,12 @@ They are numbered **IQ1–IQ6** — an earlier draft numbered them Q1–Q6, whic
 collided with `EDITOR_PLAN.md`'s own Q1–Q3 and cost the designer an answer to
 the wrong question. The two docs' numbering is deliberately disjoint now.
 
-**Status, 2026-08-02:** IQ1, IQ3 and IQ4 are `[ratified]`. IQ6 is partly
+**Status, 2026-08-02:** IQ1, IQ3, IQ4 and IQ5 are `[ratified]`. IQ6 is partly
 answered — the designer's pipeline is now `[stated]` ("outputting to json and
 uploading to the git") and one premise was corrected, leaving a single narrow
 question (where the editor is run). IQ2 is still open: it was misread as
-EDITOR_PLAN's Q2, which is now closed on its own terms — see that doc. IQ5 has
-not been answered.
+EDITOR_PLAN's Q2, which is now closed on its own terms — see that doc, and the
+designer's "we need layers and such" has moved its recommendation to option D.
 
 ---
 
@@ -83,6 +83,21 @@ one. Re-asked below unchanged.
   painting layers in a tool with no undo.
 - **C. Accept the status quo.** *Consequence:* `spike-lobby` is one accidental
   `?level=spike-lobby#editor` + Export away from silently becoming a flat room.
+
+- **D. Guard, then jump the queue (added 2026-08-02).** Round 1 (the XS
+  data-loss fixes, including the refusal guard) plus Round 2 (undo/autosave),
+  then M4 layer authoring — deferring rounds 3–6. *Consequence:* you can paint
+  storeys within two short rounds instead of after five, and you are not doing
+  it in a tool that can lose an hour's work. The palette, validation, actor
+  brushes and the editing vocabulary all wait.
+
+**Designer signal, 2026-08-02: "we need layers and such."** That is not yet an
+answer to this question — it restates the `[stated]` requirement rather than
+choosing what happens in the gap — but it points away from A-alone, which parks
+verticality indefinitely. Per CLAUDE.md a `[proposed]` recommendation bends to
+the designer's visible direction: **the recommendation is now D**, which gets
+layers authored soon without painting them in a tool that has no undo. A remains
+correct as the *first step* of D — the refusal guard is in Round 1 either way.
 
 Two brushes (void, and an un-hidden `stairway`) are XS each and are M4
 prerequisites either way.
@@ -153,9 +168,20 @@ anything like that") settles that the *grid* stays; it says nothing about one
 character per cell, so this is genuinely open. The same answer decides whether
 an actor can stand on a carpet tile (H2).
 
-**IQ5 — What should Playtest boot with?** Today it boots the résumé desk and
-makes you create a character again, so a depth-4 floor is always tested by a
-fresh level-1 solo character with no gear and no cash.
+**IQ5 — What should Playtest boot with?** — **ANSWERED: B**, `[ratified]`
+(designer, 2026-08-02: "i also have no idea what depth refers to but level 1 is
+fine"). Taken as B rather than A because B *is* A with one screen removed — it
+changes nothing about what you playtest with, it just stops asking you to make
+the character every time. XS.
+
+Recorded honestly: the answer was given without knowing what `depth` does, and
+"level 1 is fine" is true *today* only because both shipped floors are depth 1
+and 2. `scaleEnemy` (`stats.js:338-361`) gives an enemy +15% max HP per level
+above its native tier, +1 damage per attack per 2 levels, +1 AP per 3, and up to
++2 accuracy steps. On a depth-6 floor a Manager has roughly 75% more HP and +3
+damage. Testing that with a fresh level-1 solo character measures nothing. So
+**C is not rejected, it is deferred** — re-open it the first time a floor deeper
+than about 3 gets built.
 
 - **A. As today.** *Consequence:* zero work; "is this fight fair" is
   unanswerable in the tool, because `depth` scales every enemy
@@ -504,6 +530,7 @@ lives in `EDITOR_PLAN.md`'s table and is inherited, not restated.
 | 7 | This round is the painter, not the instrument: safety, closure and correctness; no encounter-preview overlays | `[ratified]` | IQ1, designer 2026-08-02: "painter". Section I sequences after M4 |
 | 8 | A map character belongs to the level; the shipped-level lint relaxes to match `parseLevel` | `[ratified]` | IQ3, designer 2026-08-02: "i dont know the difference, ill defer to your judgement" — ratified by explicit deferral, with the caveat recorded at IQ3 |
 | 9 | A placement can carry a rotation: an optional `props` sibling array, quantised to four orientations | `[ratified]` | IQ4, designer 2026-08-02: "4 different rotation can be set". Lifts H3 only — H4 (multi-cell props) is untouched |
+| 13 | Playtest remembers the last class and skips the résumé desk; a configurable test party is deferred, not rejected | `[ratified]` | IQ5, designer 2026-08-02: "level 1 is fine" — given without knowing what `depth` does, so re-open when a floor deeper than ~3 is built |
 | 10 | Cross-layer combat is LOS + reach only, no high/low-ground modifier | `[ratified]` | Inherited from EDITOR_PLAN decision 8, closed 2026-08-02. Recorded here only because it was answered in this doc's thread |
 | 11 | The authoring pipeline is export → JSON file → git; the editor's job is to produce that file, not to host levels | `[stated]` | designer, 2026-08-02: "were just outputting to json and uploading to the git". Rules Supabase out of IQ6 — `src/data/levels.js:8-12` resolves levels as build-time static imports, so a database row cannot be a campaign floor |
 | 12 | Supabase is a live option for level *sharing* (K4), which is a separate question from save-to-disk | `[proposed]` | designer-raised 2026-08-02 ("if we can use the supabase"). Gated on whether the editor is a player-facing feature at all — see K4 |
