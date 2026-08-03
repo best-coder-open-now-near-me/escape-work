@@ -1394,7 +1394,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // on ammo or AP. Every live enemy is ringed, not just the engaged - a
   // clickable bystander deserves the same feedback. A cone draws its aimed
   // wedge instead, ringing whoever it would catch.
-  function drawTargets() {
+  // The ground wash under an armed aim (TACTICS_PLAN M7). Independent of
+  // everything below it - it paints whether or not anything is hovered, and it
+  // must also know to VANISH when the turn ends, the verb is disarmed, or the
+  // aimer starts walking.
+  function drawAimWash() {
     // The aim wash first, and unconditionally: it must also KNOW to vanish
     // when the turn ends, the verb is disarmed, or the aimer is mid-walk (a
     // wash painted from a tile you are leaving is a promise about ground you
@@ -1443,53 +1447,36 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         (x, z) => world.terrainOpen(x, z) && world.hasLos(body.x, body.z, x, z) && !walkOnly(x, z),
       ));
     }
-    if (phase !== 'player') return;
-    // What is covering the character you are steering, RIGHT NOW, whatever is
-    // armed - the held-crouch half of the aiming affordance above. A crouch
-    // that says only "In Cover" is a crouch you have to guess the shape of,
-    // and in a corner the shape is the whole decision. Read through
-    // `crouchStateOf`, so the bars are the faces the next shot will actually
-    // be resolved against, and a shield that falls takes its bar with it.
-    {
-      const s = crouchStateOf(active);
-      if (s) drawFaces(s.at.x, s.at.z, s.faces, PREVIEW_COVER);
+  }
+
+  // The faces shielding whoever you are steering, right now, whatever is armed.
+  // A crouch that says only "In Cover" is one you have to guess the shape of,
+  // and in a corner the shape is the whole decision. Read through
+  // `crouchStateOf`, so the bars are the faces the next shot resolves against
+  // and a shield that falls takes its bar with it.
+  function drawHeldCrouch() {
+    const s = crouchStateOf(active);
+    if (s) drawFaces(s.at.x, s.at.z, s.faces, PREVIEW_COVER);
+  }
+
+  // A door rings only UNDER THE CURSOR (designer, 2026-07-31): it used to ring
+  // whenever the acting member stood beside one, whatever was armed, and a
+  // marker that never leaves the threshold reads as state, not affordance. The
+  // hover hands in the same predicate the pointer cursor reads, so ring and
+  // cursor light together; matching against doorsBeside keeps it on doors the
+  // member is actually AT. Green when the AP is there, red when it is not.
+  function drawHoveredDoor() {
+    if (!hoverDoor) return;
+    for (const mid of world.doorsBeside?.(active.actor.x, active.actor.z) || []) {
+      if (Math.abs(mid.x - hoverDoor.x) > 0.01 || Math.abs(mid.z - hoverDoor.z) > 0.01) continue;
+      drawRing(mid.x, mid.z, 0.3, active.ap >= mid.ap ? PREVIEW_OK : PREVIEW_FAR);
     }
-    // A door rings only UNDER THE CURSOR (designer, 2026-07-31): it used to
-    // ring whenever the acting member stood beside one, whatever was armed,
-    // and a marker that never leaves the threshold reads as state, not
-    // affordance. The hover hands in the same predicate the pointer cursor
-    // reads (combatDoorAt), so the ring and the cursor light together - and
-    // matching it against doorsBeside keeps the ring on doors the acting
-    // member is actually AT, so it can never promise a handle across the
-    // room. Green when the AP is there for it, red when it is not, same as
-    // every other ring here.
-    if (hoverDoor) {
-      for (const mid of world.doorsBeside?.(active.actor.x, active.actor.z) || []) {
-        if (Math.abs(mid.x - hoverDoor.x) > 0.01 || Math.abs(mid.z - hoverDoor.z) > 0.01) continue;
-        drawRing(mid.x, mid.z, 0.3, active.ap >= mid.ap ? PREVIEW_OK : PREVIEW_FAR);
-      }
-    }
-    // Not gated on `armed`: with nothing armed a click still swings (the basic
-    // attack), and a swing you can't see coming is worse than no swing at all -
-    // the rings are how you know which coworker a click would hit and whether
-    // you can afford it. previewAction() is that same fallback, so what's drawn
-    // is always what would happen.
-    const id = previewAction();
-    const a = id ? ACTIONS[id] : null;
-    // A stale ease position would make the next arm GLIDE in from wherever
-    // cover was last aimed - drop it the moment cover is not the live verb
-    // (including when no verb previews at all).
-    if (a?.type !== 'cover') coverEase = null;
-    if (!id) return;
-    // ONE classifier for the whole pass (combat-targeting.verbSides). This
-    // ladder used to be hand-written here in a different order from
-    // `verbKind`'s, which is how `pull` came to be missing from the body gate
-    // while `enemyRingOk` carried a live pull arm nothing could reach.
-    const sides = verbSides(a, rangeOf(id));
-    // A zone rings the tiles it would actually cover - the same list the click
-    // paints (zoneCells), so a tile that shows a ring is a tile that gets the
-    // surface. Red on the aim point alone when the placement itself is refused.
-    if (sides.kind === 'zone') {
+  }
+
+  // A zone rings the tiles it would actually cover - the same list the click
+  // paints (zoneCells), so a tile that shows a ring is a tile that gets the
+  // surface. Red on the aim point alone when the placement itself is refused.
+  function drawZoneRings(a, id) {
       if (!armed || !aimPoint) return;
       // The exact aim point - the rings must show the same disc the click
       // lays (DEGRID M6).
@@ -1503,28 +1490,25 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       });
       if (problem) { drawRing(tx, tz, 0.42, PREVIEW_FAR); return; }
       for (const [x, z] of zoneCells(a, tx, tz)) drawRing(x, z, 0.42, PREVIEW_OK);
-      return;
-    }
-    // A summon rings the tiles its employees would actually land on (green),
-    // or the aimed tile alone in red when the spot is unusable - so "where do
-    // they go?" is answered before the AP is spent.
-    if (sides.kind === 'summon') {
+      return true;
+    return true;
+  }
+
+  // Where the arrivals would actually stand: the spots the click will fill,
+  // not the tile aimed at. Red on the aim point when the posting is refused.
+  function drawSummonRings(a, id) {
       if (!armed || !aimPoint) return;
       const tx = Math.round(aimPoint.x);
       const tz = Math.round(aimPoint.z);
       const spots = summonSpotProblem(a, tx, tz) ? [] : world.summonSpots(tx, tz, a.count);
       if (!spots.length) { drawRing(tx, tz, 0.42, PREVIEW_FAR); return; }
       for (const [sx, sz] of spots) drawRing(sx, sz, 0.42, PREVIEW_OK);
-      return;
-    }
-    // Take Cover rings the SPOT YOU WOULD STAND, in the cover yellow, and
-    // draws the faces that would shield it. Ringing the shield instead was
-    // the old aim's own confusion made visible: it told you which object you
-    // had named while the side you would end up on - the thing that decides
-    // which shots you are safe from - was chosen for you and never shown.
-    // Now the ring is where you go and the bars are what covers you, so a
-    // corner reads as a corner and you can see the open angle you are leaving.
-    if (sides.kind === 'cover') {
+      return true;
+    return true;
+  }
+
+  // The crouch aim: the eased ring on the spot, and the faces it would earn.
+  function drawCoverRings(a, id) {
       if (!armed || !aimPoint) { coverEase = null; return; }
       const tx = Math.round(aimPoint.x);
       const tz = Math.round(aimPoint.z);
@@ -1550,24 +1534,74 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       coverEase.z += (tz - coverEase.z) * k;
       drawRing(coverEase.x, coverEase.z, 0.42, color);
       if (ok) drawFaces(tx, tz, crouchFacesAt(tx, tz), PREVIEW_COVER);
-      return;
+      return true;
+    return true;
+  }
+
+  // A buff rings the FRIENDLY side: green on every ally it could land on
+  // right now, red on the ones out of range, out of line, or who would get
+  // nothing from it. Same rule the click runs, so a green ring is a promise.
+  // Returns true when it has HANDLED the pass. A friend-only verb has: there is
+  // no other half to draw. A two-sided one (the purge) has NOT - it keeps going
+  // and rings the coworkers too, because ringing only colleagues while the click
+  // still resolves on the other side is an affordance describing half a verb.
+  //
+  // That fall-through is the one thing this extraction could have lost, since
+  // the original arm simply ran off its end. Stated as a return value now,
+  // rather than as the absence of one.
+  function drawAllyRings(a, id, sides) {
+    if (!armed) return true; // never auto-armed - only shown while deliberately aiming
+    for (const m of friendlies()) {
+      if (!m.actor?.entity) continue;
+      const pos = m.actor.entity.getPosition();
+      drawRing(pos.x, pos.z, TARGET_R, allyProblemFor(id, m) ? PREVIEW_FAR : PREVIEW_OK);
     }
+    return !sides.enemies;
+  }
+
+  function drawTargets() {
+    drawAimWash();
+    if (phase !== 'player') return;
+    drawHeldCrouch();
+    drawHoveredDoor();
+    // Not gated on `armed`: with nothing armed a click still swings (the basic
+    // attack), and a swing you can't see coming is worse than no swing at all -
+    // the rings are how you know which coworker a click would hit and whether
+    // you can afford it. previewAction() is that same fallback, so what's drawn
+    // is always what would happen.
+    const id = previewAction();
+    const a = id ? ACTIONS[id] : null;
+    // A stale ease position would make the next arm GLIDE in from wherever
+    // cover was last aimed - drop it the moment cover is not the live verb
+    // (including when no verb previews at all).
+    if (a?.type !== 'cover') coverEase = null;
+    if (!id) return;
+    // ONE classifier for the whole pass (combat-targeting.verbSides). This
+    // ladder used to be hand-written here in a different order from
+    // `verbKind`'s, which is how `pull` came to be missing from the body gate
+    // while `enemyRingOk` carried a live pull arm nothing could reach.
+    const sides = verbSides(a, rangeOf(id));
+    // A zone rings the tiles it would actually cover - the same list the click
+    // paints (zoneCells), so a tile that shows a ring is a tile that gets the
+    // surface. Red on the aim point alone when the placement itself is refused.
+    if (sides.kind === 'zone' && drawZoneRings(a, id)) return;
+    // A summon rings the tiles its employees would actually land on (green),
+    // or the aimed tile alone in red when the spot is unusable - so "where do
+    // they go?" is answered before the AP is spent.
+    if (sides.kind === 'summon' && drawSummonRings(a, id)) return;
+    // Take Cover rings the SPOT YOU WOULD STAND, in the cover yellow, and
+    // draws the faces that would shield it. Ringing the shield instead was
+    // the old aim's own confusion made visible: it told you which object you
+    // had named while the side you would end up on - the thing that decides
+    // which shots you are safe from - was chosen for you and never shown.
+    // Now the ring is where you go and the bars are what covers you, so a
+    // corner reads as a corner and you can see the open angle you are leaving.
+    if (sides.kind === 'cover' && drawCoverRings(a, id)) return;
     // A buff rings the FRIENDLY side instead: green on every ally it could
     // land on right now, red on the ones out of range, out of line, or who
     // would get nothing from it. Same rule the click runs (buffProblem), so a
     // green ring is a promise.
-    if (sides.allies) {
-      if (!armed) return; // never auto-armed - only shown while deliberately aiming
-      for (const m of friendlies()) {
-        if (!m.actor?.entity) continue;
-        const pos = m.actor.entity.getPosition();
-        drawRing(pos.x, pos.z, TARGET_R, allyProblemFor(id, m) ? PREVIEW_FAR : PREVIEW_OK);
-      }
-      // An ANY-target verb keeps going and rings the other half too (the
-      // purge). Returning here would ring only colleagues while the click
-      // still resolved on coworkers - the affordance describing half the verb.
-      // The gate below is that test, so it does not need repeating here.
-    }
+    if (sides.allies && drawAllyRings(a, id, sides)) return;
     if (!sides.enemies) return;
     if (a.cone) {
       const test = aimPoint && coneTest(a, aimPoint.x, aimPoint.z);
