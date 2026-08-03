@@ -1477,64 +1477,61 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // paints (zoneCells), so a tile that shows a ring is a tile that gets the
   // surface. Red on the aim point alone when the placement itself is refused.
   function drawZoneRings(a, id) {
-      if (!armed || !aimPoint) return;
-      // The exact aim point - the rings must show the same disc the click
-      // lays (DEGRID M6).
-      const tx = aimPoint.x;
-      const tz = aimPoint.z;
-      const problem = zoneProblem(a, {
-        dist: distToTile(active, tx, tz),
-        los: losToTile(active, tx, tz),
-        ap: active.ap,
-        usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
-      });
-      if (problem) { drawRing(tx, tz, 0.42, PREVIEW_FAR); return; }
-      for (const [x, z] of zoneCells(a, tx, tz)) drawRing(x, z, 0.42, PREVIEW_OK);
-      return true;
+    if (!armed || !aimPoint) return;
+    // The exact aim point - the rings must show the same disc the click
+    // lays (DEGRID M6).
+    const tx = aimPoint.x;
+    const tz = aimPoint.z;
+    const problem = zoneProblem(a, {
+      dist: distToTile(active, tx, tz),
+      los: losToTile(active, tx, tz),
+      ap: active.ap,
+      usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
+    });
+    if (problem) { drawRing(tx, tz, 0.42, PREVIEW_FAR); return; }
+    for (const [x, z] of zoneCells(a, tx, tz)) drawRing(x, z, 0.42, PREVIEW_OK);
     return true;
   }
 
   // Where the arrivals would actually stand: the spots the click will fill,
   // not the tile aimed at. Red on the aim point when the posting is refused.
   function drawSummonRings(a, id) {
-      if (!armed || !aimPoint) return;
-      const tx = Math.round(aimPoint.x);
-      const tz = Math.round(aimPoint.z);
-      const spots = summonSpotProblem(a, tx, tz) ? [] : world.summonSpots(tx, tz, a.count);
-      if (!spots.length) { drawRing(tx, tz, 0.42, PREVIEW_FAR); return; }
-      for (const [sx, sz] of spots) drawRing(sx, sz, 0.42, PREVIEW_OK);
-      return true;
+    if (!armed || !aimPoint) return;
+    const tx = Math.round(aimPoint.x);
+    const tz = Math.round(aimPoint.z);
+    const spots = summonSpotProblem(a, tx, tz) ? [] : world.summonSpots(tx, tz, a.count);
+    if (!spots.length) { drawRing(tx, tz, 0.42, PREVIEW_FAR); return; }
+    for (const [sx, sz] of spots) drawRing(sx, sz, 0.42, PREVIEW_OK);
     return true;
   }
 
   // The crouch aim: the eased ring on the spot, and the faces it would earn.
   function drawCoverRings(a, id) {
-      if (!armed || !aimPoint) { coverEase = null; return; }
-      const tx = Math.round(aimPoint.x);
-      const tz = Math.round(aimPoint.z);
-      const ok = !coverSpotProblem(tx, tz);
-      const color = ok ? PREVIEW_COVER : PREVIEW_FAR;
-      // Three layers, from the cursor down to the rule (designer, 2026-07-31:
-      // "something that is continuous and smooth for starters" - the emblem
-      // used to hop in discrete tile-sized steps):
-      //  - a small marker at the CLAMPED stand point - continuous, and
-      //    exactly where the walk will park you: the raw cursor point can
-      //    sit inside a wall's clearance band, and a marker there would
-      //    promise a spot the body cannot occupy;
-      //  - the stand-tile ring, EASED toward the resolved tile rather than
-      //    teleporting to it, so sweeping the cursor reads as one motion;
-      //  - the shielded faces, snapped to the tile's edges - they are tile
-      //    geometry, and drawing them anywhere between two tiles would show
-      //    cover on edges that do not exist.
-      const [mx, mz] = world.clampPoint(aimPoint.x, aimPoint.z);
-      drawRing(mx, mz, 0.12, color);
-      if (!coverEase) coverEase = { x: aimPoint.x, z: aimPoint.z };
-      const k = 1 - Math.exp(-(previewDt || 0) * 14); // ~70ms settle, fps-independent
-      coverEase.x += (tx - coverEase.x) * k;
-      coverEase.z += (tz - coverEase.z) * k;
-      drawRing(coverEase.x, coverEase.z, 0.42, color);
-      if (ok) drawFaces(tx, tz, crouchFacesAt(tx, tz), PREVIEW_COVER);
-      return true;
+    if (!armed || !aimPoint) { coverEase = null; return; }
+    const tx = Math.round(aimPoint.x);
+    const tz = Math.round(aimPoint.z);
+    const ok = !coverSpotProblem(tx, tz);
+    const color = ok ? PREVIEW_COVER : PREVIEW_FAR;
+    // Three layers, from the cursor down to the rule (designer, 2026-07-31:
+    // "something that is continuous and smooth for starters" - the emblem
+    // used to hop in discrete tile-sized steps):
+    //  - a small marker at the CLAMPED stand point - continuous, and
+    //    exactly where the walk will park you: the raw cursor point can
+    //    sit inside a wall's clearance band, and a marker there would
+    //    promise a spot the body cannot occupy;
+    //  - the stand-tile ring, EASED toward the resolved tile rather than
+    //    teleporting to it, so sweeping the cursor reads as one motion;
+    //  - the shielded faces, snapped to the tile's edges - they are tile
+    //    geometry, and drawing them anywhere between two tiles would show
+    //    cover on edges that do not exist.
+    const [mx, mz] = world.clampPoint(aimPoint.x, aimPoint.z);
+    drawRing(mx, mz, 0.12, color);
+    if (!coverEase) coverEase = { x: aimPoint.x, z: aimPoint.z };
+    const k = 1 - Math.exp(-(previewDt || 0) * 14); // ~70ms settle, fps-independent
+    coverEase.x += (tx - coverEase.x) * k;
+    coverEase.z += (tz - coverEase.z) * k;
+    drawRing(coverEase.x, coverEase.z, 0.42, color);
+    if (ok) drawFaces(tx, tz, crouchFacesAt(tx, tz), PREVIEW_COVER);
     return true;
   }
 
@@ -5036,7 +5033,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     if (beat === 'break') {
       acting.ap = roundAp(acting.ap - breakAp);
-      acting.wait = aiOpenOrBreak(unit, brk);
+      // Through a local, not `acting.wait = aiOpenOrBreak(...)`: an assignment
+      // resolves its target's base object BEFORE the right-hand side runs, so
+      // the direct form would write the wait to whatever `acting` was when the
+      // statement started. Nothing in here replaces `acting` today - but it is
+      // the one place in this dispatch where that would matter, and the doer
+      // is the only arm whose wait depends on what it did.
+      const wait = aiOpenOrBreak(unit, brk);
+      acting.wait = wait;
       refresh();
       return;
     }
@@ -5050,6 +5054,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // The same turtle test the crouch beat runs - a shieldless spot refuses
       // and the ladder falls through to the plain shot. tryAiCrouch bills the
       // cover AP itself, which is why this arm does not.
+      // Entrench is TWO beats and this arm is only the first: crouching flips
+      // canCrouch and canEntrench false while canShoot stays true, so the shot
+      // arrives on a later ladder run. chooseBeat reserved the AP for both
+      // halves up front. An arm that "finishes the job" by crouching and
+      // shooting in one call takes two actions in one frame and eats the 0.5s
+      // settle that makes the tuck-in readable.
       if (tryAiCrouch(unit, target)) { acting.wait = 0.5; return; }
       refused.add('entrench');
       return; // nothing animated - fall to the shot immediately
@@ -5077,6 +5087,28 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     advanceTurn(); // the pass beat - out of AP or everything refused
   }
 
+  // The head is short enough now to invite tidying, so the three things it must
+  // keep doing in this exact shape are written down rather than left to be
+  // rediscovered. All three fail silently.
+  //
+  //  - The two draw calls are ORDERED and neither belongs in the player arm.
+  //    `drawPreview` latches `previewDt = dt` as its first statement, before its
+  //    own `!preview` bail, and `drawCoverRings` reads it later in the SAME
+  //    frame through drawTargets; swap them and the crouch ring's ease runs on
+  //    the last frame's dt (0 on the first frame of an aim), so it never glides.
+  //    And `drawTargets` only LOOKS like player UI: it runs `drawAimWash()`
+  //    unconditionally before its own phase gate, and the `aimPaint.hide()` in
+  //    there is the only thing that takes the ground wash down - move the call
+  //    inside `phase === 'player'` and the wash stays painted through every
+  //    enemy turn.
+  //  - The victory check is phase-agnostic on purpose. Every verb has its own,
+  //    but this is the only one that catches a death combat.js did not cause -
+  //    a printer going up mid-fight. In the player arm, a fight whose last
+  //    hostile dies on an AI turn never ends.
+  //  - The wait gate burns the WHOLE frame, including the frame the wait
+  //    expires on. Letting it fall through when the decrement crosses zero is a
+  //    one-line efficiency tidy that speeds every beat in the game up by a
+  //    frame.
   function update(dt) {
     if (phase === 'done') return;
     retireStaleMoveStarts();
@@ -5107,10 +5139,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     const target = pickTarget(unit);
     if (!target) { defeat(); return; } // no living player-side target = party wipe
-    aiTargets.set(unit, target.member); // the standing mark stickiness holds to
+    // The standing mark stickiness holds to - and it is recorded per DECISION,
+    // which is why it sits below the `moving` guard: re-committing on every
+    // frame of a walk would make it mean "who I am walking at" instead.
+    aiTargets.set(unit, target.member);
     // Gather, decide, act. The decision is combat-ai's (chooseBeat, a pure
     // ladder over plain values); the gathering and the doing are this file's,
-    // because both need the world.
+    // because both need the world. All three happen exactly once, in this
+    // order, HERE - `refused` is minted once per turn and handed to both
+    // callees, and the tally counts DECISIONS, refusals included, so it belongs
+    // after the choice and before the doing.
     const plans = aiBeatPlans(unit, target);
     const refused = (acting.refused ??= new Set());
     const { beat } = chooseBeat(plans.beatState, refused);
