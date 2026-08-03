@@ -146,7 +146,8 @@ export function swingPointAt(attacker, en, gx, gz, { isWalkable, approach, stepO
 // Does ANY tile beside them offer a legal swing? The cheap read the target
 // rings use - pure geometry, no pathfinding, so it can run per frame. A route
 // to the spot is the click's own (more expensive) test.
-export function hasSwingSpot(attacker, en, world) {
+export function hasSwingSpot(attacker, en, { isWalkable, approach, stepOpen }) {
+  const world = { isWalkable, approach, stepOpen };
   return AROUND.some(([dx, dz]) => swingPointAt(attacker, en, en.x + dx, en.z + dz, world));
 }
 

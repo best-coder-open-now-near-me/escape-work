@@ -51,7 +51,8 @@ export function topplePlan(bx, bz, px, pz, { tileDefAt, terrainOpen, stepOpen })
 //
 // `victimAt(x, z)` is the caller's "is one of THEM standing here" test; only
 // combat knows which side a body is on.
-export function aiTopplePlan(bx, bz, world, victimAt) {
+export function aiTopplePlan(bx, bz, { tileDefAt, terrainOpen, stepOpen }, victimAt) {
+  const world = { tileDefAt, terrainOpen, stepOpen };
   for (const [dx, dz] of AROUND) {
     const plan = topplePlan(bx, bz, bx + dx, bz + dz, world);
     if (plan && victimAt(plan.lx, plan.lz)) return plan;
@@ -73,7 +74,9 @@ export function aiTopplePlan(bx, bz, world, victimAt) {
 //
 // Adjacent-only, like the topple's own aim; `victimAt` is the caller's side
 // test, `hazardAt` its "would landing there hurt" test.
-export function aiShovePlan(bx, bz, world, victimAt, { hazardAt = null, disengage = false } = {}) {
+export function aiShovePlan(bx, bz, { isWalkable, stepOpen, occupied }, victimAt,
+  { hazardAt = null, disengage = false } = {}) {
+  const world = { isWalkable, stepOpen, occupied };
   for (const [dx, dz] of AROUND) {
     const vx = bx + dx;
     const vz = bz + dz;
@@ -110,7 +113,13 @@ export function aiEdgeTopplePlan(bx, bz, { wallEdgeBetween, terrainOpen }, victi
 // `crouchOf(v)` returns the victim's live crouch AS THE PULLER SEES IT
 // (faces computed with the puller's own body not counted: standing beside
 // somebody is how you reach over their barrier, not a barrier of your own).
-export function aiPullPlan(unit, candidates, crouchOf, world) {
+// The two defaults are repeated VERBATIM from pullPlan's own destructure, and
+// that is the one line here where a slip would change behaviour: combat supplies
+// `bodyAt` and omits `name`, so getting either default wrong silently rewrites
+// a refusal or a reachability test rather than throwing.
+export function aiPullPlan(unit, candidates, crouchOf,
+  { stepOpen, open, name = 'They', bodyAt = null }) {
+  const world = { stepOpen, open, name, bodyAt };
   for (const v of candidates) {
     const crouch = crouchOf(v);
     if (!crouch) continue;
