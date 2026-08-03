@@ -12,7 +12,7 @@
 // (true always lands, false always misses), which is what lets a test assert on
 // the MISS branch at all.
 import { test, expect } from '@playwright/test';
-import { bootStash, enterCombat, waitForPlayerTurn } from './helpers.js';
+import { bootStash, enterCombat, waitForPlayerTurn, stableProject } from './helpers.js';
 
 // The Manager three tiles east of the player: inside the throw range of 5, with
 // a clear line, and too far to melee.
@@ -82,7 +82,23 @@ const setPaper = (page, n) => page.evaluate((v) => {
 const managerHp = (page) => page.evaluate(() =>
   window.__combat.enemies.find((e) => e.name === 'The Manager')?.hp ?? null);
 const lastLine = (page) => page.evaluate(() => window.__game.narration.at(-1) || '');
+// Settle the camera BEFORE projecting, or the point is stale by the time the
+// click lands and the click misses the body entirely. When that happens this
+// suite does not report a miss - it reports the assertion three lines later:
+// the throw was never resolved, so `armed` is still set, no paper is spent, no
+// fight opens, and the narrator's last line is still the ARMING line. Every
+// symptom reads like a refusal that forgot to say why.
+//
+// It sat here as a latent defect for as long as the frame budget happened to be
+// generous enough. Memoizing the focus banner (Q152) made hover frames cheaper,
+// the click started arriving earlier, and it began failing two runs in three -
+// a perf fix exposing an unpinned wait, not breaking one.
 const clickManager = async (page) => {
+  const tile = await page.evaluate(() => {
+    const en = window.__game.enemies.find((e) => e.alive);
+    return { x: en.x, z: en.z };
+  });
+  await stableProject(page, tile.x, tile.z);
   const p = await page.evaluate(() => {
     const en = window.__game.enemies.find((e) => e.alive);
     return window.__game.project3(en.px ?? en.x, 0.9, en.pz ?? en.z);
