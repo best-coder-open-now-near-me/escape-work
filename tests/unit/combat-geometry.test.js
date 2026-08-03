@@ -148,6 +148,21 @@ test('hasSwingSpot is true when any of the eight neighbours works', () => {
   assert.equal(hasSwingSpot(me, at(5, 5), { ...open, isWalkable: () => false }), false);
 });
 
+test('a long handle finds a swing spot the eight neighbours do not offer', () => {
+  // The coworker is boxed in: every one of their eight neighbours is occupied
+  // or blocked, so the only place to stand is a tile further out. A default
+  // reach genuinely has no melee option here - but the reach-grabber's 2.2
+  // does, and scanning AROUND alone said no to both, making the long weapon
+  // strictly worse than the short one in the case it exists for.
+  const en = at(5, 5);
+  const ringed = {
+    ...open,
+    isWalkable: (x, z) => Math.max(Math.abs(x - 5), Math.abs(z - 5)) !== 1,
+  };
+  assert.equal(hasSwingSpot(unit(0, 0, REACH.DEFAULT), en, ringed), false);
+  assert.equal(hasSwingSpot(unit(0, 0, REACH.DEFAULT + 0.7), en, ringed), true);
+});
+
 test('zoneCellsFor drops tiles that are unseen, unusable, or occupied', () => {
   const a = { radius: 1 };
   const origin = { x: 0, z: 0 };

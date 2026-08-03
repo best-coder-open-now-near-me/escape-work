@@ -216,20 +216,46 @@ export function planCrossLayerRoute(floors, from, to, walkableOn, costOn = () =>
     if (ax === bx && az === bz) return [[ax, az]];
     return findPath(walkableOn(l), ax, az, bx, bz, costOn(l), floors.layers[l].stepOpen);
   };
-  function fromLayer(px, pz, l) {
+  // Every stair a storey can board, in BOTH directions. The search used to
+  // take only the flights that moved toward `to.layer`, which quietly assumed
+  // the building is a stack of fully-connected floors: the moment a storey's
+  // two flights do not share a walkable region - the mezzanine you cross to
+  // reach the far stairwell, the lobby you drop back into to get around a
+  // sealed corridor - the honest route is up-and-back-down (or down-and-back-
+  // up), and monotonic search calls it "no way to get there from here".
+  const boardable = (l) => {
+    const out = [];
+    for (const s of floors.stairs) {
+      if (s.layer === l) out.push({ s, gate: s.entry, exit: s.top, to: s.upper });
+      if (s.upper === l) out.push({ s, gate: s.top, exit: s.entry, to: s.layer });
+    }
+    return out;
+  };
+  // Both directions means a route can revisit a storey, so the walk needs a
+  // cycle guard the monotonic version got for free. It counts FLIGHTS, not
+  // storeys: coming back to a floor you have already been on is the whole
+  // point (up the west stair, across, down the east one), so a storey guard
+  // would forbid the routes this exists to find. Riding the same flight twice
+  // on one branch never helps - it returns you to a storey you could already
+  // leave from anywhere - so barring that is enough to terminate, and it
+  // leaves every legitimate route on the table.
+  function fromLayer(px, pz, l, seen = new Set()) {
+    let best = null;
+    // Standing on the destination storey is a CANDIDATE, not an answer. It was
+    // an early return, so a goal on this storey that the walk cannot reach -
+    // two wings joined only by the floor above, a corridor sealed off - was
+    // reported unreachable while a perfectly good route up and back down sat
+    // there. The stair search below still runs, and the cheaper of the two
+    // wins.
     if (l === to.layer) {
       const p = walkLeg(l, px, pz, to.x, to.z);
-      return p ? { legs: [{ kind: 'walk', layer: l, path: p }], cost: p.length } : null;
+      if (p) best = { legs: [{ kind: 'walk', layer: l, path: p }], cost: p.length };
     }
-    const up = to.layer > l;
-    let best = null;
-    for (const s of floors.stairs) {
-      if (up ? s.layer !== l : s.upper !== l) continue;
-      const gate = up ? s.entry : s.top; // where this storey boards the flight
-      const exit = up ? s.top : s.entry; // where the next storey receives you
+    for (const { s, gate, exit, to: next } of boardable(l)) {
+      if (seen.has(s)) continue;
       const p = walkLeg(l, px, pz, gate.x, gate.z);
       if (!p) continue;
-      const rest = fromLayer(exit.x, exit.z, up ? s.upper : s.layer);
+      const rest = fromLayer(exit.x, exit.z, next, new Set(seen).add(s));
       if (!rest) continue;
       const cost = p.length + s.cells.length + 2 + rest.cost;
       if (!best || cost < best.cost) {
@@ -240,7 +266,7 @@ export function planCrossLayerRoute(floors, from, to, walkableOn, costOn = () =>
             {
               kind: 'climb',
               from: { x: gate.x, z: gate.z, layer: l },
-              to: { x: exit.x, z: exit.z, layer: up ? s.upper : s.layer },
+              to: { x: exit.x, z: exit.z, layer: next },
               run: s.cells.length,
             },
             ...rest.legs,

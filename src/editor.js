@@ -440,8 +440,20 @@ export function startEditor(app, levelData, stashKey) {
   // --- resizing (right/bottom edges; new cells are open floor - the world
   // outside the map is solid anyway, and partitions are painted, not filled) ---
   function resize(dw, dh) {
-    const nw = Math.min(MAX_SIZE, Math.max(MIN_SIZE, width + dw));
-    const nh = Math.min(MAX_SIZE, Math.max(MIN_SIZE, height + dh));
+    // The clamp binds only in the direction you asked for. Clamping both axes
+    // unconditionally meant that on a level LARGER than MAX_SIZE - which the
+    // editor happily loads - every resize button, including the one for the
+    // other axis, silently deleted every row and column past 40. Pressing
+    // "wider" on a 60x60 level threw away a third of it before it grew
+    // anything. Growth still stops at MAX_SIZE, shrinking still stops at
+    // MIN_SIZE, and an axis with no delta is never touched at all.
+    const clamp = (cur, d) => {
+      if (!d) return cur;
+      if (d < 0) return Math.max(MIN_SIZE, cur + d);
+      return cur + d > MAX_SIZE ? Math.max(cur, MAX_SIZE) : cur + d;
+    };
+    const nw = clamp(width, dw);
+    const nh = clamp(height, dh);
     if (nw === width && nh === height) return;
     while (rows.length < nh) rows.push(new Array(width).fill(charOfType('floor')));
     while (rows.length > nh) rows.pop();
@@ -635,18 +647,38 @@ export function startEditor(app, levelData, stashKey) {
   };
   bar.appendChild(select);
 
+  // Every localStorage touch here is guarded, like main.js's (god.js:66). These
+  // were the last unguarded ones in the codebase, and the worst of them is Exit:
+  // in a storage-blocked browser the `removeItem` throw ate the two lines that
+  // actually LEAVE, so the one button whose whole job is to get you out of the
+  // editor could not - with no error and nothing to try next. Playtest is the
+  // one case where the throw is worth reporting rather than swallowing: without
+  // the stash there is nothing to boot, so it says so and stays put instead of
+  // reloading into the shipped level as though it had worked.
+  const stash = (json) => {
+    try {
+      localStorage.setItem(stashKey, json);
+      return true;
+    } catch { return false; }
+  };
+  const unstash = () => {
+    try { localStorage.removeItem(stashKey); } catch { /* nowhere to remove from */ }
+  };
   btn('ed-playtest', '▶ Playtest').onclick = () => {
-    localStorage.setItem(stashKey, toJson());
+    if (!stash(toJson())) {
+      window.alert('This browser will not store the level, so there is nothing to play test. Export the JSON instead.');
+      return;
+    }
     location.hash = '';
     location.reload();
   };
   btn('ed-export', 'Export JSON').onclick = showExport;
   btn('ed-reset', 'Reset').onclick = () => {
-    localStorage.removeItem(stashKey);
+    unstash();
     location.reload();
   };
   btn('ed-exit', 'Exit editor').onclick = () => {
-    localStorage.removeItem(stashKey);
+    unstash();
     location.hash = '';
     location.reload();
   };

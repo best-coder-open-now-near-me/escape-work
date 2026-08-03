@@ -104,7 +104,13 @@ export function applyStatus(target, id, opts = {}, resist = 0) {
   if (blockedBy(target, id)) return false;
   let dur = opts.duration != null ? opts.duration : def.duration;
   if (def.resistable && resist > 0) dur = Math.max(1, dur - resist);
-  if (dur <= 0) return false;
+  // FINITE and positive. `dur <= 0` alone let two impossible durations through,
+  // because neither comparison is true of them: NaN wrote `left: NaN`, which no
+  // clock can decrement and no reader counts as present - and this still
+  // returned true, so the caller narrated and billed for a status that was
+  // never applied. Infinity wrote a status nothing can ever expire. A duration
+  // that is not a number is a caller bug; refusing it is how it gets found.
+  if (!Number.isFinite(dur) || dur <= 0) return false;
   const map = mapOf(target);
   const cur = map[id]?.left || 0;
   // A re-apply takes the WORSE of the two severities, for the same reason it
@@ -175,7 +181,16 @@ function tick(target, clock) {
   if (!map) return result;
   for (const id in map) {
     const def = STATUSES[id];
-    if (!def || def.clock !== clock) continue;
+    // A status id that has LEFT the registry is dropped on sight. It used to be
+    // skipped, and skipped is immortal: no clock ticked it, and both sweep
+    // options passed over it too (`harmfulOnly` reads `def.harmful`,
+    // the combat-end sweep reads `def.clock` - an absent def fails both, and
+    // both spare what they cannot classify). So a save written before a status
+    // was renamed or retired carried it forever, with `hasStatus` still
+    // answering yes. Deleting mid-`for...in` is safe, and this is the loop that
+    // visits every id on every clock.
+    if (!def) { delete map[id]; continue; }
+    if (def.clock !== clock) continue;
     const entry = map[id];
     if (!(entry.left > 0)) continue;
     // Dots take severity too, so "Composure blunts it" means the same thing
@@ -203,8 +218,11 @@ export function clearStatuses(target, { harmfulOnly = false, clock = null } = {}
   if (!map) return removed;
   for (const id in map) {
     const def = STATUSES[id];
-    if (harmfulOnly && !def?.harmful) continue;
-    if (clock && def?.clock !== clock) continue;
+    // Same rule as the tick: an id the registry no longer knows is removed by
+    // any sweep, not spared by every one of them. Both filters below ask the
+    // def a question, and an absent def answered "not me" to both.
+    if (def && harmfulOnly && !def.harmful) continue;
+    if (def && clock && def.clock !== clock) continue;
     delete map[id];
     removed.push(id);
   }

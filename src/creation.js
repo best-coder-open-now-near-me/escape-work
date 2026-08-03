@@ -167,8 +167,13 @@ export function createCharacter(draft) {
   // Bank the points, then spend them through the real function. Banking first
   // matters: spendAttrPoint refuses when the pool is empty, which is what stops
   // a malformed draft from handing out free attributes.
+  // A spend that does NOT land takes its banked point back with it.
+  // `spendAttrPoint` refuses an attribute name it does not know, and the
+  // point stayed banked - so a draft naming 'strength' handed the character
+  // free points to spend on whatever they liked later. Banking first still
+  // does its job (no free attributes); this closes the other half.
   const spends = (draft.spends || []).slice(0, CREATION_POINTS);
   sheet.attrPoints = (sheet.attrPoints || 0) + spends.length;
-  for (const attr of spends) spendAttrPoint(sheet, attr);
+  for (const attr of spends) if (!spendAttrPoint(sheet, attr)) sheet.attrPoints -= 1;
   return sheet;
 }

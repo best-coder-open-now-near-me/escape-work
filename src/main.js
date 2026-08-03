@@ -1593,7 +1593,12 @@ function startGame(level) {
   // def's `examine`); this only decides which one applies.
   function examineTile(tx, tz) {
     const def = grid.defAt(tx, tz);
-    if (isWalkable(tx, tz)) {
+    // TERRAIN, not walkability. `isWalkable` also refuses a tile somebody is
+    // STANDING on, so examining the floor under a coworker fell through the
+    // whole solid ladder below and came out as the last-resort "a cubicle
+    // wall" - on plain carpet, because the floor def carries no label of its
+    // own. What is underfoot does not change because somebody is on it.
+    if (grid.terrainOpen(tx, tz)) {
       if (runtime.isBurning(tx, tz)) return FIRE.examine;
       if (grid.isElectrified(tx, tz)) return ELECTRIFIED.examine;
       const surfId = runtime.surfaceAt(tx, tz);
@@ -1828,6 +1833,18 @@ function startGame(level) {
     const entries = layoutOf(barSheet());
     return inCombat && combat ? combat.scrambleEntries(entries) : entries;
   };
+  // The slot a visible position REALLY is. While the reorg is on, the bar
+  // draws and presses a shuffled order but the layout being rearranged is the
+  // player's own - so right-clicking slot 3 used to open the assign menu for
+  // whatever sat at true index 3, which under a scramble is a different slot
+  // from the one under the cursor. Press and assign now agree on what "this
+  // slot" means: press already read the drawn order, and assign maps through
+  // the same permutation before it writes.
+  const trueSlot = (i) => {
+    if (!inCombat || !combat) return i;
+    const order = combat.scrambleOrder(layoutOf(barSheet()).length);
+    return order ? order[i] ?? i : i;
+  };
   function buildHotbar() {
     hotbarRow = hotbar?.row ?? hotbarRow;
     hotbar?.destroy(); // a leader switch rebuilds it for the new sheet
@@ -1867,7 +1884,12 @@ function startGame(level) {
   // combat owning a different widget, not a rule anybody chose.
   function openAssignMenu(i, x, y) {
     if (!sheet || gameOver || modalOpen()) return;
-    const layout = layoutOf(barSheet());
+    // `i` is a position on the BAR; `slot` is the layout entry it stands for.
+    // Everything the menu shows is read off the drawn order (so a hint sends
+    // the player to the slot they can actually see), and only the write goes
+    // through `trueSlot`.
+    const layout = barLayout();
+    const slot = trueSlot(i);
     const here = layout[i];
     const placedAt = (kind, id) => layout.findIndex((s) => s && s.kind === kind && s.id === id);
     const rowOf = (at) => Math.floor(at / ui.HOTBAR_ROW_SLOTS) + 1;
@@ -1877,7 +1899,7 @@ function startGame(level) {
       return at === i ? 'in this slot' : `on ${rowOf(at)}·${(at % ui.HOTBAR_ROW_SLOTS) + 1}`;
     };
     const items = [{ label: `Slot ${rowOf(i)}·${(i % ui.HOTBAR_ROW_SLOTS) + 1}`, header: true }];
-    if (here) items.push({ label: 'Clear this slot', action: () => assignHotbarSlot(i, null) });
+    if (here) items.push({ label: 'Clear this slot', action: () => assignHotbarSlot(slot, null) });
     items.push({ label: 'Powers', header: true });
     for (const id of hotbarActionIds()) {
       items.push({
@@ -1885,7 +1907,7 @@ function startGame(level) {
         // same thing the same way.
         label: `${ACTIONS[id].icon || '❔'}  ${ACTIONS[id].label}`,
         hint: slotHint('action', id),
-        action: () => assignHotbarSlot(i, { kind: 'action', id }),
+        action: () => assignHotbarSlot(slot, { kind: 'action', id }),
       });
     }
     const carried = hotbarItemIds();
@@ -1895,7 +1917,7 @@ function startGame(level) {
       items.push({
         label: `${ITEMS[id].icon || '❔'}  ${ITEMS[id].name}`,
         hint: slotHint('item', id) || (n > 1 ? `×${n}` : null),
-        action: () => assignHotbarSlot(i, { kind: 'item', id }),
+        action: () => assignHotbarSlot(slot, { kind: 'item', id }),
       });
     }
     ui.showMenu(x, y, items);

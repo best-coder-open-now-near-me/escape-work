@@ -195,6 +195,54 @@ test('an unreachable stair entry refuses the whole route', () => {
   assert.equal(route, null);
 });
 
+// A building whose GROUND storey is two wings with no door between them, and
+// whose upper storey bridges them. `planCrossLayerRoute` only ever reads
+// `floors.stairs` and `floors.layers[l].stepOpen`, so a stub says exactly this
+// shape and nothing else. Two flights: west wing <-> upper, east wing <-> upper.
+const bridged = () => ({
+  layers: [{ stepOpen: () => true }, { stepOpen: () => true }],
+  stairs: [
+    { layer: 0, upper: 1, entry: { x: 1, z: 4 }, top: { x: 1, z: 0 }, cells: [{ x: 1, z: 3 }, { x: 1, z: 2 }] },
+    { layer: 0, upper: 1, entry: { x: 8, z: 4 }, top: { x: 8, z: 0 }, cells: [{ x: 8, z: 3 }, { x: 8, z: 2 }] },
+  ],
+});
+// The ground's wall runs down x=5 and nothing crosses it; upstairs is open.
+const wings = (l) => (x, z) =>
+  x >= 0 && z >= 0 && x <= 9 && z <= 4 && (l === 1 || x !== 5);
+
+test('a goal on your OWN storey routes up and back down when the floor is split', () => {
+  // The whole point: from and to are both on layer 0, and no walk on layer 0
+  // connects them. The old search took the destination storey as an early
+  // return, so it asked findPath once, got null, and refused - while the route
+  // up the west stair, across the mezzanine and down the east one was open the
+  // entire time.
+  const route = planCrossLayerRoute(bridged(),
+    { x: 0, z: 4, layer: 0 }, { x: 9, z: 4, layer: 0 }, wings);
+  assert.ok(route, 'the up-and-back-down route exists');
+  assert.deepEqual(route.legs.map((l) => l.kind), ['walk', 'climb', 'walk', 'climb', 'walk']);
+  assert.equal(route.legs[1].to.layer, 1, 'up the west flight');
+  assert.equal(route.legs[3].to.layer, 0, 'and back down the east one');
+  assert.deepEqual(route.legs[4].path[route.legs[4].path.length - 1], [9, 4]);
+});
+
+test('a plain same-storey walk still beats the detour on cost', () => {
+  // The stair search runs even when the direct walk exists, so it has to LOSE
+  // when the floor is open - or every flat route would go sightseeing.
+  const route = planCrossLayerRoute(bridged(),
+    { x: 0, z: 4, layer: 0 }, { x: 4, z: 4, layer: 0 }, () => () => true);
+  assert.equal(route.legs.length, 1);
+  assert.equal(route.legs[0].kind, 'walk');
+});
+
+test('a genuinely sealed goal still refuses, without looping through storeys', () => {
+  // Both directions on every flight means a route could revisit a storey; the
+  // guard is what stops the search walking up and down forever before it
+  // admits there is nothing there.
+  const sealed = (l) => (x, z) => wings(l)(x, z) && !(l === 1 && x > 5);
+  assert.equal(planCrossLayerRoute(bridged(),
+    { x: 0, z: 4, layer: 0 }, { x: 9, z: 4, layer: 0 }, sealed), null);
+});
+
 // --- the shipped spike level -------------------------------------------------
 test('spike-lobby parses: one 3-cell flight, atrium-height ground storey', () => {
   const f = parseFloors(spikeLobby);

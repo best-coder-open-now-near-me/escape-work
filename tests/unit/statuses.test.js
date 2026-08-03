@@ -368,3 +368,42 @@ test('a resisted FIRST application still lands blunted', () => {
   applyStatus(t, 'blinded', {}, 5);
   assert.ok(statusSeverity(t, 'blinded') < 1, 'resist blunts a fresh application');
 });
+
+// --- statuses that outlive their own registry entry --------------------------
+// A save carries status IDS, not definitions, so a status that gets renamed or
+// retired arrives on a live sheet with nothing to look it up in.
+
+test('a status id the registry no longer knows is dropped by the tick', () => {
+  // Immortal before: the tick skipped it (no def, no clock), so it never
+  // decremented and never expired, and `hasStatus` went on answering yes.
+  const t = { statuses: { 'retired-in-v7': { left: 3, sev: 1 } } };
+  assert.equal(hasStatus(t, 'retired-in-v7'), true);
+  tickTurn(t);
+  assert.equal(hasStatus(t, 'retired-in-v7'), false);
+  assert.equal('retired-in-v7' in t.statuses, false, 'gone from the map, not just expired');
+});
+
+test('a sweep removes an unknown id instead of sparing it', () => {
+  // Both filters ask the DEF a question, and an absent def used to answer
+  // "not me" to every one of them - so the id no sweep could classify was the
+  // one id no sweep would take.
+  const harm = { statuses: { 'retired-in-v7': { left: 3 } } };
+  clearStatuses(harm, { harmfulOnly: true });
+  assert.deepEqual(Object.keys(harm.statuses), []);
+  const endOfFight = { statuses: { 'retired-in-v7': { left: 3 } } };
+  clearStatuses(endOfFight, { clock: 'turn' });
+  assert.deepEqual(Object.keys(endOfFight.statuses), []);
+});
+
+test('a duration that is not a finite number applies nothing, and says so', () => {
+  const id = Object.keys(STATUSES)[0];
+  const t = { statuses: {} };
+  // NaN passed `dur <= 0` (nothing compares true to NaN) and wrote left: NaN -
+  // an entry no clock can decrement and no reader counts as present - while
+  // still returning true, so the caller narrated and billed for it.
+  assert.equal(applyStatus(t, id, { duration: NaN }), false);
+  assert.deepEqual(Object.keys(t.statuses), []);
+  // Infinity got in the same way and could never expire.
+  assert.equal(applyStatus(t, id, { duration: Infinity }), false);
+  assert.deepEqual(Object.keys(t.statuses), []);
+});

@@ -148,7 +148,24 @@ export function swingPointAt(attacker, en, gx, gz, { isWalkable, approach, stepO
 // to the spot is the click's own (more expensive) test.
 export function hasSwingSpot(attacker, en, { isWalkable, approach, stepOpen }) {
   const world = { isWalkable, approach, stepOpen };
-  return AROUND.some(([dx, dz]) => swingPointAt(attacker, en, en.x + dx, en.z + dz, world));
+  // Out to the attacker's REACH, not the eight neighbours. A long handle
+  // (the reach-grabber puts a swing at 2.2 tile-units) can hit from a tile
+  // further out, and scanning only AROUND told it there was no melee option
+  // whenever the ring was full - a coworker boxed in by their own colleagues,
+  // or one the far side of a partition whose neighbours cannot be walked to.
+  // That is the same mistake `routeToFiringPosition` was written to fix for
+  // shots, and it made a long weapon strictly worse than a short one in the
+  // one situation it exists for. Default reach rounds to 2, which still walks
+  // the eight neighbours plus a ring that `swingPointAt` rejects on distance -
+  // per-frame work stays proportional to the reach that earned it.
+  const r = Math.ceil(reachOfUnit(attacker));
+  for (let dz = -r; dz <= r; dz++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (!dx && !dz) continue;
+      if (swingPointAt(attacker, en, en.x + dx, en.z + dz, world)) return true;
+    }
+  }
+  return false;
 }
 
 // Which tiles a zone verb aimed at (tx, tz) would actually cover: in the

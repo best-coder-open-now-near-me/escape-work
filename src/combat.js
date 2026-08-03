@@ -375,7 +375,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // happens here rather than inside the sampler.
   const billMove = (holder, cost) => {
     const fromFree = Math.min(holder.freeAp || 0, cost);
-    holder.freeAp = roundAp((holder.freeAp || 0) - fromFree);
+    // The ALLOWANCE keeps its exact remainder; only the display rounds it
+    // (`fmtAp`, in the AP tag). Rounding the running total to tenths made the
+    // allowance a ratchet it could never climb down: a step costing 0.05 took
+    // 0.05 off 1.0, rounded 0.95 straight back up to 1.0, and the free move
+    // was still whole. Repeat it and you have unlimited free movement in
+    // 0.05 doses. Real AP below still rounds - that is the currency the player
+    // reads, and it errs toward charging rather than not.
+    const left = (holder.freeAp || 0) - fromFree;
+    holder.freeAp = left < 1e-9 ? 0 : left; // float dust is not an allowance
     const fromAp = roundAp(cost - fromFree);
     holder.ap = Math.max(0, roundAp(holder.ap - fromAp));
     return fromAp;
@@ -541,7 +549,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // grant cover for it.
       coverCell: (x, z) => {
         const d = world.tileDefAt(x, z);
-        return !!d && (!!d.cover || (!!d.solid && !blocksSight(d))) || guardStandingAt(x, z);
+        return !!d && (!!d.cover || (!!d.solid && !blocksSight(d)))
+          || guardStandingAt(x, z, defender);
       },
       allies,
       facing: facings.get(defender) || null,
@@ -668,9 +677,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const watching = new Map();
   // Is somebody holding a `guard` stance on this exact tile? Read by the cover
   // predicate, so a planted teammate shields the face they stand on.
-  const guardStandingAt = (x, z) => {
+  // `forUnit` is who is being SHOT AT: a guard stance shields the side that
+  // planted it, and only that side. Without the test any planted body was
+  // cover for anybody, so an enemy holding the line shielded the party member
+  // they were holding it against - and the party's own guard did the same
+  // favour for the coworkers. Sides are read live (`aiAllies`), the same rule
+  // the pincer test uses, so a charmed coworker shields the player this turn.
+  const guardStandingAt = (x, z, forUnit) => {
+    const side = forUnit && (forUnit.sheet ? members : aiAllies());
     for (const [holder, actionId] of watching) {
       if (ACTIONS[actionId]?.mode !== 'guard') continue;
+      if (side && !side.includes(holder)) continue;
       const b = bodyOf(holder);
       if (b && b.x === x && b.z === z && standing(holder)) return true;
     }
@@ -1843,8 +1860,18 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // is the player's own layout now, so the status shuffles THAT - same
   // disorientation, same per-turn seed, applied to the bar they arranged.
   function scrambleEntries(entries) {
-    if (!statusFx(active.sheet).shuffleActions) return entries;
-    return scrambled(entries.map((_, i) => i)).map((i) => entries[i]);
+    const order = scrambleOrder(entries.length);
+    return order ? order.map((i) => entries[i]) : entries;
+  }
+  // The permutation ITSELF, so a caller can map a slot the player is pointing
+  // at back to the slot it really is. main.js needs both halves: the bar draws
+  // and presses the scrambled order, but rearranging writes to the layout the
+  // reorg is scrambling, and reading one through the other put the two verbs
+  // on different slots. Null when nothing is scrambled, so the common path
+  // stays identity rather than an allocated 0..n-1.
+  function scrambleOrder(n) {
+    if (!statusFx(active.sheet).shuffleActions) return null;
+    return scrambled(Array.from({ length: n }, (_, i) => i));
   }
 
   // Point everything at the member whose initiative turn it now is:
@@ -1858,7 +1885,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // A summon lives outside party.members, so it can't be party.active - leave
     // that pointing at the real member who last held the floor (the post-combat
     // leader). The initiative tracker shows whose turn it actually is.
-    if (!m.isSummon) party.active = members.indexOf(m);
+    //
+    // A CHARMED coworker is the same story and was not covered: it is
+    // `isCharmed`, never `isSummon`, and it is appended to `members` after the
+    // real roster - so this wrote an index past the end of `party.members`,
+    // and everything keyed off `party.members[party.active]` (the portrait
+    // highlight, the leader bindings main.js re-reads when the dust settles)
+    // was reading undefined until a real member's turn came round. The test is
+    // the roster's own range rather than a list of exceptions, so the next
+    // kind of borrowed body cannot reintroduce this.
+    const at = members.indexOf(m);
+    if (at >= 0 && at < party.members.length) party.active = at;
     disarm();
     pendingMelee = null;
     pendingCrouch = null;
@@ -5572,6 +5609,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     pressAction,
     actionState,
     scrambleEntries,
+    scrambleOrder,
     // Bill a verb that is not an ACTION against the acting member's pool - a
     // consumable, pressed from the bar or from the pockets. Returns false when
     // they cannot afford it, so the caller refuses without spending anything.

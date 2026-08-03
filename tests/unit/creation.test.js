@@ -323,3 +323,18 @@ test('verb agreement handles singular they', () => {
   assert.equal(verb(pronounsOf({ pronouns: 'he' }), 'gather'), 'gathers');
   assert.equal(verb(pronounsOf({ pronouns: 'she' }), 'go', 'es'), 'goes');
 });
+
+test('a spend the sheet refuses hands its point back, not a free one', () => {
+  // A malformed draft naming an attribute that does not exist: `spendAttrPoint`
+  // correctly refuses it, but the point had already been banked - so instead of
+  // free attributes the draft handed out free POINTS, spendable on anything the
+  // player liked at the next level-up. Banking first is still what stops the
+  // free attributes; this is the other half of the same guard.
+  const clean = createCharacter(createDraft('office-drone'));
+  const d = createDraft('office-drone');
+  d.spends = ['strength', 'charisma']; // no such attributes in this office
+  const sheet = createCharacter(d);
+  assert.equal(sheet.attrPoints, clean.attrPoints,
+    'a refused spend leaves the pool exactly where an unspent draft does');
+  assert.deepEqual(sheet.attr, clean.attr, 'and nothing was raised');
+});
