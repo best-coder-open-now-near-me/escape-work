@@ -73,3 +73,75 @@ test('zero damage is a real hit, not a non-finite one', () => {
   assert.equal(a.takeDamage(0), false);
   assert.equal(a.hp, 5);
 });
+
+// --- update(dt): the waypoint walk and the tile tracker -----------------------
+//
+// The part of actors.js that everything downstream leans on and nothing tested:
+// exits, surface damage and the AI's own notifyStep all hang off `onTile`, and
+// a straight run crosses tiles WITHOUT stopping on them, so the logical tile is
+// re-derived from the entity's position every frame rather than from the path.
+//
+// It runs headless with a six-method stub. There is no anim component and no
+// leg nodes, so setClip and the leg settle no-op and the lazy `pc` handle is
+// never resolved - which is the whole reason this file can exist.
+function stubBody(a, x, z) {
+  const p = { x, y: 0, z };
+  a.entity = {
+    getPosition: () => p,
+    setPosition: (nx, ny, nz) => { p.x = nx; p.y = ny; p.z = nz; },
+    setEulerAngles: () => {},
+  };
+  a.visual = { setLocalPosition: () => {}, setLocalEulerAngles: () => {}, setLocalScale: () => {} };
+  return p;
+}
+
+// Pump frames until the walk ends, with a bail so a regression that never
+// finishes fails as a failed assertion rather than as a hung suite.
+function walkOut(a, dt, onTile, maxFrames = 200) {
+  for (let i = 0; i < maxFrames && a.moving; i++) a.update(dt, onTile);
+  assert.equal(a.moving, false, 'the walk finished within the frame budget');
+}
+
+test('onTile fires once per tile entered, and once more on arrival', () => {
+  const a = new GridActor(0, 0, { speed: 2 });
+  stubBody(a, 0, 0);
+  const calls = [];
+  a.setPath([[0, 0], [1, 0], [2, 0], [3, 0]]);
+  walkOut(a, 0.25, (x, z, done, changed) => calls.push([x, z, done, changed]));
+  // The last entry is the contract: arrival re-fires with `changed` FALSE, so
+  // per-tile effects are not re-applied to a tile the walk already entered
+  // while arrival-only logic (the exit) still gets its call.
+  assert.deepEqual(calls, [
+    [1, 0, false, true],
+    [2, 0, false, true],
+    [3, 0, false, true],
+    [3, 0, true, false],
+  ]);
+  assert.deepEqual([a.x, a.z], [3, 0]);
+});
+
+test('a bend consumes the whole frame budget - speed is constant through corners', () => {
+  // Two units of budget over a two-unit dog-leg. A driver that stopped at the
+  // waypoint and resumed next frame would land at (1,0) and still be moving,
+  // which is the hop-pause-hop the smoothing exists to prevent.
+  const a = new GridActor(0, 0, { speed: 4 });
+  const pos = stubBody(a, 0, 0);
+  a.setPath([[0, 0], [1, 0], [1, 1]]);
+  a.update(0.5);
+  assert.deepEqual([pos.x, pos.z], [1, 1]);
+  assert.deepEqual([a.x, a.z], [1, 1]);
+  assert.equal(a.moving, false);
+});
+
+test('a sub-tile walk still reports arrival', () => {
+  // The de-grid case: the walk stops short of the next tile centre, so
+  // Math.round never crosses a boundary and `changed` is false the whole way.
+  // Only the `finished` leg fires - without it a trimmed walk-up would arrive
+  // and nothing downstream would hear about it.
+  const a = new GridActor(0, 0, { speed: 1 });
+  stubBody(a, 0, 0);
+  const calls = [];
+  a.setPath([[0, 0], [0.3, 0]]);
+  walkOut(a, 0.1, (x, z, done, changed) => calls.push([x, z, done, changed]));
+  assert.deepEqual(calls, [[0, 0, true, false]]);
+});
