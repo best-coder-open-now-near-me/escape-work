@@ -557,6 +557,30 @@ export function startEditor(app, levelData, stashKey) {
     return charOfType(brush);
   }
 
+  // While a batch is open, paint() mutates rows and records which cells to
+  // redraw, and the two global passes (conduction, carpet) run ONCE at the end.
+  let batch = null;
+  function inBatch(run) {
+    if (batch) { run(); return; } // already inside one - don't nest the passes
+    batch = new Set();
+    try {
+      run();
+    } finally {
+      const touched = batch;
+      batch = null;
+      if (touched.size) {
+        refreshElectrified();
+        refreshCarpet();
+        for (const k of touched) {
+          const [cx, cz] = k.split(',').map(Number);
+          // The neighbour halo can fall off the map; renderCell indexes rows
+          // directly and would throw.
+          if (cx >= 0 && cx < width && cz >= 0 && cz < height) renderCell(cx, cz);
+        }
+      }
+    }
+  }
+
   function paint(tile, ch = charForBrush()) {
     if (!tile || !ch) return; // a refused character allocation (pool exhausted)
     const { x, z } = tile;
@@ -571,6 +595,14 @@ export function startEditor(app, levelData, stashKey) {
       }
     }
     rows[z][x] = ch;
+    if (batch) {
+      // Defer both global passes and every redraw to the end of the batch.
+      // Neighbours go in too, for the same pool-shaping reason as below.
+      for (let dz = -2; dz <= 2; dz++) {
+        for (let dx = -2; dx <= 2; dx++) batch.add((x + dx) + ',' + (z + dz));
+      }
+      return;
+    }
     // Conduction and carpet zones can change beyond the painted cell -
     // recompute first so everything renders with fresh state (live preview
     // of cable + water, carpet flowing under a just-placed desk).
@@ -590,6 +622,38 @@ export function startEditor(app, levelData, stashKey) {
 
   // --- resizing (right/bottom edges; new cells are open floor - the world
   // outside the map is solid anyway, and partitions are painted, not filled) ---
+  // Grow or shrink from the TOP/LEFT. The map could only ever change at its
+  // right and bottom edges, so adding a corridor to the north meant repainting
+  // the whole floor one row down. Shifting rows is easy; the edge runs are the
+  // real work, since every wall and door key is an absolute coordinate.
+  function shift(dx, dz) {
+    if (!dx && !dz) return;
+    const nw = Math.min(MAX_SIZE, Math.max(MIN_SIZE, width + dx));
+    const nh = Math.min(MAX_SIZE, Math.max(MIN_SIZE, height + dz));
+    if (nw === width && nh === height) return;
+    pushHistory();
+    const blank = charOfType('floor');
+    if (dz > 0) for (let i = 0; i < dz; i++) rows.unshift(new Array(width).fill(blank));
+    else for (let i = 0; i < -dz; i++) rows.shift();
+    if (dx > 0) for (const row of rows) for (let i = 0; i < dx; i++) row.unshift(blank);
+    else for (const row of rows) for (let i = 0; i < -dx; i++) row.shift();
+    width = nw;
+    height = nh;
+    const move = (set, o) => new Set([...set].map((k) => {
+      const [x, z] = k.split(',').map(Number);
+      return (x + dx) + ',' + (z + dz);
+    }).filter((k) => {
+      const [x, z] = k.split(',').map(Number);
+      return edgeInRange(o, x, z);
+    }));
+    hWalls = move(hWalls, 'h');
+    vWalls = move(vWalls, 'v');
+    hDoors = move(hDoors, 'h');
+    vDoors = move(vDoors, 'v');
+    renderAll();
+    markDirty();
+  }
+
   function resize(dw, dh) {
     const nw = Math.min(MAX_SIZE, Math.max(MIN_SIZE, width + dw));
     const nh = Math.min(MAX_SIZE, Math.max(MIN_SIZE, height + dh));
@@ -686,6 +750,141 @@ export function startEditor(app, levelData, stashKey) {
     setStatus();
   }
 
+  // --- the editing vocabulary ---------------------------------------------------
+  // The whole vocabulary used to be one cell (or one edge) at a time. These are
+  // the four that a room-painting session actually wants, all riding modifiers
+  // on the existing click handler rather than a mode you have to remember you
+  // are in.
+  const isEdgeBrush = () => brush === 'partition' || brush === 'door';
+
+  // Walk the integer line between two cells. A drag samples per mousemove with
+  // no interpolation, so a fast swipe left gaps in the painted line.
+  function cellsOnLine(a, b) {
+    const out = [];
+    let x0 = a.x;
+    let z0 = a.z;
+    const dx = Math.abs(b.x - x0);
+    const dz = Math.abs(b.z - z0);
+    const sx = x0 < b.x ? 1 : -1;
+    const sz = z0 < b.z ? 1 : -1;
+    let err2 = dx - dz;
+    for (;;) {
+      out.push({ x: x0, z: z0 });
+      if (x0 === b.x && z0 === b.z) break;
+      const e2 = 2 * err2;
+      if (e2 > -dz) { err2 -= dz; x0 += sx; }
+      if (e2 < dx) { err2 += dx; z0 += sz; }
+    }
+    return out;
+  }
+
+  // Contiguous fill over cells that currently read the same as the seed. Reuses
+  // the same 4-neighbour walk the conduction pools use, over characters.
+  function fillFrom(seed, ch) {
+    const from = rows[seed.z]?.[seed.x];
+    if (from === undefined || from === ch) return;
+    const seen = new Set([seed.x + ',' + seed.z]);
+    const stack = [seed];
+    const cells = [];
+    while (stack.length) {
+      const c = stack.pop();
+      cells.push(c);
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = c.x + dx;
+        const nz = c.z + dz;
+        const k = nx + ',' + nz;
+        if (seen.has(k)) continue;
+        if (nx < 0 || nx >= width || nz < 0 || nz >= height) continue;
+        if (rows[nz][nx] !== from) continue;
+        seen.add(k);
+        stack.push({ x: nx, z: nz });
+      }
+    }
+    inBatch(() => { for (const c of cells) paint(c, ch); });
+  }
+
+  // Alt-click reads the map instead of writing to it. Reusing a type already on
+  // the floor meant hunting a ninety-button palette for it.
+  function eyedrop(tile) {
+    const ch = rows[tile.z]?.[tile.x];
+    if (ch === undefined) return;
+    let id = null;
+    if (ch === PLAYER_CHAR) id = 'player';
+    else if (ch === ' ') id = 'void';
+    else if (tierCharIds[ch]) id = 'enemy:' + tierCharIds[ch];
+    else if (actorIdByChar[ch]) {
+      id = ENEMY_TYPES[actorIdByChar[ch]] ? 'enemy:' + actorIdByChar[ch] : 'actor:' + actorIdByChar[ch];
+    } else if (tileByChar[ch]) id = tileByChar[ch];
+    const b = id && buttonOf.get(id);
+    if (!b) { toast('Nothing to pick up there.'); return; }
+    b.click();
+    b.scrollIntoView({ block: 'nearest' });
+  }
+
+  // The last cell a stroke wrote, so shift-click can draw a line to the next one.
+  let lastPainted = null;
+
+  // Erase what is UNDER the cursor rather than whatever the brush is about.
+  // Right-clicking a partition with a tile brush selected used to erase the
+  // cell and leave the partition standing, and vice versa - so erasing meant
+  // first selecting the right brush to erase with.
+  function eraseAt(t, g) {
+    const e = nearestEdge(g);
+    if (e && edgeInRange(e.o, e.x, e.z)) {
+      const k = e.x + ',' + e.z;
+      const onEdge = (e.o === 'h' ? hWalls : vWalls).has(k) || (e.o === 'h' ? hDoors : vDoors).has(k);
+      // An edge only wins if something is actually on it; otherwise a walled
+      // cubicle would swallow every attempt to erase the floor inside it.
+      if (onEdge) { paintEdge(e, false); return; }
+    }
+    if (t) paint(t, charOfType('floor'));
+  }
+
+  // Rubber-band state for shift-drag. The preview is the ghost entity pool.
+  let anchor = null;
+  let rectGhosts = [];
+  function clearRectPreview() {
+    for (const e of rectGhosts) e.destroy();
+    rectGhosts = [];
+  }
+  function previewRect(to) {
+    clearRectPreview();
+    if (!anchor || !to) return;
+    ensureGhosts();
+    const x0 = Math.min(anchor.x, to.x);
+    const x1 = Math.max(anchor.x, to.x);
+    const z0 = Math.min(anchor.z, to.z);
+    const z1 = Math.max(anchor.z, to.z);
+    // Outline only - a filled preview over a big rectangle is a lot of entities
+    // for something that lives for the length of a drag.
+    for (let x = x0; x <= x1; x++) {
+      for (let z = z0; z <= z1; z++) {
+        if (x !== x0 && x !== x1 && z !== z0 && z !== z1) continue;
+        if (x < 0 || x >= width || z < 0 || z >= height) continue;
+        const e = new pc.Entity();
+        e.addComponent('render', { type: 'box', material: ghost.render.material });
+        e.setLocalScale(0.9, 0.05, 0.9);
+        e.setPosition(x, 0.05, z);
+        app.root.addChild(e);
+        rectGhosts.push(e);
+      }
+    }
+  }
+  function commitRect(to) {
+    if (!anchor || !to) { clearRectPreview(); anchor = null; return; }
+    const x0 = Math.min(anchor.x, to.x);
+    const x1 = Math.max(anchor.x, to.x);
+    const z0 = Math.min(anchor.z, to.z);
+    const z1 = Math.max(anchor.z, to.z);
+    const ch = charForBrush();
+    clearRectPreview();
+    anchor = null;
+    if (!ch) return;
+    inBatch(() => {
+      for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) paint({ x, z }, ch);
+    });
+  }
+
   // --- camera / input ----------------------------------------------------------------
   // The partition brush paints the edge nearest the click; every other brush
   // paints the tile. Right-click erases (the nearest partition, or the cell).
@@ -701,14 +900,45 @@ export function startEditor(app, levelData, stashKey) {
     // - a decision the author could not see until after the wall existed.
     onHover: (g) => showGhost(g),
     onHoverLeave: () => hideGhost(),
-    onLeftClickTile: (t, g) => (brush === 'partition' || brush === 'door' ? paintEdge(nearestEdge(g), true) : paint(t)),
-    onLeftDragTile: (t, g) => (brush === 'partition' || brush === 'door' ? paintEdge(nearestEdge(g), true) : paint(t)),
+    onLeftClickTile: (t, g, sx, sy, m = {}) => {
+      if (m.alt && t) { eyedrop(t); return; }         // read, don't write
+      if (isEdgeBrush()) { paintEdge(nearestEdge(g), true); return; }
+      if (!t) return;
+      if (m.shift && m.ctrl) { anchor = t; previewRect(t); return; } // rectangle
+      if (m.ctrl) { fillFrom(t, charForBrush()); return; }           // bucket
+      if (m.shift && lastPainted) {                                  // line to here
+        const ch = charForBrush();
+        if (ch) inBatch(() => { for (const c of cellsOnLine(lastPainted, t)) paint(c, ch); });
+        lastPainted = t;
+        return;
+      }
+      paint(t);
+      lastPainted = t;
+    },
+    onLeftDragTile: (t, g, m = {}) => {
+      if (m.alt) return;
+      if (isEdgeBrush()) { paintEdge(nearestEdge(g), true); return; }
+      if (!t) return;
+      if (anchor) { previewRect(t); return; }
+      // Interpolate. A drag samples per mousemove, so a fast swipe used to
+      // leave gaps in the line it looked like it was painting.
+      const ch = charForBrush();
+      if (!ch) return;
+      if (lastPainted && (Math.abs(t.x - lastPainted.x) > 1 || Math.abs(t.z - lastPainted.z) > 1)) {
+        inBatch(() => { for (const c of cellsOnLine(lastPainted, t)) paint(c, ch); });
+      } else {
+        paint(t, ch);
+      }
+      lastPainted = t;
+    },
+    onLeftRelease: (t) => { if (anchor) commitRect(t || anchor); },
     onRightClickTile: (t, sx, sy, g) => {
       beginStroke(); // erase is a gesture too, and there is no right-press hook
-      return brush === 'partition' || brush === 'door'
-        ? paintEdge(nearestEdge(g), false)
-        : paint(t, charOfType('floor'));
+      eraseAt(t, g);
     },
+    // Right-drag erases continuously, mirroring the left button. Only the left
+    // button was ever wired to drag, so rubbing out a wall was click by click.
+    onRightDragTile: (t, g) => eraseAt(t, g),
   });
 
   // --- level JSON in/out -----------------------------------------------------------
@@ -1071,6 +1301,10 @@ export function startEditor(app, levelData, stashKey) {
   btn('ed-grow-w', '+col', commands).onclick = () => resize(1, 0);
   btn('ed-shrink-h', '−row', commands).onclick = () => resize(0, -1);
   btn('ed-grow-h', '+row', commands).onclick = () => resize(0, 1);
+  btn('ed-grow-w-left', '+col ←', commands).onclick = () => shift(1, 0);
+  btn('ed-shrink-w-left', '−col ←', commands).onclick = () => shift(-1, 0);
+  btn('ed-grow-h-top', '+row ↑', commands).onclick = () => shift(0, 1);
+  btn('ed-shrink-h-top', '−row ↑', commands).onclick = () => shift(0, -1);
   commands.appendChild(sizeLabel);
   divider();
   commands.appendChild(filterBox);
