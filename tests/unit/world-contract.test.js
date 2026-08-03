@@ -23,11 +23,11 @@ import { hasSwingSpot } from '../../src/combat-geometry.js';
 const body = (x, z) => ({ x, z, actor: { x, z } });
 
 // `aiPullPlan` is the fourth rule whose needs are now in its signature
-// ({ stepOpen, open, name, bodyAt }) and it is deliberately NOT driven here:
+// ({ stepOpen, open, bodyAt, nameOf }) and it is deliberately NOT driven here:
 // reaching pullPlan's interior takes a valid shield geometry - a crouch whose
 // face stands between the two bodies - and a bag that fails to build one tests
 // the early return instead of the contract, which is the trap the rest of this
-// file exists to avoid. Its two defaults (`name`, `bodyAt`) are also absorbed
+// file exists to avoid. Its defaults (`bodyAt`, `nameOf`) are also absorbed
 // rather than thrown on, so the missing-key check would need the answer-changed
 // arm and a scenario that reaches it. Worth doing; not done.
 
