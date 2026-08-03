@@ -46,6 +46,10 @@ export function startEditor(app, levelData, stashKey) {
   // The same map resolved to bare actor ids, so a tiered placement can be drawn
   // and treated as the body it is rather than as an unrecognised character.
   let tierCharIds = {};
+  // Per-PLACEMENT rotation: "x,z" -> 90/180/270. Sparse - a cell with no entry
+  // draws at its tile type's own rotY, which is what every level did before
+  // this existed (EDITOR_INVENTORY IQ4).
+  let propRot = new Map();
   // Edge walls (partitions between tiles) - same Sets grid.js parses.
   let hWalls = new Set();
   let vWalls = new Set();
@@ -246,6 +250,7 @@ export function startEditor(app, levelData, stashKey) {
       if (type === 'floor') return;
       const res = renderer.renderMarker(x, z, type, {
         electrified: electrified.has(key),
+        rotY: propRot.get(key) ?? null,
         surfaceAt: (sx, sz) => {
           const c = rows[sz]?.[sx];
           return c && c !== ' ' ? TILE_TYPES[tileByChar[c]]?.surface || null : null;
@@ -429,6 +434,11 @@ export function startEditor(app, levelData, stashKey) {
       while (a.length < width) a.push(' ');
       return a;
     });
+    propRot = new Map();
+    for (const p of data.props || []) {
+      const r = ((Math.round((p.rotY || 0) / 90) * 90) % 360 + 360) % 360;
+      if (r && Number.isFinite(p.x) && Number.isFinite(p.z)) propRot.set(p.x + ',' + p.z, r);
+    }
     ({ h: hWalls, v: vWalls } = parseWallRuns(data.walls));
     ({ h: hDoors, v: vDoors } = parseWallRuns(data.doors));
     // A door REPLACES any wall on its edge (grid.js applies the same rule when
@@ -462,12 +472,14 @@ export function startEditor(app, levelData, stashKey) {
     rows: rows.map((r) => r.slice()),
     hWalls: new Set(hWalls), vWalls: new Set(vWalls),
     hDoors: new Set(hDoors), vDoors: new Set(vDoors),
+    propRot: new Map(propRot),
     width, height, levelName, levelNext, levelDepth,
   });
   const restore = (s) => {
     rows = s.rows.map((r) => r.slice());
     hWalls = new Set(s.hWalls); vWalls = new Set(s.vWalls);
     hDoors = new Set(s.hDoors); vDoors = new Set(s.vDoors);
+    propRot = new Map(s.propRot);
     width = s.width; height = s.height;
     levelName = s.levelName; levelNext = s.levelNext; levelDepth = s.levelDepth;
     renderAll();
@@ -970,6 +982,16 @@ export function startEditor(app, levelData, stashKey) {
     const out = { name: levelName };
     if (levelDepth != null) out.depth = levelDepth;
     Object.assign(out, { tiles, actors, map: rows.map((r) => r.join('')) });
+    // Rotations, for cells that still carry a model prop. Painting over a
+    // rotated desk should not leave its angle behind in the file.
+    const props = [];
+    for (const [k, rotY] of propRot) {
+      const [x, z] = k.split(',').map(Number);
+      const type = tileByChar[rows[z]?.[x]];
+      if (type && TILE_TYPES[type]?.model) props.push({ x, z, rotY });
+    }
+    props.sort((a, b) => a.z - b.z || a.x - b.x);
+    if (props.length) out.props = props;
     const walls = compressWallRuns(hWalls, vWalls);
     if (walls.length) out.walls = walls;
     const doors = compressWallRuns(hDoors, vDoors);
@@ -1383,6 +1405,29 @@ export function startEditor(app, levelData, stashKey) {
     // boundaries stop being ambiguous.
     if (k === 't') { e.preventDefault(); controls.toggleTactical(); return; }
     if (k === 'home' || k === 'f') { e.preventDefault(); refocus(); toast('Camera re-centred on the map.'); return; }
+    // R rotates the prop under the cursor through the four orientations. This
+    // is the whole of IQ4: `rotY` was a property of the tile TYPE, so every
+    // desk in the game faced the same way and a rotated one meant a new
+    // registry entry - which also spends a scarce map character.
+    if (k === 'r') {
+      e.preventDefault();
+      if (!hoverCell || hoverCell.edge) { toast('Point at a prop to rotate it.'); return; }
+      const { x, z } = hoverCell;
+      const type = tileByChar[rows[z]?.[x]];
+      const def = type && TILE_TYPES[type];
+      if (!def?.model) { toast('Only model props can be rotated.'); return; }
+      pushHistory();
+      const key = x + ',' + z;
+      const next = (((propRot.get(key) ?? (def.rotY || 0)) + (e.shiftKey ? 270 : 90)) % 360 + 360) % 360;
+      // Storing the type's own angle is the same as storing nothing, and an
+      // export full of no-op entries is noise in the diff.
+      if (next === (def.rotY || 0)) propRot.delete(key); else propRot.set(key, next);
+      renderCell(x, z);
+      markDirty();
+      setStatus();
+      toast(`${def.label || type} → ${next}°`);
+      return;
+    }
     const PAN = 1.6;
     const step = { w: [0, -PAN], s: [0, PAN], a: [-PAN, 0], d: [PAN, 0] }[k]
       || { arrowup: [0, -PAN], arrowdown: [0, PAN], arrowleft: [-PAN, 0], arrowright: [PAN, 0] }[k];
@@ -1454,7 +1499,13 @@ export function startEditor(app, levelData, stashKey) {
     else if (c === ' ') what = 'void';
     else if (c === PLAYER_CHAR) what = 'player start';
     else if (actorIdByChar[c] || tierCharIds[c]) what = tierChars.get(c) || actorIdByChar[c];
-    else what = TILE_TYPES[tileByChar[c]]?.label || tileByChar[c] || 'floor';
+    else {
+      const type = tileByChar[c];
+      what = TILE_TYPES[type]?.label || type || 'floor';
+      const r = propRot.get(x + ',' + z);
+      if (r != null) what += ` ${r}°`;
+      else if (TILE_TYPES[type]?.model) what += ' (R rotates)';
+    }
     return `<br><span style="opacity:.75">${x},${z} — ${what} <span style="opacity:.6">“${c === ' ' ? '␣' : c ?? '·'}”</span></span>`;
   }
   // The editor validated NOTHING. Every rule below already existed as an

@@ -328,7 +328,32 @@ export function parseLevel(level) {
     }
   };
 
+  // --- per-placement rotation (EDITOR_INVENTORY IQ4, designer 2026-08-02) ------
+  // `rotY` is a property of the tile TYPE, so every desk on every floor faced
+  // the same way and a rotated one meant a whole new registry entry - which
+  // also costs a scarce map character. An optional `props` array carries
+  // per-CELL overrides instead: `"props": [{ "x": 8, "z": 2, "rotY": 90 }]`.
+  //
+  // Deliberately a sibling of `map` rather than new map syntax: every existing
+  // level stays valid untouched, and one character per cell still means one
+  // TYPE per cell. The trade the designer accepted is that the ASCII map is no
+  // longer the complete picture of a level - a reader has to look here to learn
+  // which way that desk faces.
+  const propRot = new Map();
+  for (const p of level.props || []) {
+    if (!Number.isFinite(p?.x) || !Number.isFinite(p?.z)) continue;
+    // Quantised to the four orientations the designer asked for. Anything else
+    // is a typo, and a desk at 37 degrees reads as a bug rather than a choice.
+    const r = ((Math.round((p.rotY || 0) / 90) * 90) % 360 + 360) % 360;
+    if (r) propRot.set(p.x + ',' + p.z, r);
+  }
+  // The rotation a cell's model should be drawn at: the placement's if it has
+  // one, else the type's own.
+  const rotAt = (x, z) => propRot.get(x + ',' + z) ?? (defAt(x, z)?.rotY || 0);
+
   return {
+    props: level.props || [],
+    rotAt,
     name: level.name || '', width, height,
     typeAt, defAt, terrainOpen, sightOpenCell, sightOpenCellLow, sightOpenLow, surfaceAt, isElectrified, setType,
     propHpAt, damageProp, edgeHpBetween, damageEdge,

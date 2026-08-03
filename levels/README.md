@@ -40,6 +40,12 @@ by hand. `dev/spike-lobby.json` is the worked example.
 - **`depth`** is the floor's number. The lint checks it and the editor
   round-trips it; nothing at runtime derives a stat from it.
 - **`next`** names the file the exit leads to; omit it for a terminal floor.
+- **`props`** is optional per-placement data: `[{ "x": 8, "z": 2, "rotY": 90 }]`.
+  Today it carries rotation only, quantised to 0/90/180/270. A cell with no
+  entry draws at its tile type's own `rotY`, so every level written before this
+  existed is unchanged. Press **R** in the editor with the cursor over a model
+  prop (Shift+R to go the other way). The trade: the ASCII map is no longer the
+  complete picture — a reader has to look here to learn which way a desk faces.
 - **`walls` / `doors`** are edge runs — `"H x z len"` or `"V x z len"`, `len`
   optional and defaulting to 1. They sit *between* tiles, not on them. A door
   replaces a wall on the same edge.
