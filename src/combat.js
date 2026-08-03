@@ -10,7 +10,8 @@
 // do. Fire keeps burning throughout.
 import { ACTIONS, arrivalLine, summonSpec } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
-import { throwablesFor as throwableIdsFor } from './hotbar-model.js';
+import { throwablesFor as throwableIdsFor, UNIVERSAL_ACTIONS,
+} from './hotbar-model.js';
 import { truncateByBudget, routeToFiringPosition, trimToFirst } from './pathfinding.js';
 import { pronounsOf, capitalize, verb } from './creation.js';
 import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, gritSaveChance, MOVE, REACH } from './stats.js';
@@ -18,7 +19,8 @@ import {
   applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy,
   statusSeverity, tickStep,
 } from './statuses.js';
-import { toHitTerms, provokedBy, positionMods, inReach, dist, dirOctant, shieldedFaces, TACTICS } from './tactics.js';
+import { toHitTerms, provokedBy, positionMods, inReach, dist, dirOctant, shieldedFaces, TACTICS, shieldingFace,
+} from './tactics.js';
 import {
   buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, aimsAtAnyone, isPurge, coneFrom, conePolyline, aimRangeOf, rangeTiles, isBreakable, aimsAtProps, isPull,
 } from './powers.js';
@@ -379,7 +381,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // different orders is a tax paid mid-fight, when there is least attention to
   // spare for re-reading a row of buttons.
   const actionIdsOf = (m) => orderedActionIds(
-    m.sheet, [...m.sheet.actions, equippedAction(m.sheet), 'shove', 'take-cover', 'pull', ...throwablesFor(m)],
+    m.sheet,
+    [...m.sheet.actions, equippedAction(m.sheet), ...UNIVERSAL_ACTIONS, ...throwablesFor(m)],
   );
   // The acting member's cost for a throw - the shared rule (stats.js), bound to
   // whoever currently has the floor.
@@ -770,7 +773,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const D = posOf(defender);
     const Dt = bodyOf(defender);
     // Re-asked without the SHOOTER counting as cover (see crouchFacesOf).
-    const face = shieldingFaceFrom(crouchFacesOf(defender, attacker), A.x, A.z, D.x, D.z);
+    const face = shieldingFace(crouchFacesOf(defender, attacker), A.x, A.z, D.x, D.z);
     if (!face) return { target: defender };
     // A BODY on that face eats the shot; furniture and partitions refuse it.
     const holder = unitStandingAt(Dt.x + face[0], Dt.z + face[1]);
@@ -778,16 +781,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return { target: holder, redirected: true };
     }
     return { target: null, blocked: { ...s, face } };
-  }
-  // The shielded face pointing at the attacker, or null. A diagonal attacker
-  // is blocked by either of the two faces their way; when both are shielded
-  // the x face answers first, which only matters for naming the blocker.
-  // Continuous or tile inputs both work - dirOctant buckets the angle.
-  function shieldingFaceFrom(faces, ax, az, dx, dz) {
-    const { x: sx, z: sz } = dirOctant(ax, az, dx, dz);
-    if (sx === 0 && sz === 0) return null;
-    return (faces || []).find(([ox, oz]) =>
-      (sx !== 0 && ox === sx && oz === 0) || (sz !== 0 && oz === sz && ox === 0)) || null;
   }
   // What the refusal calls the thing doing the blocking - the thing on the
   // face that actually stopped THIS shot, not a mode name.
@@ -3547,7 +3540,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (!s) return true;
       // A face held by a BODY does not shrink the set: the shot resolves on
       // that body from anywhere, and whether to take it is performOn's call.
-      const face = shieldingFaceFrom(s.faces, x, z, en.x, en.z);
+      const face = shieldingFace(s.faces, x, z, en.x, en.z);
       if (!face) return true;
       return !!unitStandingAt(en.x + face[0], en.z + face[1]);
     };

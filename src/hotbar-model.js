@@ -29,10 +29,16 @@ import { orderedActionIds, equippedAction, ammoCostOf } from './stats.js';
 // The ORDER is stats.orderedActionIds - the same one combat's bar renders, so
 // the kit reads the same in and out of a fight. A throwable the character can't
 // fold (needsTalent) is not theirs to list.
+// The verbs EVERY character has, whatever their class - the ones the bar adds
+// on top of a kit. One list, because it was written out at both bars and a
+// third verb (`pull`) had to be added to each by hand; the next one would have
+// had the same chance of landing in only one of them.
+export const UNIVERSAL_ACTIONS = ['shove', 'take-cover', 'pull'];
+
 export function actionIdsFor(s) {
   if (!s) return [];
   return orderedActionIds(s, [
-    ...s.actions, equippedAction(s), 'shove', 'take-cover', 'pull', ...throwablesFor(s),
+    ...s.actions, equippedAction(s), ...UNIVERSAL_ACTIONS, ...throwablesFor(s),
   ]);
 }
 

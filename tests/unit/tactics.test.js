@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   toHitTerms, cheb, threatens, provokedBy, hasCover, isFlanked, isBackstab, positionMods,
-  dist, reachOpen, inReach, dirOctant, shieldedFaces, facesShieldFrom,
+  dist, reachOpen, inReach, dirOctant, shieldedFaces, facesShieldFrom, shieldingFace,
 } from '../../src/tactics.js';
 import { HIT, REACH, hitChance } from '../../src/stats.js';
 
@@ -589,4 +589,39 @@ test('hasCover is those two composed - the old answers, unchanged', () => {
   assert.equal(hasCover(5, 5, 5, 5, east), false, 'standing on them - no angle at all');
   // A diagonal shooter is stopped by either face their way.
   assert.equal(hasCover(9, 1, 5, 5, east), true);
+});
+
+// --- one cover-face rule, two shapes ------------------------------------------
+
+test('shieldingFace and facesShieldFrom are the same rule, answered differently', () => {
+  // combat.js carried its own line-for-line copy of this, returning the face
+  // where tactics.js returned a boolean - two copies of what cover IS, one edit
+  // apart from disagreeing. The boolean is now derived from the face.
+  const faces = [[1, 0], [0, -1]];
+  for (const [ax, az] of [[5, 0], [0, 0], [-5, 0], [0, 5], [0, -5], [3, 3], [-3, -3]]) {
+    assert.equal(facesShieldFrom(faces, ax, az, 0, 0),
+      !!shieldingFace(faces, ax, az, 0, 0),
+      `disagreement from (${ax},${az})`);
+  }
+});
+
+test('shieldingFace names the face that does the blocking', () => {
+  // The reason the face shape exists: a refusal has to name what is in the way.
+  assert.deepEqual(shieldingFace([[1, 0]], 5, 0, 0, 0), [1, 0]);
+  assert.equal(shieldingFace([[1, 0]], -5, 0, 0, 0), null, 'open on that side');
+  // Standing on them is no angle at all, for both shapes.
+  assert.equal(shieldingFace([[1, 0]], 0, 0, 0, 0), null);
+  assert.equal(facesShieldFrom([[1, 0]], 0, 0, 0, 0), false);
+});
+
+test('a diagonal attacker is blocked by either face, x answering first', () => {
+  // Only matters for NAMING the blocker, but it is the behaviour combat.js's
+  // copy had and the merge must not quietly change it.
+  assert.deepEqual(shieldingFace([[1, 0], [0, 1]], 5, 5, 0, 0), [1, 0]);
+  assert.deepEqual(shieldingFace([[0, 1]], 5, 5, 0, 0), [0, 1]);
+});
+
+test('an absent face list is not a crash', () => {
+  assert.equal(shieldingFace(null, 1, 0, 0, 0), null);
+  assert.equal(facesShieldFrom(null, 1, 0, 0, 0), false);
 });
