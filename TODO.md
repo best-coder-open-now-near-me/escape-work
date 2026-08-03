@@ -71,6 +71,20 @@ How to read it:
 
 ### MEDIUM
 
+- [ ] **Q900** `src/main.js` [soc] **(new 2026-08-02, from the fix work itself)**
+  The combat world facade is repeatedly NARROWER than main.js's own helpers, and
+  the contract test (Q009) cannot see it. That test checks every key the pure
+  modules destructure EXISTS; it cannot check that combat is asking the same
+  question main.js would. Four instances found while fixing other things:
+  `occupied` (absent - the crash this branch shipped), `memberSurfDamage`
+  (absent, so forced landings billed the enemy model and voided talent
+  immunities), `room` (absent, so the summon cap leg was skipped in a fight),
+  and `isBurning` (absent, so combat asked `surfaceIdAt === 'fire'` - a
+  different question - and the FX precedence drifted). All four are now closed,
+  but the PATTERN is open: the facade grows by whatever the last bug needed.
+  Worth one pass that walks main.js's own query helpers and asks, for each,
+  whether combat can reach the same answer.
+
 - [x] **Q025** `src/pathfinding.js:394` [bug] **(carried)** roundBends' arc-rejection fallback emits an unvalidated leg — reproduced: a smoothed walk crosses a partition<br>      ↳ **NOT REPRODUCIBLE — closed as refuted, with the method.** The reasoning is sound in the abstract (`p1` lies on `a->b`, so a failed `a->p1` check condemns `a->b`, and the fallback pushed `b` regardless) but the case does not arise. Instrumented `roundBends` over 200k random 7x7 maps WITH partition edges in play: **18,974 arc rejections, 0** where the straight leg `a->b` was also illegal. Without edges the branch never fires at all. A guard was written, measured to change no outcome, and reverted rather than left as complexity in a hot path. What DID land is the test gap underneath it (Q0xx): `pathfinding.test.js` asserted only that rounded-bend VERTICES sit on open floor, never the legs between them — three tests now sample the segments.
 - [x] **Q026** `/home/user/escape-work/ARCHITECTURE.md:114` [doc-drift] **(carried)** ARCHITECTURE.md's module map describes `combat-ai.js` as the old six-beat ladder; the shipped ladder has twelve arms<br>      ↳ DONE — ARCHITECTURE.md now lists all twelve arms and names beatStateFrom
 - [x] **Q027** `/home/user/escape-work/ARCHITECTURE.md:518` [doc-drift] **(carried)** ARCHITECTURE.md's debug-surface note claims damage and initiative roll `Math.random` and that a fight is never fully deterministic, and omits the new `bout` getter<br>      ↳ DONE — ARCHITECTURE.md now says a seeded fight DOES replay, and documents `bout`
@@ -182,8 +196,8 @@ How to read it:
 - [x] **Q130** `src/combat.js:3834` [bug] **(carried)** `summonSpotProblem` never passes `room`, so the summon preview ignores the live cap and the click reports the wrong reason<br>      ↳ DONE — combat passes the live cap into the shared rule, as main.js always did
 - [x] **Q131** `src/combat.js:1808` [bug] **(carried)** `notifyMemberDown` advances the turn without re-binding `active`, so the HUD reflects a corpse through the enemies' turns<br>      ↳ DONE — active rebinds to somebody standing before advanceTurn
 - [ ] **Q132** `src/pathfinding.js:166` [bug] **(carried)** clampToClearance's diagonal-corner repulsion is still edge-blind: bodies overlap partition end posts by ~0.23 tile
-- [ ] **Q133** `src/pathfinding.js:16` [bug] **(carried)** findPath has no explored-node cap and hangs on an unbounded or non-integer target
-- [ ] **Q134** `src/stats.js:823` [bug] **(carried)** `stats.applyDamage` has no non-finite guard, while its actor-side twin `EnemyActor.takeDamage` does
+- [x] **Q133** `src/pathfinding.js:16` [bug] **(carried)** findPath has no explored-node cap and hangs on an unbounded or non-integer target<br>      ↳ DONE — MAX_EXPLORED cap; hang becomes a null. Unreachable via the shipped grid - kept because the cost is an integer compare and the failure it replaces is a frozen tab
+- [x] **Q134** `src/stats.js:823` [bug] **(carried)** `stats.applyDamage` has no non-finite guard, while its actor-side twin `EnemyActor.takeDamage` does<br>      ↳ DONE — the same non-finite guard EnemyActor.takeDamage carries
 - [x] **Q135** `src/statuses.js:113` [bug] **(carried)** `applyStatus` reads a missing `sev` as 0 while every other site reads it as 1, so a resisted re-apply weakens a pre-severity entry<br>      ↳ DONE — no-entry vs entry-without-sev distinguished; 3 tests
 - [ ] **Q136** `src/looting.js:124` [dead-code] **(carried)** INV_CAP = Infinity leaves the overflow and "pockets full" branches in looting.js unreachable
 - [ ] **Q137** `/home/user/escape-work/AI_PLAN.md:458` [doc-drift] **(carried)** AI_PLAN's state machine and footgun 8 both say the stall backstop burns real AP; the shipped backstop burns nothing

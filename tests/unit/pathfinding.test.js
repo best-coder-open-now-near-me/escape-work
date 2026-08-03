@@ -531,3 +531,20 @@ test('a corridor one tile wide is walked without leaving it', () => {
   const s = smoothPath(w, [[0, 1], [1, 1], [2, 1], [3, 1], [3, 2], [3, 3], [3, 4]]);
   assert.equal(legClear(s, w), null);
 });
+
+test('a search on an unbounded world gives up instead of hanging', () => {
+  // Not reachable through the shipped grid - `defAt` returns the wall def out
+  // of bounds, so every real world is sealed. This is the guard for when that
+  // stops being true, and for a goal the frontier can never land on. Without
+  // the cap this call never returns.
+  assert.equal(findPath(() => true, 0, 0, NaN, 3), null);
+});
+
+test('the cap never fires on a search a real map could produce', () => {
+  // A wide-open 60x60 room is far larger than any shipped floor, and must still
+  // route normally - a cap that trips on real geometry would be worse than none.
+  const w = (x, z) => x >= 0 && x < 60 && z >= 0 && z < 60;
+  const p = findPath(w, 0, 0, 59, 59);
+  assert.ok(p && p.length > 1, 'a big open room still routes');
+  assert.deepEqual(p[p.length - 1], [59, 59]);
+});

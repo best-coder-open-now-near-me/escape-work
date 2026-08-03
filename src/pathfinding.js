@@ -13,13 +13,31 @@ export const DIRS8 = [
 // individual steps - this is how edge walls (partitions between tiles) block
 // movement without occupying a tile. Returns [[x, z], ...] including the start
 // tile, or null when unreachable.
+// A ceiling on how much floor one search may explore before giving up.
+//
+// The search is bounded in practice by the map's walls - `grid.defAt` returns
+// the tall `wall` def out of bounds, so every shipped world is sealed and the
+// frontier is finite. This is the guard for when that stops being true: an
+// unbounded `isWalkable`, or a non-integer goal the frontier can never land on,
+// makes the loop run until the tab dies. Verified: `findPath(() => true, 0, 0,
+// NaN, 3)` never returns.
+//
+// Kept because the cost is an integer compare in a loop that already runs and
+// the failure it replaces is a frozen browser, not a cosmetic one. The number
+// is far above any real search - the largest shipped floor is well under a
+// thousand tiles - so reaching it means something upstream is wrong, and a null
+// ("no route") is the honest thing to hand back.
+const MAX_EXPLORED = 200_000;
+
 export function findPath(isWalkable, sx, sz, tx, tz, extraCost = null, stepOpen = null) {
   if (!isWalkable(tx, tz)) return null;
   const key = (x, z) => x + ',' + z;
   const dist = new Map([[key(sx, sz), 0]]);
   const prev = new Map();
   const open = [[0, sx, sz]];
+  let explored = 0;
   while (open.length) {
+    if (++explored > MAX_EXPLORED) return null;
     open.sort((a, b) => a[0] - b[0]); // tiny grids; a heap would be overkill
     const [d, x, z] = open.shift();
     if (x === tx && z === tz) break;

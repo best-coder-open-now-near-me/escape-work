@@ -844,6 +844,18 @@ export function unequipItem(sheet, slot, invCap = Infinity) {
 }
 
 export function applyDamage(sheet, amount) {
+  // The same guard `EnemyActor.takeDamage` carries, for the same reason and on
+  // the same class of bug. A non-finite amount is always upstream (an action
+  // with no damage dice reaching a damage roll: `rand(undefined, undefined)` is
+  // NaN). Let it through and `hp` becomes NaN, which is never `<= 0` - the
+  // member can never go down, and anything waiting on that waits forever.
+  // Degrade to a visible no-op: the caller is told nothing dropped, and the bug
+  // reads as an attack that did nothing rather than as a soft-lock.
+  //
+  // The party side went unguarded while the enemy side was fixed, which is the
+  // asymmetry rather than the danger - the two halves of "take damage" should
+  // fail the same way.
+  if (!Number.isFinite(amount)) return false;
   sheet.hp = Math.max(0, sheet.hp - amount);
   return sheet.hp <= 0;
 }

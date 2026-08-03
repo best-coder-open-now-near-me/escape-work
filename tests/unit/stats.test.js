@@ -1033,3 +1033,19 @@ test('gritSaveChance scales with Grit and respects its cap (TACTICS_PLAN M6)', (
   assert.ok(gritSaveChance(3) > gritSaveChance(1), 'Grit buys escape odds');
   assert.equal(gritSaveChance(99), SAVE.CAP, 'nobody shrugs off a bookcase reliably');
 });
+
+test('applyDamage refuses a non-finite amount, like its actor-side twin', () => {
+  // NaN hp is never <= 0, so a member who takes it can never go down and
+  // anything waiting on that waits forever. EnemyActor.takeDamage has guarded
+  // this for a while; the party half did not, which is the asymmetry.
+  const sheet = { hp: 10, maxHp: 10 };
+  for (const bad of [NaN, Infinity, -Infinity, undefined, null, 'three']) {
+    assert.equal(applyDamage(sheet, bad), false, `${bad} should be a no-op`);
+    assert.equal(sheet.hp, 10, `${bad} must not move hp`);
+  }
+  // A real number still works, and still reports the drop.
+  assert.equal(applyDamage(sheet, 4), false);
+  assert.equal(sheet.hp, 6);
+  assert.equal(applyDamage(sheet, 99), true, 'and an overkill still reports down');
+  assert.equal(sheet.hp, 0, 'clamped, never negative');
+});
