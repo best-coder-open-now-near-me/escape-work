@@ -4754,6 +4754,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         // step-clocked status, would have dealt zero damage forever the day any
         // power aimed it at a coworker. Same `tickStep`, same durations, both
         // sides of the door.
+        // Sampled BEFORE the step clock ticks, exactly as the member side does
+        // (main.js `maybeSlip`, whose comment states the rule): the tile a gum
+        // wad wears off on still keeps its traction. Adding this step clock
+        // above the slip roll quietly undid that on the enemy side only, so a
+        // coworker could lose the wad and their footing on the same tile - and
+        // a slip costs a unit its whole turn.
+        const wasSlipProof = !!statusFx(unit).slipProof;
         if (unit.alive) {
           const step = tickStep(unit);
           if (step.damage > 0) {
@@ -4788,7 +4795,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         if (unit.alive && slips({
           chance: world.slipChanceAt(x, z),
           roll: rng,
-          slipProof: statusFx(unit).slipProof,
+          slipProof: wasSlipProof,
         })) {
           unit.clearPath();
           unit.flinch();

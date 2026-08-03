@@ -2896,9 +2896,17 @@ function startGame(level) {
       say(had ? 'More gum. You are building a collection.' : sfx.message);
       syncHudFor(ms);
     }
-    // A turn-clock status a surface applies (fire -> burning) needs combat's
-    // turns to tick, so it only takes hold in a fight; the instant surface
-    // damage below is the out-of-combat story.
+    // A turn-clock status a surface applies (fire -> burning) only takes hold in
+    // a fight; the instant surface damage below is the out-of-combat story.
+    //
+    // The reason this gate USED to give - "needs combat's turns to tick" - has
+    // been false since `advanceStatusTurn` landed an out-of-combat turn clock
+    // (designer, 2026-07-31: they should all be using the same thing in and out
+    // of combat). So the gate now stands on nothing but its own inertia: walk
+    // your own leader through flame out of combat and they do not catch. Fire
+    // is the only non-gum `applies` in data/surfaces.js, so this gate is
+    // entirely about fire, and whether to drop it is a design call, not a
+    // cleanup - Q032 carries the question.
     if (sfx.applies && sfx.applies !== 'gum' && inCombat && applyStatus(ms, sfx.applies)) {
       vfx.status(x, z, sfx.applies);
       syncHudFor(ms);

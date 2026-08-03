@@ -502,9 +502,13 @@ export class EnemyActor extends GridActor {
       // Gum wads stick to wanderers too: slow forever, but never slip again.
       this.onTile = (x, z, done, changed) => {
         // Gum is a status now (statuses.js), shared with the combat unit so a
-        // wanderer that steps in a wad is still gummed when a fight starts. Like
-        // combat, an actor's gum is permanent - applied once, slowing its amble
-        // and granting traction for good.
+        // wanderer that steps in a wad is still gummed when a fight starts.
+        //
+        // Out here it never wears off, because this amble runs no step clock -
+        // and that is now an inconsistency rather than the rule it used to be.
+        // Combat ticks the same wad down (combat.js's AI walk), so one wad has
+        // two lifetimes depending on whether dice are out: permanent while
+        // ambling, expiring the moment a fight starts. Queued as Q032.
         if (changed && !hasStatus(this, 'gum') && world.stickGum(x, z)) {
           applyStatus(this, 'gum');
           // DERIVE from a captured base, the same way combat's syncUnitSpeed

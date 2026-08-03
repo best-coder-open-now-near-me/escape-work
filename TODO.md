@@ -156,6 +156,43 @@ How to read it:
   throwing one look sealed to every reader who checked.
 
 
+- [ ] **Q906** `src/main.js:2899` [design] **(new 2026-08-03, from the Q032 map)**
+  Four per-tile gaps that are the same shape - a rule one side of the door
+  obeys and the other does not - and every one of them changes how the game
+  PLAYS, so none was fixed on the spot.
+
+  **Fire only burns you.** An AI unit walking its turn through fire takes the
+  flat damage and never catches; the identical tile sets a member alight for
+  2 turns x 2. Nothing structural blocks it - units carry `burning` fine
+  (turn-start dot, out-of-combat tick, ember aura all exist). Fire is currently
+  area denial that works in one direction, which may well be the intent, but
+  nothing says so.
+
+  **And it does not burn you out of combat.** The `inCombat` gate on
+  surface-applied statuses is the other half. Its stated reason died with
+  `advanceStatusTurn`; what is left is a real question - should walking through
+  flame outside a fight set you alight, with the out-of-combat turn clock
+  ticking it down? Fire is the ONLY non-gum `applies` in data/surfaces.js, so
+  this gate is entirely a decision about fire.
+
+  **Wanderers are immune to the floor.** No surface damage and no step clock on
+  an amble. Wander routing screens hazards at PLAN time only, and fire spreads
+  out of combat, so a coworker will stroll through flame that was lit across
+  their route for 0 damage - on the exact tile that bills a member 4 HP. The
+  gum half of this is a straight inconsistency (one wad, two lifetimes,
+  switched by whether dice are out); the damage half is a design call about
+  whether the world hurts bodies nobody is looking at.
+
+  **`bleed` is player-only.** main.js:2908 is the sole `applyStatus(...,
+  'bleed')` in src/, so no coworker can bleed, so the enemy step clock's damage
+  branch is unreachable and the clock only expires gum. Either a coworker
+  should be able to bleed (a paper drift cuts everyone) or the enemy clock is
+  carrying a branch for a case that will never arrive.
+
+  Recommendation if these are wanted: fire on enemies first - it is the one
+  with a real tactical payoff, and the machinery is already there.
+
+
 - [ ] **Q900** `src/main.js` [soc] **(new 2026-08-02, from the fix work itself)**
   The combat world facade is repeatedly NARROWER than main.js's own helpers, and
   the contract test (Q009) cannot see it. That test checks every key the pure
@@ -177,7 +214,7 @@ How to read it:
 - [x] **Q029** `/home/user/escape-work/TODO.md:363` [doc-drift] **(carried)** TODO.md's P1 "Enemy AI paces between two tiles" points at `combat.js:96` and calls the self-path exemption dead code, but the fix lives and is tested in `combat-ai.js`<br>      ↳ DONE — the P1 entry is ticked and corrected - the exemption is live and tested
 - [x] **Q030** `src/combat.js:574` [duplication] **(carried)** `hazardKind`/`surfaceImpactKind` are still two hardcoded surface-id→FX maps in two layers, and this branch added a fifth call site to one of them<br>      ↳ DONE — step-rules.impactKindFor; the burst comes from the registry; isBurning on the facade
 - [x] **Q031** `src/hotbar-model.js:35` [duplication] **(carried)** The universal-action list `['shove','take-cover','pull']` is written out verbatim in three places<br>      ↳ DONE — UNIVERSAL_ACTIONS in hotbar-model.js; both bars read it
-- [ ] **Q032** `src/main.js:2716` [duplication] **(carried)** Four hand-written per-tile step handlers across three layers, under a main.js section header that claims the rules are "written once"
+- [ ] **Q032** `src/main.js:2716` [duplication] **(carried)** Four hand-written per-tile step handlers across three layers, under a main.js section header that claims the rules are "written once"<br>      ↳ **MEASURED 2026-08-03, and it is not the finding it was written as.** Four callbacks of shape `(x,z,done,changed)` exist, in three files - `onMemberStep` (main.js:2949), `onSummonStep` (main.js:3046), the AI walk closure (combat.js:4730) and the wanderer amble (actors.js:503) - but they are not four hand-written copies. The first two are thin wrappers over ONE shared body (`tickStepOn`, `applySurfaceOn`, `maybeSlip`, `leaveFootprint`, two callers each), and the DECISIONS under all of them already live once in step-rules.js. What is duplicated is ORCHESTRATION - which rules fire, in what order, with what FX, log voice and rng - and that exists twice, not four times: main.js's player side and combat.js's enemy side, with the wanderer a two-rule stub of the latter. **The 'written once' header is true as scoped, not false:** it says "a body ON YOUR SIDE", and within that scope nothing is copied. Misleading by omission, since a reader takes "once" to mean once in the game. **Of ~13 per-tile rules, exactly ONE (gum pickup) is implemented by all four.** <br>      ↳ **FIXED here:** the enemy step clock read `slipProof` AFTER ticking, so the tile a gum wad wore off on could take a coworker's footing AND their whole turn, while the identical tile keeps a member upright - the drift main.js's `maybeSlip` comment documents as fixed, reintroduced on the other side of the door. Now snapshotted before the tick, as the member side does. Plus three comments that had gone false: actors.js and step-rules.js both still asserted "a coworker's gum is for keeps" (combat ticks it down now), and main.js's `inCombat` gate cited a reason `advanceStatusTurn` retired on 2026-07-31. <br>      ↳ **STILL OPEN, and they are design calls, not cleanups - see Q906.** Enemies never catch fire; your own leader never catches fire out of combat; wanderers take no surface damage and run no step clock; `bleed` has exactly one application site in the repo and it is player-side, which makes the enemy step clock's damage branch unreachable today.
 - [x] **Q033** `src/portraits.js:77` [duplication] **(carried)** portraits.js holds a fourth copy of "tint a body" — the compounding in-place multiply the other three were rewritten to remove<br>      ↳ DONE — portraits routes through cloneMaterials + tintMaterials
 - [x] **Q034** `src/tactics.js:259` [duplication] **(carried)** "Does this shielded face point at the attacker?" is implemented three times, and REVIEW.md records it as having one owner<br>      ↳ DONE — tactics.shieldingFace; facesShieldFrom derives from it; 4 tests
 - [x] **Q035** `src/combat.js:4530` [god-method] **(carried)** `update()` is a 278-line god frame-driver braiding six responsibilities, and it grew with the AI work<br>      ↳ **PARTLY DONE** — the same function as Q003 and closed by the same split; see there. The braiding is what came apart: the frame's own bookkeeping, the player half's two walk-up finishers, and the AI half's gather/decide/act are now four separate reads.

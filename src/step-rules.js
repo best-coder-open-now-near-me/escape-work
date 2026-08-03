@@ -10,10 +10,14 @@
 // and by DERIVING it from a captured base on the other, so a wanderer who got
 // gummed before a fight started wore the slow twice.
 //
-// The three callers keep what genuinely differs - the narration (the lines are
-// written in the player's voice, and a temp is not the player), the FX, whether
-// gum ever wears off (a member's ticks down, a coworker's is for keeps) - and
+// The callers keep what genuinely differs - the narration (the lines are
+// written in the player's voice, and a temp is not the player) and the FX - and
 // share the DECISIONS.
+//
+// "A coworker's gum is for keeps" used to belong in that list and no longer
+// does: combat ticks a unit's wad down on the same step clock a member's uses.
+// It is still for keeps on an out-of-combat amble, which is a gap rather than a
+// rule (Q032), not the deliberate asymmetry this sentence once described.
 //
 // The floor arrives as a plain fact sheet rather than a grid:
 //   { burning, electrified, surfaceId }
