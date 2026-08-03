@@ -12,6 +12,50 @@ for the work that did not come from a review — chiefly the character-creation
 feature from `CHARACTER_PLAN.md`. Where a Phase item and a queue item are the
 same thing, the queue is authoritative; the Phase entry is history.
 
+## Questions for the designer
+
+Raised 2026-08-03 by the queue pass. Both come out of fixing something else,
+and neither is a bug I should settle by picking — the first is a real fork, the
+second is a ratified decision reaching the screen for the first time.
+
+**1. Two saves, one desk: which run wins? (Q017, still open)**
+
+Setting a cloud save key on a browser that ALREADY has a local save destroys
+the cloud run that key points at. The desk suppresses the cloud lookup whenever
+a local save exists (`if (!restoredProgress && remote.enabled)`), so it shows
+the local Continue, never the phrase's run — and the first floor this browser
+clears pushes over the home row. `REMOTE_STORE.md`'s promise ("the same phrase
+on another browser picks up the same saves") silently inverts.
+
+- **A — offer both, let the player pick. `[proposed]`, and my recommendation.**
+  Always run the cloud pull, give the cloud offer its own button id, and put
+  each run's floor and timestamp in the sub-label. Costs: two Continue buttons
+  on the desk when both exist, and the desk gets slightly busier for the
+  players least likely to need it. Destroys nothing, needs no rule about
+  precedence, and is the only option that is obviously reversible.
+- **B — the phrase wins.** Setting a key means "this browser is now that
+  player"; the local run is set aside. Cheapest to explain, but it silently
+  demotes a run somebody may be mid-way through, and "set aside" needs somewhere
+  to go or it is just deletion with a nicer name.
+- **C — the local run wins and the cloud is read-only until it ends.** Safest
+  for data, worst to explain: the player typed their phrase and nothing
+  happened, with the reason invisible.
+
+I did NOT implement any of them — A changes what the desk looks like, which is
+yours. The two data-loss paths NEXT to this one are fixed (Q063, Q067), so this
+is now the only way the desk loses a run.
+
+**2. The Executive now shoves you off and shoots. (Q047, shipped this pass)**
+
+A4's ratified carve-out — "a RANGED unit may shove to disengage" — was
+implemented, unit-tested, described in the ladder's own comment, and never
+wired. It is wired now. Because shove sits above attack in the ladder, an
+Executive in contact will push off and fire rather than stand in the scrum
+trading punches. That is doctrine #11 working exactly as written, and it is
+also the first time anyone gets to watch it. Nothing to answer unless it plays
+badly — if it reads as slippery rather than smart, that is a re-open of A4
+rather than a bug, and the one-line gate is easy to remove.
+
 ## The 20 remaining HIGH findings — superseded
 
 Folded into THE QUEUE below, which covers all 227 standing findings rather than
@@ -60,7 +104,7 @@ How to read it:
 - [x] **Q014** `src/combat.js:2280` [bug] The stun FX fires on a party member even when the anti-chain immunity window blocked the stun — the member victim branch is a hand-mirrored copy of the enemy branch that dropped its gate<br>      ↳ DONE — one landStun helper; three copies gone
 - [x] **Q015** `src/editor.js:301` [bug] Editor char allocations leak across loadLevel, so after loading level2 the ficus brush silently paints a tier-3 Manager<br>      ↳ DONE — char slate reset at loadLevel
 - [ ] **Q016** `src/main.js:3063` [bug] In combat the crosshair/glow promise a swing that the click turns into an in-place shuffle, because the pick ray hits an adjacent body over your own tile
-- [ ] **Q017** `src/main.js:252` [bug] Setting a cloud save key on a browser that already has a local save destroys the cloud run that key points at
+- [ ] **Q017** `src/main.js:252` [bug] Setting a cloud save key on a browser that already has a local save destroys the cloud run that key points at<br>      ↳ **VERIFIED 2026-08-03, deliberately NOT fixed — it is a design fork, and it is question 1 in "Questions for the designer" at the top of this file.** The mechanism is confirmed: the desk suppresses the cloud lookup whenever a local save exists (`if (!restoredProgress && remote.enabled)`), so the phrase's run is never read, and the first floor cleared pushes over it — or a death deletes it outright. Three options are written up there with costs; the recommendation is A (offer both, distinct button ids, timestamps in the sub-labels), which destroys nothing but changes what the desk looks like. **The two data-loss paths beside it ARE fixed** (Q063, Q067), so this is the last way the desk can lose a run.
 - [x] **Q018** `src/main.js:161` [bug] clearProgress() is the one unguarded localStorage write left; a throw eats the lose screen and the Restart-run escape<br>      ↳ DONE — wrapped; remote.clear stays outside the try
 - [x] **Q019** `src/main.js:2018` [bug] Sneaking survives the floor transition as a ghost status, and the next floor can never start a fight with you<br>      ↳ DONE — held-mode statuses stripped on serialize
 - [x] **Q020** `src/stats.js:806` [bug] Equip/unequip cycling a maxHp trinket ratchets HP back to full — a free, unlimited heal<br>      ↳ DONE — debitLostHp, floored at 1
@@ -312,15 +356,15 @@ How to read it:
 - [x] **Q057** `src/floors.js:147` [bug] layeredGrid's METHODS list drops sightOpenCellLow and sightOpenLow, so sneaking on a layered level throws<br>      ↳ DONE — forwarded, plus a derived contract test
 - [x] **Q058** `src/floors.js:71` [bug] A single-cell stair run is assumed to run along z, so an east-west one-cell flight is refused with a misleading error<br>      ↳ DONE — and there is a worse sub-case than the finding's: where the upper storey happens to have floor at exactly one z-neighbour, the flight PARSES and builds a staircase to a landing the author never drew. A lone cell's axis is not a property of the cells at all — it is decided by where the landing is, which is `resolveRun`'s question — so it is asked both ways: one answer wins, two is a named ambiguity (this module's house style is to name the authoring error, not guess), none rethrows the north-south failure, honest now because both really were tried. Three tests; two fail against the old code.
 - [ ] **Q059** `src/floors.js:170` [bug] planCrossLayerRoute only moves monotonically toward the destination storey, so an up-and-back-down route is refused
-- [ ] **Q060** `src/main.js:1870` [bug] switchLeader never releases the out-of-combat crouch, so `oocCrouch` and the `covered` chip end up on the wrong members
-- [ ] **Q061** `src/main.js:1870` [bug] switchLeader leaves the sneak on the old leader, making them permanently undetectable AND unable to trigger combat
+- [x] **Q060** `src/main.js:1870` [bug] switchLeader never releases the out-of-combat crouch, so `oocCrouch` and the `covered` chip end up on the wrong members<br>      ↳ DONE — same finding as Q066, one line, closed once. `switchLeader` is the only one of the three leader handoffs that never calls `clearOocCrouch`; `forceLeader` and `syncLeaderBindings` both do. **Placement is the entire fix:** it goes BEFORE the rebind, where the siblings put it, because `clearOocCrouch` reads the module's `sheet`/`player` — called after, it strips 'covered' off the INCOMING leader while the real croucher keeps chip and pose forever, since no path ever resets a NON-leader's crouch.
+- [x] **Q061** `src/main.js:1870` [bug] switchLeader leaves the sneak on the old leader, making them permanently undetectable AND unable to trigger combat<br>      ↳ **DONE — and this is NOT a third framing of Q060/Q066.** Same function, different state, different owner, different fix. A SOLO sneak names the leader, but membership is derived LIVE (`sneakingMembers` filters on the current leader) while the chip was stamped at toggle time — so a portrait click silently swapped who the sneak meant. Ended via `endSneak` rather than handed over: re-stamping `sneaking` onto the incoming leader would slip somebody into a sneak while they are being watched, which is the one thing D8 refuses. Group mode names everybody and needs nothing. The finding overstates "permanently" — any `endSneak` clears it — but under-states the rest: the outgoing scout is also absent from the SPOT SWEEP, not just the fight trigger.
 - [ ] **Q062** `src/main.js:1741` [bug] The `confused` reorg desyncs the hotbar: pressing a slot uses the shuffled layout, right-clicking it uses the unshuffled one
-- [ ] **Q063** `src/main.js:210` [bug] Picking "Start a fresh run" at the floor desk and then dying deletes the saved campaign the desk was still offering
+- [x] **Q063** `src/main.js:210` [bug] Picking "Start a fresh run" at the floor desk and then dying deletes the saved campaign the desk was still offering<br>      ↳ DONE — the fresh-run pick nulls `restoredProgress` in memory but leaves `playtesting` FALSE (it IS a campaign run), so death ran the same `if (!playtesting) clearProgress()` as a real campaign death and took the save the desk was offering two clicks earlier, cloud copy included. A run may now retire the campaign save only if it OWNS it: restored from it, or having written it by clearing a floor. The explicit 'Restart run' verb stays unconditional — that one is the player's own choice, and the whole point of the flag is to separate the two.
 - [ ] **Q064** `src/main.js:1007` [bug] A printer explosion damages party members but never touches player-team summons standing beside it
 - [ ] **Q065** `src/main.js:1254` [bug] Layered walks splice the body's real position AFTER smoothing, so the first run is never corridor-checked
-- [ ] **Q066** `src/main.js:1870` [bug] switchLeader() is the one leader handoff that never clears the out-of-combat crouch, so 'covered' is removed from the wrong sheet and the real croucher stays crouched forever
-- [ ] **Q067** `src/main.js:274` [bug] The cloud "Continue the run" button swallows its write failure and never validates the row, so it can reload forever without ever booting the run
-- [ ] **Q068** `src/main.js:1865` [bug] Class points outlive the class track, so the fullscreen LEVEL UP modal reopens after every victory for the rest of the run
+- [x] **Q066** `src/main.js:1870` [bug] switchLeader() is the one leader handoff that never clears the out-of-combat crouch, so 'covered' is removed from the wrong sheet and the real croucher stays crouched forever<br>      ↳ DONE — duplicate of Q060, and its sharper wording is the accurate one: both halves of "removed from the wrong sheet" and "the real croucher stays crouched forever" check out exactly.
+- [x] **Q067** `src/main.js:274` [bug] The cloud "Continue the run" button swallows its write failure and never validates the row, so it can reload forever without ever booting the run<br>      ↳ DONE — both doors into the same loop. The offer is now gated on boot's OWN check (`parseProgress` + `LEVELS[levelId]`), which is stricter than the `row?.data` test it had, so a row this build cannot read is never offered rather than offered and bounced. And the reload moved inside the try, so a browser that can read but not write says so and stays put. One consequence worth knowing: a player whose only copy is an unreadable row now sees nothing rather than a button that does nothing.
+- [x] **Q068** `src/main.js:1865` [bug] Class points outlive the class track, so the fullscreen LEVEL UP modal reopens after every victory for the rest of the run<br>      ↳ DONE — new `stats.spendablePoints` beside the pool it narrows, three tests pinning where it diverges from `pendingPoints`. `nodeAvailable` already accounts for taken / prereq-locked / unaffordable, so a track merely GATED stops nagging and resumes the moment a node opens. **`pendingPoints` deliberately unchanged everywhere else** — the character sheet and party bar still show the banked total, because the points are real and hiding them would be a different lie. The new rule answers only "is it worth interrupting the player".
 - [ ] **Q069** `src/pathfinding.js:394` [bug] roundBends' arc-rejection fallback emits a leg it has just proved illegal, so a smoothed walk crosses a partition
 - [ ] **Q070** `src/picking.js:91` [bug] `picking.pick` ignores storey visibility, so a cutaway-hidden floor eats clicks aimed at the visible floor below it
 - [ ] **Q071** `src/scene.js:253` [bug] `refreshTile` and `buildLevel` silently drop every renderMarker result that is not wall/surface/prop, so toppled partitions and foliage are untrackable and stack
