@@ -12,7 +12,7 @@
 // (true always lands, false always misses), which is what lets a test assert on
 // the MISS branch at all.
 import { test, expect } from '@playwright/test';
-import { bootStash, enterCombat, waitForPlayerTurn, stableProject } from './helpers.js';
+import { bootStash, enterCombat, waitForPlayerTurn, stableProject, onScreen, onCanvas } from './helpers.js';
 
 // The Manager three tiles east of the player: inside the throw range of 5, with
 // a clear line, and too far to melee.
@@ -61,6 +61,18 @@ const DESK_ARENA = {
 
 // A '#' cell wall is solid all the way up, and DOES stop a throw. The Manager
 // sits in a side pocket with no line to the player.
+//
+// The pocket is sealed on all four sides, and that is load-bearing rather than
+// scenery. It used to open onto row 3, and coworkers WANDER (actors.js gives
+// every EnemyActor a leash and an amble timer), so he would stroll out of the
+// pocket a second or two after boot - taking the arena's whole premise with
+// him. The click then landed on empty floor where he had been standing, and
+// the failure never said so: it surfaced either as nothing happening at all
+// (the throw unresolved, the narrator still on the arming line) or, when the
+// floor he had vacated was walkable, as the player walking around the wall and
+// opening a fight. Sealing him is what makes "no line" a property of the map
+// instead of a race against his amble timer - the same way ranged.spec.js's
+// own SEALED_ARENA pocket is walled in.
 const SEALED_ARENA = {
   name: 'No Line',
   tiles: { '#': 'wall', '.': 'floor' },
@@ -68,7 +80,7 @@ const SEALED_ARENA = {
   map: [
     '#######',
     '#.@.#M#',
-    '#...#.#',
+    '#...###',
     '#.....#',
     '#######',
   ],
@@ -82,27 +94,32 @@ const setPaper = (page, n) => page.evaluate((v) => {
 const managerHp = (page) => page.evaluate(() =>
   window.__combat.enemies.find((e) => e.name === 'The Manager')?.hp ?? null);
 const lastLine = (page) => page.evaluate(() => window.__game.narration.at(-1) || '');
-// Settle the camera BEFORE projecting, or the point is stale by the time the
-// click lands and the click misses the body entirely. When that happens this
-// suite does not report a miss - it reports the assertion three lines later:
-// the throw was never resolved, so `armed` is still set, no paper is spent, no
-// fight opens, and the narrator's last line is still the ARMING line. Every
-// symptom reads like a refusal that forgot to say why.
+// Click the Manager's BODY, having first ASKED the game whether the cursor is
+// on him rather than projecting a point and hoping the ray lands.
 //
-// It sat here as a latent defect for as long as the frame budget happened to be
-// generous enough. Memoizing the focus banner (Q152) made hover frames cheaper,
-// the click started arriving earlier, and it began failing two runs in three -
-// a perf fix exposing an unpinned wait, not breaking one.
+// Out of combat there is no near-a-body fallback - that one is combat's own
+// `enemyAtPoint` - so the pick has to hit the mesh. `hoverKind` is the game's
+// OWN pick under the cursor, so moving there and polling until it says `enemy`
+// means the click that follows lands on the body the game just confirmed.
+//
+// The camera settle is the other half: a walk-up or an intro glide leaves it
+// easing, and a stale projection lands the click a tile off. Settle on the
+// PLAYER, not the target - that fixes the whole projection, enemies included,
+// which is what helpers.enterCombat relies on.
 const clickManager = async (page) => {
-  const tile = await page.evaluate(() => {
-    const en = window.__game.enemies.find((e) => e.alive);
-    return { x: en.x, z: en.z };
-  });
-  await stableProject(page, tile.x, tile.z);
-  const p = await page.evaluate(() => {
-    const en = window.__game.enemies.find((e) => e.alive);
-    return window.__game.project3(en.px ?? en.x, 0.9, en.pz ?? en.z);
-  });
+  const pp = await page.evaluate(() => window.__game.playerPos);
+  await stableProject(page, pp.x, pp.z).catch(() => {});
+  let p = null;
+  await expect.poll(async () => {
+    p = await page.evaluate(() => {
+      const en = window.__game.enemies.find((e) => e.alive);
+      return window.__game.project3(en.px ?? en.x, 0.9, en.pz ?? en.z);
+    });
+    if (!onScreen(p) || !(await onCanvas(page, p))) return 'off-canvas';
+    // The move is what makes the game run its pick; hoverKind is that pick.
+    await page.mouse.move(p.x, p.y);
+    return page.evaluate(() => window.__game.hoverKind);
+  }, { timeout: 20_000, intervals: [200] }).toBe('enemy');
   await page.mouse.click(p.x, p.y);
 };
 
