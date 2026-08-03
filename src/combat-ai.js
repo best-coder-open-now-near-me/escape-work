@@ -488,3 +488,202 @@ export function chooseBeat(s, refused = NO_REFUSALS) {
   if (ok('crouch') && s.canCrouch && s.ap >= s.coverAp) return { beat: 'crouch' };
   return { beat: 'pass' };
 }
+
+// --- taking the beat (AI_PLAN M1, the ACT half) -------------------------------
+// `chooseBeat` decides; this does. It used to live inside `startCombat`'s
+// closure, reading `acting`, `crouched` and eleven doers off it, which is why
+// the whole perform half of the AI had no test at any level (Q005) - two AI
+// bugs shipped in exactly this layer and neither could land with a regression
+// test. Nothing about the dispatch is world-shaped: every arm bills AP, calls
+// one doer, and sets a wait that outlasts its animation. So the doers arrive as
+// an argument and the rules stay here, where a test can drive all eleven arms
+// with counters instead of a browser.
+//
+// `turn` is the acting unit's turn state ({ ap, wait }) - mutated in place,
+// because that IS the shared state the frame loop reads next tick.
+//
+// Three arms - `entrench`, `advance`, `crouch` - can come back having done
+// NOTHING, and they must not end the turn: they add themselves to `refused` so
+// the next ladder run skips them and picks something lower down. That loop is
+// what makes a shieldless entrench land as a plain shot, and it is the reason
+// the pass beat is the tail of THIS function rather than its caller's - every
+// arm above it returns, and moving the tail out turns each of those returns
+// into a fall-through into the pass.
+export function takeBeat(beat, { turn, plans, unit, target, refused, doers, round = (v) => v }) {
+  const {
+    sup, supPlan, sm, shootable,
+    tp, toppleAp, pullp, pullAp, shovep, shoveAp, brk, breakAp,
+  } = plans;
+  const bill = (n) => { turn.ap = round(turn.ap - n); };
+  if (beat === 'support') {
+    unit.supportCd = sup.cooldownRounds || 0;
+    unit.supportUsed = (unit.supportUsed || 0) + 1;
+    bill(sup.ap);
+    doers.support(unit, supPlan, sup);
+    turn.wait = 0.6;
+    return;
+  }
+  if (beat === 'summon') {
+    unit.summonCd = sm.cooldownRounds || 0;
+    bill(sm.ap);
+    doers.summon(unit, target, sm);
+    turn.wait = 0.6;
+    doers.refresh();
+    return;
+  }
+  if (beat === 'topple') {
+    bill(toppleAp);
+    doers.topple(unit, tp);
+    turn.wait = 0.85;
+    doers.refresh();
+    return;
+  }
+  if (beat === 'pull') {
+    bill(pullAp);
+    doers.pull(unit, pullp);
+    turn.wait = 0.85;
+    return;
+  }
+  if (beat === 'shove') {
+    bill(shoveAp);
+    doers.shove(unit, shovep);
+    doers.refresh();
+    turn.wait = 0.6;
+    return;
+  }
+  if (beat === 'break') {
+    bill(breakAp);
+    // Through a local, not `turn.wait = doers.break(...)`: an assignment
+    // resolves its target's base object BEFORE the right-hand side runs, so the
+    // direct form would write the wait to whatever `turn` was when the
+    // statement started. Nothing in here replaces it today - but this is the
+    // one arm whose wait depends on what the doer did.
+    const wait = doers.break(unit, brk);
+    turn.wait = wait;
+    doers.refresh();
+    return;
+  }
+  if (beat === 'attack') {
+    doers.attack(unit, target);
+    bill(unit.combat.attackAp);
+    turn.wait = 0.85; // outlast the swing animation so hits read one at a time
+    return;
+  }
+  if (beat === 'entrench') {
+    // The same turtle test the crouch beat runs - a shieldless spot refuses and
+    // the ladder falls through to the plain shot. The crouch doer bills the
+    // cover AP itself, which is why this arm does not.
+    // Entrench is TWO beats and this arm is only the first: crouching flips
+    // canCrouch and canEntrench false while canShoot stays true, so the shot
+    // arrives on a later ladder run. chooseBeat reserved the AP for both halves
+    // up front. An arm that "finishes the job" by crouching and shooting in one
+    // call takes two actions in one frame and eats the 0.5s settle that makes
+    // the tuck-in readable.
+    if (doers.crouch(unit, target)) { turn.wait = 0.5; return; }
+    refused.add('entrench');
+    return; // nothing animated - fall to the shot immediately
+  }
+  if (beat === 'shoot') {
+    doers.shoot(unit, target, shootable);
+    bill(unit.combat.attackAp);
+    turn.wait = 0.85;
+    return;
+  }
+  if (beat === 'advance') {
+    const spent = doers.advance(unit, target);
+    if (spent > 0) { doers.billMove(spent); turn.wait = 0.15; return; }
+    // The advance went nowhere: refuse the beat for the rest of the turn and
+    // let the ladder re-run - the crouch this used to special-case now arrives
+    // by ladder order (AI_PLAN M4's generalized tail).
+    refused.add('advance');
+    return; // no animation happened - re-decide on the next frame, not later
+  }
+  if (beat === 'crouch') {
+    if (doers.crouch(unit, target)) { turn.wait = 0.5; return; }
+    refused.add('crouch');
+    return; // nothing animated - fall through immediately
+  }
+  doers.pass(); // out of AP, or everything refused
+}
+
+// --- gathering the beat's plans (AI_PLAN M1, the DECIDE half) -----------------
+// The other half of the same seam. `beatStateFrom` has been pure for a while,
+// but the step BEFORE it - which plans get gathered at all, and the three flags
+// derived after - lived in the closure with everything else, so the AP
+// pre-gates and the shot rule could only be exercised by watching a fight.
+//
+// Every world question arrives as a callback on `ask`. The unit and its target
+// are opaque: nothing here reads a body's position except through `ask`, which
+// is what lets a test drive it with plain objects.
+//
+// Order matters in two places and is preserved from the closure version:
+//   - `postableNow` is an ASK, not a doer - it reports how many the summoner
+//     could still post. The summon BEAT is what actually spends.
+//   - `canShoot` is filled in AFTER `beatStateFrom`, because whether a shot
+//     exists depends on `inReach`, which the assembly is what computes.
+export function aiBeatPlansFrom(unit, target, ask, costs) {
+  // A summoner reinforces before it wades in: off cooldown, able to afford the
+  // post, and under its live cap (a maxed-out HR just fights).
+  const sm = ask.summonSpec(unit);
+  const summonReady = !!sm && (unit.summonCd || 0) <= 0 && ask.ap >= sm.ap
+    && ask.postableNow(unit, sm) > 0;
+  // Triage before reinforcement (AI_PLAN M6): rationed by uses, paced by
+  // cooldown, aimed at the worst-off colleague in range - self included.
+  const sup = ask.supportSpec(unit);
+  const supReady = !!sup && (unit.supportCd || 0) <= 0
+    && (unit.supportUsed || 0) < (sup.uses ?? Infinity) && ask.ap >= sup.ap;
+  const supPlan = supReady ? ask.supportPlan(unit, sup) : null;
+  // Furniture onto somebody, or failing that a partition onto somebody - one
+  // beat, two aims. Each plan is gathered only if its price is already covered:
+  // planning is not free, and a plan the unit cannot afford is a plan the
+  // ladder will refuse anyway.
+  const tp = ask.ap >= costs.topple ? (ask.topplePlan(unit) || ask.edgeTopplePlan(unit)) : null;
+  const pullp = ask.ap >= costs.pull ? ask.pullPlan(unit) : null;
+  const shovep = ask.ap >= costs.shove ? ask.shovePlan(unit) : null;
+  // Sealed means NOBODY is engageable - while any route exists, walking it
+  // beats demolition, so the break plan is not even gathered. A shut door is
+  // priced at the door's own AP; battering carries the unit's swing price.
+  const sealed = !ask.canEngage(unit, target);
+  const brk = sealed && ask.ap > 0 ? ask.breakPlan(unit, target) : null;
+  const breakAp = brk?.kind === 'door' ? brk.ap : unit.combat.attackAp;
+  // Battering needs something to swing; opening a door needs only a hand. The
+  // PLAN is withheld rather than a flag overwritten - `canBreak` is
+  // beatStateFrom's to derive, like every other arm's.
+  const canBreak = !!brk && (brk.kind === 'door' || unit.combat.attacks.length > 0);
+  const beatState = beatStateFrom({
+    ap: ask.ap,
+    moveBudget: ask.moveBudget,
+    moveCost: costs.move,
+    inReach: ask.inReach(unit, target),
+    hasAttack: unit.combat.attacks.length > 0,
+    attackAp: unit.combat.attackAp,
+    support: sup ? { ap: sup.ap, ready: !!supPlan } : null,
+    summon: sm ? { ap: sm.ap, ready: summonReady } : null,
+    costs: {
+      topple: costs.topple, pull: costs.pull, shove: costs.shove,
+      break: breakAp, cover: costs.cover,
+    },
+    plans: { topple: tp, pull: pullp, shove: shovep, break: canBreak ? brk : null },
+    alreadyCrouched: ask.crouched(unit),
+  });
+  // The ranged kit (AI_PLAN M5): a line the unit could fire RIGHT NOW.
+  const shootable = (!beatState.inReach && beatState.hasAttack)
+    ? ask.shootable(unit, target) : null;
+  beatState.canShoot = !!shootable;
+  // The crouch's own geometry, asked ONCE and shared by the two arms that
+  // depend on it. Gating them on `true` and letting the doer refuse worked, but
+  // it spent a DECIDE iteration discovering what a predicate could have said -
+  // and it logged the beat in the tally, which makes the histogram (M1's
+  // regression tripwire) claim crouches that never happened.
+  beatState.canCrouch = !ask.crouched(unit) && !beatState.inReach
+    && ask.covered(unit, target);
+  // Entrench (crouch-then-shoot): a shot in hand AND cover to take. Attacking
+  // does not break the crouch [ratified], which is what makes this a beat
+  // rather than a way to waste a turn.
+  beatState.canEntrench = !!shootable && beatState.canCrouch;
+  return {
+    beatState, sup, supPlan, sm, shootable,
+    tp, toppleAp: costs.topple, pullp, pullAp: costs.pull,
+    shovep, shoveAp: costs.shove, brk, breakAp,
+  };
+}

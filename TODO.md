@@ -65,14 +65,18 @@ How to read it:
   those as leads. Of eight refutations in this pass, six were right about the
   code and wrong about the consequence.
 
-**228 entries** — 24 high / 106 medium / 98 low. **128 ticked, 100 open**
-(high 22/24, medium 55/106, low 51/98).
+**228 entries** — 24 high / 106 medium / 98 low. **130 ticked, 98 open**
+(high 23/24, medium 56/106, low 51/98).
 
 **Zero `[bug]` findings are open.** All 13 that remained were closed on
-2026-08-03; what is left is 25 duplication, 24 test-gap, 18 inconsistency, 14
-doc-drift and 19 structural (soc / dead-code / god-method / design). Those are
-cleanup, not defects — worth doing, but nothing on this list is currently known
-to misbehave in the played game.
+2026-08-03; what is left is 22 test-gap and 76 cleanup (duplication,
+inconsistency, doc-drift, soc / dead-code / god-method / design). Nothing on
+this list is currently known to misbehave in the played game.
+
+**One HIGH is left: Q024**, and it is an arena gap rather than a defect — no
+e2e spec ever fights an Executive or a Security Guard, so the enemy ranged kit
+has no end-to-end coverage. It is also the thing standing between the AI's
+remaining untested arms and a test, now that the seam exists (Q902).
 
 *Counted from the boxes rather than carried forward, 2026-08-03. This line had
 said "227 standing … 31 ticked" for several passes while the boxes below said
@@ -87,7 +91,24 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q002** `src/ui/hud.js:96` [bug] **(carried)** Player-typed names still go raw into `innerHTML` on four surfaces — and the save now round-trips through a shared cloud store<br>      ↳ DONE — esc() moved to chrome.js; 4 sites
 - [x] **Q003** `src/combat.js:4530` [god-method] **(carried)** `combat.js update(dt)` is a 278-line per-frame god method holding eight unrelated responsibilities — the AI turn loop cannot be tested without a browser<br>      ↳ **PARTLY DONE — 328 → 40 lines.** (278 was the count when the finding was written; it had grown since.) Nine pieces named: `retireStaleMoveStarts` (6), `finishWalkUpStrike` (33), `finishWalkUpCrouch` (17), `aiBeatPlans` (115, the gather), `takeBeat` (83, the act, pass beat included), and the four beat doers that were inline in the ladder and now sit with their five siblings - `aiSummon`, `aiTopple`, `aiShove`, `aiOpenOrBreak`. The head reads gather → decide → act. **Still open, and it is the second clause, not the first:** every piece is still inside the `startCombat` closure, so none of it is reachable from node. That is not more cutting - it is the world facade, Q041. Re-queued as Q902.
 - [x] **Q004** `src/combat.js:2713` [soc] **(carried)** `aiShoveMember` bills a party member RAW surface damage via the enemy hazard model, silently voiding the talent immunities that main.js applies to the same tile<br>      ↳ DONE — world.memberSurfDamage (Q1-A)
-- [ ] **Q005** `tests/unit/combat-ai.test.js:1` [test-gap] **(carried)** Every AI *perform* half added by this branch lives in combat.js and has no test at any level - both AI bugs that shipped on this branch were in exactly that layer, and neither landed with a regression test<br>      ↳ **Measured 2026-08-03, while splitting `update(dt)`** - the halves are named now, which is the part a test needs, but they are still closure-bound (Q902). The gap is not uniform, and this is the work list: **no coverage at any level** for the `support` arm (no arena ever wounds HR or a colleague below the heal threshold, so `aiSupportPlan` returns null and the arm is never reached), both `topple` arms (every 'puts a shoulder into' assertion in the suite is the PLAYER's), `shove` (same - the three shove specs are all player-side), and `entrench` (it needs the Executive, who appears in exactly one arena in the whole suite, a bare two-row corridor with no shielded face). **Strong** on `summon`, `pull`, `break`-the-door, `attack`, `shoot` and `crouch`; **incidental only** on `break`-by-battering (cover.spec.js's boxed Manager batters a filing cabinet on his way to the assertion, which is not the same as a test that would notice if he stopped). The player half is the same shape: the walk-up strike and walk-up crouch ARRIVALS are strongly covered, and not one of their five refusal branches is - including 'Not enough AP left', which is also the branch most likely to be quietly wrong, since the walk reserves the action's AP up front. And the `moveStart` prune has no test at any level: the two verbs it exists for, the courier dash and swap, appear in no spec at all.
+- [x] **Q005** `tests/unit/combat-ai.test.js:1` [test-gap] **(carried)** Every AI *perform* half added by this branch lives in combat.js and has no test at any level - both AI bugs that shipped on this branch were in exactly that layer, and neither landed with a regression test<br>      ↳ **Measured 2026-08-03, while splitting `update(dt)`** - the halves are named now, which is the part a test needs, but they are still closure-bound (Q902). The gap is not uniform, and this is the work list: **no coverage at any level** for the `support` arm (no arena ever wounds HR or a colleague below the heal threshold, so `aiSupportPlan` returns null and the arm is never reached), both `topple` arms (every 'puts a shoulder into' assertion in the suite is the PLAYER's), `shove` (same - the three shove specs are all player-side), and `entrench` (it needs the Executive, who appears in exactly one arena in the whole suite, a bare two-row corridor with no shielded face). **Strong** on `summon`, `pull`, `break`-the-door, `attack`, `shoot` and `crouch`; **incidental only** on `break`-by-battering (cover.spec.js's boxed Manager batters a filing cabinet on his way to the assertion, which is not the same as a test that would notice if he stopped). The player half is the same shape: the walk-up strike and walk-up crouch ARRIVALS are strongly covered, and not one of their five refusal branches is - including 'Not enough AP left', which is also the branch most likely to be quietly wrong, since the walk reserves the action's AP up front. And the `moveStart` prune has no test at any level: the two verbs it exists for, the courier dash and swap, appear in no spec at all.<br>      ↳ **CLOSED 2026-08-03 for the layer the finding names.** The perform
+      halves are reachable now (Q902) and all eleven beat arms have a unit test
+      driving them with counters: the four the measurement found with **no
+      coverage at any level** — `support`, both `topple` arms, `shove` and
+      `entrench` — plus the refusal loop that was the actual shape of both
+      shipped AI bugs (`entrench`, `advance` and `crouch` come back having done
+      nothing, add themselves to `refused`, and must NOT end the turn). One
+      test walks all eleven arms asserting none falls through to the pass beat,
+      which is the invariant a mechanical edit would break silently. The decide
+      half is covered too: the AP pre-gates, the topple's partition fallback,
+      demolition only when sealed, battering needing hands a door does not, and
+      entrench needing both halves.
+      **What is left is NOT this finding**: the doers' interiors (does
+      `aiTopple` put the right prop on the right victim) still need a body and
+      a scene, so they stay e2e's job — and the arena gaps the measurement
+      named (nothing wounds HR below the heal threshold; the Executive appears
+      in one bare corridor) are real, filed as Q024's neighbours, and unchanged
+      by this pass.
 - [x] **Q006** `src/combat-ai.js:157` [bug] A shooter already standing on a legal firing tile can never reposition or close, so a blocked shot burns its whole turn — every turn<br>      ↳ DONE — self-tile is a candidate, not a short-circuit
 - [x] **Q007** `src/combat-ai.js:97` [bug] standTilePath/standTileRoutes never test that a swing from the chosen tile is legal, so the AI's "engageable" tier admits members it provably cannot hit<br>      ↳ DONE — canSwingFrom threaded through
 - [x] **Q008** `src/combat-targeting.js:89` [bug] `ringsAtBodies` is a second verb classifier that omits `pull` — arming Pull Over draws no rings or reach circle at all, and two live-looking branches are dead<br>      ↳ DONE — derived from verbKind; the pull rings again
@@ -171,23 +192,30 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
   ally arm had no `return` and FELL THROUGH on purpose, which is what gives the
   purge rings on both halves; a mechanical cut turns that into `return true`
   silently. Expect at least one more of those in here.
-- [ ] **Q902** `src/combat.js` [test-gap] **(new 2026-08-03, the remainder of Q003/Q035)**
-  The AI turn loop is now nine named pieces instead of one 328-line frame driver,
-  and not one of them is reachable from a node test - they all live inside the
-  `startCombat` closure and read `phase`, `acting`, `crouched`, `moveStart`,
-  `world`, `fx` and `app` off it. So the half of Q003 that said "cannot be tested
-  without a browser" is untouched by the split, and cutting further will not
-  touch it either: the loop needs a seam where the world arrives as an argument,
-  which is Q041's duck-typed facade, and Q900's narrowness pass sits on the same
-  seam. Q005 (no test at any level for the AI perform halves) is downstream of
-  this one - the halves are named now, which is the part a test needs, but there
-  is still nowhere to call them from.
-  Worth carrying forward from the split: the `advanceTurn()` tail is the pass
-  beat and lives INSIDE `takeBeat` on purpose - every arm above it returns, so
-  hoisting it to the caller would make every beat also end the turn, an enemy
-  taking one action per turn instead of spending its pool, with nothing thrown
-  and nothing red. The three refusing arms (`entrench`, `advance`, `crouch`) set
-  no wait at all, and that absence is the re-decide clock, not an oversight.
+- [x] **Q902** `src/combat.js` [test-gap] **(new 2026-08-03, the remainder of Q003/Q035)**
+  **DONE 2026-08-03 — the seam exists, and both halves of the AI turn crossed it.**
+  The finding was right that cutting further would not help: the loop needed a
+  place where the world arrives as an argument. It has one now.
+
+  - **The ACT half** is `combat-ai.takeBeat`. Nothing about the dispatch was
+    world-shaped — every arm bills AP, calls one doer, sets a wait — so the
+    eleven doers arrive as an argument and the rules moved out. combat.js keeps
+    a 30-line adapter naming its closure verbs, and `acting` is passed as
+    `turn` because that IS the state the frame loop reads next tick.
+  - **The DECIDE half** is `combat-ai.aiBeatPlansFrom`. `beatStateFrom` was
+    already pure; what was still closure-bound was the step BEFORE it — which
+    plans get gathered at what price — and the three flags derived after
+    (`canShoot`, `canCrouch`, `canEntrench`). Every world question is a
+    callback on one `ask` bag.
+
+  What did NOT move, on purpose: the doers themselves (`aiTopple`, `aiShove`,
+  `aiSummon`, `aiOpenOrBreak`, `tryAiCrouch`, `aiAdvance`) genuinely touch
+  bodies, the scene and the AP ledger. Their DISPATCH is tested; they are
+  Q037/Q042's problem, not this one.
+
+  `combat.js` 5,699 → 5,589. Verified `ai` 3/3, `summons` 5/5, `cover` 7/7,
+  `ranged` 4/4, `demolition` 3/3.
+
 - [ ] **Q903** `src/looting.js` [test-gap] **(new 2026-08-03, from the Q038 split)**
   Four of the Alt overlay's five scans are driven end to end - `looseEntries` and
   the container half of `propEntries` by looting.spec.js's rummage/drop/pickup

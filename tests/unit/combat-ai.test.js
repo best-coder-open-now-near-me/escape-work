@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import {
   standTilePath, pickTarget, advanceRoute, aiCrouchCovered, chooseBeat,
   AI, standTileRoutes, scoreDestination, firingTileRoutes, beatStateFrom,
+  takeBeat, aiBeatPlansFrom,
 } from '../../src/combat-ai.js';
 import { REACH } from '../../src/stats.js';
 
@@ -566,4 +567,278 @@ test('support and summon carry their own readiness, not just their price', () =>
   assert.deepEqual(s.support, { ap: 2, ready: false });
   assert.deepEqual(s.summon, { ap: 3, ready: true });
   assert.equal(chooseBeat(s).beat, 'summon', 'triage is not ready; the summon is');
+});
+
+// --- taking the beat: the PERFORM half ---------------------------------------
+// Q005's finding was that this layer had no test at ANY level - not a unit
+// test, not an e2e - while two AI bugs had shipped in it. It was unreachable:
+// the dispatch lived inside `startCombat`'s closure. It takes its doers as an
+// argument now, so every arm can be driven with counters.
+//
+// A rig that records what each arm did. `doers.crouch` answers whether the
+// tuck-in succeeded, which is the one doer whose RETURN steers the dispatch,
+// and `doers.break` returns the wait it earned.
+const beatRig = (over = {}) => {
+  const log = [];
+  const doer = (name, ret) => (...args) => { log.push({ name, args }); return ret; };
+  const turn = { ap: 10, wait: 0 };
+  const refused = new Set();
+  const unit = {
+    x: 0, z: 0, combat: { attackAp: 2, attacks: ['punch'], reach: REACH.DEFAULT },
+  };
+  const plans = {
+    sup: { ap: 2, cooldownRounds: 3 }, supPlan: { ref: 'colleague' },
+    sm: { ap: 3, cooldownRounds: 2 }, shootable: { line: 'staple' },
+    tp: { topple: 'cabinet' }, toppleAp: 1,
+    pullp: { pull: 'over' }, pullAp: 2,
+    shovep: { shove: 'off' }, shoveAp: 1,
+    brk: { kind: 'door' }, breakAp: 1,
+  };
+  const doers = {
+    support: doer('support'), summon: doer('summon'), topple: doer('topple'),
+    pull: doer('pull'), shove: doer('shove'), break: doer('break', 0.7),
+    attack: doer('attack'), shoot: doer('shoot'),
+    crouch: doer('crouch', true), advance: doer('advance', 1.5),
+    billMove: doer('billMove'), refresh: doer('refresh'), pass: doer('pass'),
+    ...over,
+  };
+  const take = (beat) => takeBeat(beat, {
+    turn, plans, unit, target: { id: 'target' }, refused, doers,
+    round: (v) => Math.round(v * 10) / 10,
+  });
+  return { take, log, turn, refused, unit, names: () => log.map((e) => e.name) };
+};
+
+test('the support beat rations itself: cooldown, a use, and the AP', () => {
+  const r = beatRig();
+  r.take('support');
+  assert.deepEqual(r.names(), ['support']);
+  assert.equal(r.turn.ap, 8, 'billed the triage price');
+  assert.equal(r.unit.supportCd, 3, 'and put itself on cooldown');
+  assert.equal(r.unit.supportUsed, 1, 'and spent one of its rationed uses');
+  assert.equal(r.turn.wait, 0.6);
+});
+
+test('the summon beat bills, posts, and repaints', () => {
+  const r = beatRig();
+  r.take('summon');
+  assert.deepEqual(r.names(), ['summon', 'refresh']);
+  assert.equal(r.turn.ap, 7);
+  assert.equal(r.unit.summonCd, 2);
+});
+
+test('the topple and shove beats each bill their own price', () => {
+  const t = beatRig();
+  t.take('topple');
+  assert.deepEqual(t.names(), ['topple', 'refresh']);
+  assert.equal(t.turn.ap, 9);
+  assert.equal(t.turn.wait, 0.85, 'long enough to outlast the prop going over');
+
+  const s = beatRig();
+  s.take('shove');
+  assert.deepEqual(s.names(), ['shove', 'refresh']);
+  assert.equal(s.turn.ap, 9);
+});
+
+test('the break beat takes its wait from what the doer actually did', () => {
+  // Opening a door and battering one down are not the same length of pause,
+  // and this is the only arm whose wait is the doer's answer.
+  const r = beatRig();
+  r.take('break');
+  assert.equal(r.turn.wait, 0.7);
+  assert.equal(r.turn.ap, 9);
+});
+
+test('the attack and shoot beats both bill the unit\'s own swing price', () => {
+  const a = beatRig();
+  a.take('attack');
+  assert.deepEqual(a.names(), ['attack']);
+  assert.equal(a.turn.ap, 8);
+
+  const s = beatRig();
+  s.take('shoot');
+  assert.deepEqual(s.log[0], { name: 'shoot', args: [s.unit, { id: 'target' }, { line: 'staple' }] },
+    'the line it found is handed to the shot, not re-derived');
+  assert.equal(s.turn.ap, 8);
+});
+
+test('entrench crouches and bills NOTHING here - the crouch bills itself', () => {
+  const r = beatRig();
+  r.take('entrench');
+  assert.deepEqual(r.names(), ['crouch']);
+  assert.equal(r.turn.ap, 10, 'the cover AP is the doer\'s to charge');
+  assert.equal(r.turn.wait, 0.5, 'a settle long enough to read the tuck-in');
+  assert.equal(r.refused.has('entrench'), false);
+});
+
+test('a shieldless entrench refuses itself so the ladder falls to the plain shot', () => {
+  // The loop that makes entrench two beats rather than a wasted turn. Nothing
+  // animated, so it must not set a wait either - the next frame re-decides.
+  const r = beatRig({ crouch: () => false });
+  r.take('entrench');
+  assert.equal(r.refused.has('entrench'), true);
+  assert.equal(r.turn.wait, 0, 'no animation, no pause');
+  assert.equal(r.turn.ap, 10);
+});
+
+test('an advance that moves bills the distance; one that cannot refuses itself', () => {
+  const moved = beatRig();
+  moved.take('advance');
+  assert.deepEqual(moved.names(), ['advance', 'billMove']);
+  assert.equal(moved.log[1].args[0], 1.5, 'billed what the walk actually spent');
+  assert.equal(moved.refused.has('advance'), false);
+
+  const stuck = beatRig({ advance: () => 0 });
+  stuck.take('advance');
+  assert.deepEqual(stuck.names(), [], 'the walk spent nothing, so nothing is billed');
+  assert.equal(stuck.refused.has('advance'), true);
+  assert.equal(stuck.turn.wait, 0);
+});
+
+test('a crouch that finds no shield refuses itself rather than ending the turn', () => {
+  const r = beatRig({ crouch: () => false });
+  r.take('crouch');
+  assert.equal(r.refused.has('crouch'), true);
+  assert.equal(r.names().includes('pass'), false, 'refusing is not passing');
+});
+
+test('the pass beat is the tail, and only the tail, that ends the turn', () => {
+  // Every arm above returns. If one ever stops returning it falls through to
+  // here, which is a unit silently ending its turn mid-beat - so the other ten
+  // arms are checked for it too.
+  const r = beatRig();
+  r.take('pass');
+  assert.deepEqual(r.names(), ['pass']);
+  for (const beat of ['support', 'summon', 'topple', 'pull', 'shove', 'break',
+    'attack', 'entrench', 'shoot', 'advance', 'crouch']) {
+    const one = beatRig();
+    one.take(beat);
+    assert.equal(one.names().includes('pass'), false, `${beat} fell through to the pass`);
+  }
+});
+
+// --- gathering the plans: the DECIDE half ------------------------------------
+// `beatStateFrom` has been testable for a while; the step BEFORE it - which
+// plans get gathered at what price, and the three flags derived after - was
+// closure-bound with everything else.
+const COSTS = { topple: 1, pull: 2, shove: 1, cover: 1, move: 0.2 };
+const askRig = (over = {}) => ({
+  ap: 10,
+  moveBudget: 4,
+  summonSpec: () => null,
+  postableNow: () => 0,
+  supportSpec: () => null,
+  supportPlan: () => null,
+  topplePlan: () => null,
+  edgeTopplePlan: () => null,
+  pullPlan: () => null,
+  shovePlan: () => null,
+  breakPlan: () => null,
+  canEngage: () => true,
+  inReach: () => false,
+  crouched: () => false,
+  shootable: () => null,
+  covered: () => false,
+  ...over,
+});
+const gunner = (over = {}) => ({
+  x: 0, z: 0, combat: { attackAp: 2, attacks: ['staple'], reach: REACH.DEFAULT }, def: {}, ...over,
+});
+const gather = (ask, unit = gunner()) => aiBeatPlansFrom(unit, { id: 'them' }, ask, COSTS);
+
+test('a plan the unit cannot afford is never even gathered', () => {
+  // Planning is not free, and a plan it cannot pay for is one the ladder
+  // refuses anyway. The pull costs 2 and the shove 1, so at 1 AP exactly one
+  // of them is worth asking about.
+  const asked = [];
+  const ask = askRig({
+    ap: 1,
+    pullPlan: () => { asked.push('pull'); return { p: 1 }; },
+    shovePlan: () => { asked.push('shove'); return { s: 1 }; },
+    topplePlan: () => { asked.push('topple'); return { t: 1 }; },
+  });
+  const out = gather(ask);
+  assert.deepEqual(asked.sort(), ['shove', 'topple'], 'the pull is out of budget');
+  assert.equal(out.pullp, null);
+});
+
+test('a partition is the topple beat\'s fallback, not a separate beat', () => {
+  const furniture = gather(askRig({ topplePlan: () => ({ what: 'cabinet' }) }));
+  assert.deepEqual(furniture.tp, { what: 'cabinet' });
+  const edge = gather(askRig({
+    topplePlan: () => null,
+    edgeTopplePlan: () => ({ what: 'partition' }),
+  }));
+  assert.deepEqual(edge.tp, { what: 'partition' }, 'no furniture, so the wall goes over');
+});
+
+test('demolition is only planned when nobody can be reached at all', () => {
+  // While any route exists, walking it beats knocking a hole in the office.
+  let asked = 0;
+  const open = gather(askRig({ canEngage: () => true, breakPlan: () => { asked++; return {}; } }));
+  assert.equal(asked, 0, 'somebody is engageable - do not even ask');
+  assert.equal(open.brk, null);
+  const sealed = gather(askRig({ canEngage: () => false, breakPlan: () => ({ kind: 'door', ap: 1 }) }));
+  assert.equal(sealed.brk.kind, 'door');
+  assert.equal(sealed.breakAp, 1, 'a door is priced at the door\'s own AP');
+});
+
+test('battering needs something to swing with; a door handle does not', () => {
+  const bare = gunner({ combat: { attackAp: 2, attacks: [], reach: REACH.DEFAULT } });
+  const ask = askRig({ canEngage: () => false, breakPlan: () => ({ kind: 'prop' }) });
+  const out = aiBeatPlansFrom(bare, { id: 'them' }, ask, COSTS);
+  assert.equal(out.brk.kind, 'prop', 'the plan is still reported...');
+  assert.equal(out.beatState.canBreak, false, '...but empty hands cannot batter with it');
+  // The same empty hands CAN work a handle.
+  const door = askRig({ canEngage: () => false, breakPlan: () => ({ kind: 'door', ap: 1 }) });
+  assert.equal(aiBeatPlansFrom(bare, { id: 'them' }, door, COSTS).beatState.canBreak, true);
+});
+
+test('a shot is only looked for when the unit is out of reach and armed', () => {
+  let asked = 0;
+  const shot = () => { asked++; return { line: 'staple' }; };
+  assert.equal(gather(askRig({ inReach: () => true, shootable: shot })).beatState.canShoot, false);
+  assert.equal(asked, 0, 'in melee, the swing is the answer - do not price a shot');
+  asked = 0;
+  const bare = gunner({ combat: { attackAp: 2, attacks: [], reach: REACH.DEFAULT } });
+  aiBeatPlansFrom(bare, { id: 'them' }, askRig({ shootable: shot }), COSTS);
+  assert.equal(asked, 0, 'nothing to fire');
+  assert.equal(gather(askRig({ shootable: shot })).beatState.canShoot, true);
+});
+
+test('entrench needs BOTH halves: a shot in hand and cover to take', () => {
+  const both = gather(askRig({ shootable: () => ({ line: 'staple' }), covered: () => true }));
+  assert.equal(both.beatState.canEntrench, true);
+  const noCover = gather(askRig({ shootable: () => ({ line: 'staple' }), covered: () => false }));
+  assert.equal(noCover.beatState.canEntrench, false, 'nothing here shields us');
+  assert.equal(noCover.beatState.canShoot, true, 'but the plain shot survives');
+  const noShot = gather(askRig({ covered: () => true }));
+  assert.equal(noShot.beatState.canEntrench, false, 'cover with nothing to fire is just a crouch');
+  assert.equal(noShot.beatState.canCrouch, true);
+});
+
+test('a unit already tucked in does not crouch again, and one in melee never does', () => {
+  assert.equal(gather(askRig({ covered: () => true, crouched: () => true })).beatState.canCrouch,
+    false, 'already behind it');
+  assert.equal(gather(askRig({ covered: () => true, inReach: () => true })).beatState.canCrouch,
+    false, 'a swing beats cover');
+});
+
+test('triage is rationed by uses and paced by cooldown, both read off the unit', () => {
+  const sup = { ap: 2, uses: 2, cooldownRounds: 3 };
+  const ask = askRig({ supportSpec: () => sup, supportPlan: () => ({ ref: 'colleague' }) });
+  assert.equal(gather(ask).beatState.support.ready, true);
+  assert.equal(gather(ask, gunner({ supportCd: 1 })).beatState.support.ready, false, 'still cooling');
+  assert.equal(gather(ask, gunner({ supportUsed: 2 })).beatState.support.ready, false, 'out of uses');
+  // No colleague worth healing: the spec is ready, the PLAN is not.
+  const nobody = askRig({ supportSpec: () => sup, supportPlan: () => null });
+  assert.equal(gather(nobody).beatState.support.ready, false);
+});
+
+test('a maxed-out summoner just fights', () => {
+  const sm = { ap: 3, cooldownRounds: 2 };
+  const room = askRig({ summonSpec: () => sm, postableNow: () => 2 });
+  assert.equal(gather(room).beatState.summon.ready, true);
+  const full = askRig({ summonSpec: () => sm, postableNow: () => 0 });
+  assert.equal(gather(full).beatState.summon.ready, false, 'nobody left to post');
 });
