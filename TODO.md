@@ -65,18 +65,21 @@ How to read it:
   those as leads. Of eight refutations in this pass, six were right about the
   code and wrong about the consequence.
 
-**228 entries** — 24 high / 106 medium / 98 low. **130 ticked, 98 open**
-(high 23/24, medium 56/106, low 51/98).
+**228 entries** — 24 high / 106 medium / 98 low. **131 ticked, 97 open**
+(high **24/24 — the band is clear**, medium 56/106, low 51/98).
 
 **Zero `[bug]` findings are open.** All 13 that remained were closed on
 2026-08-03; what is left is 22 test-gap and 76 cleanup (duplication,
 inconsistency, doc-drift, soc / dead-code / god-method / design). Nothing on
 this list is currently known to misbehave in the played game.
 
-**One HIGH is left: Q024**, and it is an arena gap rather than a defect — no
-e2e spec ever fights an Executive or a Security Guard, so the enemy ranged kit
-has no end-to-end coverage. It is also the thing standing between the AI's
-remaining untested arms and a test, now that the seam exists (Q902).
+**Every HIGH finding is closed, and no `[bug]` is open at any severity.** What
+remains is 21 test-gap and 76 cleanup, all medium or low.
+
+*A caution for whoever reads that as "the review is nearly done": the count is
+of FINDINGS, not of work. The three biggest things on the list — `startCombat`
+and `startGame` (Q037/Q042/Q039) and the `drawTargets` body pass (Q901) — are
+one line each here and are each larger than most of the rows above them.*
 
 *Counted from the boxes rather than carried forward, 2026-08-03. This line had
 said "227 standing … 31 ticked" for several passes while the boxes below said
@@ -127,7 +130,12 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q021** `src/combat.js:2694` [duplication] aiShoveMember is a second shove resolver that has already dropped the wall-slam stun and the slam-into-a-prop topple<br>      ↳ DONE — merged into displaceBody behind victimView (Q4-A)
 - [x] **Q022** `src/combat.js:1384` [god-method] `combat.js drawTargets()` is a 321-line renderer holding thirteen verb-specific drawing rules, a third verb-dispatch ladder, and mutable animation state<br>      ↳ **PARTLY DONE — 321 → 195 lines.** Seven pieces named: drawAimWash (50), drawCoverRings (29), drawZoneRings (17), drawSummonRings (10), drawAllyRings (9), drawHoveredDoor (7), drawHeldCrouch (4). The third verb-dispatch ladder was already collapsed onto verbSides. **Still open, and deliberately:** the BODY pass - cone polyline, reach ring, shove/topple/partition/break rings, the per-enemy loop - which genuinely shares hoverFoe, coverEase and the enemy iteration and wants a real look rather than another mechanical cut. Re-queued as Q901.
 - [x] **Q023** `src/ui/chrome.js:90` [test-gap] One module-scope `window.addEventListener` in ui/chrome.js locks 1,613 lines — the whole `ui/` layer plus the three host-callback modules the architecture holds up as exemplary — out of node unit testing<br>      ↳ DONE — bound on first use; 11 modules unlocked
-- [ ] **Q024** `tests/e2e/helpers.js:92` [test-gap] No e2e arena or spec ever fights an Executive or a Security Guard - so the enemy ranged kit, M5's headline feature, has zero end-to-end coverage
+- [x] **Q024** `tests/e2e/helpers.js:92` [test-gap] No e2e arena or spec ever fights an Executive or a Security Guard - so the enemy ranged kit, M5's headline feature, has zero end-to-end coverage<br>      ↳ **DONE — and the finding was HALF STALE by the time it was reached, which is recorded rather than quietly fixed.** The Executive *is* fought: `ai.spec.js`'s Range Hall pins that he shoots from across the room instead of closing, so "the enemy ranged kit has zero end-to-end coverage" had stopped being true. What genuinely had nothing was the **Security Guard** — every `'security'` in the suite is the PLAYER's class, and the one arena named for him fights a Manager. New spec `tests/e2e/enemy-kit.spec.js`, 3 tests, all green:
+      - **Escort Hall** — the guard strikes from two tiles off and never has to close. His reach (2.1) clears a full orthogonal tile; bare hands (1.5) do not. The second assertion is the one that makes it about reach rather than about a coworker walking up.
+      - **Triage Room** — HR heals a wounded colleague (`support`, one of the four arms Q005 measured with **no coverage at any level**).
+      - **Deadline Office** — the Executive tucks in behind a cabinet and then fires (`entrench`, another of the four). Range Hall could never reach this arm: a bare two-row corridor has no shielded face, so `canCrouch` is false every frame.
+
+      **Worth carrying forward, because it cost a run and would cost the next one too:** `aiAllies()` is the ENGAGED list, so a colleague standing outside `ENGAGE_RADIUS` is not somebody HR can triage — he is not in the fight at all. The first Triage Room put the Manager six tiles out; HR spent every turn posting employees instead, which reads exactly like a broken support arm and is really a broken arena. The test now asserts the initiative order contains both coworkers BEFORE it asserts anything about the AI.
 
 ### MEDIUM
 
