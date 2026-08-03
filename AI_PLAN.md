@@ -121,8 +121,9 @@ of engagement, so the doc is enough:
   are extending).
 - **The tags bind you.** The five headline questions are answered — A3,
   A4, A5, A6, A7 are `[ratified]` (designer, 2026-08-01) and are the
-  design, not suggestions. What remains `[proposed]` (A1, A2, A8, A9,
-  A10, the tunable values, the log flavor, which enemy carries the
+  design, not suggestions. So is A10's ladder position (designer,
+  2026-08-03). What remains `[proposed]` (A1, A2, A8, A9, the tunable
+  values, the log flavor, which enemy carries the
   ranged entry) are implementation defaults: implement them as written,
   keep them cheap to reverse, and flip tags in this doc as any further
   designer verdicts arrive (the ratification loop).
@@ -334,7 +335,7 @@ Four lessons, each reflected in a decision above:
 | A7 | **No difficulty selector in v1**; every new magnitude lives in one `AI` tunables block | `[ratified]` | Q5 answered A (designer, 2026-08-01). The block is what makes any later selector cheap — one multiplier, not a scavenger hunt |
 | A8 | **Per-enemy personality is data; the brain is systems.** New per-def vocabulary (`focus`, a ranged attack entry, support flags) is documented in `data/enemies.js` like `aggression` and `reach` already are; `combat-ai.js` owns every rule that reads it | `[proposed]` | The `ARCHITECTURE.md` rule applied to AI. `aggression` (green/yellow/red) is the precedent: disposition already lives on the def |
 | A9 | **The AI never cheats.** Same AP prices (the topple precedent: "both sides push for the same", `combat-ai.js:141`), same rolls (M1's shared assembler), same information (it reacts to what combat shows it) | `[proposed]` | Difficulty that comes from fairness reads as the enemy being good; difficulty from cheating reads as the game being unfair. Every reference lesson supports it |
-| A10 | **Sealed-off enemies break through instead of turtling** — when no route to any target exists, a unit with a breakable barrier on the way batters it (`breakPlan`), and a unit sealed by a CLOSED DOOR opens it at the player's own door price rather than farming crouches forever | `[proposed]` | Also the honest fix for the class of fights the closed-door deadlock belonged to: an unreachable enemy is now a *delayed* enemy, not a stalemate. Doors have no break pool (they are not in the wall sets, by construction), so without the open arm, closing a door on an enemy mid-fight turns it into a piñata |
+| A10 | **Sealed-off enemies break through instead of turtling** — when no route to any target exists, a unit with a breakable barrier on the way batters it (`breakPlan`), and a unit sealed by a CLOSED DOOR opens it at the player's own door price rather than farming crouches forever. `break` sits ABOVE `crouch`, so a boxed-in coworker digs its way out rather than hunkering down — **including when the barrier it batters is its own cover** | `[ratified]` | The ordering was put to the designer with its consequence spelled out (a boxed enemy demolishing the cabinets protecting it) and the alternative offered (crouch above break, preserving the shipped turtle beat untouched): *"yeah thats fine the way it is"* (designer, 2026-08-03). Also the honest fix for the class of fights the closed-door deadlock belonged to: an unreachable enemy is now a *delayed* enemy, not a stalemate. Doors have no break pool (they are not in the wall sets, by construction), so without the open arm, closing a door on an enemy mid-fight turns it into a piñata |
 
 ## Architecture: where it lands
 
@@ -436,7 +437,7 @@ or fewer arms.
 | 7 | `entrench` | ranged kit, in range + LOS, not crouched, a shielding face HERE, AP for crouch AND a shot | cover AP | Crouch-then-shoot in one turn — attacking doesn't break the crouch `[ratified]`, so this is the Gears fight the cover game was built for. Must precede `shoot` or it never fires |
 | 8 | `shoot` | ranged kit, in range + LOS, `shotOutcome` clear | attack AP | The "in range but not in reach" arm; in melee reach, `attack` (above) already won — no point-blank ambiguity |
 | 9 | `advance` | a destination exists and budget covers a step | move budget | ONE arm; the destination rule is the kit's: melee walks the scored swing tile, ranged walks the scored firing tile |
-| 10 | `break` | no route to ANY target; a breakable barrier (or closed door — the open arm) on the would-be route | attack AP / door AP | Only when sealed: barrier-battering as a substitute for the advance that cannot exist (A10) |
+| 10 | `break` | no route to ANY target; a breakable barrier (or closed door — the open arm) on the would-be route | attack AP / door AP | Only when sealed: barrier-battering as a substitute for the advance that cannot exist (A10). Deliberately ABOVE the crouch `[ratified]` — a sealed coworker digs out rather than turtling, even when the thing it batters is its own cover |
 | 11 | `crouch` | as today (boxed in, actually shielded) | cover AP | The turtle stays the last resort for melee kits |
 | 12 | `pass` | — | — | Hand the turn on |
 
@@ -971,6 +972,9 @@ and the codebase, nothing else.
      shape to copy for "this attack entry only above depth N", which
      the legend's per-placement levels (`CHARACTER_PLAN.md` #15) could
      express with no new machinery.
+   - *The browser gates are no longer outstanding.* Two god levers landed
+     and all three AI beats are now pinned in a browser — see the
+     verification note above.
    - *Why it did not land with 1–6:* this milestone's input is somebody
      playing the game. Every constant in the `AI` block is a first draft
      by the same standard the four prior combat plans set — "numbers are
@@ -989,12 +993,12 @@ first (a shooter that can't pick tiles shoots from bad ones).
 ### As landed (2026-08-01/02, milestones 1–6 in one pass)
 
 All six implementation milestones shipped on this branch, one commit each.
-**Verification:** unit 688 → 711 green throughout; e2e 41 green across the
+**Verification:** unit 688 → 712 green throughout; e2e 44 green across the
 combat surface after the facade fix below — smoke (6), tactics/cover/
 topple/summons (22, the positional and cover-denial systems the new beats
 lean on), charm/statuses/hit/ranged (13, the side-swap, the status
-weighting, the roll, the shot). **Milestone 7 is open by design** — it
-wants a playtest, not a PR.
+weighting, the roll, the shot), and the three new AI gates. **Milestone 7
+is open by design** — it wants a playtest, not a PR.
 
 **The bug the first e2e run caught, and what it taught.** Milestones 1–6
 all passed unit tests and the smoke suite, and twelve specs across four
@@ -1005,6 +1009,49 @@ driver, not a stall in the ladder — `aiShovePlan` was handed the bare
 on every DECIDE with a member standing adjacent. Recorded as footgun 16,
 because the class of mistake outlives this instance: a pure module's world
 argument is a contract that only a real fight can prove was met.
+
+**The gates, and the two levers that made them possible.** All three new
+beat families are pinned in a browser (`tests/e2e/ai.spec.js`): the
+Executive shoots from across the room rather than closing, a crouched
+member is hauled over their own cover, and a coworker sealed by a shut
+door works the handle. Each reads `__combat.bout.beats`, the histogram M1
+built for exactly this.
+
+Two `god.js` levers unblocked them, and the reason each is needed is worth
+recording because it is a property of the game, not of the tests:
+
+- **`__god.fight()`** opens combat *where the bodies stand*, through the
+  same `beginCombat` entry and the same engaged set (ENGAGE_RADIUS +
+  `canTakePart`) the real trigger uses — only the walk-in is skipped. A
+  walk-in ends wherever adjacency happens to fire, which destroys any
+  staged geometry before the fight begins. Deliberately NOT wired into the
+  `enterCombat` helper: that was tried once as `startFightNow` and reverted
+  because opening from where the player stands changes the geometry
+  existing specs assume.
+- **`__god.setDoor(key, open)`** makes the terrain edit with no walk, no
+  click and no AP. Shutting a door mid-fight is the only way a unit can BE
+  sealed by one, and the player doing it needs an exact-tile click that a
+  frame's drift turns back into an ordinary step.
+
+**A correction to this document's own record:** an earlier draft (and a
+comment written during M1) claimed initiative rolled off its own hardwired
+closure, so seeded runs could not pin turn order. That was stale —
+REVIEW.md's "the rng seam is misleading" finding had already been closed.
+Initiative rolls through `initRng` off the injected stream like every other
+roll, so `?seed=` reproduces a whole fight, turn order included. The gates
+use it, and `bootStash` now takes a `seed` option. What a seed does *not*
+pin is where the bodies are when a fight opens; that is what `fight()` is
+for, and conflating the two is what sent the first attempt at these gates
+chasing the wrong fix.
+
+**A second real bug the e2e work caught.** The AI's Pull Over wiring passed
+`bodyAt` without excluding the puller's own body — the player's wiring
+excludes both puller and victim (`u !== active`, `u !== en`) and mine did
+not. A face shielded by a PARTITION can still have somebody standing on the
+neighbouring cell, and in a corridor that somebody is whoever walked up to
+reach over it, so the plan refused with "their cover is a person" for
+exactly the haul-over-a-wall the verb exists for. Fixed; footgun 16's lesson
+generalizes — the pure rule was right, the caller's contract was not.
 
 Deviations and honest notes, recorded here per the house pattern:
 

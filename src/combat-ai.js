@@ -418,7 +418,11 @@ export function beatStateFrom({
     canShove: !!plans.shove && afford(costs.shove),
     breakAp: costs.break,
     canBreak: !!plans.break && afford(costs.break),
-    canCrouch: true, // the crouch runs its own (world-shaped) test when taken
+    // The crouch's geometry is world-shaped, so this is the optimistic answer
+    // and the host overwrites it with the real one (combat.js asks
+    // aiCrouchCovered). Anything downstream of `canCrouch` - `canEntrench`
+    // below - is optimistic in the same way and overwritten by the same host.
+    canCrouch: true,
     coverAp: costs.cover,
     canShoot: !!shootable,
     // Crouch-then-shoot is only worth a beat when a shot exists and the unit is

@@ -89,12 +89,18 @@ export async function withWorldStill(page, steps) {
   }
 }
 
-export async function bootStash(page, level, classId = 'office-drone') {
+// `seed` makes every fight in the run reproducible: it feeds startCombat's
+// injected rng, which reaches EVERY in-fight roll - hits, damage, the AI's
+// line picks, slips, and initiative, so turn ORDER is pinned too. That last
+// one is what a positional AI test needs: whether the coworker or the party
+// acts first decides whether a staged barrier is still standing by the time
+// the beat under test is reached.
+export async function bootStash(page, level, classId = 'office-drone', { seed = null } = {}) {
   await page.addInitScript((lvl) => {
     localStorage.clear(); // no campaign progress bleeding into a bespoke arena
     localStorage.setItem('escape-work.playtest', JSON.stringify(lvl));
   }, level);
-  await page.goto(`/#class=${classId}`);
+  await page.goto(`/${seed == null ? '' : `?seed=${seed}`}#class=${classId}`);
   await page.waitForFunction(() => window.__game && window.__game.stats);
   await settleCamera(page);
 }

@@ -2306,11 +2306,21 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     {
       stepOpen: world.stepOpen,
       open: (x, z) => world.isWalkable(x, z) && !unitStandingAt(x, z),
-      bodyAt: (x, z) => !!unitStandingAt(x, z),
+      // The puller's own body is NOT "their cover is a person" - the same
+      // exclusion the player's wiring makes (`u !== active`), and it is not
+      // optional. A face shielded by a PARTITION can still have somebody
+      // standing on the neighbouring cell, and in a corridor that somebody is
+      // whoever walked up to reach over the barrier. Counting them refuses
+      // exactly the haul-over-a-wall the verb was written for.
+      bodyAt: (x, z) => {
+        const u = unitStandingAt(x, z);
+        return !!u && u !== unit && standing(u);
+      },
     },
   );
   const aiBreakPlanFor = (unit, target) => aiBreakPlanShared(
-    unit.x, unit.z, target.actor.x, target.actor.z, world);
+    unit.x, unit.z, target.actor.x, target.actor.z,
+    { ...world, doorsBeside: world.doorsBeside });
 
   // Put it over. `by` is whoever caused it (for the narration and the facing).
   function topple(by, plan) {
@@ -4832,11 +4842,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const shoveAp = ACTIONS.shove.ap;
     const shovep = acting.ap >= shoveAp ? aiShovePlanFor(unit) : null;
     // Sealed means NOBODY is engageable - while any route exists, walking it
-    // beats demolition, so the break plan is not even gathered.
-    const breakAp = unit.combat.attackAp;
+    // beats demolition, so the break plan is not even gathered. A shut door
+    // is priced at the door's own AP (the player's number, from the rule that
+    // charges it); battering carries the unit's swing price.
     const sealed = !canEngage(unit, target.member);
-    const brk = sealed && unit.combat.attacks.length > 0 && acting.ap >= breakAp
-      ? aiBreakPlanFor(unit, target) : null;
+    const brk = sealed && acting.ap > 0 ? aiBreakPlanFor(unit, target) : null;
+    const breakAp = brk?.kind === 'door' ? brk.ap : unit.combat.attackAp;
+    // Battering needs something to swing; opening a door needs only a hand.
+    const canBreak = !!brk && (brk.kind === 'door' || unit.combat.attacks.length > 0);
     // The ladder's input, assembled by combat-ai.beatStateFrom - the AP gating
     // and the shape are rules, and they now live somewhere a test can reach.
     const beatState = beatStateFrom({
@@ -4852,7 +4865,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         topple: toppleAp, pull: pullAp, shove: shoveAp, break: breakAp,
         cover: ACTIONS['take-cover'].ap,
       },
-      plans: { topple: tp, pull: pullp, shove: shovep, break: brk },
+      // A door plan the unit has no hands-free way to open is not a break it
+      // can take, so the plan is withheld rather than the flag overwritten -
+      // `canBreak` is beatStateFrom's to derive, like every other arm's.
+      plans: { topple: tp, pull: pullp, shove: shovep, break: canBreak ? brk : null },
       alreadyCrouched: crouched.has(unit),
     });
     // The ranged kit (AI_PLAN M5): a line the unit could fire RIGHT NOW -
@@ -4879,11 +4895,26 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Filled in after the fact, not by the assembly above: whether a shot
     // exists depends on `inReach`, which the assembly is what computes.
     beatState.canShoot = !!shootable;
-    // Entrench (crouch-then-shoot): worth it only when a shot exists, the
-    // unit is not already tucked in, and something HERE actually shields it
-    // from its target - tryAiCrouch runs that exact test. Attacking does not
-    // break the crouch [ratified], which is what makes this a beat at all.
-    beatState.canEntrench = !!shootable && !crouched.has(unit);
+    // The crouch's own geometry, asked ONCE and shared by the two arms that
+    // depend on it. Gating them on `true` and letting tryAiCrouch refuse
+    // worked, but it spent a DECIDE iteration discovering what a predicate
+    // could have said - and, worse, it logged the beat in the tally, which
+    // makes the histogram (M1's regression tripwire) claim crouches that
+    // never happened. The same legs tryAiCrouch walks: not already tucked
+    // in, not in melee reach (a swing beats cover), and something here
+    // actually shields us from the target.
+    const b = bodyOf(unit);
+    const tb2 = bodyOf(target);
+    beatState.canCrouch = !crouched.has(unit) && !beatState.inReach
+      && aiCrouchCovered(b.x, b.z, tb2.x, tb2.z, {
+        tileDefAt: world.tileDefAt,
+        stepOpen: world.stepOpen,
+        bodyAt: (x, z) => { const u = unitStandingAt(x, z); return !!u && u !== unit && standing(u); },
+      });
+    // Entrench (crouch-then-shoot): a shot in hand AND cover to take.
+    // Attacking does not break the crouch [ratified], which is what makes
+    // this a beat rather than a way to waste a turn.
+    beatState.canEntrench = !!shootable && beatState.canCrouch;
     const refused = (acting.refused ??= new Set());
     const { beat } = chooseBeat(beatState, refused);
     bout.beats[beat] = (bout.beats[beat] || 0) + 1;
@@ -4924,6 +4955,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         fx.impact(tp.tx, tp.tz, 'slam', { y: 0.3 });
         fx.shake(0.08, 0.2);
         log(`${unit.def.name} puts a shoulder into the partition. It goes over flat.${dropOnto(unit, tp.tx, tp.tz, PARTITION_TOPPLE.damage)}`);
+        engageMemo.clear(); // a retired edge changes routes mid-turn
       } else {
         unit.lunge(tp.x, tp.z);
         log(`${unit.def.name} puts a shoulder into the ${tp.def.label || 'furniture'}. ${topple(unit, tp)}`);
@@ -4955,8 +4987,23 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     if (beat === 'break') {
       acting.ap = roundAp(acting.ap - breakAp);
-      aiBreak(unit, brk);
-      acting.wait = 0.85;
+      if (brk.kind === 'door') {
+        unit.lunge(brk.tx, brk.tz);
+        faceTarget(unit, brk.tx, brk.tz);
+        world.openDoor(brk.key);
+        log(`${unit.def.name} opens the door. It was never locked.`);
+        acting.wait = 0.5;
+      } else {
+        aiBreak(unit, brk);
+        acting.wait = 0.85;
+      }
+      // The world just changed under the reachability memo, which is keyed on
+      // tiles and cleared per TURN because "within a turn the only thing
+      // moving is the unit itself". An opened door or a demolished barrier
+      // breaks that assumption - without this the unit stays "sealed" for the
+      // rest of its own turn and stands in the doorway it just opened.
+      engageMemo.clear();
+      refresh();
       return;
     }
     if (beat === 'attack') {
@@ -4970,8 +5017,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // and the ladder falls through to the plain shot.
       if (tryAiCrouch(unit, target)) { acting.wait = 0.5; return; }
       refused.add('entrench');
-      acting.wait = 0.05;
-      return;
+      return; // nothing animated - fall to the shot immediately
     }
     if (beat === 'shoot') {
       aiShoot(unit, target, shootable);
@@ -4986,14 +5032,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // and let the ladder re-run - the crouch this used to special-case now
       // arrives by ladder order (AI_PLAN M4's generalized tail).
       refused.add('advance');
-      acting.wait = 0.1;
-      return;
+      return; // no animation happened - re-decide on the next frame, not later
     }
     if (beat === 'crouch') {
       if (tryAiCrouch(unit, target)) { acting.wait = 0.5; return; }
       refused.add('crouch');
-      acting.wait = 0.05;
-      return;
+      return; // nothing animated - fall through immediately
     }
     advanceTurn(); // the pass beat - out of AP or everything refused
   }
