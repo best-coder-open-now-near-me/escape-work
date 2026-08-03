@@ -21,12 +21,22 @@ const doorsOpen = (page) =>
 
 // Hand the AI a few turns. Each end-turn runs every enemy's turn and returns
 // when control comes back, so the assertions below read a settled board.
+//
+// The histogram is snapshotted after every round and the last live one is
+// returned, because the fight can END inside the window: `__combat` is deleted
+// on victory or defeat, so reading the beats afterwards reports {} - the same
+// answer a beat that stopped firing gives. The party losing is not this
+// suite's subject either way; what the AI DID before the board cleared is.
 async function playRounds(page, n) {
+  let seen = {};
   for (let i = 0; i < n; i++) {
-    if (!(await page.evaluate(() => window.__game.inCombat))) return;
+    if (!(await page.evaluate(() => window.__game.inCombat))) break;
     await refillAp(page);
     await endTurnUntilPlayer(page).catch(() => {});
+    const b = await beats(page);
+    if (Object.keys(b).length) seen = b;
   }
+  return seen;
 }
 
 // --- M5: the ranged kit ------------------------------------------------------
@@ -52,9 +62,8 @@ test('the Executive shoots from across the room instead of closing', async ({ pa
   await enterCombat(page);
   await waitForPlayerTurn(page);
 
-  await playRounds(page, 3);
+  const b = await playRounds(page, 3);
 
-  const b = await beats(page);
   expect(b.shoot ?? 0,
     `the Executive never took the shoot beat (${JSON.stringify(await combatState(page))})`,
   ).toBeGreaterThan(0);
@@ -112,9 +121,8 @@ test('a crouched member gets hauled over their own cover', async ({ page }) => {
   expect([crouch.x, crouch.z], 'crouched on the tile the partition shields').toEqual([2, 1]);
 
   await waitForPlayerTurn(page).catch(() => {});
-  await playRounds(page, 3);
+  const b = await playRounds(page, 3);
 
-  const b = await beats(page);
   expect(b.pull ?? 0,
     `the Manager never pulled (${JSON.stringify(await combatState(page))})`,
   ).toBeGreaterThan(0);

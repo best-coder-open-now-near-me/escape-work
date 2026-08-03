@@ -4261,6 +4261,73 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     unitStrikesMember(unit, victim, sp.line);
   }
 
+  // The reinforcement beat's doing. The beat DOES the summon: it used to only
+  // narrate one, because the spawn was a side effect of the readiness check up
+  // in the ladder, so posting the req was free whenever a higher beat won the
+  // turn and billed only when this arm happened to be the one taken. A maxed-out
+  // HR posts nothing and says so.
+  function aiSummon(unit, target, spec) {
+    unit.lunge(posOf(target).x, posOf(target).z);
+    const posted = resolveSummon(unit, 'enemy', spec);
+    log(posted > 0
+      ? (spec.log || `${unit.def.name} calls in reinforcements.`)
+      : `${unit.def.name} calls for backup. Nobody is free.`);
+  }
+
+  // The topple beat's doing - one beat, two aims (AI_PLAN M4). Furniture goes
+  // over through the shared `topple`; a partition comes off its feet and lands
+  // flat on the far tile, on whoever stands there, which is the player's own
+  // performPartitionTopple seen from the other side of the cubicle.
+  function aiTopple(unit, plan) {
+    if (!plan.edge) {
+      unit.lunge(plan.x, plan.z);
+      log(`${unit.def.name} puts a shoulder into the ${plan.def.label || 'furniture'}. ${topple(unit, plan)}`);
+      return;
+    }
+    unit.lunge(plan.tx, plan.tz);
+    faceTarget(unit, plan.tx, plan.tz);
+    world.toppleEdge(unit.x, unit.z, plan.tx, plan.tz);
+    world.setType(plan.tx, plan.tz, PARTITION_TOPPLE.becomes);
+    fx.impact(plan.tx, plan.tz, 'slam', { y: 0.3 });
+    fx.shake(0.08, 0.2);
+    log(`${unit.def.name} puts a shoulder into the partition. It goes over flat.${dropOnto(unit, plan.tx, plan.tz, PARTITION_TOPPLE.damage)}`);
+    engageMemo.clear(); // a retired edge changes routes mid-turn
+  }
+
+  // The shove beat's doing. ONE resolver, both sides (Q4-A): the AI's shove
+  // wears the slam stun and the prop topple it had silently been missing. The
+  // lunge goes first, as it always did - the body has to wind up before it
+  // lands, and displaceBody moves the victim out from under the aim.
+  // `notifyMemberDown` is the victim view's own onDeath - not repeated here.
+  function aiShove(unit, plan) {
+    unit.lunge(plan.victim.actor.x, plan.victim.actor.z);
+    faceTarget(unit, plan.victim.actor.x, plan.victim.actor.z);
+    const res = displaceBody(plan.victim, plan.dx, plan.dz, { by: unit });
+    if (res.msg) log(res.msg);
+  }
+
+  // The break beat's doing. Two kinds behind one beat: a shut door opens by
+  // hand, anything else is battered down by aiBreak. Both change the world
+  // under the reachability memo, which is keyed on tiles and cleared per TURN
+  // because "within a turn the only thing moving is the unit itself" - an
+  // opened door or a demolished barrier breaks that assumption, and without
+  // the clear the unit stays "sealed" for the rest of its own turn and stands
+  // in the doorway it just opened. Returns the wait its animation needs.
+  function aiOpenOrBreak(unit, plan) {
+    let wait = 0.85;
+    if (plan.kind === 'door') {
+      unit.lunge(plan.tx, plan.tz);
+      faceTarget(unit, plan.tx, plan.tz);
+      world.openDoor(plan.key);
+      log(`${unit.def.name} opens the door. It was never locked.`);
+      wait = 0.5;
+    } else {
+      aiBreak(unit, plan);
+    }
+    engageMemo.clear();
+    return wait;
+  }
+
   // One AI unit's swing at a member: the roll, the Composure soak, the Deflect
   // stance, any applied status, and the downed/handoff/party-wipe rules. Split
   // out of aiAttack so an opportunity attack lands by exactly the same rules
@@ -4713,103 +4780,94 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   }
 
   // --- per-frame driver -------------------------------------------------------------
-  function update(dt) {
-    if (phase === 'done') return;
-    // A `moveStart` record means "this unit is mid-deliberate-move, and it
-    // began there". It has to stop meaning that when the move stops. Nothing
-    // ever retired one, and `notifyStep` re-seeds it on every leg, so the
-    // record outlived the walk that made it - which broke the exemption
-    // performDash and performSwap rely on. Both opt out of provoking by NOT
-    // seeding a record (see performDash), so a stale one left over from any
-    // earlier walk meant the next dash provoked after all: the one verb sold
-    // as the answer to a threat ring quietly stopped being it.
-    // Safe to read `moving` here: setPath assigns `path` synchronously, so a
-    // walk seeded by beginMove is already moving before this frame runs.
+
+  // A `moveStart` record means "this unit is mid-deliberate-move, and it
+  // began there". It has to stop meaning that when the move stops. Nothing
+  // ever retired one, and `notifyStep` re-seeds it on every leg, so the
+  // record outlived the walk that made it - which broke the exemption
+  // performDash and performSwap rely on. Both opt out of provoking by NOT
+  // seeding a record (see performDash), so a stale one left over from any
+  // earlier walk meant the next dash provoked after all: the one verb sold
+  // as the answer to a threat ring quietly stopped being it.
+  // Safe to read `moving` here: setPath assigns `path` synchronously, so a
+  // walk seeded by beginMove is already moving before this frame runs.
+  function retireStaleMoveStarts() {
     for (const u of [...moveStart.keys()]) {
       const body = bodyOf(u);
       if (!body || !body.moving) moveStart.delete(u);
     }
-    drawPreview(dt); // immediate-mode lines last one frame - redraw while shown
-    drawTargets();
-    // prune anyone killed externally (printer explosions during combat)
-    if (!hostilesRemain()) { victory(); return; }
-    if (phase === 'player') {
-      // finish a queued walk-up strike
-      if (pendingMelee && !active.actor.moving) {
-        const { en, action } = pendingMelee;
-        pendingMelee = null;
-        // Did we arrive somewhere this verb can act from? One predicate for
-        // both shapes (verbReaches reads the power's own range, or the melee
-        // reach a touch verb walks into), measured from the BODY - which is
-        // where the trim stopped it, so the walk's promise and the arrival
-        // check are the same question asked twice.
-        const bp = posOf(active);
-        const arrived = verbReaches(action, en, bp.x, bp.z);
-        // The crouch is re-resolved ON ARRIVAL (TACTICS_PLAN M6) - the world
-        // had a whole walk to change. Blocked here quietly stands down; a
-        // human shield takes the arriving shot by the same rule as a
-        // standing one, except one of your own, which stands down too.
-        const out = rangeOf(action) ? shotOutcome(active, en) : { target: en };
-        const fireable = !out.blocked && !(out.redirected && out.target.sheet);
-        if (en.alive && arrived && fireable
-          && active.ap >= ACTIONS[action].ap) {
-          active.actor.faceToward(en.x, en.z);
-          if (out.redirected) log(`${nameOf(out.target)} takes it instead. That is the job.`);
-          strike(action, out.target);
-        } else {
-          // A cancelled arrival SAYS why. Standing down silently was half of
-          // the stuck-walk-up bug's confusion: the walk happened, the strike
-          // didn't, and nothing on screen admitted anything had failed.
-          if (en.alive && arrived && !fireable) log(`No shot - ${en.def.name} is in cover.`);
-          else if (en.alive && !arrived) log(`${en.def.name} is still out of reach.`);
-          else if (en.alive) log(`Not enough AP left for ${ACTIONS[action].label}.`);
-          disarm();
-          refresh();
-        }
-      }
-      // finish a queued walk-up crouch (TACTICS_PLAN M6)
-      if (pendingCrouch && !active.actor.moving) {
-        const { spot } = pendingCrouch;
-        pendingCrouch = null;
-        const a = ACTIONS['take-cover'];
-        // `crouchHere` re-asks the faces on arrival, so a shield that moved or
-        // fell during the walk-up is a crouch that never happens rather than
-        // one that lands on nothing.
-        if (active.actor.x === spot[0] && active.actor.z === spot[1] && active.ap >= a.ap
-          && crouchHere(active)) {
-          active.ap = roundAp(active.ap - a.ap);
-          refresh();
-        } else {
-          log('The moment passes - no cover taken.');
-          refresh();
-        }
-      }
-      return;
+  }
+
+  // Finish a queued walk-up strike, if the walk has landed. Runs every player
+  // frame and does nothing on most of them.
+  function finishWalkUpStrike() {
+    if (!pendingMelee || active.actor.moving) return;
+    const { en, action } = pendingMelee;
+    pendingMelee = null;
+    // Did we arrive somewhere this verb can act from? One predicate for
+    // both shapes (verbReaches reads the power's own range, or the melee
+    // reach a touch verb walks into), measured from the BODY - which is
+    // where the trim stopped it, so the walk's promise and the arrival
+    // check are the same question asked twice.
+    const bp = posOf(active);
+    const arrived = verbReaches(action, en, bp.x, bp.z);
+    // The crouch is re-resolved ON ARRIVAL (TACTICS_PLAN M6) - the world
+    // had a whole walk to change. Blocked here quietly stands down; a
+    // human shield takes the arriving shot by the same rule as a
+    // standing one, except one of your own, which stands down too.
+    const out = rangeOf(action) ? shotOutcome(active, en) : { target: en };
+    const fireable = !out.blocked && !(out.redirected && out.target.sheet);
+    if (en.alive && arrived && fireable
+      && active.ap >= ACTIONS[action].ap) {
+      active.actor.faceToward(en.x, en.z);
+      if (out.redirected) log(`${nameOf(out.target)} takes it instead. That is the job.`);
+      strike(action, out.target);
+    } else {
+      // A cancelled arrival SAYS why. Standing down silently was half of
+      // the stuck-walk-up bug's confusion: the walk happened, the strike
+      // didn't, and nothing on screen admitted anything had failed.
+      if (en.alive && arrived && !fireable) log(`No shot - ${en.def.name} is in cover.`);
+      else if (en.alive && !arrived) log(`${en.def.name} is still out of reach.`);
+      else if (en.alive) log(`Not enough AP left for ${ACTIONS[action].label}.`);
+      disarm();
+      refresh();
     }
-    // The AI drives the ONE unit whose initiative turn it is (acting, set by
-    // beginTurn). It takes beats until out of AP, then advanceTurn hands the
-    // order on.
-    if (phase !== 'ai' || !acting) return;
-    if (acting.wait > 0) {
-      acting.wait -= dt;
-      return;
+  }
+
+  // Finish a queued walk-up crouch (TACTICS_PLAN M6), if the walk has landed.
+  // Deliberately NOT chained to the strike above: a failed arrival there calls
+  // disarm(), which clears armed/pendingConfirm/aimPoint but never
+  // pendingCrouch, so failing the strike and then taking the crouch in the same
+  // frame is a real path and always has been. Whether it SHOULD be is a design
+  // question; the split is not the place to answer it.
+  function finishWalkUpCrouch() {
+    if (!pendingCrouch || active.actor.moving) return;
+    const { spot } = pendingCrouch;
+    pendingCrouch = null;
+    const a = ACTIONS['take-cover'];
+    // `crouchHere` re-asks the faces on arrival, so a shield that moved or
+    // fell during the walk-up is a crouch that never happens rather than
+    // one that lands on nothing.
+    if (active.actor.x === spot[0] && active.actor.z === spot[1] && active.ap >= a.ap
+      && crouchHere(active)) {
+      active.ap = roundAp(active.ap - a.ap);
+      refresh();
+    } else {
+      log('The moment passes - no cover taken.');
+      refresh();
     }
-    const { unit } = acting;
-    if (!unit.alive) { advanceTurn(); return; }
-    if (unit.moving) return; // let the current walk play out
-    if (unit.slipped) {
-      unit.slipped = false; // a spill ends their whole turn
-      advanceTurn();
-      return;
-    }
-    const target = pickTarget(unit);
-    if (!target) { defeat(); return; } // no living player-side target = party wipe
-    aiTargets.set(unit, target.member); // the standing mark stickiness holds to
+  }
+
+  // Everything the beat ladder needs to DECIDE, and everything the beat it
+  // picks needs to ACT - gathered in one place because the two halves cannot be
+  // separated: a beat is only "available" once its plan exists, and the plan is
+  // what the arm then takes. Returned rather than assigned, because `shootable`
+  // in particular is a local the caller has to bind.
+  function aiBeatPlans(unit, target) {
     // A summoner reinforces before it wades in: off cooldown, able to afford
     // the post, and under its live cap (resolveSummon returns 0 when full, so a
     // maxed HR just fights). Posting the req is the whole beat. Enemy-side only
     // today - the player summons from the action bar, not on autopilot.
-    // The ladder itself is combat-ai.chooseBeat; everything here is the DOING.
     // The summon and the topple both have to be planned before the decision
     // can be honest about whether they are available - `resolveSummon` is the
     // only way to know a maxed-out HR has nobody left to post, and the topple
@@ -4915,9 +4973,31 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Attacking does not break the crouch [ratified], which is what makes
     // this a beat rather than a way to waste a turn.
     beatState.canEntrench = !!shootable && beatState.canCrouch;
-    const refused = (acting.refused ??= new Set());
-    const { beat } = chooseBeat(beatState, refused);
-    bout.beats[beat] = (bout.beats[beat] || 0) + 1;
+    return {
+      beatState, sup, supPlan, sm, shootable,
+      tp, toppleAp, pullp, pullAp, shovep, shoveAp, brk, breakAp,
+    };
+  }
+
+  // The chosen beat, DONE. Nearly every arm is the same three lines - bill the
+  // AP, do the thing, set a wait that outlasts its animation - which is what
+  // the four extractions above were for; the two crouching arms bill nothing
+  // here because tryAiCrouch bills itself, and the three refusing arms set no
+  // wait at all, because nothing animated and the ladder should re-decide on
+  // the very next frame rather than after a pause.
+  //
+  // The trailing `advanceTurn()` is the pass beat and belongs to this function,
+  // not to its caller: every arm above it returns, and moving the tail out
+  // would turn each of those returns into a fall-through into the pass. The
+  // `entrench`, `advance` and `crouch` arms return WITHOUT ending the turn -
+  // they add themselves to `refused` so the next frame's ladder skips them and
+  // picks something lower down. That is a loop, and it is what makes a
+  // shieldless entrench land as a plain shot.
+  function takeBeat(beat, unit, target, plans, refused) {
+    const {
+      sup, supPlan, sm, shootable,
+      tp, toppleAp, pullp, pullAp, shovep, shoveAp, brk, breakAp,
+    } = plans;
     if (beat === 'support') {
       unit.supportCd = sup.cooldownRounds || 0;
       unit.supportUsed = (unit.supportUsed || 0) + 1;
@@ -4929,37 +5009,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (beat === 'summon') {
       unit.summonCd = sm.cooldownRounds || 0;
       acting.ap = roundAp(acting.ap - sm.ap);
-      unit.lunge(posOf(target).x, posOf(target).z);
-      // The beat DOES the summon. It used to only narrate one: the spawn was a
-      // side effect of the readiness check above, so posting the req was free
-      // whenever a higher beat won the turn, and billed only when this arm
-      // happened to be the one taken.
-      const posted = resolveSummon(unit, 'enemy', sm);
-      log(posted > 0
-        ? (sm.log || `${unit.def.name} calls in reinforcements.`)
-        : `${unit.def.name} calls for backup. Nobody is free.`);
+      aiSummon(unit, target, sm);
       acting.wait = 0.6;
       refresh();
       return;
     }
     if (beat === 'topple') {
       acting.ap = roundAp(acting.ap - toppleAp);
-      if (tp.edge) {
-        // The partition version: the panel comes off its feet and lands flat
-        // on the far tile, on whoever stands there - the player's own
-        // performPartitionTopple, from the other side of the cubicle.
-        unit.lunge(tp.tx, tp.tz);
-        faceTarget(unit, tp.tx, tp.tz);
-        world.toppleEdge(unit.x, unit.z, tp.tx, tp.tz);
-        world.setType(tp.tx, tp.tz, PARTITION_TOPPLE.becomes);
-        fx.impact(tp.tx, tp.tz, 'slam', { y: 0.3 });
-        fx.shake(0.08, 0.2);
-        log(`${unit.def.name} puts a shoulder into the partition. It goes over flat.${dropOnto(unit, tp.tx, tp.tz, PARTITION_TOPPLE.damage)}`);
-        engageMemo.clear(); // a retired edge changes routes mid-turn
-      } else {
-        unit.lunge(tp.x, tp.z);
-        log(`${unit.def.name} puts a shoulder into the ${tp.def.label || 'furniture'}. ${topple(unit, tp)}`);
-      }
+      aiTopple(unit, tp);
       acting.wait = 0.85;
       refresh();
       return;
@@ -4972,37 +5029,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     if (beat === 'shove') {
       acting.ap = roundAp(acting.ap - shoveAp);
-      // ONE resolver, both sides (Q4-A). The AI's shove now wears the slam
-      // stun and the prop topple it had silently been missing. The lunge goes
-      // first, as it always did - the body has to wind up before it lands, and
-      // displaceBody moves the victim out from under the aim.
-      unit.lunge(shovep.victim.actor.x, shovep.victim.actor.z);
-      faceTarget(unit, shovep.victim.actor.x, shovep.victim.actor.z);
-      // `notifyMemberDown` is the victim view's own onDeath - not repeated here.
-      const res = displaceBody(shovep.victim, shovep.dx, shovep.dz, { by: unit });
-      if (res.msg) log(res.msg);
+      aiShove(unit, shovep);
       refresh();
       acting.wait = 0.6;
       return;
     }
     if (beat === 'break') {
       acting.ap = roundAp(acting.ap - breakAp);
-      if (brk.kind === 'door') {
-        unit.lunge(brk.tx, brk.tz);
-        faceTarget(unit, brk.tx, brk.tz);
-        world.openDoor(brk.key);
-        log(`${unit.def.name} opens the door. It was never locked.`);
-        acting.wait = 0.5;
-      } else {
-        aiBreak(unit, brk);
-        acting.wait = 0.85;
-      }
-      // The world just changed under the reachability memo, which is keyed on
-      // tiles and cleared per TURN because "within a turn the only thing
-      // moving is the unit itself". An opened door or a demolished barrier
-      // breaks that assumption - without this the unit stays "sealed" for the
-      // rest of its own turn and stands in the doorway it just opened.
-      engageMemo.clear();
+      acting.wait = aiOpenOrBreak(unit, brk);
       refresh();
       return;
     }
@@ -5014,7 +5048,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     if (beat === 'entrench') {
       // The same turtle test the crouch beat runs - a shieldless spot refuses
-      // and the ladder falls through to the plain shot.
+      // and the ladder falls through to the plain shot. tryAiCrouch bills the
+      // cover AP itself, which is why this arm does not.
       if (tryAiCrouch(unit, target)) { acting.wait = 0.5; return; }
       refused.add('entrench');
       return; // nothing animated - fall to the shot immediately
@@ -5040,6 +5075,47 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return; // nothing animated - fall through immediately
     }
     advanceTurn(); // the pass beat - out of AP or everything refused
+  }
+
+  function update(dt) {
+    if (phase === 'done') return;
+    retireStaleMoveStarts();
+    drawPreview(dt); // immediate-mode lines last one frame - redraw while shown
+    drawTargets();
+    // prune anyone killed externally (printer explosions during combat)
+    if (!hostilesRemain()) { victory(); return; }
+    if (phase === 'player') {
+      finishWalkUpStrike();
+      finishWalkUpCrouch();
+      return;
+    }
+    // The AI drives the ONE unit whose initiative turn it is (acting, set by
+    // beginTurn). It takes beats until out of AP, then advanceTurn hands the
+    // order on.
+    if (phase !== 'ai' || !acting) return;
+    if (acting.wait > 0) {
+      acting.wait -= dt;
+      return;
+    }
+    const { unit } = acting;
+    if (!unit.alive) { advanceTurn(); return; }
+    if (unit.moving) return; // let the current walk play out
+    if (unit.slipped) {
+      unit.slipped = false; // a spill ends their whole turn
+      advanceTurn();
+      return;
+    }
+    const target = pickTarget(unit);
+    if (!target) { defeat(); return; } // no living player-side target = party wipe
+    aiTargets.set(unit, target.member); // the standing mark stickiness holds to
+    // Gather, decide, act. The decision is combat-ai's (chooseBeat, a pure
+    // ladder over plain values); the gathering and the doing are this file's,
+    // because both need the world.
+    const plans = aiBeatPlans(unit, target);
+    const refused = (acting.refused ??= new Set());
+    const { beat } = chooseBeat(plans.beatState, refused);
+    bout.beats[beat] = (bout.beats[beat] || 0) + 1;
+    takeBeat(beat, unit, target, plans, refused);
   }
 
   // A crouch taken OUT of combat rides into the fight (TACTICS_PLAN M6 OOC):

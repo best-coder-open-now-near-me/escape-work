@@ -46,7 +46,7 @@ How to read it:
 
 - [x] **Q001** `src/floors.js:147` [bug] **(carried)** layeredGrid's forwarded METHODS list omits sightOpenCellLow/sightOpenLow — reproduced as a TypeError<br>      ↳ DONE — forwarded, plus a derived contract test
 - [x] **Q002** `src/ui/hud.js:96` [bug] **(carried)** Player-typed names still go raw into `innerHTML` on four surfaces — and the save now round-trips through a shared cloud store<br>      ↳ DONE — esc() moved to chrome.js; 4 sites
-- [ ] **Q003** `src/combat.js:4530` [god-method] **(carried)** `combat.js update(dt)` is a 278-line per-frame god method holding eight unrelated responsibilities — the AI turn loop cannot be tested without a browser
+- [x] **Q003** `src/combat.js:4530` [god-method] **(carried)** `combat.js update(dt)` is a 278-line per-frame god method holding eight unrelated responsibilities — the AI turn loop cannot be tested without a browser<br>      ↳ **PARTLY DONE — 328 → 40 lines.** (278 was the count when the finding was written; it had grown since.) Nine pieces named: `retireStaleMoveStarts` (6), `finishWalkUpStrike` (33), `finishWalkUpCrouch` (17), `aiBeatPlans` (115, the gather), `takeBeat` (83, the act, pass beat included), and the four beat doers that were inline in the ladder and now sit with their five siblings - `aiSummon`, `aiTopple`, `aiShove`, `aiOpenOrBreak`. The head reads gather → decide → act. **Still open, and it is the second clause, not the first:** every piece is still inside the `startCombat` closure, so none of it is reachable from node. That is not more cutting - it is the world facade, Q041. Re-queued as Q902.
 - [x] **Q004** `src/combat.js:2713` [soc] **(carried)** `aiShoveMember` bills a party member RAW surface damage via the enemy hazard model, silently voiding the talent immunities that main.js applies to the same tile<br>      ↳ DONE — world.memberSurfDamage (Q1-A)
 - [ ] **Q005** `tests/unit/combat-ai.test.js:1` [test-gap] **(carried)** Every AI *perform* half added by this branch lives in combat.js and has no test at any level - both AI bugs that shipped on this branch were in exactly that layer, and neither landed with a regression test
 - [x] **Q006** `src/combat-ai.js:157` [bug] A shooter already standing on a legal firing tile can never reposition or close, so a blocked shot burns its whole turn — every turn<br>      ↳ DONE — self-tile is a candidate, not a short-circuit
@@ -80,6 +80,23 @@ How to read it:
   ally arm had no `return` and FELL THROUGH on purpose, which is what gives the
   purge rings on both halves; a mechanical cut turns that into `return true`
   silently. Expect at least one more of those in here.
+- [ ] **Q902** `src/combat.js` [test-gap] **(new 2026-08-03, the remainder of Q003/Q035)**
+  The AI turn loop is now nine named pieces instead of one 328-line frame driver,
+  and not one of them is reachable from a node test - they all live inside the
+  `startCombat` closure and read `phase`, `acting`, `crouched`, `moveStart`,
+  `world`, `fx` and `app` off it. So the half of Q003 that said "cannot be tested
+  without a browser" is untouched by the split, and cutting further will not
+  touch it either: the loop needs a seam where the world arrives as an argument,
+  which is Q041's duck-typed facade, and Q900's narrowness pass sits on the same
+  seam. Q005 (no test at any level for the AI perform halves) is downstream of
+  this one - the halves are named now, which is the part a test needs, but there
+  is still nowhere to call them from.
+  Worth carrying forward from the split: the `advanceTurn()` tail is the pass
+  beat and lives INSIDE `takeBeat` on purpose - every arm above it returns, so
+  hoisting it to the caller would make every beat also end the turn, an enemy
+  taking one action per turn instead of spending its pool, with nothing thrown
+  and nothing red. The three refusing arms (`entrench`, `advance`, `crouch`) set
+  no wait at all, and that absence is the re-decide clock, not an oversight.
 - [ ] **Q900** `src/main.js` [soc] **(new 2026-08-02, from the fix work itself)**
   The combat world facade is repeatedly NARROWER than main.js's own helpers, and
   the contract test (Q009) cannot see it. That test checks every key the pure
@@ -104,7 +121,7 @@ How to read it:
 - [ ] **Q032** `src/main.js:2716` [duplication] **(carried)** Four hand-written per-tile step handlers across three layers, under a main.js section header that claims the rules are "written once"
 - [x] **Q033** `src/portraits.js:77` [duplication] **(carried)** portraits.js holds a fourth copy of "tint a body" — the compounding in-place multiply the other three were rewritten to remove<br>      ↳ DONE — portraits routes through cloneMaterials + tintMaterials
 - [x] **Q034** `src/tactics.js:259` [duplication] **(carried)** "Does this shielded face point at the attacker?" is implemented three times, and REVIEW.md records it as having one owner<br>      ↳ DONE — tactics.shieldingFace; facesShieldFrom derives from it; 4 tests
-- [ ] **Q035** `src/combat.js:4530` [god-method] **(carried)** `update()` is a 278-line god frame-driver braiding six responsibilities, and it grew with the AI work
+- [x] **Q035** `src/combat.js:4530` [god-method] **(carried)** `update()` is a 278-line god frame-driver braiding six responsibilities, and it grew with the AI work<br>      ↳ **PARTLY DONE** — the same function as Q003 and closed by the same split; see there. The braiding is what came apart: the frame's own bookkeeping, the player half's two walk-up finishers, and the AI half's gather/decide/act are now four separate reads.
 - [ ] **Q036** `src/combat.js:3176` [god-method] **(carried)** `handleEnemyClick` is a 243-line dispatcher with nine inline verb arms, each re-implementing the same AP check, arming teardown and victory check
 - [ ] **Q037** `src/combat.js:76` [god-method] **(carried)** The two god closures measured: `startCombat` is 5,065 lines / 176 inner functions / 21 shared mutable variables, `startGame` 4,214 / 159 / 26 — and combat.js grew 493 lines on this branch
 - [ ] **Q038** `src/looting.js:292` [god-method] **(carried)** `looting.js lootEntries` is a 120-line function running five unrelated scans, three full grid sweeps and an inline flood fill — in a module kept out of node by a single renderer import
