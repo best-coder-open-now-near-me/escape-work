@@ -97,6 +97,17 @@ How to read it:
   taking one action per turn instead of spending its pool, with nothing thrown
   and nothing red. The three refusing arms (`entrench`, `advance`, `crouch`) set
   no wait at all, and that absence is the re-decide clock, not an oversight.
+- [ ] **Q903** `src/looting.js` [test-gap] **(new 2026-08-03, from the Q038 split)**
+  Four of the Alt overlay's five scans are driven end to end - `looseEntries` and
+  the container half of `propEntries` by looting.spec.js's rummage/drop/pickup
+  test, the shop half by economy.spec.js's cleaned-out machine, `bodyEntries` by
+  the fallen-coworker test. `paperEntries` is the fifth and nothing drives it.
+  The fill underneath it now has eight unit tests, but the LABEL those patches
+  turn into does not: the centre the chip floats at, and the nearest-patch-tile
+  the click walks to rather than that centre, which is the interesting one -
+  a centroid can easily be a tile nobody can stand on. Found while splitting
+  lootEntries, not by a failure; the arm may well be right.
+
 - [ ] **Q900** `src/main.js` [soc] **(new 2026-08-02, from the fix work itself)**
   The combat world facade is repeatedly NARROWER than main.js's own helpers, and
   the contract test (Q009) cannot see it. That test checks every key the pure
