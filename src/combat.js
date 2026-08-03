@@ -2312,6 +2312,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         const u = unitStandingAt(x, z);
         return !!u && u !== unit && standing(u);
       },
+      // Per candidate, because this walks the whole standing roster - the
+      // player's twin names one target once (pullPlanned) and cannot.
+      nameOf,
     },
   );
   const aiBreakPlanFor = (unit, target) => aiBreakPlanShared(
