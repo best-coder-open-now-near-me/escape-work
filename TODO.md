@@ -130,6 +130,32 @@ How to read it:
   you never chose WHAT to leave behind, the tenth item just fell out". Worth
   deciding before a finite cap ships rather than after.
 
+- [ ] **Q905** `tests/e2e/cover.spec.js:21` [test-gap] **(new 2026-08-03, from the throwing.spec fix)**
+  Two more copies of the unpinned `clickManager` - cover.spec.js:21 (four call
+  sites) and an inline twin in demolition.spec.js - project a coworker's body
+  and click it with nothing waiting for the camera and nothing checking the
+  pick landed. throwing.spec.js had the same helper and it failed two runs in
+  three the moment hover frames got cheaper.
+  These pass today, and the reason is worth writing down because it is not
+  robustness: cover.spec.js's TURTLE_BOX Manager is walled in by filing
+  cabinets so he cannot wander, and demolition's already checks `onScreen`.
+  The other cover arenas (`#@M....#`) are open rooms where he CAN amble, and
+  the failure mode there is the one throwing.spec taught: the click lands on
+  vacated floor and the test reports something else entirely - nothing
+  happening, or a fight opening - with no symptom naming the click.
+  The proven gate is in throwing.spec.js now: settle on the PLAYER, then poll
+  `__game.hoverKind` until the game's own pick says `enemy`, and only then
+  click. Worth lifting into helpers.js as one shared `clickBody` rather than a
+  fourth copy - but note the gates alone did NOT fix throwing.spec, sealing the
+  arena did, so check each arena's coworker can be where the test needs him
+  before trusting a gate to hold.
+  While in there: `SEALED_ARENA` names two DIFFERENT fixtures, in
+  ranged.spec.js and throwing.spec.js. The ranged one is genuinely walled on
+  all sides, which is why it never flaked; the throwing one had a back door
+  until today. Same name, opposite properties, and the name is what made the
+  throwing one look sealed to every reader who checked.
+
+
 - [ ] **Q900** `src/main.js` [soc] **(new 2026-08-02, from the fix work itself)**
   The combat world facade is repeatedly NARROWER than main.js's own helpers, and
   the contract test (Q009) cannot see it. That test checks every key the pure
@@ -155,7 +181,7 @@ How to read it:
 - [x] **Q033** `src/portraits.js:77` [duplication] **(carried)** portraits.js holds a fourth copy of "tint a body" — the compounding in-place multiply the other three were rewritten to remove<br>      ↳ DONE — portraits routes through cloneMaterials + tintMaterials
 - [x] **Q034** `src/tactics.js:259` [duplication] **(carried)** "Does this shielded face point at the attacker?" is implemented three times, and REVIEW.md records it as having one owner<br>      ↳ DONE — tactics.shieldingFace; facesShieldFrom derives from it; 4 tests
 - [x] **Q035** `src/combat.js:4530` [god-method] **(carried)** `update()` is a 278-line god frame-driver braiding six responsibilities, and it grew with the AI work<br>      ↳ **PARTLY DONE** — the same function as Q003 and closed by the same split; see there. The braiding is what came apart: the frame's own bookkeeping, the player half's two walk-up finishers, and the AI half's gather/decide/act are now four separate reads.
-- [ ] **Q036** `src/combat.js:3176` [god-method] **(carried)** `handleEnemyClick` is a 243-line dispatcher with nine inline verb arms, each re-implementing the same AP check, arming teardown and victory check
+- [x] **Q036** `src/combat.js:3176` [god-method] **(carried)** `handleEnemyClick` is a 243-line dispatcher with nine inline verb arms, each re-implementing the same AP check, arming teardown and victory check<br>      ↳ **DONE — 253 → 62 lines**, six pieces named: `clickShove` (30), `clickPull` (9), `clickRanged` (77), `clickMelee` (72), plus the two epilogues the arms were repeating - `finishVerb` and `closedTheDistance`. The head is now the gates, the auto-arm, the `refuse` closure and one line per kind. **The finding's own count was wrong and it is worth recording which way.** It says nine arms each re-implementing the AP check, the arming teardown and the victory check. Measured: five copies of the one-line AP guard, two of the victory epilogue, two of the walk-only one. The five one-line arms (cover, cone, summon, zone, control) re-implement nothing - they delegate and return. And the AP guard stays a legible one-liner rather than becoming a helper, because `if (!afford(a, refuse)) return;` costs what `if (active.ap < a.ap) { refuse('Not enough AP.'); return; }` costs and buys only indirection. **What the finding missed:** two `disarm()` sites deliberately DON'T check victory - they are the walk-only branch, where no strike happened so nothing can have died. That asymmetry now has a name (`closedTheDistance` vs `finishVerb`) and a comment saying it is deliberate, which is the part a future reader would otherwise 'fix'.
 - [ ] **Q037** `src/combat.js:76` [god-method] **(carried)** The two god closures measured: `startCombat` is 5,065 lines / 176 inner functions / 21 shared mutable variables, `startGame` 4,214 / 159 / 26 — and combat.js grew 493 lines on this branch
 - [x] **Q038** `src/looting.js:292` [god-method] **(carried)** `looting.js lootEntries` is a 120-line function running five unrelated scans, three full grid sweeps and an inline flood fill — in a module kept out of node by a single renderer import<br>      ↳ **DONE — 120 → 12 lines**, and the last clause was already stale. Five scans, five names: `looseEntries`, `propEntries`, `bodyEntries`, `paperEntries`, and the host's own `extraEntries`; `lootEntries` is now the concatenation, in the order the labels were built in before they were named (the overlay renders in list order and nothing has said which way it should be, so the order is preserved rather than tidied). **The three grid sweeps are two.** Containers and machines ask the same tile the same question and now share one pass - two lists, one sweep, so the container-before-machine order survives. The third is the flood fill's own, and it stays: folding it in would cost the extraction below for one pass over a window that is at most 21x21. That is a trade, not a leftover. **The flood fill is now pure and tested** - `paperPatches(grid, inWindow, harvestable)` at module scope, 8 unit tests, each verified against a mutant: 8-connecting the fill, taking the seed tile as the patch centre, and gating the window on the seed only are all caught by exactly the test that claims to cover them. **On the stale clause:** looting.js has imported under node since 52741dc; what keeps the rest of it out is that `createLooting` builds DOM panels the moment it is constructed. That is why the fill went to module scope rather than staying an inner function - same reason, same seam, as Q902.
 - [ ] **Q039** `src/main.js:304` [god-method] **(carried)** `startGame` has grown to a 4,214-line closure with 88 inner functions and 141 closure variables

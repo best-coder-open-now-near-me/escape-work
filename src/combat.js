@@ -3278,186 +3278,153 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // the swing that would actually land rather than only the armed case.
   const previewAction = () => (phase === 'player' && active?.sheet ? (armed || defaultAttack()) : null);
 
-  function handleEnemyClick(en) {
-    if (phase !== 'player' || active.actor.moving || !en.alive) {
-      // This return is SILENT by design - a click on an AI turn or mid-walk
-      // is simply ignored - which also made it invisible in flake traces:
-      // "the click did nothing and nothing said why". The breadcrumb names
-      // the reason for the e2e suite without changing behavior.
-      lastClickOutcome = phase !== 'player' ? 'gate:phase'
-        : (active.actor.moving ? 'gate:moving' : 'gate:dead');
-      return;
-    }
-    hidePreview();
-    let autoArmed = false;
-    if (!armed) {
-      // Not enough AP for even the basic swing: say so once, rather than
-      // silently walking them into the enemy's face.
-      const id = defaultAttack();
-      if (active.ap < ACTIONS[id].ap) { log('Not enough AP to attack.'); return; }
-      armed = id;
-      autoArmed = true;
-      refresh(); // the bar lights the swing that is about to happen
-    }
-    // A refusal keeps a USER-armed action armed - aim survives a near-miss,
-    // right-click lowers it. The default the click just auto-armed is not
-    // aim: the player never raised it, so a refusal must put it back down.
-    // Left dangling, it sat lit on the bar until a right-click, and anything
-    // waiting for the swing to resolve (the e2e idle() helper) hung forever.
-    const refuse = (msg) => {
-      lastClickOutcome = `refused:${msg}`;
-      log(msg);
-      if (autoArmed) { disarm(); refresh(); }
-    };
-    lastClickOutcome = 'acted'; // overwritten by refuse(); the gate stamped its own
-    const a = ACTIONS[armed];
-    // WHICH verb this click is, from the same classifier the target rings
-    // dispatch on (combat-targeting.verbKind). Two hand-written ladders of
-    // `a.type` tests in slightly different orders is exactly how the rings came
-    // to contradict the click; there is one ladder now, and the arms below are
-    // what each branch DOES.
-    const kind = verbKind(a, rangeOf(armed));
-    // Take Cover clicked on a coworker: they are the shield ("any character
-    // as cover" - crouching behind your enemy is legal, if bold).
-    if (kind === 'cover') { performTakeCover(en.x, en.z); return; }
-    if (kind === 'cone') { fireCone(posOf(en).x, posOf(en).z); return; }
-    // Placing a summon on top of a coworker: the tile is taken, so they report
-    // to the free ground ringing outward from it. Aiming at the enemy you want
-    // them to swarm is a reasonable thing to click.
-    if (kind === 'summon') { placeSummon(en.x, en.z); return; }
-    // Aiming a zone at a coworker is a reasonable thing to click - you want it
-    // under THEM - so it resolves on their tile rather than refusing. Their own
-    // tile is excluded from the footprint (zoneCells), so what lands is the
-    // ring around their feet.
-    if (kind === 'zone') { performZone(armed, posOf(en).x, posOf(en).z); return; }
-    // A RANGED control (a cone, or one carrying `range`) resolves from where
-    // you stand. A touch-range one classifies as 'melee' and falls through to
-    // the walk-up below rather than getting its own copy of it - and `strike`
-    // is what makes the arrival resolve as a control instead of a swing.
-    if (kind === 'control') { performControl(armed, en); return; }
-    if (kind === 'shove') {
-      if (!canReach(active, en, REACH.SHOVE)) {
-        // Out of reach - but the office between you might BE the shove: a
-        // cubicle wall to bring down on them (designer, 2026-07-30)...
-        if (performPartitionTopple(en.x, en.z)) return;
-        // ...or furniture beside you whose fall lands exactly on them. One
-        // gesture: click the coworker behind the cabinet, wear the cabinet.
-        for (const [dx, dz] of AROUND) {
-          const plan = topplePlan(active, active.actor.x + dx, active.actor.z + dz);
-          if (!plan || plan.lx !== en.x || plan.lz !== en.z) continue;
-          if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
-          active.ap = roundAp(active.ap - a.ap);
-          active.actor.lunge(plan.x, plan.z);
-          faceTarget(active, plan.x, plan.z);
-          log(topple(active, plan));
-          disarm();
-          refresh();
-          if (!hostilesRemain()) victory();
-          return;
-        }
-        refuse('Too far to shove.');
-        return;
-      }
-      if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
-      joinCombat(en); // shoving a bystander is also an opinion they'll return
-      active.ap = roundAp(active.ap - a.ap);
-      active.actor.lunge(posOf(en).x, posOf(en).z);
-      faceTarget(active, en.x, en.z);
-      log(displaceBody(en, Math.sign(en.x - active.actor.x), Math.sign(en.z - active.actor.z)).msg);
-      disarm();
-      refresh();
-      if (!hostilesRemain()) victory();
-      return;
-    }
-    if (kind === 'pull') {
-      const plan = pullPlanFor(en);
-      if (!plan) { refuse(pullRefusal(en)); return; }
-      if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
-      joinCombat(en);
-      active.ap = roundAp(active.ap - a.ap);
-      performPull(armed, en, plan);
-      return;
-    }
-    const range = rangeOf(armed);
-    if (kind === 'ranged') {
-      const thrown = !!a.ammoCost; // a wad and a staple miss differently
-      const far = bodyDist(active, en) > range;
-      const blocked = !bodyLos(active, en);
-      // What the shot would ACTUALLY do from here (TACTICS_PLAN M6): a crouch
-      // behind furniture refuses it outright - free, like every other
-      // refusal - and a human shield takes it instead. Shooting THROUGH one
-      // of your own is a decision this game does not take for you, so a
-      // member-shield also refuses rather than quietly rerouting the damage.
-      const out = shotOutcome(active, en);
-      if (out.blocked) {
-        refuse(`No shot - ${en.def.name} is tucked in behind the ${crouchLabel(out.blocked)}. Find an angle.`);
-        return;
-      }
-      if (out.redirected && out.target.sheet) {
-        refuse(`No shot - you would hit ${nameOf(out.target)}.`);
-        return;
-      }
-      // A THROW refuses where it stands, exactly as it always has: you armed it
-      // deliberately, it is billed in paper, and spending your last sheet at the
-      // end of a walk you did not ask for is worse than being told no.
-      if (thrown) {
-        if (far) { refuse('Too far to throw.'); return; }
-        if (blocked) { refuse('No clear line to throw.'); return; }
-        if (active.sheet.paper < ammoCostOf(armed)) { refuse('Out of paper.'); return; }
+  // The verb arms that are more than one line, one function each. Each takes
+  // the resolved action and the caller's `refuse`, which carries the auto-arm
+  // teardown - so a refusal inside an arm still puts down a swing the player
+  // never raised.
+  //
+  // Every arm returns, and the dispatch returns immediately after calling one.
+  // None falls through to the melee tail; that tail is reached only by NOT
+  // matching a kind above it, which is what makes it the default rather than
+  // another arm.
+
+  // The verb landed, and something may have died of it.
+  function finishVerb() {
+    disarm();
+    refresh();
+    if (!hostilesRemain()) victory();
+  }
+
+  // The walk happened and the verb did not. No strike, so nothing can have
+  // died and there is no victory to check - the asymmetry with finishVerb is
+  // the point, not an omission. Saying so out loud is also the point: a silent
+  // stand-down was half of the stuck-walk-up bug's confusion.
+  function closedTheDistance() {
+    disarm();
+    log('You close the distance.');
+    refresh();
+  }
+
+  function clickShove(en, a, refuse) {
+    if (!canReach(active, en, REACH.SHOVE)) {
+      // Out of reach - but the office between you might BE the shove: a
+      // cubicle wall to bring down on them (designer, 2026-07-30)...
+      if (performPartitionTopple(en.x, en.z)) return;
+      // ...or furniture beside you whose fall lands exactly on them. One
+      // gesture: click the coworker behind the cabinet, wear the cabinet.
+      for (const [dx, dz] of AROUND) {
+        const plan = topplePlan(active, active.actor.x + dx, active.actor.z + dz);
+        if (!plan || plan.lx !== en.x || plan.lz !== en.z) continue;
         if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
-        active.actor.faceToward(en.x, en.z);
-        if (out.redirected) log(`${nameOf(out.target)} takes it instead. That is the job.`);
-        strike(armed, out.target);
+        active.ap = roundAp(active.ap - a.ap);
+        active.actor.lunge(plan.x, plan.z);
+        faceTarget(active, plan.x, plan.z);
+        log(topple(active, plan));
+        finishVerb();
         return;
       }
-      if (!far && !blocked) {
-        if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
-        active.actor.faceToward(en.x, en.z);
-        if (out.redirected) log(`${nameOf(out.target)} takes it instead. That is the job.`);
-        strike(armed, out.target);
-        return;
-      }
-      // A ranged WEAPON closes until it can fire, the same way the melee swing
-      // closes until it can hit. Its basic attack is what a bare click on a
-      // coworker uses (defaultAttack), so refusing here would break the most
-      // obvious verb in the game for anyone holding one: click a coworker two
-      // rooms away with a stapler and you walk over; with a staple gun you
-      // would have stood still and read a refusal. It walks the same route, it
-      // just stops the moment the shot is on rather than at their elbow.
-      // Route to a FIRING position, not to their elbow. routeIntoRange already
-      // ends at the nearest tile the shot is legal from, so there is no
-      // walk-further-then-cut-back step: the route costs the steps it needs and
-      // not one more, by construction.
-      const route = routeIntoRange(en, range);
-      if (!route || route.length < 2) { refuse('No way to get a shot at them.'); return; }
-      const shotBudget = moveBudget(active) - a.ap;
-      // Stop at the first point THIS weapon can fire from, not at the firing
-      // tile's centre: routeIntoRange picks the nearest legal tile, but the
-      // route often crosses into range a step before reaching it - and a
-      // 6-tile straw that walks to a tile it could have fired at from six
-      // tiles back is the "much closer than needed" complaint in its ranged
-      // form.
-      const shotWalk = walkActive(route, shotBudget, null,
-        (px, pz) => verbReaches(armed, en, px, pz));
-      // Same honest split as the melee walk-up: a degenerate route is not an
-      // AP problem, and must not be narrated as one.
-      if (!shotWalk) {
-        refuse(shotBudget > 0.05 ? 'No better shot to walk to.' : 'Not enough AP to get in range.');
-        return;
-      }
-      // Will we be able to fire when the walk finishes? The arrival check
-      // (pendingMelee, in the update loop) is authoritative either way - this
-      // only decides whether to promise the shot or report the walk. Same
-      // predicate the trim above stopped on, so the two cannot disagree.
-      if (shotWalk.done && verbReaches(armed, en, shotWalk.end[0], shotWalk.end[1])) {
-        pendingMelee = { en, action: armed }; // fire on arrival
-      } else {
-        disarm();
-        log('You close the distance.');
-        refresh();
-      }
+      refuse('Too far to shove.');
       return;
     }
+    if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
+    joinCombat(en); // shoving a bystander is also an opinion they'll return
+    active.ap = roundAp(active.ap - a.ap);
+    active.actor.lunge(posOf(en).x, posOf(en).z);
+    faceTarget(active, en.x, en.z);
+    log(displaceBody(en, Math.sign(en.x - active.actor.x), Math.sign(en.z - active.actor.z)).msg);
+    finishVerb();
+    return;
+  }
+
+  function clickPull(en, a, refuse) {
+    const plan = pullPlanFor(en);
+    if (!plan) { refuse(pullRefusal(en)); return; }
+    if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
+    joinCombat(en);
+    active.ap = roundAp(active.ap - a.ap);
+    performPull(armed, en, plan);
+    return;
+  }
+
+  function clickRanged(en, a, refuse, range) {
+    const thrown = !!a.ammoCost; // a wad and a staple miss differently
+    const far = bodyDist(active, en) > range;
+    const blocked = !bodyLos(active, en);
+    // What the shot would ACTUALLY do from here (TACTICS_PLAN M6): a crouch
+    // behind furniture refuses it outright - free, like every other
+    // refusal - and a human shield takes it instead. Shooting THROUGH one
+    // of your own is a decision this game does not take for you, so a
+    // member-shield also refuses rather than quietly rerouting the damage.
+    const out = shotOutcome(active, en);
+    if (out.blocked) {
+      refuse(`No shot - ${en.def.name} is tucked in behind the ${crouchLabel(out.blocked)}. Find an angle.`);
+      return;
+    }
+    if (out.redirected && out.target.sheet) {
+      refuse(`No shot - you would hit ${nameOf(out.target)}.`);
+      return;
+    }
+    // A THROW refuses where it stands, exactly as it always has: you armed it
+    // deliberately, it is billed in paper, and spending your last sheet at the
+    // end of a walk you did not ask for is worse than being told no.
+    if (thrown) {
+      if (far) { refuse('Too far to throw.'); return; }
+      if (blocked) { refuse('No clear line to throw.'); return; }
+      if (active.sheet.paper < ammoCostOf(armed)) { refuse('Out of paper.'); return; }
+      if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
+      active.actor.faceToward(en.x, en.z);
+      if (out.redirected) log(`${nameOf(out.target)} takes it instead. That is the job.`);
+      strike(armed, out.target);
+      return;
+    }
+    if (!far && !blocked) {
+      if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
+      active.actor.faceToward(en.x, en.z);
+      if (out.redirected) log(`${nameOf(out.target)} takes it instead. That is the job.`);
+      strike(armed, out.target);
+      return;
+    }
+    // A ranged WEAPON closes until it can fire, the same way the melee swing
+    // closes until it can hit. Its basic attack is what a bare click on a
+    // coworker uses (defaultAttack), so refusing here would break the most
+    // obvious verb in the game for anyone holding one: click a coworker two
+    // rooms away with a stapler and you walk over; with a staple gun you
+    // would have stood still and read a refusal. It walks the same route, it
+    // just stops the moment the shot is on rather than at their elbow.
+    // Route to a FIRING position, not to their elbow. routeIntoRange already
+    // ends at the nearest tile the shot is legal from, so there is no
+    // walk-further-then-cut-back step: the route costs the steps it needs and
+    // not one more, by construction.
+    const route = routeIntoRange(en, range);
+    if (!route || route.length < 2) { refuse('No way to get a shot at them.'); return; }
+    const shotBudget = moveBudget(active) - a.ap;
+    // Stop at the first point THIS weapon can fire from, not at the firing
+    // tile's centre: routeIntoRange picks the nearest legal tile, but the
+    // route often crosses into range a step before reaching it - and a
+    // 6-tile straw that walks to a tile it could have fired at from six
+    // tiles back is the "much closer than needed" complaint in its ranged
+    // form.
+    const shotWalk = walkActive(route, shotBudget, null,
+      (px, pz) => verbReaches(armed, en, px, pz));
+    // Same honest split as the melee walk-up: a degenerate route is not an
+    // AP problem, and must not be narrated as one.
+    if (!shotWalk) {
+      refuse(shotBudget > 0.05 ? 'No better shot to walk to.' : 'Not enough AP to get in range.');
+      return;
+    }
+    // Will we be able to fire when the walk finishes? The arrival check
+    // (pendingMelee, in the update loop) is authoritative either way - this
+    // only decides whether to promise the shot or report the walk. Same
+    // predicate the trim above stopped on, so the two cannot disagree.
+    if (shotWalk.done && verbReaches(armed, en, shotWalk.end[0], shotWalk.end[1])) {
+      pendingMelee = { en, action: armed }; // fire on arrival
+    } else {
+      closedTheDistance();
+    }
+    return;
+  }
+
+  function clickMelee(en, a, refuse) {
     // Everything above dispatched the verbs that DO resolve on a coworker.
     // Whatever is still here falls through to the melee walk-up, which ends in
     // `strike` - and `strike` sends anything that is not a control to
@@ -3526,10 +3493,71 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (walk.done && verbReaches(armed, en, walk.end[0], walk.end[1])) {
       pendingMelee = { en, action: armed }; // strike on arrival
     } else {
-      disarm();
-      log('You close the distance.');
-      refresh();
+      closedTheDistance();
     }
+  }
+
+  function handleEnemyClick(en) {
+    if (phase !== 'player' || active.actor.moving || !en.alive) {
+      // This return is SILENT by design - a click on an AI turn or mid-walk
+      // is simply ignored - which also made it invisible in flake traces:
+      // "the click did nothing and nothing said why". The breadcrumb names
+      // the reason for the e2e suite without changing behavior.
+      lastClickOutcome = phase !== 'player' ? 'gate:phase'
+        : (active.actor.moving ? 'gate:moving' : 'gate:dead');
+      return;
+    }
+    hidePreview();
+    let autoArmed = false;
+    if (!armed) {
+      // Not enough AP for even the basic swing: say so once, rather than
+      // silently walking them into the enemy's face.
+      const id = defaultAttack();
+      if (active.ap < ACTIONS[id].ap) { log('Not enough AP to attack.'); return; }
+      armed = id;
+      autoArmed = true;
+      refresh(); // the bar lights the swing that is about to happen
+    }
+    // A refusal keeps a USER-armed action armed - aim survives a near-miss,
+    // right-click lowers it. The default the click just auto-armed is not
+    // aim: the player never raised it, so a refusal must put it back down.
+    // Left dangling, it sat lit on the bar until a right-click, and anything
+    // waiting for the swing to resolve (the e2e idle() helper) hung forever.
+    const refuse = (msg) => {
+      lastClickOutcome = `refused:${msg}`;
+      log(msg);
+      if (autoArmed) { disarm(); refresh(); }
+    };
+    lastClickOutcome = 'acted'; // overwritten by refuse(); the gate stamped its own
+    const a = ACTIONS[armed];
+    // WHICH verb this click is, from the same classifier the target rings
+    // dispatch on (combat-targeting.verbKind). Two hand-written ladders of
+    // `a.type` tests in slightly different orders is exactly how the rings came
+    // to contradict the click; there is one ladder now, and the arms below are
+    // what each branch DOES.
+    const kind = verbKind(a, rangeOf(armed));
+    // Take Cover clicked on a coworker: they are the shield ("any character
+    // as cover" - crouching behind your enemy is legal, if bold).
+    if (kind === 'cover') { performTakeCover(en.x, en.z); return; }
+    if (kind === 'cone') { fireCone(posOf(en).x, posOf(en).z); return; }
+    // Placing a summon on top of a coworker: the tile is taken, so they report
+    // to the free ground ringing outward from it. Aiming at the enemy you want
+    // them to swarm is a reasonable thing to click.
+    if (kind === 'summon') { placeSummon(en.x, en.z); return; }
+    // Aiming a zone at a coworker is a reasonable thing to click - you want it
+    // under THEM - so it resolves on their tile rather than refusing. Their own
+    // tile is excluded from the footprint (zoneCells), so what lands is the
+    // ring around their feet.
+    if (kind === 'zone') { performZone(armed, posOf(en).x, posOf(en).z); return; }
+    // A RANGED control (a cone, or one carrying `range`) resolves from where
+    // you stand. A touch-range one classifies as 'melee' and falls through to
+    // the walk-up below rather than getting its own copy of it - and `strike`
+    // is what makes the arrival resolve as a control instead of a swing.
+    if (kind === 'control') { performControl(armed, en); return; }
+    if (kind === 'shove') { clickShove(en, a, refuse); return; }
+    if (kind === 'pull') { clickPull(en, a, refuse); return; }
+    if (kind === 'ranged') { clickRanged(en, a, refuse, rangeOf(armed)); return; }
+    clickMelee(en, a, refuse);
   }
 
 
