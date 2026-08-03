@@ -7,7 +7,8 @@ it. The editor stays ours: the designer weighed the official PlayCanvas Editor
 and external grid tools (Tiled/LDtk) and chose the in-repo one `[stated]`
 ("i dont mind using ours if its easiest", 2026-08-01). The grid stays too:
 "we dont need full flexibility, we dont have organic curves to construct or
-anything like that" `[stated]` (2026-08-01). No code yet — this is the plan.
+anything like that" `[stated]` (2026-08-01). **M0–M4 have landed** — see the
+milestones below and `EDITOR_INVENTORY.md` for the round-by-round record.
 
 `EDITOR_INVENTORY.md` is the companion gap list: a full audit of what the editor
 cannot do and what it does that loses work, sized and evidenced, with its own
@@ -89,12 +90,12 @@ work), cutting stamps first if the round needs to shrink.
 | 2 | Levels stay grid + legend + ASCII + edge runs; no freeform geometry | `[stated]` | designer, 2026-08-01: "we dont need full flexibility… no organic curves" |
 | 3 | Verticality is required: tall single-level spaces with multifloor play | `[stated]` | designer, 2026-08-01: "a lobby with a lot of height, multifloor in what is really a single 'floor' level" |
 | 4 | Verticality model: stacked full-storey layers, each authored as an ordinary flat map, with one height setting per layer | `[ratified]` | designer-proposed 2026-08-01 ("full floors with one layer/height setting"), embodied by the spike, approved on sight ("this looks great!", 2026-08-01) |
-| 5 | Format: optional `"layers"` array, one entry per floor, bottom-up; a level without it is a single ground layer | `[proposed]` | every shipped level stays valid unchanged; see format section |
+| 5 | Format: optional `"layers"` array, one entry per floor, bottom-up; a level without it is a single ground layer | `[ratified]` | shipped in the spike (merged 2026-08-01) and now written as well as read by the editor (M4). Documented in `levels/README.md`. `height` on layer *i* is the rise ABOVE storey *i*, not its own ceiling |
 | 6 | Stairs: a marker run on the lower layer; the staircase — geometry, orientation, the connection — is generated, and the opening above is validated loudly rather than carved silently | `[ratified]` | designer-proposed 2026-08-01 ("a procedurally generated staircase tile/space on each layer"); shipped in the spike and approved with it |
 | 7 | Movement: within a layer as today; between layers only via stair portals; no hop/fall/jump in v1 | `[proposed]` | cheap reversible default; shoving someone off the balcony is a tempting later verb, not v1 |
 | 8 | Cross-layer combat is LOS + reach only; no high/low-ground stat modifier | `[ratified]` | Q2, closed 2026-08-02: designer approved option A verbatim ("i approve your recommendation"). Keeps the `[stated]` "tactics stay as shipped" record intact (TODO.md) |
-| 9 | Editor QoL for v1: undo/redo, region stamps, actor brushes, save-to-disk | `[proposed]` | Q3; gap list itself confirmed by designer 2026-08-01 |
-| 10 | Save-to-disk = dev-server endpoint writing `levels/<id>.json` + regenerated registry | `[proposed]` | dev-mode only; see M0. Cheap default, easily swapped for export-and-paste |
+| 9 | Editor QoL for v1: undo/redo, region stamps, actor brushes, save-to-disk | `[ratified]` | Q3 answered by IQ1 ("painter", 2026-08-02). All four shipped, plus fill/line/rect/eyedropper, a live playability lint, a metadata strip and per-placement rotation |
+| 10 | Save-to-disk = dev-server endpoint writing `levels/<id>.json` + regenerated registry | *superseded* | The designer's pipeline is `[stated]` — "were just outputting to json and uploading to the git" (2026-08-02). Shipped instead: a Download button (Blob + `<a download>`, no server, works in any build) and an editable paste-back. The dev-server endpoint stays available if the paste step still grates — see `EDITOR_INVENTORY.md` IQ6 |
 | 11 | Camera: cutaway — layers above the active character's floor are hidden, with markers for off-layer combatants | `[proposed]` | the genre-standard answer (X-COM, BG3); the readability risk lives here, see Risks |
 
 ## The layer model (decisions 4–7, in detail)

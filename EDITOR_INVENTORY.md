@@ -1,5 +1,12 @@
 # Level Editor — Needs Inventory
 
+> **Status, 2026-08-02: rounds 1–6 and M4 have shipped.** Every item below that
+> the designer's answers put in scope is implemented, tested and verified in a
+> browser; see the commits on `claude/level-editor-inventory-ux-x266ky`. The
+> inventory is left standing as the evidence trail and the record of what was
+> deliberately NOT done — section I (encounter-preview overlays) is out of scope
+> by IQ1, and the items marked below as deferred say so and why.
+
 A full accounting of what the level editor (`src/editor.js`) cannot do, what it
 does badly, and what it does that quietly destroys work — plus the UI/UX changes
 that would fix each. This is an **inventory**, not a build order: it names the
