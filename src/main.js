@@ -3945,7 +3945,14 @@ function startGame(level) {
       // Whether it CAN act is this file's question; everything downstream of
       // the answer - visibility, the ammo count, the pocket contents - belongs
       // to the bar and now lives with it.
-      hotbarHost.syncFrame(!!sheet && !gameOver && !modalOpen());
+      // `show` is still needed HERE: the out-of-combat aim rings below are
+      // main.js's, and they are gated on the same answer the bar is. It used
+      // to be a local declared inside the block that moved out - deleting the
+      // block took the declaration with it and left the reads behind, which
+      // threw once per frame and killed the update loop, and a dead update
+      // loop is an AI turn that never ends.
+      const show = !!sheet && !gameOver && !modalOpen();
+      hotbarHost.syncFrame(show);
       // What an armed slot rings depends on what it aims at: a coworker
       // (every attack and throw), a spot on the floor (a summon), the
       // hovered furniture/partition (shove - which ALSO rings coworkers,
