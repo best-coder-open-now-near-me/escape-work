@@ -645,6 +645,7 @@ export function startEditor(app, levelData, stashKey) {
   }
 
   function charForBrush() {
+    if (brush === 'stamp') return null; // placed by stampAt, not by a character
     if (brush === 'player') return PLAYER_CHAR;
     if (brush === 'void') return ' ';
     if (brush.startsWith('enemy:')) {
@@ -942,8 +943,84 @@ export function startEditor(app, levelData, stashKey) {
     if (t) paint(t, charOfType('floor'));
   }
 
+  // --- the stamp ---------------------------------------------------------------
+  // The repeated-cubicle workflow, and the one QoL item the designer named that
+  // a rectangle FILL does not cover: capture a block of the map, then paint that
+  // block wherever you click. Cells AND the edge runs inside the region, because
+  // a cubicle is its partitions as much as its desk.
+  let clipboard = null; // { w, h, cells[][], hWalls[], vWalls[], hDoors[], vDoors[], rot[] }
+  function captureRegion(a, b) {
+    const x0 = Math.max(0, Math.min(a.x, b.x));
+    const x1 = Math.min(width - 1, Math.max(a.x, b.x));
+    const z0 = Math.max(0, Math.min(a.z, b.z));
+    const z1 = Math.min(height - 1, Math.max(a.z, b.z));
+    const cells = [];
+    const rot = [];
+    for (let z = z0; z <= z1; z++) {
+      const row = [];
+      for (let x = x0; x <= x1; x++) {
+        row.push(rows[z][x]);
+        const r = propRot.get(x + ',' + z);
+        if (r != null) rot.push({ dx: x - x0, dz: z - z0, rotY: r });
+      }
+      cells.push(row);
+    }
+    // Edges are keyed by absolute coordinate; store them relative so the stamp
+    // can be dropped anywhere. An edge on the region's far boundary belongs to
+    // it (that is the wall on its right-hand side), hence <= rather than <.
+    const rel = (set, o) => [...set].map((k) => k.split(',').map(Number))
+      .filter(([x, z]) => (o === 'h'
+        ? x >= x0 && x <= x1 && z >= z0 && z <= z1 + 1
+        : x >= x0 && x <= x1 + 1 && z >= z0 && z <= z1))
+      .map(([x, z]) => [x - x0, z - z0]);
+    clipboard = {
+      w: x1 - x0 + 1, h: z1 - z0 + 1, cells, rot,
+      hWalls: rel(hWalls, 'h'), vWalls: rel(vWalls, 'v'),
+      hDoors: rel(hDoors, 'h'), vDoors: rel(vDoors, 'v'),
+    };
+    toast(`Captured ${clipboard.w}×${clipboard.h}. Pick the stamp brush and click to place it.`);
+    renderStampButton();
+  }
+  function stampAt(at) {
+    if (!clipboard || !at) return;
+    pushHistory();
+    inBatch(() => {
+      for (let dz = 0; dz < clipboard.h; dz++) {
+        for (let dx = 0; dx < clipboard.w; dx++) {
+          paint({ x: at.x + dx, z: at.z + dz }, clipboard.cells[dz][dx]);
+        }
+      }
+    });
+    for (const { dx, dz, rotY } of clipboard.rot) {
+      const x = at.x + dx;
+      const z = at.z + dz;
+      if (x < width && z < height) propRot.set(x + ',' + z, rotY);
+    }
+    const put = (pairs, set, o) => {
+      for (const [dx, dz] of pairs) {
+        const x = at.x + dx;
+        const z = at.z + dz;
+        if (edgeInRange(o, x, z)) set.add(x + ',' + z);
+      }
+    };
+    put(clipboard.hWalls, hWalls, 'h');
+    put(clipboard.vWalls, vWalls, 'v');
+    put(clipboard.hDoors, hDoors, 'h');
+    put(clipboard.vDoors, vDoors, 'v');
+    renderAllEdges();
+    for (let dz = 0; dz < clipboard.h; dz++) {
+      for (let dx = 0; dx < clipboard.w; dx++) {
+        const x = at.x + dx;
+        const z = at.z + dz;
+        if (x < width && z < height) renderCell(x, z);
+      }
+    }
+    markDirty();
+  }
+
   // Rubber-band state for shift-drag. The preview is the ghost entity pool.
   let anchor = null;
+  let capturing = false;
   let rectGhosts = [];
   function clearRectPreview() {
     for (const e of rectGhosts) e.destroy();
@@ -1006,7 +1083,9 @@ export function startEditor(app, levelData, stashKey) {
     onHover: (g) => showGhost(g),
     onHoverLeave: () => hideGhost(),
     onLeftClickTile: (t, g, sx, sy, m = {}) => {
+      if (m.alt && m.shift && t) { anchor = t; capturing = true; previewRect(t); return; } // capture a region
       if (m.alt && t) { eyedrop(t); return; }         // read, don't write
+      if (brush === 'stamp') { stampAt(t); return; }
       if (isEdgeBrush()) { paintEdge(nearestEdge(g), true); return; }
       if (!t) return;
       if (m.shift && m.ctrl) { anchor = t; previewRect(t); return; } // rectangle
@@ -1036,7 +1115,17 @@ export function startEditor(app, levelData, stashKey) {
       }
       lastPainted = t;
     },
-    onLeftRelease: (t) => { if (anchor) commitRect(t || anchor); },
+    onLeftRelease: (t) => {
+      if (!anchor) return;
+      if (capturing) {
+        captureRegion(anchor, t || anchor);
+        clearRectPreview();
+        anchor = null;
+        capturing = false;
+        return;
+      }
+      commitRect(t || anchor);
+    },
     onRightClickTile: (t, sx, sy, g) => {
       beginStroke(); // erase is a gesture too, and there is no right-press hook
       eraseAt(t, g);
@@ -1139,7 +1228,7 @@ export function startEditor(app, levelData, stashKey) {
   palette.id = 'editor-palette';
   Object.assign(palette.style, {
     display: 'flex', gap: '5px', flexWrap: 'wrap', justifyContent: 'center',
-    alignItems: 'center', maxHeight: '34vh', overflowY: 'auto',
+    alignItems: 'center', maxHeight: '26vh', overflowY: 'auto',
   });
   const commands = document.createElement('div');
   commands.id = 'editor-commands';
@@ -1195,6 +1284,7 @@ export function startEditor(app, levelData, stashKey) {
   function selectBrush(id, button) {
     brush = id;
     setStatus();
+    if (collapsed) applyCollapse(); // the collapsed strip names the armed brush
     for (const b of brushButtons) {
       b.style.borderColor = '#3a3a52';
       b.setAttribute('aria-pressed', 'false');
@@ -1337,6 +1427,20 @@ export function startEditor(app, levelData, stashKey) {
     b.onclick = () => selectBrush('void', b);
     brushButtons.push(b); buttonOf.set('void', b);
   }
+  let stampBtn = null;
+  function renderStampButton() {
+    if (!clipboard) return;
+    if (!stampBtn) {
+      stampBtn = btn('brush-stamp', 'stamp', palette);
+      stampBtn.onclick = () => selectBrush('stamp', stampBtn);
+      brushButtons.push(stampBtn); buttonOf.set('stamp', stampBtn);
+    }
+    stampBtn.textContent = `stamp ${clipboard.w}×${clipboard.h}`;
+    stampBtn.title = `Place the captured ${clipboard.w}×${clipboard.h} block, walls and doors included.`
+      + '\nCapture another with Alt+Shift+drag.';
+    stampBtn.click();
+  }
+
   const actorRow = document.createElement('div');
   actorRow.dataset.cat = 'actors';
   Object.assign(actorRow.style, {
@@ -1581,11 +1685,59 @@ export function startEditor(app, levelData, stashKey) {
     Object.entries(LEVELS)
       .map(([id, l]) => `<option value="${id}">${l.name || id}${l.layers ? ` (${l.layers.length} storeys)` : ''}</option>`).join('');
   select.onchange = () => {
-    if (LEVELS[select.value]) loadLevel(LEVELS[select.value]);
+    const id = select.value;
     select.value = '';
+    if (!LEVELS[id]) return;
+    // Loading REPLACES the document. It used to do that with no prompt, so
+    // browsing for "the floor with the break room I liked" cost you your work.
+    // eslint-disable-next-line no-alert
+    if (dirty && !window.confirm(`Load “${LEVELS[id].name || id}”?\n\nUnsaved painting will be lost.`)) return;
+    pushHistory();
+    loadLevel(LEVELS[id]);
+    dirty = false;
+    toast(`Loaded “${levelName}”.`);
   };
   commands.appendChild(select);
 
+  // "Reset" reloads the BOOT level, which is not the same thing as starting a
+  // floor - and because the reload falls through main.js's cascade it can drop
+  // you into the editor on whatever floor your campaign save is on.
+  btn('ed-new', '✚ New', commands).onclick = () => {
+    // eslint-disable-next-line no-alert
+    if (dirty && !window.confirm('Start a new floor?\n\nUnsaved painting will be lost.')) return;
+    // eslint-disable-next-line no-alert
+    const size = window.prompt('New floor size (width×height):', '20x16');
+    if (size == null) return;
+    const m = /^\s*(\d+)\s*[x×]\s*(\d+)\s*$/.exec(size);
+    if (!m) { toast('Give a size like 20x16.'); return; }
+    const w = Math.min(MAX_SIZE, Math.max(MIN_SIZE, Number(m[1])));
+    const h = Math.min(MAX_SIZE, Math.max(MIN_SIZE, Number(m[2])));
+    pushHistory();
+    // A walled room with a spawn and an exit: the smallest thing that lints
+    // clean, so the chip is green from the first second rather than scolding
+    // you about a floor you have not drawn yet.
+    const grid = [];
+    for (let z = 0; z < h; z++) {
+      let row = '';
+      for (let x = 0; x < w; x++) {
+        row += (x === 0 || z === 0 || x === w - 1 || z === h - 1) ? '#' : '.';
+      }
+      grid.push(row);
+    }
+    const put = (x, z, ch) => { grid[z] = grid[z].slice(0, x) + ch + grid[z].slice(x + 1); };
+    put(2, 2, '@');
+    put(w - 3, h - 3, '>');
+    loadLevel({
+      name: 'Untitled Floor',
+      depth: 1,
+      tiles: { '.': 'floor', '#': 'wall', '>': 'exit' },
+      actors: { '@': 'player' },
+      map: grid,
+    });
+    dirty = true;
+    markDirty();
+    toast(`New ${w}×${h} floor. Name it in the strip, then paint.`);
+  };
   btn('ed-undo', '↶ Undo', commands).onclick = () => undo();
   btn('ed-redo', '↷ Redo', commands).onclick = () => redo();
 
@@ -1658,6 +1810,7 @@ export function startEditor(app, levelData, stashKey) {
     // is the whole of IQ4: `rotY` was a property of the tile TYPE, so every
     // desk in the game faced the same way and a rotated one meant a new
     // registry entry - which also spends a scarce map character.
+    if (e.key === 'Tab') { e.preventDefault(); toggleCollapse(); return; }
     if (k === 'r') {
       e.preventDefault();
       if (!hoverCell || hoverCell.edge) { toast('Point at a prop to rotate it.'); return; }
@@ -1708,9 +1861,37 @@ export function startEditor(app, levelData, stashKey) {
     return '';
   });
   palette.appendChild(recentRow);
+  // --- collapse ------------------------------------------------------------
+  // The bar sits ON the map it edits and had no way to get out of the way. With
+  // the command row this session grew - New, undo/redo, storeys, metadata,
+  // filter, tier - it was covering better than half the viewport, which is not
+  // a cosmetic problem: clicks land on buttons instead of on the floor.
+  const COLLAPSE_KEY = 'escape-work.editor.collapsed';
+  const collapseBtn = document.createElement('button');
+  collapseBtn.id = 'ed-collapse';
+  Object.assign(collapseBtn.style, BUTTON_CHROME, {
+    padding: '4px 10px', borderRadius: '7px', cursor: 'pointer',
+    alignSelf: 'center', minHeight: '22px', fontSize: '11px', opacity: '.85',
+  });
+  let collapsed = false;
+  function applyCollapse() {
+    palette.style.display = collapsed ? 'none' : 'flex';
+    commands.style.display = collapsed ? 'none' : 'flex';
+    collapseBtn.textContent = collapsed ? `▲ show tools — ${brushLabel()}` : '▼ hide tools';
+    collapseBtn.title = collapsed
+      ? 'Show the palette and commands (or press Tab)'
+      : 'Get the bar off the map (or press Tab)';
+    try { localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : ''); } catch { /* ignore */ }
+  }
+  function toggleCollapse() { collapsed = !collapsed; applyCollapse(); }
+  collapseBtn.onclick = toggleCollapse;
+  try { collapsed = localStorage.getItem(COLLAPSE_KEY) === '1'; } catch { /* ignore */ }
+
+  bar.appendChild(collapseBtn);
   bar.appendChild(palette);
   bar.appendChild(commands);
   document.body.appendChild(bar);
+  applyCollapse();
 
   // --- status strip -----------------------------------------------------------
   // Everything the editor knows about the current moment, in the corner the
@@ -1727,6 +1908,7 @@ export function startEditor(app, levelData, stashKey) {
   function brushLabel() {
     if (brush === 'partition') return 'partition (edge)';
     if (brush === 'door') return 'door (edge)';
+    if (brush === 'stamp') return clipboard ? `stamp ${clipboard.w}×${clipboard.h}` : 'stamp';
     if (brush === 'player') return 'player start';
     if (brush.startsWith('enemy:')) return ENEMY_TYPES[brush.slice(6)]?.name || brush;
     return TILE_TYPES[brush]?.label || brush.replace(/-/g, ' ');
