@@ -56,7 +56,16 @@ function findStairRuns(name, layers) {
     const cells = new Set();
     for (let z = 0; z < g.height; z++) {
       for (let x = 0; x < g.width; x++) {
-        if (g.typeAt(x, z) === 'stairway') cells.add(x + ',' + z);
+        // The DEF's flag, not the tile id: `stairs: true` exists in
+        // data/tiles.js for exactly this, and scene.js:77 already reads it to
+        // decide what to draw. Asking the id here made two owners of "what is
+        // a staircase" that only agree because `stairway` is currently the
+        // one tile carrying the flag - so a second stair tile added as pure
+        // data would RENDER as a flight and have no run, no entry and no
+        // landing (Q109/Q110). `defAt` falls back to the wall def out of
+        // bounds, which carries no `stairs`, so void cells stay false exactly
+        // as the id compare did.
+        if (g.defAt(x, z).stairs) cells.add(x + ',' + z);
       }
     }
     if (cells.size && l === layers.length - 1) {
@@ -66,8 +75,7 @@ function findStairRuns(name, layers) {
     for (const key of cells) {
       if (seen.has(key)) continue;
       const [x, z] = key.split(',').map(Number);
-      // A run extends along one axis; a single cell defaults to z and lets
-      // the landing checks resolve which way it faces.
+      // A run extends along one axis, read off its neighbours.
       const alongX = cells.has((x + 1) + ',' + z) || cells.has((x - 1) + ',' + z);
       const dx = alongX ? 1 : 0;
       const dz = alongX ? 0 : 1;
@@ -79,10 +87,45 @@ function findStairRuns(name, layers) {
         run.push({ x: cx, z: cz });
         seen.add(cx + ',' + cz);
       }
-      runs.push(resolveRun(name, layers, l, run, dx, dz));
+      // A LONE cell has no neighbour to read, so it used to be assumed to run
+      // along z - and an east-west one-cell flight was then refused with a
+      // message naming the wrong reason (Q058). The axis of a single cell is
+      // not a property of the cells at all; it is decided by where the landing
+      // is, which is `resolveRun`'s question. So ask it both ways.
+      runs.push(run.length === 1
+        ? resolveLoneCell(name, layers, l, run)
+        : resolveRun(name, layers, l, run, dx, dz));
     }
   }
   return runs;
+}
+
+// The one-cell case: let the landing rules pick the axis instead of guessing
+// ahead of them. z first, so a flight that only works north-south resolves
+// exactly as it always did. Both axes working is a real authoring ambiguity
+// and gets its own named error, in this module's existing house style - name
+// the mistake rather than pick one and hope (see the top-storey check).
+function resolveLoneCell(name, layers, l, run) {
+  const found = [];
+  const failures = [];
+  for (const [dx, dz] of [[0, 1], [1, 0]]) {
+    try {
+      found.push(resolveRun(name, layers, l, run, dx, dz));
+    } catch (e) {
+      failures.push(e);
+    }
+  }
+  if (found.length === 1) return found[0];
+  const where = `single-cell stairs at (${run[0].x},${run[0].z}) on storey ${l}`;
+  if (found.length === 2) {
+    throw new Error(`Level "${name}": ${where} has a landing on storey ${l + 1} BOTH `
+      + `north-south and east-west, so which way it climbs is ambiguous - `
+      + `extend the flight to two cells to say.`);
+  }
+  // Neither axis worked. Both messages are honest now, because both were
+  // really tried; lead with the north-south one, which is the shape the old
+  // code assumed and so the one an author most likely meant.
+  throw failures[0];
 }
 
 function resolveRun(name, layers, l, run, dx, dz) {

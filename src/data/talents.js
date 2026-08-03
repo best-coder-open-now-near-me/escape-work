@@ -170,6 +170,16 @@ export const TALENT_EFFECT_KEYS = [
   'sneakSpeed',         // main.js memberSpeed: no sneak movement penalty
   'ambushDamage',       // combat.js ambushDmg: the sneak-opened first strike
   'coneShrink',         // main.js sneakSightOpts: narrower watch cones
+  // statuses.js isImmune: the status ids this character simply cannot catch.
+  // Honoured by the runtime and pinned by statuses.test.js since before this
+  // list existed - it was only ever missing from the list, which made the
+  // lint reject the migration the review recommends (rewriting
+  // `paperCutImmune: true` as `statusImmune: ['bleed']`) with the false
+  // message "nothing reads it" (Q104). Note for that migration: `applyEffect`
+  // REPLACES non-numeric values on merge, so two talents granting this would
+  // clobber rather than union - fine while the "no effect key has two homes"
+  // lint holds, worth solving before it does not.
+  'statusImmune',
 ];
 
 // TEMPORARY (TALENT_PLAN M1 -> deleted by M2).

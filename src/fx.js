@@ -384,12 +384,16 @@ export function statusBurst(app, x, z, id) {
       life: 0.8, gravity: -2.2, drag: 1.1, jitter: 0.3,
     });
     flash(app, { x, y: HEAD_Y, z }, { color, size: 0.24, life: 0.22, grow: 2 });
-  } else { // 'pop' - straight out from the head, for the instantaneous ones
+  } else if (mode === 'pop') { // straight out from the head, the instantaneous ones
     flash(app, { x, y: HEAD_Y, z }, { color, size: 0.24, life: 0.2, grow: 2.4 });
     burst(app, { x, y: HEAD_Y, z }, {
       count: 10, color, speed: 2, up: 1, size: 0.12, life: 0.55, gravity: -3, drag: 1.8,
     });
   }
+  // Anything else shows nothing. `pop` used to be the bare `else`, so
+  // `burst: 'none'` - again only `sneaking` - announced the sneak with the
+  // LOUDEST of the three (Q053/Q212). A status that opts out of a burst gets
+  // no burst; the harmful/harmless default above still covers omitting the key.
 }
 
 // While a status is LIVE it wears an aura: a trickle of particles the shape of
@@ -446,11 +450,19 @@ export function createAuraLayer(app) {
         });
         break;
       case 'shield':
-      default:
         burst(app, { x: p.x, y: p.y + 0.35, z: p.z }, {
           count: 1, color, speed: 0.2, up: 1.1, size: 0.1, life: 0.75,
           gravity: -0.6, drag: 0.9, jitter: 0.3, floor: false,
         });
+        break;
+      // An aura kind this module does not implement shows NOTHING. It used to
+      // share a label with 'shield', which meant `aura: 'none'` - the only
+      // out-of-vocabulary value in data/statuses.js, and it is on `sneaking` -
+      // wore the shield's glowing motes for the whole held sneak. The one
+      // state whose entire point is not being seen was the one continuously
+      // trailing particles (Q053). Silence is also the right answer for a
+      // typo, which this arm used to swallow.
+      default:
         break;
     }
   }

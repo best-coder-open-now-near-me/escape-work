@@ -68,6 +68,47 @@ test('a run with landings at both ends is ambiguous, not guessed', () => {
   })), /exactly one end open/);
 });
 
+// --- the one-cell flight (Q058) ----------------------------------------------
+// A lone stair cell has no neighbour to read its axis off, so the axis is
+// settled by WHERE THE LANDING IS, not by a default. These three pin the three
+// outcomes: one axis works, both do, neither does.
+//
+// Ground for all three: a single 'X' at (2,1), so (1,1)/(3,1) are the east-west
+// ends and (2,0)/(2,2) the north-south ones. Upper rows are ragged on purpose -
+// off-map reads as air, exactly as the 2-cell fixture above relies on.
+const loneCell = (upper) => ({
+  name: 'lone',
+  tiles: { '.': 'floor', '#': 'wall', 'X': 'stairway' },
+  actors: { '@': 'player' },
+  layers: [{ map: ['....', '..X.', '....', '@...'] }, { map: upper }],
+});
+
+test('a one-cell flight running EAST-WEST resolves, and used to be refused', () => {
+  // Landing east at (3,1); both north-south ends are air, so only one axis works.
+  const f = parseFloors(loneCell(['    ', '   .', '    ', '    ']));
+  assert.equal(f.stairs.length, 1);
+  const s = f.stairs[0];
+  assert.deepEqual(s.cells, [{ x: 2, z: 1 }]);
+  assert.deepEqual(s.entry, { x: 1, z: 1 });
+  assert.deepEqual(s.top, { x: 3, z: 1 });
+  assert.deepEqual(s.dir, { dx: 1, dz: 0 }); // the axis the old code could not reach
+});
+
+test('a one-cell flight with a landing on BOTH axes is named, not guessed', () => {
+  // Landing north at (2,0) AND east at (3,1): each axis alone is legal.
+  assert.throws(
+    () => parseFloors(loneCell(['  . ', '   .', '    ', '    '])),
+    /ambiguous/,
+  );
+});
+
+test('a one-cell flight with no landing either way still reports the landing rule', () => {
+  assert.throws(
+    () => parseFloors(loneCell(['    ', '    ', '    ', '    '])),
+    /exactly one end open/,
+  );
+});
+
 test('a run with no walkable entry on its own storey is an error', () => {
   assert.throws(() => parseFloors(fixture({
     layers: [

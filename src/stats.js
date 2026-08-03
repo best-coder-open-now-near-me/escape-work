@@ -440,15 +440,25 @@ export function equippedStats(sheet) {
   return out;
 }
 
-// The equipped weapon's on-hit proc (EQUIPMENT_PLAN #8), or null. A proc is
-// { applies: '<status>', chance, appliesLog? } - combat rolls it when you land
-// the weapon's own swing.
-// A sheet's footwear movement multiplier (1 = ordinary shoes). Multiplied into
-// the per-tile cost, so <1 is faster and >1 is slower.
+// A sheet's movement multiplier (1 = ordinary shoes, no talent). Multiplied
+// into the per-tile cost, so <1 is faster and >1 is slower.
+//
+// Footwear AND the talent, because `moveCost` is on TALENT_EFFECT_KEYS with the
+// comment "stats.js: multiplies the AP a tile costs" and this is that site -
+// it read equipment only, so `corner-office-traction`, whose entire effect is
+// `moveCost: 0.9`, did literally nothing (Q054). Composed rather than summed:
+// good boots and a talent should stack the way boots and a spill already do.
+// One caveat if a SECOND talent ever grants the key: `applyEffect` merges
+// numbers additively, so two grants would reach here as 1.8 rather than 0.81.
+// The "no effect key has two homes" lint is what currently prevents that.
 export function moveCostOf(sheet) {
-  return equippedStats(sheet).moveCost;
+  return equippedStats(sheet).moveCost * (sheet?.talent?.effects?.moveCost ?? 1);
 }
 
+// The equipped weapon's on-hit proc (EQUIPMENT_PLAN #8), or null. A proc is
+// { applies: '<status>', chance, appliesLog? } - combat rolls it when you land
+// the weapon's own swing. (This block spent a while stranded above
+// `moveCostOf`, which left both functions describing the other one - Q192.)
 export function weaponProc(sheet) {
   return ITEMS[sheet?.equipped?.weapon]?.proc || null;
 }
