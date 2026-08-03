@@ -71,7 +71,7 @@ How to read it:
 
 ### MEDIUM
 
-- [ ] **Q907** `src/combat.js:140` [bug] **(new 2026-08-03, from the Q900 audit)**
+- [x] **Q907** `src/combat.js:140` [bug] **(new 2026-08-03, from the Q900 audit)**
   **A charmed coworker is the one body on the floor the floor cannot touch**,
   and three separately-confirmed findings turned out to be this same root.
 
@@ -93,11 +93,34 @@ How to read it:
   walks it straight through live water. And `liveSummonsOf` has no leg for a
   borrowed minion, so it falls off its summoner's books.
 
-  The suggested seam is the actor's own `onTile`, which `GridActor.update`
-  fires BEFORE `EnemyActor.update`'s `world.paused` return - the same seam
-  `aiAdvance` uses to reach a moving unit while combat is paused. Note the
-  trap recorded with it: do NOT hang a `sheet` on the unit to fix the routing,
-  because combat infers which side a body is on from the shape `!!x.sheet`.
+  **DONE.** All three, and the seam was the one recorded above: the actor's own
+  `onTile`, which `GridActor.update` fires BEFORE EnemyActor.update's
+  `world.paused` return - the only hook that reaches a body main.js drives
+  through its enemy loop while a fight is on.
+
+  The steps route to main.js's `onSummonStep`, not to a fourth copy of the
+  rules. A borrowed body is exactly a summon's case: player-side, and silent,
+  because the surface lines are written in the player's voice and somebody you
+  are driving is not you. It gets the step clock, surface damage through its own
+  sheet, the applied status, bleed, gum, slips, footprints and `notifyStep` -
+  and combat hands over its OWN carrier so notifyStep can resolve it, which a
+  fresh literal could not. `releaseCharm` hands the seam back, or aiAdvance
+  would be assigning over it the moment they return to their side.
+
+  The routing half: `findPath` and `smooth` ask the fight who is walking
+  (`actingActor`/`actingSheet`) before falling back to the leader's sheet. The
+  smoother's own comment already said it "fears the WALKER's hazards, not the
+  leader's" - it just had no way to find this walker. Both sites changed
+  together, because a smoother fearing different hazards than its router
+  straightens through the tile the route detoured around.
+
+  And `liveSummonsOf` grew its third leg: a borrowed minion is in neither
+  existing count - `liveEnemies` drops charmed bodies, and a charmed member is
+  `isCharmed`, never `isSummon` - so charming an HR employee used to free the
+  slot that posted it and let HR reinforce over its own cap.
+
+  The recorded trap was respected: no `sheet` was hung on the unit.
+
 
 
 - [ ] **Q901** `src/combat.js` [god-method] **(new 2026-08-02, the remainder of Q022)**

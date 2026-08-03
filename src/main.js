@@ -2244,7 +2244,14 @@ function startGame(level) {
         findPath: (sx, sz, tx, tz, self = player) => {
           const walker = party.members.find((m) => m.actor === self)
             || summons.find((s) => s.actor === self);
-          const ms = walker?.sheet || sheet;
+          // A borrowed coworker is in NEITHER roster - combat's `members` is a
+          // copy of this one - so ask the fight who is walking before falling
+          // back to the leader. Without it a shock-immune leader routes a
+          // borrowed body straight through live water, which is the exact
+          // mistake the smoother's comment below says this costing prevents.
+          const ms = walker?.sheet
+            || (combat?.actingActor === self ? combat.actingSheet : null)
+            || sheet;
           const blocked = (x, z) => [...party.members, ...summons].some((m) =>
             m.actor && m.actor !== self && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z);
           const open = (x, z) => isWalkable(x, z) && !blocked(x, z);
@@ -2269,7 +2276,12 @@ function startGame(level) {
         smooth: (p, actor) => {
           const walker = party.members.find((m) => m.actor === actor)
             || summons.find((s) => s.actor === actor);
-          const ms = walker?.sheet || sheet;
+          // Same borrowed-body case as findPath above, and it has to agree with
+          // it: a smoother fearing different hazards than its router straightens
+          // through the tile the route detoured around.
+          const ms = walker?.sheet
+            || (combat?.actingActor === actor ? combat.actingSheet : null)
+            || sheet;
           const blocked = (x, z) => [...party.members, ...summons].some((m) =>
             m.actor && m.actor !== actor && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z);
           return smoothFromBody(p, actor,
@@ -2388,6 +2400,23 @@ function startGame(level) {
         // Combat owns WHEN a body changes hands; main.js owns the lists, the
         // same division summons already use.
         setCharmed: (unit, on) => { unit.charmed = !!on; },
+        // A borrowed coworker's step, run through the PLAYER side's own rules.
+        //
+        // It needs a seam because it is the one body neither roster covers:
+        // combat's `members` is a copy, so the borrowed body never reaches
+        // `party.members` (which this file's per-frame loop steps) nor
+        // `summons`, and combat only installs an `onTile` in `aiAdvance`, which
+        // a player-driven body never runs. Left alone it takes no surface
+        // damage, catches nothing, picks up no gum, never slips, never ticks
+        // the step clock, leaves no footprints and provokes nobody - the one
+        // body on the floor the floor cannot touch (Q907).
+        //
+        // Routed at `onSummonStep` rather than a fourth copy of the rules,
+        // because a borrowed body is exactly a summon's case: player-side, and
+        // silent, since the surface lines are written in the player's voice and
+        // somebody you are driving is not you. The carrier comes from combat so
+        // `notifyStep` can resolve it - a fresh literal would not.
+        borrowedStep: (carrier, x, z, done, changed) => onSummonStep(carrier, x, z, done, changed),
         // The tiles a summon aimed at (tx,tz) would actually land on - the
         // placement preview draws these rings, and spawnSummon fills them, so
         // what you see is where they stand.

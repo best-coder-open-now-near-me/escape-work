@@ -160,6 +160,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // The lifetime rides the field a summon's does, so the turn engine ages it
     // with no second clock to keep in step. The ENDINGS differ, not the clock.
     unit.summonTurns = turnsLeft;
+    // The floor has to reach them. `GridActor.update` fires `this.onTile`
+    // BEFORE EnemyActor.update's `world.paused` return, so this is the one seam
+    // that reaches a body main.js drives through its enemy loop while a fight
+    // is on. Cleared in releaseCharm, or aiAdvance's own onTile would be
+    // fighting this one for the same field the moment they turn back.
+    unit.onTile = (x, z, done, changed) => world.borrowedStep?.(m, x, z, done, changed);
     members.push(m);
     turns.replace((slot) => slot.unit === unit, memberSlot(m));
     world.setCharmed?.(unit, true); // out of liveEnemies: their side turns on them
@@ -176,6 +182,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (i >= 0) members.splice(i, 1);
     if (unit) {
       unit.summonTurns = undefined;
+      // Hand the step seam back with the body. Left installed it would keep
+      // routing their steps through the PLAYER's rules after they have gone
+      // back to their own side, and aiAdvance would be assigning over it.
+      unit.onTile = null;
       unit.hp = Math.max(0, m.sheet.hp); // whatever happened to them, happened
       if (!unit.hp) unit.alive = false;
       world.setCharmed?.(unit, false);
@@ -4178,7 +4188,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const enemySummons = world.liveEnemies().filter((e) => e.summonedBy === summoner).length;
     const playerSummons = members.filter((m) =>
       m.isSummon && m.sheet.hp > 0 && m.actor && m.summonedBy === summoner).length;
-    return enemySummons + playerSummons;
+    // A BORROWED minion is still on its summoner's books. It is in neither
+    // count above: `liveEnemies` drops charmed bodies (that is what puts them
+    // on your side), and a charmed member is `isCharmed`, never `isSummon`.
+    // Without this leg, charming an HR employee frees the slot that posted it
+    // and HR reinforces over its own cap - the cap being per-SUMMONER and
+    // outliving the fight is the whole point of counting this way.
+    const borrowed = members.filter((m) =>
+      m.isCharmed && m.sheet.hp > 0 && m.unit?.summonedBy === summoner).length;
+    return enemySummons + playerSummons + borrowed;
   }
   // A summon's assignment ran out (or the fight it was called for is over and
   // main.js is sweeping): take it off the board WITHOUT killing it. This is not
