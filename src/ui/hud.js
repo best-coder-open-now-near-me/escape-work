@@ -137,7 +137,11 @@ export function createTacticalButton({ onToggle, isOn }) {
   document.body.appendChild(btn);
   registerHudButton(btn);
   paint();
-  return { refresh: paint, setVisible: (v) => { btn.style.display = v ? '' : 'none'; layoutHudRail(); } };
+  // No setVisible: the rail button is up whenever the HUD is, and the one it
+  // used to offer had no caller (Q178). Add it back beside a caller, not ahead
+  // of one - an untested show/hide that also re-runs layoutHudRail is exactly
+  // the sort of thing that works until the first time it is used.
+  return { refresh: paint };
 }
 
 // --- persistent action hotbar -------------------------------------------------
@@ -488,10 +492,11 @@ export function createLevelUpPip({ onOpen }) {
       if (points > 0) { b.textContent = `⬆ Level Up (${points})`; b.style.display = 'block'; }
       else b.style.display = 'none';
     },
-    // This hides the pip behind the memo's back, so the memo has to forget what
-    // it painted - otherwise the next refresh with the SAME count early-outs and
-    // the pip stays hidden with points still banked.
-    setVisible(v) { if (!v) { b.style.display = 'none'; shown = null; } },
+    // No setVisible. It existed to hide the pip behind the memo's back, and it
+    // never had a caller (Q178) - because main.js hides the pip the honest way
+    // instead, folding `!modalOpen()` into the count it passes to refresh(),
+    // which drives `shown` rather than going around it. Two ways to hide one
+    // pip, and only one of them keeps the memo true.
   };
 }
 

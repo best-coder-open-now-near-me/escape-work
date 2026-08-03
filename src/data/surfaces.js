@@ -82,11 +82,12 @@ export const SURFACES = {
   },
 };
 
-// Gum-on-shoe: the status a stepped-on wad (or a well-aimed Manager) applies.
-// Slows movement and disables footwork actions (the kick) - but gum is
-// TRACTION: you cannot slip while stuck. Wears off after `steps` tiles
-// walked. `slow` scales walk speed; `moveCost` scales combat move AP.
-export const GUM = { steps: 20, slow: 0.6, moveCost: 1.5 };
+// Gum-on-shoe used to carry its numbers here, as a `GUM` export, back when the
+// wad was a surface that did its own slowing. It is a STATUS now - the `gum`
+// surface above just names it in `onEnter.applies` - so data/statuses.js's
+// `gum` entry owns the duration and the two multipliers, and nothing imported
+// this. The migration the two comments kept promising has already happened;
+// the export was the last thing still describing the old shape (Q173/Q174).
 
 // Derived state for conduction pools touching a power source - not painted
 // directly.

@@ -274,7 +274,13 @@ export function showCreationStep(draft, { onCommit, onBack, onPreview }) {
 
   function repaintSummary() {
     const job = draft.className || '';
-    const who = custom ? (draft.name || '').trim() : job;
+    // `draftName` and not a hand-rolled trim: it is the rule that decides the
+    // name the character is actually CREATED with, and this line is a preview
+    // of exactly that. The hand-rolled version disagreed with it on a blank
+    // field - the summary read ", they/them, Intern." while the character you
+    // got was named Intern - and on internal whitespace, which draftName
+    // collapses (Q177).
+    const who = draftName(draft);
     sub.textContent = custom
       ? 'Nobody here yet. Say who.'
       : `${job}. This is who you are.`;

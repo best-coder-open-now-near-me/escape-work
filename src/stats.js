@@ -127,17 +127,21 @@ export const roundAp = (v) => Math.round((Number(v) || 0) * 10) / 10;
 export const fmtAp = (v) => String(roundAp(v));
 
 // --- sneaking (SNEAK_PLAN) ---------------------------------------------------
-// The cone every coworker watches through, and what sneaking costs. All
-// first drafts, deferred to playtest like every other magnitude (SNEAK_PLAN
-// question 1). The cone shape follows DOS2's reported ~90-degree base;
-// SPEED_MULT is its reported -30% sneak penalty; AMBUSH_DMG is Guerrilla's
-// confirmed +40% - sources in SNEAK_PLAN's inspirations section.
+// The cone every coworker watches through. First drafts, deferred to playtest
+// like every other magnitude (SNEAK_PLAN question 1); the shape follows DOS2's
+// reported ~90-degree base - sources in SNEAK_PLAN's inspirations section.
+//
+// Only the cone lives here, and that is the rule rather than an accident: a
+// cone is GEOMETRY, which stealth.js asks for as a system. The other three
+// magnitudes this block used to declare - the sneak speed penalty, Disgruntled's
+// ambush bonus, Forgettable Face's cone shrink - were read by nothing, because
+// each is CONTENT and already lives where content lives: `sneaking.effects
+// .speedMult` in data/statuses.js, and `ambushDamage` / `coneShrink` in
+// data/talents.js. All three matched their live twin to the digit, so this was
+// a silent second source of truth waiting for one of them to be tuned (Q175).
 export const STEALTH = {
   CONE_HALF_ANGLE: 45, // degrees either side of the watcher's facing
   CONE_RANGE: 6,       // true-distance tiles, body to body
-  SPEED_MULT: 0.7,     // sneaking movement speed multiplier
-  AMBUSH_DMG: 0.4,     // Disgruntled: bonus on a sneak-opened fight's first strike
-  CONE_SHRINK: 15,     // Forgettable Face: degrees off every cone's half-angle
 };
 
 // --- reach (TACTICS_PLAN "Revision - reach is a DISTANCE") -------------------

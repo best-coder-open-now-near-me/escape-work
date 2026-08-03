@@ -88,8 +88,10 @@ export const STATUSES = {
     fx: { color: [0.45, 0.78, 1], burst: 'rise', aura: 'shield', rate: 0.12 },
   },
   gum: {
-    // Numbers mirror GUM in data/surfaces.js (steps 20, moveCost 1.5, slow 0.6);
-    // they become one source of truth when gum migrates onto the framework.
+    // These ARE the gum numbers - the only copy. data/surfaces.js carried a
+    // second one (`GUM`) from when the wad slowed you itself; the surface only
+    // names this status now, so the export was deleted rather than kept in
+    // step by comment (Q173/Q174).
     name: 'Gum on shoe', icon: '🍬', harmful: true, clock: 'step',
     duration: 20, resistable: true,
     effects: { moveCostMult: 1.5, speedMult: 0.6, noFootwork: true, slipProof: true },
@@ -190,20 +192,13 @@ export const STATUSES = {
     log: '{name} plants themselves in the way.',
     fx: { color: [0.7, 0.75, 0.9], burst: 'rise', aura: 'shield', rate: 0.4 },
   },
-  // The take-cover crouch (TACTICS_PLAN M6). Empty effects for the watching/
-  // guarding reason: the rule - WHICH cell shields, and the immunity it buys -
-  // lives in combat's `crouched` map, keyed to geometry the effect vocabulary
-  // cannot carry. The chip exists so both sides can read the commitment. The
-  // duration is a leak bound, not a clock: combat revalidates the crouch on
-  // every consult and re-applies the chip while it holds, so only an
-  // abandoned fight ever lets it lapse on its own.
   // Sneaking (SNEAK_PLAN M2): a HELD mode, not a timed affliction - main.js
   // applies it on the toggle and removes it when the sneak breaks (spotted,
   // attacking, interacting, or toggled off), so the huge duration is never
-  // consumed; it exists because the framework sizes fx off a number. The
-  // speed cost mirrors STEALTH.SPEED_MULT (stats.js) the way gum's numbers
-  // mirror data/surfaces.js - one source of truth when statuses learn to
-  // read tunables.
+  // consumed; it exists because the framework sizes fx off a number.
+  // `speedMult` is the sneak penalty itself, not a mirror of one: stats.js
+  // used to declare a STEALTH.SPEED_MULT nothing read, and it was deleted
+  // rather than kept in step by comment (Q175).
   sneaking: {
     name: 'Sneaking', icon: '🤫', harmful: false, clock: 'turn',
     duration: 9999, resistable: false,
@@ -211,6 +206,13 @@ export const STATUSES = {
     log: '{name} goes quiet.',
     fx: { color: [0.5, 0.55, 0.75], burst: 'none', aura: 'none', rate: 0 },
   },
+  // The take-cover crouch (TACTICS_PLAN M6). Empty effects for the watching/
+  // guarding reason: the rule - WHICH cell shields, and the immunity it buys -
+  // lives in combat's `crouched` map, keyed to geometry the effect vocabulary
+  // cannot carry. The chip exists so both sides can read the commitment. The
+  // duration is a leak bound, not a clock: combat revalidates the crouch on
+  // every consult and re-applies the chip while it holds, so only an
+  // abandoned fight ever lets it lapse on its own.
   covered: {
     name: 'In Cover', icon: '🧎', harmful: false, clock: 'turn',
     duration: 4, resistable: false,
