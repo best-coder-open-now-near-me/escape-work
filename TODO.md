@@ -178,6 +178,19 @@ How to read it:
   fourth copy - but note the gates alone did NOT fix throwing.spec, sealing the
   arena did, so check each arena's coworker can be where the test needs him
   before trusting a gate to hold.
+  **A fourth sighting, and it makes this a pattern rather than three
+  incidents.** tactics.spec.js's backstab test computes a stand-tile from the
+  foe's position and then walks to it; its own header says "The Manager wanders
+  before the fight". It failed once inside a full-file run on 2026-08-03 and
+  then passed 3/3 solo and 8/8 in a re-run, which is exactly the signature -
+  the amble is the variable, and the suite's timing decides whether it moved
+  between the read and the use. The others: throwing.spec.js (fixed by sealing
+  the arena), classes.spec.js:151 (whose comment records the same thing as
+  "Invalid target." six times over, and which now settles on the PLAYER for
+  it), and cover/demolition's unpinned clickManagers below. The shared fix is
+  one rule - derive the aim AFTER the last await, or pin the body so it cannot
+  move - and it is worth doing once across the suite rather than per failure.
+
   While in there: `SEALED_ARENA` names two DIFFERENT fixtures, in
   ranged.spec.js and throwing.spec.js. The ranged one is genuinely walled on
   all sides, which is why it never flaked; the throwing one had a back door
