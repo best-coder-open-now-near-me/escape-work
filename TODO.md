@@ -86,7 +86,7 @@ How to read it:
 - [ ] **Q037** `src/combat.js:76` [god-method] **(carried)** The two god closures measured: `startCombat` is 5,065 lines / 176 inner functions / 21 shared mutable variables, `startGame` 4,214 / 159 / 26 — and combat.js grew 493 lines on this branch
 - [ ] **Q038** `src/looting.js:292` [god-method] **(carried)** `looting.js lootEntries` is a 120-line function running five unrelated scans, three full grid sweeps and an inline flood fill — in a module kept out of node by a single renderer import
 - [ ] **Q039** `src/main.js:304` [god-method] **(carried)** `startGame` has grown to a 4,214-line closure with 88 inner functions and 141 closure variables
-- [ ] **Q040** `src/combat.js:3536` [inconsistency] **(carried)** `verbKind` has only two consumers while five more hand-written `a.type` ladders are live — the exact drift TODO.md Phase 5 says to watch for
+- [x] **Q040** `src/combat.js:3536` [inconsistency] **(carried)** `verbKind` has only two consumers while five more hand-written `a.type` ladders are live — the exact drift TODO.md Phase 5 says to watch for<br>      ↳ DONE — attackOrConfront asks verbSides; three of five ladders now collapsed
 - [ ] **Q041** `src/combat-plans.js:54` [soc] **(carried)** Pure plan modules take a parameter literally named `world` that is combat's host facade, so the contract is duck-typed and unit tests structurally cannot check it
 - [ ] **Q042** `src/combat.js:76` [soc] **(carried)** `startCombat` is one 5,140-line closure - up ~440 lines on this branch - with `armed` mutated at 31 sites across eight subsystems
 - [ ] **Q043** `src/editor.js:516` [soc] **(carried)** `editor.js startEditor` is a 641-line god closure, and it hardcodes the tile-category list in system code — adding a category means editing the editor
@@ -179,7 +179,7 @@ How to read it:
 
 ### LOW
 
-- [ ] **Q130** `src/combat.js:3834` [bug] **(carried)** `summonSpotProblem` never passes `room`, so the summon preview ignores the live cap and the click reports the wrong reason
+- [x] **Q130** `src/combat.js:3834` [bug] **(carried)** `summonSpotProblem` never passes `room`, so the summon preview ignores the live cap and the click reports the wrong reason<br>      ↳ DONE — combat passes the live cap into the shared rule, as main.js always did
 - [x] **Q131** `src/combat.js:1808` [bug] **(carried)** `notifyMemberDown` advances the turn without re-binding `active`, so the HUD reflects a corpse through the enemies' turns<br>      ↳ DONE — active rebinds to somebody standing before advanceTurn
 - [ ] **Q132** `src/pathfinding.js:166` [bug] **(carried)** clampToClearance's diagonal-corner repulsion is still edge-blind: bodies overlap partition end posts by ~0.23 tile
 - [ ] **Q133** `src/pathfinding.js:16` [bug] **(carried)** findPath has no explored-node cap and hangs on an unbounded or non-integer target

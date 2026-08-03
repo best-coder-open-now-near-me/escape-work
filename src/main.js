@@ -60,6 +60,7 @@ import {
   combatOnlyReason,
 } from './hotbar-model.js';
 import { startCombat } from './combat.js';
+import { verbSides } from './combat-targeting.js';
 import { cheb as chebOf, canReach as canReachAt } from './combat-geometry.js';
 import { startEditor } from './editor.js';
 import { NPCS } from './data/npcs.js';
@@ -1545,7 +1546,13 @@ function startGame(level) {
   // --- left-click verb dispatch (Divinity-style: the target picks the verb) ---
   function attackOrConfront(en) {
     const a = armedOoc && ACTIONS[armedOoc];
-    if (a && (a.type === 'attack' || a.type === 'shove' || a.type === 'purge')) {
+    // "Does this armed verb point at a BODY" - asked of the one owner
+    // (combat-targeting.verbSides), not re-derived. This was a hand-written
+    // `attack || shove || purge` ladder, which is the same list `ringsAtBodies`
+    // carried and the same way it went stale: `pull` was missing from both, so
+    // an armed Pull Over clicked on a coworker out here fell straight past this
+    // arm into the ordinary walk-up.
+    if (a && verbSides(a, rangeOf(armedOoc)).enemies) {
       engageWithAction(en, armedOoc);
       return;
     }

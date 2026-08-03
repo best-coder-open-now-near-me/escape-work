@@ -3919,6 +3919,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     dist: distToTile(active, tx, tz),
     los: losToTile(active, tx, tz),
     hasRoomToStand: world.summonSpots(tx, tz, 1).length > 0,
+    // The live headcount. main.js's out-of-combat twin has always passed this;
+    // combat's did not, so the shared rule's cap leg was skipped in a fight -
+    // the rings promised spots a maxed-out req could not fill, and the click
+    // then blamed the FLOOR ("can't find a free desk") for a limit that is
+    // about the roster. Same number `resolveSummon` will act on.
+    room: summonRoom(active.actor, a),
   });
   function placeSummon(tx, tz) {
     const a = ACTIONS[armed];
