@@ -9,8 +9,8 @@
 // kinds extend GridActor the same way.
 import { rollLoot } from './data/items.js';
 import { unitCombat } from './stats.js';
-import { applyStatus, hasStatus, statusFx } from './statuses.js';
-import { slips, speedUnderStatus } from './step-rules.js';
+import { applyStatus, hasStatus, statusFx, tickStep } from './statuses.js';
+import { slips, speedUnderStatus, surfaceEffect } from './step-rules.js';
 import { cloneMaterials, tintMaterials } from './models.js';
 
 // The engine handle, resolved LAZILY rather than read at module scope.
@@ -501,14 +501,44 @@ export class EnemyActor extends GridActor {
       // Wet floors are slippery for everyone - a slip ends the amble there.
       // Gum wads stick to wanderers too: slow forever, but never slip again.
       this.onTile = (x, z, done, changed) => {
-        // Gum is a status now (statuses.js), shared with the combat unit so a
-        // wanderer that steps in a wad is still gummed when a fight starts.
+        // An amble obeys the floor, the same as a walk with dice out [stated]
+        // (designer, 2026-08-03, "yes all fixes"). It used to obey two rules of
+        // the thirteen - gum and slipping - so a coworker could stroll through
+        // flame lit across their route for nothing, on the exact tile that
+        // bills a member 4 HP, and a wad picked up out here was permanent while
+        // the same wad expired the moment a fight started.
         //
-        // Out here it never wears off, because this amble runs no step clock -
-        // and that is now an inconsistency rather than the rule it used to be.
-        // Combat ticks the same wad down (combat.js's AI walk), so one wad has
-        // two lifetimes depending on whether dice are out: permanent while
-        // ambling, expiring the moment a fight starts. Queued as Q032.
+        // Sampled BEFORE the clock ticks, the same rule both other handlers
+        // state: the tile a wad wears off on still keeps its traction.
+        const wasSlipProof = !!statusFx(this).slipProof;
+        if (changed && this.alive) {
+          const step = tickStep(this);
+          if (step.damage > 0 && this.takeDamage(step.damage)) return;
+          // A lapsed wad gives the legs back. Derived, never scaled in place -
+          // see the note on the pickup below.
+          if (step.expired.length) {
+            if (this.baseSpeed === undefined) this.baseSpeed = this.speed;
+            this.speed = speedUnderStatus(this.baseSpeed, statusFx(this));
+          }
+        }
+        // The floor's own rules, off the same fact sheet and the same pure
+        // `surfaceEffect` combat and the party both read - the damage, the
+        // turn-clock status it applies, and the `bleed` a paper drift leaves.
+        // Silently: the surface messages are written in the player's voice, and
+        // a coworker ambling past is not the player.
+        if (changed && this.alive) {
+          const sfx = surfaceEffect(world.floorAt(x, z));
+          if (sfx?.applies && sfx.applies !== 'gum') applyStatus(this, sfx.applies);
+          const amount = world.surfDamage(x, z);
+          if (amount > 0) {
+            if (sfx?.bleed) applyStatus(this, 'bleed', { duration: sfx.bleed });
+            this.flinch();
+            if (this.takeDamage(amount)) return;
+          }
+        }
+        // Gum is a status now (statuses.js), shared with the combat unit so a
+        // wanderer that steps in a wad is still gummed when a fight starts, and
+        // ticking down on the step clock above wherever it was picked up.
         if (changed && !hasStatus(this, 'gum') && world.stickGum(x, z)) {
           applyStatus(this, 'gum');
           // DERIVE from a captured base, the same way combat's syncUnitSpeed
@@ -520,10 +550,10 @@ export class EnemyActor extends GridActor {
           if (this.baseSpeed === undefined) this.baseSpeed = this.speed;
           this.speed = speedUnderStatus(this.baseSpeed, statusFx(this));
         }
-        if (changed && slips({
+        if (changed && this.alive && slips({
           chance: world.slipChanceAt(x, z),
           roll: Math.random,
-          slipProof: statusFx(this).slipProof,
+          slipProof: wasSlipProof,
         })) {
           this.clearPath();
           this.flinch();

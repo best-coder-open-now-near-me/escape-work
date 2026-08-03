@@ -2296,6 +2296,12 @@ function startGame(level) {
         // because the facade never offered the first.
         isBurning: (x, z) => runtime.isBurning(x, z),
         enemySurfDamage: (x, z) => rawSurfDamage(x, z),
+        // The tile's raw facts, so combat can run step-rules' own
+        // `surfaceEffect` instead of being handed a pre-chewed answer per
+        // question. Every other surface entry here is a a different question
+        // asked of this same sheet; handing over the sheet is what stops the
+        // facade growing a method every time a new one comes up (Q900).
+        floorAt,
         // What a tile costs THIS member, after their talents (Q1-A, designer
         // 2026-08-02). The enemy model above consults none, which was right
         // while only enemies were billed by it - but the AI's shove and pull
@@ -2896,18 +2902,15 @@ function startGame(level) {
       say(had ? 'More gum. You are building a collection.' : sfx.message);
       syncHudFor(ms);
     }
-    // A turn-clock status a surface applies (fire -> burning) only takes hold in
-    // a fight; the instant surface damage below is the out-of-combat story.
-    //
-    // The reason this gate USED to give - "needs combat's turns to tick" - has
-    // been false since `advanceStatusTurn` landed an out-of-combat turn clock
-    // (designer, 2026-07-31: they should all be using the same thing in and out
-    // of combat). So the gate now stands on nothing but its own inertia: walk
-    // your own leader through flame out of combat and they do not catch. Fire
-    // is the only non-gum `applies` in data/surfaces.js, so this gate is
-    // entirely about fire, and whether to drop it is a design call, not a
-    // cleanup - Q032 carries the question.
-    if (sfx.applies && sfx.applies !== 'gum' && inCombat && applyStatus(ms, sfx.applies)) {
+    // A turn-clock status a surface applies (fire -> burning), in a fight or
+    // out of one [stated] (designer, 2026-08-03, on the Q906 gaps: "yes all
+    // fixes"). This used to be gated on `inCombat` because the status "needs
+    // combat's turns to tick" - which stopped being true when advanceStatusTurn
+    // landed an out-of-combat turn clock (designer, 2026-07-31: they should all
+    // be using the same thing in and out of combat). The gate outlived its
+    // reason by three days; walking through flame now sets you alight wherever
+    // you are, and the same clock ticks it down.
+    if (sfx.applies && sfx.applies !== 'gum' && applyStatus(ms, sfx.applies)) {
       vfx.status(x, z, sfx.applies);
       syncHudFor(ms);
     }
@@ -3963,6 +3966,13 @@ function startGame(level) {
       // saves a wanderer is checked by the same rule that saves you.
       slipChanceAt,
       stickGum,
+      // The same two the other side of the door already has: the tile's raw
+      // facts, and what it bills a coworker. An amble runs the floor's rules
+      // now [stated] (designer, 2026-08-03), and it runs them off the same
+      // sheet and the same ENEMY damage model a coworker's combat walk uses -
+      // what hurts a coworker has nothing to do with the player's shoes.
+      floorAt,
+      surfDamage: (x, z) => rawSurfDamage(x, z),
       // A wander route never crosses hazards, other actors, or a party
       // member's tile; the enemy's own start tile counts as open. Returns it
       // smoothed.

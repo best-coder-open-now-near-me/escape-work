@@ -29,7 +29,7 @@ import { STATUSES } from './data/statuses.js';
 import { blocksSight, PARTITION_TOPPLE } from './data/tiles.js';
 import { PANEL_CHROME, createCombatReadout, apPips } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
-import { slips, speedUnderStatus, impactKindFor,
+import { slips, speedUnderStatus, impactKindFor, surfaceEffect,
 } from './step-rules.js';
 import {
   topplePlan as toppleplanAt, aiTopplePlan as aiToppleplanFor, breakPlan,
@@ -4733,9 +4733,26 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         // an enemy that repositions out of your reach pays for it too.
         notifyStep(unit, x, z);
         if (!unit.alive) { unit.onTile = null; return; }
-        // AI units feel the floor too
+        // AI units feel the floor too - the damage, and now the riders that
+        // come with it [stated] (designer, 2026-08-03, "yes all fixes").
+        //
+        // The same `surfaceEffect` the member side reads, off the same fact
+        // sheet, because the alternative is a second opinion about what a tile
+        // does. What it carries: a turn-clock status (fire -> burning), and a
+        // `bleed` duration on the drift that cuts. Both were player-only, which
+        // made fire area denial that worked in one direction and left `bleed`
+        // with no way to reach a coworker at all - so the step clock right
+        // below could only ever expire gum.
+        const sfx = surfaceEffect(world.floorAt(x, z));
+        if (sfx && sfx.applies && sfx.applies !== 'gum' && applyStatus(unit, sfx.applies)) {
+          statusFxAt(unit, sfx.applies);
+          refresh();
+        }
         const surf = world.enemySurfDamage(x, z);
         if (surf > 0) {
+          // Before the damage: a body that goes down on this tile still went
+          // down bleeding, and the status list is what the death FX reads.
+          if (sfx?.bleed) applyStatus(unit, 'bleed', { duration: sfx.bleed });
           const died = unit.takeDamage(surf);
           fx.impact(x, z, hazardKind(x, z), { y: 0.35 });
           if (died) deathFx(unit);
