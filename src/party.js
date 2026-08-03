@@ -81,10 +81,15 @@ export function createCompanionSheet(def, id, level = 1) {
 // is a POSITION, revalidated against a world the new floor does not have.
 const HELD_STATUSES = ['sneaking', 'covered'];
 
-export function serializeProgress(party, levelId) {
+// `savedAt` is a wall-clock stamp, not save state: nothing in the run reads it
+// and a save without one loads exactly as before. The desk uses it to tell two
+// runs apart when it offers both (a local Continue beside a cloud one), which
+// is the whole reason a player can be asked to choose between them.
+export function serializeProgress(party, levelId, now = Date.now()) {
   return {
     version: SAVE_VERSION,
     levelId,
+    savedAt: now,
     party: party.members.map((m) => strippedForSave(m.sheet)),
     active: party.active,
     cash: party.cash || 0,
@@ -215,13 +220,15 @@ export function parseProgress(raw) {
   // A save older than v6 has no purse; a corrupted one gets zero rather than a
   // NaN that would poison every later arithmetic.
   const cash = Number.isFinite(raw.cash) && raw.cash > 0 ? Math.floor(raw.cash) : 0;
+  // Absent on every save written before the desk offered two runs at once.
+  const savedAt = Number.isFinite(raw.savedAt) && raw.savedAt > 0 ? raw.savedAt : null;
   if (Array.isArray(raw.party) && raw.party.length) {
     const active = Number.isInteger(raw.active) && raw.active >= 0 && raw.active < raw.party.length
       ? raw.active : 0;
-    return { levelId: raw.levelId, sheets: raw.party.map((s) => normalizeSheet(s, version)), active, cash };
+    return { levelId: raw.levelId, sheets: raw.party.map((s) => normalizeSheet(s, version)), active, cash, savedAt };
   }
   if (raw.sheet && typeof raw.sheet === 'object') {
-    return { levelId: raw.levelId, sheets: [normalizeSheet(raw.sheet, version)], active: 0, cash };
+    return { levelId: raw.levelId, sheets: [normalizeSheet(raw.sheet, version)], active: 0, cash, savedAt };
   }
   return null;
 }

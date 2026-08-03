@@ -74,6 +74,20 @@ export function createPicker() {
     return tmin;
   }
 
+  // A hidden storey must not eat clicks. The cutaway hides a whole floor by
+  // disabling its root entity (scene.js `updateCutaway`), but a disabled
+  // entity's mesh instances keep their world AABBs - so the ray went on
+  // hitting doors and props on a storey the player cannot even see, and the
+  // door they clicked THROUGH never got the click. `layeredPick` already
+  // scans top-down through visible storeys for the same reason; this is the
+  // body picker learning the same rule. Walks the chain rather than reading
+  // `entity.enabled`, which is the LOCAL flag: the item's own flag stays true
+  // while its storey root is the thing switched off.
+  function visible(entity) {
+    for (let e = entity; e; e = e.parent) if (e.enabled === false) return false;
+    return true;
+  }
+
   const _o = new pc.Vec3();
   const _f = new pc.Vec3();
   // Nearest interactable under the screen pixel, or null. Returns a fresh
@@ -89,6 +103,7 @@ export function createPicker() {
     let bestT = Infinity;
     let best = null;
     for (const [entity, item] of items) {
+      if (!visible(entity)) continue;
       if (!bounds(item)) continue;
       const t = raySlab(_o.x, _o.y, _o.z, dx, dy, dz);
       if (t !== null && t < bestT) {

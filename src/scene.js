@@ -58,6 +58,22 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
   const walls = [];
   const surfaceVisuals = new Map(); // "x,z" -> entity
   const propVisuals = new Map();
+  // Everything else `renderMarker` hands back. The two filers below only ever
+  // kept `wall`, `surface` and `prop`, so the other two kinds were rendered
+  // and then forgotten: a `marker` (the toppled partition's floor slab, every
+  // `onFloor` remnant) and the FOLIAGE a model prop wears. Forgotten means
+  // `removePropVisual` cannot reach them, so `refreshTile` drew the new mesh
+  // on top of the old one and a plant that had been toppled kept its leaves.
+  // A tile may own several (a model's holder is filed in propVisuals, its
+  // leaves here), so this one is keyed to a LIST.
+  const extraVisuals = new Map(); // "x,z" -> entity[]
+  const trackExtra = (x, z, entities) => {
+    if (!entities?.length) return;
+    const key = x + ',' + z;
+    const list = extraVisuals.get(key) || [];
+    for (const e of entities) if (e) list.push(e);
+    if (list.length) extraVisuals.set(key, list);
+  };
 
   const carpetAt = computeCarpetZones(grid.typeAt, grid.width, grid.height);
 
@@ -99,7 +115,7 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
       else if (res.kind === 'prop') {
         propVisuals.set(x + ',' + z, res.entities[0]);
         if (interactive && picking) picking.register(res.entities[0], 'prop', { x, z });
-      }
+      } else trackExtra(x, z, res.entities);
     }
   }
   // Edge walls (partitions between tiles) join the same fade list, keyed by
@@ -202,6 +218,11 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
       v.destroy();
       propVisuals.delete(x + ',' + z);
     }
+    const extras = extraVisuals.get(x + ',' + z);
+    if (extras) {
+      for (const e of extras) e.destroy();
+      extraVisuals.delete(x + ',' + z);
+    }
   }
 
   // The damaged TELL (TACTICS_PLAN M8): a wounded prop sits visibly askew -
@@ -259,7 +280,7 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
     else if (res.kind === 'prop') {
       propVisuals.set(x + ',' + z, res.entities[0]);
       if (interactive && picking) picking.register(res.entities[0], 'prop', { x, z });
-    }
+    } else trackExtra(x, z, res.entities);
   }
 
   return {

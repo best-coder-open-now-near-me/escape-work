@@ -1288,7 +1288,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // the same gate (handleEnemyClick's: your turn, standing still) - the cursor
   // used to read its own ungated body pick, promising a swing mid-walk or on
   // an AI turn that the readout and the click both refused.
-  function handleHover(point, sx, sy, picked = null, doorMid = null) {
+  // `onOwnTile`: the ground point rounds to the ACTING body's own tile, which
+  // main.js's click resolver treats as the first authority - a self-cast or a
+  // shuffle in place, never a swing, whatever tall mesh overlaps the pixel.
+  // The hover has to agree, and it has to agree HERE rather than only at the
+  // cursor: `hoverFoe` is what draws the target ring and the to-hit readout,
+  // so gating it in main.js alone would swap one lie for a quieter one.
+  function handleHover(point, sx, sy, picked = null, doorMid = null, onOwnTile = false) {
     // Tracked before any gate, like hoverFoe: a hover that leaves the canvas
     // (main.js calls in with nulls) must clear the door ring the same frame.
     hoverDoor = doorMid;
@@ -1303,7 +1309,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // The ground point is only a fallback for rays that miss the mesh, and a
     // pick can land on a body whose ground ray misses the world entirely (a
     // chest pixel next to a wall), so the pick must not require a point.
-    hoverFoe = (picked?.alive ? picked : null) || (point ? enemyAtPoint(point) : null);
+    hoverFoe = onOwnTile
+      ? null
+      : (picked?.alive ? picked : null) || (point ? enemyAtPoint(point) : null);
     if (phase !== 'player' || active.actor.moving || (!point && !hoverFoe)) { hidePreview(); return null; }
     // Armed: the movement trail yields to the to-hit readout over a target.
     if (armed) {

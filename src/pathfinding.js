@@ -421,8 +421,20 @@ function roundBends(isWalkable, path, edgeOpen) {
     for (let s = 1; ok && s < arc.length; s++) {
       ok = walkableCorridor(isWalkable, arc[s - 1][0], arc[s - 1][1], arc[s][0], arc[s][1], edgeOpen);
     }
-    if (ok) out.push(...arc);
-    else out.push(b); // too tight to round - the sharp turn is the truth
+    if (ok) { out.push(...arc); continue; }
+    // Too tight to round - the sharp turn is the truth. But the sharp turn is
+    // only the truth if a -> b is walkable, and the FIRST check above is
+    // exactly `a -> p1`, where p1 sits ON the segment a -> b. So when that is
+    // the check that failed, this fallback used to emit a leg the loop had
+    // just proved illegal, and a smoothed walk crossed a partition.
+    //
+    // `a` is only ever wrong that way when the PREVIOUS bend rounded and left
+    // us on its arc's exit point; the input path's own corner, path[i - 1],
+    // is corridor-connected to b (tightenPath keeps every chord it moves).
+    // Stepping back onto it costs a barely-visible kink at one bend and is
+    // the honest route.
+    if (walkableCorridor(isWalkable, a[0], a[1], b[0], b[1], edgeOpen)) out.push(b);
+    else out.push(path[i - 1], b);
   }
   out.push(path[path.length - 1]);
   return out;

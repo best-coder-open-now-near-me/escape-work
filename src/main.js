@@ -207,6 +207,25 @@ const clearProgress = () => {
 // path), #editor, ?level=, and editor playtest stashes all already said which
 // level they mean. A saved campaign shows Continue on top; picking any floor
 // instead starts fresh, and only the campaign's first floor writes progress.
+//
+// TWO runs can be on offer at once - this browser's, and the one the cloud
+// save key points at - and the player picks (designer, 2026-08-03: "the
+// recommended option A is fine for persistence"). The desk used to suppress
+// the cloud lookup entirely whenever a local save existed, so the phrase's run
+// was never read and the first floor this browser cleared pushed over it. Each
+// offer gets its own button id and says which run it is, floor and age, so
+// they can be told apart.
+const AGE_UNITS = [[86400e3, 'day'], [3600e3, 'hour'], [60e3, 'minute']];
+function describeAge(stamp) {
+  if (!Number.isFinite(stamp) || stamp <= 0) return '';
+  const ms = Date.now() - stamp;
+  if (ms < 60e3) return ' — just now';
+  for (const [size, unit] of AGE_UNITS) {
+    const n = Math.floor(ms / size);
+    if (n >= 1) return ` — ${n} ${unit}${n === 1 ? '' : 's'} ago`;
+  }
+  return '';
+}
 function showLevelMenu() {
   const overlay = document.createElement('div');
   overlay.id = 'level-menu';
@@ -242,7 +261,8 @@ function showLevelMenu() {
   const boot = (fn) => { overlay.remove(); fn(); };
   if (restoredProgress) {
     button('level-continue', 'Continue the run',
-      `${LEVELS[restoredProgress.levelId]?.name || restoredProgress.levelId} — your party, mid-escape`,
+      `${LEVELS[restoredProgress.levelId]?.name || restoredProgress.levelId} — this browser`
+        + describeAge(restoredProgress.savedAt),
       () => boot(() => startGame(activeLevel)));
   }
   for (const [id, level] of Object.entries(LEVELS)) {
@@ -304,14 +324,19 @@ function showLevelMenu() {
     row.appendChild(set);
     panel.appendChild(row);
   }
-  // A cloud save can land after the desk is up: nothing local, but this
-  // device pushed a run before (or the browser was rebuilt). Offer it as
-  // Continue; clicking banks it locally and reboots through the restore
-  // path that already knows how to rebuild a party.
-  if (!restoredProgress && remote.enabled) {
+  // A cloud save can land after the desk is up: this device pushed a run
+  // before, or the browser was rebuilt, or the phrase belongs to a run made
+  // somewhere else entirely. Offer it as its own Continue; clicking banks it
+  // locally and reboots through the restore path that already knows how to
+  // rebuild a party.
+  //
+  // The pull runs whether or not there is a local save. It used to be gated on
+  // `!restoredProgress`, which is what made the cloud copy invisible to the
+  // one browser most likely to overwrite it (Q017).
+  if (remote.enabled) {
     remote.pull().then((row) => {
       if (!row?.data || !document.getElementById('level-menu')) return;
-      if (document.getElementById('level-continue')) return;
+      if (document.getElementById('level-continue-cloud')) return;
       // Validate with the BOOT path's own check before offering it. The
       // button banks the row and reloads, and boot then runs
       // `parseProgress` + `LEVELS[levelId]` over it - so a row this build
@@ -321,8 +346,16 @@ function showLevelMenu() {
       // means the offer only appears when accepting it will work.
       const p = parseProgress(row.data);
       if (!p || !LEVELS[p.levelId]) return;
-      const b = button('level-continue', 'Continue the run',
-        `${LEVELS[p.levelId].name || p.levelId} — restored from the cloud`,
+      // `updatedAt` is the row's own stamp and beats anything inside the save
+      // blob; `savedAt` is the fallback for rows written before saves carried
+      // one. And when a local run is ALSO on offer, the sub-label says what
+      // taking this one costs - banking it is what replaces the local save,
+      // and the player is the one choosing that.
+      const age = describeAge(Date.parse(row.updatedAt) || p.savedAt);
+      const b = button('level-continue-cloud',
+        restoredProgress ? 'Continue the cloud run' : 'Continue the run',
+        `${LEVELS[p.levelId].name || p.levelId} — your save key${age}`
+          + (restoredProgress ? ' · replaces this browser\'s run' : ''),
         () => {
           // The reload used to sit OUTSIDE this try, so a browser that can
           // read but not write - quota gone, private mode - reloaded onto a
@@ -336,7 +369,9 @@ function showLevelMenu() {
           }
           location.reload();
         });
-      panel.insertBefore(b, panel.children[2] || null); // above the floor list
+      // Above the floor list, and BELOW the local Continue when there is one -
+      // the run this browser is already in the middle of stays the top offer.
+      panel.insertBefore(b, panel.children[restoredProgress ? 3 : 2] || null);
     });
   }
   overlay.appendChild(panel);
@@ -1084,7 +1119,29 @@ function startGame(level) {
         : ` ${m.sheet.name} catches shrapnel. -${EXPLOSION_DAMAGE} HP.`;
       if (dead) downed.push(m);
     }
+    // Summons stand beside a printer like anyone else. They were invisible to
+    // both loops above - a player-team summon is filed in `summons`, which is
+    // neither `enemies` nor `party.members` - so a blast that flattened the
+    // whole party left the conjured coworker next to it untouched. One that
+    // runs out of HP is DISMISSED rather than downed: no body, no loot, and
+    // nothing for downOrLose to weigh, because a summon is not somebody the
+    // run can be lost with (dismissSummon).
+    const spent = [];
+    for (const s of summons) {
+      if (!s.actor?.entity || s.sheet.hp <= 0) continue;
+      if (Math.abs(s.actor.x - x) > 1 || Math.abs(s.actor.z - z) > 1) continue;
+      const gone = applyDamage(s.sheet, EXPLOSION_DAMAGE);
+      s.actor.flinch();
+      vfx.impact(s.actor.x, s.actor.z, 'slam');
+      vfx.damageText(s.actor.x, s.actor.z, `-${EXPLOSION_DAMAGE}`);
+      msg += ` ${s.sheet.name} catches shrapnel. -${EXPLOSION_DAMAGE} HP.`;
+      if (gone) spent.push(s);
+    }
     ui.say(msg);
+    for (const s of spent) {
+      ui.say(`${s.sheet.name}'s assignment ends in the toner cloud.`);
+      dismissSummon(s.actor);
+    }
     for (const en of slain) awardKill(en);
     if (sheet) paintHud(sheet);
     for (const m of downed) {
@@ -1305,9 +1362,17 @@ function startGame(level) {
     if (leg.kind === 'walk') {
       if (leg.path.length < 2) { startNextLeg(); return; }
       const g = floors.layers[leg.layer];
-      const smoothed = smoothPath(walkableOn(leg.layer), leg.path, g.edgeOpen);
+      // The body's REAL position goes in BEFORE the smoother, not after. A
+      // walk starts wherever the last one left the body - a clamped point
+      // off the tile centre - and splicing that in afterwards handed the
+      // first run a start the corridor checks never saw, so the opening leg
+      // could clip the wall the smoother had carefully cleared from the
+      // centre. Feeding it in first makes the first run the one that gets
+      // checked.
+      const path = leg.path.map((p) => [p[0], p[1]]);
       const pos = player.entity?.getPosition();
-      if (pos) smoothed[0] = [pos.x, pos.z];
+      if (pos) path[0] = [pos.x, pos.z];
+      const smoothed = smoothPath(walkableOn(leg.layer), path, g.edgeOpen);
       player.setPath(smoothed);
       lastPath = smoothed;
     } else {
@@ -3339,6 +3404,16 @@ function startGame(level) {
     onHover: (point, sx, sy) => {
       if (inCombat && combat) {
         const hit = picking.pick(controls.cameraEntity, sx, sy);
+        // The acting body's OWN tile is the click's first authority (see
+        // onLeftClickTile): a self-cast or a shuffle in place must not be
+        // stolen by an adjacent coworker's tall mesh overlapping the pixel.
+        // The hover had no such rule, so on those pixels the crosshair and
+        // the to-hit readout promised a swing that the click turned into an
+        // in-place shuffle. Same test, same rounding as `screenToTile`, so
+        // the two affordances answer together.
+        const acting = combat.actingActor || party?.members[party.active]?.actor || player;
+        const onOwnTile = !!acting && !!point
+          && Math.round(point.x) === acting.x && Math.round(point.z) === acting.z;
         // A coworker under the cursor is a TARGET, armed or not - a bare click
         // swings the basic attack (combat.js), so the cursor has to say so.
         // combat.handleHover resolves WHO that is (this body pick first, the
@@ -3347,14 +3422,18 @@ function startGame(level) {
         // crosshair keys off that one answer. Reading the raw pick here showed
         // a crosshair mid-walk and on AI turns, promising a swing while the
         // to-hit readout and the click itself refused.
-        const picked = hit?.kind === 'enemy' && hit.ref.alive ? hit.ref : null;
+        const picked = !onOwnTile && hit?.kind === 'enemy' && hit.ref.alive ? hit.ref : null;
         // The hovered door, resolved ONCE with the click's own predicate
         // (combatDoorAt) and handed to combat alongside the hover - the
         // pointer cursor and the threshold ring read this same answer, so
         // the two affordances light together and die together.
         const doorKey = combatDoorAt(hit, point);
+        // handleHover still runs with the real point - a cone, a zone and a
+        // summon drop all aim off it, and the shuffle's own move preview is
+        // priced there too. It is `hoverFoe` that stands down, which takes
+        // the crosshair, the glow, the ring and the readout together.
         const foe = combat.handleHover(point, sx, sy, picked,
-          doorKey ? doorMidpoint(doorKey) : null);
+          doorKey ? doorMidpoint(doorKey) : null, onOwnTile);
         // A coworker wins the cursor; failing that, a door you could work says
         // so with the same pointer it uses out of combat. The click reads the
         // very same predicate, so the two cannot disagree.

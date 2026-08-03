@@ -235,7 +235,9 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
   // height plus a tiny per-sheet rise keeps overlapping sheets from z-fighting.
   function addPaper(x, z) {
     const holder = new pc.Entity();
-    const baseY = hash01(x, z, 50) * 0.014;
+    // NOT `baseY` - that name belongs to the storey lift, and shadowing it
+    // here rendered an upper storey's paper drift on the ground floor.
+    const rise = hash01(x, z, 50) * 0.014;
     const n = 6 + Math.floor(hash01(x, z, 99) * 3); // 6-8 sheets
     for (let i = 0; i < n; i++) {
       const ox = (hash01(x, z, i * 4 + 1) - 0.5) * 0.86;
@@ -245,11 +247,11 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
       const e = new pc.Entity();
       e.addComponent('render', { type: 'box', material: paperTints[i % paperTints.length] });
       e.setLocalScale(s, 0.02, s * 0.74);
-      e.setLocalPosition(ox, baseY + 0.006 * i, oz);
+      e.setLocalPosition(ox, rise + 0.006 * i, oz);
       e.setLocalEulerAngles(0, ry, 0);
       holder.addChild(e);
     }
-    holder.setPosition(x, surfaceTop + baseY, z);
+    holder.setPosition(x, surfaceTop + rise + baseY, z);
     parent.addChild(holder);
     return holder;
   }
@@ -364,8 +366,12 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
       e.setLocalScale(s, 1, s);
       holder.addChild(e);
     }
-    holder.setPosition(x, floorDef.height / 2, z);
-    app.root.addChild(holder);
+    // The storey's own root and lift, like every other tile visual here.
+    // Parenting to `app.root` and dropping `baseY` put a mezzanine's plants
+    // on the lobby floor, where they also never hid with their storey - the
+    // cutaway toggles the storey root, and these were not under it.
+    holder.setPosition(x, floorDef.height / 2 + baseY, z);
+    parent.addChild(holder);
     return holder;
   }
 

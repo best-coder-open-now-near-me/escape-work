@@ -533,6 +533,33 @@ test('a corridor one tile wide is walked without leaving it', () => {
   assert.equal(legClear(s, w), null);
 });
 
+// The concrete case the leg tests above kept missing, found by sweeping random
+// 8x8 rooms: `legClear` samples TILE CENTRES, and a leg can clip a wall while
+// every sample still rounds onto open floor. Asking `segmentClear` - the same
+// primitive `walkableCorridor` uses for the travel line - is the real question.
+// Here two bends in a row round, so the second bend's `a` is the first arc's
+// exit point; its `a -> p1` check fails, and the old fallback pushed the sharp
+// corner anyway, sending the walk from (3.80,4.47) to (4.73,5.81) straight
+// through the solid cell at (4,5).
+test('a rejected arc never falls back onto the leg it just proved illegal', () => {
+  const w = walkableFrom([
+    '...###..',
+    '...##...',
+    '#...#.#.',
+    '#...###.',
+    '.#...#.#',
+    '#..#.#..',
+    '........',
+    '...#....',
+  ]);
+  const raw = findPath(w, 0, 0, 7, 7);
+  const s = smoothPath(w, raw);
+  for (let i = 1; i < s.length; i++) {
+    assert.ok(segmentClear(w, s[i - 1][0], s[i - 1][1], s[i][0], s[i][1]),
+      `leg ${i} (${s[i - 1]}) -> (${s[i]}) leaves the open floor`);
+  }
+});
+
 test('a search on an unbounded world gives up instead of hanging', () => {
   // Not reachable through the shipped grid - `defAt` returns the wall def out
   // of bounds, so every real world is sealed. This is the guard for when that
