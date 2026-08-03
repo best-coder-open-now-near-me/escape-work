@@ -147,10 +147,18 @@ test('double-clicking a combat-strip row looks at that combatant', async ({ page
 // `player` were the same object, so a follow loop reading the wrong one still
 // framed the right body.
 //
-// The shared turn is a dice outcome (d20 + speed, three combatants), so this
-// asserts opportunistically: no shared turn, nothing to prove, and the spec
-// says so rather than pretending it checked. When there IS one, the assert is
-// the whole fix - steer the teammate, and the camera must be on THEM.
+// The shared turn is a dice outcome (d20 + speed, three combatants), so the
+// fight is SEEDED. `seed: 4` rolls the Office Drone 24, IT Support 13 and the
+// Manager 10 - measured, not derived - which puts both party slots first and
+// consecutive: a shared turn, opened on the leader, with the teammate still
+// there to steer to.
+//
+// It used to `test.skip` when the roll gave no shared turn. That is worse than
+// it sounds: an unlucky roll made this leg report GREEN while proving nothing,
+// and there is no signal anywhere that says how often it actually ran. Seeds 1,
+// 3 and 5 all produce no shared turn, so it was not rare. The seeded-initiative
+// lever exists now (helpers.bootStash takes one), so the skip becomes an
+// assert.
 const PARTY_COMBAT_LEVEL = {
   name: 'Camera Party Combat Floor',
   tiles: { '#': 'wall', '.': 'floor', '>': 'exit' },
@@ -167,7 +175,7 @@ const PARTY_COMBAT_LEVEL = {
 
 test('steering a teammate mid-fight takes the camera with it', async ({ page }) => {
   test.setTimeout(300_000);
-  await bootStash(page, PARTY_COMBAT_LEVEL);
+  await bootStash(page, PARTY_COMBAT_LEVEL, 'office-drone', { seed: 4 });
 
   expect(await clickWorld(page, 3, 2)).toBe(true);
   await page.waitForFunction(() => window.__game.dialogueOpen, null, { timeout: 20_000 });
@@ -192,7 +200,9 @@ test('steering a teammate mid-fight takes the camera with it', async ({ page }) 
     const i = window.__game.party.findIndex((m) => Math.hypot(m.x - lead.x, m.z - lead.z) > 0.5);
     return i >= 0 ? window.__god.switchTo(i) : false;
   });
-  test.skip(!steered, 'the roll gave no shared turn this run - nothing to steer');
+  expect(steered,
+    'seed 4 opens on a shared leader+teammate turn, so there must be somebody to steer to')
+    .toBe(true);
 
   // The LEADER did not change - that is the whole point. `player` still names
   // the member who led the party in, so the two positions disagree, and the
