@@ -37,6 +37,7 @@ import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel, buildLayeredLevel } from './scene.js';
 import { createCombatWorld } from './combat-world.js';
+import { createHotbarHost } from './hotbar-host.js';
 
 import { loadRemoteStore, SAVE_KEY_STORAGE } from './remote-store.js';
 import { placeModel, applyCharacterProportions, cloneMaterials, tintMaterials } from './models.js';
@@ -484,11 +485,7 @@ function startGame(level) {
   // tucked in. Any deliberate walk or leader change clears it.
   let oocCrouch = null;
   let oocAim = null; // last ground point the cursor was over, out of combat
-  let hotbar = null; // persistent action bar (built once a class is picked)
   let tacticalBtn = null; // overhead-camera toggle on the HUD rail (built with the HUD)
-  let hotbarPaper = -1; // last paper count the hotbar rendered (refresh gate)
-  let hotbarBagKey = ''; // last pocket contents the hotbar rendered (item slots)
-  let hotbarRow = 0; // which hotbar row is showing - survives a bar rebuild
   let pendingGodPick = null; // god-mode click-to-place callback (see window.__god)
   let oocTurnClock = 0; // out-of-combat real-time accrued toward the next fire/smoke turn
 
@@ -1656,7 +1653,7 @@ function startGame(level) {
     approachAndDo(m.actor.x, m.actor.z, () => {
       m.sheet.statuses = {};
       armedOoc = null;
-      hotbar?.setArmed(null);
+      hotbarHost.hotbar?.setArmed(null);
       ui.say(`You power-cycle ${m.sheet.name}. Everything they were carrying clears.`);
       paintHud(sheet); // the leader's card, for a self-cast
       partyBarKey = ''; // and the roster bar re-renders next frame
@@ -1805,133 +1802,23 @@ function startGame(level) {
   // of one it is the leader's, exactly as before. Without this the layout came
   // from the leader while combat priced it against whoever was acting, which is
   // the same two-sources-of-truth drift the bars themselves had.
-  const barSheet = () => ((inCombat && combat) ? combat.actingSheet : sheet);
-  // The bar's rules live in hotbar-model.js; these bind them to whoever's bar
-  // is on screen. The DOM, the arming and the pager stay here.
-  const hotbarActionIds = () => actionIdsFor(barSheet());
-  const hotbarItemIds = () => itemCountsFor(barSheet());
-  const layoutOf = (s) => layoutFor(s, ui.HOTBAR_ROW_SLOTS);
-  // In a fight the numbers are combat's - the acting member's AP, uses and
-  // paper. Out of one they are this file's. Same slot, same fields, two
-  // rule-owners, which is the point of the bar being one widget instead of two
-  // that drift.
-  const slotVm = (entry) => ((inCombat && combat && entry?.kind === 'action')
-    ? combatSlotViewModel(entry, combat.actionState(entry.id), combat.actingSheet.name)
-    : slotViewModel(entry, barSheet()));
-
-  // What the bar's item slots are counting, as one string - the gate that keeps
-  // a per-frame DOM repaint off the hot path (like hotbarPaper for ammo).
-  const bagKey = () => (barSheet()?.inventory || []).join(',');
-  // Re-read the slots against live pocket contents: an assigned item can run
-  // out, refill, or change count, and the count is in the label. The slot
-  // view-models carry it, so this is a rebuild - cheap, and it is the same path
-  // a gear change or a level-up already takes.
-  const refreshHotbarSlots = () => { if (hotbar && sheet) buildHotbar(); };
-  // The slots the bar shows, in the order it shows them. In a fight the reorg
-  // status (`confused`) can shuffle that order - the same disorientation it
-  // always applied, now landing on the player's own arrangement instead of on
-  // a separate list combat kept for itself.
-  const barLayout = () => {
-    const entries = layoutOf(barSheet());
-    return inCombat && combat ? combat.scrambleEntries(entries) : entries;
-  };
-  // The slot a visible position REALLY is. While the reorg is on, the bar
-  // draws and presses a shuffled order but the layout being rearranged is the
-  // player's own - so right-clicking slot 3 used to open the assign menu for
-  // whatever sat at true index 3, which under a scramble is a different slot
-  // from the one under the cursor. Press and assign now agree on what "this
-  // slot" means: press already read the drawn order, and assign maps through
-  // the same permutation before it writes.
-  const trueSlot = (i) => {
-    if (!inCombat || !combat) return i;
-    const order = combat.scrambleOrder(layoutOf(barSheet()).length);
-    return order ? order[i] ?? i : i;
-  };
-  function buildHotbar() {
-    hotbarRow = hotbar?.row ?? hotbarRow;
-    hotbar?.destroy(); // a leader switch rebuilds it for the new sheet
-    hotbar = ui.createHotbar(barLayout().map(slotVm), {
-      onPress: pressHotbarSlot,
-      onAssign: openAssignMenu,
-      startRow: hotbarRow, // the row you were on survives the rebuild
-    });
-    hotbar.refresh(barSheet());
-    // A rebuild starts with no slot lit, but `armedOoc` survives it - spending
-    // a level-up point mid-aim left the bar looking unarmed while the rings,
-    // the crosshair and the next click all still acted on the armed action.
-    // The bar shows what is actually armed, or nothing is.
-    hotbar.setArmed(inCombat && combat ? combat.armed : armedOoc);
-    hotbarPaper = barSheet().paper;
-    hotbarBagKey = bagKey();
-  }
-  // Pressing a slot: arm the power, or use the item. An empty slot says what it
-  // is for rather than nothing at all - a dead button teaches nothing.
-  //
-  // In a fight the press goes to combat, which owns arming, AP and the confirm
-  // step. That routing is the only thing that differs - the slot, its icon, its
-  // number key and its position are the player's either way.
-  function pressHotbarSlot(i) {
-    const entry = barLayout()[i];
-    if (!entry) { ui.say('That slot is empty - right-click it to assign a power or an item.'); return; }
-    if (entry.kind === 'item') { loot.useItemById(entry.id); return; }
-    if (inCombat && combat) { combat.pressAction(entry.id); return; }
-    toggleOocArm(entry.id);
-  }
-  // Right-click a slot: everything that can go in it, in the bar's own order,
-  // with what is already placed marked as such. Assigning something already on
-  // the bar SWAPS the two slots - that is how the bar gets rearranged, and it
-  // means the same power can never end up in two places.
-  // Rearranging works in a fight too. The layout is the same layout either way,
-  // and "you may not touch your own bar while it matters" was an artefact of
-  // combat owning a different widget, not a rule anybody chose.
-  function openAssignMenu(i, x, y) {
-    if (!sheet || gameOver || modalOpen()) return;
-    // `i` is a position on the BAR; `slot` is the layout entry it stands for.
-    // Everything the menu shows is read off the drawn order (so a hint sends
-    // the player to the slot they can actually see), and only the write goes
-    // through `trueSlot`.
-    const layout = barLayout();
-    const slot = trueSlot(i);
-    const here = layout[i];
-    const placedAt = (kind, id) => layout.findIndex((s) => s && s.kind === kind && s.id === id);
-    const rowOf = (at) => Math.floor(at / ui.HOTBAR_ROW_SLOTS) + 1;
-    const slotHint = (kind, id) => {
-      const at = placedAt(kind, id);
-      if (at < 0) return null;
-      return at === i ? 'in this slot' : `on ${rowOf(at)}·${(at % ui.HOTBAR_ROW_SLOTS) + 1}`;
-    };
-    const items = [{ label: `Slot ${rowOf(i)}·${(i % ui.HOTBAR_ROW_SLOTS) + 1}`, header: true }];
-    if (here) items.push({ label: 'Clear this slot', action: () => assignHotbarSlot(slot, null) });
-    items.push({ label: 'Powers', header: true });
-    for (const id of hotbarActionIds()) {
-      items.push({
-        // Iconed like the slot it would fill, so the menu and the bar name the
-        // same thing the same way.
-        label: `${ACTIONS[id].icon || '❔'}  ${ACTIONS[id].label}`,
-        hint: slotHint('action', id),
-        action: () => assignHotbarSlot(slot, { kind: 'action', id }),
-      });
-    }
-    const carried = hotbarItemIds();
-    items.push({ label: 'From your pockets', header: true });
-    if (!carried.size) items.push({ label: 'Nothing usable in there' });
-    for (const [id, n] of carried) {
-      items.push({
-        label: `${ITEMS[id].icon || '❔'}  ${ITEMS[id].name}`,
-        hint: slotHint('item', id) || (n > 1 ? `×${n}` : null),
-        action: () => assignHotbarSlot(slot, { kind: 'item', id }),
-      });
-    }
-    ui.showMenu(x, y, items);
-  }
-  function assignHotbarSlot(i, entry) {
-    if (!sheet) return;
-    barSheet().hotbar = assignInto(layoutOf(barSheet()), i, entry);
-    buildHotbar();
-    ui.say(entry
-      ? `${entry.kind === 'item' ? ITEMS[entry.id].name : ACTIONS[entry.id].label} moves to slot ${Math.floor(i / ui.HOTBAR_ROW_SLOTS) + 1}·${(i % ui.HOTBAR_ROW_SLOTS) + 1}.`
-      : 'You clear the slot.');
-  }
+  // The bar's DOM host (hotbar-host.js). It owns `hotbar`, `hotbarRow`,
+  // `hotbarBagKey` and `hotbarPaper` - four variables written by one function
+  // and read from a scope shared with 87 others until now. The mutable
+  // bindings go in as getters: the bar is rebuilt across leader switches and
+  // turn handoffs and must always read the live one.
+  const hotbarHost = createHotbarHost({
+    get sheet() { return sheet; },
+    get combat() { return combat; },
+    get inCombat() { return inCombat; },
+    get gameOver() { return gameOver; },
+    get armedOoc() { return armedOoc; },
+    ui,
+    loot,
+    modalOpen,
+    toggleOocArm: (id) => toggleOocArm(id),
+  });
+  const { buildHotbar, refreshHotbarSlots, barLayout, barSheet, layoutOf } = hotbarHost;
 
   // --- leader switching --------------------------------------------------------
   // A portrait click hands control to another member. Everything leader-keyed
@@ -2082,12 +1969,12 @@ function startGame(level) {
     // arm, so it does not count as reaching for another power.)
     if (armedOoc && armedOoc !== id) {
       armedOoc = null;
-      hotbar?.setArmed(null);
+      hotbarHost.hotbar?.setArmed(null);
       ui.say('You stand down.');
       return;
     }
     armedOoc = armedOoc === id ? null : id;
-    hotbar?.setArmed(armedOoc);
+    hotbarHost.hotbar?.setArmed(armedOoc);
     if (!armedOoc) { ui.say('You stand down.'); return; }
     const a = ACTIONS[armedOoc];
     // What the armed slot is waiting for. A summon aims at the FLOOR, so
@@ -2148,7 +2035,7 @@ function startGame(level) {
     // One click, one post: the slot disarms so a stray second click walks you
     // somewhere instead of quietly filling the floor with temps.
     armedOoc = null;
-    hotbar?.setArmed(null);
+    hotbarHost.hotbar?.setArmed(null);
   }
 
   // First (enemy, member) adjacency in the party - any member can get
@@ -2345,7 +2232,7 @@ function startGame(level) {
     for (const e of enemies) e.clearPath(); // freeze any in-flight wander
     pendingAction = null;
     armedOoc = null;
-    hotbar?.setArmed(null);
+    hotbarHost.hotbar?.setArmed(null);
     dialogue.close();
     shopping.close(); // the machine can wait; it is not going anywhere
     inCombat = true;
@@ -2430,7 +2317,7 @@ function startGame(level) {
         // Repaint the shared bar. combat.js calls this wherever it used to
         // rebuild its own: control changing hands, and every refresh() that
         // moves AP, uses, paper or the armed slot.
-        refreshBar: () => { if (hotbar && sheet) buildHotbar(); },
+        refreshBar: () => { if (hotbarHost.hotbar && sheet) buildHotbar(); },
         // One combat round = one fire/smoke turn (combat.js calls this as it
         // hands the turn back to the player).
         onRound: () => { runtime.advanceTurn(); ageTempSurfaces(); },
@@ -2571,7 +2458,7 @@ function startGame(level) {
     ui.say(`${a.log} No casualties. Plenty of litter.`); // combat's own zero-hit line
     // One click, one volley: the slot disarms, same as a posted summon.
     armedOoc = null;
-    hotbar?.setArmed(null);
+    hotbarHost.hotbar?.setArmed(null);
   }
 
   // --- the office topples out of combat too (TACTICS_PLAN M6 OOC) -------------
@@ -2613,7 +2500,7 @@ function startGame(level) {
         vfx.shake(0.11, 0.28);
         ui.say(`${plan.def.label || 'It'} goes over.`);
         armedOoc = null;
-        hotbar?.setArmed(null);
+        hotbarHost.hotbar?.setArmed(null);
       });
       return true;
     }
@@ -2652,7 +2539,7 @@ function startGame(level) {
         vfx.shake(0.08, 0.2);
         ui.say('You put a shoulder into the partition. It goes over flat.');
         armedOoc = null;
-        hotbar?.setArmed(null);
+        hotbarHost.hotbar?.setArmed(null);
       };
       if (side.here) resolve();
       else if (!walkToExact(side.x, side.z, resolve)) { ui.say('No way to get at that wall.'); }
@@ -2741,7 +2628,7 @@ function startGame(level) {
       paintHud(sheet);
       ui.say(`You tuck in behind ${oocCoverNames(tile.x, tile.z)}.`);
       armedOoc = null;
-      hotbar?.setArmed(null);
+      hotbarHost.hotbar?.setArmed(null);
     };
     if (player.x === tile.x && player.z === tile.z) {
       // Your own tile: a click on a meaningfully different POINT within it is
@@ -3724,12 +3611,12 @@ function startGame(level) {
       // half with no keyboard shortcuts at all. The row you learn out of combat
       // is the row you get in one, which was always the stated point of the
       // layout living on the sheet.
-      const i = hotbar?.indexAtKey(e.key === '0' ? 10 : Number(e.key)) ?? -1;
-      if (i >= 0) pressHotbarSlot(i);
+      const i = hotbarHost.hotbar?.indexAtKey(e.key === '0' ? 10 : Number(e.key)) ?? -1;
+      if (i >= 0) hotbarHost.pressSlot(i);
     } else if ((e.key === '[' || e.key === ']') && sheet && !gameOver && !modalOpen()) {
       // Page the hotbar rows from the keyboard - the pager buttons and the wheel
       // over the bar do the same thing.
-      hotbar?.flip(e.key === ']' ? 1 : -1);
+      hotbarHost.hotbar?.flip(e.key === ']' ? 1 : -1);
     } else if (e.key === 'Tab' && sheet && !gameOver && !modalOpen()) {
       // Tab cycles which member you lead out of combat - and, in one, which
       // member of an open SHARED turn you're steering (INITIATIVE_PLAN). With
@@ -4051,18 +3938,14 @@ function startGame(level) {
     // Persistent hotbar: visible only when it can act; ammo counts refresh
     // when they change (the gate keeps DOM writes off the hot path). Armed
     // out-of-combat target rings redraw each frame, like combat's own.
-    if (hotbar) {
+    if (hotbarHost.hotbar) {
       // Visible whenever it can act - which now includes a fight. Hiding it in
       // combat was what forced combat.js to build a second bar, and cost the
       // fight the layout, the pager, the item slots and the number keys.
-      const show = !!sheet && !gameOver && !modalOpen();
-      hotbar.setVisible(show);
-      const bs = barSheet();
-      if (show && bs && bs.paper !== hotbarPaper) { hotbarPaper = bs.paper; hotbar.refresh(bs); }
-      // Item slots count the pockets, and the pockets change from places that
-      // don't route through onBagChange (god mode, a shop, an overflow drop).
-      // Same shape as the party bar's key below: compare, repaint on a change.
-      if (show && bagKey() !== hotbarBagKey) refreshHotbarSlots();
+      // Whether it CAN act is this file's question; everything downstream of
+      // the answer - visibility, the ammo count, the pocket contents - belongs
+      // to the bar and now lives with it.
+      hotbarHost.syncFrame(!!sheet && !gameOver && !modalOpen());
       // What an armed slot rings depends on what it aims at: a coworker
       // (every attack and throw), a spot on the floor (a summon), the
       // hovered furniture/partition (shove - which ALSO rings coworkers,
