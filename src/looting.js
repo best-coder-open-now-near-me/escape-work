@@ -8,16 +8,19 @@
 // accessors): getActor, getSheet, isInCombat, isGameOver - plus approachAndDo
 // so overlay clicks walk the leader in.
 import { ITEMS, LOOT_TABLES, rollLoot } from './data/items.js';
-import { PAPER_CAP, equipItem, unequipItem } from './stats.js';
+import { PAPER_CAP, equipItem, unequipItem, inventoryCapOf } from './stats.js';
 import { placeDroppedItem } from './tile-renderer.js';
 import * as ui from './ui.js';
 
-// No carry limit. The cap only ever produced overflow-onto-the-floor and
-// "pockets are full" refusals, which is friction without a decision attached -
-// you never chose WHAT to leave behind, the tenth item just fell out. Kept as
-// a named export (Infinity) so every guard site stays honest without each one
-// growing a special case.
-export const INV_CAP = Infinity;
+// The carry limit is a STAT [stated] (designer, 2026-08-03: "we'll make
+// inventory limit based on a stat, so it needs a variable cap"), so it is asked
+// of the sheet at every guard site rather than read from a constant here - and
+// the sheet in question is whoever is leading right now, which changes.
+//
+// `stats.inventoryCapOf` answers Infinity until the stat is picked, so today's
+// behaviour is unchanged and the guards below are all live paths waiting on a
+// number rather than dead code. They were briefly on the books as dead code to
+// delete (Q136); this is the answer to that, and it is the opposite one.
 
 // Contiguous paper drifts, 4-connected, as { tiles, cx, cz } - the tiles the
 // patch covers and its centre, which is where its Alt label floats.
@@ -107,7 +110,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
   const corpseAt = (x, z) =>
     enemies.find((e) => !e.alive && e.loot?.length && e.x === x && e.z === z) || null;
 
-  const invPanel = ui.createInventoryPanel(ITEMS, INV_CAP, {
+  const invPanel = ui.createInventoryPanel(ITEMS, inventoryCapOf, {
     onUse: (i) => useItem(i),
     onDrop: (i) => dropItem(i),
     onExamine: (i) => ui.say(ITEMS[getSheet().inventory[i]]?.examine || 'It is what it is.'),
@@ -168,7 +171,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
         taken.push(`${itemName(id)} (${money}💵)`);
         continue;
       }
-      if (sheet.inventory.length < INV_CAP) {
+      if (sheet.inventory.length < inventoryCapOf(sheet)) {
         sheet.inventory.push(id);
         taken.push(itemName(id));
       } else {
@@ -301,15 +304,15 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     }
   }
 
-  // Unequip a slot back to the pockets - refused politely when the bag is full
-  // (INV_CAP), so gear never vanishes.
+  // Unequip a slot back to the pockets - refused politely when the bag is full,
+  // so gear never vanishes.
   function unequip(slot) {
     const sheet = getSheet();
     if (!sheet) return;
     if (isInCombat()) { ui.say('Not mid-fight - swap your kit on your own time.'); return; }
     const id = sheet.equipped?.[slot];
     if (!id) return;
-    if (unequipItem(sheet, slot, INV_CAP)) {
+    if (unequipItem(sheet, slot, inventoryCapOf(sheet))) {
       ui.say(`You stow the ${itemName(id)}.`);
       invPanel.refresh(sheet);
       onBagChange?.();

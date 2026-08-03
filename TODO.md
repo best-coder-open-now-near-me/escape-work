@@ -108,6 +108,28 @@ How to read it:
   a centroid can easily be a tile nobody can stand on. Found while splitting
   lootEntries, not by a failure; the arm may well be right.
 
+- [ ] **Q904** `src/stats.js` [design] **(new 2026-08-03, from the Q136 answer)**
+  The carry cap is a stat **[stated]** (designer, 2026-08-03) and the seam now
+  carries a variable one, but two things are open and the second is not a
+  number, it is a rule.
+
+  **Which stat, and what the numbers are.** `inventoryCapOf` returns Infinity
+  and is the one place to change. Grit is the obvious reading of "how much can
+  you carry" against the four office attributes, but nothing has said so, so it
+  is not written in.
+
+  **Nothing reconciles a bag that is already OVER the cap.** Every guard today
+  is on the way IN - picking up, unequipping - because with an infinite cap
+  there was no other direction to guard. A cap that can FALL has several: a
+  leader switch to somebody with less of the stat, a lost point, a debuff,
+  unequipping whatever was raising it. The options are real design forks, not
+  implementation detail: refuse the thing that would lower the cap; allow the
+  bag over cap and block additions until it drains; or spill the excess to the
+  floor. The third is what the old overflow arm did, and the note that removed
+  the finite cap called exactly that "friction without a decision attached -
+  you never chose WHAT to leave behind, the tenth item just fell out". Worth
+  deciding before a finite cap ships rather than after.
+
 - [ ] **Q900** `src/main.js` [soc] **(new 2026-08-02, from the fix work itself)**
   The combat world facade is repeatedly NARROWER than main.js's own helpers, and
   the contract test (Q009) cannot see it. That test checks every key the pure
@@ -236,7 +258,7 @@ How to read it:
 - [x] **Q133** `src/pathfinding.js:16` [bug] **(carried)** findPath has no explored-node cap and hangs on an unbounded or non-integer target<br>      ↳ DONE — MAX_EXPLORED cap; hang becomes a null. Unreachable via the shipped grid - kept because the cost is an integer compare and the failure it replaces is a frozen tab
 - [x] **Q134** `src/stats.js:823` [bug] **(carried)** `stats.applyDamage` has no non-finite guard, while its actor-side twin `EnemyActor.takeDamage` does<br>      ↳ DONE — the same non-finite guard EnemyActor.takeDamage carries
 - [x] **Q135** `src/statuses.js:113` [bug] **(carried)** `applyStatus` reads a missing `sev` as 0 while every other site reads it as 1, so a resisted re-apply weakens a pre-severity entry<br>      ↳ DONE — no-entry vs entry-without-sev distinguished; 3 tests
-- [ ] **Q136** `src/looting.js:124` [dead-code] **(carried)** INV_CAP = Infinity leaves the overflow and "pockets full" branches in looting.js unreachable<br>      ↳ **CONFIRMED, and deliberately left open — it needs a design answer, not a cleanup.** Understated if anything: there are THREE unreachable arms, not two (receiveItems' overflow `else`, its 'Pockets full' clause, and unequip's `else`), and no test anywhere references either message. But the file's own comment already calls them deliberate — INV_CAP is "kept as a named export (Infinity) so every guard site stays honest without each one growing a special case" — so the queue says defect and the code says on purpose, and one of them is wrong. Deleting the arms commits the game to "no carry cap, ever"; keeping them keeps a seam warm for a cap that may never come back, at the cost of two unreachable player-facing refusals. **Question for the designer, with a recommendation: delete them.** The shipped game already tells the player pockets are unlimited (game.spec.js asserts the header is a bare count, not "0/10"), so the dead arms describe a game that is not shipping. If a cap ever returns it comes back as a real design decision with its own numbers, and re-adding two branches is not the expensive part of that. Either way `stats.unequipItem`'s `invCap` parameter and the panel's `cap` parameter stay - those are the real seam, and they stay parameterised under either answer.
+- [x] **Q136** `src/looting.js:124` [dead-code] **(carried)** INV_CAP = Infinity leaves the overflow and "pockets full" branches in looting.js unreachable<br>      ↳ **CLOSED BY A DESIGN ANSWER, and not the one this entry asked for.** The finding called the arms dead code; the recommendation put to the designer was to delete them and commit to uncapped pockets. Both lose. **[stated]** (designer, 2026-08-03): "we'll make inventory limit based on a stat, so it needs a variable cap". So the arms are not dead code - they are the guard sites a finite cap will run through, and the thing actually wrong with them was that the cap was a module CONSTANT. It is now `stats.inventoryCapOf(sheet)`, asked per call: the limit rides the character, and the character the pockets panel is showing changes under it. `createInventoryPanel` took the cap once at construction and printed it in the header forever - that was the one place a variable cap could not have reached, and it takes `capOf` now and asks per refresh. `inventoryCapOf` answers Infinity until the stat is picked, so today's behaviour is unchanged. Which stat and what numbers are the designer's, and are not guessed here: Q904.
 - [x] **Q137** `/home/user/escape-work/AI_PLAN.md:458` [doc-drift] **(carried)** AI_PLAN's state machine and footgun 8 both say the stall backstop burns real AP; the shipped backstop burns nothing<br>      ↳ **DONE** — both sites. The plan said the stall backstop burns real AP; the shipped `pass` beat bills nothing and simply ends the turn, which already strands whatever AP and allowance are left. Footgun 8 reworded to match, and its stale `combat-ai.js:163` pointer dropped.
 - [x] **Q138** `/home/user/escape-work/AI_PLAN.md:9` [doc-drift] **(carried)** AI_PLAN.md still opens with "No code yet" while its own As-landed section reports six shipped milestones<br>      ↳ **DONE** — "No code yet" replaced with what actually shipped: milestones 1-6 on 2026-08-01/02, milestone 7 open by design, pointing at the doc's own **As landed** section.
 - [x] **Q139** `/home/user/escape-work/ARCHITECTURE.md:110` [doc-drift] **(carried)** ARCHITECTURE.md's `combat-plans.js` entry lists "take cover" as one of its plans; the take-cover plan was deleted<br>      ↳ **DONE** — and the list was short as well as wrong: `take cover` is a tombstone in combat-plans.js, and `shove` is a shipped plan the map never named. Now `topple, shove, break, pull, displace`.

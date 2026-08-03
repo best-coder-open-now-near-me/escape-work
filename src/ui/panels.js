@@ -13,7 +13,10 @@ import { PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, registerHudButton, layo
 // Equip-slot display names (In Hand / Dress Code / Flair).
 const SLOT_LABELS = { weapon: 'In Hand', outfit: 'Dress Code', trinket: 'Flair', shoes: 'On Foot' };
 
-export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onEquip, onUnequip, onSend, canSend, getCash }) {
+// `capOf` is asked per refresh, not captured: the carry limit is a stat, so it
+// moves with the character and with whoever is currently the leader. A panel
+// built once with a number would print the boot-time cap forever.
+export function createInventoryPanel(ITEMS, capOf, { onUse, onDrop, onExamine, onEquip, onUnequip, onSend, canSend, getCash }) {
   // The bag sits immediately right of the bottom-left profile card, where your
   // eye already is for HP - not up in the top-left corner it used to share with
   // nothing. Its exact left edge is measured from the card each layout pass,
@@ -106,6 +109,7 @@ export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onE
 
   function refresh(sheet) {
     const inv = sheet?.inventory || [];
+    const cap = capOf(sheet);
     panel.innerHTML = `<div style="font-weight:700; letter-spacing:1px; margin-bottom:7px;">
       POCKETS <span style="opacity:.6; font-weight:400;">${Number.isFinite(cap) ? `${inv.length}/${cap}` : inv.length}</span></div>`;
     if (sheet?.equipped) renderEquipStrip(sheet);
