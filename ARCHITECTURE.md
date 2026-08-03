@@ -108,7 +108,7 @@ src/
                      covers vs what its CLICK acts from), the walk-up's
                      stand point, a zone's covered tiles     (pure logic)
   combat-plans.js    Where a verb LANDS: the plan half of every plan/perform
-                     pair - topple, break, pull, take cover, displace. A
+                     pair - topple, shove, break, pull, displace. A
                      plan returns the shape the perform half needs or the
                      reason it refuses, never both                (pure)
   combat-ai.js       What an AI unit DECIDES: who to fight, where to stand,

@@ -14,7 +14,7 @@ import { throwablesFor as throwableIdsFor, UNIVERSAL_ACTIONS,
 } from './hotbar-model.js';
 import { truncateByBudget, routeToFiringPosition, trimToFirst } from './pathfinding.js';
 import { pronounsOf, capitalize, verb } from './creation.js';
-import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, gritSaveChance, MOVE, REACH } from './stats.js';
+import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, gritSaveChance, roundAp, fmtAp, MOVE, REACH } from './stats.js';
 import {
   applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy,
   statusSeverity, tickStep,
@@ -45,7 +45,7 @@ import {
 import {
   enemyRingOk, verbKind, verbSides, toppleRings, partitionRings, breakRings,
 } from './combat-targeting.js';
-import { summonSpotProblem as spotProblem } from './summon-rules.js';
+import { summonSpotProblem as spotProblem, summonRoom as capRoom, dropCount } from './summon-rules.js';
 import {
   cheb, TARGET_R, SURPRISE_RADIUS, AROUND, ORTHO, reachOfUnit, posOf, withinReach,
   canReach as canReachAt, reachSpecOf, actRangeOf, verbReaches as verbReachesAt,
@@ -616,9 +616,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const stepCost = (x, z) => surfaceStepCost(x, z)
     * (statusFx(active.sheet).moveCostMult ?? 1)
     * moveCostOf(active.sheet); // footwear (MOVEMENT_PLAN M4)
-  // AP is spent in tenths now that movement charges by distance.
-  const roundAp = (v) => Math.round(v * 10) / 10;
-  const fmtAp = (v) => String(roundAp(v)).replace(/\.0$/, '');
+  // AP is spent in tenths now that movement charges by distance - `roundAp`
+  // and `fmtAp` come from stats.js, which owns that rate.
 
   // Proper per-unit initiative (initiative.js): ONE interleaved order for the
   // whole fight, not side-phases. `phase` now only says who's driving the
@@ -2042,9 +2041,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // the target's face - the exact thing holding a ranged weapon is for.
     if (rangeOf(id)) {
       if (a.ammoCost) active.sheet.paper -= ammoCostOf(id);
-      let flight = 'shot'; // fired: a small pellet, flat and quick
-      if (id === 'paper-airplane') flight = 'plane';
-      else if (a.ammoCost) flight = 'ball';
+      // The action says what it looks like in flight; the default is a fired
+      // pellet, flat and quick, and anything that spends paper is lobbed.
+      const flight = a.flight || (a.ammoCost ? 'ball' : 'shot');
       // Body to body, like hitFx: the shot departs the shooter's actual
       // stance and lands on the target's, not on their tile centres - the
       // walk-up just stopped at a trimmed free point, and a ball spawning
@@ -3964,8 +3963,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // combat's did not, so the shared rule's cap leg was skipped in a fight -
     // the rings promised spots a maxed-out req could not fill, and the click
     // then blamed the FLOOR ("can't find a free desk") for a limit that is
-    // about the roster. Same number `resolveSummon` will act on.
-    room: summonRoom(active.actor, a),
+    // about the roster. The module's own `room` - headcount still free, which
+    // is the number its predicate is written against - not the arrivals count
+    // `resolveSummon` acts on. The two go to zero together, so the ring says
+    // the same thing either way; they are asked separately because they are
+    // separate questions.
+    room: capRoom(a, liveSummonsOf(active.actor)),
   });
   function placeSummon(tx, tz) {
     const a = ACTIONS[armed];
@@ -4163,13 +4166,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // whenever triage won the turn - two employees, no AP, no cooldown
   // (REVIEW.md 2026-08-02 section 1.1). A plan-gathering call with side effects
   // is a live hazard the moment a ladder can reorder.
-  function summonRoom(summoner, d) {
-    const room = (d.cap ?? d.count) - liveSummonsOf(summoner);
-    return Math.min(d.count, Math.max(0, room));
+  //
+  // Named for what it answers - how many actually turn up - because
+  // summon-rules exports a `summonRoom` that answers a different question
+  // (how much headcount is free) and main.js imports that one. Two meanings
+  // under one name across two files is how the restatement below got written
+  // in the first place; the cap math itself is the module's, composed here
+  // rather than repeated.
+  function postableNow(summoner, d) {
+    return dropCount(d, capRoom(d, liveSummonsOf(summoner)));
   }
 
   function resolveSummon(summoner, team, d, at = null) {
-    const n = summonRoom(summoner, d);
+    const n = postableNow(summoner, d);
     if (n <= 0) return 0;
     const spawned = world.spawnSummon(d.archetype, team, summoner, n, at) || [];
     for (const rec of spawned) {
@@ -4871,7 +4880,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // needs its plan anyway to take it.
     const sm = summonSpec(unit.def.summon);
     const summonReady = !!sm && (unit.summonCd || 0) <= 0 && acting.ap >= sm.ap
-      && summonRoom(unit, sm) > 0; // ASK; the summon beat is what acts
+      && postableNow(unit, sm) > 0; // ASK; the summon beat is what acts
     // Triage before reinforcement (AI_PLAN M6): rationed by uses, paced by
     // cooldown, aimed at the worst-off colleague in range - self included.
     // Everything it reads lives on the def, the summon descriptor's pattern.
@@ -5413,7 +5422,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // be the strongest move in the game.
     spendAp: (n) => {
       if (phase !== 'player' || active.ap < n) return false;
-      active.ap -= n;
+      // Through roundAp like every other spend. Nothing visibly breaks without
+      // it - both callers pass whole numbers and every AP reader already
+      // defends itself - but this was the last raw `.ap` write in the file, and
+      // "the one that does it differently" is how the other three float-AP
+      // sites got written in the first place.
+      active.ap = roundAp(active.ap - n);
       refresh();
       return true;
     },

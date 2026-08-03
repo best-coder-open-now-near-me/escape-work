@@ -855,8 +855,8 @@ opens), and flanking a partially covered target is pinned in
   arrows kill scrolling in every DOM panel; and `modalOpen()` is still only
   `dialogue || shopping` (`main.js:1260`), so WASD pans the world behind the
   level-up screen, the sheet, the pockets and the game menu.
-- **Member slips still roll `Math.random()`** (`main.js:2171`) while AI slips
-  roll off the seeded stream (`combat.js:3882`), so a seeded fight does not
+- **Member slips still roll `Math.random()`** (`main.js:2933`, `maybeSlip`) while
+  AI slips roll off the seeded stream (`combat.js:4762`), so a seeded fight does not
   replay. One line. The recent slip work consolidated the *rule* into
   `step-rules.js` and stopped slip-proof characters drawing at all — it did
   not change where the member roll's randomness comes from.
@@ -883,10 +883,16 @@ opens), and flanking a partially covered target is pinned in
   explains two jobs above. It does work on `main`.
 - **79 `waitForTimeout` sleeps across 22 specs**, `helpers.js` included — up
   from the 73 and 78 the two earlier passes counted.
-- **Two modules are still missing from the module map:** `portraits.js` and
-  `powers.js`. `powers.js` is not a small omission — it owns the predicates
-  (`isPull`, `aimsAtProps`, `pullLanding`) that three other modules dispatch
-  on.
+- **Eight modules are still missing from the module map:** `powers.js`,
+  `portraits.js`, `stealth.js`, `ground-marks.js`, `remote-store.js`,
+  `data/actor-registries.js`, `data/looks.js` and `data/talents.js` —
+  ARCHITECTURE.md names none of them in the map, and all but `powers` (which
+  survives in the Layering pure-module list) appear nowhere in the document at
+  all. A ninth, root `creation.js`, reads as present only because the map's one
+  `creation.js` entry is the unrelated `ui/creation.js`. This bullet said "two"
+  when it was written; the count was never checked against the tree.
+  `powers.js` is not a small omission — it owns the predicates (`isPull`,
+  `aimsAtProps`, `pullLanding`) that three other modules dispatch on.
 
 ### Closed since the earlier passes
 
@@ -1373,8 +1379,8 @@ editing system code:
 
 - **`ARCHITECTURE.md`** — the flagship doc is wrong on: combat AP ("1 AP per tile" —
   it's 0.5) and melee range ("needs adjacency" — reach is continuous Euclidean, never
-  mentioned); the module map (omits `powers.js`, `portraits.js`,
-  `data/actor-registries.js`; pure-module list omits `powers`; `actions.js` described as
+  mentioned); the module map (omits eight modules — see the
+  module-map bullet above; pure-module list omits `powers`; `actions.js` described as
   "attack/defend/heal" vs the nine-verb vocabulary); the layering claim ("data/* imports
   nothing, levels.js the one exception" — four data modules import, two importing
   *behavior*); and the editor warning (it still claims re-export drops NPCs/companions —

@@ -125,13 +125,27 @@ function ensureFocusBanner() {
 // info: { name, sub, color, dotColor }. Tiered + centred - the name on top,
 // `sub` (HP, or the verb a click takes) beneath. When `dotColor` is set a small
 // dot flanks each side of the name; callers use it for an enemy's aggression.
+// Rebuilt only when the banner's CONTENT changes. It is not called on hover
+// alone: main.js re-runs the hover resolve every frame while vision is fading
+// or a WASD pan is held, so a straight rebuild tears down and re-creates three
+// elements sixty times a second at the exact moments the camera is already
+// working. `sub` is in the key because it carries live HP - a banner that must
+// follow a target taking damage still does.
+let focusKey = null;
 export function setFocusBanner(info) {
   const el = ensureFocusBanner();
   if (!info) {
+    // Forget the painted banner as well as hiding it: this branch leaves the
+    // children in place, so a memo that survived the clear would early-out on
+    // re-hovering the same target and leave it named but invisible.
+    focusKey = null;
     el.style.opacity = '0';
     el.style.transform = 'translate(-50%, -4px)';
     return;
   }
+  const key = [info.name, info.sub || '', info.color || '', info.dotColor || ''].join('\u0000');
+  if (key === focusKey) return;
+  focusKey = key;
   el.innerHTML = '';
 
   const nameRow = document.createElement('div');

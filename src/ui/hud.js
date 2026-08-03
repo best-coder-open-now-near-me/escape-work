@@ -3,7 +3,7 @@
 // The bottom-left profile card and its status chips, the rail's tactical
 // button, the always-on attack hotbar, the party bar and the level-up pip.
 import { statusList } from '../statuses.js';
-import { pendingPoints } from '../stats.js';
+import { pendingPoints, fmtAp } from '../stats.js';
 import {
   PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, registerHudButton, layoutHudRail,
   actionDock, refreshDockVisibility, esc,
@@ -386,8 +386,6 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
 // Double-clicking asks the host to point the CAMERA at that member - a
 // separate verb, because a member you can't switch to (downed, waiting on
 // their own initiative slot) is still somewhere worth looking.
-// One decimal, and no trailing '.0' - the same shape combat.js prints AP in.
-const fmtAp = (v) => String(Math.round((Number(v) || 0) * 10) / 10).replace(/\.0$/, '');
 
 export function createPartyBar({ onSelect, onLevelUp, onFocus }) {
   const bar = document.createElement('div');
@@ -478,12 +476,22 @@ export function createLevelUpPip({ onOpen }) {
   b.onmousedown = (e) => e.stopPropagation();
   b.onclick = onOpen;
   document.body.appendChild(b);
+  // `refresh` is called from main.js's per-frame update, not from a level-up
+  // event, so it has to be cheap when nothing has changed - which is almost
+  // always. The memo is the whole point; without it this writes textContent and
+  // a style property sixty times a second for as long as a point sits banked.
+  let shown = null; // the count currently painted; null = nothing painted yet
   return {
     refresh(points) {
+      if (points === shown) return;
+      shown = points;
       if (points > 0) { b.textContent = `⬆ Level Up (${points})`; b.style.display = 'block'; }
       else b.style.display = 'none';
     },
-    setVisible(v) { if (!v) b.style.display = 'none'; },
+    // This hides the pip behind the memo's back, so the memo has to forget what
+    // it painted - otherwise the next refresh with the SAME count early-outs and
+    // the pip stays hidden with points still banked.
+    setVisible(v) { if (!v) { b.style.display = 'none'; shown = null; } },
   };
 }
 

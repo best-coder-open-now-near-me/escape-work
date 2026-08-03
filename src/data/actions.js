@@ -644,6 +644,11 @@ export const ACTIONS = {
     label: 'Paper Airplane',
     icon: '✈️',
     desc: 'A folded dart to the eyes - blinds them. Origami Specialists only.',
+    // What the shot looks like in flight. Combat defaults to 'shot' (a flat
+    // pellet) and lobs a 'ball' for anything that spends paper; a dart is
+    // neither, and until this field existed combat.js knew that by checking
+    // for this action's id by name.
+    flight: 'plane',
     // Gated on a talent effect (combat.throwablesFor): folding a dart that
     // lands in an eye is a craft. The Drone's Origami Specialist talent
     // already advertises it ("airplanes fold for 1 sheet").

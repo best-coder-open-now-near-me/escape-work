@@ -137,18 +137,30 @@ try {
   }
 } catch { /* no URL machinery - keep whatever resolved above */ }
 
-// Dev express lane: ?seed=<n> makes fights repeatable (AI_PLAN M1's sparring
-// bouts). The stream feeds startCombat's injected `rng`, and that reaches
-// EVERY in-fight roll - hit rolls, damage and the AI's line picks (the
+// Dev express lane: ?seed=<n> makes a fight repeatable (AI_PLAN M1's sparring
+// bouts). The stream feeds startCombat's injected `rng`, and that reaches the
+// rolls combat.js owns - hit rolls, damage and the AI's line picks (the
 // module-level `rand` takes its randomness as an argument), initiative
-// (`initRng`), slips, loot. REVIEW.md's "the rng seam is misleading" finding
-// was closed before this landed; one seed reproduces a whole fight including
-// turn order. mulberry32, the same mixer the confused-shuffle already trusts
-// (combat.js). Absent means Math.random, the shipping default.
+// (`initRng`), and a UNIT's slip. REVIEW.md's "the rng seam is misleading"
+// finding was closed before this landed: initiative rolls off the injected
+// stream like everything else, so turn order is pinned too. mulberry32, the
+// same mixer the confused-shuffle already trusts (combat.js). Absent means
+// Math.random, the shipping default.
 //
-// What a seed does NOT pin is where the bodies are when the fight OPENS: a
-// walk-in ends wherever adjacency happens to fire. That is what __god.fight()
-// is for.
+// Three things a seed does NOT pin, and this comment claimed two of them for
+// most of its life:
+//
+//  - Two in-fight rolls escape the stream, both outside combat.js: a MEMBER's
+//    slip (`maybeSlip` below) and a body's loot table (`actors.js` die() ->
+//    rollLoot, defaulting to Math.random). Neither replays, and because they
+//    never draw from the stream they do not move it either. The member slip is
+//    on the open list in REVIEW.md; the earlier version of this comment said
+//    "slips, loot" as though both were covered.
+//  - The stream is built once at boot and never reset per fight, so each fight
+//    draws from wherever the last one stopped. A seed pins the FIRST fight of
+//    a run reliably; the second only replays if everything before it did.
+//  - Where the bodies are when the fight OPENS: a walk-in ends wherever
+//    adjacency happens to fire. That is what __god.fight() is for.
 let combatRng = Math.random;
 try {
   const s = new URLSearchParams(location.search).get('seed');

@@ -6,7 +6,9 @@ designer has already sized up: *"the game is laughably easy right now"*
 (designer, 2026-07-31, recorded in `POWERS_PLAN.md` M9). This document is the
 implementation plan: what the AI decides today, where its game is smaller than
 the player's, the milestone order for closing that gap, and the design
-decisions with their tags. No code yet.
+decisions with their tags. Milestones 1-6 shipped on 2026-08-01/02 - see
+**As landed** below for the deviations; milestone 7, the tuning pass, is open
+by design.
 
 The thesis, up front: **the AI's difficulty problem is decision quality, not
 numbers.** The numbers already have an owner — `stats.scaleEnemy` grows HP,
@@ -457,9 +459,11 @@ six more doing-arms, that special case becomes the rule:
   bounded, so no fight can hang — which is the property the pacing bug
   and the corridor stall each violated once, from outside the ladder.
 - **The stall backstop stays**: when everything is refused or
-  unaffordable and the crouch fails, burn the real AP (never the
-  movement allowance — it buys nothing) and end the turn, exactly as
-  today (`combat.js:4375`).
+  unaffordable and the crouch fails, the `pass` beat ends the turn
+  outright (`advanceTurn`, at the tail of `takeBeat` in `combat.js`). It
+  bills nothing — ending the turn already strands whatever AP and
+  movement allowance are left, so there is no burn to perform. The plan
+  said "burn the real AP"; the shipped backstop never did.
 
 ### Timing and interrupts
 
@@ -765,10 +769,10 @@ cheap to dodge on the way in and expensive to debug after.
    prefer moving over swinging. Flank-seeking is for the approach, not a
    reason to leave reach.
 8. **Two currencies, never crossed.** Advances bill the move budget
-   (`billMove`); every other beat bills real AP (`roundAp`); the stall
-   burns AP and deliberately strands the allowance (`combat-ai.js:163`).
-   A beat that bills both, or a refusal that burns the allowance,
-   quietly rewrites the AP economy.
+   (`billMove`); every other beat bills real AP (`roundAp`); `pass`
+   bills neither and simply ends the turn, stranding what is left of
+   both. A beat that bills both, or a refusal that burns either
+   currency, quietly rewrites the AP economy.
 9. **`attacks` stops being uniform-random the day one entry carries
    `range`.** The picker becomes context-aware in the same PR that adds
    the entry (milestone 5, not 6): melee lines in reach, the ranged line

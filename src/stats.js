@@ -117,6 +117,15 @@ export const MOVE = {
   COST_PER_TILE: 0.5, // AP per tile of clean floor (was an implicit 1.0)
 };
 
+// AP is spent in tenths - a half-tile step, a talent shaving a cost - so float
+// subtraction leaves dust, and a pool of 1.7999999999999998 has to print as
+// "1.8" wherever it is shown. One rounding and one printed shape for the whole
+// game, because the two readouts that show AP are in different files: the
+// combat bar in combat.js and the party bar in ui/hud.js each grew their own
+// copy of this, and the second one pinned itself to the first by COMMENT.
+export const roundAp = (v) => Math.round((Number(v) || 0) * 10) / 10;
+export const fmtAp = (v) => String(roundAp(v));
+
 // --- sneaking (SNEAK_PLAN) ---------------------------------------------------
 // The cone every coworker watches through, and what sneaking costs. All
 // first drafts, deferred to playtest like every other magnitude (SNEAK_PLAN
