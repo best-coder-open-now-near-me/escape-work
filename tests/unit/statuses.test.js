@@ -336,3 +336,35 @@ test('re-applying `covered` each tick holds the crouch chip open', () => {
   tickTurn(croucher); tickTurn(croucher); tickTurn(croucher);
   assert.equal(hasStatus(croucher, 'covered'), false);
 });
+
+test('a resisted re-apply cannot weaken a severity-less entry', () => {
+  // An entry with no `sev` is at full severity - that is what statusSeverity,
+  // the tick and statusList all assume. applyStatus was the one site reading it
+  // as 0, so `Math.max(0, smaller)` picked the smaller: refreshing a status
+  // weakened it, which is precisely what the rule there forbids. The shapes
+  // that arrive without a `sev` are real - a pre-severity save carried through
+  // party.js's migration, and the anti-chain immunity window.
+  const t = { statuses: { blinded: { left: 3 } } };       // no sev: effectively 1
+  applyStatus(t, 'blinded', {}, 5);                        // a heavily resisted re-apply
+  assert.equal(statusSeverity(t, 'blinded'), 1, 'the bite it already had survives');
+});
+
+test('a re-apply still takes the WORSE severity when the new one is worse', () => {
+  // `blinded` rather than `stunned`: a stun grants an anti-chain window, so a
+  // second stun is REFUSED rather than compared - which is the right behaviour
+  // and the wrong fixture for this rule.
+  const t = {};
+  applyStatus(t, 'blinded', {}, 5);                        // resisted: blunted
+  assert.ok(statusSeverity(t, 'blinded') < 1);
+  applyStatus(t, 'blinded', {}, 0);                        // unresisted: full
+  assert.equal(statusSeverity(t, 'blinded'), 1, 'the worse of the two wins');
+});
+
+test('a resisted FIRST application still lands blunted', () => {
+  // The other side of the floor: with no entry yet the severity must come from
+  // the roll, not from the severity-less default - or Composure would stop
+  // blunting anything.
+  const t = {};
+  applyStatus(t, 'blinded', {}, 5);
+  assert.ok(statusSeverity(t, 'blinded') < 1, 'resist blunts a fresh application');
+});

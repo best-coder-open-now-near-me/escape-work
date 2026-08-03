@@ -37,6 +37,7 @@ export const SURFACES = {
     examine: 'The 3pm incident. Nobody speaks of it.',
   },
   cable: {
+    impact: 'zap', // bare copper sparks even unpowered
     powers: true,
     style: 'cable',
     color: [0.14, 0.14, 0.18],
@@ -68,6 +69,7 @@ export const SURFACES = {
     examine: 'Somebody is going to have to file an incident report about this.',
   },
   paper: {
+    impact: 'paper', // what a paper cut throws: shreds
     style: 'paper',
     flammable: true,
     color: [0.93, 0.91, 0.83],

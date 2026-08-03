@@ -110,7 +110,20 @@ export function applyStatus(target, id, opts = {}, resist = 0) {
   // A re-apply takes the WORSE of the two severities, for the same reason it
   // takes the longer of the two durations: refreshing a status must never be a
   // way to weaken one that is already biting.
-  const sev = Math.max(map[id]?.sev ?? 0, severityFor(id, resist));
+  //
+  // The floor distinguishes NO ENTRY from an entry with no `sev`, which a bare
+  // `?? 0` could not:
+  //   - nothing there yet -> 0, so a first application takes its own severity,
+  //     resist included. This is what makes a resisted status land blunted.
+  //   - an entry without `sev` -> 1, because that is what every OTHER reader
+  //     assumes (statusSeverity, the tick, statusList). Reading it as 0 here
+  //     made this the one site that disagreed, and it disagreed in the
+  //     direction the rule above forbids: a resisted re-apply on a
+  //     severity-less entry - one carried from a pre-severity save, or the
+  //     immunity window written below - replaced an effective 1 with a smaller
+  //     number, weakening a status by refreshing it.
+  const prior = map[id] ? (map[id].sev ?? 1) : 0;
+  const sev = Math.max(prior, severityFor(id, resist));
   map[id] = { left: Math.max(cur, dur), sev };
   // Grant the anti-chain window LAST, so it can never block the application
   // that created it, and size it off `dur` - the duration actually applied,

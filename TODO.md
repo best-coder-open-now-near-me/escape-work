@@ -76,7 +76,7 @@ How to read it:
 - [x] **Q027** `/home/user/escape-work/ARCHITECTURE.md:518` [doc-drift] **(carried)** ARCHITECTURE.md's debug-surface note claims damage and initiative roll `Math.random` and that a fight is never fully deterministic, and omits the new `bout` getter<br>      ↳ DONE — ARCHITECTURE.md now says a seeded fight DOES replay, and documents `bout`
 - [x] **Q028** `/home/user/escape-work/TODO.md:823` [doc-drift] **(carried)** TODO.md Phase 8 is still headed "BLOCKED" with four checkboxes whose fixes are live in the code<br>      ↳ DONE — Phase 8 re-headed SHIPPED; five of six legs ticked, the death path left open
 - [x] **Q029** `/home/user/escape-work/TODO.md:363` [doc-drift] **(carried)** TODO.md's P1 "Enemy AI paces between two tiles" points at `combat.js:96` and calls the self-path exemption dead code, but the fix lives and is tested in `combat-ai.js`<br>      ↳ DONE — the P1 entry is ticked and corrected - the exemption is live and tested
-- [ ] **Q030** `src/combat.js:574` [duplication] **(carried)** `hazardKind`/`surfaceImpactKind` are still two hardcoded surface-id→FX maps in two layers, and this branch added a fifth call site to one of them
+- [x] **Q030** `src/combat.js:574` [duplication] **(carried)** `hazardKind`/`surfaceImpactKind` are still two hardcoded surface-id→FX maps in two layers, and this branch added a fifth call site to one of them<br>      ↳ DONE — step-rules.impactKindFor; the burst comes from the registry; isBurning on the facade
 - [x] **Q031** `src/hotbar-model.js:35` [duplication] **(carried)** The universal-action list `['shove','take-cover','pull']` is written out verbatim in three places<br>      ↳ DONE — UNIVERSAL_ACTIONS in hotbar-model.js; both bars read it
 - [ ] **Q032** `src/main.js:2716` [duplication] **(carried)** Four hand-written per-tile step handlers across three layers, under a main.js section header that claims the rules are "written once"
 - [x] **Q033** `src/portraits.js:77` [duplication] **(carried)** portraits.js holds a fourth copy of "tint a body" — the compounding in-place multiply the other three were rewritten to remove<br>      ↳ DONE — portraits routes through cloneMaterials + tintMaterials
@@ -180,11 +180,11 @@ How to read it:
 ### LOW
 
 - [ ] **Q130** `src/combat.js:3834` [bug] **(carried)** `summonSpotProblem` never passes `room`, so the summon preview ignores the live cap and the click reports the wrong reason
-- [ ] **Q131** `src/combat.js:1808` [bug] **(carried)** `notifyMemberDown` advances the turn without re-binding `active`, so the HUD reflects a corpse through the enemies' turns
+- [x] **Q131** `src/combat.js:1808` [bug] **(carried)** `notifyMemberDown` advances the turn without re-binding `active`, so the HUD reflects a corpse through the enemies' turns<br>      ↳ DONE — active rebinds to somebody standing before advanceTurn
 - [ ] **Q132** `src/pathfinding.js:166` [bug] **(carried)** clampToClearance's diagonal-corner repulsion is still edge-blind: bodies overlap partition end posts by ~0.23 tile
 - [ ] **Q133** `src/pathfinding.js:16` [bug] **(carried)** findPath has no explored-node cap and hangs on an unbounded or non-integer target
 - [ ] **Q134** `src/stats.js:823` [bug] **(carried)** `stats.applyDamage` has no non-finite guard, while its actor-side twin `EnemyActor.takeDamage` does
-- [ ] **Q135** `src/statuses.js:113` [bug] **(carried)** `applyStatus` reads a missing `sev` as 0 while every other site reads it as 1, so a resisted re-apply weakens a pre-severity entry
+- [x] **Q135** `src/statuses.js:113` [bug] **(carried)** `applyStatus` reads a missing `sev` as 0 while every other site reads it as 1, so a resisted re-apply weakens a pre-severity entry<br>      ↳ DONE — no-entry vs entry-without-sev distinguished; 3 tests
 - [ ] **Q136** `src/looting.js:124` [dead-code] **(carried)** INV_CAP = Infinity leaves the overflow and "pockets full" branches in looting.js unreachable
 - [ ] **Q137** `/home/user/escape-work/AI_PLAN.md:458` [doc-drift] **(carried)** AI_PLAN's state machine and footgun 8 both say the stall backstop burns real AP; the shipped backstop burns nothing
 - [ ] **Q138** `/home/user/escape-work/AI_PLAN.md:9` [doc-drift] **(carried)** AI_PLAN.md still opens with "No code yet" while its own As-landed section reports six shipped milestones

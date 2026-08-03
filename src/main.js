@@ -50,7 +50,7 @@ import { createLooting } from './looting.js';
 import { createShopping } from './shopping.js';
 import {
   surfaceEffect, rawSurfaceDamage, effectiveSurfaceDamage, slipChance, slips,
-  hasGum, surfacePathCost,
+  hasGum, surfacePathCost, impactKindFor,
 } from './step-rules.js';
 import { createDoors, atDoor, COMBAT_DOOR_AP, doorMidpoint } from './doors.js';
 import { createDialogue, shopKeyForNpc, sayRecruited } from './dialogue.js';
@@ -2266,6 +2266,10 @@ function startGame(level) {
         stepOpen: grid.stepOpen,
         surfaceIdAt: (x, z) => runtime.surfaceAt(x, z),
         isElectrified: (x, z) => grid.isElectrified(x, z),
+        // Whether the tile is actually ALIGHT, which is not the same question
+        // as "is its painted surface `fire`" - combat had to ask the second
+        // because the facade never offered the first.
+        isBurning: (x, z) => runtime.isBurning(x, z),
         enemySurfDamage: (x, z) => rawSurfDamage(x, z),
         // What a tile costs THIS member, after their talents (Q1-A, designer
         // 2026-08-02). The enemy model above consults none, which was right
@@ -3742,14 +3746,11 @@ function startGame(level) {
   // hazard the tile actually IS right now (fire beats electrified beats the
   // painted surface), so a paper cut throws shreds and live water throws
   // sparks without either side hard-coding the other's list.
-  function surfaceImpactKind(x, z) {
-    if (runtime.isBurning(x, z)) return 'fire';
-    if (grid.isElectrified(x, z)) return 'zap';
-    const surf = runtime.surfaceAt(x, z);
-    if (surf === 'paper') return 'paper';
-    if (surf === 'cable') return 'zap';
-    return 'slam';
-  }
+  const surfaceImpactKind = (x, z) => impactKindFor({
+    burning: runtime.isBurning(x, z),
+    electrified: grid.isElectrified(x, z),
+    surface: runtime.surfaceAt(x, z),
+  }, SURFACES);
 
   // One tile entered, one print left (or not) - the bookkeeping of which foot
   // and how bloody the sole still is lives in fx.js, keyed by the actor.

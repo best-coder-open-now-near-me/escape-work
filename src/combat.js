@@ -29,7 +29,8 @@ import { STATUSES } from './data/statuses.js';
 import { blocksSight, PARTITION_TOPPLE } from './data/tiles.js';
 import { PANEL_CHROME, createCombatReadout, apPips } from './ui.js';
 import { createTurnOrder } from './turn-order.js';
-import { slips, speedUnderStatus } from './step-rules.js';
+import { slips, speedUnderStatus, impactKindFor,
+} from './step-rules.js';
 import {
   topplePlan as toppleplanAt, aiTopplePlan as aiToppleplanFor, breakPlan,
   aiShovePlan as aiShovePlanShared, aiEdgeTopplePlan as aiEdgeTopplePlanShared,
@@ -589,14 +590,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     fx.shake(0.07, 0.22);
   };
   // What the floor of a tile throws when it hurts somebody standing on it.
-  const hazardKind = (x, z) => {
-    if (world.isElectrified && world.isElectrified(x, z)) return 'zap';
-    const surf = world.surfaceIdAt(x, z);
-    if (surf === 'fire') return 'fire';
-    if (surf === 'paper') return 'paper';
-    if (surf === 'cable') return 'zap';
-    return 'slam';
-  };
+  // One rule, shared with main.js (step-rules.impactKindFor). This copy used to
+  // check electrification BEFORE fire - the opposite of main.js's stated
+  // precedence - so a burning puddle threw sparks in a fight and flame outside
+  // one. It also asked `surfaceIdAt === 'fire'` where main.js asks the runtime
+  // whether the tile is burning, which are not the same question.
+  const hazardKind = (x, z) => impactKindFor({
+    burning: world.isBurning(x, z),
+    electrified: !!(world.isElectrified && world.isElectrified(x, z)),
+    surface: world.surfaceIdAt(x, z),
+  }, SURFACES);
   // Movement cost per unit distance, derived from the surface's `slow`
   // multiplier (0.5 => twice the AP) - one number in data drives both walk
   // speed and AP pricing, for everyone. Gum on a shoe surcharges every step;
@@ -1821,6 +1824,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (!livingParty().length) { defeat(); return; } // party wipe - the only loss
     if (phase === 'player' && active.sheet.hp <= 0) {
       log(`${active.sheet.name} goes down!`);
+      // Hand the floor to somebody still standing BEFORE advancing. `active` is
+      // what the HUD, the party card and the profile read, and `advanceTurn`
+      // does not rebind it - so a member who dropped on their own turn stayed
+      // "active" through every enemy turn that followed, and the HUD sat on a
+      // corpse until the order came back round. The same handoff `releaseCharm`
+      // makes when the body it borrowed leaves the roster.
+      const standing = livingParty()[0];
+      if (standing && standing !== active) makeActive(standing);
       advanceTurn();
     } else {
       refresh();

@@ -119,3 +119,21 @@ export function surfacePathCost(floor = {}, talents = {}) {
   if (floor.electrified) return talents?.shockImmune ? 1 : ELECTRIFIED.pathCost;
   return SURFACES[floor.surfaceId]?.pathCost || 0;
 }
+
+// What a hurting floor LOOKS like when it bites, in one place.
+//
+// The precedence is the design (main.js's own wording): fire beats
+// electrification beats the painted surface, so a burning puddle throws flame
+// rather than sparks. It is here because it was written twice - `hazardKind` in
+// combat.js and `surfaceImpactKind` in main.js - and the two copies had already
+// drifted into checking fire and electrification in OPPOSITE orders, so a tile
+// that was both showed flame to one layer and sparks to the other.
+//
+// The surface's own burst comes from its registry entry (`impact`), not from a
+// hardcoded list of ids, so a new surface brings its own FX with it.
+export function impactKindFor({ burning = false, electrified = false, surface = null } = {},
+  surfaces = {}) {
+  if (burning) return 'fire';
+  if (electrified) return 'zap';
+  return surfaces[surface]?.impact || 'slam';
+}
