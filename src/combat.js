@@ -270,6 +270,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // 'attack' broke gating, whatever the damage says). dmgDealt counts what
   // AI swings actually land on member sheets (OAs included - they resolve
   // through the same strike).
+  //
+  // oaCount is the AI's OWN provokes - opportunity attacks it walked its
+  // coworkers into, which is the number M3's acceptance wants going DOWN as
+  // the destination scorer learns to route around threat. It counted BOTH
+  // sides for its whole life, which made it useless for that: the passive-
+  // party bout the tally is designed around moves nobody, but any bout with a
+  // player in it mixed the player's mistakes into the AI's score and could
+  // rise while the AI got strictly better. Overwatch is deliberately outside
+  // it - a held stance that fires is not a provoke, and no routing choice
+  // avoids it.
   const bout = { rounds: 0, dmgDealt: 0, beats: {}, oaCount: 0 };
 
   const engageMemo = new Map(); // "ux,uz|mx,mz" -> boolean
@@ -4640,7 +4650,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     for (const t of provokedBy(threatsAgainst(mover), from.px, from.pz, to.x, to.z, world.stepOpen)) {
       if (!canReact(t.ref)) continue; // an earlier swing this step spent it
       reactions.set(t.ref, (reactions.get(t.ref) || 0) + 1);
-      bout.oaCount += 1;
+      // Only when the AI walked into it - see the tally's own note. aiAllies()
+      // is the side test Q011 made the single owner of "who is on THEIR side",
+      // so a charmed coworker you are driving counts as yours here too.
+      if (aiAllies().includes(mover)) bout.oaCount += 1;
       opportunityStrike(t.ref, mover);
       if (!standing(mover)) break; // dropped mid-flight - no further swings
     }

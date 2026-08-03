@@ -1,14 +1,25 @@
 // Enemy type registry. Adding an enemy = adding an entry here and giving it a
 // character in a level's "actors" legend. `model` is a .glb under
-// assets/characters/. `attacks` are picked at random each enemy turn; the log
-// line gets the rolled damage appended. `loot` (data/items.js ids) rolls onto
-// their body when they fall - bodies stay on the floor and can be looted.
+// assets/characters/. `attacks` are drawn per SWING, not per turn, and the
+// draw is weighted rather than flat: combat.js's `pickLine` rolls the fight's
+// rng over `combat-ai.lineWeights`, where a line whose `applies` status the
+// target is not already wearing counts AI.STATUS_WEIGHT instead of 1 - so a
+// guard blinds you on purpose, sometimes, and stops re-blinding you once it
+// sticks. The pool is split first: a line with `range` is ranged and the two
+// pools are never drawn from together (see below). The log line gets the
+// rolled damage appended. `loot` (data/items.js ids) rolls onto their body
+// when they fall - bodies stay on the floor and can be looted.
 //
-// `aggression` is their disposition toward starting a fight, surfaced as the
-// dots flanking their name in the focus banner:
-//   'green'  - no intention of initiating; only fights if provoked
-//   'yellow' - will talk first, then maybe escalate
-//   'red'    - straight to battle
+// `aggression` is a DISPLAY signal only, despite the name: the dots flanking
+// their name in the focus banner, read in exactly one place
+// (`hover.js` AGGRO). Nothing gates fight initiation on it - what starts a
+// fight is proximity and the sight cones (`checkCombatTrigger`), the same for
+// every def. Treat it as how they LOOK to the player, not what they will do:
+//   'yellow' - reads as "will talk first, then maybe escalate"
+//   'red'    - reads as "straight to battle"
+// A third value, 'green', was documented here for a long time and is carried
+// by no entry in this file; the dot table falls back to red for anything it
+// does not know, so adding one is a hover.js change too.
 //
 // `focus` (0..1, default combat-ai.AI.FOCUS_DEFAULT) is targeting discipline
 // once the fight is on (AI_PLAN M2): 0 harasses whoever is closest, 1 picks

@@ -447,8 +447,13 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   bindings; everything a member does with their feet (surfaces, slips, gum,
   ammo pickup) runs against THAT member's own sheet via `onMemberStep`. The
   exit and walk-up interactions stay leader-only. Combat fields every member
-  with per-member AP/deflect/uses (`combat.js` `members`, `active`); enemies
-  target the nearest living member, ties to the bloodied one. Campaign saves
+  with per-member AP/deflect/uses (`combat.js` `members`, `active`); who the
+  enemies target is `combat-ai.pickTarget`, a scored choice, not a nearest-first
+  rule (AI_PLAN M2) - an ENGAGEABLE member outranks any unreachable one
+  whatever the score, and within that tier nearness, kill-securability,
+  fragility and stickiness to last turn's target are blended by the def's own
+  `focus`. At `focus: 0` the blend collapses back to the pre-M2 rule (nearest,
+  bloodied tiebreak), which is why that reading survived here so long. Campaign saves
   are at `party.SAVE_VERSION` (`{ version, levelId, party: [sheets], active }`
   - v3 added attributes, v4 statuses, v5 equipment); old single-sheet
   saves migrate on load (`party.parseProgress`), and recruited companions
