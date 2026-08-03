@@ -17,7 +17,7 @@
 // The scene's key lights are DIRECTIONAL, which is what makes the staging trick
 // work: direction doesn't depend on position, so the staged rig is lit exactly
 // as it would be on the floor.
-const pc = window.pc;
+const pc = globalThis.window?.pc;
 import { cloneMaterials, tintMaterials, placeModel, applyCharacterProportions } from './models.js';
 
 const SIZE = 128;

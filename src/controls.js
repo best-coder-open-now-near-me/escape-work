@@ -3,7 +3,7 @@
 // and zooming are handled entirely in here - game logic never sees them.
 import { applyCameraPostFx } from './shading.js';
 
-const pc = window.pc;
+const pc = globalThis.window?.pc;
 
 // `onTacticalChange` fires whenever the tactical view goes on or off - by the
 // button, by the T key, by a pitch drag, or by a raw setView. Anything PAINTING

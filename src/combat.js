@@ -52,7 +52,7 @@ import {
 } from './combat-geometry.js';
 import { createGroundMarks } from './ground-marks.js';
 
-const pc = window.pc;
+const pc = globalThis.window?.pc;
 // Inclusive integer roll. Takes its randomness as an ARGUMENT rather than
 // reading Math.random, because a module-scope read is unreachable from the
 // injected `rng` - which meant damage was the one part of a resolution a seeded

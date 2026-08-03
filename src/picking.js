@@ -9,7 +9,7 @@
 //
 // It is camera-agnostic at construction (the camera rig is built after the
 // scene): pick(cameraEntity, sx, sy) takes the camera each call.
-const pc = window.pc;
+const pc = globalThis.window?.pc;
 
 export function createPicker() {
   // holder entity -> { kind, ref, instances: MeshInstance[] }. The mesh

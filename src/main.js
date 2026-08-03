@@ -66,7 +66,7 @@ import { NPCS } from './data/npcs.js';
 import { installGodMode } from './god.js';
 import * as ui from './ui.js';
 
-const pc = window.pc;
+const pc = globalThis.window?.pc;
 const STASH_KEY = 'escape-work.playtest';
 const PROGRESS_KEY = 'escape-work.progress';
 // Cloud saves (REMOTE_STORE.md): Supabase behind the local save, configured

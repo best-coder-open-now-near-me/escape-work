@@ -6,7 +6,12 @@ import { TILE_TYPES } from './data/tiles.js';
 import { createTileRenderer, computeCarpetZones } from './tile-renderer.js';
 import { occludes } from './occlusion.js';
 
-const pc = window.pc;
+// `globalThis.window?.pc` rather than `window.pc`: the bare read runs at IMPORT
+// time and throws under node, which is what kept this module - and anything
+// importing it - out of the unit suite. Nothing here touches `pc` at module
+// scope, so deferring the failure to first USE costs nothing and buys the file
+// an import. Same treatment as actors.js/models.js/shading.js already carry.
+const pc = globalThis.window?.pc;
 
 export function createApp(canvas) {
   const app = new pc.Application(canvas, {

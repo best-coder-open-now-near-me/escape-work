@@ -9,7 +9,7 @@ import { makeMaterial, makeSpriteMaterial } from './shading.js';
 import { placeModel } from './models.js';
 import { burst } from './fx.js';
 
-const pc = window.pc;
+const pc = globalThis.window?.pc;
 
 // `root` (default app.root) parents everything drawn, so a layered level can
 // show/hide a whole storey by toggling one entity; `baseY` lifts every world

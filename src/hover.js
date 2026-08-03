@@ -19,7 +19,7 @@
 import { addHighlight, setHighlight } from './shading.js';
 import { createGroundMarks } from './ground-marks.js';
 
-const pc = window.pc;
+const pc = globalThis.window?.pc;
 
 // Body-glow colours, by what the thing IS: hostile red, talkable green, party
 // teal, lootable gold, neutral interactable (doors, props) cyan.
@@ -47,10 +47,16 @@ const AGGRO = {
 // OK / FAR / COVER / REACH come from ground-marks.js, shared with combat.js so
 // the hover ring and the aim ring cannot drift apart. The four below are
 // hover's own - it rings bodies, which combat never does.
-const RING_PARTY = new pc.Color(0.45, 0.9, 0.8);
-const RING_DOWN = new pc.Color(1.0, 0.82, 0.4);
-const RING_HOSTILE = new pc.Color(1.0, 0.28, 0.2);
-const RING_FRIENDLY = new pc.Color(0.42, 0.85, 0.42);
+// hover's own body-ring colours - the ones combat never draws. Built on first
+// use, for the same reason ground-marks.js is a factory: `new pc.Color(...)` at
+// module scope runs at import and throws under node.
+let _bodyRings = null;
+const bodyRings = () => (_bodyRings ??= {
+  PARTY: new pc.Color(0.45, 0.9, 0.8),
+  DOWN: new pc.Color(1.0, 0.82, 0.4),
+  HOSTILE: new pc.Color(1.0, 0.28, 0.2),
+  FRIENDLY: new pc.Color(0.42, 0.85, 0.42),
+});
 
 // `queries` is the live world, asked rather than captured - the leader, the
 // sheet and the armed action are all re-pointed by a leader switch, so a
@@ -379,22 +385,22 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
       for (const m of queries.party()?.members || []) {
         if (!m.actor?.entity) continue;
         const p = m.actor.entity.getPosition();
-        ring(p.x, p.z, 0.42, m.sheet.hp <= 0 ? RING_DOWN : RING_PARTY);
+        ring(p.x, p.z, 0.42, m.sheet.hp <= 0 ? bodyRings().DOWN : bodyRings().PARTY);
       }
       for (const en of queries.enemies()) {
         if (!en.alive || !en.entity) continue;
         const p = en.entity.getPosition();
-        ring(p.x, p.z, 0.5, RING_HOSTILE);
+        ring(p.x, p.z, 0.5, bodyRings().HOSTILE);
       }
       for (const s of queries.summons()) {
         if (s.sheet.hp <= 0 || !s.actor.entity) continue;
         const p = s.actor.entity.getPosition();
-        ring(p.x, p.z, 0.42, RING_PARTY); // your summons ring as friendly
+        ring(p.x, p.z, 0.42, bodyRings().PARTY); // your summons ring as friendly
       }
       for (const npc of queries.npcs()) {
         if (!npc.entity) continue;
         const p = npc.entity.getPosition();
-        ring(p.x, p.z, 0.42, RING_FRIENDLY);
+        ring(p.x, p.z, 0.42, bodyRings().FRIENDLY);
       }
     },
     // How far YOU can swing - so it belongs over a coworker and nowhere else.

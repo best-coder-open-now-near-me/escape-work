@@ -12,7 +12,7 @@ import { makeMaterial, toonifyMaterial } from './shading.js';
 import { STATUSES } from './data/statuses.js';
 import { TILE_TYPES } from './data/tiles.js';
 
-const pc = window.pc;
+const pc = globalThis.window?.pc;
 
 // World point -> CSS-pixel screen point. Every DOM element tracking a world
 // position (damage popups, loot labels, test helpers) projects through this.
@@ -29,11 +29,20 @@ const pc = window.pc;
 // Input and output vectors MUST be distinct: worldToScreen re-reads the
 // world point after writing the result (for the perspective divide), so
 // passing one vector as both corrupts the projection.
-const _projIn = new pc.Vec3();
-const _projOut = new pc.Vec3();
+// Scratch vectors for the world->screen projection, built on FIRST USE rather
+// than at import. Constructing engine objects at module scope is what kept this
+// file - and tile-renderer, scene and editor, which import it - out of node.
+let _projIn = null;
+let _projOut = null;
+const projScratch = () => {
+  _projIn ??= new pc.Vec3();
+  _projOut ??= new pc.Vec3();
+  return [_projIn, _projOut];
+};
 export function worldToScreenCss(cameraEntity, wx, wy, wz) {
-  cameraEntity.camera.worldToScreen(_projIn.set(wx, wy, wz), _projOut);
-  return { x: _projOut.x, y: _projOut.y, behind: _projOut.z < 0 };
+  const [vin, vout] = projScratch();
+  cameraEntity.camera.worldToScreen(vin.set(wx, wy, wz), vout);
+  return { x: vout.x, y: vout.y, behind: vout.z < 0 };
 }
 
 // Body landmarks, in world units above the floor's top face. Characters are

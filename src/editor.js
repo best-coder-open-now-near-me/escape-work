@@ -16,7 +16,7 @@ import { worldToScreenCss } from './fx.js';
 import { parseLevel, parseWallRuns, compressWallRuns, TYPE_ALIASES } from './grid.js';
 import { say, PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 
-const pc = window.pc;
+const pc = globalThis.window?.pc;
 const PLAYER_CHAR = '@';
 const MIN_SIZE = 4;
 const MAX_SIZE = 40;
