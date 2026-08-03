@@ -703,6 +703,25 @@ export function gainXp(sheet, amount) {
 // points the others were advertising.
 export const pendingPoints = (sheet) => (sheet?.attrPoints || 0) + (sheet?.classPoints || 0);
 
+// The banked points that can ACTUALLY be spent right now - which is not the
+// same number, because class points keep accruing per level while a track is
+// finite. Once a track is bought out its points are unspendable forever, and
+// the fullscreen LEVEL UP modal was queued off `pendingPoints`, so it reopened
+// after every victory for the rest of the run with nothing to buy (Q068). On
+// the shipped campaign that starts partway through floor 2 and never stops.
+//
+// Attribute points are always spendable. Class points count only while the
+// track still offers a node - `nodeAvailable` already accounts for taken,
+// prereq-locked and unaffordable, so a track merely GATED by prereqs stops
+// nagging and starts again the moment a node opens.
+//
+// Deliberately a second reading and not a replacement: `pendingPoints` is
+// still what the character sheet and the party bar show, because the points
+// are real and banked and hiding them would be a different lie. This one
+// answers "is it worth interrupting the player", which is a narrower question.
+export const spendablePoints = (sheet) => (sheet?.attrPoints || 0)
+  + (classTrack(sheet || {}).some((n) => nodeAvailable(sheet, n)) ? (sheet?.classPoints || 0) : 0);
+
 // How much this character can carry. A STAT drives it [stated] (designer,
 // 2026-08-03: "we'll make inventory limit based on a stat, so it needs a
 // variable cap"), which is why it is a function of the sheet and not the module

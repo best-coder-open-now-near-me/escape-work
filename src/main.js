@@ -20,7 +20,8 @@ import { seesBody, coneBoundary, deriveFacing } from './stealth.js';
 import {
   createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, grantTalent, classTrack,
   scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
-  orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, lookOf, stairwellHeal, REACH, STEALTH,
+  orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, spendablePoints,
+  lookOf, stairwellHeal, REACH, STEALTH,
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
@@ -95,6 +96,18 @@ let activeLevel = LEVELS[FIRST_LEVEL];
 let activeLevelId = FIRST_LEVEL;
 let playtesting = false;
 let restoredProgress = null; // { levelId, sheets, active } - party.js handles old shapes
+// Does the run about to be played OWN the campaign save? Only a run that was
+// restored from it, or one that has since written it by clearing a floor.
+//
+// The two IMPLICIT retirements - dying, and winning a level with no next floor
+// - are gated on this. They used to be gated on `!playtesting` alone, and
+// "Start a fresh run" at the desk is a campaign run (`playtesting` false) that
+// has written nothing: so picking it and then dying on floor one, which is
+// exactly where a level-one party dies, deleted the saved campaign the desk
+// had been offering two clicks earlier - local copy and cloud copy both (Q063).
+// The player never chose 'Restart run'. That verb stays unconditional; this
+// only stops a run destroying somebody else's save on its way out.
+let campaignSaveIsOurs = false;
 try {
   // Each source gets its OWN guard. Sharing one meant a corrupt playtest stash
   // threw before the campaign save was ever read, so a bad stash silently
@@ -119,6 +132,7 @@ try {
         activeLevel = LEVELS[p.levelId];
         activeLevelId = p.levelId;
         restoredProgress = p;
+        campaignSaveIsOurs = true; // this run continues the save, so it may retire it
       }
     } catch { /* corrupt save - the shipped level is the honest fallback */ }
   }
@@ -298,10 +312,28 @@ function showLevelMenu() {
     remote.pull().then((row) => {
       if (!row?.data || !document.getElementById('level-menu')) return;
       if (document.getElementById('level-continue')) return;
+      // Validate with the BOOT path's own check before offering it. The
+      // button banks the row and reloads, and boot then runs
+      // `parseProgress` + `LEVELS[levelId]` over it - so a row this build
+      // cannot read (an older save naming a level id since renamed) came back
+      // to the desk with no error and no run booted, and clicking again did
+      // the same thing forever (Q067). Asking the same two questions here
+      // means the offer only appears when accepting it will work.
+      const p = parseProgress(row.data);
+      if (!p || !LEVELS[p.levelId]) return;
       const b = button('level-continue', 'Continue the run',
-        `${LEVELS[row.data.levelId]?.name || 'a saved floor'} — restored from the cloud`,
+        `${LEVELS[p.levelId].name || p.levelId} — restored from the cloud`,
         () => {
-          try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(row.data)); } catch { /* boot fresh */ }
+          // The reload used to sit OUTSIDE this try, so a browser that can
+          // read but not write - quota gone, private mode - reloaded onto a
+          // desk with nothing banked, the same loop by the other door. Say so
+          // and stay put instead.
+          try {
+            localStorage.setItem(PROGRESS_KEY, JSON.stringify(row.data));
+          } catch {
+            ui.toast('This browser cannot store a save - the cloud run stays in the cloud.');
+            return;
+          }
           location.reload();
         });
       panel.insertBefore(b, panel.children[2] || null); // above the floor list
@@ -937,7 +969,7 @@ function startGame(level) {
     // dying in a playtest must not delete the saved run sitting in the same
     // browser - that is somebody's progress, wiped by a tool they were using
     // to check a room.
-    if (!playtesting) clearProgress();
+    if (!playtesting && campaignSaveIsOurs) clearProgress();
     ui.showLoseScreen(message);
   }
 
@@ -1892,7 +1924,13 @@ function startGame(level) {
   // at a time.
   function openLevelUps() {
     if (!party) return;
-    const queue = party.members.filter((m) => pending(m.sheet) > 0);
+    // `spendablePoints`, not `pending`: class points keep accruing per level
+    // while a track is finite, so a bought-out member reopened this fullscreen
+    // modal after every victory with nothing purchasable (Q068). The character
+    // sheet and the party bar keep showing `pending` - the points ARE banked,
+    // and hiding them would be a different lie. This is only the decision to
+    // interrupt.
+    const queue = party.members.filter((m) => spendablePoints(m.sheet) > 0);
     let i = 0;
     const next = () => (i < queue.length ? openLevelUpFor(queue[i++], next) : refreshProgressUi());
     next();
@@ -1901,6 +1939,25 @@ function startGame(level) {
     if (!party || inCombat || gameOver || modalOpen()) return;
     const m = party.members[i];
     if (!m?.actor || m === partyLeader(party) || m.sheet.hp <= 0) return;
+    // Both calls go BEFORE the rebind, like the two sibling handoffs at
+    // forceLeader and syncLeaderBindings - `clearOocCrouch` reads the module's
+    // `sheet`/`player`, so after the rebind it strips 'covered' off the
+    // INCOMING leader and leaves the real croucher crouched forever, which is
+    // precisely the leak (Q060/Q066). `quiet` because a handoff CONSUMES the
+    // crouch rather than abandoning it, and the "You take point" line below is
+    // already the sentence for this moment.
+    clearOocCrouch(true); // the crouch belongs to the sheet that took it
+    // A SOLO sneak names the leader, and the naming is derived live
+    // (`sneakingMembers` filters on the current leader) while the chip was
+    // stamped at toggle time - so a portrait click used to silently swap who
+    // the sneak meant, leaving the outgoing scout wearing the chip, skipped by
+    // the fight trigger and absent from the spot sweep: un-triggerable and
+    // un-spottable until something else ended the mode (Q061). Ended rather
+    // than handed over, because re-stamping `sneaking` onto the incoming
+    // leader would slip somebody into a sneak while they are being watched,
+    // which is the one thing D8 refuses. Group mode names everybody, so it
+    // survives the handoff untouched.
+    if (sneak?.mode === 'solo') endSneak('You break off. The scout straightens up.');
     player.clearPath();
     pendingAction = null;
     armedOoc = null;
@@ -3016,6 +3073,7 @@ function startGame(level) {
           try {
             const saved = serializeProgress(party, level.next);
             localStorage.setItem(PROGRESS_KEY, JSON.stringify(saved));
+            campaignSaveIsOurs = true; // the save is this run's from here on
             // Fire-and-forget: the local write above is the save; the cloud
             // copy is the carrier that survives a rebuilt browser.
             remote.push(saved);
@@ -3024,7 +3082,7 @@ function startGame(level) {
         } else {
           // Same rule as loseGame: finishing a PLAYTEST level is not finishing
           // a campaign run, so it must not clear the campaign save either.
-          if (!playtesting) clearProgress();
+          if (!playtesting && campaignSaveIsOurs) clearProgress();
           ui.showWinScreen({ level: ms.level, defeated: enemies.filter((e) => !e.alive).length });
         }
         return;

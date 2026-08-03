@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { COMPANIONS } from '../../src/data/companions.js';
 import {
-  createSheet, grantTalent, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist, accuracy, dodge, hitChance, rollHit, unitCombat, equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, stairwellHeal, gritSaveChance, SAVE,
+  createSheet, grantTalent, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, spendablePoints, pendingPoints, scaleEnemy, effectiveLevel, statusResist, accuracy, dodge, hitChance, rollHit, unitCombat, equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, stairwellHeal, gritSaveChance, SAVE,
 } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
@@ -291,6 +291,36 @@ test('classTrack returns the sheet class own nodes', () => {
   const ids = classTrack(createSheet('middle-manager')).map((n) => n.id);
   assert.ok(ids.includes('mgr-stonewall'));
   assert.ok(!ids.includes('drone-thick-skin'));
+});
+
+// spendablePoints is the narrower reading of pendingPoints: what can be spent
+// NOW. It exists because class points accrue per level while a track is
+// finite, so a bought-out member kept re-opening the level-up modal with
+// nothing to buy (Q068). These pin the divergence, which is the whole point of
+// having two numbers.
+test('spendablePoints ignores class points a bought-out track cannot take', () => {
+  const s = createSheet('office-drone');
+  s.attrPoints = 0;
+  s.classPoints = 3;
+  s.perks = classTrack(s).map((n) => n.id); // every node taken
+  assert.equal(pendingPoints(s), 3); // still banked, still shown on the sheet
+  assert.equal(spendablePoints(s), 0); // but nothing to interrupt the player for
+});
+
+test('spendablePoints counts class points while a node is still open', () => {
+  const s = createSheet('office-drone');
+  s.attrPoints = 0;
+  s.classPoints = 3;
+  s.perks = [];
+  assert.equal(spendablePoints(s), 3);
+});
+
+test('spendablePoints always counts attribute points', () => {
+  const s = createSheet('office-drone');
+  s.attrPoints = 2;
+  s.classPoints = 1;
+  s.perks = classTrack(s).map((n) => n.id);
+  assert.equal(spendablePoints(s), 2); // the attr half survives a dead track
 });
 
 // --- enemy tiers + floor curve (milestone 4) --------------------------------
