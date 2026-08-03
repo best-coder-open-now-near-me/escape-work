@@ -25,6 +25,7 @@ import {
   buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, aimsAtAnyone, isPurge, coneFrom, conePolyline, aimRangeOf, rangeTiles, isBreakable, aimsAtProps, isPull,
 } from './powers.js';
 import { createAimPaint } from './aim-paint.js';
+import { createAimView } from './combat-aim.js';
 import { STATUSES } from './data/statuses.js';
 import { blocksSight, PARTITION_TOPPLE } from './data/tiles.js';
 import { PANEL_CHROME, createCombatReadout, apPips } from './ui.js';
@@ -850,18 +851,18 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // RESOLVED rather than because the player backed out.
   //
   // It exists because those sites each wrote the teardown by hand and drifted:
-  // all of them cleared `armed`, only four cleared `aimPoint`, only three
+  // all of them cleared `armed`, only four cleared `aim.aimPoint`, only three
   // cleared `pendingConfirm`. The three are one state - what the next click
   // will do - and they have to fall together or a resolved cone leaves its aim
   // point behind for the next verb to read. Both of the strays are
   // behaviour-neutral to fold in here, which is why this is a carve and not a
-  // fix: every `aimPoint` read is already gated on `armed` (drawTargets:1475,
+  // fix: every `aim.aimPoint` read is already gated on `armed` (drawTargets:1475,
   // 1494, 1510), and `pendingConfirm` is nulled before anything arms
   // (`:3742`), so it is provably null wherever `armed` was set.
   function disarm() {
     armed = null;
     pendingConfirm = null;
-    aimPoint = null;
+    aim.clearAim();
   }
 
   // --- initiative order --------------------------------------------------------
@@ -1027,33 +1028,107 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // door opened, smoke landing) repaints on its next frame without this
   // module knowing why.
   const aimPaint = createAimPaint(app);
-  let paintEpoch = 0;
-  let preview = null; // { reach: [[x,z],...], tail: [[x,z],...] | null }
-  let aimPoint = null; // hover point while a cone attack is armed
-  // The enemy the cursor is on as of the last hover event - the body pick when
-  // main.js has one, else the ground-point fallback (enemyAtPoint). This is
-  // the ONE answer to "am I aiming at someone?": the crosshair cursor, the
-  // to-hit readout and the reach ring all read it, because computing it per
-  // consumer is what let the crosshair promise a swing the readout denied.
-  // Tracked even on gated frames (mid-move, AI turn) so the reach ring keeps
-  // drawing while a walk finishes.
-  let hoverFoe = null;
-  let hoverHitChance = null; // to-hit chance shown for the enemy under an armed cursor
-  // The door under the cursor as of the last hover event, as an edge midpoint
-  // - main.js resolves it with the click's own combatDoorAt and hands it in,
-  // so the threshold ring below can only exist while the cursor is actually
-  // on the door (the same life the pointer cursor has).
-  let hoverDoor = null;
+  // The aim VIEW (combat-aim.js): the wash, the walk preview, the ring drawers
+  // and the six variables only they touch (`preview`, `previewDt`, `coverEase`,
+  // `hoverDoor`, `paintEpoch`, `aim.aimPoint`). Declared here, private there - the
+  // point of the slice is that five thousand lines can no longer assign to
+  // them, only ask through the named methods at the bottom of that file.
+  // `view` hands over the turn, which IS still combat's: getters rather than
+  // values, so a frame draws against the live turn and never a stale copy.
+  const aim = createAimView({
+    app,
+    pc,
+    marks,
+    aimPaint,
+    actions: ACTIONS,
+    world,
+    costTag,
+    REACH,
+    view: {
+      get phase() { return phase; },
+      get armed() { return armed; },
+      get active() { return active; },
+    },
+    // Every rule is wrapped rather than passed by reference, and that is not
+    // style. This object is built where `aim` is declared, which is ABOVE half
+    // the closure - and six of these (`verbReaches`, `zoneCells`,
+    // `summonSpotProblem`, `crouchFacesAt`, `friendlies`, `allyProblemFor`) are
+    // `const` arrows declared further down. Passing those by reference reads
+    // them in their temporal dead zone: the build is perfectly happy and the
+    // first fight throws. Wrapping defers every lookup to call time, so the
+    // bag cannot care where in the file a rule happens to live.
+    ask: {
+      TARGET_R,
+      reachSpec: (id) => reachSpecOf(id),
+      previewAction: () => previewAction(),
+      isControl: (a) => isControl(a),
+      isPurge: (a) => isPurge(a),
+      isZone: (a) => isZone(a),
+      isMobility: (a) => isMobility(a),
+      isPull: (a) => isPull(a),
+      isToppleable: (d) => isToppleable(d),
+      aimsAtAlly: (a) => aimsAtAlly(a),
+      rangeOf: (id) => rangeOf(id),
+      ammoCostOf: (id) => ammoCostOf(id),
+      shotOutcome: (u, en) => shotOutcome(u, en),
+      crouchLabel: (b) => crouchLabel(b),
+      nameOf: (u) => nameOf(u),
+      bodyDist: (u, en) => bodyDist(u, en),
+      bodyLos: (u, en) => bodyLos(u, en),
+      canReach: (u, en, r) => canReach(u, en, r),
+      hasSwingSpot: (en) => hasSwingSpot(en),
+      routeIntoRange: (en, r) => routeIntoRange(en, r),
+      routeBeside: (en) => routeBeside(en),
+      previewWalk: (path, point, a, stop) => previewWalk(path, point, a, stop),
+      controlIsRanged: (a) => controlIsRanged(a),
+      controlProblem: (a, q) => controlProblem(a, q),
+      attackMods: (u, t, plan) => attackMods(u, t, plan),
+      hitChance: (acc, dodge, mods) => hitChance(acc, dodge, mods),
+      mobilityProblem: (a, q) => mobilityProblem(a, q),
+      dashDistanceOf: (a) => dashDistanceOf(a),
+      truncateByBudget: (s2, b, c) => truncateByBudget(s2, b, c),
+      stepCost: (...args) => stepCost(...args),
+      moveBudget: (u) => moveBudget(u),
+      roundAp: (v) => roundAp(v),
+      fmtAp: (v) => fmtAp(v),
+      allyAtPoint: (pt) => allyAtPoint(pt),
+      enemyAtPoint: (pt) => enemyAtPoint(pt),
+      verbSides: (a, r) => verbSides(a, r),
+      coneTest: (a, x, z) => coneTest(a, x, z),
+      conePolyline: (a, t) => conePolyline(a, t),
+      toppleRings: (x, z, o) => toppleRings(x, z, o),
+      topplePlan: (u, x, z) => topplePlan(u, x, z),
+      partitionRings: (x, z, w) => partitionRings(x, z, w),
+      breakRings: (a, x, z, r, o) => breakRings(a, x, z, r, o),
+      breakPlanAt: (id, x, z) => breakPlanAt(id, x, z),
+      enemyRingOk: (a, q) => enemyRingOk(a, q),
+      pullPlanFor: (en) => pullPlanFor(en),
+      reachOfUnit: (u) => reachOfUnit(u),
+      bodyOf: (u) => bodyOf(u),
+      aimsAtAnyone: (a) => aimsAtAnyone(a),
+      posOf: (u) => posOf(u),
+      verbReaches: (id, en, x, z) => verbReaches(id, en, x, z),
+      rangeTiles: (x, z, r, ok) => rangeTiles(x, z, r, ok),
+      crouchStateOf: (u) => crouchStateOf(u),
+      zoneProblem: (a, q) => zoneProblem(a, q),
+      distToTile: (u, x, z) => distToTile(u, x, z),
+      losToTile: (u, x, z) => losToTile(u, x, z),
+      zoneCells: (a, x, z) => zoneCells(a, x, z),
+      summonSpotProblem: (a, x, z) => summonSpotProblem(a, x, z),
+      coverSpotProblem: (x, z) => coverSpotProblem(x, z),
+      crouchFacesAt: (x, z) => crouchFacesAt(x, z),
+      friendlies: () => friendlies(),
+      allyProblemFor: (id, m) => allyProblemFor(id, m),
+    },
+  });
+  // Three entry points where there were sixteen functions and eight shared
+  // variables: the frame loop draws, main.js hovers, and combat hides the
+  // readout when a turn or a verb ends.
+  const { drawTargets, drawPreview, handleHover, hidePreview } = aim;
   // Test-only: what the last combat click resolved to. Every silent path
   // stamps a reason, so a wedged e2e run can say WHY a click did nothing
   // instead of leaving a trace full of clicks with no visible effect.
   let lastClickOutcome = null;
-
-  function hidePreview() {
-    preview = null;
-    hoverHitChance = null;
-    costTag.style.display = 'none';
-  }
 
   // The live enemy near a ground point, if any - the fallback for pick rays
   // that miss the body mesh. Measured against the BODY's continuous position,
@@ -1088,7 +1163,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const { points, cost, done, tail } = truncateByBudget(
       s, Math.max(0, moveBudget(active) - a.ap), stepCost);
     if (points.length < 2) return null;
-    preview = { reach: points, tail };
+    aim.setPreview({ reach: points, tail });
     return { end: points[points.length - 1], cost, done };
   }
 
@@ -1103,203 +1178,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // point (attackMods' `plan`), because cover, flanking and the melee/ranged
   // split all move with the attacker - a percentage computed from the tile
   // being LEFT would be a lie about the attack being promised.
-  function showHitPreview(en, sx, sy) {
-    hoverHitChance = null;
-    // The readout REPLACES the movement trail. Clearing it here rather than at
-    // the call sites is what makes that true: `preview` is redrawn every frame,
-    // so a trail left over from the last patch of floor the cursor crossed kept
-    // hanging off the character while they were plainly aiming at someone.
-    // (previewWalk re-fills it when a walk is genuinely part of the click.)
-    preview = null;
-    const id = previewAction();
-    const a = ACTIONS[id];
-    // A control rolls to hit like a swing does, so it earns the same readout -
-    // an odds display that vanished the moment you armed Detain would make the
-    // one power you most want to know the odds of the one that hides them.
-    if (!a || (a.type !== 'attack' && !isControl(a) && !isPurge(a)) || a.cone || !en) {
-      costTag.style.display = 'none';
-      return;
-    }
-    const place = (text) => {
-      costTag.textContent = text;
-      costTag.style.left = `${sx + 14}px`;
-      costTag.style.top = `${sy + 14}px`;
-      costTag.style.display = 'block';
-    };
-    // A crouched target reshapes the readout before any odds exist
-    // (TACTICS_PLAN M6): no angle means NO number - a percentage over an
-    // unhittable target is a lie - and a human shield shows the odds against
-    // the body that would actually take it.
-    let target = en;
-    let shieldNote = '';
-    let plan = null; // planned stand point while the click includes a walk
-    let planCost = 0; // what that walk takes out of this turn's budget
-    const range = rangeOf(id);
-    if (range) {
-      const so = shotOutcome(active, en);
-      if (so.blocked || (so.redirected && so.target.sheet)) {
-        place(so.blocked
-          ? `No shot - in cover behind the ${crouchLabel(so.blocked)}`
-          : `No shot - you would hit ${nameOf(so.target)}`);
-        return;
-      }
-      if (so.redirected) {
-        target = so.target;
-        shieldNote = ` vs ${nameOf(so.target)} (human shield)`;
-      }
-      const far = bodyDist(active, en) > range;
-      const noLine = !bodyLos(active, en);
-      if (far || noLine) {
-        // A throw refuses where it stands (the click's own rule) - say so
-        // instead of quoting odds for a throw that will not happen.
-        if (a.ammoCost) { place(far ? 'Too far to throw.' : 'No clear line to throw.'); return; }
-        const stop = (px, pz) => verbReaches(id, en, px, pz);
-        const route = routeIntoRange(en, range);
-        const w = route && route.length >= 2 ? previewWalk(route, null, a, stop) : null;
-        if (!w) { place('No way to get a shot at them.'); return; }
-        if (!w.done || !stop(w.end[0], w.end[1])) {
-          place('Out of range this turn - a click closes the distance.');
-          return; // the trail stays up: green as far as the budget carries
-        }
-        plan = { x: w.end[0], z: w.end[1] };
-        planCost = w.cost;
-      }
-    } else if (!(isControl(a) && controlIsRanged(a)) && !canReach(active, en)) {
-      // The melee walk-in (swings, touch controls, a purge): preview the same
-      // route the click will take, to the same legal stand point.
-      const stop = (px, pz) => verbReaches(id, en, px, pz);
-      const best = routeBeside(en);
-      if (!best) { place('No way to get a swing at them.'); return; }
-      const w = previewWalk(best.path, best.point, a, stop);
-      if (!w) { place('Already as close as the route gets.'); return; }
-      if (!w.done || !stop(w.end[0], w.end[1])) {
-        place('Out of reach this turn - a click closes the distance.');
-        return;
-      }
-      plan = { x: w.end[0], z: w.end[1] };
-      planCost = w.cost;
-    }
-    // The same terms the swing will roll - not a second copy of the math. The
-    // reason string matters: a positional modifier the player can't see reads
-    // as randomness (TACTICS_PLAN, ui.js note).
-    const t = attackMods(active, target, plan);
-    hoverHitChance = hitChance(t.acc, t.dodge, t.mods);
-    const why = t.covered ? ' - in cover'
-      : (t.behind ? ' - from behind' : (t.flanked ? ' - flanked' : ''));
-    let text = `${Math.round(hoverHitChance * 100)}% to hit${why}${shieldNote}`;
-    // Price the whole click while a walk is part of it: what the move takes
-    // out of real AP (the allowance is spent first, exactly as billMove
-    // spends it) plus the swing itself.
-    if (plan && planCost > 0.02) {
-      const free = Math.min(active.freeAp || 0, planCost);
-      const total = roundAp(roundAp(planCost - free) + a.ap);
-      text += ` · ${fmtAp(total)} AP after the walk`;
-    }
-    place(text);
-  }
-
   // While a buff is armed, the cursor names WHO it would land on and what they
   // would get - or why they would get nothing. The friendly twin of the to-hit
   // readout: the same "say the outcome before the AP is spent" contract, on a
   // verb whose outcome is not a percentage.
-  function showAllyPreview(point, sx, sy) {
-    preview = null; // aiming replaces the movement trail, same as a swing
-    const a = ACTIONS[armed];
-    const m = allyAtPoint(point);
-    if (!m) { hidePreview(); return; }
-    const problem = allyProblemFor(armed, m);
-    const who = m === active ? 'yourself' : m.sheet.name;
-    costTag.textContent = problem || `${a.label} on ${who} · ${a.ap} AP`;
-    costTag.style.left = `${sx + 14}px`;
-    costTag.style.top = `${sy + 14}px`;
-    costTag.style.display = 'block';
-  }
-
   // While a dash is armed, the cursor prices the RUN: how far of it you would
   // actually cover, and that it costs a flat fee rather than the per-tile
   // charge the trail normally shows.
-  function showDashPreview(point, sx, sy) {
-    preview = null;
-    const a = ACTIONS[armed];
-    // handleHover admits a ground point of null (a pick can land on a body
-    // whose ground ray misses the world entirely - a chest pixel beside a
-    // wall), and a dash is aimed at the FLOOR, so there is nothing to price.
-    if (!point) { hidePreview(); return; }
-    const tx = Math.round(point.x);
-    const tz = Math.round(point.z);
-    const problem = mobilityProblem(a, {
-      ap: active.ap,
-      usesLeft: a.uses ? active.usesLeft[armed] ?? 0 : null,
-    });
-    if (!problem && world.isWalkable(tx, tz)) {
-      const raw = world.findPath(active.actor.x, active.actor.z, tx, tz, active.actor);
-      if (raw && raw.length >= 2) {
-        const s = world.smooth([...raw.slice(0, -1), world.clampPoint(point.x, point.z)], active.actor);
-        const { points, done } = truncateByBudget(s, dashDistanceOf(a), () => 1);
-        // The trail IS the affordance for a move - but it has to be stored in
-        // the shape drawPreview reads (`{ reach, tail }`, declared where
-        // `preview` is). A bare array left `preview.reach` undefined, and
-        // drawPreview walks it every frame: `pts.length` on undefined threw
-        // once per frame for as long as a dash was armed over a legal route.
-        // A dash has no `tail` - it stops where the budget stops, and the
-        // "as far as it reaches" wording on the cost tag already says so.
-        preview = { reach: points, tail: null };
-        costTag.textContent = done
-          ? `${a.label} · ${a.ap} AP · no opportunity attacks`
-          : `${a.label} · ${a.ap} AP · as far as it reaches`;
-        costTag.style.left = `${sx + 14}px`;
-        costTag.style.top = `${sy + 14}px`;
-        costTag.style.display = 'block';
-        return;
-      }
-    }
-    costTag.textContent = problem || 'No route there.';
-    costTag.style.left = `${sx + 14}px`;
-    costTag.style.top = `${sy + 14}px`;
-    costTag.style.display = 'block';
-  }
-
   // While a zone is armed, the cursor says how much of it would actually land.
   // That number is the whole question for this verb: the tiles it can take are
   // whatever happens to be plain floor, so the same click over open carpet and
   // over a cubicle row costs the same AP for very different results.
-  function showZonePreview(point, sx, sy) {
-    preview = null;
-    const a = ACTIONS[armed];
-    // The zone lands where you POINT (DEGRID M6): the disc of covered cells
-    // is centred on the exact aim point, so the preview prices that point,
-    // not the tile it rounds to.
-    const tx = point.x;
-    const tz = point.z;
-    const problem = zoneProblem(a, {
-      dist: distToTile(active, tx, tz),
-      los: losToTile(active, tx, tz),
-      ap: active.ap,
-      usesLeft: a.uses ? active.usesLeft[armed] ?? 0 : null,
-    });
-    const n = problem ? 0 : zoneCells(a, tx, tz).length;
-    costTag.textContent = problem || `Cover ${n} tile${n === 1 ? '' : 's'} · ${a.ap} AP`;
-    costTag.style.left = `${sx + 14}px`;
-    costTag.style.top = `${sy + 14}px`;
-    costTag.style.display = 'block';
-  }
-
   // While a summon is armed, the cursor previews the DROP: how many employees
   // that spot fits, or why it doesn't work. Same rule the click runs.
-  function showSummonPreview(point, sx, sy) {
-    preview = null; // the drop zone replaces the trail, same as the hit readout
-    const a = ACTIONS[armed];
-    const tx = Math.round(point.x);
-    const tz = Math.round(point.z);
-    const problem = summonSpotProblem(a, tx, tz);
-    const room = problem ? 0 : world.summonSpots(tx, tz, a.count).length;
-    costTag.textContent = problem
-      || `Post ${room} employee${room === 1 ? '' : 's'} here · ${a.ap} AP`;
-    costTag.style.left = `${sx + 14}px`;
-    costTag.style.top = `${sy + 14}px`;
-    costTag.style.display = 'block';
-  }
-
   // Resolve the hover and return the enemy a click would swing at RIGHT NOW,
   // or null. main.js keys the crosshair cursor off the return value, so the
   // cursor, the to-hit readout and the click all run the same resolution AND
@@ -1312,92 +1203,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // The hover has to agree, and it has to agree HERE rather than only at the
   // cursor: `hoverFoe` is what draws the target ring and the to-hit readout,
   // so gating it in main.js alone would swap one lie for a quieter one.
-  function handleHover(point, sx, sy, picked = null, doorMid = null, onOwnTile = false) {
-    // Tracked before any gate, like hoverFoe: a hover that leaves the canvas
-    // (main.js calls in with nulls) must clear the door ring the same frame.
-    hoverDoor = doorMid;
-    // While aiming, target rings replace the movement trail entirely. Cone
-    // attacks and summon placement additionally track the cursor - the wedge
-    // (or the drop zone) follows it.
-    // A zone tracks the cursor the way a cone and a summon placement do - the
-    // footprint follows the aim, because where it lands IS the decision.
-    if (armed && (ACTIONS[armed].cone || ACTIONS[armed].type === 'summon'
-      || ACTIONS[armed].type === 'cover' || isZone(ACTIONS[armed]))) aimPoint = point;
-    // Who is the cursor on? The body pick wins - it sees what the pixel shows.
-    // The ground point is only a fallback for rays that miss the mesh, and a
-    // pick can land on a body whose ground ray misses the world entirely (a
-    // chest pixel next to a wall), so the pick must not require a point.
-    hoverFoe = onOwnTile
-      ? null
-      : (picked?.alive ? picked : null) || (point ? enemyAtPoint(point) : null);
-    if (phase !== 'player' || active.actor.moving || (!point && !hoverFoe)) { hidePreview(); return null; }
-    // Armed: the movement trail yields to the to-hit readout over a target.
-    if (armed) {
-      if (ACTIONS[armed].type === 'summon') {
-        if (point) showSummonPreview(point, sx, sy); else hidePreview();
-        return hoverFoe;
-      }
-      if (isZone(ACTIONS[armed])) {
-        if (point) showZonePreview(point, sx, sy); else hidePreview();
-        // A zone is aimed at the GROUND, so it must not claim a foe - the
-        // crosshair would promise a swing the click does not make.
-        return null;
-      }
-      // A buff points the other way, so it must NOT return a foe: main.js
-      // keys the crosshair off this return value, and a crosshair over a
-      // coworker while Performance Review is armed promises a swing the click
-      // would refuse - the exact class of lie the one-hover-answer rule
-      // exists to prevent (ARCHITECTURE, hover.js).
-      // An ANY-target verb belongs to whichever half the cursor is on: over a
-      // coworker it must promise the swing the click will make, over a
-      // colleague the friendly cast. Only a friends-ONLY verb returns null
-      // unconditionally - that is the lie-prevention rule, not a ban on verbs
-      // that legitimately point both ways.
-      if (aimsAtAlly(ACTIONS[armed]) && !(aimsAtAnyone(ACTIONS[armed]) && hoverFoe)) {
-        showAllyPreview(point, sx, sy);
-        return null;
-      }
-      // A dash is aimed at the FLOOR, so it keeps the movement trail rather
-      // than a target readout - what the player needs to see is where they
-      // would end up, which is the one preview the game already draws well.
-      if (isMobility(ACTIONS[armed])) { showDashPreview(point, sx, sy); return null; }
-      showHitPreview(hoverFoe, sx, sy);
-      return hoverFoe;
-    }
-    // Nothing armed, but a coworker under the cursor is still a target - the
-    // click swings by default, so preview the odds rather than falling through
-    // to a movement route (their tile isn't walkable, so that showed nothing at
-    // all, which read as "a click here does nothing").
-    if (hoverFoe) { showHitPreview(hoverFoe, sx, sy); return hoverFoe; }
-    const tx = Math.round(point.x);
-    const tz = Math.round(point.z);
-    if (!world.isWalkable(tx, tz)) { hidePreview(); return; } // enemies/walls: no route preview
-    let raw;
-    if (tx === active.actor.x && tz === active.actor.z) {
-      const pos = active.actor.entity?.getPosition();
-      if (!pos) { hidePreview(); return; }
-      raw = [[pos.x, pos.z], world.clampPoint(point.x, point.z)];
-    } else {
-      const p = world.findPath(active.actor.x, active.actor.z, tx, tz, active.actor);
-      if (!p || p.length < 2) { hidePreview(); return; }
-      raw = [...p.slice(0, -1), world.clampPoint(point.x, point.z)];
-    }
-    const s = world.smooth(raw, active.actor);
-    const { points, cost, done, tail } = truncateByBudget(s, moveBudget(active), stepCost);
-    preview = { reach: points, tail };
-    // Show what it actually costs YOU: the allowance is spent first, so a short
-    // reposition can read as free even though the route has a distance cost.
-    const free = Math.min(active.freeAp || 0, cost);
-    const apPart = roundAp(cost - free);
-    const label = free > 0
-      ? (apPart > 0 ? `${fmtAp(apPart)} AP + ${fmtAp(free)} move` : `${fmtAp(free)} move (free)`)
-      : `${fmtAp(cost)} AP`;
-    costTag.textContent = done ? label : `${label} - out of reach`;
-    costTag.style.left = `${sx + 14}px`;
-    costTag.style.top = `${sy + 14}px`;
-    costTag.style.display = 'block';
-  }
-
 
   // The faces that would shield a crouch on this tile - the aim's twin of
   // `crouchFacesOf`, which asks the same of a unit already standing somewhere.
@@ -1409,25 +1214,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // The cover aim's eased ring position, and the frame's dt for the easing -
   // immediate-mode lines redraw every frame, so smoothness is state carried
   // between frames, not an animation the engine runs.
-  let coverEase = null;
-  let previewDt = 0;
-
-  function drawPreview(dt = 0) {
-    previewDt = dt;
-    if (!preview) return;
-    const y = 0.14; // above the floor top (0.1) and surface decals (0.12)
-    const seg = (pts, color) => {
-      for (let i = 1; i < pts.length; i++) {
-        app.drawLine(new pc.Vec3(pts[i - 1][0], y, pts[i - 1][1]),
-          new pc.Vec3(pts[i][0], y, pts[i][1]), color);
-      }
-    };
-    seg(preview.reach, PREVIEW_OK);
-    if (preview.tail) seg(preview.tail, PREVIEW_FAR);
-    // ring where the walk would stop
-    const [ex, ez] = preview.reach[preview.reach.length - 1];
-    drawRing(ex, ez, 0.32, PREVIEW_OK, y);
-  }
 
   // The wedge, aimed from the acting member's body. The geometry itself lives
   // in powers.js so the out-of-combat preview draws the identical shape; this
@@ -1443,143 +1229,23 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // everything below it - it paints whether or not anything is hovered, and it
   // must also know to VANISH when the turn ends, the verb is disarmed, or the
   // aimer starts walking.
-  function drawAimWash() {
-    // The aim wash first, and unconditionally: it must also KNOW to vanish
-    // when the turn ends, the verb is disarmed, or the aimer is mid-walk (a
-    // wash painted from a tile you are leaving is a promise about ground you
-    // no longer own). The key makes the repaint free while nothing changes.
-    // reachSpecOf is the ONE answer to "how far does this verb reach": the
-    // shapes powers.js owns plus a plain ranged ATTACK's (stats.rangeOf, where
-    // a throw's undeclared THROW_RANGE lives). The wash, the target rings and
-    // every walk-up read it, so the three cannot disagree.
-    const spec = phase === 'player' && armed && !active.actor.moving
-      ? reachSpecOf(armed)
-      : null;
-    if (!spec) {
-      aimPaint.hide();
-    } else {
-      const ax = active.actor.x;
-      const az = active.actor.z;
-      // An ANY-target verb (a purge - Reboot) has TWO reaches, and the wash is
-      // sized by the wider one: a colleague can be rebooted from across the
-      // room (the friendly click resolves at buff range), while a coworker
-      // goes down handleEnemyClick's melee walk-in and has to be walked up to.
-      // Painting the friendly radius over a coworker promises a cast that
-      // would actually be a walk, so those tiles drop out of the wash - it
-      // covers the ground an aim LANDS on right now, and the coworker's own
-      // ring (which already reads the walk-in rule) says the rest.
-      //
-      // Scoped to `aimsAtAnyone` deliberately: every other verb's wash radius
-      // IS its act range, so the test would be a no-op - and a cone, whose
-      // range lives in `cone` rather than where actRangeOf looks, would have
-      // holes punched in a wash that is perfectly honest.
-      const twoReaches = aimsAtAnyone(ACTIONS[armed]);
-      const body = posOf(active);
-      const walkOnly = (x, z) => {
-        if (!twoReaches) return false;
-        const en = world.liveEnemies().find((e) => e.x === x && e.z === z);
-        return !!en && !verbReaches(armed, en, body.x, body.z);
-      };
-      // Painted, ranged and sighted from the BODY (DEGRID D4/D6): the wash
-      // must promise exactly what the gates measure, and they measure from
-      // where the model stands. The key still uses the tile - a sub-tile
-      // shuffle should not repaint the world.
-      aimPaint.show(`${armed}:${ax},${az}:${paintEpoch}`, () => rangeTiles(
-        body.x, body.z, spec.r,
-        // Paintable ground: open floor the aimer can SEE. Solid cells stay
-        // unpainted - they read as objects standing in the wash, and the
-        // shadow they cast behind themselves is the whole lesson.
-        (x, z) => world.terrainOpen(x, z) && world.hasLos(body.x, body.z, x, z) && !walkOnly(x, z),
-      ));
-    }
-  }
-
   // The faces shielding whoever you are steering, right now, whatever is armed.
   // A crouch that says only "In Cover" is one you have to guess the shape of,
   // and in a corner the shape is the whole decision. Read through
   // `crouchStateOf`, so the bars are the faces the next shot resolves against
   // and a shield that falls takes its bar with it.
-  function drawHeldCrouch() {
-    const s = crouchStateOf(active);
-    if (s) drawFaces(s.at.x, s.at.z, s.faces, PREVIEW_COVER);
-  }
-
   // A door rings only UNDER THE CURSOR (designer, 2026-07-31): it used to ring
   // whenever the acting member stood beside one, whatever was armed, and a
   // marker that never leaves the threshold reads as state, not affordance. The
   // hover hands in the same predicate the pointer cursor reads, so ring and
   // cursor light together; matching against doorsBeside keeps it on doors the
   // member is actually AT. Green when the AP is there, red when it is not.
-  function drawHoveredDoor() {
-    if (!hoverDoor) return;
-    for (const mid of world.doorsBeside?.(active.actor.x, active.actor.z) || []) {
-      if (Math.abs(mid.x - hoverDoor.x) > 0.01 || Math.abs(mid.z - hoverDoor.z) > 0.01) continue;
-      drawRing(mid.x, mid.z, 0.3, active.ap >= mid.ap ? PREVIEW_OK : PREVIEW_FAR);
-    }
-  }
-
   // A zone rings the tiles it would actually cover - the same list the click
   // paints (zoneCells), so a tile that shows a ring is a tile that gets the
   // surface. Red on the aim point alone when the placement itself is refused.
-  function drawZoneRings(a, id) {
-    if (!armed || !aimPoint) return;
-    // The exact aim point - the rings must show the same disc the click
-    // lays (DEGRID M6).
-    const tx = aimPoint.x;
-    const tz = aimPoint.z;
-    const problem = zoneProblem(a, {
-      dist: distToTile(active, tx, tz),
-      los: losToTile(active, tx, tz),
-      ap: active.ap,
-      usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
-    });
-    if (problem) { drawRing(tx, tz, 0.42, PREVIEW_FAR); return; }
-    for (const [x, z] of zoneCells(a, tx, tz)) drawRing(x, z, 0.42, PREVIEW_OK);
-    return true;
-  }
-
   // Where the arrivals would actually stand: the spots the click will fill,
   // not the tile aimed at. Red on the aim point when the posting is refused.
-  function drawSummonRings(a, id) {
-    if (!armed || !aimPoint) return;
-    const tx = Math.round(aimPoint.x);
-    const tz = Math.round(aimPoint.z);
-    const spots = summonSpotProblem(a, tx, tz) ? [] : world.summonSpots(tx, tz, a.count);
-    if (!spots.length) { drawRing(tx, tz, 0.42, PREVIEW_FAR); return; }
-    for (const [sx, sz] of spots) drawRing(sx, sz, 0.42, PREVIEW_OK);
-    return true;
-  }
-
   // The crouch aim: the eased ring on the spot, and the faces it would earn.
-  function drawCoverRings(a, id) {
-    if (!armed || !aimPoint) { coverEase = null; return; }
-    const tx = Math.round(aimPoint.x);
-    const tz = Math.round(aimPoint.z);
-    const ok = !coverSpotProblem(tx, tz);
-    const color = ok ? PREVIEW_COVER : PREVIEW_FAR;
-    // Three layers, from the cursor down to the rule (designer, 2026-07-31:
-    // "something that is continuous and smooth for starters" - the emblem
-    // used to hop in discrete tile-sized steps):
-    //  - a small marker at the CLAMPED stand point - continuous, and
-    //    exactly where the walk will park you: the raw cursor point can
-    //    sit inside a wall's clearance band, and a marker there would
-    //    promise a spot the body cannot occupy;
-    //  - the stand-tile ring, EASED toward the resolved tile rather than
-    //    teleporting to it, so sweeping the cursor reads as one motion;
-    //  - the shielded faces, snapped to the tile's edges - they are tile
-    //    geometry, and drawing them anywhere between two tiles would show
-    //    cover on edges that do not exist.
-    const [mx, mz] = world.clampPoint(aimPoint.x, aimPoint.z);
-    drawRing(mx, mz, 0.12, color);
-    if (!coverEase) coverEase = { x: aimPoint.x, z: aimPoint.z };
-    const k = 1 - Math.exp(-(previewDt || 0) * 14); // ~70ms settle, fps-independent
-    coverEase.x += (tx - coverEase.x) * k;
-    coverEase.z += (tz - coverEase.z) * k;
-    drawRing(coverEase.x, coverEase.z, 0.42, color);
-    if (ok) drawFaces(tx, tz, crouchFacesAt(tx, tz), PREVIEW_COVER);
-    return true;
-  }
-
   // A buff rings the FRIENDLY side: green on every ally it could land on
   // right now, red on the ones out of range, out of line, or who would get
   // nothing from it. Same rule the click runs, so a green ring is a promise.
@@ -1591,212 +1257,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // That fall-through is the one thing this extraction could have lost, since
   // the original arm simply ran off its end. Stated as a return value now,
   // rather than as the absence of one.
-  function drawAllyRings(a, id, sides) {
-    if (!armed) return true; // never auto-armed - only shown while deliberately aiming
-    for (const m of friendlies()) {
-      if (!m.actor?.entity) continue;
-      const pos = m.actor.entity.getPosition();
-      drawRing(pos.x, pos.z, TARGET_R, allyProblemFor(id, m) ? PREVIEW_FAR : PREVIEW_OK);
-    }
-    return !sides.enemies;
-  }
-
-  function drawTargets() {
-    drawAimWash();
-    if (phase !== 'player') return;
-    drawHeldCrouch();
-    drawHoveredDoor();
-    // Not gated on `armed`: with nothing armed a click still swings (the basic
-    // attack), and a swing you can't see coming is worse than no swing at all -
-    // the rings are how you know which coworker a click would hit and whether
-    // you can afford it. previewAction() is that same fallback, so what's drawn
-    // is always what would happen.
-    const id = previewAction();
-    const a = id ? ACTIONS[id] : null;
-    // A stale ease position would make the next arm GLIDE in from wherever
-    // cover was last aimed - drop it the moment cover is not the live verb
-    // (including when no verb previews at all).
-    if (a?.type !== 'cover') coverEase = null;
-    if (!id) return;
-    // ONE classifier for the whole pass (combat-targeting.verbSides). This
-    // ladder used to be hand-written here in a different order from
-    // `verbKind`'s, which is how `pull` came to be missing from the body gate
-    // while `enemyRingOk` carried a live pull arm nothing could reach.
-    const sides = verbSides(a, rangeOf(id));
-    // A zone rings the tiles it would actually cover - the same list the click
-    // paints (zoneCells), so a tile that shows a ring is a tile that gets the
-    // surface. Red on the aim point alone when the placement itself is refused.
-    if (sides.kind === 'zone' && drawZoneRings(a, id)) return;
-    // A summon rings the tiles its employees would actually land on (green),
-    // or the aimed tile alone in red when the spot is unusable - so "where do
-    // they go?" is answered before the AP is spent.
-    if (sides.kind === 'summon' && drawSummonRings(a, id)) return;
-    // Take Cover rings the SPOT YOU WOULD STAND, in the cover yellow, and
-    // draws the faces that would shield it. Ringing the shield instead was
-    // the old aim's own confusion made visible: it told you which object you
-    // had named while the side you would end up on - the thing that decides
-    // which shots you are safe from - was chosen for you and never shown.
-    // Now the ring is where you go and the bars are what covers you, so a
-    // corner reads as a corner and you can see the open angle you are leaving.
-    if (sides.kind === 'cover' && drawCoverRings(a, id)) return;
-    // A buff rings the FRIENDLY side instead: green on every ally it could
-    // land on right now, red on the ones out of range, out of line, or who
-    // would get nothing from it. Same rule the click runs (buffProblem), so a
-    // green ring is a promise.
-    if (sides.allies && drawAllyRings(a, id, sides)) return;
-    if (!sides.enemies) return;
-    if (a.cone) {
-      const test = aimPoint && coneTest(a, aimPoint.x, aimPoint.z);
-      if (test) {
-        const y = 0.14;
-        const line = conePolyline(a, test);
-        for (let i = 1; i < line.length; i++) {
-          app.drawLine(new pc.Vec3(line[i - 1][0], y, line[i - 1][1]),
-            new pc.Vec3(line[i][0], y, line[i][1]), PREVIEW_OK);
-        }
-      }
-      for (const en of world.liveEnemies()) {
-        if (!en.entity) continue;
-        const pos = en.entity.getPosition();
-        // Test the BODY (where the ring is drawn), not the tile centre, so the
-        // ring and the rule agree about what the cone catches.
-        const hit = test && test(pos.x, pos.z, TARGET_R)
-          && bodyLos(active, en);
-        drawRing(pos.x, pos.z, TARGET_R, hit && active.ap >= a.ap ? PREVIEW_OK : PREVIEW_FAR);
-      }
-      return;
-    }
-    // Reach is a RADIUS, so the honest affordance is a circle on the floor.
-    // Highlighting whole tiles would draw a plus-with-corners that lies about
-    // the shape, and without any affordance a long weapon is an invisible
-    // statistic - the player would feel the extra tile without being told why.
-    // Drawn on the ACTOR's continuous position, which is what the rule measures,
-    // and ONLY while a coworker is under the cursor - the same hoverFoe the
-    // crosshair and the readout key off, so the three affordances can't
-    // disagree about whether you're aiming at someone. It's the answer to "can
-    // I hit them from here?", a question you only ask while aiming; always-on,
-    // it was just a circle that followed you around.
-    // A RANGED attack is not answered by this circle: its rule is a Chebyshev
-    // square plus a line of sight, which a radius describes wrongly at the
-    // corners, and the melee reach drawn under a staple gun says the opposite
-    // of the truth. The per-enemy rings below answer it exactly for those.
-    if (hoverFoe?.alive && !rangeOf(id)) {
-      const me = posOf(active);
-      const r = a.type === 'shove' ? REACH.SHOVE : isPull(a) ? REACH.PULL : reachOfUnit(active);
-      drawRing(me.x, me.z, r, REACH_RING);
-    }
-    // Props are targets too, and nothing ever said so. A shove that puts a
-    // filing cabinet on somebody is strictly the better move where it is
-    // available - it damages, it stuns, and it leaves cover the other side has
-    // to walk around - so the affordance for it should not be "the player
-    // happened to try it". Eight neighbours, the same scan the AI runs, and
-    // `topplePlan` is the same rule the click runs: a green ring here is the
-    // same promise it is anywhere else on this bar.
-    if (a.type === 'shove') {
-      const b = bodyOf(active);
-      const afford = active.ap >= a.ap;
-      for (const { x, z, plan } of toppleRings(b.x, b.z, {
-        isToppleableAt: (px, pz) => isToppleable(world.tileDefAt(px, pz)),
-        planAt: (px, pz) => topplePlan(active, px, pz),
-      })) {
-        const canDrop = !!plan && afford;
-        drawRing(x, z, 0.42, canDrop ? PREVIEW_OK : PREVIEW_FAR);
-        // ...and WHERE it lands (designer, 2026-07-30): the fall is
-        // sign-derived from where you stand, so the read must be too - a
-        // smaller ring on the landing tile, tied to the prop's by a line.
-        if (plan) {
-          drawRing(plan.lx, plan.lz, 0.28, canDrop ? PREVIEW_OK : PREVIEW_FAR);
-          app.drawLine(new pc.Vec3(x, 0.14, z),
-            new pc.Vec3(plan.lx, 0.14, plan.lz), canDrop ? PREVIEW_OK : PREVIEW_FAR);
-        }
-      }
-      for (const { x, z, clear } of partitionRings(b.x, b.z, world)) {
-        drawRing(x, z, 0.42, clear && afford ? PREVIEW_OK : PREVIEW_FAR);
-      }
-    }
-    // Breakable cover rings under an ARMED attack (TACTICS_PLAN M8) - the
-    // same promise the shove's prop rings make: green means the click lands
-    // the hit. A melee swing rings its neighbourhood, a ranged attack
-    // everything it could hit; adjacent partitions ring like the shove's do
-    // (a DISTANT partition stays un-rung - the shove's own partial-affordance
-    // precedent `[proposed]` - though the ranged click still resolves).
-    //
-    // ARMED is load-bearing, and was not enforced. The coworker rings above
-    // are deliberately drawn with nothing armed, because a bare click still
-    // swings; these are not the same. `aimsAtProps` passes for the plain
-    // basic attack, so every partition edge you stood beside rang green for
-    // the whole fight - a ring on the tile ACROSS a cubicle wall, promising
-    // a verb nobody had reached for (designer, 2026-07-31). Breaking cover
-    // down is a thing you go looking for; its affordance appears when you do.
-    if (armed) {
-      const b = bodyOf(active);
-      const paid = (!a.ammoCost || active.sheet.paper >= ammoCostOf(id)) && active.ap >= a.ap;
-      const { props, edges } = breakRings(a, b.x, b.z, rangeOf(id), {
-        tileDefAt: world.tileDefAt,
-        planAt: (px, pz) => breakPlanAt(id, px, pz),
-        edgeHpBetween: world.edgeHpBetween,
-      });
-      for (const { x, z, landable } of props) {
-        drawRing(x, z, 0.42, landable && paid ? PREVIEW_OK : PREVIEW_FAR);
-      }
-      for (const { x, z } of edges) drawRing(x, z, 0.42, paid ? PREVIEW_OK : PREVIEW_FAR);
-    }
-    // The verdict ladder is combat-targeting.enemyRingOk; everything gathered
-    // here is a leaf fact only this file can answer. The lazy getters matter:
-    // shotOutcome and pullPlanFor are not free, and only one branch of the
-    // ladder ever reads them.
-    const range = rangeOf(id);
-    for (const en of world.liveEnemies()) {
-      if (!en.entity) continue;
-      // ONE shotOutcome per enemy, memoised and LAZY, because it runs
-      // crouchStateOf - which lazily BREAKS a stale crouch. Idempotent (a
-      // second call finds nothing left to break), but this is a per-frame path
-      // and asking twice where one answer will do is waste.
-      //
-      // Lazy is safe, and worth saying why: the ladder's `&&` chain means an
-      // out-of-range or blind target never reads it, so the incidental
-      // revalidation this used to do every frame no longer happens here. It
-      // does not need to. `refresh()` is the OWNER of crouch revalidation
-      // (it walks every crouch), and every event that can stale one - a shove
-      // glide, a topple taking the shield, a swap, a step - goes through it.
-      // Between refreshes only the cursor moves, and a cursor cannot invalidate
-      // a crouch.
-      let shot = null;
-      const outcome = () => (shot ??= shotOutcome(active, en));
-      const ok = enemyRingOk(a, {
-        ap: active.ap,
-        ammoOk: !a.ammoCost || active.sheet.paper >= ammoCostOf(id),
-        range,
-        dist: bodyDist(active, en),
-        los: bodyLos(active, en),
-        get shoveReach() { return canReach(active, en, REACH.SHOVE); },
-        get pullOk() { return !!pullPlanFor(en); },
-        get controlRefused() {
-          return controlProblem(a, {
-            dist: bodyDist(active, en),
-            los: bodyLos(active, en),
-            ap: active.ap,
-            usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
-            alive: en.alive,
-          });
-        },
-        get shotBlocked() { return !!outcome().blocked; },
-        get shotRedirectedToAlly() {
-          const so = outcome();
-          return !!so.redirected && !!so.target?.sheet;
-        },
-        get meleeReachable() { return canReach(active, en) || hasSwingSpot(en); },
-      });
-      const pos = en.entity.getPosition();
-      drawRing(pos.x, pos.z, TARGET_R, ok ? PREVIEW_OK : PREVIEW_FAR);
-    }
-    // A purge can also target yourself - ring the caster too.
-    if (a.purge && active.actor.entity) {
-      const pp = active.actor.entity.getPosition();
-      drawRing(pp.x, pp.z, 0.5, active.ap >= a.ap ? PREVIEW_OK : PREVIEW_FAR);
-    }
-  }
-
   // The reorg (`confused`). Every power still works and still says what it
   // does - it is just not where you left it. Deterministic per turn rather than
   // Math.random, and re-dealt only at turnStart: a bar that reshuffled on every
@@ -1942,7 +1402,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Anything worth redrawing the HUD for may also have reshaped what the
     // aim can see (a door toggled, smoke landed, a prop toppled) - stale the
     // aim wash's key so its next frame recomputes.
-    paintEpoch += 1;
+    aim.bumpEpoch();
     // ...and may have invalidated somebody's crouch (a shove glide, a topple
     // taking the shield, a swap). Revalidating here keeps the status chips
     // honest without hooking every displacement path (TACTICS_PLAN M6).
@@ -5037,7 +4497,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
 
   // Finish a queued walk-up crouch (TACTICS_PLAN M6), if the walk has landed.
   // Deliberately NOT chained to the strike above: a failed arrival there calls
-  // disarm(), which clears armed/pendingConfirm/aimPoint but never
+  // disarm(), which clears armed/pendingConfirm/aim.aimPoint but never
   // pendingCrouch, so failing the strike and then taking the crouch in the same
   // frame is a real path and always has been. Whether it SHOULD be is a design
   // question; the split is not the place to answer it.
@@ -5335,7 +4795,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     get pendingConfirm() { return pendingConfirm; },
     // The hovered door's midpoint, or null - the threshold ring's own gate,
     // so a spec can assert the ring exists only while the cursor is on it.
-    get hoverDoor() { return hoverDoor; },
+    get hoverDoor() { return aim.hoverDoor; },
     // The aim wash (TACTICS_PLAN M7): which aim is painted and how many tiles
     // it covers. A test that can't see the wash can only assert the click.
     get aimPaint() { return aimPaint.debug; },
@@ -5359,11 +4819,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // armed-hover preview is currently showing - both for the e2e suite to
     // assert the previewed odds match the math that actually rolls.
     get lastRoll() { return lastRoll; },
-    get hoverHitChance() { return hoverHitChance; },
+    get hoverHitChance() { return aim.hoverHitChance; },
     get lastClickOutcome() { return lastClickOutcome; },
     // Is the movement trail currently drawn? Aiming at a coworker must replace
     // it with the to-hit readout, not draw both.
-    get movePreview() { return !!preview; },
+    get movePreview() { return !!aim.preview; },
     get usesLeft() { return active.usesLeft; }, // live { actionId: count } - edit in place, then call refresh()
     get party() {
       return members.map((m) => ({ name: m.sheet.name, hp: m.sheet.hp, ap: m.ap, active: m === active, statuses: statusList(m.sheet) }));

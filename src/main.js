@@ -36,6 +36,8 @@ import { shieldedFaces } from './tactics.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel, buildLayeredLevel } from './scene.js';
+import { createCombatWorld } from './combat-world.js';
+
 import { loadRemoteStore, SAVE_KEY_STORAGE } from './remote-store.js';
 import { placeModel, applyCharacterProportions, cloneMaterials, tintMaterials } from './models.js';
 import { createPortraits } from './portraits.js';
@@ -2373,205 +2375,49 @@ function startGame(level) {
       // Summons that outlived the last fight walk into this one - they're still
       // on the floor with turns left on the clock, so they fight.
       allies: summons.filter((s) => s.sheet.hp > 0),
-      world: {
+      // The floor this fight is fought on (combat-world.js). The MUTABLE
+      // bindings go in as getters, not values: a fight outlives a leader
+      // switch, and a facade holding the sheet somebody had when combat opened
+      // would answer every question about the wrong character.
+      world: createCombatWorld({
+        get sheet() { return sheet; },
+        get player() { return player; },
+        get combat() { return combat; },
+        get party() { return party; },
+        get enemies() { return enemies; },
+        get summons() { return summons; },
+        grid,
+        runtime,
+        scene,
+        doors,
         isWalkable,
-        doorsBeside: (x, z) => doors.doorsBeside(x, z),
-        // The raw edit, for the side combat charges itself (AI_PLAN A10).
-        openDoor: (key) => doors.setDoorOpen(key, true),
-        // The acting body's own route: allies BLOCK in combat (no ending a
-        // move stacked on a teammate; sequenced moves can afford the detour)
-        // and the costs are the walker's own talents, not the leader's.
-        // "The walker" includes a summon you're driving - it has its own sheet
-        // and its own talents, so looking only at party.members made a shock-
-        // immune leader route an employee straight through live water.
-        // Summons block too: a member's move must not end stacked on one.
-        findPath: (sx, sz, tx, tz, self = player) => {
-          const walker = party.members.find((m) => m.actor === self)
-            || summons.find((s) => s.actor === self);
-          // A borrowed coworker is in NEITHER roster - combat's `members` is a
-          // copy of this one - so ask the fight who is walking before falling
-          // back to the leader. Without it a shock-immune leader routes a
-          // borrowed body straight through live water, which is the exact
-          // mistake the smoother's comment below says this costing prevents.
-          const ms = walker?.sheet
-            || (combat?.actingActor === self ? combat.actingSheet : null)
-            || sheet;
-          const blocked = (x, z) => [...party.members, ...summons].some((m) =>
-            m.actor && m.actor !== self && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z);
-          const open = (x, z) => isWalkable(x, z) && !blocked(x, z);
-          return findPath(open, sx, sz, tx, tz, hazardCostFor(ms), grid.stepOpen);
-        },
-        // AI routing (enemies and player-team summons): never through a party
-        // member's or another summon's tile, costed by the enemy hazard model -
-        // your talents don't shape an AI unit's fears. The mover's own start
-        // tile isn't re-checked by findPath, so a unit never blocks on itself.
-        findEnemyPath: (sx, sz, tx, tz) => findPath(
-          (x, z) => isWalkable(x, z) && !partyAt(x, z) && !summonAt(x, z),
-          sx, sz, tx, tz, enemyHazardCost, grid.stepOpen),
-        // Any-angle smoothing for combat walks, each mirroring ITS router's
-        // world - a smoother that disagrees with the route it was handed
-        // degrades to raw tile centres (or worse, straightens through a tile
-        // the route detoured around). The party variant blocks the same
-        // teammates findPath blocked and fears the WALKER's hazards, not the
-        // leader's; the enemy variant blocks the party members and summons
-        // findEnemyPath routed around. Both splice the body and both let the
-        // route's own cells through (routeOpen, which also covers the mover's
-        // own start tile - a body standing in a spill can smooth its way out).
-        smooth: (p, actor) => {
-          const walker = party.members.find((m) => m.actor === actor)
-            || summons.find((s) => s.actor === actor);
-          // Same borrowed-body case as findPath above, and it has to agree with
-          // it: a smoother fearing different hazards than its router straightens
-          // through the tile the route detoured around.
-          const ms = walker?.sheet
-            || (combat?.actingActor === actor ? combat.actingSheet : null)
-            || sheet;
-          const blocked = (x, z) => [...party.members, ...summons].some((m) =>
-            m.actor && m.actor !== actor && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z);
-          return smoothFromBody(p, actor,
-            (x, z) => !blocked(x, z) && effectiveSurfDamage(x, z, ms) <= 0);
-        },
-        smoothEnemy: (en, p) => {
-          const pos = en.entity?.getPosition();
-          if (pos) p = [[pos.x, pos.z], ...p.slice(1)];
-          const base = (x, z) => enemyClearOfHazards(x, z) && !partyAt(x, z) && !summonAt(x, z);
-          return smoothPath(routeOpen(base, p), p, grid.edgeOpen);
-        },
+        partyAt,
+        summonAt,
         clampPoint,
-        approach: approachTo,
-        // Partitions (edge walls) are chest height: they block movement but
-        // not throws - lob paper right over the cubicle wall. Closed doors go
-        // floor to frame, so they DO stop throws (grid.sightOpen); so does smoke
-        // (sightClear).
-        hasLos: (ax, az, bx, bz) => segmentClear(sightClear, ax, az, bx, bz, grid.sightOpen),
-        stepOpen: grid.stepOpen,
-        surfaceIdAt: (x, z) => runtime.surfaceAt(x, z),
-        isElectrified: (x, z) => grid.isElectrified(x, z),
-        // Whether the tile is actually ALIGHT, which is not the same question
-        // as "is its painted surface `fire`" - combat had to ask the second
-        // because the facade never offered the first.
-        isBurning: (x, z) => runtime.isBurning(x, z),
-        enemySurfDamage: (x, z) => rawSurfDamage(x, z),
-        // The tile's raw facts, so combat can run step-rules' own
-        // `surfaceEffect` instead of being handed a pre-chewed answer per
-        // question. Every other surface entry here is a a different question
-        // asked of this same sheet; handing over the sheet is what stops the
-        // facade growing a method every time a new one comes up (Q900).
+        approachTo,
         floorAt,
-        // What a tile costs THIS member, after their talents (Q1-A, designer
-        // 2026-08-02). The enemy model above consults none, which was right
-        // while only enemies were billed by it - but the AI's shove and pull
-        // land a MEMBER on a tile, and were reading it, so an IT Support in ESD
-        // Steel-Toes took full shock damage from a forced landing and none from
-        // walking onto the same tile. "The same tile means the same thing
-        // however you got there" is the rule the walking model already states;
-        // this is the seam that lets combat.js honour it.
-        memberSurfDamage: (s, x, z) => effectiveSurfDamage(x, z, s),
         slipChanceAt,
         stickGum,
-        // Cone attacks carpet plain floor with a surface tile (Bulk Mail ->
-        // paper). Only bare floor converts - carpets, surfaces, props stay.
-        // `turns` > 0 marks the surface as LITTER rather than terrain: it
-        // clears itself after that many rounds (see ageTempSurfaces).
-        // The read-only twin of leaveSurface's own first line. The zone verb's
-        // ring preview and its cursor count both need to know which tiles will
-        // TAKE a surface without painting one to find out - and asking a
-        // different question than the commit asks is how a preview starts
-        // lying (the rings promised tiles the click then skipped).
-        canTakeSurface: (x, z) => grid.typeAt(x, z) === 'floor',
-        // Toppling (POWERS_PLAN M6) needs to read a prop's definition, test
-        // whether the tile behind it is clear, and mutate both. setType is the
-        // same call the exploding printer already makes, so the grid, the
-        // renderer and pathfinding re-read a toppled prop exactly as they do a
-        // destroyed one - no new invalidation path.
-        tileDefAt: (x, z) => grid.defAt(x, z),
-        terrainOpen: (x, z) => grid.terrainOpen(x, z),
-        setType: (x, z, type) => {
-          grid.setType(x, z, type);
-          scene.refreshTile?.(x, z);
-        },
-        // Partition toppling (TACTICS_PLAN M6): is a plain wall edge standing
-        // between these cells, and knock it out of the world - grid rule and
-        // mesh together, the same pairing setType already is. Doors never
-        // appear in the wall sets, so they are untoppleable by construction.
-        wallEdgeBetween: (x, z, nx, nz) => !!grid.wallEdgeBetween(x, z, nx, nz),
-        toppleEdge: (x, z, nx, nz) => {
-          const e = grid.removeEdgeBetween(x, z, nx, nz);
-          if (e) scene.removeEdgeWall?.(e.o, e.k);
-          return !!e;
-        },
-        // Breaking cover down (TACTICS_PLAN M8). Grid keeps the pool, this
-        // pairs the grid rule with the mesh exactly as setType/toppleEdge do:
-        // a surviving prop leans (the damaged tell - the pool is hidden by
-        // design, so the object has to wear the damage), a spent one is
-        // REMOVED - tile to floor, edge out of the world, no debris ("gone
-        // means gone", designer 2026-07-30). Returns hp remaining, 0 for
-        // destroyed, null for a target with no pool.
-        propHpAt: (x, z) => grid.propHpAt(x, z),
-        damageProp: (x, z, amount) => {
-          const left = grid.damageProp(x, z, amount);
-          if (left === null) return null;
-          if (left <= 0) {
-            grid.setType(x, z, 'floor');
-            scene.refreshTile?.(x, z);
-            return 0;
-          }
-          scene.markPropDamaged?.(x, z);
-          return left;
-        },
-        edgeHpBetween: (x, z, nx, nz) => grid.edgeHpBetween(x, z, nx, nz),
-        damageEdge: (x, z, nx, nz, amount) => {
-          const left = grid.damageEdge(x, z, nx, nz, amount);
-          if (left === null) return null;
-          if (left <= 0) {
-            const e = grid.removeEdgeBetween(x, z, nx, nz);
-            if (e) scene.removeEdgeWall?.(e.o, e.k);
-            return 0;
-          }
-          const e = grid.wallEdgeBetween(x, z, nx, nz);
-          if (e) scene.markEdgeDamaged?.(e.o, e.k);
-          return left;
-        },
-        leaveSurface: leaveSurfaceAt,
-        // Anyone alive is a legal target - bystanders outside the initial
-        // engagement get pulled in when attacked.
-        // A BORROWED coworker is off this list for the duration (TODO Phase 8).
-        // Every AI target picker reads it, so dropping them here is the single
-        // edit that turns their own colleagues against them - no side flag
-        // threaded through the targeting code, because there is no side flag in
-        // this engine to thread.
-        liveEnemies: () => enemies.filter((e) => e.alive && !e.charmed),
-        // Combat owns WHEN a body changes hands; main.js owns the lists, the
-        // same division summons already use.
-        setCharmed: (unit, on) => { unit.charmed = !!on; },
-        // A borrowed coworker's step, run through the PLAYER side's own rules.
-        //
-        // It needs a seam because it is the one body neither roster covers:
-        // combat's `members` is a copy, so the borrowed body never reaches
-        // `party.members` (which this file's per-frame loop steps) nor
-        // `summons`, and combat only installs an `onTile` in `aiAdvance`, which
-        // a player-driven body never runs. Left alone it takes no surface
-        // damage, catches nothing, picks up no gum, never slips, never ticks
-        // the step clock, leaves no footprints and provokes nobody - the one
-        // body on the floor the floor cannot touch (Q907).
-        //
-        // Routed at `onSummonStep` rather than a fourth copy of the rules,
-        // because a borrowed body is exactly a summon's case: player-side, and
-        // silent, since the surface lines are written in the player's voice and
-        // somebody you are driving is not you. The carrier comes from combat so
-        // `notifyStep` can resolve it - a fresh literal would not.
-        borrowedStep: (carrier, x, z, done, changed) => onSummonStep(carrier, x, z, done, changed),
-        // The tiles a summon aimed at (tx,tz) would actually land on - the
-        // placement preview draws these rings, and spawnSummon fills them, so
-        // what you see is where they stand.
-        summonSpots: (tx, tz, n) => freeTilesNear(tx, tz, n, 0),
-        // A summon whose assignment lapsed (or one that fell) leaves the board
-        // here - combat.js decides when, main.js owns the lists and the body.
-        dismissSummon: (body) => dismissSummon(body),
-        // The spawn path itself is shared with the out-of-combat post - see
-        // spawnSummonUnits, above.
-        spawnSummon: spawnSummonUnits,
-      },
+        segmentClear,
+        sightClear,
+        smoothPath,
+        smoothFromBody,
+        routeOpen,
+        freeTilesNear,
+        hazardCostFor,
+        enemyHazardCost,
+        enemyClearOfHazards,
+        rawSurfDamage,
+        effectiveSurfDamage,
+        leaveSurfaceAt,
+        onSummonStep,
+        spawnSummonUnits,
+        // Both of these are ALSO facade keys, which is exactly why they need
+        // naming here: inside the object literal `findPath(...)` no longer
+        // resolves to main.js's function, it resolves to nothing.
+        findPath,
+        dismissSummon,
+      }),
       fx: vfx,
       callbacks: {
         say: ui.say,
