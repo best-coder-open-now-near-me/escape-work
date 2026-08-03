@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
+import { lintLevel } from '../../src/level-lint.js';
 import { parseLevel } from '../../src/grid.js';
 import { findPath } from '../../src/pathfinding.js';
 import { existsSync } from 'node:fs';
@@ -368,46 +369,14 @@ test('every registry cross-reference resolves', () => {
 });
 
 for (const f of files) {
-  test(`${f} parses and has a player spawn and an exit`, () => {
-    const data = load(f);
-    const g = parseLevel(data); // throws on unknown tile types
-    const playerChar = Object.entries(data.actors).find(([, v]) => v === 'player')?.[0];
-    assert.ok(playerChar, 'actors legend names a player');
-    assert.ok(data.map.some((row) => row.includes(playerChar)), 'player is on the map');
-    let hasExit = false;
-    for (let z = 0; z < g.height; z++) {
-      for (let x = 0; x < g.width; x++) if (g.typeAt(x, z) === 'exit') hasExit = true;
-    }
-    assert.ok(hasExit, 'level has an exit');
-  });
-
-  test(`${f} every map character is declared in a legend`, () => {
-    // parseLevel silently defaults an unknown tile char to 'floor' (grid.js), so
-    // a typo'd map char would ship as invisible walkable floor. Guard the map
-    // against any char that isn't in the tiles OR actors legend (space = void).
-    const data = load(f);
-    const declared = new Set([...Object.keys(data.tiles || {}), ...Object.keys(data.actors || {})]);
-    for (let z = 0; z < data.map.length; z++) {
-      for (const ch of data.map[z]) {
-        if (ch === ' ') continue;
-        assert.ok(declared.has(ch), `map char "${ch}" (row ${z}) is declared in a legend`);
-      }
-    }
-  });
-
-  test(`${f} the exit is reachable from the player spawn`, () => {
-    // A walled-off exit would make the floor uncompletable while passing every
-    // other check. Doors are openable, so they count as passable for reach.
-    const data = load(f);
-    const g = parseLevel(data);
-    let exit = null;
-    for (let z = 0; z < g.height && !exit; z++) {
-      for (let x = 0; x < g.width; x++) if (g.typeAt(x, z) === 'exit') { exit = { x, z }; break; }
-    }
-    assert.ok(exit, 'level has an exit tile');
-    const stepPassable = (x, z, nx, nz) => g.edgeOpen(x, z, nx, nz) || !!g.doorBetween(x, z, nx, nz);
-    const route = findPath(g.terrainOpen, g.playerSpawn.x, g.playerSpawn.z, exit.x, exit.z, null, stepPassable);
-    assert.ok(route, 'a walk-up route from the spawn to the exit exists (doors count as openable)');
+  // The playability rules moved to src/level-lint.js so the EDITOR can run them
+  // too - they used to live here as assertions, which meant they only ever ran
+  // over files already in levels/ and the tool that produces those files could
+  // not ask. This is now the same call the editor makes on every edit.
+  test(`${f} is playable`, () => {
+    const findings = lintLevel(load(f));
+    assert.deepEqual(findings, [],
+      `${f}: ${findings.map((x) => `${x.level} ${x.rule}: ${x.message}`).join('; ')}`);
   });
 
   // RELAXED 2026-08-02 (designer deferred the call: "i dont know the difference,

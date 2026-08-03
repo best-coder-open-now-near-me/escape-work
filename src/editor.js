@@ -13,12 +13,15 @@
 // playtest stash is a separate hand-off slot, not the save.
 import { TILE_TYPES } from './data/tiles.js';
 import { ENEMY_TYPES } from './data/enemies.js';
+import { COMPANIONS } from './data/companions.js';
+import { NPCS } from './data/npcs.js';
 import { actorChar, actorLegend, parseActorRef } from './data/actor-registries.js';
 import { LEVELS } from './data/levels.js';
 import { createControls } from './controls.js';
 import { createTileRenderer, computeCarpetZones } from './tile-renderer.js';
 import { worldToScreenCss } from './fx.js';
 import { parseLevel, parseWallRuns, compressWallRuns, TYPE_ALIASES } from './grid.js';
+import { lintLevel } from './level-lint.js';
 import { toast, PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 
 const pc = window.pc;
@@ -71,7 +74,9 @@ export function startEditor(app, levelData, stashKey) {
   const CHAR_POOL = [];
   for (let c = 33; c < 127; c++) {
     const ch = String.fromCharCode(c);
-    if (ch === '\\') continue; // escaped inside a JSON map row - the worst one
+    // Both of these are escaped inside a JSON map row, which turns every row
+    // holding one into `\"` noise for a human reading the diff.
+    if (ch === '\\' || ch === '"') continue;
     CHAR_POOL.push(ch);
   }
   // These three are rebuilt per LOAD, not per session (resetAllocator below).
@@ -105,9 +110,11 @@ export function startEditor(app, levelData, stashKey) {
     if (hit) { delete tileByChar[hit]; delete charByType[id]; }
     const want = TILE_TYPES[id]?.char;
     const ch = free(want) ? want : CHAR_POOL.find(free);
-    // Pool exhausted. There are 87 paintable tile types against 86 usable
+    // Pool exhausted. There are 86 paintable tile types against 85 usable
     // characters, so this is reachable, not theoretical - and it used to
     // substitute floor in silence under a comment promising it would "say so".
+    // (A level only hits it by using that many DISTINCT types, but a tiered
+    // placement mints from the same pool, so a busy floor gets there sooner.)
     if (!ch) {
       toast(`No map character left for "${TILE_TYPES[id]?.label || id}" - this level already uses every one.`);
       return null;
@@ -435,6 +442,7 @@ export function startEditor(app, levelData, stashKey) {
     levelNext = data.next;
     levelDepth = data.depth;
     renderAll();
+    syncMetaFields?.();
   }
 
   // --- history and autosave ---------------------------------------------------
@@ -502,6 +510,7 @@ export function startEditor(app, levelData, stashKey) {
   let draftTimer = null;
   function markDirty() {
     dirty = true;
+    runLint();
     clearTimeout(draftTimer);
     draftTimer = setTimeout(() => {
       try { localStorage.setItem(DRAFT_KEY, toJson()); } catch { /* private mode, quota */ }
@@ -511,9 +520,40 @@ export function startEditor(app, levelData, stashKey) {
 
   // --- painting -------------------------------------------------------------------
   let brush = 'wall'; // a tile type id, 'player', or 'enemy:<typeId>'
+  // Characters this level has minted for tiered placements it PAINTED (as
+  // opposed to ones it inherited on load, which live in `tierChars`). Both end
+  // up in the same export legend; they are tracked together.
+  function charForTier(id, tier) {
+    const ref = `${id}@${tier}`;
+    for (const [ch, val] of tierChars) if (val === ref) return ch;
+    // A tiered placement cannot reuse the actor's canonical char - that char
+    // already means "this actor at its own tier", and sharing it would make the
+    // two indistinguishable on the map. Mint one from the same pool tiles draw
+    // from, then reserve it so no tile can take it.
+    const free = (ch) => ch && !reservedChars.has(ch) && !tileByChar[ch];
+    const ch = CHAR_POOL.find(free);
+    if (!ch) {
+      toast(`No map character left to place a tier-${tier} ${id}.`);
+      return null;
+    }
+    reservedChars.add(ch);
+    tierChars.set(ch, ref);
+    tierCharIds[ch] = id;
+    return ch;
+  }
+
   function charForBrush() {
     if (brush === 'player') return PLAYER_CHAR;
-    if (brush.startsWith('enemy:')) return ENEMY_TYPES[brush.slice(6)].char;
+    if (brush === 'void') return ' ';
+    if (brush.startsWith('enemy:')) {
+      const id = brush.slice(6);
+      const tier = brushTier();
+      // A tier at or below the enemy's own does nothing, so it stays untiered
+      // rather than spending a scarce character to say the default out loud.
+      if (tier && tier > (ENEMY_TYPES[id].level || 1)) return charForTier(id, tier);
+      return ENEMY_TYPES[id].char;
+    }
+    if (brush.startsWith('actor:')) return actorChar(brush.slice(6));
     return charOfType(brush);
   }
 
@@ -689,7 +729,12 @@ export function startEditor(app, levelData, stashKey) {
     // which is the same data loss one step later.
     // Tiered placements last, so their char keeps its own meaning even if the
     // base actor's canonical char happens to collide with it.
-    const actors = { [PLAYER_CHAR]: 'player', ...actorLegend(), ...Object.fromEntries(tierChars) };
+    // Only tiered entries this map actually uses: minting a character for a tier
+    // and then painting over it should not leave a legend entry behind.
+    const usedChars = new Set();
+    for (const r of rows) for (const ch of r) usedChars.add(ch);
+    const usedTiers = [...tierChars].filter(([ch]) => usedChars.has(ch));
+    const actors = { [PLAYER_CHAR]: 'player', ...actorLegend(), ...Object.fromEntries(usedTiers) };
     // Key order mirrors the hand-authored files in levels/, so a re-export
     // diffs cleanly against the original.
     const out = { name: levelName };
@@ -912,11 +957,107 @@ export function startEditor(app, levelData, stashKey) {
     b.onclick = () => selectBrush('player', b);
     brushButtons.push(b); buttonOf.set('player', b);
   }
+  {
+    // Void is a first-class cell - the airspace the layer model is built on, and
+    // how a non-rectangular floor plan is drawn. The editor could DESTROY it
+    // (erase paints floor, resize fills floor) and never restore it.
+    const b = btn('brush-void', 'void');
+    b.title = 'Void — a hole in the map. Impassable, not drawn, and what airspace is made of.';
+    b.onclick = () => selectBrush('void', b);
+    brushButtons.push(b); buttonOf.set('void', b);
+  }
+  const actorRow = document.createElement('div');
+  actorRow.dataset.cat = 'actors';
+  Object.assign(actorRow.style, {
+    display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center',
+    width: '100%', justifyContent: 'center',
+  });
+  {
+    const tag = document.createElement('span');
+    tag.textContent = 'actors';
+    Object.assign(tag.style, {
+      opacity: '.5', letterSpacing: '1px', textTransform: 'uppercase',
+      fontSize: '10px', minWidth: '68px', textAlign: 'right',
+    });
+    actorRow.appendChild(tag);
+  }
   for (const [id, def] of Object.entries(ENEMY_TYPES)) {
-    const b = btn('brush-' + id, def.name);
-    b.title = `${def.name} — native tier ${def.level || 1}. Floors do NOT scale enemies; place a tier explicitly to make one tougher.`;
+    const b = btn('brush-' + id, def.name, actorRow);
+    b.title = `${def.name} — native tier ${def.level || 1}.\nFloors do NOT scale enemies: set the tier field to place a tougher one.`;
     b.onclick = () => selectBrush('enemy:' + id, b);
     brushButtons.push(b); buttonOf.set('enemy:' + id, b);
+  }
+  // Companions and NPCs. They round-tripped correctly and could never be
+  // placed, so a second recruitable coworker meant hand-editing JSON.
+  for (const reg of [COMPANIONS, NPCS]) {
+    for (const [id, def] of Object.entries(reg)) {
+      const b = btn('brush-' + id, def.name || id, actorRow);
+      b.title = `${def.name || id} — ${reg === COMPANIONS ? 'a recruitable coworker' : 'a talkable coworker'}. Never fights on the office's side.`;
+      b.onclick = () => selectBrush('actor:' + id, b);
+      brushButtons.push(b); buttonOf.set('actor:' + id, b);
+    }
+  }
+  // The tier stepper. `enemy:<id>` at tier N exports as `<id>@N` under its own
+  // character, which is what the format has always supported and the editor
+  // could never write.
+  const tierField = document.createElement('input');
+  tierField.id = 'ed-tier';
+  tierField.type = 'number';
+  tierField.min = '1';
+  tierField.placeholder = 'tier';
+  tierField.title = 'Tier for the next enemy you paint. Blank or 1 = the enemy\'s own native tier.';
+  tierField.setAttribute('aria-label', 'Enemy tier');
+  Object.assign(tierField.style, BUTTON_CHROME, {
+    padding: '7px 8px', borderRadius: '7px', width: '58px', cursor: 'text',
+  });
+  actorRow.appendChild(tierField);
+  const brushTier = () => {
+    const n = parseInt(tierField.value, 10);
+    return Number.isInteger(n) && n > 1 ? n : null;
+  };
+  palette.appendChild(actorRow);
+
+  divider();
+
+  // --- level identity ---------------------------------------------------------
+  const field = (id, placeholder, width, title) => {
+    const i = document.createElement('input');
+    i.id = id;
+    i.placeholder = placeholder;
+    i.title = title;
+    i.setAttribute('aria-label', title);
+    Object.assign(i.style, BUTTON_CHROME, {
+      padding: '8px 9px', borderRadius: '7px', width, cursor: 'text',
+    });
+    commands.appendChild(i);
+    return i;
+  };
+  const nameField = field('ed-name', 'floor name', '150px', 'The name shown when this floor loads');
+  nameField.oninput = () => { levelName = nameField.value; markDirty(); setStatus(); };
+  const depthField = field('ed-depth', 'depth', '62px',
+    'The floor number. Enemies do NOT scale with it - place a tier explicitly to make one tougher.');
+  depthField.type = 'number';
+  depthField.min = '1';
+  depthField.oninput = () => {
+    const n = parseInt(depthField.value, 10);
+    levelDepth = Number.isInteger(n) && n > 0 ? n : undefined;
+    markDirty();
+  };
+  const nextField = document.createElement('select');
+  nextField.id = 'ed-next';
+  nextField.title = 'The floor this one\'s exit leads to. Blank = the run ends here.';
+  nextField.setAttribute('aria-label', 'Next floor');
+  Object.assign(nextField.style, BUTTON_CHROME, { padding: '8px', borderRadius: '7px', cursor: 'pointer' });
+  nextField.innerHTML = '<option value="">next: (ends the run)</option>'
+    + Object.entries(LEVELS).filter(([, l]) => !l.layers)
+      .map(([id, l]) => `<option value="${id}">next: ${l.name || id}</option>`).join('');
+  nextField.onchange = () => { levelNext = nextField.value || undefined; markDirty(); };
+  commands.appendChild(nextField);
+  // Keep the fields honest when a load replaces the document under them.
+  function syncMetaFields() {
+    nameField.value = levelName || '';
+    depthField.value = levelDepth == null ? '' : String(levelDepth);
+    nextField.value = levelNext || '';
   }
 
   divider();
@@ -1082,13 +1223,45 @@ export function startEditor(app, levelData, stashKey) {
     else what = TILE_TYPES[tileByChar[c]]?.label || tileByChar[c] || 'floor';
     return `<br><span style="opacity:.75">${x},${z} — ${what} <span style="opacity:.6">“${c === ' ' ? '␣' : c ?? '·'}”</span></span>`;
   }
+  // The editor validated NOTHING. Every rule below already existed as an
+  // assertion in the test suite, which only runs over files already in levels/ -
+  // so the tool that produces those files could happily Export a floor with no
+  // exit, or an exit sealed off from the spawn, and you found out from CI.
+  // Same module the suite calls (src/level-lint.js), debounced.
+  let lintTimer = null;
+  let findings = [];
+  function runLint() {
+    clearTimeout(lintTimer);
+    lintTimer = setTimeout(() => {
+      try { findings = lintLevel(JSON.parse(toJson())); } catch { findings = []; }
+      setStatus();
+    }, 350);
+  }
+  function lintHtml() {
+    if (!findings.length) return '<br><span style="color:#8adf76">✓ playable</span>';
+    const errs = findings.filter((f) => f.level === 'error');
+    const warns = findings.filter((f) => f.level === 'warn');
+    const line = (f) => `<br><span style="color:${f.level === 'error' ? '#ff8f9e' : '#f0c674'}">`
+      + `${f.level === 'error' ? '✕' : '!'} ${f.message}</span>`;
+    // Errors in full - they stop the floor working. Warnings collapse past two,
+    // or a messy work-in-progress buries the readout it shares a box with.
+    return errs.map(line).join('') + warns.slice(0, 2).map(line).join('')
+      + (warns.length > 2 ? `<br><span style="color:#f0c674">! +${warns.length - 2} more</span>` : '');
+  }
+
   function setStatus() {
     const ch = charByType[brush];
     status.innerHTML = `<b>${levelName || 'Untitled Floor'}</b> &nbsp; ${width}×${height}`
       + `<br>brush: <b style="color:#8adf76">${brushLabel()}</b>`
       + (ch ? ` <span style="opacity:.6">writes “${ch}”</span>` : '')
-      + underCursor();
+      + underCursor()
+      + lintHtml();
   }
+
+  // levels/<id>.json - the id is the filename, and the lint derives it from
+  // there, so the download names itself after the floor.
+  const suggestedId = () => (levelName || 'untitled')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'untitled';
 
   function showExport() {
     // One modal at a time - a second Export click used to stack another
@@ -1102,22 +1275,64 @@ export function startEditor(app, levelData, stashKey) {
       alignItems: 'center', justifyContent: 'center', background: 'rgba(10,10,18,.82)',
       color: '#f0f0f5', font: '13px system-ui, sans-serif',
     });
+    const btnCss = 'padding:8px 16px; border-radius:7px; border:1px solid #3a3a52;'
+      + ' background:#2e2e46; color:#f0f0f5; font:inherit; cursor:pointer;';
+    // The workflow is "output json, upload to the git" (designer, 2026-08-02),
+    // so Download is the primary action: it needs no server, works identically
+    // in a local build and a deployed one, and lands a file ready to move into
+    // levels/ and commit. Copy stays for pasting somewhere.
     div.innerHTML = `
-      <div style="background:#232334; border:1px solid #3a3a52; border-radius:12px; padding:18px; width:min(640px,92vw);">
-        <div style="font-weight:700; margin-bottom:8px;">Level JSON — paste into levels/ (or hand it to Claude)</div>
-        <textarea id="export-json" readonly style="width:100%; height:300px; background:#171722; color:#c9e4a5;
+      <div style="background:#232334; border:1px solid #3a3a52; border-radius:12px; padding:18px; width:min(680px,92vw);">
+        <div style="font-weight:700; margin-bottom:4px;">Level JSON</div>
+        <div id="export-note" style="opacity:.75; margin-bottom:8px; font-size:12px;"></div>
+        <textarea id="export-json" spellcheck="false" style="width:100%; height:300px; background:#171722; color:#c9e4a5;
           border:1px solid #3a3a52; border-radius:8px; padding:10px; font:12px monospace; white-space:pre;"></textarea>
-        <div style="display:flex; gap:8px; margin-top:10px; justify-content:flex-end;">
-          <button id="export-copy" style="padding:8px 16px; border-radius:7px; border:1px solid #3a3a52; background:#2e2e46; color:#f0f0f5; font:inherit; cursor:pointer;">Copy</button>
-          <button id="export-close" style="padding:8px 16px; border-radius:7px; border:1px solid #3a3a52; background:#2e2e46; color:#f0f0f5; font:inherit; cursor:pointer;">Close</button>
+        <div style="opacity:.6; font-size:11px; margin-top:6px;">Editable — paste a level in and press Load to keep working on it.</div>
+        <div style="display:flex; gap:8px; margin-top:10px; justify-content:flex-end; flex-wrap:wrap;">
+          <button id="export-load" style="${btnCss}">Load this JSON</button>
+          <button id="export-copy" style="${btnCss}">Copy</button>
+          <button id="export-download" style="${btnCss} border-color:#4d7a4a;">⬇ Download</button>
+          <button id="export-close" style="${btnCss}">Close</button>
         </div>
       </div>`;
     document.body.appendChild(div);
     const ta = div.querySelector('#export-json');
     ta.value = toJson();
+    // Say up front whether this file is shippable, rather than letting CI say it.
+    const note = div.querySelector('#export-note');
+    const errs = findings.filter((f) => f.level === 'error');
+    note.innerHTML = errs.length
+      ? `<span style="color:#ff8f9e">This floor cannot be finished: ${errs[0].message}</span>`
+      : `<span style="color:#8adf76">✓ playable</span> — save as <code>levels/${suggestedId()}.json</code>`
+        + ' and register it in <code>src/data/levels.js</code>.';
     div.querySelector('#export-copy').onclick = () => {
       ta.select(); // visible feedback either way
       navigator.clipboard?.writeText(ta.value).catch(() => {});
+    };
+    div.querySelector('#export-download').onclick = () => {
+      const blob = new Blob([ta.value], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${suggestedId()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast(`Downloaded ${suggestedId()}.json — move it into levels/ and register it.`);
+    };
+    // The only way back INTO the editor used to be the single-slot playtest
+    // stash, so a level you had exported could not be picked up again.
+    div.querySelector('#export-load').onclick = () => {
+      let parsed;
+      try { parsed = JSON.parse(ta.value); } catch (e) { toast(`That is not valid JSON: ${e.message}`); return; }
+      if (!Array.isArray(parsed?.map) || !parsed.map.length) { toast('That JSON has no `map` array.'); return; }
+      try {
+        pushHistory();
+        loadLevel(parsed);
+        div.remove();
+        toast(`Loaded “${levelName}”.`);
+      } catch (e) {
+        toast(`That level would not load: ${e.message}`);
+      }
     };
     div.querySelector('#export-close').onclick = () => div.remove();
   }
