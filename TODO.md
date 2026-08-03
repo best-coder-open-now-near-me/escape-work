@@ -71,6 +71,35 @@ How to read it:
 
 ### MEDIUM
 
+- [ ] **Q907** `src/combat.js:140` [bug] **(new 2026-08-03, from the Q900 audit)**
+  **A charmed coworker is the one body on the floor the floor cannot touch**,
+  and three separately-confirmed findings turned out to be this same root.
+
+  `charmUnit` borrows an EnemyActor and makes it a player-driven member, but
+  combat's `members` is a COPY of the roster (`party.members.map(asMember)`), so
+  the borrowed body never reaches main.js's `party.members` or `summons`. Which
+  means: `onMemberStep` does not cover it, `onSummonStep` does not cover it, and
+  combat sets `unit.onTile` only in `aiAdvance` - which a player-driven body
+  never runs. Drive a borrowed coworker through fire, live water, a cable or a
+  paper drift and they take no damage, catch no `burning`, gain no `bleed`, pick
+  up no gum, never slip, never tick the step clock and leave no footprints.
+  `notifyStep` is on the same two hooks, so they provoke no opportunity attacks
+  either.
+
+  The two other confirmations are the same body seen from elsewhere: main.js's
+  `findPath`/`smooth` resolve the walker via `party.members.find(...) ||
+  summons.find(...)` and fall back to the LEADER's sheet, so a borrowed body is
+  routed and its corridor cut with the leader's talents - a shock-immune leader
+  walks it straight through live water. And `liveSummonsOf` has no leg for a
+  borrowed minion, so it falls off its summoner's books.
+
+  The suggested seam is the actor's own `onTile`, which `GridActor.update`
+  fires BEFORE `EnemyActor.update`'s `world.paused` return - the same seam
+  `aiAdvance` uses to reach a moving unit while combat is paused. Note the
+  trap recorded with it: do NOT hang a `sheet` on the unit to fix the routing,
+  because combat infers which side a body is on from the shape `!!x.sheet`.
+
+
 - [ ] **Q901** `src/combat.js` [god-method] **(new 2026-08-02, the remainder of Q022)**
   `drawTargets`'s BODY pass, ~195 lines: the cone polyline, the melee reach ring,
   the shove/topple/partition/break rings and the per-enemy ring loop. Unlike the
@@ -187,27 +216,37 @@ How to read it:
 
   11 e2e green across fire, surfaces and statuses - notably NONE of them pinned
   the old behaviour, so nothing had to be weakened to let the fixes through.
-- [ ] **Q900** `src/main.js` [soc] **(new 2026-08-02, from the fix work itself)**
-  The combat world facade is repeatedly NARROWER than main.js's own helpers, and
-  the contract test (Q009) cannot see it. That test checks every key the pure
-  modules destructure EXISTS; it cannot check that combat is asking the same
-  question main.js would. Four instances found while fixing other things:
-  `occupied` (absent - the crash this branch shipped), `memberSurfDamage`
-  (absent, so forced landings billed the enemy model and voided talent
-  immunities), `room` (absent, so the summon cap leg was skipped in a fight),
-  and `isBurning` (absent, so combat asked `surfaceIdAt === 'fire'` - a
-  different question - and the FX precedence drifted). All four are now closed,
-  but the PATTERN is open: the facade grows by whatever the last bug needed.
-  Worth one pass that walks main.js's own query helpers and asks, for each,
-  whether combat can reach the same answer.
+- [x] **Q900** `src/main.js` [soc] **(new 2026-08-02, from the fix work itself)**
+  The pass this entry asked for is DONE: 46 of main.js's query helpers walked,
+  each asked whether combat can reach the same answer, with every claimed
+  divergence independently re-checked. 29 fine, 9 latent, 4 bugs, 4 cosmetic;
+  8 divergences confirmed and 7 dismissed on the second read, which is the
+  ratio that makes the surviving ones worth acting on.
 
-- [x] **Q025** `src/pathfinding.js:394` [bug] **(carried)** roundBends' arc-rejection fallback emits an unvalidated leg — reproduced: a smoothed walk crosses a partition<br>      ↳ **NOT REPRODUCIBLE — closed as refuted, with the method.** The reasoning is sound in the abstract (`p1` lies on `a->b`, so a failed `a->p1` check condemns `a->b`, and the fallback pushed `b` regardless) but the case does not arise. Instrumented `roundBends` over 200k random 7x7 maps WITH partition edges in play: **18,974 arc rejections, 0** where the straight leg `a->b` was also illegal. Without edges the branch never fires at all. A guard was written, measured to change no outcome, and reverted rather than left as complexity in a hot path. What DID land is the test gap underneath it (Q0xx): `pathfinding.test.js` asserted only that rounded-bend VERTICES sit on open floor, never the legs between them — three tests now sample the segments.
-- [x] **Q026** `/home/user/escape-work/ARCHITECTURE.md:114` [doc-drift] **(carried)** ARCHITECTURE.md's module map describes `combat-ai.js` as the old six-beat ladder; the shipped ladder has twelve arms<br>      ↳ DONE — ARCHITECTURE.md now lists all twelve arms and names beatStateFrom
-- [x] **Q027** `/home/user/escape-work/ARCHITECTURE.md:518` [doc-drift] **(carried)** ARCHITECTURE.md's debug-surface note claims damage and initiative roll `Math.random` and that a fight is never fully deterministic, and omits the new `bout` getter<br>      ↳ DONE — ARCHITECTURE.md now says a seeded fight DOES replay, and documents `bout`
-- [x] **Q028** `/home/user/escape-work/TODO.md:823` [doc-drift] **(carried)** TODO.md Phase 8 is still headed "BLOCKED" with four checkboxes whose fixes are live in the code<br>      ↳ DONE — Phase 8 re-headed SHIPPED; five of six legs ticked, the death path left open
-- [x] **Q029** `/home/user/escape-work/TODO.md:363` [doc-drift] **(carried)** TODO.md's P1 "Enemy AI paces between two tiles" points at `combat.js:96` and calls the self-path exemption dead code, but the fix lives and is tested in `combat-ai.js`<br>      ↳ DONE — the P1 entry is ticked and corrected - the exemption is live and tested
-- [x] **Q030** `src/combat.js:574` [duplication] **(carried)** `hazardKind`/`surfaceImpactKind` are still two hardcoded surface-id→FX maps in two layers, and this branch added a fifth call site to one of them<br>      ↳ DONE — step-rules.impactKindFor; the burst comes from the registry; isBurning on the facade
-- [x] **Q031** `src/hotbar-model.js:35` [duplication] **(carried)** The universal-action list `['shove','take-cover','pull']` is written out verbatim in three places<br>      ↳ DONE — UNIVERSAL_ACTIONS in hotbar-model.js; both bars read it
+  **The four this entry already listed were the tip.** What the pass found is
+  that the facade is not uniformly narrow - it is narrow in one specific place
+  every time: wherever combat is handed a pre-chewed ANSWER instead of the
+  facts, and main.js asks the question a different way. Every confirmed
+  divergence is that shape.
+
+  **Fixed here.** (1) A forced landing skipped the surface's RIDERS: shoved into
+  fire you took the 4 and never caught; shoved onto a drift you were cut without
+  bleeding - while walking onto either tile did both. The facade's own
+  `memberSurfDamage` comment states the rule that was broken ("the same tile
+  means the same thing however you got there"); Q1-A made the number honour it
+  and left these behind. (2) The AI's shove gate asked the talent-free model and
+  a slip that never rolls, while the resolver bills `memberSurfDamage` through
+  the victim's own talents - so a member in ESD Steel-Toes was shoved on a plan
+  priced at 6 that bills 0, and plain water admitted a shove whose whole effect
+  was a one-tile reposition. The ladder ranks shove ABOVE the swing, so both
+  traded the unit's best beat for nothing.
+
+  **Still open, and they share one root: Q907.**
+
+  The remedy this pass argues for is the one `floorAt` already demonstrates -
+  hand over the facts, derive with a pure rule - and it is now the test for any
+  new facade key: if the key is an answer rather than a fact, main.js will
+  eventually ask it differently.
 - [ ] **Q032** `src/main.js:2716` [duplication] **(carried)** Four hand-written per-tile step handlers across three layers, under a main.js section header that claims the rules are "written once"<br>      ↳ **MEASURED 2026-08-03, and it is not the finding it was written as.** Four callbacks of shape `(x,z,done,changed)` exist, in three files - `onMemberStep` (main.js:2949), `onSummonStep` (main.js:3046), the AI walk closure (combat.js:4730) and the wanderer amble (actors.js:503) - but they are not four hand-written copies. The first two are thin wrappers over ONE shared body (`tickStepOn`, `applySurfaceOn`, `maybeSlip`, `leaveFootprint`, two callers each), and the DECISIONS under all of them already live once in step-rules.js. What is duplicated is ORCHESTRATION - which rules fire, in what order, with what FX, log voice and rng - and that exists twice, not four times: main.js's player side and combat.js's enemy side, with the wanderer a two-rule stub of the latter. **The 'written once' header is true as scoped, not false:** it says "a body ON YOUR SIDE", and within that scope nothing is copied. Misleading by omission, since a reader takes "once" to mean once in the game. **Of ~13 per-tile rules, exactly ONE (gum pickup) is implemented by all four.** <br>      ↳ **FIXED here:** the enemy step clock read `slipProof` AFTER ticking, so the tile a gum wad wore off on could take a coworker's footing AND their whole turn, while the identical tile keeps a member upright - the drift main.js's `maybeSlip` comment documents as fixed, reintroduced on the other side of the door. Now snapshotted before the tick, as the member side does. Plus three comments that had gone false: actors.js and step-rules.js both still asserted "a coworker's gum is for keeps" (combat ticks it down now), and main.js's `inCombat` gate cited a reason `advanceStatusTurn` retired on 2026-07-31. <br>      ↳ **STILL OPEN, and they are design calls, not cleanups - see Q906.** Enemies never catch fire; your own leader never catches fire out of combat; wanderers take no surface damage and run no step clock; `bleed` has exactly one application site in the repo and it is player-side, which makes the enemy step clock's damage branch unreachable today.
 - [x] **Q033** `src/portraits.js:77` [duplication] **(carried)** portraits.js holds a fourth copy of "tint a body" — the compounding in-place multiply the other three were rewritten to remove<br>      ↳ DONE — portraits routes through cloneMaterials + tintMaterials
 - [x] **Q034** `src/tactics.js:259` [duplication] **(carried)** "Does this shielded face point at the attacker?" is implemented three times, and REVIEW.md records it as having one owner<br>      ↳ DONE — tactics.shieldingFace; facesShieldFrom derives from it; 4 tests

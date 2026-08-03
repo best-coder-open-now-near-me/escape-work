@@ -2239,8 +2239,24 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const pd = Math.hypot(dx, dz) || 1;
     const [lpx, lpz] = world.clampPoint(tx + (dx / pd) * 0.22, tz + (dz / pd) * 0.22);
     v.body.pushTo(tx, tz, lpx, lpz);
+    // The riders that come WITH a hazard tile, not just its number. The facade's
+    // own memberSurfDamage comment states the rule this restores - "the same
+    // tile means the same thing however you got there" - and Q1-A made the
+    // DAMAGE honour it while leaving these behind: a body shoved into fire took
+    // the 4 and never caught, and one shoved onto a drift was cut without being
+    // left bleeding, while walking onto either tile did both.
+    //
+    // Same pure `surfaceEffect` off the same `floorAt` sheet the walk sites
+    // read, so there is no second opinion about what a tile does. `applies`
+    // lands whether or not the tile bites; `bleed` rides the damage, which is
+    // the order main.js's applySurfaceOn uses.
     const dmg = v.hazardAt(tx, tz);
+    const sfx = surfaceEffect(world.floorAt(tx, tz));
+    if (sfx?.applies && sfx.applies !== 'gum' && applyStatus(v.statusTarget, sfx.applies)) {
+      statusFxAt(v.statusTarget, sfx.applies);
+    }
     if (dmg > 0) {
+      if (sfx?.bleed) applyStatus(v.statusTarget, 'bleed', { duration: sfx.bleed });
       const live = world.isElectrified && world.isElectrified(tx, tz);
       const surf = world.surfaceIdAt(tx, tz);
       const died = v.hurt(dmg);
@@ -2290,7 +2306,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     stepOpen: world.stepOpen,
     occupied: (x, z) => !!unitStandingAt(x, z),
   }, memberAt, {
-    hazardAt: (x, z) => world.enemySurfDamage(x, z) > 0 || world.slipChanceAt(x, z) > 0,
+    // Ask exactly what the resolver will BILL, for the body it will bill. The
+    // victim of an AI shove is always a member (`memberAt`), and displaceBody
+    // charges `memberSurfDamage` - through that member's own talents - so a
+    // gate reading the talent-free model priced a landing at 6 that bills 0 for
+    // anyone in ESD Steel-Toes, and the ladder ranks shove ABOVE the swing.
+    //
+    // The slip term is gone with it: displaceBody rolls no slip anywhere, so
+    // "there is water behind them" used to admit a plan whose entire effect was
+    // a one-tile reposition, traded for the unit's best beat.
+    hazardAt: (x, z, victim) => world.memberSurfDamage(victim.sheet, x, z) > 0,
   });
   const aiPullPlanFor = (unit) => aiPullPlanShared(
     unit,

@@ -84,7 +84,9 @@ export function aiShovePlan(bx, bz, { isWalkable, stepOpen, occupied }, victimAt
     if (!victim) continue;
     const plan = displacePlan(vx, vz, dx, dz, world);
     if (!plan) continue;
-    if (plan.blocked || disengage || (hazardAt && hazardAt(plan.tx, plan.tz))) {
+    // The victim goes to `hazardAt` because the caller's test is about THIS
+    // body: what a landing costs depends on whose talents are in the boots.
+    if (plan.blocked || disengage || (hazardAt && hazardAt(plan.tx, plan.tz, victim))) {
       return { victim, dx, dz, ...plan };
     }
   }
