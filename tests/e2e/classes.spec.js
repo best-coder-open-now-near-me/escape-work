@@ -92,7 +92,8 @@ test('Mail Room: Bulk Mail cones damage and leave paper drifts', async ({ page }
   // reliably damages this foe.
   await page.evaluate(() => { window.__combat.forceHit = true; });
   await clickAction(page, 'mail-cone');
-  await page.waitForTimeout(800); // camera settle before projecting
+  // The condition the sleep here was guessing at, asked directly.
+  await stableProject(page, foe.x, foe.z).catch(() => {});
   expect(await clickWorld(page, foe.x, foe.z)).toBe(true);
   await expect.poll(() => page.evaluate(
     ([x, z, hp]) => {
@@ -148,7 +149,12 @@ test('Security: Detain roots without damaging, and the guard wears the cop rig',
   for (let i = 0; i < 6; i++) {
     const cur = await foeNow();
     if (cur && cur.statuses.some((s) => s.id === 'detained')) break;
-    await page.waitForTimeout(900); // camera settle before projecting
+    // Settle on the PLAYER, not the foe: that fixes the whole projection,
+    // enemies included, and unlike a settle aimed at the target it cannot be
+    // satisfied by the target coming to rest somewhere new. The aim is still
+    // re-read below, after every await, for the reason written there.
+    const pp = await page.evaluate(() => window.__game.playerPos);
+    await stableProject(page, pp.x, pp.z).catch(() => {});
     if (!(await page.evaluate(() => window.__combat?.phase === 'player'))) continue;
     // Closing the distance spends AP, which can leave the 3 AP Detain
     // unaffordable and its button disabled. This spec is about the root, not

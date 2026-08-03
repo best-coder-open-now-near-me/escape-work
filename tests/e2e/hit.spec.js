@@ -3,7 +3,7 @@
 // two things a miss must do - spend the cost, and do nothing else: no damage,
 // and no applied status.
 import { test, expect } from '@playwright/test';
-import { bootStash, enterCombat } from './helpers.js';
+import { bootStash, enterCombat, stableProject } from './helpers.js';
 
 // You and one Manager, two tiles apart in an open room. enterCombat walks you
 // adjacent and opens the fight against the Manager alone.
@@ -41,7 +41,6 @@ test('a forced miss deals no damage but still spends the attack AP', async ({ pa
   const cost = await page.evaluate(() => window.__god.actionAp('attack'));
   let swung = false;
   for (let i = 0; i < 6 && !swung; i++) {
-    await page.waitForTimeout(800); // camera settle before projecting
     // NEVER click a disabled button: Playwright waits for it to become enabled
     // and burns the whole test timeout. A mis-projected click walks instead of
     // swinging, which can drain the turn below the cost - so pass the turn and
@@ -58,7 +57,10 @@ test('a forced miss deals no damage but still spends the attack AP', async ({ pa
     if (await page.evaluate(() => window.__combat.armed) !== 'attack') {
       await page.click('#hotbar-act-attack');
     }
-    const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
+    // Settle and project in one step: stableProject polls this exact point
+    // until two readings land within 1.5px, which is the condition the fixed
+    // sleep here was guessing at. A stale projection walks instead of swinging.
+    const fp = await stableProject(page, foe.x, foe.z);
     await page.mouse.click(fp.x, fp.y);
     await page.waitForTimeout(300);
     const apAfter = await page.evaluate(() => window.__combat.ap);
@@ -134,7 +136,10 @@ test('the armed hover shows a to-hit percentage that matches the roll', async ({
   for (let i = 0; i < 6 && !landed; i++) {
     await page.waitForTimeout(600);
     if (await page.evaluate(() => window.__combat.armed) !== 'attack') await page.click('#hotbar-act-attack');
-    const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
+    // Settle and project in one step: stableProject polls this exact point
+    // until two readings land within 1.5px, which is the condition the fixed
+    // sleep here was guessing at. A stale projection walks instead of swinging.
+    const fp = await stableProject(page, foe.x, foe.z);
     await page.mouse.click(fp.x, fp.y);
     await page.waitForTimeout(300);
     const hp = await foeHp();
