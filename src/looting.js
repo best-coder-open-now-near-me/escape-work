@@ -19,6 +19,53 @@ import * as ui from './ui.js';
 // growing a special case.
 export const INV_CAP = Infinity;
 
+// Contiguous paper drifts, 4-connected, as { tiles, cx, cz } - the tiles the
+// patch covers and its centre, which is where its Alt label floats.
+//
+// Pure, and at module scope on purpose: the rest of this file is a closure that
+// builds DOM panels the moment it is constructed, so nothing inside it can be
+// reached from node. The flood fill is the one part of the overlay that is an
+// algorithm rather than a wiring diagram, and it is the part most able to be
+// quietly wrong - a patch that stops at the window edge, a tile counted twice,
+// a centre that drifts off the drift. The caller supplies the leaf facts: how
+// big the grid is, which tiles are in the near window, and which of those still
+// hold gatherable paper.
+//
+// `inWindow` gates the fill as well as the seed, so a drift running out of the
+// window is labelled as the part you can actually see - the same bound the
+// label's own reach check uses.
+export function paperPatches({ width, height }, inWindow, harvestable) {
+  const patches = [];
+  const visited = new Set();
+  const key = (x, z) => x + ',' + z;
+  for (let z = 0; z < height; z++) {
+    for (let x = 0; x < width; x++) {
+      if (visited.has(key(x, z)) || !inWindow(x, z) || !harvestable(x, z)) continue;
+      const tiles = [];
+      let sx = 0;
+      let sz = 0;
+      const stack = [[x, z]];
+      visited.add(key(x, z));
+      while (stack.length) {
+        const [cx, cz] = stack.pop();
+        tiles.push([cx, cz]);
+        sx += cx;
+        sz += cz;
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = cx + dx;
+          const nz = cz + dz;
+          if (!visited.has(key(nx, nz)) && inWindow(nx, nz) && harvestable(nx, nz)) {
+            visited.add(key(nx, nz));
+            stack.push([nx, nz]);
+          }
+        }
+      }
+      patches.push({ tiles, cx: sx / tiles.length, cz: sz / tiles.length });
+    }
+  }
+  return patches;
+}
+
 // `extraEntries` (optional) lets the host add non-loot entries to the Alt
 // overlay (doors) without this module knowing what they are.
 // `onBagChange` fires after any mutation of the pockets (use, drop, equip,
@@ -289,14 +336,18 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
   // Everything lootable in the area, as clickable Alt-overlay entries.
   // Clicking a label walks you into reach and loots - same path as clicking
   // the object itself.
-  function lootEntries() {
-    const out = [];
-    const me = getActor();
-    const near = (x, z) => Math.max(Math.abs(x - me.x), Math.abs(z - me.z)) <= 10;
-    // One label per TILE, not per item: picking up takes the whole tile anyway
-    // (pickUpAt), and a stack of dropped items used to render a stack of chips
-    // at the identical screen position, each hiding the one behind it. The
-    // label lists what is actually down there.
+  //
+  // Five scans, one per kind of lootable thing, and the ORDER they concatenate
+  // in is the order the labels were built in before they were named - loose
+  // piles, containers, machines, bodies, paper, then whatever the host adds.
+  // Kept, because the overlay renders in list order and nothing has said which
+  // way it should be.
+
+  // One label per TILE, not per item: picking up takes the whole tile anyway
+  // (pickUpAt), and a stack of dropped items used to render a stack of chips at
+  // the identical screen position, each hiding the one behind it. The label
+  // lists what is actually down there.
+  function looseEntries(near) {
     const byTile = new Map();
     for (const li of looseItems) {
       if (!near(li.x, li.z)) continue;
@@ -304,49 +355,50 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
       if (!byTile.has(key)) byTile.set(key, []);
       byTile.get(key).push(li);
     }
-    for (const pile of byTile.values()) {
-      const [first, ...rest] = pile;
-      out.push({
-        icon: ITEMS[first.id]?.icon,
-        text: itemName(first.id),
-        also: rest.map((li) => `${ITEMS[li.id]?.icon || '📦'} ${itemName(li.id)}`),
-        // Floated above the item rather than through it - the chip is a tag on
-        // the loot, not a lid over it.
-        world: { x: first.x, y: 0.9, z: first.z },
-        onClick: () => approachAndDo(first.x, first.z, () => pickUpAt(first.x, first.z)),
-      });
-    }
+    return [...byTile.values()].map(([first, ...rest]) => ({
+      icon: ITEMS[first.id]?.icon,
+      text: itemName(first.id),
+      also: rest.map((li) => `${ITEMS[li.id]?.icon || '📦'} ${itemName(li.id)}`),
+      // Floated above the item rather than through it - the chip is a tag on
+      // the loot, not a lid over it.
+      world: { x: first.x, y: 0.9, z: first.z },
+      onClick: () => approachAndDo(first.x, first.z, () => pickUpAt(first.x, first.z)),
+    }));
+  }
+
+  // Containers and merchant machines share ONE grid sweep - they ask the same
+  // tile the same question - but stay two lists, because containers labelled
+  // ahead of machines before this was split and the overlay renders in order.
+  //
+  // Merchant props (ECONOMY_PLAN M2) label alongside the containers: a machine
+  // you can't see from the corridor is a machine you never find. A sold-out one
+  // still labels, saying so, rather than silently vanishing and leaving you to
+  // walk over and discover it.
+  function propEntries(near) {
+    const containers = [];
+    const shops = [];
     for (let z = 0; z < grid.height; z++) {
       for (let x = 0; x < grid.width; x++) {
+        if (!near(x, z)) continue;
         const def = grid.defAt(x, z);
-        if (!def.loot || !near(x, z)) continue;
-        const rolled = containerLoot.get(x + ',' + z);
-        if (rolled && !rolled.length) continue; // already cleaned out
         const cx = x;
         const cz = z;
-        out.push({
-          // Keyed by loot table, so a new table needs an entry here or its
-          // Alt label renders with no icon at all.
-          icon: { trash: '🗑️', printer: '🖨️', desk: '🗄️', 'filing-cabinet': '📁' }[def.loot],
-          text: def.label,
-          world: { x, y: def.height + 0.8, z },
-          onClick: () => approachAndDo(cx, cz, () => lootContainer(cx, cz)),
-        });
-      }
-    }
-    // Merchant props (ECONOMY_PLAN M2) label alongside the containers - a
-    // machine you can't see from the corridor is a machine you never find. A
-    // sold-out one still labels, saying so, rather than silently vanishing and
-    // leaving you to walk over and discover it.
-    if (openShop) {
-      for (let z = 0; z < grid.height; z++) {
-        for (let x = 0; x < grid.width; x++) {
-          const def = grid.defAt(x, z);
-          if (!def.shop || !near(x, z)) continue;
+        // `rolled && !rolled.length` is "already cleaned out" - an unrolled
+        // container has no entry yet and still labels.
+        const rolled = def.loot ? containerLoot.get(x + ',' + z) : null;
+        if (def.loot && !(rolled && !rolled.length)) {
+          containers.push({
+            // Keyed by loot table, so a new table needs an entry here or its
+            // Alt label renders with no icon at all.
+            icon: { trash: '🗑️', printer: '🖨️', desk: '🗄️', 'filing-cabinet': '📁' }[def.loot],
+            text: def.label,
+            world: { x, y: def.height + 0.8, z },
+            onClick: () => approachAndDo(cx, cz, () => lootContainer(cx, cz)),
+          });
+        }
+        if (def.shop && openShop) {
           const empty = shopSoldOut?.(x + ',' + z);
-          const cx = x;
-          const cz = z;
-          out.push({
+          shops.push({
             icon: '🥤',
             text: empty ? `${def.label} (sold out)` : def.label,
             world: { x, y: def.height + 0.8, z },
@@ -355,6 +407,11 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
         }
       }
     }
+    return [...containers, ...shops];
+  }
+
+  function bodyEntries(near) {
+    const out = [];
     for (const en of enemies) {
       if (en.alive || !en.loot?.length || !en.entity || !near(en.x, en.z)) continue;
       out.push({
@@ -364,50 +421,41 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
         onClick: () => approachAndDo(en.x, en.z, () => lootBody(en)),
       });
     }
-    // Harvestable paper: one label per contiguous drift near the player
-    // (4-connected flood fill, bounded to the near window). Clicking walks to
-    // the patch's nearest tile and gathers the whole drift's ammo at once.
-    const visited = new Set();
-    for (let z = 0; z < grid.height; z++) {
-      for (let x = 0; x < grid.width; x++) {
-        if (visited.has(x + ',' + z) || !near(x, z) || !paperHarvestable(x, z)) continue;
-        const patch = [];
-        let sx = 0;
-        let sz = 0;
-        const stack = [[x, z]];
-        visited.add(x + ',' + z);
-        while (stack.length) {
-          const [cx, cz] = stack.pop();
-          patch.push([cx, cz]);
-          sx += cx;
-          sz += cz;
-          for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-            const nx = cx + dx;
-            const nz = cz + dz;
-            if (!visited.has(nx + ',' + nz) && near(nx, nz) && paperHarvestable(nx, nz)) {
-              visited.add(nx + ',' + nz);
-              stack.push([nx, nz]);
-            }
-          }
-        }
-        const n = patch.length;
-        // Approach the patch tile nearest the player; label sits at its centre.
-        let target = patch[0];
-        let bestD = Infinity;
-        for (const [px, pz] of patch) {
-          const d = Math.max(Math.abs(px - me.x), Math.abs(pz - me.z));
-          if (d < bestD) { bestD = d; target = [px, pz]; }
-        }
-        out.push({
-          icon: '📄',
-          text: n > 1 ? `Loose paper ×${n}` : 'Loose paper',
-          world: { x: sx / n, y: 0.85, z: sz / n },
-          onClick: () => approachAndDo(target[0], target[1], () => harvestPaperPatch(patch)),
-        });
-      }
-    }
-    if (extraEntries) out.push(...extraEntries());
     return out;
+  }
+
+  // One label per contiguous drift near the player. The fill itself is the pure
+  // `paperPatches` above; what is left here is the label - it floats at the
+  // patch's centre, and clicking walks to the patch tile NEAREST the player
+  // rather than to that centre, which may be a tile you cannot stand on.
+  function paperEntries(near, me) {
+    return paperPatches(grid, near, paperHarvestable).map(({ tiles, cx, cz }) => {
+      let target = tiles[0];
+      let bestD = Infinity;
+      for (const [px, pz] of tiles) {
+        const d = Math.max(Math.abs(px - me.x), Math.abs(pz - me.z));
+        if (d < bestD) { bestD = d; target = [px, pz]; }
+      }
+      const n = tiles.length;
+      return {
+        icon: '📄',
+        text: n > 1 ? `Loose paper ×${n}` : 'Loose paper',
+        world: { x: cx, y: 0.85, z: cz },
+        onClick: () => approachAndDo(target[0], target[1], () => harvestPaperPatch(tiles)),
+      };
+    });
+  }
+
+  function lootEntries() {
+    const me = getActor();
+    const near = (x, z) => Math.max(Math.abs(x - me.x), Math.abs(z - me.z)) <= 10;
+    return [
+      ...looseEntries(near),
+      ...propEntries(near),
+      ...bodyEntries(near),
+      ...paperEntries(near, me),
+      ...(extraEntries ? extraEntries() : []),
+    ];
   }
   function showLabels() { lootLabels.show(lootEntries()); }
 
