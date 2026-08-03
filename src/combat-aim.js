@@ -467,7 +467,7 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
       raw = [...p.slice(0, -1), world.clampPoint(point.x, point.z)];
     }
     const s = world.smooth(raw, view.active.actor);
-    const { points, cost, done, tail } = ask.truncateByBudget(s, ask.moveBudget(view.active), stepCost);
+    const { points, cost, done, tail } = ask.truncateByBudget(s, ask.moveBudget(view.active), ask.stepCost);
     setPreview({ reach: points, tail });
     // Show what it actually costs YOU: the allowance is spent first, so a short
     // reposition can read as free even though the route has a distance cost.
