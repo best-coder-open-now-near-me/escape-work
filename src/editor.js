@@ -22,6 +22,7 @@ import { createTileRenderer, computeCarpetZones } from './tile-renderer.js';
 import { worldToScreenCss } from './fx.js';
 import { parseLevel, parseWallRuns, compressWallRuns, TYPE_ALIASES } from './grid.js';
 import { lintLevel } from './level-lint.js';
+import { parseFloors } from './floors.js';
 import { toast, PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 
 const pc = window.pc;
@@ -50,6 +51,31 @@ export function startEditor(app, levelData, stashKey) {
   // draws at its tile type's own rotY, which is what every level did before
   // this existed (EDITOR_INVENTORY IQ4).
   let propRot = new Map();
+
+  // --- storeys (EDITOR_PLAN M4) -------------------------------------------------
+  // A level may be several full storeys stacked bottom-up. The variables above
+  // are always the ACTIVE storey; the others park in `storeys`. That keeps
+  // every painting path - paint, paintEdge, resize, undo, the lint - working on
+  // a flat map exactly as before, which is the whole point of the layer model:
+  // painting a floor IS the editor's existing job.
+  let storeys = [];   // parked { rows, hWalls, vWalls, hDoors, vDoors, propRot, height }
+  let active = 0;
+  const STOREY_DEFAULT_H = 2.1; // matches floors.js STOREY_H
+  const captureStorey = () => ({
+    rows: rows.map((r) => r.slice()),
+    hWalls: new Set(hWalls), vWalls: new Set(vWalls),
+    hDoors: new Set(hDoors), vDoors: new Set(vDoors),
+    propRot: new Map(propRot),
+    height: storeys[active]?.height ?? STOREY_DEFAULT_H,
+  });
+  function adoptStorey(st) {
+    rows = st.rows.map((r) => r.slice());
+    hWalls = new Set(st.hWalls); vWalls = new Set(st.vWalls);
+    hDoors = new Set(st.hDoors); vDoors = new Set(st.vDoors);
+    propRot = new Map(st.propRot);
+    height = rows.length;
+    width = rows.length ? Math.max(...rows.map((r) => r.length)) : 0;
+  }
   // Edge walls (partitions between tiles) - same Sets grid.js parses.
   let hWalls = new Set();
   let vWalls = new Set();
@@ -364,6 +390,40 @@ export function startEditor(app, levelData, stashKey) {
     }
   }
 
+  // A faint copy of the storey below, so painting a mezzanine is not done blind
+  // over a floor you cannot see. Flat quads only - the real renderer would cost
+  // a whole second map of props for something that is a positioning aid.
+  let onionEntities = [];
+  let onionMat = null;
+  function renderOnionSkin() {
+    for (const e of onionEntities) e.destroy();
+    onionEntities = [];
+    if (active === 0) return;
+    const below = storeys[active - 1];
+    if (!below) return;
+    if (!onionMat) {
+      onionMat = new pc.StandardMaterial();
+      onionMat.diffuse = new pc.Color(0.45, 0.62, 0.85);
+      onionMat.opacity = 0.22;
+      onionMat.blendType = pc.BLEND_NORMAL;
+      onionMat.depthWrite = false;
+      onionMat.update();
+    }
+    for (let z = 0; z < below.rows.length; z++) {
+      for (let x = 0; x < below.rows[z].length; x++) {
+        const ch = below.rows[z][x];
+        if (ch === ' ') continue;              // void below shows as nothing
+        if (rows[z]?.[x] !== undefined && rows[z][x] !== ' ') continue; // covered anyway
+        const e = new pc.Entity();
+        e.addComponent('render', { type: 'box', material: onionMat });
+        e.setLocalScale(0.92, 0.02, 0.92);
+        e.setPosition(x, -0.06, z);
+        app.root.addChild(e);
+        onionEntities.push(e);
+      }
+    }
+  }
+
   function renderAll() {
     for (const list of cellEntities.values()) for (const e of list) e.destroy();
     cellEntities.clear();
@@ -377,14 +437,21 @@ export function startEditor(app, levelData, stashKey) {
     carpet = computeCarpet();
     for (let z = 0; z < height; z++) for (let x = 0; x < width; x++) renderCell(x, z);
     renderAllEdges();
+    renderOnionSkin();
     updateSizeLabel();
     refocus();
     setStatus();
   }
 
   function loadLevel(data) {
-    height = data.map.length;
-    width = Math.max(...data.map.map((r) => r.length));
+    // A layered level's storeys share one legend; only the maps and edge runs
+    // differ. Storey 0 is the working set and the rest park until you switch.
+    const layerDefs = Array.isArray(data.layers) && data.layers.length
+      ? data.layers
+      : [{ map: data.map, walls: data.walls, doors: data.doors, height: undefined }];
+    const ground = layerDefs[0];
+    height = ground.map.length;
+    width = Math.max(...ground.map.map((r) => r.length));
     // Level legends are per-file (any char can mean anything); the editor
     // paints and exports canonical registry chars. Remap through the file's
     // OWN legend on the way in, or a hand-authored level using different
@@ -429,18 +496,19 @@ export function startEditor(app, levelData, stashKey) {
       const type = TYPE_ALIASES[raw] || raw;
       return TILE_TYPES[type] ? charOfType(type) : charOfType('floor');
     };
-    rows = data.map.map((r) => {
+    const rowsOf = (map, w) => map.map((r) => {
       const a = r.split('').map(canonical);
-      while (a.length < width) a.push(' ');
+      while (a.length < w) a.push(' ');
       return a;
     });
+    rows = rowsOf(ground.map, width);
     propRot = new Map();
-    for (const p of data.props || []) {
+    for (const p of (ground.props || data.props || [])) {
       const r = ((Math.round((p.rotY || 0) / 90) * 90) % 360 + 360) % 360;
       if (r && Number.isFinite(p.x) && Number.isFinite(p.z)) propRot.set(p.x + ',' + p.z, r);
     }
-    ({ h: hWalls, v: vWalls } = parseWallRuns(data.walls));
-    ({ h: hDoors, v: vDoors } = parseWallRuns(data.doors));
+    ({ h: hWalls, v: vWalls } = parseWallRuns(ground.walls));
+    ({ h: hDoors, v: vDoors } = parseWallRuns(ground.doors));
     // A door REPLACES any wall on its edge (grid.js applies the same rule when
     // the game parses a level). A hand-authored file may legitimately run a
     // wall straight through a doorway; without this the editor rendered both
@@ -448,11 +516,33 @@ export function startEditor(app, levelData, stashKey) {
     // and exported the edge into `walls` AND `doors`.
     for (const k of hDoors) hWalls.delete(k);
     for (const k of vDoors) vWalls.delete(k);
+    // Park every storey, including the ground one, so `storeys` is always the
+    // whole level and `active` indexes into it.
+    active = 0;
+    storeys = layerDefs.map((L, i) => {
+      const w = Math.max(...L.map.map((r) => r.length));
+      const hw = parseWallRuns(L.walls);
+      const hd = parseWallRuns(L.doors);
+      for (const k of hd.h) hw.h.delete(k);
+      for (const k of hd.v) hw.v.delete(k);
+      const rot = new Map();
+      for (const pr of (i === 0 ? (data.props || []) : (L.props || []))) {
+        const r = ((Math.round((pr.rotY || 0) / 90) * 90) % 360 + 360) % 360;
+        if (r && Number.isFinite(pr.x) && Number.isFinite(pr.z)) rot.set(pr.x + ',' + pr.z, r);
+      }
+      return {
+        rows: rowsOf(L.map, w),
+        hWalls: hw.h, vWalls: hw.v, hDoors: hd.h, vDoors: hd.v,
+        propRot: rot,
+        height: L.height ?? STOREY_DEFAULT_H,
+      };
+    });
     levelName = data.name || 'Untitled Floor';
     levelNext = data.next;
     levelDepth = data.depth;
     renderAll();
     syncMetaFields?.();
+    renderStoreyTabs?.();
   }
 
   // --- history and autosave ---------------------------------------------------
@@ -903,7 +993,10 @@ export function startEditor(app, levelData, stashKey) {
   const controls = createControls({
     app,
     canvas: document.getElementById('app'),
-    focus: { x: (levelData.map[0].length - 1) / 2, z: (levelData.map.length - 1) / 2 },
+    // A layered level has no top-level `map` - the storeys own it - and
+    // `refocus()` recomputes this from the real extent as soon as renderAll
+    // runs, so the initial value only has to be harmless.
+    focus: { x: 0, z: 0 },
     // One snapshot per STROKE. A drag fires this once and then streams tiles,
     // so undo steps back over the whole swipe rather than one cell of it.
     onAnyLeftPress: () => beginStroke(),
@@ -959,8 +1052,13 @@ export function startEditor(app, levelData, stashKey) {
     // export used to name the whole registry, which is what made a character
     // a scarce global resource instead of a per-level one. Walked in registry
     // order rather than paint order so two exports of the same level agree.
+    // Every storey's characters, not just the one on screen: the legends are
+    // level-wide, so a type used only on the mezzanine still has to be named.
+    const allRows = storeys.length
+      ? storeys.flatMap((st, i) => (i === active ? rows : st.rows))
+      : rows;
     const used = new Set(['floor']); // actor cells parse as floor beneath them
-    for (const r of rows) for (const ch of r) if (tileByChar[ch]) used.add(tileByChar[ch]);
+    for (const r of allRows) for (const ch of r) if (tileByChar[ch]) used.add(tileByChar[ch]);
     const tiles = {};
     for (const [id, def] of Object.entries(TILE_TYPES)) {
       if (def.runtimeOnly || !used.has(id)) continue; // never painted, never exported
@@ -974,28 +1072,50 @@ export function startEditor(app, levelData, stashKey) {
     // Only tiered entries this map actually uses: minting a character for a tier
     // and then painting over it should not leave a legend entry behind.
     const usedChars = new Set();
-    for (const r of rows) for (const ch of r) usedChars.add(ch);
+    for (const r of allRows) for (const ch of r) usedChars.add(ch);
     const usedTiers = [...tierChars].filter(([ch]) => usedChars.has(ch));
     const actors = { [PLAYER_CHAR]: 'player', ...actorLegend(), ...Object.fromEntries(usedTiers) };
     // Key order mirrors the hand-authored files in levels/, so a re-export
     // diffs cleanly against the original.
     const out = { name: levelName };
     if (levelDepth != null) out.depth = levelDepth;
-    Object.assign(out, { tiles, actors, map: rows.map((r) => r.join('')) });
+    Object.assign(out, { tiles, actors });
+    if (storeys.length <= 1) out.map = rows.map((r) => r.join(''));
     // Rotations, for cells that still carry a model prop. Painting over a
     // rotated desk should not leave its angle behind in the file.
-    const props = [];
-    for (const [k, rotY] of propRot) {
-      const [x, z] = k.split(',').map(Number);
-      const type = tileByChar[rows[z]?.[x]];
-      if (type && TILE_TYPES[type]?.model) props.push({ x, z, rotY });
+    const propsOf = (st) => {
+      const list = [];
+      for (const [k, rotY] of st.propRot) {
+        const [x, z] = k.split(',').map(Number);
+        const type = tileByChar[st.rows[z]?.[x]];
+        if (type && TILE_TYPES[type]?.model) list.push({ x, z, rotY });
+      }
+      return list.sort((a, b) => a.z - b.z || a.x - b.x);
+    };
+    // Whatever is on screen is the truth for the active storey.
+    const all = storeys.map((st, i) => (i === active ? captureStorey() : st));
+    if (all.length > 1) {
+      // Multi-storey: the legends stay level-wide and each storey carries its
+      // own map, runs, props and rise. A reader of this file sees exactly the
+      // shape levels/README.md documents.
+      out.layers = all.map((st) => {
+        const L = { height: st.height ?? STOREY_DEFAULT_H, map: st.rows.map((r) => r.join('')) };
+        const w = compressWallRuns(st.hWalls, st.vWalls);
+        if (w.length) L.walls = w;
+        const d = compressWallRuns(st.hDoors, st.vDoors);
+        if (d.length) L.doors = d;
+        const pr = propsOf(st);
+        if (pr.length) L.props = pr;
+        return L;
+      });
+    } else {
+      const props = propsOf(all[0]);
+      if (props.length) out.props = props;
+      const walls = compressWallRuns(hWalls, vWalls);
+      if (walls.length) out.walls = walls;
+      const doors = compressWallRuns(hDoors, vDoors);
+      if (doors.length) out.doors = doors;
     }
-    props.sort((a, b) => a.z - b.z || a.x - b.x);
-    if (props.length) out.props = props;
-    const walls = compressWallRuns(hWalls, vWalls);
-    if (walls.length) out.walls = walls;
-    const doors = compressWallRuns(hDoors, vDoors);
-    if (doors.length) out.doors = doors;
     if (levelNext) out.next = levelNext;
     return JSON.stringify(out, null, 2);
   }
@@ -1068,6 +1188,7 @@ export function startEditor(app, levelData, stashKey) {
     return [head, bits.join(' · '), def.examine || ''].filter(Boolean).join('\n');
   }
 
+  const stairTypes = [];
   const brushButtons = [];
   const buttonOf = new Map(); // brush id -> its button, for hotkeys and recents
   const recent = [];
@@ -1167,12 +1288,10 @@ export function startEditor(app, levelData, stashKey) {
   const byCategory = new Map();
   for (const [id, def] of Object.entries(TILE_TYPES)) {
     if (def.runtimeOnly) continue; // not a brush - it has no character to paint
-    // A stair marker only means something with a storey above it, which this
-    // editor cannot author yet (EDITOR_PLAN M4). Painting one today exports a
-    // level the shipped-level lint rejects and, in a flat level, an invisible
-    // wall the author cannot see in playtest. Hidden until M4 re-enables it
-    // with live run validation.
-    if (def.stairs) continue;
+    // A stair marker only means something with a storey above it. The button
+    // exists but stays disabled until the level has one, because on a flat
+    // level it is an invisible wall the author cannot see in playtest.
+    if (def.stairs) { stairTypes.push(id); }
     const cat = def.category || 'basics';
     if (!byCategory.has(cat)) byCategory.set(cat, []);
     byCategory.get(cat).push(id);
@@ -1271,6 +1390,124 @@ export function startEditor(app, levelData, stashKey) {
 
   divider();
 
+  // --- storeys (EDITOR_PLAN M4) --------------------------------------------------
+  // Deliberately small, which is the point of the layer model: a storey is an
+  // ordinary flat map, so this is a switcher plus a height field rather than an
+  // elevation UI.
+  const storeyBox = document.createElement('div');
+  storeyBox.id = 'ed-storeys';
+  Object.assign(storeyBox.style, { display: 'flex', gap: '4px', alignItems: 'center' });
+  commands.appendChild(storeyBox);
+
+  const heightField = document.createElement('input');
+  heightField.id = 'ed-storey-height';
+  heightField.type = 'number';
+  heightField.step = '0.1';
+  heightField.min = '0.5';
+  heightField.title = 'How far the NEXT storey sits above this one, in world units.'
+    + '\nPut the tall number on the ground storey to get an atrium.';
+  heightField.setAttribute('aria-label', 'Storey height');
+  Object.assign(heightField.style, BUTTON_CHROME, {
+    padding: '7px 8px', borderRadius: '7px', width: '68px', cursor: 'text',
+  });
+  heightField.oninput = () => {
+    const v = parseFloat(heightField.value);
+    if (storeys[active] && Number.isFinite(v) && v > 0) { storeys[active].height = v; markDirty(); }
+  };
+
+  function switchStorey(i) {
+    if (i === active || !storeys[i]) return;
+    storeys[active] = captureStorey();
+    active = i;
+    adoptStorey(storeys[i]);
+    renderAll();
+    renderStoreyTabs();
+    toast(`Storey ${i}${i === 0 ? ' (ground)' : ''}`);
+  }
+  function addStorey() {
+    storeys[active] = captureStorey();
+    // A new storey starts EMPTY - all void. An upper floor is mostly airspace
+    // with a band of floor around it, so blank-as-void is the useful default
+    // and blank-as-floor would mean erasing a whole slab by hand.
+    storeys.push({
+      rows: Array.from({ length: height }, () => new Array(width).fill(' ')),
+      hWalls: new Set(), vWalls: new Set(), hDoors: new Set(), vDoors: new Set(),
+      propRot: new Map(),
+      height: STOREY_DEFAULT_H,
+    });
+    pushHistory();
+    switchStorey(storeys.length - 1);
+    toast('Added a storey. It starts as open air - paint the floor you want.');
+  }
+  function removeStorey() {
+    if (storeys.length < 2) { toast('A level needs at least its ground storey.'); return; }
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(`Delete storey ${active} and everything painted on it?`)) return;
+    pushHistory();
+    storeys.splice(active, 1);
+    active = Math.min(active, storeys.length - 1);
+    adoptStorey(storeys[active]);
+    renderAll();
+    renderStoreyTabs();
+    markDirty();
+  }
+  function renderStoreyTabs() {
+    storeyBox.innerHTML = '';
+    const label = document.createElement('span');
+    label.textContent = 'storey';
+    Object.assign(label.style, { opacity: '.55', fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase' });
+    storeyBox.appendChild(label);
+    storeys.forEach((st, i) => {
+      const b = document.createElement('button');
+      b.id = 'ed-storey-' + i;
+      b.textContent = String(i);
+      b.title = i === 0 ? 'Ground storey' : `Storey ${i}`;
+      b.setAttribute('aria-pressed', i === active ? 'true' : 'false');
+      Object.assign(b.style, BUTTON_CHROME, {
+        padding: '8px 11px', borderRadius: '7px', minHeight: '38px', cursor: 'pointer',
+        borderColor: i === active ? '#8adf76' : '#3a3a52',
+      });
+      b.onclick = () => switchStorey(i);
+      storeyBox.appendChild(b);
+    });
+    const add = document.createElement('button');
+    add.id = 'ed-storey-add';
+    add.textContent = '+';
+    add.title = 'Add a storey above';
+    Object.assign(add.style, BUTTON_CHROME, { padding: '8px 10px', borderRadius: '7px', minHeight: '38px', cursor: 'pointer' });
+    add.onclick = addStorey;
+    storeyBox.appendChild(add);
+    if (storeys.length > 1) {
+      const del = document.createElement('button');
+      del.id = 'ed-storey-remove';
+      del.textContent = '−';
+      del.title = 'Delete the storey you are on';
+      Object.assign(del.style, BUTTON_CHROME, {
+        padding: '8px 10px', borderRadius: '7px', minHeight: '38px', cursor: 'pointer', borderColor: '#7a3a4a',
+      });
+      del.onclick = removeStorey;
+      storeyBox.appendChild(del);
+    }
+    heightField.value = String(storeys[active]?.height ?? STOREY_DEFAULT_H);
+    heightField.style.display = storeys.length > 1 ? '' : 'none';
+    // A stair run needs somewhere to climb to. On a flat level the marker is an
+    // invisible wall, so the brush is present-but-refused rather than hidden -
+    // the author can see the capability exists and why it is unavailable.
+    const canStair = storeys.length > 1 && active < storeys.length - 1;
+    for (const id of stairTypes) {
+      const b = buttonOf.get(id);
+      if (!b) continue;
+      b.disabled = !canStair;
+      b.style.opacity = canStair ? '1' : '.4';
+      b.title = canStair
+        ? 'Stairway — paint a RUN of these; floors.js orients the flight and carves the opening above.'
+        : 'Stairway — needs a storey above this one. Add one with + first.';
+    }
+  }
+  commands.appendChild(heightField);
+
+  divider();
+
   // --- level identity ---------------------------------------------------------
   const field = (id, placeholder, width, title) => {
     const i = document.createElement('input');
@@ -1339,11 +1576,10 @@ export function startEditor(app, levelData, stashKey) {
   Object.assign(select.style, BUTTON_CHROME, {
     padding: '6px', borderRadius: '7px', cursor: 'auto',
   });
+  // Layered levels are on the list now that the editor speaks storeys.
   select.innerHTML = `<option value="">load level…</option>` +
-    // Layered levels stay off the base list until the editor learns storeys
-    // (EDITOR_PLAN M4) - offering one here would just crash the load.
-    Object.entries(LEVELS).filter(([, l]) => !l.layers)
-      .map(([id, l]) => `<option value="${id}">${l.name || id}</option>`).join('');
+    Object.entries(LEVELS)
+      .map(([id, l]) => `<option value="${id}">${l.name || id}${l.layers ? ` (${l.layers.length} storeys)` : ''}</option>`).join('');
   select.onchange = () => {
     if (LEVELS[select.value]) loadLevel(LEVELS[select.value]);
     select.value = '';
@@ -1518,7 +1754,22 @@ export function startEditor(app, levelData, stashKey) {
   function runLint() {
     clearTimeout(lintTimer);
     lintTimer = setTimeout(() => {
-      try { findings = lintLevel(JSON.parse(toJson())); } catch { findings = []; }
+      try {
+        const data = JSON.parse(toJson());
+        if (data.layers) {
+          // Layered levels get their own checks: parseFloors throws named
+          // errors for an unclimbable run or an occupied landing, which is the
+          // whole reason stairs are generated rather than hand-drawn.
+          findings = [];
+          try {
+            parseFloors(data);
+          } catch (e) {
+            findings = [{ level: 'error', rule: 'storeys', message: e.message }];
+          }
+        } else {
+          findings = lintLevel(data);
+        }
+      } catch { findings = []; }
       setStatus();
     }, 350);
   }

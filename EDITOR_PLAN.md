@@ -227,11 +227,15 @@ above pre-paid parts of M1/M2: what remains in them is listed as deltas.
   wash on two floors, AI routing to stairs and picking targets it can
   actually see. High/low-ground modifiers only if Q2 ratifies them — the
   hook (`hitChance` mods) already exists.
-- **M4 — Editor authors layers** (`src/editor.js`). Layer switcher tabs,
-  add/remove layer, per-layer height field, stair marker brush with live
-  validation, and an onion-skin ghost of the layer below while painting an
-  upper floor. Deliberately small — the point of the layer model is that
-  painting a floor IS the editor's existing job.
+- **M4 — Editor authors layers (landed 2026-08-02).** Storey switcher, add and
+  remove a storey, per-storey height, an onion-skin of the storey below, and
+  the stairway brush enabled only where a run has somewhere to climb to. Live
+  validation runs `parseFloors`, so an unclimbable run or an occupied landing
+  is named in the status strip rather than at load time. `toJson` emits the
+  `layers` array with level-wide legends; a single-storey level exports exactly
+  as it always did. It was indeed small — the point of the layer model is that
+  painting a floor IS the editor's existing job, and the storey switcher is
+  mostly bookkeeping around the flat-map code that already worked.
 
 ## Risks and open questions (engineering)
 

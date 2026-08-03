@@ -3,11 +3,13 @@
 One JSON file per floor. `src/grid.js` (`parseLevel`) is the authority on what
 these mean; this file is the authoring recipe.
 
-Most floors are painted in the in-repo editor (`#editor`, or the link on the
-class picker) and exported. **Multi-storey floors are the exception: the editor
-cannot author storeys yet (EDITOR_PLAN M4) and refuses to open a layered level
-rather than flattening it.** Until it can, the recipe below is how you write one
-by hand. `dev/spike-lobby.json` is the worked example.
+Every floor, flat or multi-storey, can be painted in the in-repo editor
+(`#editor`, or the link on the class picker) and exported. The editor speaks
+storeys as of EDITOR_PLAN M4: a storey switcher in the command row, `+`/`−` to
+add and remove one, a height field, an onion-skin of the storey below while you
+paint, and the stairway brush enabled only where a run has somewhere to climb
+to. The recipe below is the format it reads and writes;
+`dev/spike-lobby.json` is the worked example.
 
 ## A flat level
 
@@ -85,7 +87,8 @@ Four things decide whether it works:
 3. **Stairs are generated from a marker run.** Paint `stairway` cells on the
    *lower* storey; `floors.js` orients the flight, carves the opening above and
    emits the portal that pathfinding uses. The run's length is however many
-   cells you paint — three reads well, one reads as a ladder.
+   cells you paint — three reads well, one reads as a ladder. The editor greys
+   the brush out on the top storey, since there is nothing there to climb to.
 4. **The validations are loud on purpose.** `floors.js` throws a named error if
    the space above a stair run is occupied, if a run has no open neighbour to
    climb from, or if a layer's map disagrees in size. A load-time error naming

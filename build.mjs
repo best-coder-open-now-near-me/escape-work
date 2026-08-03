@@ -17,7 +17,8 @@ mkdirSync(OUT, { recursive: true });
 await esbuild.build({
   entryPoints: ['src/main.js'],
   bundle: true,
-  minify: true,
+  minify: process.env.NO_MINIFY ? false : true,
+  sourcemap: process.env.NO_MINIFY ? "inline" : false,
   format: 'iife',
   target: 'es2020',
   outfile: `${OUT}/bundle.js`,
