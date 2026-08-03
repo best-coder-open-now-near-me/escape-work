@@ -1,11 +1,31 @@
 # Level Editor — Needs Inventory
 
-> **Status, 2026-08-02: rounds 1–6 and M4 have shipped.** Every item below that
-> the designer's answers put in scope is implemented, tested and verified in a
-> browser; see the commits on `claude/level-editor-inventory-ux-x266ky`. The
-> inventory is left standing as the evidence trail and the record of what was
-> deliberately NOT done — section I (encounter-preview overlays) is out of scope
-> by IQ1, and the items marked below as deferred say so and why.
+> **Status, 2026-08-02: rounds 1–11 and M4 have shipped, including section I.**
+> Every item in this document is now implemented, tested and verified in a
+> browser, with three explicit exceptions listed below. See the commits on
+> `claude/level-editor-inventory-ux-x266ky`. The inventory is left standing as
+> the evidence trail.
+>
+> Section I (the encounter-preview overlays) was out of scope by IQ1 and then
+> built anyway once M4 landed, which was the condition it was deferred behind —
+> `src/level-preview.js` plus seven overlays and a floor-budget readout.
+>
+> **What is deliberately NOT done, and why:**
+>
+> - **K8, the second half.** The shipped levels are hardcoded fixtures for ~20
+>   e2e specs. Migrating those specs onto their own fixture floor is the real
+>   fix; doing it blind to a suite that takes hours to run would trade one
+>   flavour of red for another. What landed is the half that fixes the
+>   *confusion*: a shape fingerprint of both floors, so an edit fails in one
+>   obvious place naming the cause in 1.5 seconds.
+> - **M1: actors, doors and interactable props on upper storeys.** `parseFloors`
+>   still refuses them loudly. This is not editor work — it needs layer-aware
+>   bodies (blocking, wander, combat entry, spawn height) and belongs to
+>   EDITOR_PLAN M1/M3 alongside the cross-storey sightline. The M2 half that WAS
+>   editor-adjacent is done: model props now parent under their storey root.
+> - **SNEAK's editor-authored actor facing.** Still `[proposed]` in
+>   `SNEAK_PLAN.md`, so the `notice` overlay draws the cone's RADIUS rather than
+>   a cone, and says so on the button.
 
 A full accounting of what the level editor (`src/editor.js`) cannot do, what it
 does badly, and what it does that quietly destroys work — plus the UI/UX changes
