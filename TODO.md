@@ -31,50 +31,31 @@ Answered directly by the project owner — recorded so they are not relitigated.
   curve was a plan doc's own recommendation, and `STAIRWELL_HEAL`
   (`main.js:384`) never appears in any plan doc's decision table at all. Its
   entire justification is a code comment.
-  - **`STAIRWELL_HEAL = 6`** (`main.js:384`, applied `:2901`) — the between-floors
-    heal. Struck.
-  - **`VICTORY_HEAL = 5`** (`main.js:383`, applied `:2358`) — the same species,
-    after each won fight, and *not* what the designer named. **Open question,
-    below** — do not remove it on the strength of the stairwell verdict.
-  - **The downed rule rides along and must not be struck by accident.**
-    `stairwellHeal` (`stats.js:49-50`) is `min(maxHp, max(hp, 0) + amount)`; the
-    `max(hp, 0)` is what carries a downed character to the landing and revives
-    them there. Deleting the heal deletes the revival, and a run that starts a
-    floor with a downed leader may have no way forward. **What replaces it is a
-    design question, not a mechanical one** — see "Open questions" below.
-
-### Open questions from the 2026-08-02 no-auto-healing verdict
-
-Both need the designer, and the first blocks the change from shipping.
-
-**H1 — A character is downed when the floor is cleared. What happens?** Today
-the stairwell heal revives them on the landing (`stats.js:49-50`). With the heal
-struck, something has to take its place.
-
-- **A. They stay downed into the next floor (recommended).** *Consequence:* the
-  honest reading of "no auto healing", and it makes downing a real cost that
-  follows you. Needs one guard: if the *leader* is downed with no living member,
-  that is a loss, not a soft-lock — check what `loseGame` does today before
-  shipping it.
-- **B. Downed revive at 1 HP, no other healing.** *Consequence:* keeps the run
-  moving and still deletes the +6; "carried to the landing" survives as fiction
-  without being a heal.
-- **C. Downed stay downed and are revivable only by an item or a power.**
-  *Consequence:* the most demanding, and the most interesting — it makes healing
-  something you *stock* (which `ECONOMY_PLAN.md:466` already budgets per floor)
-  rather than something the floor hands you. Costs a revive verb that does not
-  exist yet.
-
-I'd take B to ship the change safely and C as the real answer once a revive verb
-exists.
-
-**H2 — Does `VICTORY_HEAL = 5` go too?** It is the same kind of rule — an
-automatic top-up nobody asked for, after every won fight rather than every floor
-— but the designer named floors specifically, and striking both at once is a
-much larger difficulty swing than striking one. Recommend: **strike it too, but
-separately and after H1 lands**, so the two effects can be felt apart. If both
-go at once, healing becomes entirely item-driven overnight and
-`ECONOMY_PLAN.md`'s per-floor heal budget needs a pass in the same breath.
+  - **All three automatic revives are struck, and they had to go together.**
+    `STAIRWELL_HEAL` (between floors) and `VICTORY_HEAL` (after every won fight)
+    both healed the standing AND stood the fallen back up. So did `helpUp`, the
+    free walk-over hand up — the one this entry originally missed, and the one
+    that would have made striking the other two cosmetic.
+  - **The hidden revive.** `stairwellHeal` was `min(maxHp, max(hp, 0) + amount)`,
+    and that `max(hp, 0)` was quietly the only thing standing a downed character
+    back up. Deleting the heal deleted the revival, which is why the replacement
+    had to land in the same change rather than after it.
+  - **H1 answered: option C** `[stated]` (designer, 2026-08-02: "c"). Downed
+    characters stay downed — across a victory, across a floor transition — and
+    are revived only by an item carrying `revive` (`data/items.js`), spent
+    through `helpUp` out of the helper's own pockets. The first one is the
+    Expired First-Aid Kit: 4 HP, one use, uncommon in break rooms, occasionally
+    filed in cabinets, and reliably stocked by the mail-room cart so a run can
+    BUY the thing it depends on.
+  - **H2 resolved with it.** `VICTORY_HEAL` went too. It was flagged as a
+    separate question, but option C answers it: "revivable only by an item or a
+    power" cannot coexist with a rule that revives everyone for free after every
+    fight. Healing is now entirely item-driven, so
+    `ECONOMY_PLAN.md:466`'s per-floor heal budget is the number to watch first
+    in playtest.
+  - **The wipe guard needed no work.** `downOrLose` (`main.js`) already ends the
+    run when nothing is left standing; option C just makes that reachable in one
+    more way, which is the intent.
 
 ## E2e status in this environment (measured, with the method stated)
 
@@ -384,9 +365,12 @@ killing anyone, and therefore the correct play every time.
       no longer reach the melee fall-through at all (rather than being guarded
       out of it at one call site); `actors.js:430` clamps a non-finite
       `takeDamage` to a visible no-op.
-- [ ] **Editor playtest must not wipe the campaign save** (`main.js:592`):
-      gate `clearProgress()` on campaign mode in both `loseGame()` and the
-      exit handler's non-campaign branch.
+- [x] **Editor playtest must not wipe the campaign save.** Done in
+      `loseGame()` and the exit handler, and the THIRD site this entry missed -
+      the game menu's `menu-restart`, which was ungated and also removed the
+      stash, so "Restart run" during a playtest deleted the campaign save, its
+      cloud row, and the level being edited. All three gate on `playtesting`
+      now, and the menu item reads "Restart this level" while playtesting.
 - [ ] **Backfill `xp`/`xpNext` in `normalizeSheet`** (`party.js:83`) so legacy
       saves can level again. *Same function as the save v8 drop — one
       migration test pass.*

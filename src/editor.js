@@ -14,7 +14,7 @@ import { createControls } from './controls.js';
 import { createTileRenderer, computeCarpetZones } from './tile-renderer.js';
 import { worldToScreenCss } from './fx.js';
 import { parseLevel, parseWallRuns, compressWallRuns, TYPE_ALIASES } from './grid.js';
-import { say, PANEL_CHROME, BUTTON_CHROME } from './ui.js';
+import { toast, PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 
 const pc = window.pc;
 const PLAYER_CHAR = '@';
@@ -35,6 +35,9 @@ export function startEditor(app, levelData, stashKey) {
   // char -> a `<id>@<level>` legend value, preserved verbatim across the round
   // trip (see the load path). Empty for a level with no tiered placements.
   let tierChars = new Map();
+  // The same map resolved to bare actor ids, so a tiered placement can be drawn
+  // and treated as the body it is rather than as an unrecognised character.
+  let tierCharIds = {};
   // Edge walls (partitions between tiles) - same Sets grid.js parses.
   let hWalls = new Set();
   let vWalls = new Set();
@@ -66,27 +69,54 @@ export function startEditor(app, levelData, stashKey) {
     if (ch === '\\') continue; // escaped inside a JSON map row - the worst one
     CHAR_POOL.push(ch);
   }
-  // Actor characters are off the table for tiles: a level's two legends share
-  // one map, and parseLevel checks `actors` first, so a tile handed an actor's
-  // character would silently become that actor. This is the collision the
-  // levels lint used to catch by hand-counting.
-  const reservedChars = new Set([PLAYER_CHAR, ' ', ...Object.keys(actorLegend())]);
-  const tileByChar = {};
-  const charByType = {};
+  // These three are rebuilt per LOAD, not per session (resetAllocator below).
+  // They used to live for the whole of startEditor and only ever grow, which
+  // made an export depend on which levels you had opened first in that browser
+  // session: load a level that reserves 'G' for `manager@3`, then load one that
+  // wants 'G' for `ficus`, and the plant drew a pool char instead. Worse in the
+  // other order - a cached `charByType` entry was returned WITHOUT re-testing
+  // reservations, so a painted plant could export under an enemy's character
+  // and parse back as that enemy.
+  let reservedChars = new Set();
+  let tileByChar = {};
+  let charByType = {};
+  function resetAllocator() {
+    // Actor characters are off the table for tiles: a level's two legends share
+    // one map, and parseLevel checks `actors` first, so a tile handed an actor's
+    // character would silently become that actor.
+    reservedChars = new Set([PLAYER_CHAR, ' ', ...Object.keys(actorLegend())]);
+    tileByChar = {};
+    charByType = {};
+    // Floor first, so its '.' is never handed to anything else - it is the
+    // fallback every unrecognised cell resolves to.
+    charOfType('floor');
+  }
   function charOfType(id) {
-    const hit = charByType[id];
-    if (hit) return hit;
-    const want = TILE_TYPES[id]?.char;
     const free = (ch) => ch && !reservedChars.has(ch) && !tileByChar[ch];
+    const hit = charByType[id];
+    // Re-validate the cache: a tiered placement reserved after this type was
+    // first allocated can invalidate an answer we already gave.
+    if (hit && (!reservedChars.has(hit) || tileByChar[hit] === id)) return hit;
+    if (hit) { delete tileByChar[hit]; delete charByType[id]; }
+    const want = TILE_TYPES[id]?.char;
     const ch = free(want) ? want : CHAR_POOL.find(free);
-    if (!ch) return charByType.floor; // pool exhausted: paint floor, say so below
+    // Pool exhausted. There are 87 paintable tile types against 86 usable
+    // characters, so this is reachable, not theoretical - and it used to
+    // substitute floor in silence under a comment promising it would "say so".
+    if (!ch) {
+      toast(`No map character left for "${TILE_TYPES[id]?.label || id}" - this level already uses every one.`);
+      return null;
+    }
     charByType[id] = ch;
     tileByChar[ch] = id;
     return ch;
   }
-  // Floor first, so its '.' is never handed to anything else - it is the
-  // fallback every unrecognised cell resolves to.
-  charOfType('floor');
+  resetAllocator();
+  // Every actor a registry can name, not just the paintable enemies: a
+  // companion or a tiered placement that renders as bare floor is one a brush
+  // stroke deletes without anything visibly vanishing.
+  const actorIdByChar = {};
+  for (const [ch, ref] of Object.entries(actorLegend())) actorIdByChar[ch] = parseActorRef(ref).id;
   const enemyByChar = {};
   for (const [id, def] of Object.entries(ENEMY_TYPES)) enemyByChar[def.char] = id;
 
@@ -104,9 +134,28 @@ export function startEditor(app, levelData, stashKey) {
     return m;
   };
   const playerMat = mat([0.3, 0.8, 0.45]);
-  const enemyMats = {};
-  const enemyPalette = [[0.88, 0.32, 0.32], [0.9, 0.55, 0.25], [0.75, 0.35, 0.75]];
-  Object.keys(ENEMY_TYPES).forEach((id, i) => { enemyMats[id] = mat(enemyPalette[i % enemyPalette.length]); });
+  // One colour per actor ID, derived rather than drawn from a fixed list. The
+  // list held three colours and was indexed `i % 3` across four enemy types, so
+  // the Manager and the Security Guard painted the identical red box - two
+  // bodies with different stats, AP and loot, indistinguishable on the map you
+  // are balancing. A hash also means the fifth enemy type does not collide the
+  // day it is added.
+  const hueToRgb = (h, s = 0.62, l = 0.58) => {
+    const k = (n) => (n + h * 12) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(Math.min(k(n) - 3, 9 - k(n)), 1));
+    return [f(0), f(8), f(4)];
+  };
+  const actorMats = {};
+  function actorMat(id) {
+    if (!actorMats[id]) {
+      let h = 0;
+      for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+      // Away from the player's green, so a spawn never reads as a coworker.
+      actorMats[id] = mat(hueToRgb(((h % 300) + 60) / 360));
+    }
+    return actorMats[id];
+  }
 
   // Live conduction preview: recompute electrified pools from the current map
   // exactly the way the game will (grid.js), so painting a cable next to
@@ -133,7 +182,7 @@ export function startEditor(app, levelData, stashKey) {
   const effectiveTypeAt = (x, z) => {
     const ch = rows[z]?.[x];
     if (ch === undefined || ch === ' ') return null;
-    if (ch === PLAYER_CHAR || enemyByChar[ch]) return 'floor';
+    if (ch === PLAYER_CHAR || actorIdByChar[ch] || tierCharIds[ch]) return 'floor';
     return tileByChar[ch] || 'floor';
   };
   const computeCarpet = () => computeCarpetZones(effectiveTypeAt, width, height);
@@ -159,13 +208,17 @@ export function startEditor(app, levelData, stashKey) {
     cellEntities.set(key, out);
     const ch = rows[z][x];
     if (ch === ' ') return;
-    const isActor = ch === PLAYER_CHAR || !!enemyByChar[ch];
+    const isActor = ch === PLAYER_CHAR || !!actorIdByChar[ch] || !!tierCharIds[ch];
     // Inherited carpet wins, exactly as buildLevel renders it in the game.
     out.push(renderer.renderFloor(x, z, carpet.get(key) || (isActor ? 'floor' : tileByChar[ch] || 'floor')));
     if (ch === PLAYER_CHAR) {
       out.push(addBox(playerMat, x, 0.35, z, 0.55, 0.5, 0.55));
-    } else if (enemyByChar[ch]) {
-      out.push(addBox(enemyMats[enemyByChar[ch]], x, 0.35, z, 0.55, 0.5, 0.55));
+    } else if (actorIdByChar[ch] || tierCharIds[ch]) {
+      // A companion, an NPC or a tiered placement gets a marker too. They used
+      // to render as bare floor, so a carpet drag erased one with nothing
+      // visibly vanishing - the load path went to real trouble to preserve
+      // them and the canvas quietly did not show them.
+      out.push(addBox(actorMat(actorIdByChar[ch] || tierCharIds[ch]), x, 0.35, z, 0.55, 0.5, 0.55));
     } else {
       const type = tileByChar[ch] || 'floor';
       if (type === 'floor') return;
@@ -296,6 +349,7 @@ export function startEditor(app, levelData, stashKey) {
     for (let z = 0; z < height; z++) for (let x = 0; x < width; x++) renderCell(x, z);
     renderAllEdges();
     updateSizeLabel();
+    setStatus();
   }
 
   function loadLevel(data) {
@@ -312,9 +366,15 @@ export function startEditor(app, levelData, stashKey) {
     // placement into it silently demotes the enemy - the same bug the `depth`
     // note above exists for, one level down. So these chars are passed through
     // untouched and re-emitted verbatim on export.
+    // A fresh level gets a fresh allocation. Without this the editor carried
+    // one session-long map, so what you exported depended on what you had
+    // opened before it.
+    resetAllocator();
     tierChars = new Map();
+    tierCharIds = {};
     for (const [ch, val] of Object.entries(data.actors || {})) {
-      if (parseActorRef(val).level != null) tierChars.set(ch, val);
+      const ref = parseActorRef(val);
+      if (ref.level != null) { tierChars.set(ch, val); tierCharIds[ch] = ref.id; }
     }
     // A tiered placement's character is whatever the source file chose, not a
     // registry character, so the allocator cannot know it is taken - and a
@@ -366,7 +426,7 @@ export function startEditor(app, levelData, stashKey) {
   }
 
   function paint(tile, ch = charForBrush()) {
-    if (!tile) return;
+    if (!tile || !ch) return; // a refused character allocation (pool exhausted)
     const { x, z } = tile;
     if (x < 0 || x >= width || z < 0 || z >= height) return;
     if (rows[z][x] === ch) return;
@@ -497,6 +557,7 @@ export function startEditor(app, levelData, stashKey) {
   const brushButtons = [];
   function selectBrush(id, button) {
     brush = id;
+    setStatus();
     for (const b of brushButtons) b.style.borderColor = '#3a3a52';
     button.style.borderColor = '#8adf76';
   }
@@ -513,11 +574,20 @@ export function startEditor(app, levelData, stashKey) {
   }
   // Tile brushes, grouped. Uncategorised entries (floor, walls, hazards - the
   // originals) stay in a leading "basics" row so the old muscle memory holds.
+  // Every category a tile type actually declares has to appear here: a missing
+  // one scores `(-1 + 1) || 99` and sorts last as an orphan row. 'furniture'
+  // did exactly that, stranding the snack machine alone at the bottom.
   const CATEGORY_ORDER = ['basics', 'work', 'seating', 'tables', 'storage',
-    'breakroom', 'decor', 'structure', 'facilities'];
+    'breakroom', 'furniture', 'decor', 'structure', 'facilities'];
   const byCategory = new Map();
   for (const [id, def] of Object.entries(TILE_TYPES)) {
     if (def.runtimeOnly) continue; // not a brush - it has no character to paint
+    // A stair marker only means something with a storey above it, which this
+    // editor cannot author yet (EDITOR_PLAN M4). Painting one today exports a
+    // level the shipped-level lint rejects and, in a flat level, an invisible
+    // wall the author cannot see in playtest. Hidden until M4 re-enables it
+    // with live run validation.
+    if (def.stairs) continue;
     const cat = def.category || 'basics';
     if (!byCategory.has(cat)) byCategory.set(cat, []);
     byCategory.get(cat).push(id);
@@ -609,6 +679,32 @@ export function startEditor(app, levelData, stashKey) {
   };
   document.body.appendChild(bar);
 
+  // --- status strip -----------------------------------------------------------
+  // Everything the editor knows about the current moment, in the corner the
+  // game's empty HUD pill was wasting. It is deliberately OUTSIDE the palette:
+  // the palette scrolls, and a readout you have to scroll to is not a readout.
+  const status = document.createElement('div');
+  status.id = 'ed-status';
+  Object.assign(status.style, PANEL_CHROME, {
+    position: 'fixed', left: '12px', bottom: '14px', zIndex: '31',
+    padding: '7px 11px', borderRadius: '9px', font: '12px system-ui, sans-serif',
+    pointerEvents: 'none', maxWidth: '46vw', lineHeight: '1.45',
+  });
+  document.body.appendChild(status);
+  function brushLabel() {
+    if (brush === 'partition') return 'partition (edge)';
+    if (brush === 'door') return 'door (edge)';
+    if (brush === 'player') return 'player start';
+    if (brush.startsWith('enemy:')) return ENEMY_TYPES[brush.slice(6)]?.name || brush;
+    return TILE_TYPES[brush]?.label || brush.replace(/-/g, ' ');
+  }
+  function setStatus() {
+    const ch = charByType[brush];
+    status.innerHTML = `<b>${levelName || 'Untitled Floor'}</b> &nbsp; ${width}×${height}`
+      + `<br>brush: <b style="color:#8adf76">${brushLabel()}</b>`
+      + (ch ? ` <span style="opacity:.6">writes “${ch}”</span>` : '');
+  }
+
   function showExport() {
     // One modal at a time - a second Export click used to stack another
     // full-screen overlay with duplicate #export-modal / #export-json ids,
@@ -642,7 +738,13 @@ export function startEditor(app, levelData, stashKey) {
   }
 
   loadLevel(levelData);
-  say('LEVEL EDITOR — left-click paints (partition brush paints tile edges), right-click erases, middle-drag orbits');
+  // The game's HUD ships in index.html unconditionally and `updateStatsHud` is
+  // only ever called from startGame, so in editor mode `#stats` sat empty in
+  // the bottom-left as a bordered pill with nothing in it. Take the corner.
+  const gameHud = document.getElementById('hud');
+  if (gameHud) gameHud.style.display = 'none';
+  setStatus();
+  toast('Left-click paints · right-click erases · the partition brush works on tile EDGES · middle-drag orbits');
 
   // Read-only handle for tests and console poking.
   window.__editor = {

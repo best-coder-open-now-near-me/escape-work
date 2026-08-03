@@ -426,8 +426,11 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   small dialogue tree on left-click (`ui.createDialoguePanel`; the tree is
   `{ start, nodes: { text, options:[{label,next}] } }`, `next:null` ends it).
   They live in their own `npcs` array, never in `enemies`, so combat never
-  touches them. (The editor doesn't paint NPCs yet - it normalises unknown
-  actor chars to floor, so re-exporting a level in the editor drops them.)
+  touches them. (The editor has no NPC/companion BRUSH yet, but it no longer
+  loses them: a load remaps through `actor-registries.js` and the export names
+  every registry, so re-exporting a level keeps its coworkers - fixed
+  2026-07-27, pinned by `tests/e2e/editor.spec.js`. They draw as markers on the
+  canvas too, so a brush stroke can no longer erase one invisibly.)
 - **Movement is free-form, the grid is the data model.** Actors stand at
   continuous points (a click walks you to the exact spot, clamped clear of
   walls by `clampToClearance`); routes come from grid Dijkstra and are

@@ -410,31 +410,46 @@ for (const f of files) {
     assert.ok(route, 'a walk-up route from the spawn to the exit exists (doors count as openable)');
   });
 
-  test(`${f} legend matches the registries' canonical characters`, () => {
+  // RELAXED 2026-08-02 (designer deferred the call: "i dont know the difference,
+  // ill defer to your judgement"; EDITOR_INVENTORY.md IQ3 answer A). A map
+  // character belongs to the LEVEL, not the registry.
+  //
+  // This used to demand every legend char equal the registry's canonical one,
+  // which the editor structurally could not always satisfy: it allocates chars
+  // per level, and there are 87 paintable tile types against 86 usable
+  // characters, so a collision hands out a pool char and the export failed CI on
+  // a file the author had no way to fix from inside the tool. The registry's
+  // `char` stays a PREFERRED hint - taken when free, which is what keeps
+  // hand-authored levels round-tripping unchanged - but it is no longer a rule.
+  //
+  // What is actually load-bearing is what `parseLevel` needs, and that is all
+  // still checked: every legend entry names a real type, no character means two
+  // things at once, and a tile never borrows a character the actors legend has
+  // claimed (parseLevel checks `actors` first, so it would silently become that
+  // actor).
+  test(`${f} legend is internally consistent`, () => {
     const data = load(f);
     for (const [ch, type] of Object.entries(data.tiles)) {
       assert.ok(TILE_TYPES[type], `tile type "${type}" exists`);
-      assert.equal(TILE_TYPES[type].char, ch,
-        `char "${ch}" is canonical for "${type}" (the editor round-trips on canonical chars)`);
+      assert.ok(!data.actors[ch],
+        `char "${ch}" is a tile AND an actor in ${f} - parseLevel reads actors first, so the tile would vanish`);
     }
+    const seen = new Map();
     for (const [ch, ref] of Object.entries(data.actors)) {
+      assert.ok(!seen.has(ch), `char "${ch}" is declared twice in ${f}`);
+      seen.set(ch, ref);
       if (ref === 'player') continue;
-      const { id: actor, level: tier } = parseActorRef(ref);
+      const { id: actor } = parseActorRef(ref);
       const reg = ENEMY_TYPES[actor] || NPCS[actor] || COMPANIONS[actor]; // enemies, NPCs, or recruits
       assert.ok(reg, `actor type "${actor}" exists`);
-      if (tier == null) {
-        assert.equal(reg.char, ch, `char "${ch}" is canonical for "${actor}"`);
-        continue;
-      }
-      // A TIERED placement must NOT use the canonical char: that char already
-      // means "this actor at the floor's depth", so sharing it would make the
-      // two indistinguishable on the map and collapse them on an editor round
-      // trip. It just has to be a char nothing else in this level has claimed.
-      assert.notEqual(reg.char, ch,
-        `char "${ch}" is canonical for "${actor}" - a tiered placement needs its own`);
-      assert.ok(!data.tiles[ch], `char "${ch}" is already a tile in ${f}`);
-      assert.equal(Object.keys(data.actors).filter((c) => c === ch).length, 1);
     }
+    // Two placements of the SAME actor at different tiers still need different
+    // characters, or the map cannot tell them apart and an editor round trip
+    // collapses one into the other - that part was never about canonical chars.
+    const byRef = [...seen.entries()].filter(([, r]) => r !== 'player');
+    const refs = byRef.map(([, r]) => r);
+    assert.equal(new Set(refs).size, refs.length,
+      `${f} declares the same actor reference under two characters`);
   });
 
   test(`${f} wall and door runs stay inside the map`, () => {

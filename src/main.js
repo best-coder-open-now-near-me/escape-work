@@ -266,11 +266,35 @@ function showLevelMenu() {
 }
 
 if (location.hash.includes('editor')) {
-  // The editor speaks single-storey levels; hand it the ground storey of a
-  // layered one rather than crashing on level.layers.
-  startEditor(app, activeLevel.layers
-    ? { ...activeLevel, ...activeLevel.layers[0], layers: undefined }
-    : activeLevel, STASH_KEY);
+  // REFUSE a layered level rather than flattening it. This used to hand the
+  // editor the ground storey alone - which meant opening a two-storey level and
+  // pressing Export silently deleted every floor above the first, along with
+  // the ground storey's own `height`. The editor cannot author storeys until
+  // EDITOR_PLAN M4, and a tool that quietly destroys what it cannot represent
+  // is worse than one that says no.
+  if (activeLevel.layers) {
+    const box = document.createElement('div');
+    Object.assign(box.style, {
+      position: 'fixed', inset: '0', zIndex: '40', display: 'flex',
+      alignItems: 'center', justifyContent: 'center', background: 'rgba(10,10,18,.9)',
+      color: '#f0f0f5', font: '14px system-ui, sans-serif', textAlign: 'center', padding: '24px',
+    });
+    box.innerHTML = `<div style="max-width:520px; background:#232334; border:1px solid #3a3a52;
+        border-radius:12px; padding:22px; line-height:1.5;">
+      <div style="font-weight:700; margin-bottom:10px;">“${activeLevel.name}” has more than one storey</div>
+      <p style="margin:0 0 10px;">The editor cannot author storeys yet, and opening this level here
+        would flatten it to its ground floor — Export would then write back a level with the
+        upper storeys deleted.</p>
+      <p style="margin:0 0 16px; opacity:.8;">So it is refused rather than quietly destroyed.
+        Edit the JSON by hand for now; <code>levels/README.md</code> has the layer format.</p>
+      <button id="layered-back" style="padding:8px 16px; border-radius:7px; border:1px solid #3a3a52;
+        background:#2e2e46; color:#f0f0f5; font:inherit; cursor:pointer;">Back</button>
+    </div>`;
+    document.body.appendChild(box);
+    box.querySelector('#layered-back').onclick = () => { location.hash = ''; location.reload(); };
+  } else {
+    startEditor(app, activeLevel, STASH_KEY);
+  }
 } else if (!playtesting && !location.hash.includes('class=')) {
   showLevelMenu();
 } else {
@@ -4100,10 +4124,20 @@ function startGame(level) {
       // worse than one honest one. A meaningful "same character, floor one"
       // needs run state to separate from character state first.
       id: 'menu-restart',
-      label: 'Restart run',
+      // While playtesting, "the run" is a scratch level someone is editing -
+      // not a campaign. This was the THIRD ungated clearProgress (its two
+      // siblings at loseGame and the exit handler were fixed; this one was
+      // missed), and it took the campaign save, its cloud row, AND the level in
+      // the editor with it. Both halves are gated now, and the label says which
+      // thing it is about to throw away.
+      label: playtesting ? 'Restart this level' : 'Restart run',
       action: () => {
-        clearProgress();
-        localStorage.removeItem(STASH_KEY);
+        if (!playtesting) {
+          clearProgress();
+          localStorage.removeItem(STASH_KEY);
+        }
+        // A playtest keeps its stash - restarting the level means replaying it,
+        // not losing the thing you are editing.
         location.hash = ''; // drop any #class= express lane, or it skips the desk
         location.reload();
       },
