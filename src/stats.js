@@ -360,10 +360,17 @@ export function scaleEnemy(def, level) {
   return out;
 }
 
-// The level an enemy actually spawns at on a floor of the given depth: never
-// below its native tier, so a high variant keeps its tier on a shallow floor
-// and a base enemy scales up on a deep one.
-export const effectiveLevel = (def, depth) => Math.max(def.level || 1, depth || 1);
+// `effectiveLevel(def, depth)` used to live here: the floor curve, which spawned
+// any enemy at max(nativeTier, floorDepth) so a base coworker got beefier the
+// deeper you went. It is GONE by design - the designer struck it 2026-08-02
+// ("things shouldnt autoscale thats absurd... by floor i mean. thats just
+// lazy"; PROGRESSION_PLAN.md decisions 13-14). An enemy now spawns at the tier
+// it was PLACED at, and a floor is made harder by authoring harder placements
+// (`"Z": "manager@2"`) or by placing a tougher variant.
+//
+// `scaleEnemy` stays and is still the one curve: a tiered placement has to be
+// derived from somewhere. What changed is who picks the level - the author,
+// not the floor number.
 
 // Normalize any unit archetype - an ENEMY_TYPES def or a class - into the
 // combat stats the AI reads. The only field that differs by registry is max

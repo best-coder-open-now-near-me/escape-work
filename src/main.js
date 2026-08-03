@@ -19,7 +19,7 @@ import { findPath, smoothPath, routeOpen, segmentClear, clampToClearance, approa
 import { seesBody, coneBoundary, deriveFacing } from './stealth.js';
 import {
   createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, grantTalent, classTrack,
-  scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
+  scaleEnemy, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
   orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, lookOf, stairwellHeal, REACH, STEALTH,
 } from './stats.js';
 import {
@@ -329,10 +329,16 @@ function startGame(level) {
   // without a second registry entry existing to BE the harder one. Either way
   // it is the same scaleEnemy doing it: there is one curve, and a level picks a
   // point on it rather than hand-writing a rival to it.
-  const floorDepth = level.depth || 1;
+  // `level.depth` is deliberately NOT read here any more. It stays in the
+  // format as the floor's number - the lint checks it, the editor round-trips
+  // it, the campaign-chain check orders by it - but nothing at runtime derives
+  // a number from it. That was the floor curve, and it is gone.
   const enemies = grid.enemySpawns.map((s) => {
     const base = ENEMY_TYPES[s.type];
-    const lvl = s.level ?? effectiveLevel(base, floorDepth);
+    // The tier the AUTHOR placed, or the enemy's own native tier. No floor
+    // curve: `depth` is the floor's number, not a difficulty multiplier
+    // (PROGRESSION_PLAN.md decisions 13-14, designer 2026-08-02).
+    const lvl = s.level ?? (base.level || 1);
     return new EnemyActor(s.x, s.z, s.type, scaleEnemy(base, lvl));
   });
   // Player-team summons (SUMMON_PLAN.md): temporary combatants conjured
@@ -4442,10 +4448,13 @@ function startGame(level) {
     },
     // Resolves an ENEMY_TYPES id or a class archetype (e.g. 'employee'), so a
     // tester can drop class-based units to feel out balance.
-    spawnEnemy(typeId, x, z) {
+    // `level` is optional and defaults to the archetype's native tier. It is
+    // explicit now rather than inferred from the floor: with the floor curve
+    // gone, "what tier is this thing" is only ever something someone chose.
+    spawnEnemy(typeId, x, z, level = null) {
       const base = ENEMY_TYPES[typeId] || CLASSES[typeId];
       if (!base) return null;
-      const def = scaleEnemy(base, effectiveLevel(base, floorDepth)); // match the floor
+      const def = scaleEnemy(base, level ?? (base.level || 1));
       const en = new EnemyActor(x, z, typeId, def);
       enemies.push(en);
       placeModel(app, `assets/characters/${def.model}.glb`, x, z, {

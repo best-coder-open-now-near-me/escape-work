@@ -149,11 +149,23 @@ loses its only caller.
 
 **Two things that are not small, and are content decisions, not code:**
 
-1. **`levels/level2.json` currently leans on `depth: 2`** to make its base
-   coworkers one tier up — milestone 5 says so in as many words ("`depth: 2`
-   (base coworkers +1 tier)"). Removing the curve makes floor 2 easier until
-   its placements are re-authored with explicit tiers. Which coworkers on floor
-   2 should be which tier is the designer's call, not a mechanical translation.
+1. ~~**`levels/level2.json` currently leans on `depth: 2`**~~ — **DONE, and
+   balance-preserving.** The two Managers and the HR rep were the only
+   placements the curve was lifting (Executive and Security Guard are natively
+   tier 2 and were already sitting at their own tier). They now say so out loud:
+   `"Z": "manager@2"` and `"J": "hr@2"`. Verified by parsing the shipped file —
+   every enemy on floor 2 spawns at exactly the level and HP it did before the
+   curve was struck, including the pre-existing `manager@3`. Nothing about
+   playing floor 2 changed; only the mechanism that decides it did.
+   New chars were needed because the lint requires a tiered placement to carry
+   its own char (`tests/unit/levels.test.js:429-434`). Both shadow tile types
+   this level does not use (`fridge`, `bar-stool`) — the same shape as the
+   pre-existing `"G"`/`ficus` shadow, and safe once the editor's allocator stops
+   leaking across loads (`EDITOR_INVENTORY.md` A4). Worth noting the squeeze:
+   **there was no char that shadowed nothing.** All 86 usable characters are
+   spoken for by the 87 paintable tile types (A5), so this change spent two of
+   the scarcest resource in the format. Deliberate re-tiering of floor 2 — as
+   opposed to this faithful translation — is still the designer's call.
 2. **Authoring difficulty by hand needs the editor to author tiers**, and it
    cannot (`EDITOR_INVENTORY.md` H1 — the editor has no tier brush and no way
    to emit `id@n`). Until then, hand-tuned difficulty means hand-editing JSON.

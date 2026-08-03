@@ -3,8 +3,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { COMPANIONS } from '../../src/data/companions.js';
 import {
-  createSheet, grantTalent, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist, accuracy, dodge, hitChance, rollHit, unitCombat, equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, stairwellHeal, gritSaveChance, SAVE,
+  createSheet, grantTalent, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, scaleEnemy, statusResist, accuracy, dodge, hitChance, rollHit, unitCombat, equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, stairwellHeal, gritSaveChance, SAVE,
 } from '../../src/stats.js';
+import * as stats from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
 import { ITEMS } from '../../src/data/items.js';
@@ -312,11 +313,13 @@ test('scaleEnemy grows hp, xp, and damage with level, leaving the base def intac
   assert.equal(s.maxHp, undefined); // enemies carry `hp`, not `maxHp`
 });
 
-test('effectiveLevel never drops below the native tier', () => {
-  const exec = ENEMY_TYPES.executive; // level 2
-  assert.equal(effectiveLevel(exec, 1), 2); // shallow floor keeps its tier
-  assert.equal(effectiveLevel(exec, 5), 5); // deep floor scales up
-  assert.equal(effectiveLevel(ENEMY_TYPES.manager, 4), 4);
+// The floor curve is gone (PROGRESSION_PLAN.md decisions 13-14, designer
+// 2026-08-02: enemies do not autoscale with depth). `effectiveLevel` went with
+// it, so what used to be asserted here is now asserted by its absence: an
+// enemy's level comes from its placement, and nothing derives one from a floor.
+test('nothing derives an enemy level from floor depth any more', () => {
+  assert.equal(typeof stats.effectiveLevel, 'undefined',
+    'effectiveLevel is retired - a floor number must not imply a tier');
 });
 
 // A placement may name its own tier (`"G": "manager@3"`), which is how a floor
@@ -331,9 +334,8 @@ test('a tiered placement reproduces the curve, not a second stat block', () => {
   assert.equal(at3.level, 3);
   assert.ok(at3.hp > m.hp, 'tougher than the base tier');
   assert.ok(at3.xp > m.xp, 'and worth more');
-  // The SAME def a floor of depth 3 would produce - one mechanism, two ways of
-  // asking for it.
-  assert.deepEqual(at3, scaleEnemy(m, effectiveLevel(m, 3)));
+  // Asking for the tier directly is now the ONLY way to ask for it.
+  assert.deepEqual(at3, scaleEnemy(m, 3));
 });
 
 test('scaleEnemy grows AP once the gap reaches AP_PER levels', () => {
