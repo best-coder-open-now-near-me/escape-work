@@ -98,6 +98,21 @@ export const SIGHT_BLOCK_HEIGHT = 0.75;
 export const blocksSight = (def) =>
   !!def?.solid && (!!def.tall || (def.height ?? 1) >= SIGHT_BLOCK_HEIGHT);
 
+// The order the editor groups tile brushes in. It lives HERE, with the tiles,
+// because it is a fact about the CONTENT: adding a category to a tile def and
+// having the editor lay it out should be one edit, not two.
+//
+// It was a `CATEGORY_ORDER` const inside editor.js, and it had already fallen
+// behind - `snack-machine` declares `furniture`, which the editor's list did
+// not name, so its brush sorted silently to the end of the palette. A tile
+// whose category is missing here still shows up; it just lands last, which is
+// exactly the kind of quiet wrong the lint below now refuses.
+//
+// `basics` is the bucket for a def with no category at all - floor, walls,
+// hazards, the originals - and leads so the old muscle memory holds.
+export const TILE_CATEGORIES = ['basics', 'work', 'seating', 'tables', 'storage',
+  'breakroom', 'furniture', 'decor', 'structure', 'facilities'];
+
 export const TILE_TYPES = {
   wall: {
     char: '#',

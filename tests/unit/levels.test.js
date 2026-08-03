@@ -7,7 +7,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { parseLevel } from '../../src/grid.js';
 import { findPath } from '../../src/pathfinding.js';
 import { existsSync } from 'node:fs';
-import { TILE_TYPES, blocksSight } from '../../src/data/tiles.js';
+import { TILE_TYPES, blocksSight, TILE_CATEGORIES,
+} from '../../src/data/tiles.js';
 import { ENEMY_TYPES, ENEMY_KITS } from '../../src/data/enemies.js';
 import { TALENTS, TALENT_EFFECT_KEYS, STARTING_TALENT_BY_CLASS } from '../../src/data/talents.js';
 import { parseActorRef } from '../../src/data/actor-registries.js';
@@ -647,4 +648,28 @@ test('every talent a class is seeded with exists, and every class is covered', (
     if (def.playable === false) continue;
     assert.ok(STARTING_TALENT_BY_CLASS[id], `playable class "${id}" has no seeded talent`);
   }
+});
+
+test('every tile category is one the editor palette knows how to order', () => {
+  // The category order used to be a const inside editor.js, so a tile could
+  // declare a category the palette had never heard of and its brush would sort
+  // silently to the end. `snack-machine` did exactly that with `furniture`.
+  // Now the order is content (data/tiles.js) and this refuses the next one.
+  const known = new Set(TILE_CATEGORIES);
+  const orphans = [];
+  for (const [id, def] of Object.entries(TILE_TYPES)) {
+    if (def.runtimeOnly || !def.category) continue; // no category = the 'basics' bucket
+    if (!known.has(def.category)) orphans.push(`${id} -> '${def.category}'`);
+  }
+  assert.deepEqual(orphans, [],
+    `these declare a category TILE_CATEGORIES does not list: ${orphans.join(', ')}`);
+});
+
+test('the category order carries no names nothing uses', () => {
+  // The other direction: a stale entry is harmless but it is a lie about the
+  // content, and it is how the list drifts out of step in the first place.
+  const used = new Set(['basics']); // the bucket for an uncategorised def
+  for (const def of Object.values(TILE_TYPES)) if (def.category) used.add(def.category);
+  const stale = TILE_CATEGORIES.filter((c) => !used.has(c));
+  assert.deepEqual(stale, [], `TILE_CATEGORIES lists unused categories: ${stale.join(', ')}`);
 });

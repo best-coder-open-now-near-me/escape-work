@@ -6,7 +6,8 @@
 // stashes the level in localStorage and reloads into the real game; the game
 // shows a badge to jump back here. Any shipped level can be loaded as a base,
 // and the grid can be grown/shrunk from the right/bottom edges.
-import { TILE_TYPES } from './data/tiles.js';
+import { TILE_TYPES, TILE_CATEGORIES,
+} from './data/tiles.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { actorChar, actorLegend, parseActorRef } from './data/actor-registries.js';
 import { LEVELS } from './data/levels.js';
@@ -522,10 +523,11 @@ export function startEditor(app, levelData, stashKey) {
     b.onclick = () => selectBrush('door', b);
     brushButtons.push(b);
   }
-  // Tile brushes, grouped. Uncategorised entries (floor, walls, hazards - the
-  // originals) stay in a leading "basics" row so the old muscle memory holds.
-  const CATEGORY_ORDER = ['basics', 'work', 'seating', 'tables', 'storage',
-    'breakroom', 'decor', 'structure', 'facilities'];
+  // Tile brushes, grouped. The order is CONTENT (data/tiles.js), not a list the
+  // editor keeps: adding a category to a tile def used to mean editing this
+  // file too, and the one time somebody didn't, `snack-machine`'s `furniture`
+  // sorted silently to the end of the palette.
+  const CATEGORY_ORDER = TILE_CATEGORIES;
   const byCategory = new Map();
   for (const [id, def] of Object.entries(TILE_TYPES)) {
     if (def.runtimeOnly) continue; // not a brush - it has no character to paint
