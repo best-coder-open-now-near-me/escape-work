@@ -65,12 +65,21 @@ How to read it:
 - [x] **Q019** `src/main.js:2018` [bug] Sneaking survives the floor transition as a ghost status, and the next floor can never start a fight with you<br>      ↳ DONE — held-mode statuses stripped on serialize
 - [x] **Q020** `src/stats.js:806` [bug] Equip/unequip cycling a maxHp trinket ratchets HP back to full — a free, unlimited heal<br>      ↳ DONE — debitLostHp, floored at 1
 - [x] **Q021** `src/combat.js:2694` [duplication] aiShoveMember is a second shove resolver that has already dropped the wall-slam stun and the slam-into-a-prop topple<br>      ↳ DONE — merged into displaceBody behind victimView (Q4-A)
-- [ ] **Q022** `src/combat.js:1384` [god-method] `combat.js drawTargets()` is a 321-line renderer holding thirteen verb-specific drawing rules, a third verb-dispatch ladder, and mutable animation state
+- [x] **Q022** `src/combat.js:1384` [god-method] `combat.js drawTargets()` is a 321-line renderer holding thirteen verb-specific drawing rules, a third verb-dispatch ladder, and mutable animation state<br>      ↳ **PARTLY DONE — 321 → 195 lines.** Seven pieces named: drawAimWash (50), drawCoverRings (29), drawZoneRings (17), drawSummonRings (10), drawAllyRings (9), drawHoveredDoor (7), drawHeldCrouch (4). The third verb-dispatch ladder was already collapsed onto verbSides. **Still open, and deliberately:** the BODY pass - cone polyline, reach ring, shove/topple/partition/break rings, the per-enemy loop - which genuinely shares hoverFoe, coverEase and the enemy iteration and wants a real look rather than another mechanical cut. Re-queued as Q901.
 - [x] **Q023** `src/ui/chrome.js:90` [test-gap] One module-scope `window.addEventListener` in ui/chrome.js locks 1,613 lines — the whole `ui/` layer plus the three host-callback modules the architecture holds up as exemplary — out of node unit testing<br>      ↳ DONE — bound on first use; 11 modules unlocked
 - [ ] **Q024** `tests/e2e/helpers.js:92` [test-gap] No e2e arena or spec ever fights an Executive or a Security Guard - so the enemy ranged kit, M5's headline feature, has zero end-to-end coverage
 
 ### MEDIUM
 
+- [ ] **Q901** `src/combat.js` [god-method] **(new 2026-08-02, the remainder of Q022)**
+  `drawTargets`'s BODY pass, ~195 lines: the cone polyline, the melee reach ring,
+  the shove/topple/partition/break rings and the per-enemy ring loop. Unlike the
+  ground arms these are NOT independent - they share `hoverFoe`, `coverEase` and
+  the enemy iteration, so splitting them means deciding what owns that state, not
+  just moving braces. Worth noting what the ground-arm extraction nearly cost: the
+  ally arm had no `return` and FELL THROUGH on purpose, which is what gives the
+  purge rings on both halves; a mechanical cut turns that into `return true`
+  silently. Expect at least one more of those in here.
 - [ ] **Q900** `src/main.js` [soc] **(new 2026-08-02, from the fix work itself)**
   The combat world facade is repeatedly NARROWER than main.js's own helpers, and
   the contract test (Q009) cannot see it. That test checks every key the pure
