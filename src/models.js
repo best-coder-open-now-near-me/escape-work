@@ -54,11 +54,24 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
   // happen to the model still happens, to the marker.
   const placeFallback = () => {
     const holder = new (pc().Entity)(`missing:${url}`);
-    holder.addComponent('render', { type: 'box' });
+    // The box is a CHILD, exactly as the success path's instantiated model is.
+    // That is not tidiness: `GridActor.attach` reads `entity.children[0] ||
+    // entity`, so a childless holder makes the holder its own `visual` - and
+    // `updateAnim` writes `visual.setLocalPosition(0, lift + bob, forward)`
+    // every frame, which on the holder is a LOCAL position under app.root.
+    // A character whose .glb failed was therefore dragged to the world origin
+    // on the first frame and pinned there: the marker stopped marking where
+    // the missing character was, its tile effects fired at (0,0), and any walk
+    // issued to it never arrived (Q045). Keeping the holder/child shape the
+    // success path establishes is what makes the marker behave like the model
+    // it stands in for - which is this function's whole promise.
+    const box = new (pc().Entity)('missing-marker');
+    box.addComponent('render', { type: 'box' });
     const mat = new (pc().StandardMaterial)();
     mat.diffuse = new (pc().Color)(1, 0, 1);
     mat.update();
-    holder.render.material = mat;
+    box.render.material = mat;
+    holder.addChild(box);
     holder.setLocalScale(0.5 * scale, 0.5 * scale, 0.5 * scale);
     holder.setEulerAngles(tiltX, rotY, tiltZ);
     holder.setPosition(tileX, lift + 0.25, tileZ);

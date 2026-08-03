@@ -2336,6 +2336,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // "there is water behind them" used to admit a plan whose entire effect was
     // a one-tile reposition, traded for the unit's best beat.
     hazardAt: (x, z, victim) => world.memberSurfDamage(victim.sheet, x, z) > 0,
+    // A4's one carve-out, ratified and until now unwired (Q047/Q075/Q094):
+    // a RANGED unit may shove purely to BREAK CONTACT, where a melee unit
+    // needs the slam or the hazard. Doctrine #11 is the reason - kiting is
+    // priced (stepping out of reach provokes), and the disengage shove is the
+    // one escape that does not, because forced movement never provokes (#9).
+    // Without this the Executive stood in the scrum trading punches, which is
+    // the opposite of what a shooter is for.
+    //
+    // `rangedLines` is the same predicate `aiAdvance` and `aiBeatPlans`
+    // already mean by "the ranged kit", so kit-hood does not get a second
+    // definition here. It is declared below this one, which is safe because
+    // this arrow only ever runs at decide time.
+    disengage: rangedLines(unit).length > 0,
   });
   const aiPullPlanFor = (unit) => aiPullPlanShared(
     unit,
@@ -4298,6 +4311,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // lines falls back to point-blank fire rather than standing there.
   const meleeLines = (unit) => unit.combat.attacks.filter((a) => !a.range);
   const rangedLines = (unit) => unit.combat.attacks.filter((a) => a.range);
+  // What a swing AT CONTACT RANGE may draw from - one owner, because the
+  // reaction swing had its own copy that was just `attacks` and so could fire
+  // the Executive's rifle line as an opportunity attack (Q048). Footgun 9's
+  // rule is "melee in reach, fall back to the whole list only for a def that
+  // owns no melee at all", and every contact swing needs it, not just aiAttack.
+  const swingPool = (unit) => {
+    const melee = meleeLines(unit);
+    return melee.length ? melee : unit.combat.attacks;
+  };
 
   // A weighted draw over the pool (AI_PLAN M6): a line whose status the
   // target is not already wearing rolls at STATUS_WEIGHT, so the guard
@@ -4317,9 +4339,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   }
 
   function aiAttack(unit, target) {
-    const melee = meleeLines(unit);
-    const pool = melee.length ? melee : unit.combat.attacks;
-    const atk = pickLine(pool, target.member);
+    const atk = pickLine(swingPool(unit), target.member);
     unit.lunge(posOf(target).x, posOf(target).z);
     faceTarget(unit, target.actor.x, target.actor.z); // you face what you swing at
     if (target.member) unitStrikesMember(unit, target.member, atk);
@@ -4699,7 +4719,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // check instead of a crash (a CLASS backing an AI unit need not declare
     // `attacks` at all - see stats.js).
     if (!attacker.combat.attacks.length) return;
-    const base = attacker.combat.attacks[rand(0, attacker.combat.attacks.length - 1)];
+    // The same contact-range pool aiAttack draws from (Q048). A reaction IS a
+    // swing at somebody who just walked past you, so it cannot come out of the
+    // rifle line; this used to draw uniformly over every line the def owns,
+    // which let the Executive's ranged entry resolve at arm's length.
+    // The draw stays UNWEIGHTED, deliberately: `pickLine`'s status weighting
+    // is a chosen swing, and the comment above already calls this a reflex
+    // rather than a committed one - routing it through pickLine is a separate
+    // question, not a tidy-up.
+    const pool = swingPool(attacker);
+    const base = pool[rand(0, pool.length - 1)];
     attacker.lunge(posOf(defender).x, posOf(defender).z);
     unitStrikesMember(attacker, defender, {
       ...base,
@@ -4727,6 +4756,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // the firing field at all.
     const rls = rangedLines(unit);
     let routes = null;
+    // Whether these routes are FIRING tiles, decided where the field is
+    // actually chosen rather than after the fallback has overwritten it
+    // (Q052). Read off `routes.length` below the fallback, it answered "this
+    // unit owns a ranged line and has SOME field", which is true of a shooter
+    // walking a melee swing field - so a shooter with no routable firing tile
+    // scored plain swing tiles with the entrench-potential bonus and the
+    // keep-away term, and could take a longer route to a shielded tile on a
+    // turn it was going to punch from.
+    let ranged = false;
     if (rls.length) {
       const rmax = Math.max(...rls.map((a) => a.range));
       routes = firingTileRoutes(unit.x, unit.z, target.actor.x, target.actor.z, rmax, {
@@ -4739,12 +4777,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           return !!so.target && (!so.redirected || !!so.target.sheet);
         },
       });
+      ranged = !!(routes && routes.length);
     }
     if (!routes || !routes.length) {
       routes = standTileRoutes(unit.x, unit.z, target.actor.x, target.actor.z,
         swingFieldFor(unit, target));
     }
-    const ranged = !!(rls.length && routes.length);
     // A support kit hangs toward the edge of the scrum too: the keep-away
     // term biases WHICH swing tile she takes, never whether she advances -
     // it is a weight over an already-admitted field, so no stall can enter.
