@@ -26,6 +26,15 @@ import { SURFACES, ELECTRIFIED, FIRE } from '../../src/data/surfaces.js';
 const files = readdirSync('levels').filter((f) => f.endsWith('.json'));
 const load = (f) => JSON.parse(readFileSync(`levels/${f}`, 'utf8'));
 
+// B5: levels/dev/ was outside this file's reach purely by directory, so a
+// second dev level would have got no validation at all. They are not campaign
+// floors - no `next`, not on the chain, and the layered one has actors the flat
+// rules do not describe - so they get the checks that DO apply: they parse, and
+// they are registered.
+const devFiles = existsSync('levels/dev')
+  ? readdirSync('levels/dev').filter((f) => f.endsWith('.json'))
+  : [];
+
 test('there are shipped levels', () => {
   assert.ok(files.length >= 1);
 });
@@ -631,4 +640,110 @@ test('every talent a class is seeded with exists, and every class is covered', (
     if (def.playable === false) continue;
     assert.ok(STARTING_TALENT_BY_CLASS[id], `playable class "${id}" has no seeded talent`);
   }
+});
+
+
+// --- the campaign as a graph (EDITOR_INVENTORY B4) ---------------------------
+// Every check above is about ONE file. The designer's unit of work is a
+// campaign, and none of these were checked anywhere: that `FIRST_LEVEL` even
+// resolves (a bad value silently disables campaign saves entirely), that the
+// chain reaches every floor, that it terminates, and that it does not loop.
+test('FIRST_LEVEL names a registered level', () => {
+  assert.ok(LEVELS[FIRST_LEVEL],
+    `FIRST_LEVEL is "${FIRST_LEVEL}", which is not in LEVELS - campaign saves would never restore`);
+});
+
+test('the campaign chain terminates, reaches every campaign floor, and does not loop', () => {
+  // Dev levels are reachable by ?level= and are deliberately off the chain.
+  const devIds = new Set(devFiles.map((f) => f.replace(/\.json$/, '')));
+  const campaign = Object.keys(LEVELS).filter((id) => !devIds.has(id));
+
+  const walked = [];
+  const seen = new Set();
+  let id = FIRST_LEVEL;
+  while (id) {
+    assert.ok(!seen.has(id), `the chain loops at "${id}" - a run could never finish`);
+    seen.add(id);
+    walked.push(id);
+    const next = LEVELS[id].next;
+    if (!next) break;
+    assert.ok(LEVELS[next], `"${id}".next names "${next}", which is not registered`);
+    id = next;
+  }
+  for (const c of campaign) {
+    assert.ok(seen.has(c), `"${c}" is registered but the chain from ${FIRST_LEVEL} never reaches it`);
+  }
+  const terminals = campaign.filter((c) => !LEVELS[c].next);
+  assert.equal(terminals.length, 1,
+    `exactly one floor should end the run; found ${terminals.length} (${terminals.join(', ')})`);
+});
+
+test('depth does not go backwards along the chain', () => {
+  // `depth` is the floor's NUMBER since the curve was struck, so a chain that
+  // descends is a bookkeeping error rather than a difficulty one - but it is
+  // still the kind of thing nobody notices until a save restores oddly.
+  let id = FIRST_LEVEL;
+  let last = 0;
+  while (id && LEVELS[id]) {
+    const d = LEVELS[id].depth ?? 1;
+    assert.ok(d >= last, `"${id}" has depth ${d}, below the floor before it (${last})`);
+    last = d;
+    id = LEVELS[id].next;
+  }
+});
+
+for (const f of devFiles) {
+  test(`dev/${f} parses and is registered`, () => {
+    const data = JSON.parse(readFileSync(`levels/dev/${f}`, 'utf8'));
+    // A layered dev level is parsed by floors.test.js, which knows about
+    // storeys; a flat one has to satisfy the ordinary parser here.
+    if (!data.layers) assert.doesNotThrow(() => parseLevel(data));
+    const id = f.replace(/\.json$/, '');
+    assert.ok(LEVELS[id], `levels/dev/${f} is registered as LEVELS["${id}"]`);
+  });
+}
+
+// --- the shipped levels are load-bearing test fixtures (EDITOR_INVENTORY K8) --
+// The tool ARCHITECTURE.md points at for editing levels/ is pointed at the files
+// the e2e suite measures itself against. Moving a desk in level1's break room
+// turns the suite red in specs whose names have nothing to do with levels
+// (combat-bar, economy, exit), and the failure reads as unrelated.
+//
+// Migrating ~20 specs onto their own fixture floor is the real fix and is NOT
+// done here - it is a large mechanical change to a suite that takes hours to
+// run, and doing it blind would trade one flavour of red for another. What is
+// here is the cheap half that fixes the CONFUSION: a fingerprint of the
+// properties those specs actually lean on, so an edit to a shipped level fails
+// in one obvious place with a message naming the cause, in 1.5 seconds, instead
+// of somewhere unrecognisable an hour later.
+//
+// Updating these numbers when you deliberately change a floor is correct and
+// expected. Being told to is the entire point.
+test('shipped levels keep the shape the e2e suite is written against', () => {
+  const shape = (f) => {
+    const g = parseLevel(load(f));
+    let walkable = 0;
+    let exits = 0;
+    for (let z = 0; z < g.height; z++) {
+      for (let x = 0; x < g.width; x++) {
+        if (g.terrainOpen(x, z)) walkable += 1;
+        if (g.typeAt(x, z) === 'exit') exits += 1;
+      }
+    }
+    return {
+      width: g.width, height: g.height, walkable, exits,
+      spawn: `${g.playerSpawn.x},${g.playerSpawn.z}`,
+      enemies: g.enemySpawns.length,
+      companions: g.companionSpawns.length,
+    };
+  };
+  // level1: the smoke, exit, combat-bar, economy and editor specs all click
+  // precise points on this floor.
+  assert.deepEqual(shape('level1.json'), {
+    width: 24, height: 18, walkable: 412, exits: 1, spawn: '2,2', enemies: 3, companions: 1,
+  }, 'level1 changed shape - the e2e specs that click its tiles need re-checking');
+  // level2: the campaign-transition and progression specs land here.
+  assert.deepEqual(shape('level2.json'), {
+    width: 28, height: 20, walkable: 538, exits: 1, spawn: '2,2', enemies: 6, companions: 1,
+  }, 'level2 changed shape - the e2e specs that walk it need re-checking');
 });

@@ -95,7 +95,12 @@ jobs:
         if: ${{ !contains(github.event.head_commit.message, '[quick]') && steps.pw-cache.outputs.cache-hit == 'true' }}
         run: npx playwright install-deps chromium
 
-      - name: Smoke tests
+      # The editor specs ride the fast gate with the smoke ones. They are the
+      # only regression tests the editor has - the companion round-trip guard in
+      # particular - and they were outside the gate that would catch a
+      # regression, which is the wrong side of it for a tool that edits the
+      # files everything else is measured against.
+      - name: Smoke + editor tests
         if: ${{ !contains(github.event.head_commit.message, '[quick]') }}
         run: npm run test:e2e:smoke
 
