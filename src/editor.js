@@ -23,6 +23,7 @@ import { worldToScreenCss } from './fx.js';
 import { parseLevel, parseWallRuns, compressWallRuns, TYPE_ALIASES } from './grid.js';
 import { lintLevel } from './level-lint.js';
 import { parseFloors } from './floors.js';
+import * as preview from './level-preview.js';
 import { toast, PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 
 const pc = window.pc;
@@ -850,6 +851,7 @@ export function startEditor(app, levelData, stashKey) {
     ghost.enabled = true;
     ghost.setPosition(x, 0.04, z);
     hoverCell = { x, z, edge: null };
+    if (overlay === 'fire') drawOverlay(); // the burn is traced FROM the cursor
     setStatus();
   }
 
@@ -1062,6 +1064,92 @@ export function startEditor(app, levelData, stashKey) {
     inBatch(() => {
       for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) paint({ x, z }, ch);
     });
+  }
+
+  // --- overlays: seeing the fight ------------------------------------------------
+  // Everything a floor's PLACEMENT implies, drawn on the floor. All of it was
+  // always derivable and none of it was ever visible - an author found out by
+  // walking the level. Flat quads, computed by src/level-preview.js (the same
+  // predicates the game uses), recomputed on the same debounce as the lint.
+  const OVERLAYS = [
+    { id: 'reach', label: 'reach', title: 'Rooms nobody can walk into, in red. Everything the player can reach is left clear.' },
+    { id: 'cover', label: 'cover', title: 'How many faces of a tile are shielded. Brighter = better cover to fight from.' },
+    { id: 'engage', label: 'fights', title: 'Which coworkers join ONE fight, by sightline. A group of six is a very different floor from three pairs.' },
+    { id: 'surprise', label: 'surprise', title: 'Open a fight from inside this band and that coworker loses its first turn.' },
+    { id: 'notice', label: 'notice', title: 'Where a coworker could see you from, at the stealth cone\'s range. Facing is not authored yet, so this is the radius, not the cone.' },
+    { id: 'wander', label: 'wander', title: 'Where a placed coworker might actually be standing - they drift up to 2 tiles.' },
+    { id: 'fire', label: 'fire', title: 'Hover a flammable tile to see everything that would burn, and every printer that would go with it.' },
+  ];
+  let overlay = null;
+  let overlayEntities = [];
+  const overlayMats = {};
+  function overlayMat(rgb, opacity = 0.35) {
+    const k = rgb.join(',') + ':' + opacity;
+    if (!overlayMats[k]) {
+      const m = new pc.StandardMaterial();
+      m.diffuse = new pc.Color(rgb[0], rgb[1], rgb[2]);
+      m.emissive = new pc.Color(rgb[0] * 0.5, rgb[1] * 0.5, rgb[2] * 0.5);
+      m.opacity = opacity;
+      m.blendType = pc.BLEND_NORMAL;
+      m.depthWrite = false;
+      m.update();
+      overlayMats[k] = m;
+    }
+    return overlayMats[k];
+  }
+  function clearOverlay() {
+    for (const e of overlayEntities) e.destroy();
+    overlayEntities = [];
+  }
+  function overlayQuad(x, z, rgb, opacity) {
+    const e = new pc.Entity();
+    e.addComponent('render', { type: 'box', material: overlayMat(rgb, opacity) });
+    e.setLocalScale(0.92, 0.03, 0.92);
+    e.setPosition(x, 0.09, z);
+    app.root.addChild(e);
+    overlayEntities.push(e);
+  }
+  const CLUSTER_HUES = [[0.95, 0.45, 0.35], [0.4, 0.7, 0.95], [0.6, 0.95, 0.5],
+    [0.95, 0.85, 0.4], [0.8, 0.5, 0.95], [0.4, 0.95, 0.85]];
+  function drawOverlay() {
+    clearOverlay();
+    if (!overlay) return;
+    let g;
+    try { g = parseLevel(JSON.parse(toJson2D())); } catch { return; }
+    const at = (k) => k.split(',').map(Number);
+    if (overlay === 'reach') {
+      for (const k of preview.orphans(g)) { const [x, z] = at(k); overlayQuad(x, z, [0.95, 0.3, 0.35], 0.45); }
+    } else if (overlay === 'cover') {
+      for (const [k, n] of preview.coverMap(g)) {
+        const [x, z] = at(k);
+        overlayQuad(x, z, [0.35, 0.75, 0.95], 0.12 + 0.12 * n);
+      }
+    } else if (overlay === 'engage') {
+      preview.engagementClusters(g).forEach((group, i) => {
+        const hue = CLUSTER_HUES[i % CLUSTER_HUES.length];
+        for (const s of group) overlayQuad(s.x, s.z, hue, 0.6);
+      });
+    } else if (overlay === 'surprise') {
+      for (const k of preview.surpriseBand(g)) { const [x, z] = at(k); overlayQuad(x, z, [0.95, 0.8, 0.35], 0.3); }
+    } else if (overlay === 'notice') {
+      for (const k of preview.noticeRange(g)) { const [x, z] = at(k); overlayQuad(x, z, [0.95, 0.55, 0.3], 0.22); }
+    } else if (overlay === 'wander') {
+      for (const k of preview.wanderFootprint(g)) { const [x, z] = at(k); overlayQuad(x, z, [0.7, 0.5, 0.95], 0.3); }
+    } else if (overlay === 'fire' && hoverCell && !hoverCell.edge) {
+      const { burns, blasts } = preview.fireSpread(g, hoverCell);
+      for (const k of burns) { const [x, z] = at(k); overlayQuad(x, z, [0.98, 0.45, 0.2], 0.4); }
+      for (const k of blasts) { const [x, z] = at(k); overlayQuad(x, z, [1, 0.9, 0.3], 0.75); }
+    }
+  }
+  // The overlays only speak flat maps; on a layered level they answer for the
+  // storey you are standing on, which is the one you are painting.
+  function toJson2D() {
+    const data = JSON.parse(toJson());
+    if (data.layers) {
+      const L = data.layers[active];
+      return JSON.stringify({ ...data, layers: undefined, map: L.map, walls: L.walls, doors: L.doors });
+    }
+    return JSON.stringify(data);
   }
 
   // --- camera / input ----------------------------------------------------------------
@@ -1491,6 +1579,52 @@ export function startEditor(app, levelData, stashKey) {
     return Number.isInteger(n) && n > 1 ? n : null;
   };
   palette.appendChild(actorRow);
+
+  divider();
+
+  // --- overlay toggles ----------------------------------------------------------
+  const overlayBox = document.createElement('div');
+  overlayBox.id = 'ed-overlays';
+  Object.assign(overlayBox.style, { display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' });
+  const overlayBtns = new Map();
+  for (const o of OVERLAYS) {
+    const b = document.createElement('button');
+    b.id = 'ed-overlay-' + o.id;
+    b.textContent = o.label;
+    b.title = o.title;
+    b.setAttribute('aria-pressed', 'false');
+    Object.assign(b.style, BUTTON_CHROME, {
+      padding: '6px 9px', borderRadius: '7px', minHeight: '32px', cursor: 'pointer', fontSize: '11px',
+    });
+    b.onclick = () => {
+      overlay = overlay === o.id ? null : o.id;
+      for (const [id, btn2] of overlayBtns) {
+        const on = id === overlay;
+        btn2.style.borderColor = on ? '#8adf76' : '#3a3a52';
+        btn2.setAttribute('aria-pressed', on ? 'true' : 'false');
+      }
+      drawOverlay();
+      if (overlay === 'fire') toast('Hover a flammable tile - paper, a spill - to trace the burn.');
+    };
+    overlayBtns.set(o.id, b);
+    overlayBox.appendChild(b);
+  }
+  const budgetBtn = document.createElement('button');
+  budgetBtn.id = 'ed-budget';
+  budgetBtn.textContent = 'budget';
+  budgetBtn.title = 'What this floor is worth: healing, revives, ammo, cash and XP. '
+    + 'Every input was already in the level - it just had to be played to find out.';
+  Object.assign(budgetBtn.style, BUTTON_CHROME, {
+    padding: '6px 9px', borderRadius: '7px', minHeight: '32px', cursor: 'pointer', fontSize: '11px',
+  });
+  budgetBtn.onclick = () => {
+    let b;
+    try { b = preview.floorBudget(JSON.parse(toJson2D())); } catch (e) { toast(`Cannot total a level that will not parse: ${e.message}`); return; }
+    toast(`${b.enemies} coworkers · ${b.xp} XP · ${b.healHp} HP of healing · `
+      + `${b.revives} revives · ${b.ammo} paper · ${b.cash} cash — from ${b.containers} containers`, 7000);
+  };
+  overlayBox.appendChild(budgetBtn);
+  commands.appendChild(overlayBox);
 
   divider();
 
@@ -1965,6 +2099,7 @@ export function startEditor(app, levelData, stashKey) {
           findings = lintLevel(data);
         }
       } catch { findings = []; }
+      drawOverlay();
       setStatus();
     }, 350);
   }

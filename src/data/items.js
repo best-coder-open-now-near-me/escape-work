@@ -419,6 +419,13 @@ export const LOOT_TABLES = {
     { item: 'stress-ball', chance: 0.2 },
     // Borrowed from Facilities, filed in a drawer, never given back.
     { item: 'staple-gun', chance: 0.12 },
+    // A kit in a desk drawer, because the wall one has been empty since 2009.
+    // This is deliberately on the DESK table rather than only the break-room
+    // and filing-cabinet ones: with the automatic revives struck, a floor whose
+    // props cannot drop a kit has no way to stand anybody back up, and desks
+    // are the one container every floor has. Low, so carrying one still counts
+    // as having thought ahead.
+    { item: 'first-aid', chance: 0.14 },
     { item: 'red-stapler', chance: 0.06 },
   ],
   // Paperwork, not desk clutter. A filing cabinet reusing the `desk` table
