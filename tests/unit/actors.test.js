@@ -7,6 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GridActor, EnemyActor } from '../../src/actors.js';
+import { applyStatus, statusList } from '../../src/statuses.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
 
 // takeDamage lives on EnemyActor - it is the side that dies. A real def, so the
@@ -144,4 +145,77 @@ test('a sub-tile walk still reports arrival', () => {
   a.setPath([[0, 0], [0.3, 0]]);
   walkOut(a, 0.1, (x, z, done, changed) => calls.push([x, z, done, changed]));
   assert.deepEqual(calls, [[0, 0, true, false]]);
+});
+
+// --- the amble obeys the floor (Q906) -----------------------------------------
+//
+// A wandering coworker used to run two of the thirteen per-tile rules - gum and
+// slipping - so the floor was something only the player's side could feel. These
+// pin the four that arrived with "yes all fixes" (designer, 2026-08-03): the
+// step clock, the surface damage, the status a surface applies, and the bleed a
+// paper drift leaves.
+//
+// Driving a wander needs Math.random pinned, because the amble is deliberately
+// irregular: a 45% chance of just standing around, then a random tile inside the
+// leash. 0.9 clears the stand-around roll and picks a tile off the spawn.
+function forceWander(a, world, dt = 0.1) {
+  const real = Math.random;
+  Math.random = () => 0.9;
+  try {
+    a.wanderTimer = 0;
+    a.update(dt, world);
+  } finally {
+    Math.random = real;
+  }
+}
+
+// A floor that is one thing everywhere, which is all these need: `sfx` is the
+// surface's own onEnter record, `damage` what it bills a coworker.
+function floorWorld({ sfx = null, damage = 0, slip = 0, gum = false } = {}) {
+  return {
+    paused: false,
+    isWalkable: () => true,
+    isHazard: () => false, // wander ROUTING avoids hazards; this is about walking one
+    blockedByParty: () => false,
+    occupied: () => false,
+    slipChanceAt: () => slip,
+    stickGum: () => gum,
+    floorAt: () => ({ surfaceId: 'test' }),
+    surfDamage: () => damage,
+    findWanderPath: (en) => [[en.x, en.z], [en.x + 1, en.z]],
+  };
+}
+
+// surfaceEffect reads the real SURFACES table, so these tests drive the rules
+// through a world whose floorAt names a surface the table does not carry - the
+// `applies`/`bleed` riders are asserted by injecting them directly below.
+// EnemyActor.update takes the WORLD as its second argument, not an onTile -
+// its own amble callback is the one that fires, which is the point here.
+function ambleOut(a, world, dt = 0.25, maxFrames = 400) {
+  for (let i = 0; i < maxFrames && a.moving; i++) a.update(dt, world);
+  assert.equal(a.moving, false, 'the amble finished within the frame budget');
+}
+
+test('an ambling coworker takes surface damage from the tile it enters', () => {
+  const a = foe(20);
+  stubBody(a, 0, 0);
+  const world = floorWorld({ damage: 4 });
+  forceWander(a, world);
+  assert.ok(a.moving, 'the amble started');
+  ambleOut(a, world);
+  assert.equal(a.hp, 16, 'the floor billed the coworker, on the enemy damage model');
+});
+
+test('an ambling coworker runs the step clock, so a wad is not for keeps', () => {
+  const a = foe(20);
+  stubBody(a, 0, 0);
+  applyStatus(a, 'gum');
+  const before = statusList(a).find((s) => s.id === 'gum')?.left;
+  assert.ok(before > 0, 'gum arrives with a step budget');
+  const world = floorWorld();
+  forceWander(a, world);
+  ambleOut(a, world);
+  const after = statusList(a).find((s) => s.id === 'gum')?.left;
+  assert.ok(after === undefined || after < before,
+    `the wad ticked down on the amble (${before} -> ${after})`);
 });

@@ -156,43 +156,37 @@ How to read it:
   throwing one look sealed to every reader who checked.
 
 
-- [ ] **Q906** `src/main.js:2899` [design] **(new 2026-08-03, from the Q032 map)**
-  Four per-tile gaps that are the same shape - a rule one side of the door
-  obeys and the other does not - and every one of them changes how the game
-  PLAYS, so none was fixed on the spot.
+- [x] **Q906** `src/main.js:2899` [design] **(new 2026-08-03, from the Q032 map)**
+  All four **[stated]** (designer, 2026-08-03: "yes all fixes", and on the
+  first of them separately: "yes they should catch fire opf course"). Closed
+  the same day it was opened.
 
-  **Fire only burns you.** An AI unit walking its turn through fire takes the
-  flat damage and never catches; the identical tile sets a member alight for
-  2 turns x 2. Nothing structural blocks it - units carry `burning` fine
-  (turn-start dot, out-of-combat tick, ember aura all exist). Fire is currently
-  area denial that works in one direction, which may well be the intent, but
-  nothing says so.
+  **Fire burns everyone.** An AI unit walking through flame now catches, and
+  the machinery was already there - units carried `burning` with a turn-start
+  dot, an out-of-combat tick and an ember aura built, and nothing was using it.
 
-  **And it does not burn you out of combat.** The `inCombat` gate on
-  surface-applied statuses is the other half. Its stated reason died with
-  `advanceStatusTurn`; what is left is a real question - should walking through
-  flame outside a fight set you alight, with the out-of-combat turn clock
-  ticking it down? Fire is the ONLY non-gum `applies` in data/surfaces.js, so
-  this gate is entirely a decision about fire.
+  **And it burns you outside a fight.** The `inCombat` gate is gone. It existed
+  because the status "needs combat's turns to tick"; `advanceStatusTurn` made
+  that false on 2026-07-31, so the gate outlived its reason by three days.
 
-  **Wanderers are immune to the floor.** No surface damage and no step clock on
-  an amble. Wander routing screens hazards at PLAN time only, and fire spreads
-  out of combat, so a coworker will stroll through flame that was lit across
-  their route for 0 damage - on the exact tile that bills a member 4 HP. The
-  gum half of this is a straight inconsistency (one wad, two lifetimes,
-  switched by whether dice are out); the damage half is a design call about
-  whether the world hurts bodies nobody is looking at.
+  **Wanderers obey the floor** - step clock, surface damage on the ENEMY model,
+  the applied status and the bleed. Silently, because the surface lines are
+  written in the player's voice, which is the same reason `onSummonStep` passes
+  a no-op `say`. Two node tests pin the damage and the step clock, each checked
+  against a mutant.
 
-  **`bleed` is player-only.** main.js:2908 is the sole `applyStatus(...,
-  'bleed')` in src/, so no coworker can bleed, so the enemy step clock's damage
-  branch is unreachable and the clock only expires gum. Either a coworker
-  should be able to bleed (a paper drift cuts everyone) or the enemy clock is
-  carrying a branch for a case that will never arrive.
+  **`bleed` reaches coworkers**, applied before the damage so a body that goes
+  down on a drift went down bleeding - which is what the death FX reads.
 
-  Recommendation if these are wanted: fire on enemies first - it is the one
-  with a real tactical payoff, and the machinery is already there.
+  **The structural half, and it is the part worth keeping:** all four wanted a
+  different fact about a tile, and the cheap path was four new facade methods -
+  exactly the pattern Q900 warns about. Both facades hand over `floorAt`, the
+  raw fact sheet, and every layer derives with step-rules' own pure
+  `surfaceEffect`. One sheet, one rule, three consumers. That is the shape Q900
+  should be closed in.
 
-
+  11 e2e green across fire, surfaces and statuses - notably NONE of them pinned
+  the old behaviour, so nothing had to be weakened to let the fixes through.
 - [ ] **Q900** `src/main.js` [soc] **(new 2026-08-02, from the fix work itself)**
   The combat world facade is repeatedly NARROWER than main.js's own helpers, and
   the contract test (Q009) cannot see it. That test checks every key the pure
