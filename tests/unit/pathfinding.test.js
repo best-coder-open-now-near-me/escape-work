@@ -2,7 +2,8 @@
 // '#' solid, '.' open. No PlayCanvas, no DOM - plain node --test.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findPath, segmentClear, clampToClearance, approachPoint, truncateByBudget, smoothPath, routeOpen, routeToFiringPosition, trimToFirst } from '../../src/pathfinding.js';
+import { findPath, segmentClear, clampToClearance, approachPoint, truncateByBudget, smoothPath, routeOpen, routeToFiringPosition, trimToFirst, BODY_RADIUS,
+} from '../../src/pathfinding.js';
 
 // Build isWalkable from rows of '.'/'#'; everything off-map is solid.
 const walkableFrom = (rows) => (x, z) =>
@@ -547,4 +548,32 @@ test('the cap never fires on a search a real map could produce', () => {
   const p = findPath(w, 0, 0, 59, 59);
   assert.ok(p && p.length > 1, 'a big open room still routes');
   assert.deepEqual(p[p.length - 1], [59, 59]);
+});
+
+test('a body keeps clear of a partition END POST, not just the wall', () => {
+  // The corner repulsion tested the diagonal TILE and nothing else, so it could
+  // not see a wall segment that terminates at the post. A body in the tile
+  // beside the partition's row rounded the end and clipped through it - 0.25 of
+  // a tile of overlap at BODY_RADIUS 0.3, i.e. 0.05 from a post it must keep
+  // 0.3 from.
+  const isOpen = () => true;                      // every TILE is open...
+  // ...but one partition sits between (0,0) and (1,0), ending at post (0.5,0.5).
+  const edgeOpen = (x, z, nx, nz) => !(Math.round(z) === 0 && Math.round(nz) === 0
+    && Math.min(Math.round(x), Math.round(nx)) === 0
+    && Math.max(Math.round(x), Math.round(nx)) === 1);
+  for (let i = 0; i <= 20; i++) {
+    const pz = 0.10 + (i / 20) * 0.60;
+    const [x, z] = clampToClearance(isOpen, edgeOpen, 0.45, pz);
+    const d = Math.hypot(x - 0.5, z - 0.5);
+    assert.ok(d >= BODY_RADIUS - 1e-9,
+      `body at (${x.toFixed(3)},${z.toFixed(3)}) is ${d.toFixed(3)} from the end post`);
+  }
+});
+
+test('open ground is not repelled by posts that carry no wall', () => {
+  // The other half: a corner with nothing at it must leave the point alone, or
+  // the fix would shove bodies around in empty rooms.
+  const [x, z] = clampToClearance(() => true, () => true, 0.45, 0.45);
+  assert.equal(x, 0.45);
+  assert.equal(z, 0.45);
 });

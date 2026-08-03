@@ -181,8 +181,21 @@ export function clampToClearance(isOpen, edgeOpen, px, pz, radius = BODY_RADIUS)
   if (blocked(cx - 1, cz)) x = Math.max(x, cx - 0.5 + radius);
   if (blocked(cx, cz + 1)) z = Math.min(z, cz + 0.5 - radius);
   if (blocked(cx, cz - 1)) z = Math.max(z, cz - 0.5 + radius);
+  // The four corner posts. A post is solid when the DIAGONAL TILE is solid -
+  // or when any wall segment terminates there, which is the case the tile test
+  // alone cannot see.
+  //
+  // The two edges touching the body's own tile are already handled above: an
+  // orthogonal clamp pushes it clear along that axis. The two on the FAR side
+  // were not consulted at all, so a body standing in the tile beside a
+  // partition's row could round its end post and clip straight through it -
+  // measured at 0.25 of a tile with BODY_RADIUS 0.3, i.e. the body ending up
+  // 0.05 from a post it must keep 0.3 from.
+  const postSolid = (dx, dz) => !isOpen(cx + dx, cz + dz)
+    || (edgeOpen && (!edgeOpen(cx + dx, cz, cx + dx, cz + dz)
+      || !edgeOpen(cx, cz + dz, cx + dx, cz + dz)));
   for (const [dx, dz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-    if (isOpen(cx + dx, cz + dz)) continue;
+    if (!postSolid(dx, dz)) continue;
     const kx = cx + dx * 0.5;
     const kz = cz + dz * 0.5;
     const vx = x - kx;
