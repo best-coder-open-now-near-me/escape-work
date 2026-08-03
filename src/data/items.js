@@ -5,6 +5,14 @@
 // Item fields the code understands:
 //   name, icon - shown in the inventory panel and Alt loot labels
 //   heal       - using it restores HP (consumed)
+//   revive     - brings a DOWNED party member up at this much HP (consumed).
+//                Not used from the pockets on yourself: a character at 0 HP is
+//                out of action and cannot use anything, which is the point. It
+//                is spent by walking to a fallen colleague and choosing "Help
+//                <name> up" (main.js helpUp). Since the designer struck the
+//                automatic heals (TODO.md, 2026-08-02), this is the ONLY way a
+//                downed character gets back up - so an item with `revive` is a
+//                run-critical object, not a snack.
 //   ammo       - using it adds paper ammo, capped at PAPER_CAP in stats.js
 //                (consumed)
 //   cash       - picking it up BANKS this much Petty Cash instead of pocketing
@@ -46,6 +54,21 @@ export const ITEMS = {
     value: 3,
     examine: 'A mug that says WORLD\'S OKAYEST EMPLOYEE. Still half full.',
   },
+  // --- the revive economy (no-auto-healing, designer 2026-08-02) ---------------
+  // Downed colleagues used to get up for free: after every won fight, in every
+  // stairwell, and on any walk-over "hand up". All three are gone, so getting
+  // somebody back on their feet is now a thing you have to be CARRYING. That
+  // makes this the most important object in the game and it is deliberately not
+  // generous - one use, a modest 4 HP, and you have to have thought ahead.
+  'first-aid': {
+    name: 'Expired First-Aid Kit',
+    icon: '🩹',
+    revive: 4,
+    useLog: 'You crack the seal on the first-aid kit. Most of it is 2009 aspirin.',
+    value: 14,
+    examine: 'Mounted by the fire door. The inspection tag stops three managers ago.',
+  },
+
   // --- the retired class heals (POWERS_PLAN M9) --------------------------------
   // Five classes each carried a self-heal on the action bar: Coffee Break,
   // Executive Espresso, Snack Cart Raid, Night Thermos, Energy Drink. Six
@@ -379,6 +402,10 @@ export const LOOT_TABLES = {
     // somebody carrying it down, which is rare and worth finding.
     { item: 'executive-espresso', chance: 0.15 },
     { item: 'half-sandwich', chance: 0.5 },
+    // The kit off the wall by the fire door. A break room is where it hangs,
+    // and with the automatic revives gone this is the roll that decides whether
+    // a wipe was survivable - so it is uncommon rather than rare.
+    { item: 'first-aid', chance: 0.4 },
   ],
   desk: [
     { item: 'cold-coffee', chance: 1 },
@@ -407,6 +434,8 @@ export const LOOT_TABLES = {
     { item: 'paper-ream', chance: 0.4 },
     { item: 'laminated-lanyard', chance: 0.2 },
     { item: 'usb-stick', chance: 0.2 },
+    // Filed rather than mounted, because somebody in Facilities took it down.
+    { item: 'first-aid', chance: 0.15 },
     { item: 'letter-opener', chance: 0.15 },
   ],
 };

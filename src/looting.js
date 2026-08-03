@@ -210,6 +210,14 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     if (!sheet || i >= sheet.inventory.length) return;
     const id = sheet.inventory[i];
     const def = ITEMS[id] || {};
+    // A revive is not used FROM the pockets: the person who needs it is at 0 HP
+    // and cannot act, so it is spent by walking to them and choosing the hand
+    // up (main.js helpUp). Say so rather than letting it read as inert flavour -
+    // it is the one item whose whole point is easy to miss.
+    if (def.revive && !def.heal && !def.ammo) {
+      ui.say(`${def.name} is for somebody who is down. Walk to them and offer a hand up.`);
+      return;
+    }
     // Flavor first: something with no heal and no ammo is not consumed, costs
     // nothing, and can be read at any time.
     if (!def.heal && !def.ammo) { ui.say(def.examine || 'It is what it is.'); return; }

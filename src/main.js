@@ -20,7 +20,7 @@ import { seesBody, coneBoundary, deriveFacing } from './stealth.js';
 import {
   createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, grantTalent, classTrack,
   scaleEnemy, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
-  orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, lookOf, stairwellHeal, REACH, STEALTH,
+  orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, lookOf, REACH, STEALTH,
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
@@ -386,8 +386,6 @@ function startGame(level) {
   // --- gameplay tuning --------------------------------------------------------
   const ENGAGE_RADIUS = 4; // Chebyshev tiles within which enemies join a fight
   const EXPLOSION_DAMAGE = 8; // shrapnel to the player standing beside a printer
-  const VICTORY_HEAL = 5; // the breather after winning a fight
-  const STAIRWELL_HEAL = 6; // the breather between floors
   const OOC_TURN_SECONDS = 1.6; // out-of-combat seconds that count as one fire/smoke turn
 
   // Merchants (ECONOMY_PLAN.md). Built before looting because the Alt overlay
@@ -956,11 +954,30 @@ function startGame(level) {
     if (m.actor) m.actor.fx = { kind: 'death', t: 0 };
     ui.say(`${m.sheet.name} goes down. Breathing, but done for now.`);
   }
+  // A hand up COSTS something now. It used to be free and unlimited - walk
+  // over, click, they stand at 1 HP - which is the third automatic revive the
+  // designer struck (TODO.md, 2026-08-02) and the one that would have made
+  // striking the other two pointless. It spends an item carrying `revive`
+  // (data/items.js) out of the helper's own pockets.
+  const reviveIndex = (bag) => (bag || []).findIndex((id) => ITEMS[id]?.revive);
   function helpUp(m) {
     if (!m || m.sheet.hp > 0) return;
-    m.sheet.hp = 1;
+    // Whoever is doing the helping pays for it: in a fight that is the acting
+    // member, out of one it is the leader - the same rule a consumable follows.
+    const helper = (inCombat && combat ? combat.actingSheet : sheet);
+    const i = reviveIndex(helper?.inventory);
+    if (i === -1) {
+      ui.say(`${m.sheet.name} is not getting up on encouragement alone. You need a first-aid kit.`);
+      return;
+    }
+    const id = helper.inventory[i];
+    const def = ITEMS[id];
+    helper.inventory.splice(i, 1);
+    m.sheet.hp = Math.min(m.sheet.maxHp, def.revive);
     if (m.actor) m.actor.fx = null;
-    ui.say(`You haul ${m.sheet.name} upright. They pretend that was a stretch.`);
+    ui.say(`${def.useLog} ${m.sheet.name} is back on their feet at ${m.sheet.hp} HP.`);
+    ui.updateStatsHud(sheet);
+    refreshHotbarSlots();
   }
 
   // Every enemy death pays out the same way - combat kill, shove into live
@@ -2357,18 +2374,12 @@ function startGame(level) {
           // out mid-fight, between fights, or in the next one. combat.js has
           // already swept any that were killed.
           syncLeaderBindings(); // control stays with whoever had the floor
-          // A breather after every victory, so back-to-back fights aren't a
-          // death spiral - wounds still carry over, just less brutally. The
-          // whole party catches its breath, and the downed come to at 1 HP.
-          for (const m of party.members) {
-            if (m.sheet.hp > 0) m.sheet.hp = Math.min(m.sheet.maxHp, m.sheet.hp + VICTORY_HEAL);
-            else {
-              m.sheet.hp = 1;
-              if (m.actor) m.actor.fx = null;
-              ui.toast(`${m.sheet.name} comes to.`);
-            }
-          }
-          ui.say(`The floor is yours. You catch your breath. (+${VICTORY_HEAL} HP)`);
+          // NO victory heal, and no free revive. Winning used to top the party
+          // up and stand the fallen back at 1 HP; the designer struck every
+          // automatic heal (TODO.md, 2026-08-02). Wounds carry, the downed stay
+          // down, and both are fixed by things you carry - a heal from the
+          // pockets, a first-aid kit for somebody on the floor.
+          ui.say('The floor is yours. Nobody feels better about it.');
           paintHud(sheet);
           refreshHotbarSlots(); // the combat-only verbs dim again with the fight over
           openLevelUps(); // spend the fight's promotions now that it's safe
@@ -2900,12 +2911,11 @@ function startGame(level) {
         // coffee habits - carries over via saved progress). The last floor,
         // and any playtest level, ends the run.
         if (!playtesting && level.next && LEVELS[level.next]) {
-          // A breather in the stairwell, so you never start a floor one
-          // puddle away from death. The downed get carried and come to on
-          // the landing.
-          for (const m of party.members) {
-            m.sheet.hp = stairwellHeal(m.sheet, STAIRWELL_HEAL);
-          }
+          // NO stairwell breather. This used to heal the party +6 and revive
+          // anyone downed, which is what made "carried to the landing" true.
+          // Struck 2026-08-02 with the rest of the automatic healing: you take
+          // a floor's damage to the next floor, and you take its casualties
+          // there too. A downed member arrives downed and needs a kit.
           // Guarded like every other write (god.js:66): localStorage throws in
           // private mode and when the quota is gone, and this one runs in the
           // middle of a floor transition - an unguarded throw here would take
@@ -3299,7 +3309,15 @@ function startGame(level) {
         if (m && (m !== partyLeader(party) || m.sheet.hp <= 0)) {
           const items = [];
           if (m.sheet.hp <= 0) {
-            items.push({ label: `Help ${m.sheet.name} up`, action: () => approachAndDo(hit.ref.x, hit.ref.z, () => helpUp(m)) });
+            // The label states the cost, because a hand up is no longer free
+            // and finding that out by walking over is a wasted turn.
+            const kit = reviveIndex((inCombat && combat ? combat.actingSheet : sheet)?.inventory);
+            items.push({
+              label: kit === -1
+                ? `Help ${m.sheet.name} up (need a first-aid kit)`
+                : `Help ${m.sheet.name} up (${ITEMS[(inCombat && combat ? combat.actingSheet : sheet).inventory[kit]].name})`,
+              action: () => approachAndDo(hit.ref.x, hit.ref.z, () => helpUp(m)),
+            });
           } else {
             if (hit.ref.def?.dialogue || hit.ref.def?.recruitedDialogue) {
               items.push({ label: `Talk to ${m.sheet.name}`, action: () => approachAndDo(hit.ref.x, hit.ref.z, () => dialogue.open(hit.ref)) });
