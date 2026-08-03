@@ -1589,11 +1589,24 @@ export function startEditor(app, levelData, stashKey) {
   btn('ed-undo', '↶ Undo', commands).onclick = () => undo();
   btn('ed-redo', '↷ Redo', commands).onclick = () => redo();
 
+  // IQ5 answer B (designer 2026-08-02: "level 1 is fine"): Playtest remembers
+  // the last character so the resume desk stops appearing between every
+  // iteration. It changes nothing about WHAT you playtest with - same fresh
+  // level-1 solo character - it just stops asking you to make it every time.
+  const PLAYTEST_CLASS_KEY = 'escape-work.playtest.class';
   btn('ed-playtest', '▶ Playtest', commands).onclick = () => {
+    // Refuse to launch something that cannot be finished. The lint already
+    // knows; walking into a floor with no exit to discover it is a wasted trip.
+    const errs = findings.filter((f) => f.level === 'error');
+    // eslint-disable-next-line no-alert
+    if (errs.length && !window.confirm(`This floor cannot be finished:\n\n${errs.map((f) => `• ${f.message}`).join('\n')}\n\nPlaytest anyway?`)) return;
     localStorage.setItem(stashKey, toJson());
     dirty = false; // the stash IS a save - leaving for it is not losing work
     clearDraft();
-    location.hash = '';
+    let last = null;
+    try { last = localStorage.getItem(PLAYTEST_CLASS_KEY); } catch { /* ignore */ }
+    // The `#class=` express lane already exists for exactly this (main.js).
+    location.hash = last ? `#class=${last}` : '';
     location.reload();
   };
   btn('ed-export', 'Export JSON', commands).onclick = showExport;

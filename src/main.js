@@ -93,6 +93,10 @@ const app = createApp(document.getElementById('app'));
 let activeLevel = LEVELS[FIRST_LEVEL];
 let activeLevelId = FIRST_LEVEL;
 let playtesting = false;
+// Whether THIS boot came from the editor's stash, as opposed to the ?level=
+// express lane or a floor picked off the desk. Both suppress campaign writes;
+// only one of them has an editor to go back to.
+let fromStash = false;
 let restoredProgress = null; // { levelId, sheets, active } - party.js handles old shapes
 try {
   // Each source gets its OWN guard. Sharing one meant a corrupt playtest stash
@@ -103,9 +107,17 @@ try {
   const stash = localStorage.getItem(STASH_KEY);
   if (stash) {
     try {
-      activeLevel = JSON.parse(stash);
+      const parsed = JSON.parse(stash);
+      // A stash that PARSES but is not a level used to brick the game and the
+      // editor together, with no in-app recovery - the shape check is what
+      // makes "unreadable" mean the same thing for both failure modes.
+      if (!Array.isArray(parsed?.map) && !Array.isArray(parsed?.layers)) {
+        throw new Error('stashed value is not a level');
+      }
+      activeLevel = parsed;
       activeLevelId = null;
       playtesting = true;
+      fromStash = true;
     } catch {
       localStorage.removeItem(STASH_KEY); // unreadable, and it will stay that way
     }
@@ -4196,6 +4208,9 @@ function startGame(level) {
     // an untouched draft. That is byte-for-byte the character this hash always
     // produced, so the whole existing suite keeps booting exactly as it did,
     // and the one place that wants to exercise creation asks for it by name.
+    if (playtesting) {
+      try { localStorage.setItem('escape-work.playtest.class', preselectedClass()); } catch { /* ignore */ }
+    }
     beginRun(createCharacter(createDraft(preselectedClass())));
   } else {
     // The desk. openDesk frames the spawn tile close and head-on (eye-ish
@@ -4204,9 +4219,18 @@ function startGame(level) {
     // a screen you can only reach once is a screen you cannot back out of.
     openDesk();
   }
-  if (playtesting) {
+  // The badge belongs to a STASHED level specifically. `playtesting` also covers
+  // the ?level= express lane and a desk pick, neither of which has an editor to
+  // go back to - which is why picking Floor 2 used to raise a playtest badge.
+  if (playtesting && fromStash) {
     ui.showPlaytestBadge(() => {
       location.hash = '#editor';
+      location.reload();
+    }, () => {
+      // Drop ONLY the stash. The campaign save is not this button's business -
+      // that distinction is the whole reason this exists.
+      localStorage.removeItem(STASH_KEY);
+      location.hash = '';
       location.reload();
     });
   }
