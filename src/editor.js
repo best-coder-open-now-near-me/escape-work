@@ -391,6 +391,46 @@ export function startEditor(app, levelData, stashKey) {
     }
   }
 
+  // --- grid, rulers, boundary (C7) ---------------------------------------------
+  // `renderFloor` draws continuous carpet with +/-0.018 tint variation, with the
+  // explicit intent that surfaces "read as continuous carpet instead of a grid
+  // of tiles" (tile-renderer.js). Correct for the game and wrong for the tool:
+  // counting cells was done by eye against a surface engineered to hide cell
+  // boundaries. Editor-only, so the game's look is untouched.
+  let gridEntities = [];
+  let gridMat = null;
+  let showGrid = true;
+  function renderGrid() {
+    for (const e of gridEntities) e.destroy();
+    gridEntities = [];
+    if (!showGrid || !width || !height) return;
+    if (!gridMat) {
+      gridMat = new pc.StandardMaterial();
+      gridMat.diffuse = new pc.Color(0.1, 0.1, 0.14);
+      gridMat.emissive = new pc.Color(0.28, 0.3, 0.38);
+      gridMat.opacity = 0.3;
+      gridMat.blendType = pc.BLEND_NORMAL;
+      gridMat.depthWrite = false;
+      gridMat.update();
+    }
+    const line = (x, y, z, sx, sz) => {
+      const e = new pc.Entity();
+      e.addComponent('render', { type: 'box', material: gridMat });
+      e.setLocalScale(sx, 0.01, sz);
+      e.setPosition(x, y, z);
+      app.root.addChild(e);
+      gridEntities.push(e);
+    };
+    // Every fifth line is brighter, which is what makes counting possible at a
+    // glance rather than one tile at a time.
+    for (let x = 0; x <= width; x++) {
+      line(x - 0.5, 0.02, height / 2 - 0.5, x % 5 === 0 ? 0.06 : 0.02, height);
+    }
+    for (let z = 0; z <= height; z++) {
+      line(width / 2 - 0.5, 0.02, z - 0.5, width, z % 5 === 0 ? 0.06 : 0.02);
+    }
+  }
+
   // A faint copy of the storey below, so painting a mezzanine is not done blind
   // over a floor you cannot see. Flat quads only - the real renderer would cost
   // a whole second map of props for something that is a positioning aid.
@@ -438,6 +478,7 @@ export function startEditor(app, levelData, stashKey) {
     carpet = computeCarpet();
     for (let z = 0; z < height; z++) for (let x = 0; x < width; x++) renderCell(x, z);
     renderAllEdges();
+    renderGrid();
     renderOnionSkin();
     updateSizeLabel();
     refocus();
@@ -763,6 +804,11 @@ export function startEditor(app, levelData, stashKey) {
     const nh = Math.min(MAX_SIZE, Math.max(MIN_SIZE, height + dh));
     if (nw === width && nh === height) return;
     pushHistory();
+    const ow = Math.min(nw, width);
+    const oh = Math.min(nh, height);
+    // Conduction and carpet are global passes, so a NEW cell can recolour an
+    // old one; only a pure shrink leaves the interior provably untouched.
+    const grew = nw > width || nh > height;
     // Shrinking silently deleted whatever was in the trimmed rows/columns,
     // including the player spawn. Say what is about to go; undo can take it
     // back now, but only if you know to reach for it.
@@ -794,7 +840,34 @@ export function startEditor(app, levelData, stashKey) {
     vWalls = new Set([...vWalls].filter(inRange('v')));
     hDoors = new Set([...hDoors].filter(inRange('h')));
     vDoors = new Set([...vDoors].filter(inRange('v')));
-    renderAll();
+    // Incremental. `renderAll` destroys and re-creates EVERY entity on the map
+    // and re-instantiates each .glb prop - and growing to the 40x40 ceiling is
+    // ~30 clicks, each a full teardown of a map that is getting larger every
+    // click, which is the worst possible cost curve for the one interaction
+    // that reaches the advertised limit. Only the cells that appeared or
+    // vanished need touching.
+    for (const [k, list] of [...cellEntities]) {
+      const [cx, cz] = k.split(',').map(Number);
+      if (cx < width && cz < height) continue;
+      for (const e of list) e.destroy();
+      cellEntities.delete(k);
+      cellVersion.set(k, (cellVersion.get(k) || 0) + 1); // orphan any in-flight model load
+    }
+    electrified = computeElectrifiedSet();
+    carpet = computeCarpet();
+    for (let z = 0; z < height; z++) {
+      for (let x = 0; x < width; x++) {
+        if (x < ow && z < oh && !grew) continue; // untouched interior
+        renderCell(x, z);
+      }
+    }
+    renderAllEdges();
+    renderGrid();
+    renderOnionSkin();
+    updateSizeLabel();
+    refocus();
+    setStatus();
+    markDirty();
   }
 
   // --- hover ghost --------------------------------------------------------------
@@ -849,6 +922,14 @@ export function startEditor(app, levelData, stashKey) {
     const z = Math.round(g.z);
     if (x < 0 || x >= width || z < 0 || z >= height) { ghost.enabled = false; hoverCell = null; setStatus(); return; }
     ghost.enabled = true;
+    // A prop's MESH can overhang its cell while its collision never does - a
+    // conference table is faked as adjacent copies and blocks only the tiles
+    // under them. Widen the ghost to the model's real scale so the mismatch is
+    // visible rather than discovered in play (EDITOR_INVENTORY H4; rotation
+    // lifted H3, this is the half it did not).
+    const hoverDef = TILE_TYPES[tileByChar[rows[z]?.[x]]];
+    const spread = hoverDef?.model ? Math.max(1, hoverDef.scale || 1) : 1;
+    ghost.setLocalScale(0.98 * spread, 0.06, 0.98 * spread);
     ghost.setPosition(x, 0.04, z);
     hoverCell = { x, z, edge: null };
     if (overlay === 'fire') drawOverlay(); // the burn is traced FROM the cursor
@@ -1896,6 +1977,54 @@ export function startEditor(app, levelData, stashKey) {
     location.reload();
   };
   btn('ed-export', 'Export JSON', commands).onclick = showExport;
+  // Every affordance in this tool used to be undiscoverable: that the partition
+  // brush works on EDGES, that right-click's meaning follows the cursor, that
+  // any of the modifier tools exist at all. The boot toast says three of them;
+  // this says the rest, and stays available.
+  btn('ed-help', '?', commands).onclick = () => {
+    document.getElementById('ed-help-panel')?.remove();
+    const d = document.createElement('div');
+    d.id = 'ed-help-panel';
+    Object.assign(d.style, {
+      position: 'fixed', inset: '0', zIndex: '41', display: 'flex',
+      alignItems: 'center', justifyContent: 'center', background: 'rgba(10,10,18,.85)',
+      color: '#f0f0f5', font: '13px system-ui, sans-serif',
+    });
+    const row = (k, v) => `<tr><td style="padding:3px 14px 3px 0; white-space:nowrap;
+      color:#8adf76; font-family:monospace;">${k}</td><td style="padding:3px 0;">${v}</td></tr>`;
+    d.innerHTML = `
+      <div style="background:#232334; border:1px solid #3a3a52; border-radius:12px;
+           padding:20px 24px; width:min(680px,92vw); max-height:86vh; overflow:auto;">
+        <div style="font-weight:700; margin-bottom:10px;">Level editor</div>
+        <table style="border-collapse:collapse; line-height:1.5;">
+          ${row('left-click', 'paint · <b>right-click</b> erases whatever is under the cursor')}
+          ${row('partition / door', 'paint the EDGE between tiles, not the tile')}
+          ${row('shift + click', 'line from the last cell painted')}
+          ${row('ctrl + click', 'fill the contiguous region')}
+          ${row('ctrl + shift + drag', 'rectangle')}
+          ${row('alt + click', 'eyedropper — arm the brush under the cursor')}
+          ${row('alt + shift + drag', 'capture a block, then place it with the stamp brush')}
+          ${row('R / shift+R', 'rotate the prop under the cursor')}
+          ${row('Ctrl+Z / Ctrl+Shift+Z', 'undo / redo — one step per stroke')}
+          ${row('WASD or arrows', 'pan · <b>F</b> re-centre · <b>T</b> overhead · <b>G</b> grid')}
+          ${row('[ / ]', 'cycle brushes · <b>Tab</b> hides the toolbar')}
+          ${row('middle-drag', 'orbit · <b>wheel</b> zooms')}
+        </table>
+        <p style="opacity:.75; margin:14px 0 0;">The strip bottom-left names what you are
+          holding, what is under the cursor, and whether the floor can be finished.
+          Overlays in the command row show cover, sightlines and what would burn.</p>
+        <p style="opacity:.75; margin:8px 0 0;">Work autosaves as a draft. <b>Download</b>
+          in the export dialog writes <code>&lt;floor&gt;.json</code> — move it into
+          <code>levels/</code> and register it in <code>src/data/levels.js</code>.</p>
+        <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+          <button id="ed-help-close" style="padding:8px 16px; border-radius:7px;
+            border:1px solid #3a3a52; background:#2e2e46; color:#f0f0f5; font:inherit;
+            cursor:pointer;">Close</button>
+        </div>
+      </div>`;
+    document.body.appendChild(d);
+    d.querySelector('#ed-help-close').onclick = () => d.remove();
+  };
   // Reset and Exit each throw the session away. They used to do it on one
   // unconfirmed click, styled identically to Export sitting beside them.
   const dangerBtn = (id, label, confirmText, act) => {
@@ -1931,7 +2060,11 @@ export function startEditor(app, levelData, stashKey) {
       return;
     }
     if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
-    if (e.key === 'Escape') { document.getElementById('export-modal')?.remove(); return; }
+    if (e.key === 'Escape') {
+      document.getElementById('export-modal')?.remove();
+      document.getElementById('ed-help-panel')?.remove();
+      return;
+    }
     if (mod) return; // leave the browser's own chords alone
     const k = e.key.toLowerCase();
     // Overhead. `controls` has had this since the game shipped it on the HUD
@@ -1945,6 +2078,13 @@ export function startEditor(app, levelData, stashKey) {
     // desk in the game faced the same way and a rotated one meant a new
     // registry entry - which also spends a scarce map character.
     if (e.key === 'Tab') { e.preventDefault(); toggleCollapse(); return; }
+    if (k === 'g') {
+      e.preventDefault();
+      showGrid = !showGrid;
+      renderGrid();
+      toast(showGrid ? 'Grid on.' : 'Grid off.');
+      return;
+    }
     if (k === 'r') {
       e.preventDefault();
       if (!hoverCell || hoverCell.edge) { toast('Point at a prop to rotate it.'); return; }

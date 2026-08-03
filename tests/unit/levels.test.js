@@ -8,7 +8,7 @@ import { lintLevel } from '../../src/level-lint.js';
 import { parseLevel } from '../../src/grid.js';
 import { findPath } from '../../src/pathfinding.js';
 import { existsSync } from 'node:fs';
-import { TILE_TYPES, blocksSight } from '../../src/data/tiles.js';
+import { TILE_TYPES, blocksSight, SIGHT_BLOCK_HEIGHT } from '../../src/data/tiles.js';
 import { ENEMY_TYPES, ENEMY_KITS } from '../../src/data/enemies.js';
 import { TALENTS, TALENT_EFFECT_KEYS, STARTING_TALENT_BY_CLASS } from '../../src/data/talents.js';
 import { parseActorRef } from '../../src/data/actor-registries.js';
@@ -746,4 +746,16 @@ test('shipped levels keep the shape the e2e suite is written against', () => {
   assert.deepEqual(shape('level2.json'), {
     width: 28, height: 20, walkable: 538, exits: 1, spawn: '2,2', enemies: 6, companions: 1,
   }, 'level2 changed shape - the e2e specs that walk it need re-checking');
+});
+
+test('the fbx converter reports the same sight-block threshold the game uses', () => {
+  // tools/fbx-to-glb.py runs inside Blender's Python and cannot import the
+  // game's modules, so it duplicates SIGHT_BLOCK_HEIGHT to tell a conversion
+  // whether the model it just measured will stop thrown attacks. A duplicated
+  // constant is fine as long as something fails when they drift.
+  const src = readFileSync('tools/fbx-to-glb.py', 'utf8');
+  const m = /^SIGHT_BLOCK_HEIGHT\s*=\s*([\d.]+)/m.exec(src);
+  assert.ok(m, 'the converter declares SIGHT_BLOCK_HEIGHT');
+  assert.equal(Number(m[1]), SIGHT_BLOCK_HEIGHT,
+    'tools/fbx-to-glb.py and src/data/tiles.js disagree about what blocks sight');
 });

@@ -117,7 +117,12 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   const aimed = (sx, sy) => (aim ? aim(sx, sy) : [sx, sy]);
   app.mouse.on(pc.EVENT_MOUSEDOWN, (e) => {
     if (!onCanvas(e)) return;
-    if (e.button === pc.MOUSEBUTTON_MIDDLE) {
+    if (e.button === pc.MOUSEBUTTON_MIDDLE || (e.button === pc.MOUSEBUTTON_LEFT && mods.alt && mods.shift)) {
+      // Alt+Shift+left is the second orbit binding. Orbit was middle-drag only,
+      // which a trackpad without a middle button cannot produce at all - the
+      // camera was simply unusable there. Alt alone and Alt+Shift alone are
+      // both taken by the editor's eyedropper and capture, so the chord is the
+      // pair plus the button.
       orbiting = true;
     } else if (e.button === pc.MOUSEBUTTON_LEFT) {
       leftHeld = true;
@@ -133,6 +138,7 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   app.mouse.on(pc.EVENT_MOUSEUP, (e) => {
     if (e.button === pc.MOUSEBUTTON_MIDDLE) orbiting = false;
     if (e.button === pc.MOUSEBUTTON_LEFT) {
+      if (orbiting) { orbiting = false; return; } // an alt+shift orbit, not a stroke
       leftHeld = false;
       // The end of a drag is where a rubber-banded tool COMMITS. Without this
       // hook a rectangle could only ever be previewed, never applied.
