@@ -411,7 +411,7 @@ How to read it:
 - [ ] **Q112** `src/ui/hud.js:319` [soc] The hotbar computes the ammo-affordability rule itself, never surfaces the reason, and does not disable the slot its own header says is disabled
 - [ ] **Q113** `/home/user/escape-work/AI_PLAN.md:1018` [test-gap] AI_PLAN's "As landed" claims M2-M6 shipped "as specified" while every e2e spec those milestones name is absent
 - [ ] **Q114** `AI_PLAN.md:1013` [test-gap] None of the six e2e specs AI_PLAN names for M1-M6 shipped, and the combat.js half of every new beat has zero coverage — while the doc records the milestones "as specified"
-- [ ] **Q115** `playwright.config.js:6` [test-gap] playwright.config.js raises the per-test budget to 120 s but leaves expect.timeout at Playwright's 5 s default, which 52 of the 174 expect.poll sites rely on
+- [ ] **Q115** `playwright.config.js:6` [test-gap] playwright.config.js raises the per-test budget to 120 s but leaves expect.timeout at Playwright's 5 s default, which 52 of the 174 expect.poll sites rely on<br>      ↳ **CAUGHT IN THE ACT 2026-08-03, still open.** `cover.spec.js:177` failed inside a test carrying its own `test.setTimeout(300_000)` — and gave up after **5s**, because a bare `expect(...).toHaveAttribute(...)` never sees the test budget at all. Solo, the same assertion passes and the test takes 48.8s. So this finding does not just cost wall-clock, it manufactures failures that read as regressions in exactly the specs the config comment already blames for false alarms. Fix is `expect: { timeout: ... }` in the config, ideally derived from the same env var the per-test budget wants.
 - [x] **Q116** `src/ui/chrome.js:90` [test-gap] `ui/chrome.js` touches `window` at module scope, so every module importing `ui.js` — including `dialogue.js` and its exported pure rule — cannot be imported under node<br>      ↳ DONE — bound on first use; 11 modules unlocked
 - [ ] **Q117** `tests/e2e/helpers.js:92` [test-gap] __combat.bout - the AI regression tripwire milestone 1 exists to provide - is read by no test, and the ?seed= lane that makes it reproducible is exercised by no test
 - [ ] **Q118** `tests/e2e/summons.spec.js:45` [test-gap] The HR summon-cap assertion passes vacuously: it sleeps 1500 ms and asserts <= 2 without ever establishing that HR got another turn
@@ -748,6 +748,37 @@ Answered directly by the project owner — recorded so they are not relitigated.
   `PAPER_CAP`/`INV_CAP` become real numbers rather than `Infinity`.
 
 ## E2e status in this environment (measured, with the method stated)
+
+### The 2026-08-03 queue pass: 71 tests, one non-reproducing failure
+
+Method, stated because the last pass's headline number was ruined by not
+stating it: **one Playwright run at a time, never two, and no rebuild while a
+run is in flight.** Every run below is the whole machine.
+
+| run | specs | result |
+|---|---|---|
+| Q907 verification | charm, summons, surfaces | **9 / 9** |
+| batch 1 | smoke, party, portraits, sneak, ooc-cone, progression | **27 / 27** |
+| batch 2 | ai, tactics, cover, degrid, creation, editor, camera | **28 / 29** |
+| cover.spec SOLO | cover | **7 / 7** — the batch-2 failure does not reproduce |
+
+The one failure was `cover.spec.js:171` "take cover walks you in behind the
+desk", and it is worth recording WHERE it failed: line 177, the very first
+assertion, **before** `enterCombat` — and it gave up after 5s inside a test
+whose own budget is 300s. That is not the test's budget at all, it is
+Playwright's `expect` default, which is exactly **Q115**, still open. Solo the
+same assertion passes and the test runs 48.8s. So this is evidence FOR Q115
+rather than a regression, and the next person to see a 5s timeout in a 120s
+test should suspect the same thing before bisecting.
+
+**One caveat on the Q907 run, stated rather than buried:** a `npm run build`
+landed between its tests 7 and 9, so those two ran against a slightly newer
+bundle. The only behavioural delta in that rebuild was `bout.oaCount`'s side
+gate, which no test reads (Q117), so the verification stands - but it should
+not have happened, and it is why "no rebuild while a run is in flight" is now
+written into the method above rather than assumed.
+
+
 
 This environment's software GL is far slower than the CI the suite was tuned
 for, and the dominant failure mode is the 120s per-test budget expiring rather
