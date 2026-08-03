@@ -5,6 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   topplePlan, aiTopplePlan, breakPlan, pullPlan, displacePlan,
+  aiShovePlan, aiEdgeTopplePlan, aiPullPlan, aiBreakPlan,
 } from '../../src/combat-plans.js';
 import { REACH } from '../../src/stats.js';
 
@@ -179,4 +180,92 @@ test('a wall, a partition and a BODY all count as something solid', () => {
 
 test('a push with no direction is not a push', () => {
   assert.equal(displacePlan(1, 1, 0, 0, pushWorld()), null);
+});
+
+// --- the AI's cover-denial plans (AI_PLAN M4) --------------------------------
+
+test('a shove that merely moves somebody is refused; a slam is taken', () => {
+  const victimAt = (x, z) => (x === 1 && z === 0 ? { name: 'v' } : null);
+  const openWorld = { isWalkable: () => true, stepOpen: () => true, occupied: () => false };
+  // Open floor behind them: nothing strictly better about it - no plan.
+  assert.equal(aiShovePlan(0, 0, openWorld, victimAt), null);
+  // A wall behind them is the slam.
+  const walled = { ...openWorld, isWalkable: (x) => x < 2 };
+  const slam = aiShovePlan(0, 0, walled, victimAt);
+  assert.ok(slam && slam.blocked);
+  assert.equal(slam.victim.name, 'v');
+});
+
+test('a hazard landing is worth a shove; disengage widens the gate', () => {
+  const victimAt = (x, z) => (x === 1 && z === 0 ? { name: 'v' } : null);
+  const openWorld = { isWalkable: () => true, stepOpen: () => true, occupied: () => false };
+  const wet = aiShovePlan(0, 0, openWorld, victimAt, {
+    hazardAt: (x, z) => x === 2 && z === 0,
+  });
+  assert.ok(wet && !wet.blocked);
+  // The ranged kit's carve-out: breaking contact is itself the value.
+  const step = aiShovePlan(0, 0, openWorld, victimAt, { disengage: true });
+  assert.ok(step && !step.blocked);
+});
+
+test('the partition topple wants an edge, an open far tile, and a victim', () => {
+  const w = {
+    wallEdgeBetween: (x, z, nx, nz) => nx === 1 && nz === 0,
+    terrainOpen: () => true,
+  };
+  const hit = aiEdgeTopplePlan(0, 0, w, (x, z) => x === 1 && z === 0);
+  assert.deepEqual(hit, { edge: true, tx: 1, tz: 0 });
+  // Empty carpet behind the panel: nothing to gain, no plan.
+  assert.equal(aiEdgeTopplePlan(0, 0, w, () => false), null);
+});
+
+test('aiPullPlan hauls the first crouched victim the pull rules accept', () => {
+  const puller = { x: 0, z: 0 };
+  const victim = { sheet: { name: 'v' }, actor: { x: 2, z: 0 } };
+  const crouch = { at: { x: 2, z: 0 }, faces: [[-1, 0]] }; // shield toward the puller
+  const w = { stepOpen: () => true, open: () => true, bodyAt: () => false };
+  const plan = aiPullPlan(puller, [victim], () => crouch, w);
+  assert.ok(plan && plan.landing);
+  assert.equal(plan.victim, victim);
+  // No crouch, no pull - it is cover-denial, not a generic yank.
+  assert.equal(aiPullPlan(puller, [victim], () => null, w), null);
+  // Shield on the wrong side: pullPlan refuses and the wrapper passes it up.
+  const wrong = { at: { x: 2, z: 0 }, faces: [[1, 0]] };
+  assert.equal(aiPullPlan(puller, [victim], () => wrong, w), null);
+});
+
+test('a shut door beats battering, and only toward the target', () => {
+  const flat = { tileDefAt: () => ({ label: 'floor' }), edgeHpBetween: () => null };
+  // Closed door on the way to a target at (5,0): open it - a door carries no
+  // HP pool at all, so without this arm the unit would stand there forever.
+  const toward = aiBreakPlan(0, 0, 5, 0, {
+    ...flat,
+    doorsBeside: () => [{ key: 'h:1:0', ap: 1, open: false, to: [1, 0] }],
+  });
+  assert.deepEqual(toward, { kind: 'door', key: 'h:1:0', ap: 1, tx: 1, tz: 0 });
+  // A door leading AWAY is not a way through.
+  assert.equal(aiBreakPlan(0, 0, 5, 0, {
+    ...flat,
+    doorsBeside: () => [{ key: 'h:-1:0', ap: 1, open: false, to: [-1, 0] }],
+  }), null);
+  // An already-open door is not a plan either - the route is the answer.
+  assert.equal(aiBreakPlan(0, 0, 5, 0, {
+    ...flat,
+    doorsBeside: () => [{ key: 'h:1:0', ap: 1, open: true, to: [1, 0] }],
+  }), null);
+});
+
+test('a sealed unit finds the barrier on the way toward its target', () => {
+  const cabinetAt = (x, z) => (x === 1 && z === 0 ? CABINET : { label: 'floor' });
+  const prop = aiBreakPlan(0, 0, 5, 0, { tileDefAt: cabinetAt, edgeHpBetween: () => null });
+  assert.deepEqual(prop, { kind: 'prop', tx: 1, tz: 0 });
+  const edge = aiBreakPlan(0, 0, 5, 0, {
+    tileDefAt: () => ({ label: 'floor' }),
+    edgeHpBetween: (x, z, nx, nz) => (nx === 1 ? 12 : null),
+  });
+  assert.deepEqual(edge, { kind: 'edge', a: [0, 0], b: [1, 0] });
+  // Nothing breakable on the faces toward them: no plan, the crouch is next.
+  assert.equal(aiBreakPlan(0, 0, 5, 0, {
+    tileDefAt: () => ({ label: 'floor' }), edgeHpBetween: () => null,
+  }), null);
 });

@@ -136,6 +136,32 @@ try {
   }
 } catch { /* no URL machinery - keep whatever resolved above */ }
 
+// Dev express lane: ?seed=<n> makes fights repeatable (AI_PLAN M1's sparring
+// bouts). The stream feeds startCombat's injected `rng`, and that reaches
+// EVERY in-fight roll - hit rolls, damage and the AI's line picks (the
+// module-level `rand` takes its randomness as an argument), initiative
+// (`initRng`), slips, loot. REVIEW.md's "the rng seam is misleading" finding
+// was closed before this landed; one seed reproduces a whole fight including
+// turn order. mulberry32, the same mixer the confused-shuffle already trusts
+// (combat.js). Absent means Math.random, the shipping default.
+//
+// What a seed does NOT pin is where the bodies are when the fight OPENS: a
+// walk-in ends wherever adjacency happens to fire. That is what __god.fight()
+// is for.
+let combatRng = Math.random;
+try {
+  const s = new URLSearchParams(location.search).get('seed');
+  if (s) {
+    let a = (Number(s) >>> 0) || 1;
+    combatRng = () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+} catch { /* no URL machinery - unseeded like always */ }
+
 const clearProgress = () => {
   localStorage.removeItem(PROGRESS_KEY);
   remote.clear(); // the desk must not offer a ghost of an abandoned run
@@ -2170,6 +2196,7 @@ function startGame(level) {
       engaged,
       opening,
       sneakOpened,
+      rng: combatRng,
       // A crouch taken before the fight rides into it (TACTICS_PLAN M6 OOC):
       // combat owns it from here - the status chip is already on the sheet.
       preCrouch: (() => { const c = oocCrouch; oocCrouch = null; return c; })(),
@@ -2179,6 +2206,8 @@ function startGame(level) {
       world: {
         isWalkable,
         doorsBeside: (x, z) => doors.doorsBeside(x, z),
+        // The raw edit, for the side combat charges itself (AI_PLAN A10).
+        openDoor: (key) => doors.setDoorOpen(key, true),
         // The acting body's own route: allies BLOCK in combat (no ending a
         // move stacked on a teammate; sequenced moves can afford the detour)
         // and the costs are the walker's own talents, not the leader's.
@@ -4434,6 +4463,42 @@ function startGame(level) {
     // grant path rather than hand-writing an effects bag.
     grantTalent: (sheet, talentId) => grantTalent(sheet, talentId),
     get doors() { return [...grid.doors].map(([key, d]) => ({ key, open: d.open })); },
+    // Open or shut a door with no walk, no click and no AP. A door is the
+    // only terrain a fight can change, so a test that needs one SHUT mid-fight
+    // otherwise has to park the acting member on an exact tile and click an
+    // edge midpoint that a frame's drift turns back into an ordinary step.
+    // Same edit the player's own toggle makes (doors.setDoorOpen) - the price
+    // and the gating are what this skips, not the rule.
+    setDoor(key, open) {
+      if (!grid.doors.has(key)) return false;
+      doors.setDoorOpen(key, !!open);
+      return true;
+    },
+    // Open a fight WHERE EVERYBODY STANDS, through the same entry the real
+    // trigger uses (beginCombat) with the same engaged set (ENGAGE_RADIUS +
+    // canTakePart) - only the walk-in is skipped. That walk is what a spec
+    // cannot control: it ends wherever adjacency happens to fire, so the
+    // geometry a positional test staged is gone by the time the fight opens.
+    //
+    // Deliberately NOT wired into the e2e enterCombat helper. That was tried
+    // once as `startFightNow` and reverted for a good reason: opening from
+    // where the player stands changes the geometry the existing specs are
+    // written against (a touch-range verb like Detain arrives out of reach).
+    // Opt-in per spec, so nothing already green re-interprets itself.
+    fight(primaryName = null) {
+      if (!sheet || inCombat || gameOver || !player.entity) return false;
+      const live = enemies.filter((e) => e.alive);
+      const primary = (primaryName && live.find((e) => e.def.name === primaryName))
+        || live.find((e) => canTakePart(player, e))
+        || live[0];
+      if (!primary) return false;
+      const engaged = live.filter((e) =>
+        Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= ENGAGE_RADIUS
+        && canTakePart(player, e));
+      if (!engaged.includes(primary)) engaged.push(primary);
+      beginCombat({ engaged, primary });
+      return true;
+    },
     setDoorOpen(key, open) {
       if (!grid.doors.has(key)) return;
       grid.setDoorOpen(key, open);

@@ -8,11 +8,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  standTilePath, pickTarget, advanceRoute, aiCrouchCovered, chooseBeat, afterFailedAdvance,
+  standTilePath, pickTarget, advanceRoute, aiCrouchCovered, chooseBeat,
+  AI, standTileRoutes, scoreDestination, firingTileRoutes,
 } from '../../src/combat-ai.js';
 import { REACH } from '../../src/stats.js';
 
-const member = (x, z, hp = 10) => ({ sheet: { hp }, actor: { x, z } });
+const member = (x, z, hp = 10, maxHp = 10) => ({ sheet: { hp, maxHp }, actor: { x, z } });
 const unit = (x, z) => ({ x, z, combat: { reach: REACH.DEFAULT } });
 
 // --- standing and routing ----------------------------------------------------
@@ -63,18 +64,149 @@ test('an engageable member outranks a nearer one behind a wall', () => {
   assert.equal(t.member, far);
 });
 
-test('within a group, distance decides and the wounded break the tie', () => {
+test('focus 0 is the old rule: nearest, wounded tiebreak (AI_PLAN M2)', () => {
   const a = member(3, 0, 10);
   const b = member(1, 0, 10);
-  assert.equal(pickTarget(0, 0, [a, b], () => true).member, b);
+  assert.equal(pickTarget(0, 0, [a, b], () => true, { focus: 0 }).member, b);
 
+  // Equal distance, one of them already hurt: the wounded one takes the tie -
+  // the shipped rule this scoring replaced, preserved at the knob's floor.
   const hale = member(2, 0, 10);
   const hurt = member(0, 2, 3);
-  assert.equal(pickTarget(0, 0, [hale, hurt], () => true).member, hurt);
+  assert.equal(pickTarget(0, 0, [hale, hurt], () => true, { focus: 0 }).member, hurt);
+});
+
+test('at focus 1 a finishable target outranks a nearer hale one', () => {
+  const near = member(1, 0, 20, 20); // adjacent, untouched
+  const far = member(3, 0, 3, 20); // three swings away, one swing from down
+  const expSwings = (m) => Math.ceil(m.sheet.hp / 3);
+  const t = pickTarget(0, 0, [near, far], () => true, { focus: 1, expSwings });
+  assert.equal(t.member, far);
+});
+
+test('stickiness holds the current target against a marginally nearer one', () => {
+  const mark = member(2, 0, 10);
+  const closer = member(1, 0, 10);
+  // With no standing mark, proximity wins...
+  assert.equal(pickTarget(0, 0, [mark, closer], () => true, { focus: 0 }).member, closer);
+  // ...but the mark's hysteresis outweighs the one-tile difference, so the
+  // unit does not flip-flop between near-equal members every turn.
+  assert.equal(
+    pickTarget(0, 0, [mark, closer], () => true, { focus: 0, current: mark }).member,
+    mark,
+  );
+  assert.ok(AI.STICKINESS > 0); // the test above is vacuous if the knob hits 0
+});
+
+test('full ties fall to candidate order, so a seeded fight replays', () => {
+  const first = member(2, 0, 10);
+  const second = member(0, 2, 10);
+  assert.equal(pickTarget(0, 0, [first, second], () => true).member, first);
+});
+
+test('engageability is a tier no score can buy past', () => {
+  // A one-swing kill on the far side of a sealed wall still loses to a
+  // reachable full-health member: walking to the wall and swinging at
+  // nothing is the stall the M3 lesson exists to prevent.
+  const sealed = member(1, 0, 1, 20);
+  const open = member(4, 0, 20, 20);
+  const t = pickTarget(0, 0, [sealed, open], (m) => m === open, {
+    focus: 1, expSwings: (m) => Math.ceil(m.sheet.hp / 3),
+  });
+  assert.equal(t.member, open);
 });
 
 test('no candidates means no target - which is how a party wipe reads', () => {
   assert.equal(pickTarget(0, 0, [], () => true), null);
+});
+
+// --- destination scoring (AI_PLAN M3) ---------------------------------------
+
+test('standTileRoutes returns the whole field - and the self-path alone', () => {
+  assert.equal(standTileRoutes(0, 0, 5, 5, routeWorld()).length, 8);
+  // Already on a swing tile: not a field to score, THE answer - the pacing
+  // bug's fix keeps absolute priority over any scored alternative.
+  assert.deepEqual(standTileRoutes(4, 5, 5, 5, routeWorld()), [[[4, 5], [4, 5]]]);
+});
+
+test('a flanking arrival outranks a shorter route', () => {
+  const target = { x: 5, z: 5 };
+  const shortest = [[5, 7], [5, 6]]; // cost 1, arrives south - no pincer
+  const flank = [[5, 7], [4, 6]]; // cost 1.41, arrives SW - opposite the NE ally
+  const allies = [{ x: 6, z: 4, reach: 1.5 }];
+  assert.equal(scoreDestination([shortest, flank], { target, allies }), flank);
+  // Without the ally there is nothing to buy: the cheap route wins.
+  assert.equal(scoreDestination([shortest, flank], { target }), shortest);
+});
+
+test('a route that eats an opportunity attack loses to an equal-cost detour', () => {
+  const threats = [{ x: 0, z: 2, reach: 1.5 }];
+  const through = [[0, 0], [0, 1], [3, 1]]; // enters the watcher's reach, then leaves
+  const around = [[0, 0], [2, 0], [4, 0]]; // same total cost, never inside
+  assert.equal(scoreDestination([through, around], { threats }), around);
+});
+
+test('a route through a hazard loses to a dry detour worth less than its weight', () => {
+  const surfDamageAt = (x, z) => (x === 1 && z === 0 ? 3 : 0);
+  const wet = [[0, 0], [1, 0], [2, 0]]; // cost 2, through the spill
+  const dry = [[0, 0], [1, 1], [2, 0]]; // cost 2.83, around it
+  assert.equal(scoreDestination([wet, dry], { surfDamageAt }), dry);
+  // No spill, no detour: the cheap route wins again.
+  assert.equal(scoreDestination([wet, dry], {}), wet);
+});
+
+test('positions are judged at the approach point, not the tile centre', () => {
+  const target = { x: 5, z: 5 };
+  const allies = [{ x: 6, z: 5, reach: 1.5 }];
+  const diag = [[3, 3], [4, 4]]; // tile centre reads diagonal - no pincer with an east ally
+  const south = [[3, 3], [3, 4]]; // cheaper, first in the field
+  // Without the approach point, nothing flanks and cheap wins...
+  assert.equal(scoreDestination([south, diag], { target, allies }), south);
+  // ...but the real arrival spot drifts toward the target's west face, the
+  // octant goes cardinal, and the east ally is suddenly dead opposite.
+  const approach = (gx, gz) => (gx === 4 && gz === 4 ? [4.6, 4.9] : [gx, gz]);
+  assert.equal(scoreDestination([south, diag], { target, allies, approach }), diag);
+});
+
+// --- the ranged kit (AI_PLAN M5) --------------------------------------------
+
+test('firing tiles want range AND a line of sight, and the fan is capped', () => {
+  const w = routeWorld({ hasLos: () => true });
+  const routes = firingTileRoutes(0, 0, 4, 0, 3, w);
+  assert.ok(routes.length > 0 && routes.length <= 12);
+  for (const r of routes) {
+    const [gx, gz] = r[r.length - 1];
+    assert.ok(Math.hypot(gx - 4, gz - 0) <= 3 - AI.RANGE_SLACK + 1e-9);
+  }
+  // No line anywhere means no firing field - the caller falls back to the
+  // melee swing field rather than standing still.
+  assert.equal(firingTileRoutes(0, 0, 4, 0, 3, routeWorld({ hasLos: () => false })).length, 0);
+  // Already standing on a firing tile: the answer, not a candidate.
+  assert.deepEqual(firingTileRoutes(3, 0, 4, 0, 3, w), [[[3, 0], [3, 0]]]);
+});
+
+test('the entrenched shot: crouch first, but only when both are affordable', () => {
+  assert.equal(chooseBeat(rich({ inReach: false, canShoot: true, canEntrench: true })).beat, 'entrench');
+  // coverAp 1 + attackAp 2 = 3 > 2 AP: the crouch would cost the shot - just shoot.
+  assert.equal(chooseBeat(rich({ inReach: false, canShoot: true, canEntrench: true, ap: 2 })).beat, 'shoot');
+  assert.equal(chooseBeat(rich({ inReach: false, canShoot: true })).beat, 'shoot');
+  // In reach the swing wins outright - no point-blank ambiguity.
+  assert.equal(chooseBeat(rich({ canShoot: true })).beat, 'attack');
+  // And a standing shot outranks closing the distance.
+  assert.equal(chooseBeat(rich({ inReach: false, canShoot: true, moveBudget: 10 })).beat, 'shoot');
+});
+
+test('a shooter prefers a shielded firing tile and keeps its distance', () => {
+  const open = [[0, 0], [2, 0]];
+  const desk = [[0, 0], [2, 1]]; // slightly dearer, but crouchable
+  const shieldFaceAt = (x, z) => x === 2 && z === 1;
+  assert.equal(scoreDestination([open, desk], { shieldFaceAt }), desk);
+  // A tile inside the party's reach invites the melee answer: with a threat
+  // at (2.5, 0), the equal-cost tile away from it wins.
+  const near = [[0, 0], [2, 0]];
+  const far = [[0, 0], [0, 2]];
+  const nearestThreatDist = (ax, az) => Math.hypot(ax - 2.5, az - 0);
+  assert.equal(scoreDestination([near, far], { nearestThreatDist }), far);
 });
 
 // --- the advance -------------------------------------------------------------
@@ -182,7 +314,10 @@ test('a BODY on the face is cover like anything else', () => {
 // A unit with every option live and the AP for all of them.
 const rich = (over = {}) => ({
   ap: 10, moveBudget: 10, moveCost: 1, inReach: true, hasAttack: true, attackAp: 2,
-  summon: null, toppleAp: 2, canTopple: false, canCrouch: true, coverAp: 1, ...over,
+  support: null, summon: null,
+  pullAp: 2, canPull: false, toppleAp: 2, canTopple: false, shoveAp: 2, canShove: false,
+  canEntrench: false, canShoot: false, breakAp: 2, canBreak: false,
+  canCrouch: true, coverAp: 1, ...over,
 });
 
 test('the summoner reinforces before it wades in', () => {
@@ -217,8 +352,80 @@ test('a boxed-in unit crouches rather than standing there as a target', () => {
   assert.equal(chooseBeat(rich({ inReach: false, moveBudget: 0, ap: 0 })).beat, 'pass');
 });
 
-test('an advance that spends nothing gets the crouch it would have had', () => {
-  assert.equal(afterFailedAdvance(rich()).beat, 'crouch');
-  assert.equal(afterFailedAdvance(rich({ canCrouch: false })).beat, 'stall');
-  assert.equal(afterFailedAdvance(rich({ ap: 0 })).beat, 'stall');
+// --- the cover-denial arms and the refused tail (AI_PLAN M4) -----------------
+
+test('the pull outranks everything but reinforcement', () => {
+  assert.equal(chooseBeat(rich({ canPull: true, canTopple: true, canShove: true })).beat, 'pull');
+  assert.equal(chooseBeat(rich({ canPull: true, summon: { ap: 3, ready: true } })).beat, 'summon');
+  assert.equal(chooseBeat(rich({ canPull: true, ap: 1 })).beat, 'crouch'); // cannot afford it
+});
+
+test('the shove sits between the topple and the swing', () => {
+  // The plan only EXISTS when strictly better (a slam or a hazard landing),
+  // so the arm outranking the plain attack is safe by construction.
+  assert.equal(chooseBeat(rich({ canShove: true })).beat, 'shove');
+  assert.equal(chooseBeat(rich({ canShove: true, canTopple: true })).beat, 'topple');
+});
+
+test('break fires only when there is no walk to make', () => {
+  // With a move budget the advance still wins - walking beats demolition.
+  assert.equal(chooseBeat(rich({ inReach: false, canBreak: true })).beat, 'advance');
+  assert.equal(chooseBeat(rich({ inReach: false, moveBudget: 0, canBreak: true })).beat, 'break');
+});
+
+test('a refused advance falls through the ladder to the crouch', () => {
+  const s = rich({ inReach: false });
+  assert.equal(chooseBeat(s).beat, 'advance');
+  assert.equal(chooseBeat(s, new Set(['advance'])).beat, 'crouch');
+  assert.equal(chooseBeat(s, new Set(['advance', 'crouch'])).beat, 'pass');
+});
+
+test('the turn terminates: every DECIDE spends, refuses, or ends', () => {
+  // Exhaustive walk of the refused-set lattice for a unit with everything
+  // live: keep refusing whatever the ladder offers and it must reach `pass`
+  // within one refusal per arm - the invariant both shipped stall bugs
+  // violated from outside the ladder.
+  const everything = rich({
+    inReach: false, canPull: true, canTopple: true, canShove: true, canBreak: true,
+    canEntrench: true, canShoot: true,
+    support: { ap: 2, ready: true }, summon: { ap: 3, ready: true },
+  });
+  const refused = new Set();
+  let steps = 0;
+  for (;;) {
+    const { beat } = chooseBeat(everything, refused);
+    steps += 1;
+    assert.ok(steps <= 12, 'the ladder must exhaust within one refusal per arm');
+    if (beat === 'pass') break;
+    assert.ok(!refused.has(beat), 'a refused arm must never be offered again');
+    refused.add(beat);
+  }
+});
+
+// --- support and the line weights (AI_PLAN M6) -------------------------------
+
+test('triage outranks reinforcement, and rations like everything else', () => {
+  const both = rich({ support: { ap: 2, ready: true }, summon: { ap: 3, ready: true } });
+  assert.equal(chooseBeat(both).beat, 'support');
+  assert.equal(chooseBeat(rich({ support: { ap: 2, ready: false }, summon: { ap: 3, ready: true } })).beat, 'summon');
+  assert.equal(chooseBeat(rich({ ap: 1, support: { ap: 2, ready: true } })).beat, 'crouch');
+});
+
+test('the worst-off ally in range gets the heal; expiring temps do not', async () => {
+  const { aiSupportPlan, lineWeights } = await import('../../src/combat-ai.js');
+  const spec = { heal: [4, 7], range: 4 };
+  const hurt = { x: 1, z: 0, hp: 5, maxHp: 20, ref: 'hurt' };
+  const worse = { x: 2, z: 0, hp: 2, maxHp: 20, ref: 'worse' };
+  const fine = { x: 0, z: 1, hp: 19, maxHp: 20, ref: 'fine' };
+  const ghost = { x: 1, z: 1, hp: 1, maxHp: 20, expiring: true, ref: 'ghost' };
+  const far = { x: 9, z: 9, hp: 1, maxHp: 20, ref: 'far' };
+  assert.equal(aiSupportPlan(0, 0, spec, [hurt, worse, fine, ghost, far]).ally.ref, 'worse');
+  // Nobody under the threshold in range: no plan, the ladder moves on.
+  assert.equal(aiSupportPlan(0, 0, spec, [fine, far]), null);
+
+  // The line weights: a status the target lacks doubles the line's chances;
+  // one they already wear rolls flat.
+  const pool = [{ min: 1, max: 2 }, { min: 1, max: 2, applies: 'blinded' }];
+  assert.deepEqual(lineWeights(pool, () => false), [1, AI.STATUS_WEIGHT]);
+  assert.deepEqual(lineWeights(pool, (id) => id === 'blinded'), [1, 1]);
 });

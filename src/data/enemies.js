@@ -9,8 +9,19 @@
 //   'green'  - no intention of initiating; only fights if provoked
 //   'yellow' - will talk first, then maybe escalate
 //   'red'    - straight to battle
+//
+// `focus` (0..1, default combat-ai.AI.FOCUS_DEFAULT) is targeting discipline
+// once the fight is on (AI_PLAN M2): 0 harasses whoever is closest, 1 picks
+// the member it can actually finish and works them. Personality data, read
+// by one shared rule - like `aggression`, it says who they are, not how the
+// game works.
 import { fromClass } from './classes.js';
 
+// An attack entry with `range` is a RANGED line (AI_PLAN M5): the AI fires
+// it only out of reach, gated on line of sight and a clear shot (the crouch
+// game's shotOutcome - object shields refuse it, human shields take it), at
+// the same attackAp as any line. Entries without `range` are the melee pool.
+//
 // id -> either a standalone stat block, or `{ classId, ...overrides }` for a
 // coworker who IS one of the playable classes. The Security Guard and the HR
 // Representative are those: each is the same job as a class, so each names it
@@ -41,6 +52,7 @@ const KITS = {
     attackAp: 3, // AP one swing costs them in combat
     xp: 8,
     aggression: 'red', // straight to battle
+    focus: 0.2, // harasses whoever is closest - pettiness, not strategy
     examine: 'The Manager: radiates unread-email energy.',
     loot: [
       { item: 'performance-review', chance: 1 },
@@ -70,6 +82,7 @@ const KITS = {
     xp: 10,
     accuracy: 0.05, // sharper aim than the base coworkers (HIT_PLAN)
     aggression: 'red', // descended from the floors above; negotiation is beneath him
+    focus: 0.9, // picks the kill and works it - restructuring is a discipline
     examine: 'An Executive, down from the floors above. The air pressure changes around him.',
     loot: [
       { item: 'performance-review', chance: 1 },
@@ -82,6 +95,11 @@ const KITS = {
     ],
     attacks: [
       { min: 3, max: 5, log: 'The Executive restructures your reporting line.' },
+      // The ranged line (AI_PLAN M5, the ratified Q1 pick): the first enemy
+      // in the game that shoots, which is what makes the PLAYER's crouch,
+      // human shields and Pull Over finally matter. Range matches the throw
+      // precedent; no ammo - an executive never runs out of deadlines.
+      { min: 2, max: 4, range: 5, log: 'The Executive sets a hard deadline from across the room.', missLog: 'The deadline sails past. It was aspirational.' },
       // A reorg, delivered as a question. The action bar comes back in a
       // different order for a couple of turns (statuses: `confused`).
       { min: 2, max: 4, log: 'The Executive asks what it is you even do here.', applies: 'confused', appliesLog: 'Good question. Your whole remit swims for a moment.' },
@@ -108,6 +126,7 @@ const KITS = {
     attackAp: 3,
     xp: 6,
     aggression: 'yellow', // wants a "culture-fit conversation" before the knives
+    focus: 0.4, // a people person - spreads the attention around, mostly
     examine: 'HR: smiles warmly. Never stops taking notes.',
     loot: [
       { item: 'hr-pamphlet', chance: 1 },
@@ -140,6 +159,19 @@ const KITS = {
       lifetimeTurns: 5,
       log: 'HR posts the role internally. Employees materialize, résumés in hand.',
     },
+    // Enemy-side triage (AI_PLAN M6, Q4 ratified): she patches the worst-off
+    // colleague she can reach, RATIONED - `uses` per fight, cooldown-paced -
+    // because M9 cut the player's heal ritual and the enemy side must not
+    // reintroduce it from the other direction. The numbers mirror the shape
+    // of her summon descriptor: everything the AI reads lives on the def.
+    support: {
+      heal: [4, 7],
+      uses: 2,
+      cooldownRounds: 1,
+      ap: 2,
+      range: 4,
+      log: 'HR approves emergency self-care. Attendance is mandatory.',
+    },
   },
 
   'security-guard': {
@@ -170,6 +202,7 @@ const KITS = {
     // Badge first, force second: he wants to see your lanyard before anything
     // escalates, which is exactly what 'yellow' means.
     aggression: 'yellow',
+    focus: 0.5, // steady, procedural; STICKINESS does his character work
     examine: 'Security. Knows the badge policy by heart. Has never once been asked about it.',
     loot: [
       { item: 'laminated-lanyard', chance: 1 },

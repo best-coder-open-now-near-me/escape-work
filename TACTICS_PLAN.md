@@ -702,7 +702,11 @@ None. See decision #6.
    - Honest scope notes: no shipped enemy has a ranged attack, so the
      PLAYER-side crouch is future-proofing today — the immediate gameplay is
      enemies turtling against your throws, and human-shield redirects fire
-     player-side only until enemies crouch behind bodies. `hold-the-line`
+     player-side only until enemies crouch behind bodies. **Superseded
+     2026-08-01 (AI_PLAN M5):** the Executive shoots now — the player-side
+     crouch, human shields and Pull Over are live gameplay, and the AI's
+     shot runs this milestone's own `shotOutcome` gauntlet from the other
+     side. `hold-the-line`
      still exists unabsorbed. The "safe cover vs topplable" colour split is
      partial: the hovered shield rings yellow, but yellow does not yet
      distinguish topplable from fixed. Combat-only verb: out of a fight the
@@ -761,6 +765,8 @@ None. See decision #6.
      a body it lands on stands IN the cell until the pin lifts, and walks
      out because pathfinding never tests a walk's starting tile. The AI
      does not yet topple partitions (furniture only) — a follow-up.
+     **Done 2026-08-01 (AI_PLAN M4):** the AI topples partitions onto
+     members through the same machinery.
 
 7. **Shots sail over low furniture (M6a).** ✅ Landed.
    `[ratified]` "height threshold as you suggest" (designer, 2026-07-29).
@@ -888,7 +894,8 @@ None. See decision #6.
      follow-up if wanted `[proposed]` (an armed OOC attack still refuses
      props); no walk-in for prop attacks (melee rings only promise reach);
      the `pinned` chip's log line still says "under it", which reads odd on
-     a pull; enemies neither break nor pull yet.
+     a pull; enemies neither break nor pull yet — **superseded 2026-08-01
+     (AI_PLAN M4): they do both now, at the player's own prices.**
 
 Milestones 1 and 2 are independent and may be swapped; 3–5 all depend on 1.
 M6 depends on 1, 2 and 5 (opportunity attacks and facing already exist for

@@ -372,7 +372,14 @@ killing anyone, and therefore the correct play every time.
       oscillating (3,2)→(3,3)→(3,2)… forever. The player-side twin
       `routeBeside` (`combat.js:2094`) already fixes exactly this and carries a
       comment describing the same symptom — port that special case.
-- [ ] **Ranged walk-in asks a melee question** (`combat.js:2020-2056`): the
+- [x] ~~**Ranged walk-in asks a melee question**~~ — DONE. Both sides route to
+      a firing position through the shared pure rule `routeToFiringPosition`
+      (`pathfinding.js:440`): combat via `routeIntoRange` (`combat.js`), out of
+      combat via `bestFiringPath` (`main.js:1289`), each cached and each
+      under-promising the circle the arrival check measures. Verified
+      2026-08-02 while wiring the AI's own firing-tile search (AI_PLAN M5),
+      which asks the same question from the other side. Original entry:
+      **Ranged walk-in asks a melee question** (`combat.js:2020-2056`): the
       ranged-weapon path routes via `routeBeside(en)` (a tile *beside* the
       enemy) when the requirement is any tile within `range` with line of
       sight, so it refuses "No way to get a shot at them" while reachable
