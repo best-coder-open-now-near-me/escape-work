@@ -12,6 +12,7 @@ import { TILE_TYPES, blocksSight, TILE_CATEGORIES,
 import { ENEMY_TYPES, ENEMY_KITS } from '../../src/data/enemies.js';
 import { TALENTS, TALENT_EFFECT_KEYS, STARTING_TALENT_BY_CLASS } from '../../src/data/talents.js';
 import { parseActorRef } from '../../src/data/actor-registries.js';
+import { CHAR_POOL } from '../../src/editor.js';
 import { NPCS } from '../../src/data/npcs.js';
 import { COMPANIONS, COMPANION_KITS } from '../../src/data/companions.js';
 import { CLASSES, MERGED_PER_KEY } from '../../src/data/classes.js';
@@ -672,4 +673,19 @@ test('the category order carries no names nothing uses', () => {
   for (const def of Object.values(TILE_TYPES)) if (def.category) used.add(def.category);
   const stale = TILE_CATEGORIES.filter((c) => !used.has(c));
   assert.deepEqual(stale, [], `TILE_CATEGORIES lists unused categories: ${stale.join(', ')}`);
+});
+
+test('the editor can name every paintable tile type', () => {
+  // The editor allocates a legend character per DISTINCT type a level uses,
+  // so the ceiling is the pool size minus what is reserved off it. It was
+  // reached: 87 paintable types against 86 allocatable characters, and the
+  // 87th painted plain floor (Q056). The failure had no symptom a level
+  // author could act on, which is what makes it worth a test rather than a
+  // comment - the pool must be able to name every type, with room to grow.
+  const paintable = Object.values(TILE_TYPES).filter((d) => !d.runtimeOnly).length;
+  const reserved = new Set(['@', ' ', ...Object.keys(actorLegend())]);
+  const allocatable = CHAR_POOL.filter((c) => !reserved.has(c)).length;
+  assert.ok(allocatable >= paintable,
+    `the editor's character pool holds ${allocatable} allocatable characters for `
+    + `${paintable} paintable tile types - a level using them all would silently paint floor`);
 });

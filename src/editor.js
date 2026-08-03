@@ -19,6 +19,32 @@ import { say, PANEL_CHROME, BUTTON_CHROME } from './ui.js';
 
 const pc = globalThis.window?.pc;
 const PLAYER_CHAR = '@';
+
+// Every character a tile type may be allocated in a level's legend: printable
+// ASCII, then the printable Latin-1 block.
+//
+// The second half is headroom the first half had run out of. ASCII gives 93
+// usable characters, '@' and the six actor characters are reserved off it, and
+// the registry has 87 paintable types - so the pool was ONE short of the types
+// it must be able to name, and the 87th distinct type on a level painted plain
+// floor with no message at all (Q056). Map rows are JSON strings and
+// `parseLevel` indexes single BMP characters, so Latin-1 costs nothing and
+// round-trips; a type's preferred registry character is still claimed first,
+// so no hand-authored level changes by a byte.
+//
+// Exported for the test that pins the headroom - the wall this hit is exactly
+// the kind that should be a red suite rather than a brush that does nothing.
+export const CHAR_POOL = [];
+for (let c = 33; c < 127; c++) {
+  const ch = String.fromCharCode(c);
+  if (ch === '\\') continue; // escaped inside a JSON map row - the worst one
+  CHAR_POOL.push(ch);
+}
+for (let c = 0xA1; c <= 0xFF; c++) {
+  if (c === 0xAD) continue; // soft hyphen: invisible in an editor, unfindable in a diff
+  CHAR_POOL.push(String.fromCharCode(c));
+}
+
 const MIN_SIZE = 4;
 const MAX_SIZE = 40;
 
@@ -61,12 +87,9 @@ export function startEditor(app, levelData, stashKey) {
   //
   // `runtimeOnly` tiles (the fallen twins, POWERS_PLAN M6) are never painted,
   // so they never draw a character and never reach a legend.
-  const CHAR_POOL = [];
-  for (let c = 33; c < 127; c++) {
-    const ch = String.fromCharCode(c);
-    if (ch === '\\') continue; // escaped inside a JSON map row - the worst one
-    CHAR_POOL.push(ch);
-  }
+  // The pool itself is at module scope (CHAR_POOL), so a node test can check
+  // it is big enough instead of a level author discovering it is not.
+  //
   // Actor characters are off the table for tiles: a level's two legends share
   // one map, and parseLevel checks `actors` first, so a tile handed an actor's
   // character would silently become that actor. This is the collision the
@@ -80,7 +103,14 @@ export function startEditor(app, levelData, stashKey) {
     const want = TILE_TYPES[id]?.char;
     const free = (ch) => ch && !reservedChars.has(ch) && !tileByChar[ch];
     const ch = free(want) ? want : CHAR_POOL.find(free);
-    if (!ch) return charByType.floor; // pool exhausted: paint floor, say so below
+    if (!ch) {
+      // The comment that used to sit here promised this was said "below", and
+      // nothing said it - so exhaustion was a brush that silently painted
+      // floor and a level that exported with no trace of the attempt. The
+      // author's only clue was that the tile they clicked did not appear.
+      say(`Editor: out of map characters - "${id}" cannot be painted on this level.`);
+      return charByType.floor;
+    }
     charByType[id] = ch;
     tileByChar[ch] = id;
     return ch;
