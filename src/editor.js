@@ -1397,7 +1397,7 @@ export function startEditor(app, levelData, stashKey) {
   palette.id = 'editor-palette';
   Object.assign(palette.style, {
     display: 'flex', gap: '5px', flexWrap: 'wrap', justifyContent: 'center',
-    alignItems: 'center', maxHeight: '26vh', overflowY: 'auto',
+    alignItems: 'center', maxHeight: '22vh', overflowY: 'auto',
   });
   const commands = document.createElement('div');
   commands.id = 'editor-commands';
@@ -1405,6 +1405,39 @@ export function startEditor(app, levelData, stashKey) {
     display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'center',
     alignItems: 'center', borderTop: '1px solid #3a3a52', paddingTop: '7px',
   });
+  // Two more rows for the controls you touch per SESSION rather than per
+  // minute - level identity, storeys, size, overlays. They collapse by default:
+  // with everything on one row the bar wrapped to four lines and covered the
+  // middle of the map, so clicking the centre tile hit a button instead of the
+  // floor. (Found by a test that paints the map centre, which is exactly the
+  // thing a real author does.)
+  const rowStyle = {
+    display: 'none', gap: '6px', flexWrap: 'wrap', justifyContent: 'center',
+    alignItems: 'center', paddingTop: '6px',
+  };
+  const levelRow = document.createElement('div');
+  levelRow.id = 'editor-level-row';
+  Object.assign(levelRow.style, rowStyle);
+  const viewRow = document.createElement('div');
+  viewRow.id = 'editor-view-row';
+  Object.assign(viewRow.style, rowStyle);
+  const groupToggle = (id, label, row, title) => {
+    const b = document.createElement('button');
+    b.id = id;
+    b.textContent = label;
+    b.title = title;
+    b.setAttribute('aria-expanded', 'false');
+    Object.assign(b.style, BUTTON_CHROME, {
+      padding: '9px 11px', borderRadius: '7px', minHeight: '40px', cursor: 'pointer',
+    });
+    b.onclick = () => {
+      const open = row.style.display === 'none';
+      row.style.display = open ? 'flex' : 'none';
+      b.setAttribute('aria-expanded', open ? 'true' : 'false');
+      b.style.borderColor = open ? '#8adf76' : '#3a3a52';
+    };
+    return b;
+  };
   const btn = (id, label, host = palette) => {
     const b = document.createElement('button');
     b.id = id;
@@ -1661,8 +1694,6 @@ export function startEditor(app, levelData, stashKey) {
   };
   palette.appendChild(actorRow);
 
-  divider();
-
   // --- overlay toggles ----------------------------------------------------------
   const overlayBox = document.createElement('div');
   overlayBox.id = 'ed-overlays';
@@ -1705,9 +1736,7 @@ export function startEditor(app, levelData, stashKey) {
       + `${b.revives} revives · ${b.ammo} paper · ${b.cash} cash — from ${b.containers} containers`, 7000);
   };
   overlayBox.appendChild(budgetBtn);
-  commands.appendChild(overlayBox);
-
-  divider();
+  viewRow.appendChild(overlayBox);
 
   // --- storeys (EDITOR_PLAN M4) --------------------------------------------------
   // Deliberately small, which is the point of the layer model: a storey is an
@@ -1716,7 +1745,7 @@ export function startEditor(app, levelData, stashKey) {
   const storeyBox = document.createElement('div');
   storeyBox.id = 'ed-storeys';
   Object.assign(storeyBox.style, { display: 'flex', gap: '4px', alignItems: 'center' });
-  commands.appendChild(storeyBox);
+  levelRow.appendChild(storeyBox);
 
   const heightField = document.createElement('input');
   heightField.id = 'ed-storey-height';
@@ -1823,9 +1852,7 @@ export function startEditor(app, levelData, stashKey) {
         : 'Stairway — needs a storey above this one. Add one with + first.';
     }
   }
-  commands.appendChild(heightField);
-
-  divider();
+  levelRow.appendChild(heightField);
 
   // --- level identity ---------------------------------------------------------
   const field = (id, placeholder, width, title) => {
@@ -1837,7 +1864,7 @@ export function startEditor(app, levelData, stashKey) {
     Object.assign(i.style, BUTTON_CHROME, {
       padding: '8px 9px', borderRadius: '7px', width, cursor: 'text',
     });
-    commands.appendChild(i);
+    levelRow.appendChild(i);
     return i;
   };
   const nameField = field('ed-name', 'floor name', '150px', 'The name shown when this floor loads');
@@ -1860,7 +1887,7 @@ export function startEditor(app, levelData, stashKey) {
     + Object.entries(LEVELS).filter(([, l]) => !l.layers)
       .map(([id, l]) => `<option value="${id}">next: ${l.name || id}</option>`).join('');
   nextField.onchange = () => { levelNext = nextField.value || undefined; markDirty(); };
-  commands.appendChild(nextField);
+  levelRow.appendChild(nextField);
   // Keep the fields honest when a load replaces the document under them.
   function syncMetaFields() {
     nameField.value = levelName || '';
@@ -1875,16 +1902,15 @@ export function startEditor(app, levelData, stashKey) {
   sizeLabel.id = 'ed-size';
   Object.assign(sizeLabel.style, { padding: '0 4px', opacity: '.8' });
   function updateSizeLabel() { sizeLabel.textContent = `${width}×${height}`; }
-  btn('ed-shrink-w', '−col', commands).onclick = () => resize(-1, 0);
-  btn('ed-grow-w', '+col', commands).onclick = () => resize(1, 0);
-  btn('ed-shrink-h', '−row', commands).onclick = () => resize(0, -1);
-  btn('ed-grow-h', '+row', commands).onclick = () => resize(0, 1);
-  btn('ed-grow-w-left', '+col ←', commands).onclick = () => shift(1, 0);
-  btn('ed-shrink-w-left', '−col ←', commands).onclick = () => shift(-1, 0);
-  btn('ed-grow-h-top', '+row ↑', commands).onclick = () => shift(0, 1);
-  btn('ed-shrink-h-top', '−row ↑', commands).onclick = () => shift(0, -1);
-  commands.appendChild(sizeLabel);
-  divider();
+  btn('ed-shrink-w', '−col', levelRow).onclick = () => resize(-1, 0);
+  btn('ed-grow-w', '+col', levelRow).onclick = () => resize(1, 0);
+  btn('ed-shrink-h', '−row', levelRow).onclick = () => resize(0, -1);
+  btn('ed-grow-h', '+row', levelRow).onclick = () => resize(0, 1);
+  btn('ed-grow-w-left', '+col ←', levelRow).onclick = () => shift(1, 0);
+  btn('ed-shrink-w-left', '−col ←', levelRow).onclick = () => shift(-1, 0);
+  btn('ed-grow-h-top', '+row ↑', levelRow).onclick = () => shift(0, 1);
+  btn('ed-shrink-h-top', '−row ↑', levelRow).onclick = () => shift(0, -1);
+  levelRow.appendChild(sizeLabel);
   commands.appendChild(filterBox);
 
   divider();
@@ -2151,6 +2177,7 @@ export function startEditor(app, levelData, stashKey) {
   function applyCollapse() {
     palette.style.display = collapsed ? 'none' : 'flex';
     commands.style.display = collapsed ? 'none' : 'flex';
+    if (collapsed) { levelRow.style.display = 'none'; viewRow.style.display = 'none'; }
     collapseBtn.textContent = collapsed ? `▲ show tools — ${brushLabel()}` : '▼ hide tools';
     collapseBtn.title = collapsed
       ? 'Show the palette and commands (or press Tab)'
@@ -2161,9 +2188,15 @@ export function startEditor(app, levelData, stashKey) {
   collapseBtn.onclick = toggleCollapse;
   try { collapsed = localStorage.getItem(COLLAPSE_KEY) === '1'; } catch { /* ignore */ }
 
+  commands.appendChild(groupToggle('ed-group-level', 'level ▾', levelRow,
+    'Name, depth, next floor, storeys and map size'));
+  commands.appendChild(groupToggle('ed-group-view', 'view ▾', viewRow,
+    'Overlays: reach, cover, fights, surprise, notice, wander, fire, budget'));
   bar.appendChild(collapseBtn);
   bar.appendChild(palette);
   bar.appendChild(commands);
+  bar.appendChild(levelRow);
+  bar.appendChild(viewRow);
   document.body.appendChild(bar);
   applyCollapse();
 

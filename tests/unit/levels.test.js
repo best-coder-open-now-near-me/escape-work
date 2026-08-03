@@ -15,6 +15,7 @@ import { parseActorRef } from '../../src/data/actor-registries.js';
 import { NPCS } from '../../src/data/npcs.js';
 import { COMPANIONS, COMPANION_KITS } from '../../src/data/companions.js';
 import { CLASSES, MERGED_PER_KEY } from '../../src/data/classes.js';
+import { CUSTOM_RIGS } from '../../src/data/looks.js';
 import { ACTIONS, summonSpec } from '../../src/data/actions.js';
 import { ITEMS, LOOT_TABLES } from '../../src/data/items.js';
 import { SHOPS } from '../../src/data/shops.js';
@@ -758,4 +759,26 @@ test('the fbx converter reports the same sight-block threshold the game uses', (
   assert.ok(m, 'the converter declares SIGHT_BLOCK_HEIGHT');
   assert.equal(Number(m[1]), SIGHT_BLOCK_HEIGHT,
     'tools/fbx-to-glb.py and src/data/tiles.js disagree about what blocks sight');
+});
+
+test('every character rig on disk is a rig the game can legitimately ask for', () => {
+  // build.mjs prunes unreferenced PROP models and deliberately exempts
+  // assets/characters/ - rigs are named by string interpolation from sheet, def
+  // and wardrobe data in eight places, so a static sweep cannot follow them. An
+  // earlier version tried to enumerate those sources and silently dropped the
+  // four CUSTOM_RIGS, which shipped a game where a custom character had no body.
+  //
+  // This is the guard that makes the exemption safe to keep: every rig on disk
+  // is accounted for by some registry or by the wardrobe, so "ship them all" is
+  // never shipping junk, and adding a rig nobody references fails here.
+  const rigs = readdirSync('assets/characters')
+    .filter((f) => f.endsWith('.glb')).map((f) => f.replace(/\.glb$/, ''));
+  const claimed = new Set(CUSTOM_RIGS);
+  for (const reg of [CLASSES, ...ACTOR_REGISTRIES]) {
+    for (const def of Object.values(reg)) if (def.model) claimed.add(def.model);
+  }
+  for (const rig of rigs) {
+    assert.ok(claimed.has(rig),
+      `assets/characters/${rig}.glb is claimed by no class, actor or CUSTOM_RIGS entry`);
+  }
 });

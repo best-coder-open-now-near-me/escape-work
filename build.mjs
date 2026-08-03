@@ -31,57 +31,53 @@ await esbuild.build({
 cpSync('src/index.html', `${OUT}/index.html`);
 cpSync(ENGINE, `${OUT}/playcanvas.min.js`);
 
-// Ship the assets the game can actually reach. `assets/` holds far more than
-// the registries reference - a whole furniture kit was converted at once, and
-// most of it is not placed by any tile type - so copying the directory wholesale
+// Ship the props the game can actually place. `assets/` holds far more than the
+// registries reference - a whole furniture kit was converted at once, and most
+// of it is not placed by any tile type - so copying the directory wholesale
 // shipped several MB of .glb nothing points at.
 //
-// Reachability is derived from the registries rather than from a hand-kept
-// list, so "drop a file in assets/ and it deploys" still holds the moment
-// something references it. Anything that is NOT a .glb (textures, audio,
-// sprites) is copied as before: those are small and referenced by string in
-// ways this sweep cannot see.
-const referencedModels = new Set();
+// The sweep prunes ONLY what it can prove: prop models, which are referenced
+// exactly one way (`TILE_TYPES[x].model`). Character rigs are deliberately
+// exempt. They are named by string interpolation from sheet, def and wardrobe
+// data in eight places, plus CUSTOM_RIGS, and an earlier version of this sweep
+// that tried to enumerate those sources got it wrong and silently dropped four
+// rigs - a build that ships a broken game to save 200KB is a bad trade. There
+// are twelve of them; they all ship.
+//
+// Everything that is not a .glb (textures, audio, sprites) is copied as before.
+const referencedProps = new Set();
 {
   const { TILE_TYPES } = await import('./src/data/tiles.js');
-  const { CLASSES } = await import('./src/data/classes.js');
-  const { ACTOR_REGISTRIES } = await import('./src/data/actor-registries.js');
-  const { LOOKS } = await import('./src/data/looks.js');
-  for (const def of Object.values(TILE_TYPES)) if (def.model) referencedModels.add(`${def.model}.glb`);
-  for (const reg of [CLASSES, ...ACTOR_REGISTRIES]) {
-    for (const def of Object.values(reg)) if (def.model) referencedModels.add(`characters/${def.model}.glb`);
-  }
-  // A look can swap the body a character wears.
-  for (const look of Object.values(LOOKS || {})) {
-    if (look?.model) referencedModels.add(`characters/${look.model}.glb`);
-  }
+  for (const def of Object.values(TILE_TYPES)) if (def.model) referencedProps.add(`${def.model}.glb`);
 }
 let shipped = 0;
 let skipped = 0;
+const CHARACTERS = `characters${sep}`;
 if (existsSync('assets')) {
   cpSync('assets', `${OUT}/assets`, {
     recursive: true,
     filter: (src) => {
       if (!src.endsWith('.glb')) return true;
-      const rel = src.replace(/^assets[\\/]/, '').split(sep).join('/');
-      const keep = referencedModels.has(rel);
+      const rel = src.replace(/^assets[\\/]/, '');
+      if (rel.startsWith(CHARACTERS) || rel.startsWith('characters/')) return true; // rigs always ship
+      const keep = referencedProps.has(rel.split(sep).join('/'));
       if (keep) shipped += 1; else skipped += 1;
       return keep;
     },
   });
 }
 
-// If the sweep names a model that is not on disk, the build has just shipped a
+// If the sweep drops a prop a tile type names, the build has just shipped a
 // guaranteed 404 - fail here rather than at someone's first playthrough. (The
 // unit suite checks the same relation from the other side: every registry model
-// must exist. This catches a path-shape mistake in the sweep itself.)
-if (shipped !== referencedModels.size) {
-  const found = new Set();
-  for (const m of referencedModels) if (existsSync(`${OUT}/assets/${m}`)) found.add(m);
-  const lost = [...referencedModels].filter((m) => !found.has(m));
-  throw new Error(
-    `Build would ship ${lost.length} missing model(s): ${lost.join(', ')}\n`
-    + 'Either the file is absent from assets/ or the reachability sweep in build.mjs derives its path wrongly.');
+// must exist on disk. This catches a path-shape mistake in the sweep itself.)
+{
+  const lost = [...referencedProps].filter((m) => !existsSync(`${OUT}/assets/${m}`));
+  if (lost.length) {
+    throw new Error(
+      `Build would ship ${lost.length} missing prop model(s): ${lost.join(', ')}\n`
+      + 'Either the file is absent from assets/ or the sweep in build.mjs derives its path wrongly.');
+  }
 }
 
-console.log(`Build complete -> ${OUT}/  (${shipped} models shipped, ${skipped} unreferenced skipped)`);
+console.log(`Build complete -> ${OUT}/  (${shipped} prop models + all character rigs shipped, ${skipped} unreferenced props skipped)`);
