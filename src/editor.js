@@ -6,6 +6,11 @@
 // stashes the level in localStorage and reloads into the real game; the game
 // shows a badge to jump back here. Any shipped level can be loaded as a base,
 // and the grid can be grown/shrunk from the right/bottom edges.
+//
+// Work is protected three ways: snapshot undo/redo (Ctrl+Z / Ctrl+Shift+Z, one
+// step per STROKE), a debounced autosave draft that is restored on the next
+// boot, and confirmations on the two buttons that throw the session away. The
+// playtest stash is a separate hand-off slot, not the save.
 import { TILE_TYPES } from './data/tiles.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { actorChar, actorLegend, parseActorRef } from './data/actor-registries.js';
@@ -271,10 +276,12 @@ export function startEditor(app, levelData, stashKey) {
       const target = brush === 'door' ? doorSet : wallSet;
       const other = brush === 'door' ? wallSet : doorSet;
       if (target.has(k) && !other.has(k)) return;
+      commitStroke();
       other.delete(k);
       target.add(k);
     } else {
       if (!wallSet.has(k) && !doorSet.has(k)) return;
+      commitStroke();
       wallSet.delete(k);
       doorSet.delete(k);
     }
@@ -370,6 +377,8 @@ export function startEditor(app, levelData, stashKey) {
     // one session-long map, so what you exported depended on what you had
     // opened before it.
     resetAllocator();
+    history = [];
+    future = [];
     tierChars = new Map();
     tierCharIds = {};
     for (const [ch, val] of Object.entries(data.actors || {})) {
@@ -417,6 +426,78 @@ export function startEditor(app, levelData, stashKey) {
     renderAll();
   }
 
+  // --- history and autosave ---------------------------------------------------
+  // Every edit used to be immediately final. The default brush is `wall` and
+  // left-DRAG paints, so one stray press-and-move across a finished room
+  // replaced a swath of floor with cubicle wall and there was no way back
+  // except repainting from memory. `-col` deleted a whole column on one click.
+  //
+  // Full snapshots rather than a diff format: at the 40x40 ceiling a snapshot
+  // is ~1600 characters plus four small Sets, which is cheaper to write and
+  // very much cheaper to reason about than an inverse-operation log.
+  const HISTORY_CAP = 60;
+  let history = [];
+  let future = [];
+  let dirty = false;
+  const snapshot = () => ({
+    rows: rows.map((r) => r.slice()),
+    hWalls: new Set(hWalls), vWalls: new Set(vWalls),
+    hDoors: new Set(hDoors), vDoors: new Set(vDoors),
+    width, height, levelName, levelNext, levelDepth,
+  });
+  const restore = (s) => {
+    rows = s.rows.map((r) => r.slice());
+    hWalls = new Set(s.hWalls); vWalls = new Set(s.vWalls);
+    hDoors = new Set(s.hDoors); vDoors = new Set(s.vDoors);
+    width = s.width; height = s.height;
+    levelName = s.levelName; levelNext = s.levelNext; levelDepth = s.levelDepth;
+    renderAll();
+  };
+  // A gesture ARMS a snapshot; the first mutation inside it commits. Pushing
+  // eagerly on press meant a click on empty space created an undo step that
+  // undid nothing, which reads as a broken Ctrl+Z.
+  let pendingStroke = null;
+  const beginStroke = () => { pendingStroke = snapshot(); };
+  function pushHistory() {
+    history.push(pendingStroke || snapshot());
+    pendingStroke = null;
+    if (history.length > HISTORY_CAP) history.shift();
+    future = [];
+    markDirty();
+  }
+  // Called by paint/paintEdge once they know they are really changing something.
+  function commitStroke() {
+    if (pendingStroke) pushHistory();
+    else markDirty();
+  }
+  function undo() {
+    if (!history.length) { toast('Nothing to undo.'); return; }
+    future.push(snapshot());
+    restore(history.pop());
+    toast(`Undo. (${history.length} step${history.length === 1 ? '' : 's'} left)`);
+  }
+  function redo() {
+    if (!future.length) { toast('Nothing to redo.'); return; }
+    history.push(snapshot());
+    restore(future.pop());
+    toast('Redo.');
+  }
+
+  // Autosave is SEPARATE from the playtest stash. The stash is a hand-off slot
+  // written only when you press Playtest; before this, closing the tab or
+  // hitting Reset threw away everything since that press - and a reload
+  // silently restored the stash, which could be an hour old.
+  const DRAFT_KEY = 'escape-work.editor.draft';
+  let draftTimer = null;
+  function markDirty() {
+    dirty = true;
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(() => {
+      try { localStorage.setItem(DRAFT_KEY, toJson()); } catch { /* private mode, quota */ }
+    }, 700);
+  }
+  const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ } };
+
   // --- painting -------------------------------------------------------------------
   let brush = 'wall'; // a tile type id, 'player', or 'enemy:<typeId>'
   function charForBrush() {
@@ -430,6 +511,7 @@ export function startEditor(app, levelData, stashKey) {
     const { x, z } = tile;
     if (x < 0 || x >= width || z < 0 || z >= height) return;
     if (rows[z][x] === ch) return;
+    commitStroke();
     // exactly one player spawn: painting a new one clears the old
     if (ch === PLAYER_CHAR) {
       for (let zz = 0; zz < height; zz++) {
@@ -461,6 +543,21 @@ export function startEditor(app, levelData, stashKey) {
     const nw = Math.min(MAX_SIZE, Math.max(MIN_SIZE, width + dw));
     const nh = Math.min(MAX_SIZE, Math.max(MIN_SIZE, height + dh));
     if (nw === width && nh === height) return;
+    pushHistory();
+    // Shrinking silently deleted whatever was in the trimmed rows/columns,
+    // including the player spawn. Say what is about to go; undo can take it
+    // back now, but only if you know to reach for it.
+    if (nw < width || nh < height) {
+      let lostActors = 0;
+      for (let z = 0; z < height; z++) {
+        for (let x = 0; x < width; x++) {
+          if (x < nw && z < nh) continue;
+          const c = rows[z][x];
+          if (c === PLAYER_CHAR || actorIdByChar[c] || tierCharIds[c]) lostActors++;
+        }
+      }
+      if (lostActors) toast(`Trimmed ${lostActors} placed actor${lostActors === 1 ? '' : 's'}. Ctrl+Z puts them back.`);
+    }
     while (rows.length < nh) rows.push(new Array(width).fill(charOfType('floor')));
     while (rows.length > nh) rows.pop();
     for (const row of rows) {
@@ -488,10 +585,17 @@ export function startEditor(app, levelData, stashKey) {
     app,
     canvas: document.getElementById('app'),
     focus: { x: (levelData.map[0].length - 1) / 2, z: (levelData.map.length - 1) / 2 },
+    // One snapshot per STROKE. A drag fires this once and then streams tiles,
+    // so undo steps back over the whole swipe rather than one cell of it.
+    onAnyLeftPress: () => beginStroke(),
     onLeftClickTile: (t, g) => (brush === 'partition' || brush === 'door' ? paintEdge(nearestEdge(g), true) : paint(t)),
     onLeftDragTile: (t, g) => (brush === 'partition' || brush === 'door' ? paintEdge(nearestEdge(g), true) : paint(t)),
-    onRightClickTile: (t, sx, sy, g) =>
-      (brush === 'partition' || brush === 'door' ? paintEdge(nearestEdge(g), false) : paint(t, charOfType('floor'))),
+    onRightClickTile: (t, sx, sy, g) => {
+      beginStroke(); // erase is a gesture too, and there is no right-press hook
+      return brush === 'partition' || brush === 'door'
+        ? paintEdge(nearestEdge(g), false)
+        : paint(t, charOfType('floor'));
+    },
   });
 
   // --- level JSON in/out -----------------------------------------------------------
@@ -662,21 +766,63 @@ export function startEditor(app, levelData, stashKey) {
   };
   bar.appendChild(select);
 
+  btn('ed-undo', '↶ Undo').onclick = () => undo();
+  btn('ed-redo', '↷ Redo').onclick = () => redo();
+
   btn('ed-playtest', '▶ Playtest').onclick = () => {
     localStorage.setItem(stashKey, toJson());
+    dirty = false; // the stash IS a save - leaving for it is not losing work
+    clearDraft();
     location.hash = '';
     location.reload();
   };
   btn('ed-export', 'Export JSON').onclick = showExport;
-  btn('ed-reset', 'Reset').onclick = () => {
-    localStorage.removeItem(stashKey);
-    location.reload();
+  // Reset and Exit each throw the session away. They used to do it on one
+  // unconfirmed click, styled identically to Export sitting beside them.
+  const dangerBtn = (id, label, confirmText, act) => {
+    const b = btn(id, label);
+    Object.assign(b.style, { borderColor: '#7a3a4a', color: '#ffd9e0' });
+    b.onclick = () => {
+      // eslint-disable-next-line no-alert
+      if (dirty && !window.confirm(confirmText)) return;
+      act();
+    };
+    return b;
   };
-  btn('ed-exit', 'Exit editor').onclick = () => {
-    localStorage.removeItem(stashKey);
-    location.hash = '';
-    location.reload();
-  };
+  dangerBtn('ed-reset', 'Reset',
+    'Discard the level you are editing and reload?\n\nUnsaved painting since your last Playtest will be lost.',
+    () => { localStorage.removeItem(stashKey); clearDraft(); location.reload(); });
+  dangerBtn('ed-exit', 'Exit editor',
+    'Leave the editor?\n\nUnsaved painting since your last Playtest will be lost.',
+    () => {
+      localStorage.removeItem(stashKey);
+      clearDraft();
+      location.hash = '';
+      location.reload();
+    });
+
+  // --- keyboard ---------------------------------------------------------------
+  // The editor registered no key handlers at all: no undo, no Escape, nothing.
+  window.addEventListener('keydown', (e) => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) redo(); else undo();
+      return;
+    }
+    if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
+    if (e.key === 'Escape') { document.getElementById('export-modal')?.remove(); }
+  });
+
+  // The browser's own "you have unsaved changes" prompt is the only thing that
+  // survives a tab close, a back button, or a reload typed into the bar.
+  window.addEventListener('beforeunload', (e) => {
+    if (!dirty) return undefined;
+    e.preventDefault();
+    e.returnValue = '';
+    return '';
+  });
   document.body.appendChild(bar);
 
   // --- status strip -----------------------------------------------------------
@@ -737,14 +883,31 @@ export function startEditor(app, levelData, stashKey) {
     div.querySelector('#export-close').onclick = () => div.remove();
   }
 
-  loadLevel(levelData);
+  // Prefer an autosaved draft over the level we were handed. The editor used to
+  // have exactly one persistence slot - the playtest stash, written only when
+  // you press Playtest - so a crash or a stray reload lost everything since
+  // that press, and the reload silently came back with the stale stash instead.
+  let restoredDraft = false;
+  try {
+    const draft = localStorage.getItem(DRAFT_KEY);
+    if (draft) {
+      const parsed = JSON.parse(draft);
+      if (parsed?.map?.length) { loadLevel(parsed); restoredDraft = true; }
+    }
+  } catch { /* a corrupt draft is not worth refusing to open the editor over */ }
+  if (!restoredDraft) loadLevel(levelData);
   // The game's HUD ships in index.html unconditionally and `updateStatsHud` is
   // only ever called from startGame, so in editor mode `#stats` sat empty in
   // the bottom-left as a bordered pill with nothing in it. Take the corner.
   const gameHud = document.getElementById('hud');
   if (gameHud) gameHud.style.display = 'none';
   setStatus();
-  toast('Left-click paints · right-click erases · the partition brush works on tile EDGES · middle-drag orbits');
+  if (restoredDraft) {
+    dirty = true; // it is unsaved by definition - it never reached a stash
+    toast(`Restored your unsaved draft of “${levelName}”. Reset discards it.`);
+  } else {
+    toast('Left-click paints · right-click erases · partition works on tile EDGES · Ctrl+Z undoes');
+  }
 
   // Read-only handle for tests and console poking.
   window.__editor = {
