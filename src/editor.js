@@ -129,7 +129,17 @@ export function startEditor(app, levelData, stashKey) {
   // The SAME renderer the game uses (tile-renderer.js), so what you paint is what the
   // game shows - puddles, cables, paper drifts, props, glowing exits and all.
   const renderer = createTileRenderer(app);
-  app.on('update', (dt) => renderer.animate(dt));
+  // The camera focus, and the per-frame call that actually MOVES the rig.
+  // `controls.pan()` and `recenter()` only mutate the rig's target; `follow()`
+  // is the one thing that writes its position, and it was called from exactly
+  // one place in the repo - inside startGame. So in the editor the camera was
+  // pinned to wherever boot put it, and any pan would have been inert.
+  const focus = { x: 0, z: 0 };
+  const refocus = () => { focus.x = (width - 1) / 2; focus.z = (height - 1) / 2; };
+  app.on('update', (dt) => {
+    renderer.animate(dt);
+    controls.follow(focus, dt);
+  });
   // Actor spawn markers are editor-only affordances (the game replaces them
   // with character models).
   const mat = (rgb) => {
@@ -356,6 +366,7 @@ export function startEditor(app, levelData, stashKey) {
     for (let z = 0; z < height; z++) for (let x = 0; x < width; x++) renderCell(x, z);
     renderAllEdges();
     updateSizeLabel();
+    refocus();
     setStatus();
   }
 
@@ -578,6 +589,63 @@ export function startEditor(app, levelData, stashKey) {
     renderAll();
   }
 
+  // --- hover ghost --------------------------------------------------------------
+  // One reusable entity, repositioned rather than rebuilt. It shows the CELL a
+  // tile brush will write, or the EDGE a partition/door brush has picked.
+  let ghost = null;
+  let ghostEdge = null;
+  let hoverCell = null;
+  function ghostMat() {
+    const m = new pc.StandardMaterial();
+    m.diffuse = new pc.Color(0.55, 0.9, 0.5);
+    m.opacity = 0.34;
+    m.blendType = pc.BLEND_NORMAL;
+    m.depthWrite = false;
+    m.update();
+    return m;
+  }
+  function ensureGhosts() {
+    if (ghost) return;
+    const material = ghostMat();
+    ghost = new pc.Entity();
+    ghost.addComponent('render', { type: 'box', material });
+    ghost.setLocalScale(0.98, 0.06, 0.98);
+    app.root.addChild(ghost);
+    ghostEdge = new pc.Entity();
+    ghostEdge.addComponent('render', { type: 'box', material });
+    app.root.addChild(ghostEdge);
+  }
+  function hideGhost() {
+    if (ghost) { ghost.enabled = false; ghostEdge.enabled = false; }
+    hoverCell = null;
+    setStatus();
+  }
+  function showGhost(g) {
+    if (!g) { hideGhost(); return; }
+    ensureGhosts();
+    if (brush === 'partition' || brush === 'door') {
+      const e = nearestEdge(g);
+      ghost.enabled = false;
+      if (!e || !edgeInRange(e.o, e.x, e.z)) { ghostEdge.enabled = false; hoverCell = null; setStatus(); return; }
+      ghostEdge.enabled = true;
+      // Match renderEdgeWall's footprint so the preview reads as the thing it
+      // is about to become, not as a generic marker.
+      if (e.o === 'h') { ghostEdge.setLocalScale(1, 0.9, 0.12); ghostEdge.setPosition(e.x, 0.45, e.z - 0.5); }
+      else { ghostEdge.setLocalScale(0.12, 0.9, 1); ghostEdge.setPosition(e.x - 0.5, 0.45, e.z); }
+      hoverCell = { x: Math.round(g.x), z: Math.round(g.z), edge: e };
+      setStatus();
+      return;
+    }
+    ghostEdge.enabled = false;
+    const x = Math.round(g.x);
+    const z = Math.round(g.z);
+    if (x < 0 || x >= width || z < 0 || z >= height) { ghost.enabled = false; hoverCell = null; setStatus(); return; }
+    ghost.enabled = true;
+    ghost.setPosition(x, 0.04, z);
+    hoverCell = { x, z, edge: null };
+    setStatus();
+  }
+
   // --- camera / input ----------------------------------------------------------------
   // The partition brush paints the edge nearest the click; every other brush
   // paints the tile. Right-click erases (the nearest partition, or the cell).
@@ -588,6 +656,11 @@ export function startEditor(app, levelData, stashKey) {
     // One snapshot per STROKE. A drag fires this once and then streams tiles,
     // so undo steps back over the whole swipe rather than one cell of it.
     onAnyLeftPress: () => beginStroke(),
+    // Nothing used to preview what a click would do. Worst for the partition
+    // brush, which picks an EDGE from the sub-tile fraction of the ground point
+    // - a decision the author could not see until after the wall existed.
+    onHover: (g) => showGhost(g),
+    onHoverLeave: () => hideGhost(),
     onLeftClickTile: (t, g) => (brush === 'partition' || brush === 'door' ? paintEdge(nearestEdge(g), true) : paint(t)),
     onLeftDragTile: (t, g) => (brush === 'partition' || brush === 'door' ? paintEdge(nearestEdge(g), true) : paint(t)),
     onRightClickTile: (t, sx, sy, g) => {
@@ -635,46 +708,157 @@ export function startEditor(app, levelData, stashKey) {
   bar.id = 'editor-bar';
   Object.assign(bar.style, PANEL_CHROME, {
     position: 'fixed', left: '50%', bottom: '14px', transform: 'translateX(-50%)',
-    zIndex: '30', display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'center',
+    zIndex: '30', display: 'flex', flexDirection: 'column', gap: '7px',
     maxWidth: '96vw', borderRadius: '10px', padding: '9px',
-    font: '12px system-ui, sans-serif', alignItems: 'center',
-    // The furniture kit pushed this past seventy brushes: cap the height and
-    // scroll, or the palette eats the screen it is meant to sit under.
-    maxHeight: '42vh', overflowY: 'auto',
+    font: '12px system-ui, sans-serif', alignItems: 'stretch',
+    userSelect: 'none', // or drag-painting selects the button labels
   });
-  const btn = (id, label, host = bar) => {
+  // TWO surfaces, not one. Everything used to be appended to a single element
+  // capped at 42vh with `overflow-y: auto` - so Playtest, Export, Reset, Exit,
+  // the size controls and the level loader were the LAST children of the list
+  // you scroll through most, and the selected brush was frequently scrolled out
+  // of sight. The palette scrolls; the commands never do.
+  const palette = document.createElement('div');
+  palette.id = 'editor-palette';
+  Object.assign(palette.style, {
+    display: 'flex', gap: '5px', flexWrap: 'wrap', justifyContent: 'center',
+    alignItems: 'center', maxHeight: '34vh', overflowY: 'auto',
+  });
+  const commands = document.createElement('div');
+  commands.id = 'editor-commands';
+  Object.assign(commands.style, {
+    display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'center',
+    alignItems: 'center', borderTop: '1px solid #3a3a52', paddingTop: '7px',
+  });
+  const btn = (id, label, host = palette) => {
     const b = document.createElement('button');
     b.id = id;
     b.textContent = label;
     Object.assign(b.style, BUTTON_CHROME, {
-      padding: '7px 10px', borderRadius: '7px',
+      // 40px of target rather than ~30: the game's own hotbar slots are 44px
+      // (ui/hud.js) and the editor was the one surface below the house floor.
+      padding: '9px 11px', borderRadius: '7px', minHeight: '40px', cursor: 'pointer',
     });
     host.appendChild(b);
     return b;
   };
-  const divider = () => {
+  const divider = (host = commands) => {
     const s = document.createElement('div');
     Object.assign(s.style, { width: '1px', alignSelf: 'stretch', background: '#3a3a52', margin: '0 4px' });
-    bar.appendChild(s);
+    host.appendChild(s);
   };
 
+  // The tooltip used to report the map character and nothing else, while the
+  // registry it was reading carried solid/tall/height/onEnter/loot/surface/
+  // topple/hp/shop/carpet - none of it shown. Whether a prop stops a thrown
+  // attack hangs on one 0.75 height threshold (data/tiles.js blocksSight) and
+  // was invisible in a paint view of grey boxes.
+  const SIGHT_BLOCK_HEIGHT = 0.75;
+  function tileTooltip(id, def) {
+    const bits = [];
+    if (def.solid) bits.push('blocks movement');
+    if (def.solid && (def.tall || (def.height ?? 1) >= SIGHT_BLOCK_HEIGHT)) bits.push('blocks sight');
+    else if (def.solid) bits.push('shoot over it');
+    if (def.surface) bits.push(`surface: ${def.surface}`);
+    if (def.loot) bits.push('rummageable');
+    if (def.hp) bits.push('breakable');
+    if (def.topple) bits.push('topples');
+    if (def.shop) bits.push('merchant');
+    if (def.carpet) bits.push('carpet zone');
+    if (def.stairs) bits.push('stair marker');
+    if (id === 'exit') bits.push('the way out');
+    const head = `${def.label || id}${def.height != null ? `  (height ${def.height})` : ''}`;
+    return [head, bits.join(' · '), def.examine || ''].filter(Boolean).join('\n');
+  }
+
   const brushButtons = [];
+  const buttonOf = new Map(); // brush id -> its button, for hotkeys and recents
+  const recent = [];
   function selectBrush(id, button) {
     brush = id;
     setStatus();
-    for (const b of brushButtons) b.style.borderColor = '#3a3a52';
+    for (const b of brushButtons) {
+      b.style.borderColor = '#3a3a52';
+      b.setAttribute('aria-pressed', 'false');
+    }
+    // Colour was the ONLY channel signalling the armed brush, on one of ninety
+    // buttons, often scrolled out of view. It still is a channel; it is no
+    // longer the only one - the status strip names the brush, and the button
+    // carries aria-pressed the way the game's own toggle does (ui/hud.js).
     button.style.borderColor = '#8adf76';
+    button.setAttribute('aria-pressed', 'true');
+    const at = recent.indexOf(id);
+    if (at !== -1) recent.splice(at, 1);
+    recent.unshift(id);
+    if (recent.length > 8) recent.pop();
+    renderRecent();
+  }
+
+  // Filtering ninety text-only buttons beats scanning them. Matches label and
+  // id, hides the rest live, and hides a category row that has nothing left.
+  const filterBox = document.createElement('input');
+  filterBox.id = 'ed-filter';
+  filterBox.type = 'search';
+  filterBox.placeholder = 'filter brushes…';
+  filterBox.setAttribute('aria-label', 'Filter the brush palette');
+  Object.assign(filterBox.style, BUTTON_CHROME, {
+    padding: '8px 10px', borderRadius: '7px', minWidth: '150px', cursor: 'text',
+  });
+  filterBox.oninput = () => {
+    const q = filterBox.value.trim().toLowerCase();
+    for (const b of brushButtons) {
+      const hit = !q || b.textContent.toLowerCase().includes(q) || b.id.slice(6).includes(q);
+      b.style.display = hit ? '' : 'none';
+    }
+    for (const row of palette.querySelectorAll('[data-cat]')) {
+      const any = [...row.querySelectorAll('button')].some((b) => b.style.display !== 'none');
+      row.style.display = any ? '' : 'none';
+    }
+  };
+
+  const recentRow = document.createElement('div');
+  recentRow.id = 'ed-recent';
+  Object.assign(recentRow.style, {
+    display: 'none', gap: '5px', flexWrap: 'wrap', alignItems: 'center',
+    width: '100%', justifyContent: 'center',
+  });
+  function renderRecent() {
+    recentRow.innerHTML = '';
+    if (recent.length < 2) { recentRow.style.display = 'none'; return; }
+    recentRow.style.display = 'flex';
+    const tag = document.createElement('span');
+    tag.textContent = 'recent';
+    Object.assign(tag.style, {
+      opacity: '.5', letterSpacing: '1px', textTransform: 'uppercase',
+      fontSize: '10px', minWidth: '68px', textAlign: 'right',
+    });
+    recentRow.appendChild(tag);
+    for (const id of recent) {
+      const src = buttonOf.get(id);
+      if (!src) continue;
+      const b = document.createElement('button');
+      b.textContent = src.textContent;
+      b.title = src.title;
+      Object.assign(b.style, BUTTON_CHROME, {
+        padding: '7px 10px', borderRadius: '7px', minHeight: '36px', cursor: 'pointer',
+        borderColor: id === brush ? '#8adf76' : '#3a3a52',
+      });
+      b.onclick = () => src.click();
+      recentRow.appendChild(b);
+    }
   }
   {
     // Partitions first - with edge walls they are the main way to build rooms.
     const b = btn('brush-partition', 'partition');
+    b.title = 'Partition — a wall on the EDGE between two tiles, not on a tile.\nRight-click erases the nearest edge.';
     b.onclick = () => selectBrush('partition', b);
-    brushButtons.push(b);
+    brushButtons.push(b); buttonOf.set('partition', b);
   }
   {
     const b = btn('brush-door', 'door');
+    b.title = 'Door — replaces a wall on the same edge. Enemies never open one.';
     b.onclick = () => selectBrush('door', b);
-    brushButtons.push(b);
+    brushButtons.push(b); buttonOf.set('door', b);
   }
   // Tile brushes, grouped. Uncategorised entries (floor, walls, hazards - the
   // originals) stay in a leading "basics" row so the old muscle memory holds.
@@ -700,6 +884,7 @@ export function startEditor(app, levelData, stashKey) {
     .sort((a, b) => (CATEGORY_ORDER.indexOf(a) + 1 || 99) - (CATEGORY_ORDER.indexOf(b) + 1 || 99));
   for (const cat of cats) {
     const row = document.createElement('div');
+    row.dataset.cat = cat;
     Object.assign(row.style, {
       display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center',
       width: '100%', justifyContent: 'center',
@@ -714,24 +899,24 @@ export function startEditor(app, levelData, stashKey) {
     for (const id of byCategory.get(cat)) {
       const def = TILE_TYPES[id];
       const b = btn('brush-' + id, def.label || id.replace(/-/g, ' '), row);
-      b.title = def.char
-        ? `${def.label || id}  (map char "${def.char}" when free)`
-        : `${def.label || id}  (map char assigned when painted)`;
+      b.title = tileTooltip(id, def);
       b.onclick = () => selectBrush(id, b);
-      brushButtons.push(b);
-      if (id === brush) b.style.borderColor = '#8adf76';
+      brushButtons.push(b); buttonOf.set(id, b);
+      if (id === brush) { b.style.borderColor = '#8adf76'; b.setAttribute('aria-pressed', 'true'); }
     }
-    bar.appendChild(row);
+    palette.appendChild(row);
   }
   {
     const b = btn('brush-player', 'player start');
+    b.title = 'Player start — exactly one per level. Painting a new one clears the old.';
     b.onclick = () => selectBrush('player', b);
-    brushButtons.push(b);
+    brushButtons.push(b); buttonOf.set('player', b);
   }
   for (const [id, def] of Object.entries(ENEMY_TYPES)) {
     const b = btn('brush-' + id, def.name);
+    b.title = `${def.name} — native tier ${def.level || 1}. Floors do NOT scale enemies; place a tier explicitly to make one tougher.`;
     b.onclick = () => selectBrush('enemy:' + id, b);
-    brushButtons.push(b);
+    brushButtons.push(b); buttonOf.set('enemy:' + id, b);
   }
 
   divider();
@@ -741,11 +926,13 @@ export function startEditor(app, levelData, stashKey) {
   sizeLabel.id = 'ed-size';
   Object.assign(sizeLabel.style, { padding: '0 4px', opacity: '.8' });
   function updateSizeLabel() { sizeLabel.textContent = `${width}×${height}`; }
-  btn('ed-shrink-w', '−col').onclick = () => resize(-1, 0);
-  btn('ed-grow-w', '+col').onclick = () => resize(1, 0);
-  btn('ed-shrink-h', '−row').onclick = () => resize(0, -1);
-  btn('ed-grow-h', '+row').onclick = () => resize(0, 1);
-  bar.appendChild(sizeLabel);
+  btn('ed-shrink-w', '−col', commands).onclick = () => resize(-1, 0);
+  btn('ed-grow-w', '+col', commands).onclick = () => resize(1, 0);
+  btn('ed-shrink-h', '−row', commands).onclick = () => resize(0, -1);
+  btn('ed-grow-h', '+row', commands).onclick = () => resize(0, 1);
+  commands.appendChild(sizeLabel);
+  divider();
+  commands.appendChild(filterBox);
 
   divider();
 
@@ -764,23 +951,23 @@ export function startEditor(app, levelData, stashKey) {
     if (LEVELS[select.value]) loadLevel(LEVELS[select.value]);
     select.value = '';
   };
-  bar.appendChild(select);
+  commands.appendChild(select);
 
-  btn('ed-undo', '↶ Undo').onclick = () => undo();
-  btn('ed-redo', '↷ Redo').onclick = () => redo();
+  btn('ed-undo', '↶ Undo', commands).onclick = () => undo();
+  btn('ed-redo', '↷ Redo', commands).onclick = () => redo();
 
-  btn('ed-playtest', '▶ Playtest').onclick = () => {
+  btn('ed-playtest', '▶ Playtest', commands).onclick = () => {
     localStorage.setItem(stashKey, toJson());
     dirty = false; // the stash IS a save - leaving for it is not losing work
     clearDraft();
     location.hash = '';
     location.reload();
   };
-  btn('ed-export', 'Export JSON').onclick = showExport;
+  btn('ed-export', 'Export JSON', commands).onclick = showExport;
   // Reset and Exit each throw the session away. They used to do it on one
   // unconfirmed click, styled identically to Export sitting beside them.
   const dangerBtn = (id, label, confirmText, act) => {
-    const b = btn(id, label);
+    const b = btn(id, label, commands);
     Object.assign(b.style, { borderColor: '#7a3a4a', color: '#ffd9e0' });
     b.onclick = () => {
       // eslint-disable-next-line no-alert
@@ -812,7 +999,35 @@ export function startEditor(app, levelData, stashKey) {
       return;
     }
     if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
-    if (e.key === 'Escape') { document.getElementById('export-modal')?.remove(); }
+    if (e.key === 'Escape') { document.getElementById('export-modal')?.remove(); return; }
+    if (mod) return; // leave the browser's own chords alone
+    const k = e.key.toLowerCase();
+    // Overhead. `controls` has had this since the game shipped it on the HUD
+    // rail and the T key; the editor - where precise clicking matters most -
+    // never offered it. Its own comment is the argument: overhead is where tile
+    // boundaries stop being ambiguous.
+    if (k === 't') { e.preventDefault(); controls.toggleTactical(); return; }
+    if (k === 'home' || k === 'f') { e.preventDefault(); refocus(); toast('Camera re-centred on the map.'); return; }
+    const PAN = 1.6;
+    const step = { w: [0, -PAN], s: [0, PAN], a: [-PAN, 0], d: [PAN, 0] }[k]
+      || { arrowup: [0, -PAN], arrowdown: [0, PAN], arrowleft: [-PAN, 0], arrowright: [PAN, 0] }[k];
+    if (step) {
+      e.preventDefault();
+      focus.x += step[0];
+      focus.z += step[1];
+      return;
+    }
+    // Brush cycling: [ and ] step through the palette in the order it is drawn,
+    // so a nearby brush is one key away rather than a scan of ninety buttons.
+    if (k === '[' || k === ']') {
+      e.preventDefault();
+      const visible = brushButtons.filter((b) => b.style.display !== 'none');
+      if (!visible.length) return;
+      const cur = visible.findIndex((b) => b.getAttribute('aria-pressed') === 'true');
+      const nextI = (cur + (k === ']' ? 1 : -1) + visible.length) % visible.length;
+      visible[nextI].click();
+      visible[nextI].scrollIntoView({ block: 'nearest' });
+    }
   });
 
   // The browser's own "you have unsaved changes" prompt is the only thing that
@@ -823,6 +1038,9 @@ export function startEditor(app, levelData, stashKey) {
     e.returnValue = '';
     return '';
   });
+  palette.appendChild(recentRow);
+  bar.appendChild(palette);
+  bar.appendChild(commands);
   document.body.appendChild(bar);
 
   // --- status strip -----------------------------------------------------------
@@ -844,11 +1062,32 @@ export function startEditor(app, levelData, stashKey) {
     if (brush.startsWith('enemy:')) return ENEMY_TYPES[brush.slice(6)]?.name || brush;
     return TILE_TYPES[brush]?.label || brush.replace(/-/g, ' ');
   }
+  // What is under the cursor, named the way the author thinks about it: the
+  // tile's label, or the actor standing there, or "void".
+  function underCursor() {
+    if (!hoverCell) return '';
+    const { x, z, edge } = hoverCell;
+    if (edge) {
+      const k = edge.x + ',' + edge.z;
+      const has = (edge.o === 'h' ? hWalls : vWalls).has(k) ? 'wall'
+        : (edge.o === 'h' ? hDoors : vDoors).has(k) ? 'door' : 'open';
+      return `<br><span style="opacity:.75">edge ${edge.o.toUpperCase()} ${edge.x},${edge.z} — ${has}</span>`;
+    }
+    const c = rows[z]?.[x];
+    let what;
+    if (c === undefined) what = 'off-map';
+    else if (c === ' ') what = 'void';
+    else if (c === PLAYER_CHAR) what = 'player start';
+    else if (actorIdByChar[c] || tierCharIds[c]) what = tierChars.get(c) || actorIdByChar[c];
+    else what = TILE_TYPES[tileByChar[c]]?.label || tileByChar[c] || 'floor';
+    return `<br><span style="opacity:.75">${x},${z} — ${what} <span style="opacity:.6">“${c === ' ' ? '␣' : c ?? '·'}”</span></span>`;
+  }
   function setStatus() {
     const ch = charByType[brush];
     status.innerHTML = `<b>${levelName || 'Untitled Floor'}</b> &nbsp; ${width}×${height}`
       + `<br>brush: <b style="color:#8adf76">${brushLabel()}</b>`
-      + (ch ? ` <span style="opacity:.6">writes “${ch}”</span>` : '');
+      + (ch ? ` <span style="opacity:.6">writes “${ch}”</span>` : '')
+      + underCursor();
   }
 
   function showExport() {
