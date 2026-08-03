@@ -121,8 +121,9 @@ of engagement, so the doc is enough:
   are extending).
 - **The tags bind you.** The five headline questions are answered — A3,
   A4, A5, A6, A7 are `[ratified]` (designer, 2026-08-01) and are the
-  design, not suggestions. What remains `[proposed]` (A1, A2, A8, A9,
-  A10, the tunable values, the log flavor, which enemy carries the
+  design, not suggestions. So is A10's ladder position (designer,
+  2026-08-03). What remains `[proposed]` (A1, A2, A8, A9, the tunable
+  values, the log flavor, which enemy carries the
   ranged entry) are implementation defaults: implement them as written,
   keep them cheap to reverse, and flip tags in this doc as any further
   designer verdicts arrive (the ratification loop).
@@ -334,7 +335,7 @@ Four lessons, each reflected in a decision above:
 | A7 | **No difficulty selector in v1**; every new magnitude lives in one `AI` tunables block | `[ratified]` | Q5 answered A (designer, 2026-08-01). The block is what makes any later selector cheap — one multiplier, not a scavenger hunt |
 | A8 | **Per-enemy personality is data; the brain is systems.** New per-def vocabulary (`focus`, a ranged attack entry, support flags) is documented in `data/enemies.js` like `aggression` and `reach` already are; `combat-ai.js` owns every rule that reads it | `[proposed]` | The `ARCHITECTURE.md` rule applied to AI. `aggression` (green/yellow/red) is the precedent: disposition already lives on the def |
 | A9 | **The AI never cheats.** Same AP prices (the topple precedent: "both sides push for the same", `combat-ai.js:141`), same rolls (M1's shared assembler), same information (it reacts to what combat shows it) | `[proposed]` | Difficulty that comes from fairness reads as the enemy being good; difficulty from cheating reads as the game being unfair. Every reference lesson supports it |
-| A10 | **Sealed-off enemies break through instead of turtling** — when no route to any target exists, a unit with a breakable barrier on the way batters it (`breakPlan`), and a unit sealed by a CLOSED DOOR opens it at the player's own door price rather than farming crouches forever | `[proposed]` | Also the honest fix for the class of fights the closed-door deadlock belonged to: an unreachable enemy is now a *delayed* enemy, not a stalemate. Doors have no break pool (they are not in the wall sets, by construction), so without the open arm, closing a door on an enemy mid-fight turns it into a piñata |
+| A10 | **Sealed-off enemies break through instead of turtling** — when no route to any target exists, a unit with a breakable barrier on the way batters it (`breakPlan`), and a unit sealed by a CLOSED DOOR opens it at the player's own door price rather than farming crouches forever. `break` sits ABOVE `crouch`, so a boxed-in coworker digs its way out rather than hunkering down — **including when the barrier it batters is its own cover** | `[ratified]` | The ordering was put to the designer with its consequence spelled out (a boxed enemy demolishing the cabinets protecting it) and the alternative offered (crouch above break, preserving the shipped turtle beat untouched): *"yeah thats fine the way it is"* (designer, 2026-08-03). Also the honest fix for the class of fights the closed-door deadlock belonged to: an unreachable enemy is now a *delayed* enemy, not a stalemate. Doors have no break pool (they are not in the wall sets, by construction), so without the open arm, closing a door on an enemy mid-fight turns it into a piñata |
 
 ## Architecture: where it lands
 
@@ -436,7 +437,7 @@ or fewer arms.
 | 7 | `entrench` | ranged kit, in range + LOS, not crouched, a shielding face HERE, AP for crouch AND a shot | cover AP | Crouch-then-shoot in one turn — attacking doesn't break the crouch `[ratified]`, so this is the Gears fight the cover game was built for. Must precede `shoot` or it never fires |
 | 8 | `shoot` | ranged kit, in range + LOS, `shotOutcome` clear | attack AP | The "in range but not in reach" arm; in melee reach, `attack` (above) already won — no point-blank ambiguity |
 | 9 | `advance` | a destination exists and budget covers a step | move budget | ONE arm; the destination rule is the kit's: melee walks the scored swing tile, ranged walks the scored firing tile |
-| 10 | `break` | no route to ANY target; a breakable barrier (or closed door — the open arm) on the would-be route | attack AP / door AP | Only when sealed: barrier-battering as a substitute for the advance that cannot exist (A10) |
+| 10 | `break` | no route to ANY target; a breakable barrier (or closed door — the open arm) on the would-be route | attack AP / door AP | Only when sealed: barrier-battering as a substitute for the advance that cannot exist (A10). Deliberately ABOVE the crouch `[ratified]` — a sealed coworker digs out rather than turtling, even when the thing it batters is its own cover |
 | 11 | `crouch` | as today (boxed in, actually shielded) | cover AP | The turtle stays the last resort for melee kits |
 | 12 | `pass` | — | — | Hand the turn on |
 
