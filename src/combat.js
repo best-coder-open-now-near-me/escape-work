@@ -28,6 +28,7 @@ import { createAimPaint } from './aim-paint.js';
 import { createAimView } from './combat-aim.js';
 import { createCombatHandle } from './combat-handle.js';
 import { createReactions } from './combat-reactions.js';
+import { createSummonLifecycle } from './summon-lifecycle.js';
 import { createAiAdvance } from './combat-advance.js';
 import { STATUSES } from './data/statuses.js';
 import { blocksSight, PARTITION_TOPPLE } from './data/tiles.js';
@@ -933,7 +934,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // needs a panel, a body or the app: the host answers below, and the four
   // functions they point at (takeTurn, skipTurnFor, expireSummon, applyTurnDot),
   // which sit together further down under "what the turn engine asks this file".
-  // They are declarations, so naming them here before they are written is fine.
+  // Three of the four are `function` declarations, which HOIST, so naming them
+  // here before they are written is fine. `expireSummon` no longer is: it comes
+  // off summon-lifecycle.js as a const, far below this line, so it is wrapped -
+  // an eager read of it here is a dead-zone throw at boot, not a stale value.
   const turns = createTurnOrder({
     entries: [...members.map(memberSlot), ...engaged.filter((e) => e.alive).map(unitSlot)],
     rng: initRng,
@@ -949,7 +953,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       lose: defeat,
       lifetimeLeft: (s) => slotActor(s)?.summonTurns ?? null,
       spendLifetime: (s) => { slotActor(s).summonTurns -= 1; },
-      expire: expireSummon,
+      expire: (...a) => expireSummon(...a),
       dot: applyTurnDot,
       skip: skipTurnFor,
       take: takeTurn,
@@ -3694,27 +3698,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return 'hold';
   }
 
-  // A summon's turns ran out with the fight still on: it leaves mid-battle,
-  // which is the cost of fielding temps. Dismissing an enemy-side one can empty
-  // the enemy list - the engine re-reads the outcome on the next attempt, so
-  // this only has to take the body off the board.
-  function expireSummon(s) {
-    // A BORROWED coworker is RETURNED, not dismissed. They share the lifetime
-    // clock with summons - one clock, nothing to keep in step - but the endings
-    // are opposites: a summon is destroyed, a colleague walks away.
-    if (s.member?.isCharmed) {
-      log(`The session drops. ${s.member.sheet.name} is theirs again.`);
-      releaseCharm(s.member);
-      return;
-    }
-    // The house voice was already they/them here; now it ASKS the character
-    // rather than assuming, which is the whole point of storing the field.
-    const w = pronounsOf(s.member?.sheet);
-    log(`${slotName(s)}'s assignment ends. ${capitalize(w.subject)} `
-      + `${verb(w, 'gather')} ${w.possessive} things and ${verb(w, 'go', 'es')}.`);
-    dismissSummon(s.member || s.unit);
-    refresh();
-  }
 
   // The line for a turn spent incapacitated - stun reads differently from the
   // surprise it generalized.
@@ -3752,103 +3735,38 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return 'fell';
   }
 
-  // --- summons ----------------------------------------------------------------
-  // Live minions a summoner still has on the board - the cap counts these.
-  // Enemy-team summons are AI actors in the shared enemy list; player-team
-  // summons are temporary MEMBERS (below), tagged with who conjured them.
-  function liveSummonsOf(summoner) {
-    const enemySummons = world.liveEnemies().filter((e) => e.summonedBy === summoner).length;
-    const playerSummons = members.filter((m) =>
-      m.isSummon && m.sheet.hp > 0 && m.actor && m.summonedBy === summoner).length;
-    // A BORROWED minion is still on its summoner's books. It is in neither
-    // count above: `liveEnemies` drops charmed bodies (that is what puts them
-    // on your side), and a charmed member is `isCharmed`, never `isSummon`.
-    // Without this leg, charming an HR employee frees the slot that posted it
-    // and HR reinforces over its own cap - the cap being per-SUMMONER and
-    // outliving the fight is the whole point of counting this way.
-    const borrowed = members.filter((m) =>
-      m.isCharmed && m.sheet.hp > 0 && m.unit?.summonedBy === summoner).length;
-    return enemySummons + playerSummons + borrowed;
-  }
-  // A summon's assignment ran out (or the fight it was called for is over and
-  // main.js is sweeping): take it off the board WITHOUT killing it. This is not
-  // a death - no topple, no corpse, no loot, no XP - the temp just leaves.
-  //   a member  -> drop its body; a null `actor` is exactly what slotAlive,
-  //                livingMembers and the initiative strip already read as "not
-  //                in this fight", so nothing else needs to know.
-  //   an AI unit -> mark it not-alive so victory can be reached, and hand the
-  //                body back to main.js to destroy.
-  function dismissSummon(target) {
-    if (target.sheet) {
-      const body = target.actor;
-      target.actor = null;
-      world.dismissSummon(body);
-      // The floor can't be held by someone who just walked out.
-      if (active === target) makeActive(livingParty()[0] || members[0]);
-      return;
-    }
-    target.alive = false;
-    target.loot = [];
-    world.dismissSummon(target);
-  }
-  // Post the req: spawn up to the descriptor's `count` for `team` beside the
-  // summoner, never past its live `cap`. Returns how many actually showed up.
-  //   enemy team -> AI actors: join `engaged` (counted for victory, queued next
-  //     round) and take a `{unit}` initiative slot, surprised so they don't act
-  //     the turn they're posted.
-  //   player team -> temporary MEMBERS you control: a real sheet + body, its own
-  //     action bar and AP, a `{member}` initiative slot. Not in party.members
-  //     (outside the cap, unsaved); combat owns them, despawned at fight's end.
-  //   `at` is the player's chosen drop point ({x,z}); without one (enemy AI,
-  //   the debug hook) they report beside the summoner as before.
-  // How many bodies this descriptor could post RIGHT NOW - the question half,
-  // with no spawning in it.
-  //
-  // It exists because `resolveSummon` was being called as a readiness predicate
-  // while it is in fact the act: it spawns, pushes into `engaged`, applies
-  // `surprised` and inserts initiative slots. That was survivable only while
-  // `summon` was the top arm of the AI ladder, so the beat that followed always
-  // paid for it. AI M6 inserted `support` above it, and the spawn became free
-  // whenever triage won the turn - two employees, no AP, no cooldown
-  // (REVIEW.md 2026-08-02 section 1.1). A plan-gathering call with side effects
-  // is a live hazard the moment a ladder can reorder.
-  //
-  // Named for what it answers - how many actually turn up - because
-  // summon-rules exports a `summonRoom` that answers a different question
-  // (how much headcount is free) and main.js imports that one. Two meanings
-  // under one name across two files is how the restatement below got written
-  // in the first place; the cap math itself is the module's, composed here
-  // rather than repeated.
-  function postableNow(summoner, d) {
-    return dropCount(d, capRoom(d, liveSummonsOf(summoner)));
-  }
+  // --- summons (summon-lifecycle.js) ------------------------------------------
+  // Posting, counting and dismissing a temp live in their own file; what stays
+  // here is the wiring. `expireSummon` is handed to the turn engine ABOVE this
+  // point, which is why that bag wraps it rather than passing it by reference -
+  // these are consts now, and a const read from two thousand lines up is a
+  // dead-zone read at boot.
+  const {
+    liveSummonsOf, dismissSummon, expireSummon, postableNow, resolveSummon,
+  } = createSummonLifecycle({
+    get active() { return active; },
+    members,
+    engaged,
+    world,
+    fx,
+    dropCount,
+    capRoom,
+    applyStatus,
+    pronounsOf,
+    capitalize,
+    verb,
+    asMember: (...a) => asMember(...a),
+    memberSlot: (...a) => memberSlot(...a),
+    unitSlot: (...a) => unitSlot(...a),
+    insertSlot: (...a) => insertSlot(...a),
+    slotName: (...a) => slotName(...a),
+    makeActive: (...a) => makeActive(...a),
+    livingParty: (...a) => livingParty(...a),
+    releaseCharm: (...a) => releaseCharm(...a),
+    log: (...a) => log(...a),
+    refresh: (...a) => refresh(...a),
+  });
 
-  function resolveSummon(summoner, team, d, at = null) {
-    const n = postableNow(summoner, d);
-    if (n <= 0) return 0;
-    const spawned = world.spawnSummon(d.archetype, team, summoner, n, at) || [];
-    for (const rec of spawned) {
-      // The contract. `lifetimeTurns` is how many of its OWN turns the unit
-      // serves before it files out (beginTurn spends them; main.js's world
-      // clock spends them out of combat). Omit it and the summon is permanent,
-      // which is the old behavior and still what a descriptor gets by default.
-      const body = team === 'enemy' ? rec : rec.actor;
-      body.summonTurns = d.lifetimeTurns ?? null;
-      if (team === 'enemy') {
-        if (!engaged.includes(rec)) engaged.push(rec);
-        applyStatus(rec, 'surprised');
-        // Arriving is an event: the temp lands in a puff of onboarding.
-        fx.impact(body.x, body.z, 'toner', { y: 0.5, scale: 0.55 });
-        insertSlot(unitSlot(rec));
-      } else {
-        const m = asMember(rec, { isSummon: true, summonedBy: summoner });
-        fx.impact(body.x, body.z, 'toner', { y: 0.5, scale: 0.55 });
-        members.push(m);
-        insertSlot(memberSlot(m)); // slots in by its own roll; acts when its turn comes
-      }
-    }
-    return spawned.length;
-  }
 
   // One AI unit's swing at its target. AI only ever drives ENEMIES (player-side
   // summons are player-controlled members - resolveSummon), and pickTarget only

@@ -34,7 +34,7 @@ import { readFileSync } from 'node:fs';
 const MODULES = [
   'src/combat-aim.js', 'src/combat-world.js', 'src/hotbar-host.js',
   'src/floor-effects.js', 'src/desk.js', 'src/combat-advance.js', 'src/ooc-verbs.js',
-  'src/party-control.js', 'src/sneak-layer.js', 'src/progression-ui.js', 'src/summon-layer.js', 'src/walking.js', 'src/examine.js', 'src/keyboard.js', 'src/mouse.js', 'src/combat-entry.js', 'src/frame.js', 'src/debug-handles.js', 'src/combat-handle.js', 'src/combat-reactions.js',
+  'src/party-control.js', 'src/sneak-layer.js', 'src/progression-ui.js', 'src/summon-layer.js', 'src/walking.js', 'src/examine.js', 'src/keyboard.js', 'src/mouse.js', 'src/combat-entry.js', 'src/frame.js', 'src/debug-handles.js', 'src/combat-handle.js', 'src/combat-reactions.js', 'src/summon-lifecycle.js',
 ];
 // The HOST side of every seam. Nothing here takes a deps bag, so the `d` rules
 // do not apply - but the unbound scan does, and this is the half that has twice
@@ -185,8 +185,17 @@ function deadZoneDeps(hostSrc, hostName) {
     }
     const lit = hostSrc.slice(open, end + 1);
     const eager = new Set();
-    for (const m of lit.matchAll(/^\s{4}([A-Za-z_$][\w$]*),\s*$/gm)) eager.add(m[1]);
-    for (const m of lit.matchAll(/^\s{4}([A-Za-z_$][\w$]*):\s*([A-Za-z_$][\w$]*),\s*$/gm)) eager.add(m[2]);
+    // Any depth, not just the bag's top level. This said `\s{4}` - exactly one
+    // level of indent - and a NESTED entry is eagerly evaluated in precisely the
+    // same way: `createTurnOrder({ host: { expire: expireSummon } })` reads the
+    // name when the literal is built, six spaces in. That miss was live. The
+    // summon-lifecycle cut turned `expireSummon` from a hoisted `function` into
+    // a `const` two thousand seven hundred lines BELOW that bag, and this check
+    // passed it - while the host carried a comment promising the opposite
+    // ("they are declarations, so naming them here before they are written is
+    // fine"), which is how the old shape kept vouching for the new one.
+    for (const m of lit.matchAll(/^\s{4,}([A-Za-z_$][\w$]*),\s*$/gm)) eager.add(m[1]);
+    for (const m of lit.matchAll(/^\s{4,}([A-Za-z_$][\w$]*):\s*([A-Za-z_$][\w$]*),\s*$/gm)) eager.add(m[2]);
     for (const name of eager) {
       // `function` declarations HOIST, so a function passed eagerly from above
       // its own declaration is fine - `onExplosion: handleExplosion` is the
