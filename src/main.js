@@ -851,7 +851,10 @@ function startGame(level) {
     get CATCH_UP() { return CATCH_UP; },
     get FOLLOW_NEAR() { return FOLLOW_NEAR; },
     canRecruit: (...a) => canRecruit(...a),
-    charSheet: (...a) => charSheet(...a),
+    // An OBJECT, not a function - and declared below, so a getter either way.
+    // The call-through wrapper every function dep gets made `d.charSheet` a
+    // function, and `d.charSheet.refresh` undefined on every leader switch.
+    get charSheet() { return charSheet; },
     charSheetVm: (...a) => charSheetVm(...a),
     clampPoint: (...a) => clampPoint(...a),
     clearOocCrouch: (...a) => clearOocCrouch(...a),

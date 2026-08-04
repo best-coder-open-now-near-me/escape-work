@@ -49,10 +49,35 @@ function rewriteDamage(raw, file) {
   return hits;
 }
 
+// The third kind of rewrite damage, and the only one that is a MISMATCH rather
+// than a corruption: an OBJECT dependency handed the call-through wrapper that
+// every function dependency gets. `charSheet: (...a) => charSheet(...a)` makes
+// `d.charSheet` a function, so `d.charSheet.refresh(...)` is a TypeError on
+// every leader switch - and the name is bound, the code parses, and the party
+// spec passed because the throw landed on the last line of the function, after
+// everything it asserts.
+//
+// So: for every `d.<name>.<prop>` a module reads, if a bag anywhere passes
+// `<name>` as `(...a) => <name>(...a)`, the two disagree about its shape.
+// Property access on a wrapper is never what the caller meant.
+const BAGS = ['src/main.js', 'src/combat.js'].map((f) => readFileSync(f, 'utf8')).join('\n');
+const wrapped = new Set(
+  [...BAGS.matchAll(/^\s+([A-Za-z_$][\w$]*): \(\.\.\.a\) =>/gm)].map((m) => m[1]));
+function shapeMismatch(raw, file) {
+  const hits = new Set();
+  for (const m of raw.matchAll(/\bd\.([A-Za-z_$][\w$]*)\.[A-Za-z_$]/g)) {
+    if (wrapped.has(m[1])) {
+      hits.add(`${file}: reads \`d.${m[1]}.<prop>\`, but a bag passes ${m[1]} as a call-through wrapper - that property is undefined`);
+    }
+  }
+  return [...hits];
+}
+
 let bad = 0;
 for (const file of MODULES) {
   const raw = readFileSync(file, 'utf8');
   for (const hit of rewriteDamage(raw, file)) { bad += 1; console.log(hit); }
+  for (const hit of shapeMismatch(raw, file)) { bad += 1; console.log(hit); }
   // Strip comments, then every flavour of string literal, so prose cannot
   // masquerade as an identifier.
   let code = raw.split('\n').map((l) => l.split('//')[0]).join('\n');
