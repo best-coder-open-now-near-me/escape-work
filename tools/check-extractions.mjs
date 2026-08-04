@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs';
 const MODULES = [
   'src/combat-aim.js', 'src/combat-world.js', 'src/hotbar-host.js',
   'src/floor-effects.js', 'src/desk.js', 'src/combat-advance.js', 'src/ooc-verbs.js',
-  'src/party-control.js', 'src/sneak-layer.js', 'src/progression-ui.js', 'src/summon-layer.js', 'src/walking.js', 'src/examine.js', 'src/keyboard.js', 'src/mouse.js', 'src/combat-entry.js', 'src/frame.js',
+  'src/party-control.js', 'src/sneak-layer.js', 'src/progression-ui.js', 'src/summon-layer.js', 'src/walking.js', 'src/examine.js', 'src/keyboard.js', 'src/mouse.js', 'src/combat-entry.js', 'src/frame.js', 'src/debug-handles.js',
 ];
 // The HOST side of every seam. Nothing here takes a deps bag, so the `d` rules
 // do not apply - but the unbound scan does, and this is the half that has twice
@@ -218,6 +218,19 @@ for (const file of [...MODULES, ...HOSTS]) {
     const inner = [...lit.matchAll(/\$\{([^{}]*)\}/g)].map((m) => m[1]).join(';');
     return inner ? `(${inner})` : '``';
   }).replace(/'(?:[^'\\]|\\.)*'/g, "''").replace(/"(?:[^"\\]|\\.)*"/g, '""');
+  // REGEX literals are the fourth flavour of not-code, and they were missed:
+  // `[\w-]+` inside a character class reads as the identifier `w`, so a file
+  // with a regex in it reports an unbound name that does not exist. It stayed
+  // invisible for as long as it did because something else in the same file
+  // happened to DECLARE `w` (a `walls.filter((w) => ...)` callback) - the
+  // masking, not the stripping, was doing the work, and the debug-handles cut
+  // moved that callback out. Run after the string passes, so a slash inside a
+  // string cannot open one. Only a slash in an operand position starts a regex
+  // - after `= ( , : [ ! & | ? { } ;` or `return` - which is what keeps plain
+  // division from being eaten.
+  code = code.replace(
+    /(^|[=(,:[!&|?{};]|\breturn)(\s*)\/(?![*/])(?:[^/\\\n[]|\\.|\[(?:[^\]\\]|\\.)*\])+\/[gimsuy]*/g,
+    (_, lead, gap) => `${lead}${gap}/(?:)/`);
   const declared = new Set([...code.matchAll(/(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
   // Imported names count as declared - a module that imports `ACTIONS` is not
   // reading an unbound one.
