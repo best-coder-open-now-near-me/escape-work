@@ -452,17 +452,22 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
   // Returns { kind, entities }; model props arrive via onAsync(holder).
   // `surfaceAt(x, z)` (optional) reports the surface id of any cell so
   // liquid pools can merge with their same-surface neighbours.
-  function renderMarker(x, z, type, { electrified = false, onAsync = null, surfaceAt = null } = {}) {
+  function renderMarker(x, z, type, { electrified = false, onAsync = null, surfaceAt = null, rotY = null } = {}) {
     const def = TILE_TYPES[type];
     if (!def) return { kind: 'none', entities: [] };
     // Carpet variants ARE the floor - renderFloor already drew them recolored.
     if (def.carpet) return { kind: 'none', entities: [] };
     if (def.model) {
       placeModel(app, `assets/${def.model}.glb`, x, z, {
-        // Models parent to app.root inside placeModel, so they sit outside a
-        // storey's show/hide root - keep model props off upper storeys until
-        // the layered builder owns their parenting.
-        scale: def.scale || 1, rotY: def.rotY || 0, lift: floorDef.height / 2 + baseY,
+        // Parented under THIS renderer's root, so a prop hides and shows with
+        // the storey it stands on. It used to go to app.root regardless, which
+        // put every model prop outside its storey's show/hide root - the reason
+        // upper storeys were primitives-only through the spike. Positions still
+        // carry baseY themselves (the root sits at the origin), so this does
+        // not double-count the height.
+        parent,
+        // A per-PLACEMENT rotation wins over the type's own (grid.rotAt).
+        scale: def.scale || 1, rotY: rotY ?? def.rotY ?? 0, lift: floorDef.height / 2 + baseY,
         // A toppled prop lies over (POWERS_PLAN M6). Data, so a new fallen
         // twin is a registry entry rather than a renderer change.
         tiltX: def.tiltX || 0, tiltZ: def.tiltZ || 0,

@@ -97,6 +97,25 @@ you build it from scratch, which is the point, not a chore to skip.
 
 ## Design decisions (recommended, with alternatives considered)
 
+> **REVERSED 2026-08-02 — depth no longer scales enemies.** `[stated]`
+> (designer: "things shouldnt autoscale thats absurd… by floor i mean. thats
+> just lazy"). This strikes the **floor curve** from decisions 3, 10 and 11:
+> an enemy spawns at the tier it is *placed* at, and a floor is made harder by
+> authoring harder placements, not by a number scaling what is already there.
+>
+> Worth recording plainly, because it is the failure mode `CLAUDE.md` exists to
+> prevent: **the designer never asked for the floor curve.** This table is
+> headed "recommended", carries no status tags, and has no "Questions for the
+> designer" section — so under the house rule every row here was `[proposed]`,
+> and the shipped game embodying it is not the same as the designer choosing
+> it. Decision 3's own rationale ("floor-scaling-only was simpler but every
+> floor fights the same three faces") shows the doc weighing the trade and
+> deciding for itself. It then became doctrine by citation. The reversal below
+> is the record correcting itself, not the designer changing their mind.
+>
+> The rows are left standing rather than deleted so the reversal is legible.
+> See "The reversal, concretely" beneath the table for what changes in code.
+
 | # | Decision | Choice | Why / alternatives |
 |---|----------|--------|--------------------|
 | 1 | Attribute set | **Office-themed 4-stat**: Grit, Hustle, Savvy, Composure | Fits the satire and stays small enough to balance across 4 classes + companions + enemies and to fit the god panel. A classic STR/DEX/CON/INT/WIS/CHA spread was considered — familiar and deeper, but off-theme and 6 axes to tune. A derived-only, no-raw-attribute model was rejected: it wouldn't deliver a real "attribute point system." |
@@ -111,6 +130,59 @@ you build it from scratch, which is the point, not a chore to skip.
 | 10 | Enemy level source | `effectiveLevel = max(entry.level, floorDepth)`; `scaleEnemy(def, effectiveLevel)` derives hp/attacks/ap/xp at spawn | `max` means a low variant placed deep still scales up, while a high-tier variant on a shallow floor keeps its tier — no double-inflation. Variants exist mainly for **fiction, new attacks, and loot**; the curve owns the **numbers**. |
 | 11 | Floor depth is data | Each level gets an explicit `depth` (floor number) in its JSON / `data/levels.js` | Deriving depth by walking the `next` chain is fragile and editor-hostile; an explicit field is one integer and lints cleanly. |
 | 12 | Elite modifiers | **Stretch / out of scope for the core plan**, but the enemy scaler is designed so a `modifiers:[]` layer can bolt on later without reshaping it | Keeps this plan focused on levels + tiers; leaves a clean seam. |
+| 13 | **Enemy level source (replaces #10)** | An enemy spawns at **its placed tier**: `s.level ?? (base.level \|\| 1)`. No floor curve. | `[stated]` 2026-08-02. A floor is made harder by *authoring* it harder — placing a Senior Manager, or a tiered `manager@3` — not by a number inflating whatever happens to be there. |
+| 14 | **Floor `depth` (replaces #11)** | Stays in the format as the floor's **number**, used for display and campaign ordering. It no longer feeds `scaleEnemy`. | `[stated]` 2026-08-02, by consequence. Keeping the field costs nothing and the lint already checks it; removing it would churn both shipped levels and the campaign chain for no gain. |
+
+### The reversal, concretely
+
+**The format already supports the replacement.** A placement can name its own
+tier today — `"G": "manager@3"` — parsed by `parseActorRef`
+(`data/actor-registries.js:37-47`), carried through `grid.js:110-111` as
+`{ type, x, z, level }`, and honoured at spawn: `main.js:335` already reads
+`s.level ?? effectiveLevel(base, floorDepth)`, so an explicit tier *already*
+wins over the curve. `levels/level2.json:37` uses it.
+
+**So the code change is small.** Drop the fallback to `effectiveLevel` at
+`main.js:335` so it reads the enemy's native tier instead; `scaleEnemy` stays
+(a tiered placement still needs deriving) and `effectiveLevel` (`stats.js:366`)
+loses its only caller.
+
+**Two things that are not small, and are content decisions, not code:**
+
+1. ~~**`levels/level2.json` currently leans on `depth: 2`**~~ — **DONE, and
+   balance-preserving.** The two Managers and the HR rep were the only
+   placements the curve was lifting (Executive and Security Guard are natively
+   tier 2 and were already sitting at their own tier). They now say so out loud:
+   `"Z": "manager@2"` and `"J": "hr@2"`. Verified by parsing the shipped file —
+   every enemy on floor 2 spawns at exactly the level and HP it did before the
+   curve was struck, including the pre-existing `manager@3`. Nothing about
+   playing floor 2 changed; only the mechanism that decides it did.
+   New chars were needed because the lint requires a tiered placement to carry
+   its own char (`tests/unit/levels.test.js:429-434`). Both shadow tile types
+   this level does not use (`fridge`, `bar-stool`) — the same shape as the
+   pre-existing `"G"`/`ficus` shadow, and safe once the editor's allocator stops
+   leaking across loads (`EDITOR_INVENTORY.md` A4). Worth noting the squeeze:
+   **there was no char that shadowed nothing.** All 86 usable characters are
+   spoken for by the 87 paintable tile types (A5), so this change spent two of
+   the scarcest resource in the format. Deliberate re-tiering of floor 2 — as
+   opposed to this faithful translation — is still the designer's call.
+2. **Authoring difficulty by hand needs the editor to author tiers**, and it
+   cannot (`EDITOR_INVENTORY.md` H1 — the editor has no tier brush and no way
+   to emit `id@n`). Until then, hand-tuned difficulty means hand-editing JSON.
+   **This promotes H1 from a nice-to-have to load-bearing**: it is the tool the
+   replacement design depends on.
+
+**One test encodes the old behaviour** — `tests/e2e/progression.spec.js:106`
+("a floor deeper than an enemy tier scales that enemy up") — and inverts rather
+than deletes: a floor deeper than an enemy's tier should now leave it alone.
+
+**The cost the old rationale was buying, stated honestly so it is not lost:**
+decision 3 kept the floor curve so "even the base three stay relevant at
+depth". Without it, a deep floor populated with base coworkers gets *easier*
+relative to a levelling party. The answer is more authored variants and
+deliberate tier placement — which is the point of the reversal — but it is
+real work per floor rather than one integer, and it is the thing to watch when
+floors 3+ get built.
 
 ## The two currencies
 

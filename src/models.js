@@ -33,7 +33,13 @@ function setupAnim(inst, asset) {
 // fallen bookcase needs to rotate about an axis in the floor plane, and a
 // bespoke second placement path for the one case would have been a parallel
 // copy of the asset caching, the toonify and the outline pass.
-export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY = 0, tiltX = 0, tiltZ = 0, onReady = null, animate = false } = {}) {
+// `parent` is the entity the model hangs off, defaulting to app.root. A layered
+// level builds each storey under its own root and shows or hides that root for
+// the cutaway - so a prop parented to app.root sat OUTSIDE its storey and stayed
+// visible when the floor it belongs to was hidden. That is why upper storeys
+// were primitives-only during the spike.
+export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY = 0, tiltX = 0, tiltZ = 0, onReady = null, animate = false, parent = null } = {}) {
+  const host = () => parent || app.root;
   // Reuse the asset if this .glb was already requested (props repeat a lot,
   // and the editor repaints cells constantly).
   let asset = app.assets.find(url);
@@ -75,7 +81,7 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
     holder.setLocalScale(0.5 * scale, 0.5 * scale, 0.5 * scale);
     holder.setEulerAngles(tiltX, rotY, tiltZ);
     holder.setPosition(tileX, lift + 0.25, tileZ);
-    app.root.addChild(holder);
+    host().addChild(holder);
     if (onReady) onReady(holder);
   };
   if (asset.loadFailed) { placeFallback(); return; } // already known bad - don't re-wait
@@ -101,7 +107,7 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
     holder.setLocalScale(scale, scale, scale);
     holder.setEulerAngles(tiltX, rotY, tiltZ);
     holder.setPosition(tileX, lift, tileZ);
-    app.root.addChild(holder);
+    host().addChild(holder);
     if (onReady) onReady(holder);
   });
   app.assets.load(asset);

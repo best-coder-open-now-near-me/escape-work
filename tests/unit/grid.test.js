@@ -297,3 +297,43 @@ test('edge pools: partitions dent, and the pool dies with the edge', () => {
   assert.ok(e);
   assert.equal(g.edgeHpBetween(0, 0, 1, 0), null);
 });
+
+// --- per-placement rotation (EDITOR_INVENTORY IQ4, designer 2026-08-02) ------
+// `rotY` was a property of the tile TYPE, so every desk on every floor faced the
+// same way. An optional `props` sibling array carries per-CELL overrides.
+test('a props entry rotates one placement without touching the type', () => {
+  const g = parseLevel({
+    name: 'rot',
+    tiles: { '.': 'floor', D: 'desk' },
+    actors: { '@': 'player' },
+    map: ['@.D.', '..D.'],
+    props: [{ x: 2, z: 0, rotY: 90 }],
+  });
+  assert.equal(g.rotAt(2, 0), 90, 'the placement with an entry uses it');
+  assert.equal(g.rotAt(2, 1), TILE_TYPES.desk.rotY || 0,
+    'the placement without one falls back to the type');
+});
+
+test('rotation quantises to the four orientations and drops no-ops', () => {
+  const g = parseLevel({
+    name: 'rot',
+    tiles: { '.': 'floor', D: 'desk' },
+    actors: { '@': 'player' },
+    map: ['@DDD'],
+    props: [{ x: 1, z: 0, rotY: 91 }, { x: 2, z: 0, rotY: -90 }, { x: 3, z: 0, rotY: 360 }],
+  });
+  assert.equal(g.rotAt(1, 0), 90, '91 rounds to 90');
+  assert.equal(g.rotAt(2, 0), 270, 'negatives wrap into range');
+  assert.equal(g.rotAt(3, 0), TILE_TYPES.desk.rotY || 0, '360 is no rotation at all');
+});
+
+test('a level with no props array behaves exactly as before', () => {
+  const g = parseLevel({
+    name: 'rot',
+    tiles: { '.': 'floor', D: 'desk' },
+    actors: { '@': 'player' },
+    map: ['@.D.'],
+  });
+  assert.equal(g.rotAt(2, 0), TILE_TYPES.desk.rotY || 0);
+  assert.deepEqual(g.props, []);
+});

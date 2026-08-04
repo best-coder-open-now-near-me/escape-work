@@ -16,7 +16,12 @@ const pc = globalThis.window?.pc;
 // the WORLD a question goes through it first. Deliberately only the left click
 // and the hover - the right-click menu and the editor's drag-paint stay exact,
 // because blind should make you fumble a swing, not a menu.
-export function createControls({ app, canvas, focus, onLeftClickTile, onRightClickTile, onAnyLeftPress, onLeftDragTile, onHover, onHoverLeave, onTacticalChange = null, aim = null }) {
+// `mods` on the click/drag callbacks carries the modifier keys held at the
+// moment of the event, and `onLeftRelease` / `onRightDragTile` complete the
+// gesture vocabulary. The editor needs all three for shift-rectangles,
+// alt-eyedropper and right-drag erase; the game passes none of them and is
+// unaffected.
+export function createControls({ app, canvas, focus, onLeftClickTile, onRightClickTile, onAnyLeftPress, onLeftDragTile, onLeftRelease, onRightDragTile, onHover, onHoverLeave, onTacticalChange = null, aim = null }) {
   // Rig: camYaw (spins around the focus) -> camPitch (tilts) -> camera (sits
   // back at a fixed distance, looking at the focus).
   const camYaw = new pc.Entity('camYaw');
@@ -99,24 +104,47 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   let lastX = 0;
   let lastY = 0;
   let haveMouse = false;
+  let rightHeld = false;
+  // PlayCanvas mouse events don't carry modifier state, so track it off the
+  // window. Chords arrive as a plain object rather than the raw event, so a
+  // consumer can't reach past it into the DOM.
+  const mods = { shift: false, alt: false, ctrl: false };
+  const readMods = (e) => { mods.shift = e.shiftKey; mods.alt = e.altKey; mods.ctrl = e.ctrlKey || e.metaKey; };
+  window.addEventListener('keydown', readMods);
+  window.addEventListener('keyup', readMods);
+  window.addEventListener('mousedown', readMods, true);
+  window.addEventListener('mousemove', readMods, true);
   const aimed = (sx, sy) => (aim ? aim(sx, sy) : [sx, sy]);
   app.mouse.on(pc.EVENT_MOUSEDOWN, (e) => {
     if (!onCanvas(e)) return;
-    if (e.button === pc.MOUSEBUTTON_MIDDLE) {
+    if (e.button === pc.MOUSEBUTTON_MIDDLE || (e.button === pc.MOUSEBUTTON_LEFT && mods.alt && mods.shift)) {
+      // Alt+Shift+left is the second orbit binding. Orbit was middle-drag only,
+      // which a trackpad without a middle button cannot produce at all - the
+      // camera was simply unusable there. Alt alone and Alt+Shift alone are
+      // both taken by the editor's eyedropper and capture, so the chord is the
+      // pair plus the button.
       orbiting = true;
     } else if (e.button === pc.MOUSEBUTTON_LEFT) {
       leftHeld = true;
-      onAnyLeftPress && onAnyLeftPress();
+      onAnyLeftPress && onAnyLeftPress({ ...mods });
       const [ax, ay] = aimed(e.x, e.y);
-      onLeftClickTile && onLeftClickTile(screenToTile(ax, ay), screenToGround(ax, ay), ax, ay);
+      onLeftClickTile && onLeftClickTile(screenToTile(ax, ay), screenToGround(ax, ay), ax, ay, { ...mods });
     } else if (e.button === pc.MOUSEBUTTON_RIGHT) {
-      onRightClickTile && onRightClickTile(screenToTile(e.x, e.y), e.x, e.y, screenToGround(e.x, e.y));
+      rightHeld = true;
+      onRightClickTile && onRightClickTile(screenToTile(e.x, e.y), e.x, e.y, screenToGround(e.x, e.y), { ...mods });
     }
   });
   // Releases are never filtered - an orbit/drag must end even over UI.
   app.mouse.on(pc.EVENT_MOUSEUP, (e) => {
     if (e.button === pc.MOUSEBUTTON_MIDDLE) orbiting = false;
-    if (e.button === pc.MOUSEBUTTON_LEFT) leftHeld = false;
+    if (e.button === pc.MOUSEBUTTON_LEFT) {
+      if (orbiting) { orbiting = false; return; } // an alt+shift orbit, not a stroke
+      leftHeld = false;
+      // The end of a drag is where a rubber-banded tool COMMITS. Without this
+      // hook a rectangle could only ever be previewed, never applied.
+      onLeftRelease && onLeftRelease(screenToTile(e.x, e.y), screenToGround(e.x, e.y), { ...mods });
+    }
+    if (e.button === pc.MOUSEBUTTON_RIGHT) rightHeld = false;
   });
   app.mouse.on(pc.EVENT_MOUSEMOVE, (e) => {
     if (orbiting) {
@@ -129,7 +157,9 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
       CAM.pitch = pc.math.clamp(CAM.pitch + e.dy * 0.3, CAM.minPitch, CAM.maxPitch);
       apply();
     } else if (leftHeld && onLeftDragTile && onCanvas(e)) {
-      onLeftDragTile(screenToTile(e.x, e.y), screenToGround(e.x, e.y));
+      onLeftDragTile(screenToTile(e.x, e.y), screenToGround(e.x, e.y), { ...mods });
+    } else if (rightHeld && onRightDragTile && onCanvas(e)) {
+      onRightDragTile(screenToTile(e.x, e.y), screenToGround(e.x, e.y), { ...mods });
     } else if (onCanvas(e)) {
       hoveringCanvas = true;
       lastX = e.x;

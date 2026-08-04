@@ -94,6 +94,7 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
       const interactive = !!def && (def.loot || def.shop || def.ignitable || def.explosive);
       const res = r.renderMarker(x, z, type, {
         electrified: grid.isElectrified(x, z),
+        rotY: grid.rotAt?.(x, z) ?? null,
         surfaceAt: (sx, sz) => TILE_TYPES[grid.typeAt(sx, sz)]?.surface || null,
         // A model prop's holder only exists once its .glb lands, so this is the
         // one moment it is offered. Track it exactly like a primitive prop's
@@ -270,6 +271,7 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
     const interactive = !!def && (def.loot || def.shop || def.ignitable || def.explosive);
     const res = r.renderMarker(x, z, type, {
       electrified: grid.isElectrified(x, z),
+      rotY: grid.rotAt?.(x, z) ?? null,
       surfaceAt: (sx, sz) => TILE_TYPES[grid.typeAt(sx, sz)]?.surface || null,
       onAsync: (holder) => {
         propVisuals.set(x + ',' + z, holder);

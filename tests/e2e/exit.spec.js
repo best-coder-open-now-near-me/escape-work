@@ -152,7 +152,11 @@ test('the exit mid-campaign banks the save and carries the party to the next flo
   // Clear the floor first: this test is about the stairwell, not about fighting
   // through to it, and a fight on the way would make the walk a coin flip.
   await page.evaluate(() => window.__god.enemies.forEach((e) => { if (e.alive) e.die(); }));
-  await page.evaluate(() => { window.__god.player.hp = 4; }); // wounded, to prove the breather heals
+  // Wounded on the way out. Wounds CARRY now: the stairwell breather was struck
+  // 2026-08-02 with the rest of the automatic healing ("i also never asked for
+  // auto healing between floors"), so this is what a floor transition must NOT
+  // change.
+  await page.evaluate(() => { window.__god.player.hp = 4; });
 
   const exit = exitTile(level1);
   expect(await walkAcross(page, exit, walkableTiles(level1))).toBe(true);
@@ -167,13 +171,16 @@ test('the exit mid-campaign banks the save and carries the party to the next flo
   expect(saved.levelId).toBe('level2');
   expect(saved.party.length).toBeGreaterThanOrEqual(1);
   expect(saved.version).toBeGreaterThanOrEqual(6);
-  expect(saved.party[0].hp).toBeGreaterThan(4); // the stairwell breather landed
+  // INVERTED 2026-08-02. This used to assert the stairwell breather healed the
+  // party on the way out. There is no breather - you take a floor's damage to
+  // the next floor, and casualties with it.
+  expect(saved.party[0].hp).toBe(4);
 
   // Keep Climbing actually arrives on the next floor, with the sheet intact.
   await page.click('#next-floor');
   await page.waitForFunction(() => window.__game && window.__game.stats, null, { timeout: 90_000 });
   expect(await page.evaluate(() => window.__game.levelId)).toBe('level2');
-  expect(await page.evaluate(() => window.__god.player.hp)).toBeGreaterThan(4);
+  expect(await page.evaluate(() => window.__god.player.hp)).toBe(4);
 });
 
 test('a party WIPE is the only way to lose the run', async ({ page }) => {

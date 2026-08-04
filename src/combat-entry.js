@@ -176,18 +176,12 @@ export function createCombatEntry(d) {
           // out mid-fight, between fights, or in the next one. combat.js has
           // already swept any that were killed.
           d.syncLeaderBindings(); // control stays with whoever had the floor
-          // A breather after every victory, so back-to-back fights aren't a
-          // death spiral - wounds still carry over, just less brutally. The
-          // whole party catches its breath, and the downed come to at 1 HP.
-          for (const m of d.party.members) {
-            if (m.sheet.hp > 0) m.sheet.hp = Math.min(m.sheet.maxHp, m.sheet.hp + d.VICTORY_HEAL);
-            else {
-              m.sheet.hp = 1;
-              if (m.actor) m.actor.fx = null;
-              d.ui.toast(`${m.sheet.name} comes to.`);
-            }
-          }
-          d.ui.say(`The floor is yours. You catch your breath. (+${d.VICTORY_HEAL} HP)`);
+          // NO victory heal, and no free revive. Winning used to top the party
+          // up and stand the fallen back at 1 HP; the designer struck every
+          // automatic heal (TODO.md, 2026-08-02). Wounds carry, the downed stay
+          // down, and both are fixed by things you carry - a heal from the
+          // pockets, a first-aid kit for somebody on the floor.
+          d.ui.say('The floor is yours. Nobody feels better about it.');
           d.paintHud(d.sheet);
           d.refreshHotbarSlots(); // the combat-only verbs dim again with the fight over
           d.openLevelUps(); // spend the fight's promotions now that it's safe

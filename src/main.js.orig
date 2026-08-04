@@ -19,9 +19,9 @@ import { findPath, smoothPath, routeOpen, segmentClear, clampToClearance, approa
 import { seesBody, coneBoundary, deriveFacing } from './stealth.js';
 import {
   createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, grantTalent, classTrack,
-  scaleEnemy, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
+  scaleEnemy, effectiveLevel, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
   orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, spendablePoints,
-  lookOf, REACH, STEALTH,
+  lookOf, stairwellHeal, REACH, STEALTH,
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
@@ -111,10 +111,6 @@ const app = createApp(document.getElementById('app'));
 let activeLevel = LEVELS[FIRST_LEVEL];
 let activeLevelId = FIRST_LEVEL;
 let playtesting = false;
-// Whether THIS boot came from the editor's stash, as opposed to the ?level=
-// express lane or a floor picked off the desk. Both suppress campaign writes;
-// only one of them has an editor to go back to.
-let fromStash = false;
 let restoredProgress = null; // { levelId, sheets, active } - party.js handles old shapes
 // Does the run about to be played OWN the campaign save? Only a run that was
 // restored from it, or one that has since written it by clearing a floor.
@@ -137,17 +133,9 @@ try {
   const stash = localStorage.getItem(STASH_KEY);
   if (stash) {
     try {
-      const parsed = JSON.parse(stash);
-      // A stash that PARSES but is not a level used to brick the game and the
-      // editor together, with no in-app recovery - the shape check is what
-      // makes "unreadable" mean the same thing for both failure modes.
-      if (!Array.isArray(parsed?.map) && !Array.isArray(parsed?.layers)) {
-        throw new Error('stashed value is not a level');
-      }
-      activeLevel = parsed;
+      activeLevel = JSON.parse(stash);
       activeLevelId = null;
       playtesting = true;
-      fromStash = true;
     } catch {
       localStorage.removeItem(STASH_KEY); // unreadable, and it will stay that way
     }
@@ -250,13 +238,11 @@ const openFloorSelect = () => showLevelMenu({
 });
 
 if (location.hash.includes('editor')) {
-  // The editor speaks storeys now (EDITOR_PLAN M4), so a layered level opens
-  // as itself: storey 0 is the working set, the rest park behind the switcher,
-  // and Export writes the whole stack back. It used to be handed the ground
-  // storey alone, which meant opening a two-storey level and pressing Export
-  // silently deleted every floor above the first.
-  startEditor(app, activeLevel, STASH_KEY);
-
+  // The editor speaks single-storey levels; hand it the ground storey of a
+  // layered one rather than crashing on level.layers.
+  startEditor(app, activeLevel.layers
+    ? { ...activeLevel, ...activeLevel.layers[0], layers: undefined }
+    : activeLevel, STASH_KEY);
 } else if (!playtesting && !location.hash.includes('class=')) {
   openFloorSelect();
 } else {
@@ -315,16 +301,10 @@ function startGame(level) {
   // without a second registry entry existing to BE the harder one. Either way
   // it is the same scaleEnemy doing it: there is one curve, and a level picks a
   // point on it rather than hand-writing a rival to it.
-  // `level.depth` is deliberately NOT read here any more. It stays in the
-  // format as the floor's number - the lint checks it, the editor round-trips
-  // it, the campaign-chain check orders by it - but nothing at runtime derives
-  // a number from it. That was the floor curve, and it is gone.
+  const floorDepth = level.depth || 1;
   const enemies = grid.enemySpawns.map((s) => {
     const base = ENEMY_TYPES[s.type];
-    // The tier the AUTHOR placed, or the enemy's own native tier. No floor
-    // curve: `depth` is the floor's number, not a difficulty multiplier
-    // (PROGRESSION_PLAN.md decisions 13-14, designer 2026-08-02).
-    const lvl = s.level ?? (base.level || 1);
+    const lvl = s.level ?? effectiveLevel(base, floorDepth);
     return new EnemyActor(s.x, s.z, s.type, scaleEnemy(base, lvl));
   });
   // Player-team summons (SUMMON_PLAN.md): temporary combatants conjured
@@ -368,6 +348,8 @@ function startGame(level) {
   // --- gameplay tuning --------------------------------------------------------
   const ENGAGE_RADIUS = 4; // Chebyshev tiles within which enemies join a fight
   const EXPLOSION_DAMAGE = 8; // shrapnel to the player standing beside a printer
+  const VICTORY_HEAL = 5; // the breather after winning a fight
+  const STAIRWELL_HEAL = 6; // the breather between floors
   const OOC_TURN_SECONDS = 1.6; // out-of-combat seconds that count as one fire/smoke turn
 
   // Merchants (ECONOMY_PLAN.md). Built before looting because the Alt overlay
@@ -837,9 +819,6 @@ function startGame(level) {
     get BASE_SPEED() { return BASE_SPEED; },
     get CATCH_UP() { return CATCH_UP; },
     get FOLLOW_NEAR() { return FOLLOW_NEAR; },
-    ITEMS,
-    get combat() { return combat; },
-    refreshHotbarSlots: (...a) => refreshHotbarSlots(...a),
     canRecruit: (...a) => canRecruit(...a),
     // An OBJECT, not a function - and declared below, so a getter either way.
     // The call-through wrapper every function dep gets made `d.charSheet` a
@@ -876,7 +855,6 @@ function startGame(level) {
     switchLeader,
     syncLeaderBindings,
     updateFollowers,
-    reviveIndex,
   } = partyControl;
 
   // --- game flow ----------------------------------------------------------------
@@ -1644,6 +1622,7 @@ function startGame(level) {
     combatRng,
     ENGAGE_RADIUS,
     STEALTH,
+    VICTORY_HEAL,
     startCombat,
     createCombatWorld,
     partyLeader,
@@ -1907,11 +1886,12 @@ function startGame(level) {
         // coffee habits - carries over via saved progress). The last floor,
         // and any playtest level, ends the run.
         if (!playtesting && level.next && LEVELS[level.next]) {
-          // NO stairwell breather. This used to heal the party +6 and revive
-          // anyone downed, which is what made "carried to the landing" true.
-          // Struck 2026-08-02 with the rest of the automatic healing: you take
-          // a floor's damage to the next floor, and you take its casualties
-          // there too. A downed member arrives downed and needs a kit.
+          // A breather in the stairwell, so you never start a floor one
+          // puddle away from death. The downed get carried and come to on
+          // the landing.
+          for (const m of party.members) {
+            m.sheet.hp = stairwellHeal(m.sheet, STAIRWELL_HEAL);
+          }
           // Guarded like every other write (god.js:66): localStorage throws in
           // private mode and when the quota is gone, and this one runs in the
           // middle of a floor transition - an unguarded throw here would take
@@ -2048,8 +2028,6 @@ function startGame(level) {
       partyLeader,
       memberOf: (...a) => memberOf(...a),
       helpUp: (...a) => helpUp(...a),
-      reviveIndex: (...a) => reviveIndex(...a),
-      ITEMS,
       confront: (...a) => confront(...a),
       isWalkable: (...a) => isWalkable(...a),
       openShopAt: (...a) => openShopAt(...a),
@@ -2436,20 +2414,10 @@ function startGame(level) {
       // worse than one honest one. A meaningful "same character, floor one"
       // needs run state to separate from character state first.
       id: 'menu-restart',
-      // While playtesting, "the run" is a scratch level someone is editing -
-      // not a campaign. This was the THIRD ungated clearProgress (its two
-      // siblings at loseGame and the exit handler were fixed; this one was
-      // missed), and it took the campaign save, its cloud row, AND the level in
-      // the editor with it. Both halves are gated now, and the label says which
-      // thing it is about to throw away.
-      label: playtesting ? 'Restart this level' : 'Restart run',
+      label: 'Restart run',
       action: () => {
-        if (!playtesting) {
-          clearProgress();
-          localStorage.removeItem(STASH_KEY);
-        }
-        // A playtest keeps its stash - restarting the level means replaying it,
-        // not losing the thing you are editing.
+        clearProgress();
+        localStorage.removeItem(STASH_KEY);
         location.hash = ''; // drop any #class= express lane, or it skips the desk
         location.reload();
       },
@@ -2530,9 +2498,6 @@ function startGame(level) {
     // an untouched draft. That is byte-for-byte the character this hash always
     // produced, so the whole existing suite keeps booting exactly as it did,
     // and the one place that wants to exercise creation asks for it by name.
-    if (playtesting) {
-      try { localStorage.setItem('escape-work.playtest.class', preselectedClass()); } catch { /* ignore */ }
-    }
     beginRun(createCharacter(createDraft(preselectedClass())));
   } else {
     // The desk. openDesk frames the spawn tile close and head-on (eye-ish
@@ -2541,18 +2506,9 @@ function startGame(level) {
     // a screen you can only reach once is a screen you cannot back out of.
     openDesk();
   }
-  // The badge belongs to a STASHED level specifically. `playtesting` also covers
-  // the ?level= express lane and a desk pick, neither of which has an editor to
-  // go back to - which is why picking Floor 2 used to raise a playtest badge.
-  if (playtesting && fromStash) {
+  if (playtesting) {
     ui.showPlaytestBadge(() => {
       location.hash = '#editor';
-      location.reload();
-    }, () => {
-      // Drop ONLY the stash. The campaign save is not this button's business -
-      // that distinction is the whole reason this exists.
-      localStorage.removeItem(STASH_KEY);
-      location.hash = '';
       location.reload();
     });
   }
@@ -2860,13 +2816,10 @@ function startGame(level) {
     },
     // Resolves an ENEMY_TYPES id or a class archetype (e.g. 'employee'), so a
     // tester can drop class-based units to feel out balance.
-    // `level` is optional and defaults to the archetype's native tier. It is
-    // explicit now rather than inferred from the floor: with the floor curve
-    // gone, "what tier is this thing" is only ever something someone chose.
-    spawnEnemy(typeId, x, z, level = null) {
+    spawnEnemy(typeId, x, z) {
       const base = ENEMY_TYPES[typeId] || CLASSES[typeId];
       if (!base) return null;
-      const def = scaleEnemy(base, level ?? (base.level || 1));
+      const def = scaleEnemy(base, effectiveLevel(base, floorDepth)); // match the floor
       const en = new EnemyActor(x, z, typeId, def);
       enemies.push(en);
       placeModel(app, `assets/characters/${def.model}.glb`, x, z, {

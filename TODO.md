@@ -788,6 +788,39 @@ Answered directly by the project owner — recorded so they are not relitigated.
   turn (BG3 Dominate, not DOS2's AI-driven Charmed). See Phase 8.
 - Consumables cost 2 AP in combat; paper upgrading is out-of-combat only;
   `PAPER_CAP`/`INV_CAP` become real numbers rather than `Infinity`.
+- **No automatic healing.** Two rules struck 2026-08-02 `[stated]`: enemies do
+  not autoscale with floor depth ("things shouldnt autoscale thats absurd… by
+  floor i mean. thats just lazy" — see `PROGRESSION_PLAN.md` decisions 13–14),
+  and the party is not healed between floors ("i also never asked for auto
+  healing between floors"). Both were **presumptions, not asks** — the floor
+  curve was a plan doc's own recommendation, and `STAIRWELL_HEAL`
+  (`main.js:384`) never appears in any plan doc's decision table at all. Its
+  entire justification is a code comment.
+  - **All three automatic revives are struck, and they had to go together.**
+    `STAIRWELL_HEAL` (between floors) and `VICTORY_HEAL` (after every won fight)
+    both healed the standing AND stood the fallen back up. So did `helpUp`, the
+    free walk-over hand up — the one this entry originally missed, and the one
+    that would have made striking the other two cosmetic.
+  - **The hidden revive.** `stairwellHeal` was `min(maxHp, max(hp, 0) + amount)`,
+    and that `max(hp, 0)` was quietly the only thing standing a downed character
+    back up. Deleting the heal deleted the revival, which is why the replacement
+    had to land in the same change rather than after it.
+  - **H1 answered: option C** `[stated]` (designer, 2026-08-02: "c"). Downed
+    characters stay downed — across a victory, across a floor transition — and
+    are revived only by an item carrying `revive` (`data/items.js`), spent
+    through `helpUp` out of the helper's own pockets. The first one is the
+    Expired First-Aid Kit: 4 HP, one use, uncommon in break rooms, occasionally
+    filed in cabinets, and reliably stocked by the mail-room cart so a run can
+    BUY the thing it depends on.
+  - **H2 resolved with it.** `VICTORY_HEAL` went too. It was flagged as a
+    separate question, but option C answers it: "revivable only by an item or a
+    power" cannot coexist with a rule that revives everyone for free after every
+    fight. Healing is now entirely item-driven, so
+    `ECONOMY_PLAN.md:466`'s per-floor heal budget is the number to watch first
+    in playtest.
+  - **The wipe guard needed no work.** `downOrLose` (`main.js`) already ends the
+    run when nothing is left standing; option C just makes that reachable in one
+    more way, which is the intent.
 
 ## E2e status in this environment (measured, with the method stated)
 
@@ -1128,9 +1161,12 @@ killing anyone, and therefore the correct play every time.
       no longer reach the melee fall-through at all (rather than being guarded
       out of it at one call site); `actors.js:430` clamps a non-finite
       `takeDamage` to a visible no-op.
-- [ ] **Editor playtest must not wipe the campaign save** (`main.js:592`):
-      gate `clearProgress()` on campaign mode in both `loseGame()` and the
-      exit handler's non-campaign branch.
+- [x] **Editor playtest must not wipe the campaign save.** Done in
+      `loseGame()` and the exit handler, and the THIRD site this entry missed -
+      the game menu's `menu-restart`, which was ungated and also removed the
+      stash, so "Restart run" during a playtest deleted the campaign save, its
+      cloud row, and the level being edited. All three gate on `playtesting`
+      now, and the menu item reads "Restart this level" while playtesting.
 - [ ] **Backfill `xp`/`xpNext` in `normalizeSheet`** (`party.js:83`) so legacy
       saves can level again. *Same function as the save v8 drop — one
       migration test pass.*

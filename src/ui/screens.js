@@ -466,16 +466,37 @@ export function showGameMenu(items, hints = null) {
 
 // Small corner badge shown while playtesting an editor level.
 
-export function showPlaytestBadge(onBack) {
-  const b = document.createElement('button');
-  b.id = 'playtest-badge';
-  b.textContent = '⏸ PLAYTEST — back to editor';
-  Object.assign(b.style, {
+// The badge carries TWO actions now. It used to offer only "back to editor",
+// which meant a stale playtest stash hijacked every boot with no way out that
+// did not also destroy something: the stash sits at the top of the boot cascade,
+// so the floor-select desk and its Continue button never rendered while one
+// existed, and the only documented escape (Restart run) wiped the campaign save.
+export function showPlaytestBadge(onBack, onLeave) {
+  const wrap = document.createElement('div');
+  wrap.id = 'playtest-badge-wrap';
+  Object.assign(wrap.style, {
     position: 'fixed', top: '12px', right: '12px', zIndex: '25',
+    display: 'flex', gap: '6px', alignItems: 'center',
+  });
+  const chrome = {
     background: '#3a2e46', color: '#e8d8f5', border: '1px solid #6a5a80',
     borderRadius: '7px', padding: '7px 11px', font: '12px system-ui, sans-serif',
     cursor: 'pointer',
-  });
+  };
+  const b = document.createElement('button');
+  b.id = 'playtest-badge';
+  b.textContent = '⏸ PLAYTEST — back to editor';
+  Object.assign(b.style, chrome);
   b.onclick = onBack;
-  document.body.appendChild(b);
+  wrap.appendChild(b);
+  if (onLeave) {
+    const l = document.createElement('button');
+    l.id = 'playtest-leave';
+    l.textContent = '✕ Leave playtest';
+    l.title = 'Drop the playtest level and boot your own run. Your campaign save is untouched.';
+    Object.assign(l.style, chrome);
+    l.onclick = onLeave;
+    wrap.appendChild(l);
+  }
+  document.body.appendChild(wrap);
 }

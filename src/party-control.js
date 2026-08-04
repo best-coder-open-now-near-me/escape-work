@@ -34,11 +34,30 @@ export function createPartyControl(d) {
     d.ui.say(`${m.sheet.name} goes down. Breathing, but done for now.`);
   }
 
+  // A hand up COSTS something now. It used to be free and unlimited - walk
+  // over, click, they stand at 1 HP - which is the third automatic revive the
+  // designer struck (TODO.md, 2026-08-02) and the one that would have made
+  // striking the other two pointless. It spends an item carrying `revive`
+  // (data/items.js) out of the helper's own pockets.
+  const reviveIndex = (bag) => (bag || []).findIndex((id) => d.ITEMS[id]?.revive);
   function helpUp(m) {
     if (!m || m.sheet.hp > 0) return;
-    m.sheet.hp = 1;
+    // Whoever is doing the helping pays for it: in a fight that is the acting
+    // member, out of one it is the leader - the same rule a consumable follows.
+    const helper = (d.inCombat && d.combat ? d.combat.actingSheet : d.sheet);
+    const i = reviveIndex(helper?.inventory);
+    if (i === -1) {
+      d.ui.say(`${m.sheet.name} is not getting up on encouragement alone. You need a first-aid kit.`);
+      return;
+    }
+    const id = helper.inventory[i];
+    const def = d.ITEMS[id];
+    helper.inventory.splice(i, 1);
+    m.sheet.hp = Math.min(m.sheet.maxHp, def.revive);
     if (m.actor) m.actor.fx = null;
-    d.ui.say(`You haul ${m.sheet.name} upright. They pretend that was a stretch.`);
+    d.ui.say(`${def.useLog} ${m.sheet.name} is back on their feet at ${m.sheet.hp} HP.`);
+    d.ui.updateStatsHud(d.sheet);
+    d.refreshHotbarSlots();
   }
 
   function recruitCompanion(npc) {
@@ -194,6 +213,7 @@ export function createPartyControl(d) {
   }
 
   return {
+    reviveIndex,
     memberSpeed,
     downCompanion,
     helpUp,

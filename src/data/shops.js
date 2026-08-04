@@ -65,6 +65,10 @@ export const SHOPS = {
       { item: 'letter-opener', qty: 1, chance: 0.35 },
       // The one place to buy range on purpose, rather than hope a drawer has one.
       { item: 'staple-gun', qty: 1, chance: 0.3 },
+      // Eleven years of corridors means he has seen people go down and knows
+      // what it costs. The one reliable place to BUY a revive rather than
+      // hope a break room rolls one.
+      { item: 'first-aid', qty: 2, chance: 0.9 },
     ],
   },
 };

@@ -7,15 +7,22 @@ it. The editor stays ours: the designer weighed the official PlayCanvas Editor
 and external grid tools (Tiled/LDtk) and chose the in-repo one `[stated]`
 ("i dont mind using ours if its easiest", 2026-08-01). The grid stays too:
 "we dont need full flexibility, we dont have organic curves to construct or
-anything like that" `[stated]` (2026-08-01). No code yet — this is the plan.
+anything like that" `[stated]` (2026-08-01). **M0–M4 have landed** — see the
+milestones below and `EDITOR_INVENTORY.md` for the round-by-round record.
+
+`EDITOR_INVENTORY.md` is the companion gap list: a full audit of what the editor
+cannot do and what it does that loses work, sized and evidenced, with its own
+six questions for the designer. This doc stays the record for the editor's
+`[stated]`/`[ratified]` decisions and owns the milestones; the inventory feeds
+M0 and M4 and re-tags nothing here.
 
 ## Questions for the designer
 
 Asked in-session on 2026-08-01. **Q1 is closed**: the designer proposed the
 layer-stack model, directed a feasibility spike ahead of milestone work, and
 approved the built result ("this looks great!", 2026-08-01) — see the spike
-section. Q2 and Q3 remain open and the plan proceeds on the recommended
-defaults, tagged `[proposed]`.
+section. **Q2 is closed** (2026-08-02, answer A — see below). Q3 remains open
+and the plan proceeds on its recommended default, tagged `[proposed]`.
 
 **Q1 — What does "multifloor in a single level" mean mechanically?** The
 stated scene is "a lobby with a lot of height, multifloor in what is really a
@@ -40,6 +47,10 @@ matters, that is a new question, not a silent extension. Status: `[ratified]`
 ("this looks great!", 2026-08-01); decisions 4 and 6 carry the tags.
 
 **Q2 — Do different heights change combat math, or only geometry?**
+**CLOSED 2026-08-02 — answer A**, `[ratified]`: the designer approved the
+recommendation verbatim ("i approve your recommendation", quoting option A,
+2026-08-02). Decision 8 carries the tag. C stays available later without
+rework — the `hitChance` mods stack is the hook — but it is not v1.
 
 - **A. LOS + reach only (recommended).** Height decides what you can see and
   shoot (no firing through the mezzanine slab; melee never crosses layers)
@@ -79,12 +90,12 @@ work), cutting stamps first if the round needs to shrink.
 | 2 | Levels stay grid + legend + ASCII + edge runs; no freeform geometry | `[stated]` | designer, 2026-08-01: "we dont need full flexibility… no organic curves" |
 | 3 | Verticality is required: tall single-level spaces with multifloor play | `[stated]` | designer, 2026-08-01: "a lobby with a lot of height, multifloor in what is really a single 'floor' level" |
 | 4 | Verticality model: stacked full-storey layers, each authored as an ordinary flat map, with one height setting per layer | `[ratified]` | designer-proposed 2026-08-01 ("full floors with one layer/height setting"), embodied by the spike, approved on sight ("this looks great!", 2026-08-01) |
-| 5 | Format: optional `"layers"` array, one entry per floor, bottom-up; a level without it is a single ground layer | `[proposed]` | every shipped level stays valid unchanged; see format section |
+| 5 | Format: optional `"layers"` array, one entry per floor, bottom-up; a level without it is a single ground layer | `[ratified]` | shipped in the spike (merged 2026-08-01) and now written as well as read by the editor (M4). Documented in `levels/README.md`. `height` on layer *i* is the rise ABOVE storey *i*, not its own ceiling |
 | 6 | Stairs: a marker run on the lower layer; the staircase — geometry, orientation, the connection — is generated, and the opening above is validated loudly rather than carved silently | `[ratified]` | designer-proposed 2026-08-01 ("a procedurally generated staircase tile/space on each layer"); shipped in the spike and approved with it |
 | 7 | Movement: within a layer as today; between layers only via stair portals; no hop/fall/jump in v1 | `[proposed]` | cheap reversible default; shoving someone off the balcony is a tempting later verb, not v1 |
-| 8 | Cross-layer combat is LOS + reach only; no high/low-ground stat modifier | `[proposed]` | Q2; keeps the `[stated]` "tactics stay as shipped" record intact (TODO.md) |
-| 9 | Editor QoL for v1: undo/redo, region stamps, actor brushes, save-to-disk | `[proposed]` | Q3; gap list itself confirmed by designer 2026-08-01 |
-| 10 | Save-to-disk = dev-server endpoint writing `levels/<id>.json` + regenerated registry | `[proposed]` | dev-mode only; see M0. Cheap default, easily swapped for export-and-paste |
+| 8 | Cross-layer combat is LOS + reach only; no high/low-ground stat modifier | `[ratified]` | Q2, closed 2026-08-02: designer approved option A verbatim ("i approve your recommendation"). Keeps the `[stated]` "tactics stay as shipped" record intact (TODO.md) |
+| 9 | Editor QoL for v1: undo/redo, region stamps, actor brushes, save-to-disk | `[ratified]` | Q3 answered by IQ1 ("painter", 2026-08-02). All four shipped, plus fill/line/rect/eyedropper, a live playability lint, a metadata strip and per-placement rotation |
+| 10 | Save-to-disk = dev-server endpoint writing `levels/<id>.json` + regenerated registry | *superseded* | The designer's pipeline is `[stated]` — "were just outputting to json and uploading to the git" (2026-08-02). Shipped instead: a Download button (Blob + `<a download>`, no server, works in any build) and an editable paste-back. The dev-server endpoint stays available if the paste step still grates — see `EDITOR_INVENTORY.md` IQ6 |
 | 11 | Camera: cutaway — layers above the active character's floor are hidden, with markers for off-layer combatants | `[proposed]` | the genre-standard answer (X-COM, BG3); the readability risk lives here, see Risks |
 
 ## The layer model (decisions 4–7, in detail)
@@ -217,11 +228,15 @@ above pre-paid parts of M1/M2: what remains in them is listed as deltas.
   wash on two floors, AI routing to stairs and picking targets it can
   actually see. High/low-ground modifiers only if Q2 ratifies them — the
   hook (`hitChance` mods) already exists.
-- **M4 — Editor authors layers** (`src/editor.js`). Layer switcher tabs,
-  add/remove layer, per-layer height field, stair marker brush with live
-  validation, and an onion-skin ghost of the layer below while painting an
-  upper floor. Deliberately small — the point of the layer model is that
-  painting a floor IS the editor's existing job.
+- **M4 — Editor authors layers (landed 2026-08-02).** Storey switcher, add and
+  remove a storey, per-storey height, an onion-skin of the storey below, and
+  the stairway brush enabled only where a run has somewhere to climb to. Live
+  validation runs `parseFloors`, so an unclimbable run or an occupied landing
+  is named in the status strip rather than at load time. `toJson` emits the
+  `layers` array with level-wide legends; a single-storey level exports exactly
+  as it always did. It was indeed small — the point of the layer model is that
+  painting a floor IS the editor's existing job, and the storey switcher is
+  mostly bookkeeping around the flat-map code that already worked.
 
 ## Risks and open questions (engineering)
 

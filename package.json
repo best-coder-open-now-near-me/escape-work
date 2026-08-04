@@ -9,7 +9,7 @@
     "serve": "node build.mjs && node serve.mjs --port 8000",
     "test": "node --test tests/unit/*.test.js",
     "test:e2e": "playwright test",
-    "test:e2e:smoke": "playwright test smoke.spec.js",
+    "test:e2e:smoke": "playwright test smoke.spec.js editor.spec.js",
     "check:extractions": "node tools/check-extractions.mjs"
   },
   "dependencies": {

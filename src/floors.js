@@ -195,7 +195,7 @@ export function layeredGrid(floors, level, getActive) {
   const METHODS = ['typeAt', 'defAt', 'terrainOpen', 'sightOpenCell', 'sightOpenCellLow',
     'sightOpenLow', 'surfaceAt', 'isElectrified',
     'setType', 'propHpAt', 'damageProp', 'edgeHpBetween', 'damageEdge', 'edgeOpen', 'stepOpen',
-    'sightOpen', 'wallEdgeBetween', 'removeEdgeBetween', 'doorBetween', 'setDoorOpen'];
+    'sightOpen', 'rotAt', 'wallEdgeBetween', 'removeEdgeBetween', 'doorBetween', 'setDoorOpen'];
   for (const m of METHODS) facade[m] = (...args) => g()[m](...args);
   // Sets and maps are read as properties, so they need live getters.
   for (const p of ['hWalls', 'vWalls', 'doors']) {

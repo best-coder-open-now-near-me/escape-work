@@ -71,6 +71,13 @@ export function showLevelMenu(d) {
         d.startGame(d.activeLevel);
       }));
   }
+  // The editor's front door. It was a 12px grey link on the class picker - a
+  // screen that stopped being the first thing you see the moment this desk
+  // landed in front of it, so a designer opening the game had no way to find
+  // the tool they were meant to build floors with.
+  button('level-editor', 'Level editor', 'Paint a floor, or open a shipped one',
+    () => { location.hash = '#editor'; location.reload(); });
+
   // The save key (shown only when the cloud is configured): a private phrase
   // that becomes this player's cloud identity - hashed locally, never sent
   // raw - so nobody else's device stomps their rows, and the same phrase on

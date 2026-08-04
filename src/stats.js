@@ -41,13 +41,13 @@ export const PROGRESSION = {
   XP_GROWTH: 1.5,       // each promotion multiplies the threshold by this
 };
 
-// The breather between floors: everyone comes up by `amount`, capped at their
-// maximum. The `Math.max(hp, 0)` is the load-bearing part - a DOWNED character
-// sits at or below zero, and adding to a negative would land them still down,
-// or up by less than everybody else. They are carried to the landing and come
-// to there, which is the rule this expresses.
-export const stairwellHeal = (sheet, amount) =>
-  Math.min(sheet.maxHp, Math.max(sheet.hp, 0) + amount);
+// `stairwellHeal(sheet, amount)` used to live here: the between-floors top-up,
+// whose `Math.max(hp, 0)` was also the ONLY thing standing a downed character
+// back up on the landing. Both halves are gone (TODO.md, designer 2026-08-02:
+// "i also never asked for auto healing between floors"). Damage and casualties
+// both carry to the next floor now, and the revive that replaced the hidden one
+// is an object you have to be carrying - an item with `revive`, spent through
+// main.js `helpUp`.
 
 // The xp threshold a character at `level` should be sitting on. Replays the
 // same rounding gainXp applies step by step, so a rebuilt value and a value
@@ -373,10 +373,17 @@ export function scaleEnemy(def, level) {
   return out;
 }
 
-// The level an enemy actually spawns at on a floor of the given depth: never
-// below its native tier, so a high variant keeps its tier on a shallow floor
-// and a base enemy scales up on a deep one.
-export const effectiveLevel = (def, depth) => Math.max(def.level || 1, depth || 1);
+// `effectiveLevel(def, depth)` used to live here: the floor curve, which spawned
+// any enemy at max(nativeTier, floorDepth) so a base coworker got beefier the
+// deeper you went. It is GONE by design - the designer struck it 2026-08-02
+// ("things shouldnt autoscale thats absurd... by floor i mean. thats just
+// lazy"; PROGRESSION_PLAN.md decisions 13-14). An enemy now spawns at the tier
+// it was PLACED at, and a floor is made harder by authoring harder placements
+// (`"Z": "manager@2"`) or by placing a tougher variant.
+//
+// `scaleEnemy` stays and is still the one curve: a tiered placement has to be
+// derived from somewhere. What changed is who picks the level - the author,
+// not the floor number.
 
 // Normalize any unit archetype - an ENEMY_TYPES def or a class - into the
 // combat stats the AI reads. The only field that differs by registry is max

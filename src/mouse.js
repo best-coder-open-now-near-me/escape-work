@@ -316,7 +316,15 @@ export function createMouse(d) {
         if (m && (m !== d.partyLeader(d.party) || m.sheet.hp <= 0)) {
           const items = [];
           if (m.sheet.hp <= 0) {
-            items.push({ label: `Help ${m.sheet.name} up`, action: () => d.approachAndDo(hit.ref.x, hit.ref.z, () => d.helpUp(m)) });
+            // The label states the cost, because a hand up is no longer free
+            // and finding that out by walking over is a wasted turn.
+            const kit = d.reviveIndex((d.inCombat && d.combat ? d.combat.actingSheet : d.sheet)?.inventory);
+            items.push({
+              label: kit === -1
+                ? `Help ${m.sheet.name} up (need a first-aid kit)`
+                : `Help ${m.sheet.name} up (${d.ITEMS[(d.inCombat && d.combat ? d.combat.actingSheet : d.sheet).inventory[kit]].name})`,
+              action: () => d.approachAndDo(hit.ref.x, hit.ref.z, () => d.helpUp(m)),
+            });
           } else {
             if (hit.ref.def?.dialogue || hit.ref.def?.recruitedDialogue) {
               items.push({ label: `Talk to ${m.sheet.name}`, action: () => d.approachAndDo(hit.ref.x, hit.ref.z, () => d.dialogue.open(hit.ref)) });
