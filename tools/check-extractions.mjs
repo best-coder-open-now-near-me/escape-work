@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs';
 const MODULES = [
   'src/combat-aim.js', 'src/combat-world.js', 'src/hotbar-host.js',
   'src/floor-effects.js', 'src/desk.js', 'src/combat-advance.js', 'src/ooc-verbs.js',
-  'src/party-control.js', 'src/sneak-layer.js', 'src/progression-ui.js', 'src/summon-layer.js',
+  'src/party-control.js', 'src/sneak-layer.js', 'src/progression-ui.js', 'src/summon-layer.js', 'src/walking.js',
 ];
 // The HOST side of every seam. Nothing here takes a deps bag, so the `d` rules
 // do not apply - but the unbound scan does, and this is the half that has twice
@@ -130,6 +130,44 @@ function unsuppliedDeps(raw, file) {
   return [...hits];
 }
 
+// And the fifth, which is about the CALL SITE rather than the module: a
+// dependency passed EAGERLY whose declaration sits below the factory call.
+// `createWalking({ controls, ... })` reads `controls` the moment the bag is
+// built, and if `const controls = createControls(...)` is two hundred lines
+// further down that is a temporal dead zone - a ReferenceError at boot. The
+// fix is always the same (`get controls() { return controls; }`, or a
+// `(...a) =>` wrapper), and main.js already carries a comment naming four
+// consts it had to do this for. A comment is not a check.
+//
+// Only EAGER entries can trip: a getter body and a wrapper arrow both defer the
+// read to call time, which is exactly why they are the fix.
+function deadZoneDeps(hostSrc, hostName) {
+  const hits = [];
+  for (const call of hostSrc.matchAll(/\b(create[A-Za-z_$][\w$]*)\(\{/g)) {
+    const open = hostSrc.indexOf('{', call.index);
+    let depth = 0;
+    let end = open;
+    for (; end < hostSrc.length; end += 1) {
+      if (hostSrc[end] === '{') depth += 1;
+      else if (hostSrc[end] === '}') { depth -= 1; if (depth === 0) break; }
+    }
+    const lit = hostSrc.slice(open, end + 1);
+    const eager = new Set();
+    for (const m of lit.matchAll(/^\s{4}([A-Za-z_$][\w$]*),\s*$/gm)) eager.add(m[1]);
+    for (const m of lit.matchAll(/^\s{4}([A-Za-z_$][\w$]*):\s*([A-Za-z_$][\w$]*),\s*$/gm)) eager.add(m[2]);
+    for (const name of eager) {
+      // `function` declarations HOIST, so a function passed eagerly from above
+      // its own declaration is fine - `onExplosion: handleExplosion` is the
+      // house example. Only the let/const family has a dead zone.
+      const decl = hostSrc.search(new RegExp(`^\\s*(?:const|let|var)\\s+${name}\\b`, 'm'));
+      if (decl > end) {
+        hits.push(`${hostName}: ${call[1]} is passed \`${name}\` eagerly, but \`${name}\` is declared below the call - a dead-zone read at boot (use a getter or a wrapper)`);
+      }
+    }
+  }
+  return hits;
+}
+
 let bad = 0;
 for (const file of [...MODULES, ...HOSTS]) {
   const raw = readFileSync(file, 'utf8');
@@ -137,6 +175,9 @@ for (const file of [...MODULES, ...HOSTS]) {
     for (const hit of rewriteDamage(raw, file)) { bad += 1; console.log(hit); }
     for (const hit of shapeMismatch(raw, file)) { bad += 1; console.log(hit); }
     for (const hit of unsuppliedDeps(raw, file)) { bad += 1; console.log(hit); }
+  }
+  if (HOSTS.includes(file)) {
+    for (const hit of deadZoneDeps(raw, file)) { bad += 1; console.log(hit); }
   }
   // Strip comments, then every flavour of string literal, so prose cannot
   // masquerade as an identifier.
