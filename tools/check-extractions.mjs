@@ -65,6 +65,26 @@ function rewriteDamage(raw, file) {
   for (const m of raw.matchAll(/\(\s*d\s*\)\s*=>|\(\s*d\s*,|,\s*d\s*\)\s*(?:=>|\{)/g)) {
     hits.push(`${file}: a parameter named \`d\` shadows the deps bag - ${m[0].trim()}`);
   }
+  // ASSIGNING to the deps bag. `d` is a plain object of getters and functions,
+  // so `d.inCombat = true` writes a property on the BAG - and since a getter
+  // with no setter is read-only, in a module (always strict) that throws. The
+  // host's binding never changes either way.
+  //
+  // This is how it shipped: the rewriter prefixed `inCombat = true` to
+  // `d.inCombat = true`, and the pass that was supposed to turn assignments
+  // into `setInCombat(true)` ran afterwards, looking for the UNPREFIXED form.
+  // It matched nothing, and combat stopped starting at all.
+  //
+  // Worse, the diff used to verify that cut normalised `d.` away - which made
+  // `d.inCombat = true` and `inCombat = true` compare EQUAL. The one check that
+  // was supposed to catch a bad rewrite was blind to exactly this class, which
+  // is why it needs to be a rule here instead.
+  //
+  // Every write from a module goes through a named setter. No exceptions: if a
+  // module needs to change a host binding, the bag says so out loud.
+  for (const m of raw.matchAll(/\bd\.([A-Za-z_$][\w$]*)\s*(?:=[^=]|\+=|-=|\|\|=|\?\?=)/g)) {
+    hits.push(`${file}: assigns to \`d.${m[1]}\` - a deps bag is read-only, use a named setter`);
+  }
   return hits;
 }
 

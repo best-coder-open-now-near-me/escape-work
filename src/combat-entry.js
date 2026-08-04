@@ -80,7 +80,7 @@ export function createCombatEntry(d) {
     d.hotbarHost.hotbar?.setArmed(null);
     d.dialogue.close();
     d.shopping.close(); // the machine can wait; it is not going anywhere
-    d.inCombat = true;
+    d.setInCombat(true);
     d.controls.recenter(); // a fight starts AT the party - a panned-away view returns
     d.ui.hideMenu();
     d.loot.hideLabels(); // no browsing the shelves mid-fight
@@ -168,8 +168,8 @@ export function createCombatEntry(d) {
         onRound: () => { d.runtime.advanceTurn(); d.ageTempSurfaces(); },
         onEnemyKilled: d.awardKill,
         onWin: () => {
-          d.inCombat = false;
-          d.combat = null;
+          d.setInCombat(false);
+          d.setCombat(null);
           // Summons stay. They used to blink out the instant the last coworker
           // fell, which made a two-turn-old employee feel like a prop; now the
           // assignment (`lifetimeTurns`) is what ends them, whether that runs
@@ -193,8 +193,8 @@ export function createCombatEntry(d) {
           d.openLevelUps(); // spend the fight's promotions now that it's safe
         },
         onLose: () => {
-          d.inCombat = false;
-          d.combat = null;
+          d.setInCombat(false);
+          d.setCombat(null);
           d.despawnSummons();
           d.loseGame('The office wins this round. Darkness falls between the cubicles.');
         },
@@ -204,7 +204,7 @@ export function createCombatEntry(d) {
     // returns - onWin/onLose already tore the fight down and nulled `combat`,
     // so binding the returned controller here would resurrect a dead one (and
     // a later abort would run its cleanup a second time).
-    if (d.inCombat) d.combat = controller;
+    if (d.inCombat) d.setCombat(controller);
     // Rebuild the bar NOW that combat's rules own it: the combat-only verbs
     // (Take Cover, Deflect, the heals) light up the moment a fight starts,
     // not at whatever next press happened to rebuild the slots - which is
