@@ -37,6 +37,34 @@ import * as ui from './ui.js';
 // `inWindow` gates the fill as well as the seed, so a drift running out of the
 // window is labelled as the part you can actually see - the same bound the
 // label's own reach check uses.
+// One paper patch as the overlay shows it: where the chip floats, and where a
+// click on it actually walks.
+//
+// These are deliberately two DIFFERENT points, which is the part worth pinning.
+// The chip floats at the patch's centre so it reads as one label for the whole
+// drift rather than sitting on an arbitrary corner of it - but a centre is an
+// average, and the average of a horseshoe or an L is a tile nobody can stand on
+// (or one that is not even paper). So the walk goes to the patch tile NEAREST
+// the walker, by the same Chebyshev step the rest of movement uses.
+//
+// Lifted to module scope for the same reason `paperPatches` was: the rest of
+// looting.js builds DOM the moment it is constructed and cannot be reached from
+// node, and the arm that picks a walk target is worth more than a comment.
+export function paperLabel({ tiles, cx, cz }, me) {
+  let target = tiles[0];
+  let bestD = Infinity;
+  for (const [px, pz] of tiles) {
+    const d = Math.max(Math.abs(px - me.x), Math.abs(pz - me.z));
+    if (d < bestD) { bestD = d; target = [px, pz]; }
+  }
+  const n = tiles.length;
+  return {
+    text: n > 1 ? `Loose paper ×${n}` : 'Loose paper',
+    world: { x: cx, y: 0.85, z: cz },
+    target,
+  };
+}
+
 export function paperPatches({ width, height }, inWindow, harvestable) {
   const patches = [];
   const visited = new Set();
@@ -440,19 +468,13 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
   // patch's centre, and clicking walks to the patch tile NEAREST the player
   // rather than to that centre, which may be a tile you cannot stand on.
   function paperEntries(near, me) {
-    return paperPatches(grid, near, paperHarvestable).map(({ tiles, cx, cz }) => {
-      let target = tiles[0];
-      let bestD = Infinity;
-      for (const [px, pz] of tiles) {
-        const d = Math.max(Math.abs(px - me.x), Math.abs(pz - me.z));
-        if (d < bestD) { bestD = d; target = [px, pz]; }
-      }
-      const n = tiles.length;
+    return paperPatches(grid, near, paperHarvestable).map((patch) => {
+      const { text, world, target } = paperLabel(patch, me);
       return {
         icon: '📄',
-        text: n > 1 ? `Loose paper ×${n}` : 'Loose paper',
-        world: { x: cx, y: 0.85, z: cz },
-        onClick: () => approachAndDo(target[0], target[1], () => harvestPaperPatch(tiles)),
+        text,
+        world,
+        onClick: () => approachAndDo(target[0], target[1], () => harvestPaperPatch(patch.tiles)),
       };
     });
   }

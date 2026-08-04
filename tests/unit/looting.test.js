@@ -9,7 +9,7 @@
 // that is the patch's own average rather than the seed tile.
 import test from 'node:test';
 import assert from 'node:assert';
-import { paperPatches } from '../../src/looting.js';
+import { paperPatches, paperLabel } from '../../src/looting.js';
 
 // A tiny grid painted from rows of characters: '.' is bare floor, 'p' is a
 // live paper drift. Rows are z, columns are x - the same way the e2e arenas
@@ -105,4 +105,47 @@ test('a spent tile splits a drift the way a harvested one does', () => {
   // middle of a run leaves two labels rather than one that re-offers the lot.
   const { grid, harvestable } = paint(['pp.pp']);
   assert.equal(paperPatches(grid, ALL, harvestable).length, 2);
+});
+
+// --- the label the patches turn into (Q903) ---------------------------------
+// The fill underneath had eight tests and the label had none, which left the
+// interesting arm unpinned: the chip floats at the patch CENTRE, but the click
+// walks to the nearest patch TILE. A centre is an average, so on any patch that
+// is not a filled rectangle it can be a tile nobody can stand on - and walking
+// to it would be a click that refuses, or worse, silently goes somewhere else.
+
+test('the chip floats at the centre and the walk goes to the nearest tile', () => {
+  const patch = { tiles: [[1, 1], [2, 1], [3, 1]], cx: 2, cz: 1 };
+  const label = paperLabel(patch, { x: 5, z: 1 });
+  assert.deepEqual(label.world, { x: 2, y: 0.85, z: 1 }, 'the chip sits on the centre');
+  assert.deepEqual(label.target, [3, 1], 'the walk goes to the near end, not the centre');
+});
+
+test('the walk target follows the walker, the chip does not', () => {
+  const patch = { tiles: [[1, 1], [2, 1], [3, 1]], cx: 2, cz: 1 };
+  const fromLeft = paperLabel(patch, { x: -4, z: 1 });
+  const fromRight = paperLabel(patch, { x: 9, z: 1 });
+  assert.deepEqual(fromLeft.target, [1, 1]);
+  assert.deepEqual(fromRight.target, [3, 1]);
+  assert.deepEqual(fromLeft.world, fromRight.world, 'the chip is a property of the patch, not the viewer');
+});
+
+test('a horseshoe centre is not a patch tile, and the walk still lands on paper', () => {
+  // The case the finding names. A U of paper: the centroid falls in the mouth,
+  // which is bare floor - so a click that walked to the CHIP would walk to a
+  // tile with no paper on it and harvest nothing.
+  const tiles = [[0, 0], [0, 1], [0, 2], [1, 2], [2, 2], [2, 1], [2, 0]];
+  const cx = tiles.reduce((t, [x]) => t + x, 0) / tiles.length;
+  const cz = tiles.reduce((t, [, z]) => t + z, 0) / tiles.length;
+  const label = paperLabel({ tiles, cx, cz }, { x: 1, z: -3 });
+  const onPaper = tiles.some(([x, z]) => x === label.target[0] && z === label.target[1]);
+  assert.ok(onPaper, `the walk target ${JSON.stringify(label.target)} is not a paper tile`);
+  const centreIsPaper = tiles.some(([x, z]) => x === Math.round(cx) && z === Math.round(cz));
+  assert.equal(centreIsPaper, false,
+    'this fixture is meant to have a centre OFF the patch - if that stops being true, the test stops testing anything');
+});
+
+test('one tile is named in the singular, more than one carries the count', () => {
+  assert.equal(paperLabel({ tiles: [[0, 0]], cx: 0, cz: 0 }, { x: 0, z: 0 }).text, 'Loose paper');
+  assert.equal(paperLabel({ tiles: [[0, 0], [1, 0]], cx: 0.5, cz: 0 }, { x: 0, z: 0 }).text, 'Loose paper \u00d72');
 });

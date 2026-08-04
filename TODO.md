@@ -224,7 +224,7 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
   `combat.js` 5,699 → 5,589. Verified `ai` 3/3, `summons` 5/5, `cover` 7/7,
   `ranged` 4/4, `demolition` 3/3.
 
-- [ ] **Q903** `src/looting.js` [test-gap] **(new 2026-08-03, from the Q038 split)**
+- [x] **Q903** `src/looting.js` [test-gap] **(new 2026-08-03, from the Q038 split)**
   Four of the Alt overlay's five scans are driven end to end - `looseEntries` and
   the container half of `propEntries` by looting.spec.js's rummage/drop/pickup
   test, the shop half by economy.spec.js's cleaned-out machine, `bodyEntries` by
@@ -234,7 +234,7 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
   the click walks to rather than that centre, which is the interesting one -
   a centroid can easily be a tile nobody can stand on. Found while splitting
   lootEntries, not by a failure; the arm may well be right.
-
+<br>      ↳ **DONE — `paperLabel` at module scope, four tests.** The arm the entry called "the interesting one" is pinned: the chip floats at the patch CENTRE, the click walks to the nearest patch TILE, and those are deliberately different points. The test that matters is a horseshoe of paper whose centroid lands in the mouth on bare floor - a click that walked to the chip would harvest nothing - and it asserts its own fixture still has a centre OFF the patch, so it cannot quietly stop testing anything. Red-first: routing the walk to the centre fails 3 of the 4. The finding guessed "the arm may well be right", and it was; what was missing was anything that would notice if it stopped being.
 - [ ] **Q904** `src/stats.js` [design] **(new 2026-08-03, from the Q136 answer)**
   The carry cap is a stat **[stated]** (designer, 2026-08-03) and the seam now
   carries a variable one, but two things are open and the second is not a
