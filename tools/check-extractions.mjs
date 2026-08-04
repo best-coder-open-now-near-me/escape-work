@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs';
 const MODULES = [
   'src/combat-aim.js', 'src/combat-world.js', 'src/hotbar-host.js',
   'src/floor-effects.js', 'src/desk.js', 'src/combat-advance.js', 'src/ooc-verbs.js',
-  'src/party-control.js', 'src/sneak-layer.js', 'src/progression-ui.js', 'src/summon-layer.js', 'src/walking.js', 'src/examine.js', 'src/keyboard.js', 'src/mouse.js', 'src/combat-entry.js', 'src/frame.js',
+  'src/party-control.js', 'src/sneak-layer.js', 'src/progression-ui.js', 'src/summon-layer.js', 'src/walking.js', 'src/examine.js', 'src/keyboard.js', 'src/mouse.js', 'src/combat-entry.js', 'src/frame.js', 'src/cover-crouch.js',
 ];
 // The HOST side of every seam. Nothing here takes a deps bag, so the `d` rules
 // do not apply - but the unbound scan does, and this is the half that has twice
@@ -30,7 +30,7 @@ const MODULES = [
 // on the progression cut, which stayed wired to the party bar's level-up pip
 // after every declaration of it had moved out. Both are a ReferenceError on a
 // click, and a build reports neither.
-const HOSTS = ['src/main.js'];
+const HOSTS = ['src/main.js', 'src/combat.js'];
 const GLOBALS = new Set([
   'if', 'else', 'return', 'const', 'let', 'var', 'new', 'true', 'false', 'null', 'undefined',
   'for', 'of', 'in', 'function', 'continue', 'break', 'export', 'import', 'from', 'typeof',
@@ -214,10 +214,44 @@ for (const file of [...MODULES, ...HOSTS]) {
   // what is INSIDE `${...}`, which is real code. Dropping the whole template
   // hid a live `summonRange(a)` call in an interpolated sentence, and the
   // module shipped with it unbound.
-  code = code.replace(/`[\s\S]*?`/g, (lit) => {
-    const inner = [...lit.matchAll(/\$\{([^{}]*)\}/g)].map((m) => m[1]).join(';');
-    return inner ? `(${inner})` : '``';
-  }).replace(/'(?:[^'\\]|\\.)*'/g, "''").replace(/"(?:[^"\\]|\\.)*"/g, '""');
+  // Templates NEST: `${spec.log || `${unit.def.name} patches up a colleague.`}`
+  // is one interpolation containing another template, and no regex handles that
+  // - ``[^`]*`` matches from the OUTER backtick to the INNER one, which is not a
+  // template at all. A single non-greedy pass spilled that sentence's words into
+  // the identifier scan (`patches`, `up`, `colleague` all reported unbound).
+  //
+  // So scan it properly: walk the text tracking template depth, drop the literal
+  // chunks and keep what is inside `${...}`, which IS code and has hidden a real
+  // unbound call before.
+  code = ((text) => {
+    let out = '';
+    let i = 0;
+    const depth = []; // one entry per open template, counting its brace nesting
+    while (i < text.length) {
+      const c = text[i];
+      if (c === '\\') { if (depth.length === 0) out += text.slice(i, i + 2); i += 2; continue; }
+      if (c === '`') {
+        if (depth.length && depth[depth.length - 1] === 0) depth.pop();
+        else depth.push(0);
+        out += depth.length ? ' ' : "'' ";
+        i += 1;
+        continue;
+      }
+      if (depth.length) {
+        // Inside a template: literal text is prose, `${...}` is code.
+        if (c === '$' && text[i + 1] === '{') { depth[depth.length - 1] += 1; out += ' ('; i += 2; continue; }
+        const inInterp = depth[depth.length - 1] > 0;
+        if (inInterp && c === '}') { depth[depth.length - 1] -= 1; out += ') '; i += 1; continue; }
+        out += inInterp ? c : ' ';
+        i += 1;
+        continue;
+      }
+      out += c;
+      i += 1;
+    }
+    return out;
+  })(code);
+  code = code.replace(/'(?:[^'\\]|\\.)*'/g, "''").replace(/"(?:[^"\\]|\\.)*"/g, '""');
   const declared = new Set([...code.matchAll(/(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
   // Imported names count as declared - a module that imports `ACTIONS` is not
   // reading an unbound one.
