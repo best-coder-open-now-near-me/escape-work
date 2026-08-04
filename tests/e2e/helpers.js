@@ -394,3 +394,37 @@ export async function endTurnUntilPlayer(page) {
     { timeout: 60_000 },
   ).toBe('player');
 }
+
+// Click a living coworker's BODY, with the pick pinned.
+//
+// The naive version of this - project the body, click the pixel - was copied
+// into four specs and flaked in three of them (Q905). It has two silent failure
+// modes and no guard against either: the camera may still be easing, so the
+// projection is of where the body WAS; and the point may land off-canvas or on
+// a HUD panel, where the click is swallowed and the test waits out its timeout
+// on an action that never happened.
+//
+// So this proves the pick landed before it commits: it settles the camera,
+// re-projects the LIVE position each attempt (a coworker takes turns and moves),
+// and polls `hoverKind` - which is the game's own pick, not a guess about it -
+// until it says `enemy`. Only then does it click.
+//
+// `y` is how far up the body to aim. 0.9 is chest height for a standing body;
+// a crouched one is a squashed pose and wants something nearer the floor.
+export async function clickEnemyBody(page, y = 0.9) {
+  const pp = await page.evaluate(() => window.__game.playerPos);
+  await stableProject(page, pp.x, pp.z).catch(() => {});
+  let p = null;
+  await expect.poll(async () => {
+    p = await page.evaluate((yy) => {
+      const en = window.__game.enemies.find((e) => e.alive);
+      return en ? window.__game.project3(en.px ?? en.x, yy, en.pz ?? en.z) : null;
+    }, y);
+    if (!onScreen(p) || !(await onCanvas(page, p))) return 'off-canvas';
+    // The move is what makes the game run its pick; hoverKind is that pick.
+    await page.mouse.move(p.x, p.y);
+    return page.evaluate(() => window.__game.hoverKind);
+  }, { timeout: 20_000, intervals: [200] }).toBe('enemy');
+  await page.mouse.click(p.x, p.y);
+  return p;
+}

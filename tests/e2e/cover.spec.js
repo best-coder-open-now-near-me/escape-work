@@ -11,6 +11,7 @@
 import { test, expect } from '@playwright/test';
 import {
   bootStash, enterCombat, waitForPlayerTurn, refillAp, clickWorld, waitStill, clickAction, onScreen,
+  clickEnemyBody,
 } from './helpers.js';
 
 const setPaper = (page, n) => page.evaluate((v) => {
@@ -18,13 +19,7 @@ const setPaper = (page, n) => page.evaluate((v) => {
   window.__combat?.refresh();
 }, n);
 const lastLine = (page) => page.evaluate(() => window.__game.narration.at(-1) || '');
-const clickManager = async (page) => {
-  const p = await page.evaluate(() => {
-    const en = window.__game.enemies.find((e) => e.alive);
-    return window.__game.project3(en.px ?? en.x, 0.9, en.pz ?? en.z);
-  });
-  await page.mouse.click(p.x, p.y);
-};
+
 
 // A Manager boxed in by filing cabinets: low solids, so bodies are stuck but
 // sight (and thrown paper) passes over. With nowhere to walk and nobody in
@@ -68,7 +63,7 @@ test('a boxed crouch refuses every angle, and breaking a face opens that one', a
   await page.click('#hotbar-act-paper-ball');
   await expect.poll(() => page.evaluate(() => window.__game.armed), { timeout: 10_000 })
     .toBe('paper-ball');
-  await clickManager(page);
+  await clickEnemyBody(page);
   await expect.poll(() => page.evaluate(() => window.__game.inCombat), { timeout: 30_000 }).toBe(true);
   await page.waitForTimeout(700);
   await page.evaluate(() => { window.__combat.forceHit = true; });
@@ -103,7 +98,7 @@ test('a boxed crouch refuses every angle, and breaking a face opens that one', a
     await page.click('#hotbar-act-paper-ball');
     await expect.poll(() => page.evaluate(() => window.__combat.armed), { timeout: 10_000 })
       .toBe('paper-ball');
-    await clickManager(page);
+    await clickEnemyBody(page);
     await page.waitForTimeout(500);
     expect(await page.evaluate(() => window.__god.player.paper),
       `a refusal from ${wx},${wz} costs nothing`).toBe(40);
@@ -143,7 +138,7 @@ test('a boxed crouch refuses every angle, and breaking a face opens that one', a
   await page.click('#hotbar-act-paper-ball');
   await expect.poll(() => page.evaluate(() => window.__combat.armed), { timeout: 10_000 })
     .toBe('paper-ball');
-  await clickManager(page);
+  await clickEnemyBody(page);
   await page.waitForTimeout(700);
   if (await page.evaluate(() => window.__game.inCombat)) {
     expect(await page.evaluate(() =>
@@ -290,7 +285,7 @@ test('a crouch taken before the fight rides into it', async ({ page }) => {
   await page.click('#hotbar-act-paper-ball');
   await expect.poll(() => page.evaluate(() => window.__game.armed), { timeout: 10_000 })
     .toBe('paper-ball');
-  await clickManager(page);
+  await clickEnemyBody(page);
   await expect.poll(() => page.evaluate(() => window.__game.inCombat), { timeout: 30_000 }).toBe(true);
   await page.waitForTimeout(500);
   // The fight starts with the leader already crouched behind the desk cell.
