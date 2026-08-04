@@ -194,6 +194,23 @@ function deadZoneDeps(hostSrc, hostName) {
   return hits;
 }
 
+// A seventh class is KNOWN and deliberately NOT checked here, because every
+// cheap way to express it was noisier than it was worth: a factory whose result
+// is destructured BELOW code that already runs. `canEngage` reads `canReach`,
+// `pickTarget` calls `canEngage`, and startCombat's surprise sweep calls
+// `pickTarget` at the top level of the closure - so wiring the hit-resolution
+// factory after the sweep put `canReach` in its dead zone and startCombat threw
+// on the first fight. combat.js even says it in prose: "everything here must be
+// safe EAGERLY".
+//
+// The rule that would catch it needs to know which `  foo(...)` lines are top
+// level of the host closure and which are inside a nested function, and a
+// line-shape heuristic cannot: pointed at main.js it reported all seventeen
+// factories against an `if (...) return;` sitting inside an unrelated helper.
+// A check nobody trusts is worse than no check. The mitigation is a rule of
+// thumb instead - wire factories at the TOP of the closure, above anything that
+// executes - and the e2e suite, which caught this one in six tests.
+
 let bad = 0;
 for (const file of [...MODULES, ...HOSTS]) {
   const raw = readFileSync(file, 'utf8');

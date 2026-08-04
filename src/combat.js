@@ -128,6 +128,42 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Every damage roll in this fight, bound to the injected rng.
   const rand = (lo, hi) => randWith(rng, lo, hi);
   const livingMembers = () => members.filter((m) => m.sheet.hp > 0 && m.actor);
+  // Hoisted to the TOP of this closure on purpose. `canEngage` reads `canReach`
+  // and `pickTarget` runs during the startCombat surprise sweep below - before
+  // any turn exists - so anything the sweep can reach has to be initialised
+  // before it. The file already said this in prose ("everything here must be
+  // safe EAGERLY"); leaving the factory where the code came from put `canReach`
+  // in its dead zone and startCombat threw on the first fight.
+  // Does it land, and what does that look like (hit-resolution.js). The three
+  // debug pins - `forceHit`, `forceProc`, `lastRoll` - are OWNED there: this
+  // cluster was their only writer, so they moved with it and are reached back
+  // through the accessors the debug surface already used.
+  const hits = createHitResolution({
+    world,
+    members,
+    fx,
+    rng,
+    get active() { return active; },
+    // A Map declared below this call - a getter, or it is a dead-zone read.
+    get facings() { return facings; },
+    aiAllies: (...a) => aiAllies(...a),
+    bodyOf: (...a) => bodyOf(...a),
+    standing: (...a) => standing(...a),
+    posOf: (...a) => posOf(...a),
+    nameOf: (...a) => nameOf(...a),
+    carrierOf: (...a) => carrierOf(...a),
+    unitStandingAt: (...a) => unitStandingAt(...a),
+    guardStandingAt: (...a) => guardStandingAt(...a),
+    coverCellFor: (...a) => coverCellFor(...a),
+    crouchStateOf: (...a) => crouchStateOf(...a),
+    crouchFacesOf: (...a) => crouchFacesOf(...a),
+    log: (...a) => log(...a),
+  });
+  const {
+    resolveHit, statusesOf, accuracyOf, dodgeOf, canReach, bodyDist, bodyLos,
+    distToTile, losToTile, attackMods, rollAgainst, resolveProc, hitFx,
+    statusFxAt, deathFx, hazardKind, surfaceStepCost, stepCost,
+  } = hits;
   // --- charm (TODO Phase 8) -------------------------------------------------
   // Borrow a coworker: they leave their own side, take their turns under your
   // control, and are handed back intact when the session drops.
@@ -436,36 +472,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     if (u.baseSpeed === undefined) u.baseSpeed = u.speed;
     u.speed = speedUnderStatus(u.baseSpeed, statusFx(u));
   };
-  // Does it land, and what does that look like (hit-resolution.js). The three
-  // debug pins - `forceHit`, `forceProc`, `lastRoll` - are OWNED there: this
-  // cluster was their only writer, so they moved with it and are reached back
-  // through the accessors the debug surface already used.
-  const hits = createHitResolution({
-    world,
-    members,
-    fx,
-    rng,
-    get active() { return active; },
-    // A Map declared below this call - a getter, or it is a dead-zone read.
-    get facings() { return facings; },
-    aiAllies: (...a) => aiAllies(...a),
-    bodyOf: (...a) => bodyOf(...a),
-    standing: (...a) => standing(...a),
-    posOf: (...a) => posOf(...a),
-    nameOf: (...a) => nameOf(...a),
-    carrierOf: (...a) => carrierOf(...a),
-    unitStandingAt: (...a) => unitStandingAt(...a),
-    guardStandingAt: (...a) => guardStandingAt(...a),
-    coverCellFor: (...a) => coverCellFor(...a),
-    crouchStateOf: (...a) => crouchStateOf(...a),
-    crouchFacesOf: (...a) => crouchFacesOf(...a),
-    log: (...a) => log(...a),
-  });
-  const {
-    resolveHit, statusesOf, accuracyOf, dodgeOf, canReach, bodyDist, bodyLos,
-    distToTile, losToTile, attackMods, rollAgainst, resolveProc, hitFx,
-    statusFxAt, deathFx, hazardKind, surfaceStepCost, stepCost,
-  } = hits;
   // AP is spent in tenths now that movement charges by distance - `roundAp`
   // and `fmtAp` come from stats.js, which owns that rate.
 
