@@ -8,6 +8,7 @@
 // first), thrown weapons need range and line of sight. Nearby enemies join
 // the fight; enemies have persistent map HP and take surface damage like you
 // do. Fire keeps burning throughout.
+import { createCoverDenialPlans } from './cover-denial-plans.js';
 import { createSummonDesk } from './summon-desk.js';
 import { createCrouch } from './cover-crouch.js';
 import { ACTIONS, arrivalLine, summonSpec } from './data/actions.js';
@@ -1716,84 +1717,29 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Whether the prop at (px, pz) can be knocked over by `from` right now, and
   // where it would land. Returns null when it cannot. Shared by the click, the
   // hover affordance and the AI, so all three agree.
-  const topplePlan = (from, px, pz) => {
-    const b = bodyOf(from);
-    return toppleplanAt(b.x, b.z, px, pz, world);
-  };
-
-  // The AI's version of the same question - the victim test is combat's,
-  // because only combat knows which side a body is on.
-  const memberAt = (x, z) => members.find((m) => m.sheet.hp > 0 && m.actor
-    && m.actor.x === x && m.actor.z === z) || null;
-  const aiTopplePlan = (unit) => aiToppleplanFor(unit.x, unit.z, world,
-    (x, z) => !!memberAt(x, z));
-  // The rest of the cover-denial plans (AI_PLAN M4), each the shared pure
-  // rule with combat's own side tests threaded in. All of them are gathered
-  // per-DECIDE and priced by chooseBeat, exactly as the summon and the
-  // furniture topple always were.
-  const aiEdgeToppleFor = (unit) => aiEdgeTopplePlanShared(unit.x, unit.z, world,
-    (x, z) => !!memberAt(x, z));
-  // displacePlan needs an `occupied` test the facade does not carry - the
-  // player's shove builds its own too (the two-combatants-stacked trap).
-  // Any standing body blocks the landing, both sides alike.
-  const aiShovePlanFor = (unit) => aiShovePlanShared(unit.x, unit.z, {
-    isWalkable: world.isWalkable,
-    stepOpen: world.stepOpen,
-    occupied: (x, z) => !!unitStandingAt(x, z),
-  }, memberAt, {
-    // Ask exactly what the resolver will BILL, for the body it will bill. The
-    // victim of an AI shove is always a member (`memberAt`), and displaceBody
-    // charges `memberSurfDamage` - through that member's own talents - so a
-    // gate reading the talent-free model priced a landing at 6 that bills 0 for
-    // anyone in ESD Steel-Toes, and the ladder ranks shove ABOVE the swing.
-    //
-    // The slip term is gone with it: displaceBody rolls no slip anywhere, so
-    // "there is water behind them" used to admit a plan whose entire effect was
-    // a one-tile reposition, traded for the unit's best beat.
-    hazardAt: (x, z, victim) => world.memberSurfDamage(victim.sheet, x, z) > 0,
-    // A4's one carve-out, ratified and until now unwired (Q047/Q075/Q094):
-    // a RANGED unit may shove purely to BREAK CONTACT, where a melee unit
-    // needs the slam or the hazard. Doctrine #11 is the reason - kiting is
-    // priced (stepping out of reach provokes), and the disengage shove is the
-    // one escape that does not, because forced movement never provokes (#9).
-    // Without this the Executive stood in the scrum trading punches, which is
-    // the opposite of what a shooter is for.
-    //
-    // `rangedLines` is the same predicate `aiAdvance` and `aiBeatPlans`
-    // already mean by "the ranged kit", so kit-hood does not get a second
-    // definition here. It is declared below this one, which is safe because
-    // this arrow only ever runs at decide time.
-    disengage: rangedLines(unit).length > 0,
+  // The cover-denial plans (cover-denial-plans.js): each shared pure rule with
+  // combat's own side tests threaded in. Adapters only - they write nothing.
+  const {
+    topplePlan, memberAt, aiTopplePlan, aiEdgeToppleFor, aiShovePlanFor,
+    aiPullPlanFor, aiBreakPlanFor,
+  } = createCoverDenialPlans({
+    world,
+    members,
+    toppleplanAt,
+    aiToppleplanFor,
+    aiEdgeTopplePlanShared,
+    aiShovePlanShared,
+    aiPullPlanShared,
+    aiBreakPlanShared,
+    bodyOf: (...a) => bodyOf(...a),
+    standing: (...a) => standing(...a),
+    unitStandingAt: (...a) => unitStandingAt(...a),
+    crouchStateOf: (...a) => crouchStateOf(...a),
+    crouchFacesOf: (...a) => crouchFacesOf(...a),
+    nameOf: (...a) => nameOf(...a),
+    // Declared below this call; these arrows only run at decide time.
+    rangedLines: (...a) => rangedLines(...a),
   });
-  const aiPullPlanFor = (unit) => aiPullPlanShared(
-    unit,
-    members.filter((m) => standing(m)),
-    (m) => {
-      const s = crouchStateOf(m);
-      return s && { ...s, faces: crouchFacesOf(m, unit) };
-    },
-    {
-      stepOpen: world.stepOpen,
-      open: (x, z) => world.isWalkable(x, z) && !unitStandingAt(x, z),
-      // The puller's own body is NOT "their cover is a person" - the same
-      // exclusion the player's wiring makes (`u !== active`), and it is not
-      // optional. A face shielded by a PARTITION can still have somebody
-      // standing on the neighbouring cell, and in a corridor that somebody is
-      // whoever walked up to reach over the barrier. Counting them refuses
-      // exactly the haul-over-a-wall the verb was written for.
-      bodyAt: (x, z) => {
-        const u = unitStandingAt(x, z);
-        return !!u && u !== unit && standing(u);
-      },
-      // Per candidate, because this walks the whole standing roster - the
-      // player's twin names one target once (pullPlanned) and cannot.
-      nameOf,
-    },
-  );
-  const aiBreakPlanFor = (unit, target) => aiBreakPlanShared(
-    unit.x, unit.z, target.actor.x, target.actor.z,
-    { ...world, doorsBeside: world.doorsBeside });
-
   // Put it over. `by` is whoever caused it (for the narration and the facing).
   function topple(by, plan) {
     const { def, x, z, lx, lz } = plan;
