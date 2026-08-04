@@ -38,6 +38,7 @@ import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel, buildLayeredLevel } from './scene.js';
 import { createCombatWorld } from './combat-world.js';
 import { createHotbarHost } from './hotbar-host.js';
+import { createFloorEffects } from './floor-effects.js';
 
 import { loadRemoteStore, SAVE_KEY_STORAGE } from './remote-store.js';
 import { placeModel, applyCharacterProportions, cloneMaterials, tintMaterials } from './models.js';
@@ -2741,127 +2742,61 @@ function startGame(level) {
   // wandering the floor. Deaths are collected and resolved AFTER the sweep,
   // the same shape handleExplosion uses - one casualty must not cut the tick
   // short for everybody else, or the XP for the coworkers it finished off.
-  function advanceStatusTurn() {
-    if (!party) return;
-    // `covered` is the one turn-clocked chip whose duration is a LEAK BOUND
-    // rather than a clock (data/statuses.js): combat revalidates the crouch on
-    // every consult and re-applies the chip while it holds, so only an
-    // abandoned fight lets it lapse. Out here the crouch is `oocCrouch`, and
-    // it holds until a deliberate walk breaks it - so re-apply on the same
-    // terms rather than letting the new clock time it out from under a
-    // stationary character. Without this, a crouch taken before a fight
-    // evaporated after four ticks of standing still.
-    // ...and the same revalidation combat does: the crouch is only real while
-    // its position still has a shielded face. A partition toppled out of a
-    // fight, or a coworker who wandered off the face they were covering, ends
-    // it here rather than lingering until a fight starts and combat notices.
-    if (oocCrouch && sheet) {
-      if (oocCoverProblem(oocCrouch.at.x, oocCrouch.at.z)) clearOocCrouch();
-      else applyStatus(sheet, 'covered');
-    }
-    const downed = [];
-    for (const m of party.members) {
-      if (!m.actor || m.sheet.hp <= 0) continue;
-      const r = tickTurnClockOn(m.sheet, m.actor, (d) => applyDamage(m.sheet, d));
-      if (r.damage > 0 || r.expired.length) syncHudFor(m.sheet);
-      if (r.down) downed.push(m);
-    }
-    for (const s of [...summons]) {
-      if (!s.actor || s.sheet.hp <= 0) continue;
-      // A temp takes the rules in silence, like everywhere else in this file.
-      if (tickTurnClockOn(s.sheet, s.actor, (d) => applyDamage(s.sheet, d)).down) {
-        dismissSummon(s.actor);
-      }
-    }
-    const slain = [];
-    for (const en of enemies) {
-      if (!en.alive) continue;
-      if (tickTurnClockOn(en, en, (d) => en.takeDamage(d)).down) slain.push(en);
-    }
-    for (const en of slain) {
-      vfx.impact(en.x, en.z, 'blood', { y: 0.4 });
-      awardKill(en);
-    }
-    for (const m of downed) {
-      downOrLose(m, 'Burned down at your desk. The incident report writes itself.');
-      if (gameOver) return; // that was the wipe
-    }
-  }
 
   // Surfaces (data/surfaces.js): fire and electrified pools hurt, paper cuts
   // (and arms you), gum sticks, water and coffee editorialize. The walker's own
   // talents can shrug the damage off. True if it dropped them.
-  function applySurfaceOn(ms, actor, x, z, say) {
-    const sfx = surfEffect(x, z);
-    if (!sfx) return false;
-    if (sfx.ammo) {
-      ms.paper = Math.min(PAPER_CAP, ms.paper + sfx.ammo);
-      vfx.impact(x, z, 'shreds', { y: 0.3, scale: 0.8 });
-      vfx.damageText(x, z, '+📄', '#8adf76');
-    }
-    // Gum on shoe: slowed, no kicking, but genuine traction (can't slip).
-    if (sfx.applies === 'gum' && stickGum(x, z)) {
-      const had = hasStatus(ms, 'gum');
-      applyStatus(ms, 'gum');
-      vfx.impact(x, z, 'gum', { y: 0.12 });
-      vfx.status(x, z, 'gum');
-      say(had ? 'More gum. You are building a collection.' : sfx.message);
-      syncHudFor(ms);
-    }
-    // A turn-clock status a surface applies (fire -> burning), in a fight or
-    // out of one [stated] (designer, 2026-08-03, on the Q906 gaps: "yes all
-    // fixes"). This used to be gated on `inCombat` because the status "needs
-    // combat's turns to tick" - which stopped being true when advanceStatusTurn
-    // landed an out-of-combat turn clock (designer, 2026-07-31: they should all
-    // be using the same thing in and out of combat). The gate outlived its
-    // reason by three days; walking through flame now sets you alight wherever
-    // you are, and the same clock ticks it down.
-    if (sfx.applies && sfx.applies !== 'gum' && applyStatus(ms, sfx.applies)) {
-      vfx.status(x, z, sfx.applies);
-      syncHudFor(ms);
-    }
-    const amount = effectiveSurfDamage(x, z, ms);
-    if (amount > 0) {
-      if (sfx.bleed) applyStatus(ms, 'bleed', { duration: sfx.bleed });
-      const down = applyDamage(ms, amount);
-      actor.flinch();
-      vfx.impact(x, z, surfaceImpactKind(x, z), { y: 0.3 });
-      vfx.damageText(x, z, `-${amount}`);
-      say(sfx.message);
-      syncHudFor(ms);
-      return down;
-    }
-    if (sfx.amount) {
-      say(ms.talent?.effects?.shockImmune && grid.isElectrified(x, z)
-        ? 'The water crackles. Your ESD soles rate this a non-event. 0 damage.'
-        : 'You glide across the drift; the edges respect a master. Not a scratch.');
-      syncHudFor(ms);
-    } else if (sfx.message && !sfx.applies) {
-      say(sfx.message);
-    }
-    return false;
-  }
 
   // Slippery surfaces: every wet tile entered risks a spill that ends the walk
   // right there. In combat the movement AP already spent stays spent - that IS
   // the penalty. slipImmune tread never slips; neither does a gummed shoe - gum
   // is traction. `wasSlipProof` is sampled BEFORE the step clock ticks, so the
   // tile a gum wad wears off on still keeps its grip.
-  function maybeSlip(ms, actor, x, z, wasSlipProof, say) {
-    if (gameOver) return;
-    if (!slips({
-      chance: slipChanceAt(x, z),
-      roll: Math.random,
-      slipProof: wasSlipProof || statusFx(ms).slipProof || equippedStats(ms).slipProof,
-      slipImmune: ms.talent?.effects?.slipImmune,
-    })) return;
-    actor.clearPath();
-    actor.flinch();
-    vfx.impact(x, z, 'slip', { y: 0.12 });
-    vfx.damageText(x, z, 'slip!', '#8ad4df');
-    if (inCombat) combat?.notifySlip();
-    else say('The floor was, in fact, wet. You go down. Gracefully? No.');
-  }
+
+  // What the floor does to a body (floor-effects.js): the per-step surface
+  // effects, the slip roll, and the out-of-combat turn clock. The mutable
+  // bindings go in as getters - a floor effect resolves against whoever is
+  // standing on it right now, not whoever was when the game booted.
+  const floorFx = createFloorEffects({
+    get sheet() { return sheet; },
+    get party() { return party; },
+    get combat() { return combat; },
+    get inCombat() { return inCombat; },
+    get gameOver() { return gameOver; },
+    get oocCrouch() { return oocCrouch; },
+    get enemies() { return enemies; },
+    get summons() { return summons; },
+    grid,
+    PAPER_CAP,
+    // `vfx` and `surfaceImpactKind` are `const`s declared BELOW this call, so
+    // passing them by reference would read them in their temporal dead zone -
+    // a build that is perfectly happy and a first step that throws. Wrapped,
+    // the lookup happens when a body actually stands on something.
+    vfx: {
+      impact: (...a) => vfx.impact(...a),
+      damageText: (...a) => vfx.damageText(...a),
+      status: (...a) => vfx.status(...a),
+    },
+    surfaceImpactKind: (x, z) => surfaceImpactKind(x, z),
+    applyDamage,
+    applyStatus,
+    hasStatus,
+    statusFx,
+    equippedStats,
+    slips,
+    tickTurnClockOn,
+    surfEffect,
+    effectiveSurfDamage,
+    slipChanceAt,
+    stickGum,
+    syncHudFor,
+    awardKill,
+    downOrLose,
+    dismissSummon,
+    clearOocCrouch,
+    oocCoverProblem,
+  });
+  const { advanceStatusTurn, applySurfaceOn, maybeSlip } = floorFx;
 
   function onMemberStep(member, x, z, pathDone, changed = true) {
     // Stepping out of an enemy's reach mid-fight provokes it (TACTICS_PLAN M2).
