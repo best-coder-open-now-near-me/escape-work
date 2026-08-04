@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs';
 const MODULES = [
   'src/combat-aim.js', 'src/combat-world.js', 'src/hotbar-host.js',
   'src/floor-effects.js', 'src/desk.js', 'src/combat-advance.js', 'src/ooc-verbs.js',
-  'src/party-control.js', 'src/sneak-layer.js', 'src/progression-ui.js', 'src/summon-layer.js', 'src/walking.js',
+  'src/party-control.js', 'src/sneak-layer.js', 'src/progression-ui.js', 'src/summon-layer.js', 'src/walking.js', 'src/examine.js',
 ];
 // The HOST side of every seam. Nothing here takes a deps bag, so the `d` rules
 // do not apply - but the unbound scan does, and this is the half that has twice

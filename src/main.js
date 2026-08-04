@@ -41,6 +41,7 @@ import { createHotbarHost } from './hotbar-host.js';
 import { createFloorEffects } from './floor-effects.js';
 import { showLevelMenu } from './desk.js';
 import { createOocVerbs } from './ooc-verbs.js';
+import { createExamine } from './examine.js';
 import { createWalking } from './walking.js';
 import { createSummonLayer } from './summon-layer.js';
 import { createProgressionUi } from './progression-ui.js';
@@ -1345,47 +1346,15 @@ function startGame(level) {
   // - out of combat, in combat - says the same thing about the same object.
   // Flavor lives in the registries (data/tiles.js `examine`, an enemy or NPC
   // def's `examine`); this only decides which one applies.
-  function examineTile(tx, tz) {
-    const def = grid.defAt(tx, tz);
-    // TERRAIN, not walkability. `isWalkable` also refuses a tile somebody is
-    // STANDING on, so examining the floor under a coworker fell through the
-    // whole solid ladder below and came out as the last-resort "a cubicle
-    // wall" - on plain carpet, because the floor def carries no label of its
-    // own. What is underfoot does not change because somebody is on it.
-    if (grid.terrainOpen(tx, tz)) {
-      if (runtime.isBurning(tx, tz)) return FIRE.examine;
-      if (grid.isElectrified(tx, tz)) return ELECTRIFIED.examine;
-      const surfId = runtime.surfaceAt(tx, tz);
-      return (surfId && SURFACES[surfId].examine) || 'Standard-issue office carpet. Faintly damp.';
-    }
-    // Burning first: a trash can on fire is a different object than a trash can.
-    if (def.ignitable && runtime.isBurning(tx, tz)) {
-      return 'The trash can is thoroughly on fire. Somewhere, an alarm should be going off.';
-    }
-    if (def.examine) return def.examine;
-    if (def.ignitable) return 'A trash can. Sixty percent paper, forty percent regret.';
-    if (def.explosive) return 'The printer. It has jammed 4 times today. It is waiting.';
-    if (def.shop) return 'A snack machine, humming. Row E7 has been stuck since before you were hired.';
-    if (def.loot) return `${def.label}. Probably contains secrets. Or staples.`;
-    // Naming it beats miscalling it. The cubicle wall is the LAST resort now:
-    // as the catch-all for everything solid it introduced half the furniture in
-    // the office - chairs, sofas, fridges, bookshelves - as a cubicle wall.
-    return def.label
-      ? `${def.label}. Office issue, and not going anywhere.`
-      : 'A cubicle wall. It has seen things.';
-  }
-  const doorExamine = (open) => (open
-    ? 'An office door, ajar. A bold statement of availability.'
-    : 'A closed office door. The universal sign for "do not perceive me."');
-  // Whatever the cursor resolves to: a body first, then a door, then the tile.
-  function examineAt(hit, tile, point) {
-    if (hit?.kind === 'npc') return hit.ref.def.examine || 'A coworker. Non-hostile, for now.';
-    if (hit?.kind === 'party') return hit.ref.def?.examine || 'One of yours. Holding up, mostly.';
-    if (hit?.kind === 'enemy') return hit.ref.def.examine || 'A coworker, in the way.';
-    const doorKey = hit?.kind === 'door' ? hit.ref : (point ? doorNearPoint(point) : null);
-    if (doorKey) return doorExamine(grid.doors.get(doorKey)?.open);
-    return tile ? examineTile(tile.x, tile.z) : null;
-  }
+  // What the thing under the cursor is called (examine.js).
+  const { examineTile, doorExamine, examineAt } = createExamine({
+    get grid() { return grid; },
+    get runtime() { return runtime; },
+    SURFACES,
+    FIRE,
+    ELECTRIFIED,
+    doorNearPoint: (...a) => doorNearPoint(...a),
+  });
 
   const canvasEl = document.getElementById('app');
   // Which party member owns this actor, if any.
@@ -1972,21 +1941,24 @@ function startGame(level) {
     get enemies() { return enemies; },
     get summons() { return summons; },
     grid,
+    get runtime() { return runtime; },
+    SURFACES,
     PAPER_CAP,
-    // `vfx` and `surfaceImpactKind` are `const`s declared BELOW this call, so
-    // passing them by reference would read them in their temporal dead zone -
-    // a build that is perfectly happy and a first step that throws. Wrapped,
-    // the lookup happens when a body actually stands on something.
+    // `vfx` is a `const` declared BELOW this call, so passing it by reference
+    // would read it in its temporal dead zone - a build that is perfectly
+    // happy and a first step that throws. Wrapped, the lookup happens when a
+    // body actually stands on something.
     vfx: {
       impact: (...a) => vfx.impact(...a),
       damageText: (...a) => vfx.damageText(...a),
       status: (...a) => vfx.status(...a),
       splat: (...a) => vfx.splat(...a),
+      footstep: (...a) => vfx.footstep(...a),
     },
-    surfaceImpactKind: (x, z) => surfaceImpactKind(x, z),
     applyDamage,
     applyStatus,
     hasStatus,
+    impactKindFor,
     statusFx,
     equippedStats,
     slips,
@@ -2005,6 +1977,7 @@ function startGame(level) {
   });
   const {
     advanceStatusTurn, applySurfaceOn, maybeSlip, tickStepOn, tickTurnClockOn,
+    isBleeding, surfaceImpactKind, leaveFootprint,
   } = floorFx;
 
   function onMemberStep(member, x, z, pathDone, changed = true) {
@@ -2837,32 +2810,6 @@ function startGame(level) {
       if (en.alive && en.entity) auraScratch.push({ entity: en.entity, statuses: statusList(en) });
     }
     return auraScratch;
-  }
-
-  // Is this walker leaving a trail? A live bleed is the obvious case; so is
-  // being badly enough hurt that you're dripping without a status saying so.
-  const isBleeding = (s) => hasStatus(s, 'bleed') || s.hp <= Math.max(1, s.maxHp * 0.3);
-
-  // What a hurting floor looks like when it bites: the burst matches the
-  // hazard the tile actually IS right now (fire beats electrified beats the
-  // painted surface), so a paper cut throws shreds and live water throws
-  // sparks without either side hard-coding the other's list.
-  const surfaceImpactKind = (x, z) => impactKindFor({
-    burning: runtime.isBurning(x, z),
-    electrified: grid.isElectrified(x, z),
-    surface: runtime.surfaceAt(x, z),
-  }, SURFACES);
-
-  // One tile entered, one print left (or not) - the bookkeeping of which foot
-  // and how bloody the sole still is lives in fx.js, keyed by the actor.
-  function leaveFootprint(actor, s, x, z) {
-    if (!actor?.entity) return;
-    const surf = runtime.surfaceAt(x, z);
-    vfx.footstep(actor, x, z, {
-      bleeding: isBleeding(s),
-      surface: surf,
-      onPaper: surf === 'paper',
-    });
   }
 
   // --- main loop ------------------------------------------------------------------

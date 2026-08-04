@@ -92,7 +92,7 @@ export function createFloorEffects(d) {
       if (sfx.bleed) d.applyStatus(ms, 'bleed', { duration: sfx.bleed });
       const down = d.applyDamage(ms, amount);
       actor.flinch();
-      d.vfx.impact(x, z, d.surfaceImpactKind(x, z), { y: 0.3 });
+      d.vfx.impact(x, z, surfaceImpactKind(x, z), { y: 0.3 });
       d.vfx.damageText(x, z, `-${amount}`);
       say(sfx.message);
       d.syncHudFor(ms);
@@ -159,6 +159,32 @@ export function createFloorEffects(d) {
     return { down: hurt(damage), damage, expired };
   }
 
+  // Is this walker leaving a trail? A live bleed is the obvious case; so is
+  // being badly enough hurt that you're dripping without a status saying so.
+  const isBleeding = (s) => d.hasStatus(s, 'bleed') || s.hp <= Math.max(1, s.maxHp * 0.3);
+
+  // What a hurting floor looks like when it bites: the burst matches the
+  // hazard the tile actually IS right now (fire beats electrified beats the
+  // painted surface), so a paper cut throws shreds and live water throws
+  // sparks without either side hard-coding the other's list.
+  const surfaceImpactKind = (x, z) => d.impactKindFor({
+    burning: d.runtime.isBurning(x, z),
+    electrified: d.grid.isElectrified(x, z),
+    surface: d.runtime.surfaceAt(x, z),
+  }, d.SURFACES);
+
+  // One tile entered, one print left (or not) - the bookkeeping of which foot
+  // and how bloody the sole still is lives in fx.js, keyed by the actor.
+  function leaveFootprint(actor, s, x, z) {
+    if (!actor?.entity) return;
+    const surf = d.runtime.surfaceAt(x, z);
+    d.vfx.footstep(actor, x, z, {
+      bleeding: isBleeding(s),
+      surface: surf,
+      onPaper: surf === 'paper',
+    });
+  }
+
   function maybeSlip(ms, actor, x, z, wasSlipProof, say) {
     if (d.gameOver) return;
     if (!d.slips({
@@ -175,5 +201,8 @@ export function createFloorEffects(d) {
     else say('The floor was, in fact, wet. You go down. Gracefully? No.');
   }
 
-  return { advanceStatusTurn, applySurfaceOn, maybeSlip, tickStepOn, tickTurnClockOn };
+  return {
+    advanceStatusTurn, applySurfaceOn, maybeSlip, tickStepOn, tickTurnClockOn,
+    isBleeding, surfaceImpactKind, leaveFootprint,
+  };
 }
