@@ -14,15 +14,27 @@
 //
 // The check is deliberately dumb: for each extracted module, collect every
 // identifier that is not declared locally, not a parameter, not a known global,
-// and not a property key - then report it. Prose inside strings and comments is
-// stripped first. A hit is not automatically a bug, but every real bug of this
-// class IS a hit, which is the property that matters.
+// and not a property key - then report it. Everything that is not code is
+// removed first, in one pass (stripNotCode). A hit is not automatically a bug,
+// but every real bug of this class IS a hit, which is the property that
+// matters - and that property is only as good as the two halves below.
+//
+// What it can MISS is worth as much as what it catches, because both halves
+// have failed silently:
+//   - the strip has to be right. A regex literal left in reported an `w` that
+//     was `[\w-]+`, and a nested template left prose in as code.
+//   - masking has to be narrow. A `get x()` used to DECLARE `x` for the whole
+//     file, which made `get armed() { return armed; }` - the unbound read this
+//     tool exists for - invisible, in the two modules built entirely out of
+//     that shape. Keys are erased from the read stream now, not declared.
+// Both were found by mutation rather than by reading: break a name on purpose
+// and check the tool says so. Do that after changing anything in here.
 import { readFileSync } from 'node:fs';
 
 const MODULES = [
   'src/combat-aim.js', 'src/combat-world.js', 'src/hotbar-host.js',
   'src/floor-effects.js', 'src/desk.js', 'src/combat-advance.js', 'src/ooc-verbs.js',
-  'src/party-control.js', 'src/sneak-layer.js', 'src/progression-ui.js', 'src/summon-layer.js', 'src/walking.js', 'src/examine.js', 'src/keyboard.js', 'src/mouse.js', 'src/combat-entry.js', 'src/frame.js', 'src/debug-handles.js',
+  'src/party-control.js', 'src/sneak-layer.js', 'src/progression-ui.js', 'src/summon-layer.js', 'src/walking.js', 'src/examine.js', 'src/keyboard.js', 'src/mouse.js', 'src/combat-entry.js', 'src/frame.js', 'src/debug-handles.js', 'src/combat-handle.js',
 ];
 // The HOST side of every seam. Nothing here takes a deps bag, so the `d` rules
 // do not apply - but the unbound scan does, and this is the half that has twice
@@ -30,7 +42,7 @@ const MODULES = [
 // on the progression cut, which stayed wired to the party bar's level-up pip
 // after every declaration of it had moved out. Both are a ReferenceError on a
 // click, and a build reports neither.
-const HOSTS = ['src/main.js'];
+const HOSTS = ['src/main.js', 'src/combat.js'];
 const GLOBALS = new Set([
   'if', 'else', 'return', 'const', 'let', 'var', 'new', 'true', 'false', 'null', 'undefined',
   'for', 'of', 'in', 'function', 'continue', 'break', 'export', 'import', 'from', 'typeof',
@@ -194,6 +206,106 @@ function deadZoneDeps(hostSrc, hostName) {
   return hits;
 }
 
+// Everything in a source file that is NOT code, removed in ONE left-to-right
+// pass: comments, the three string flavours, and regex literals. It used to be
+// a chain of independent regex replaces, and a chain cannot do this job -
+// each pass re-reads text the previous one already mangled, so one bad strip
+// cascades into the rest.
+//
+// Both failures the chain actually produced are worth keeping written down,
+// because they look like unrelated bugs and are the same one:
+//
+//   - a REGEX literal was never stripped at all, so `[\w-]+` reported an
+//     unbound `w`. It hid for as long as it did because something else in the
+//     same file happened to declare `w`; the masking was doing the work.
+//   - NESTED templates broke the template pass: the non-greedy `` `[\s\S]*?` ``
+//     ends at the first inner backtick, so the rest of the prose came out as
+//     code AND the leaked backtick unbalanced the quote passes that ran next -
+//     which is why combat.js reported `colleague`, `patches` and `up`, three
+//     words out of a log line, only one of which is even in the broken
+//     template. That is the cascade: the visible hits were not where the bug
+//     was.
+//
+// What is KEPT is as important as what goes: the contents of `${...}` are real
+// code, and dropping them once hid a live `summonRange(a)` call inside an
+// interpolated sentence - a module shipped with it unbound. So an
+// interpolation's body is emitted as code, however deeply nested.
+function stripNotCode(src) {
+  let out = '';
+  let i = 0;
+  // The mode stack. `tpl` means "inside a template's PROSE" (emit nothing);
+  // anything else is code. An interpolation pushes a brace depth, so `${...}`
+  // knows which `}` hands the reader back to the prose - which is the whole
+  // trick, and the reason this is a stack rather than a recursive walk. A
+  // recursive one was tried first and double-counted: it walked the nested
+  // template AND re-emitted the raw range around it, so the prose came back
+  // out as code anyway.
+  const stack = [];
+  const inTemplate = () => stack[stack.length - 1]?.type === 'tpl';
+  // Whether a `/` here opens a regex or divides. Regex only follows an operand
+  // POSITION - an operator, an opening bracket, or a keyword - never a value.
+  const opensRegex = () => {
+    const before = out.replace(/\s+$/, '');
+    if (!before) return true;
+    if ('=(,:[!&|?{};+-*%~^<>'.includes(before[before.length - 1])) return true;
+    return /\b(return|typeof|case|in|of|new|delete|void|do|else|yield|await)$/.test(before);
+  };
+  while (i < src.length) {
+    const c = src[i];
+    const next = src[i + 1];
+    if (inTemplate()) {
+      if (c === '\\') { i += 2; continue; }
+      if (c === '`') { stack.pop(); out += ')'; i += 1; continue; }
+      // The contents of `${...}` are real code, and dropping them once hid a
+      // live `summonRange(a)` call inside an interpolated sentence - a module
+      // shipped with it unbound. So the body is emitted; only prose is not.
+      if (c === '$' && next === '{') { stack.push({ type: 'interp', depth: 0 }); out += ';'; i += 2; continue; }
+      i += 1; // prose
+      continue;
+    }
+    if (c === '/' && next === '/') { while (i < src.length && src[i] !== '\n') i += 1; continue; }
+    if (c === '/' && next === '*') { const at = src.indexOf('*/', i); i = at < 0 ? src.length : at + 2; continue; }
+    if (c === "'" || c === '"') {
+      i += 1;
+      while (i < src.length && src[i] !== c) i += src[i] === '\\' ? 2 : 1;
+      i += 1;
+      out += c + c;
+      continue;
+    }
+    if (c === '`') { stack.push({ type: 'tpl' }); out += '('; i += 1; continue; }
+    if (c === '{') { const top = stack[stack.length - 1]; if (top?.type === 'interp') top.depth += 1; out += c; i += 1; continue; }
+    if (c === '}') {
+      const top = stack[stack.length - 1];
+      if (top?.type === 'interp') {
+        if (top.depth === 0) { stack.pop(); out += ';'; i += 1; continue; } // back to the prose
+        top.depth -= 1;
+      }
+      out += c;
+      i += 1;
+      continue;
+    }
+    if (c === '/' && opensRegex()) {
+      i += 1;
+      let inClass = false;
+      while (i < src.length) {
+        if (src[i] === '\\') { i += 2; continue; }
+        if (src[i] === '[') inClass = true;
+        else if (src[i] === ']') inClass = false;
+        else if (src[i] === '/' && !inClass) break;
+        else if (src[i] === '\n') break; // unterminated - it was division after all
+        i += 1;
+      }
+      i += 1;
+      while (i < src.length && /[gimsuy]/.test(src[i])) i += 1;
+      out += '/(?:)/';
+      continue;
+    }
+    out += c;
+    i += 1;
+  }
+  return out;
+}
+
 let bad = 0;
 for (const file of [...MODULES, ...HOSTS]) {
   const raw = readFileSync(file, 'utf8');
@@ -205,32 +317,7 @@ for (const file of [...MODULES, ...HOSTS]) {
   if (HOSTS.includes(file)) {
     for (const hit of deadZoneDeps(raw, file)) { bad += 1; console.log(hit); }
   }
-  // Strip comments, then every flavour of string literal, so prose cannot
-  // masquerade as an identifier.
-  let code = raw.replace(/^import\s[\s\S]*?from\s*['"][^'"]*['"];?$/gm, '');
-  code = code.split('\n').map((l) => l.split('//')[0]).join('\n');
-  code = code.replace(/\/\*[\s\S]*?\*\//g, '');
-  // Template literals span lines, so strip them with a dot-all pass - but keep
-  // what is INSIDE `${...}`, which is real code. Dropping the whole template
-  // hid a live `summonRange(a)` call in an interpolated sentence, and the
-  // module shipped with it unbound.
-  code = code.replace(/`[\s\S]*?`/g, (lit) => {
-    const inner = [...lit.matchAll(/\$\{([^{}]*)\}/g)].map((m) => m[1]).join(';');
-    return inner ? `(${inner})` : '``';
-  }).replace(/'(?:[^'\\]|\\.)*'/g, "''").replace(/"(?:[^"\\]|\\.)*"/g, '""');
-  // REGEX literals are the fourth flavour of not-code, and they were missed:
-  // `[\w-]+` inside a character class reads as the identifier `w`, so a file
-  // with a regex in it reports an unbound name that does not exist. It stayed
-  // invisible for as long as it did because something else in the same file
-  // happened to DECLARE `w` (a `walls.filter((w) => ...)` callback) - the
-  // masking, not the stripping, was doing the work, and the debug-handles cut
-  // moved that callback out. Run after the string passes, so a slash inside a
-  // string cannot open one. Only a slash in an operand position starts a regex
-  // - after `= ( , : [ ! & | ? { } ;` or `return` - which is what keeps plain
-  // division from being eaten.
-  code = code.replace(
-    /(^|[=(,:[!&|?{};]|\breturn)(\s*)\/(?![*/])(?:[^/\\\n[]|\\.|\[(?:[^\]\\]|\\.)*\])+\/[gimsuy]*/g,
-    (_, lead, gap) => `${lead}${gap}/(?:)/`);
+  let code = stripNotCode(raw.replace(/^import\s[\s\S]*?from\s*['"][^'"]*['"];?$/gm, ''));
   const declared = new Set([...code.matchAll(/(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
   // Imported names count as declared - a module that imports `ACTIONS` is not
   // reading an unbound one.
@@ -274,15 +361,23 @@ for (const file of [...MODULES, ...HOSTS]) {
       if (/^[A-Za-z_$][\w$]*$/.test(n)) declared.add(n);
     }
   }
-  // Shorthand methods in an object literal (`bumpEpoch() { ... }`) declare a
-  // property too - and one of these WAS a real bug once, so the check keeps
-  // knowing about them: `setPreview` existed only as a method and the moved
-  // code called it as a function. That failure shows up as an unbound read at
-  // the CALL site, which this check still catches.
-  for (const m of code.matchAll(/^\s{2,}([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/gm)) declared.add(m[1]);
-  // `get name()` in an object literal declares a property, not a read.
-  for (const m of code.matchAll(/\bget\s+([A-Za-z_$][\w$]*)\s*\(/g)) declared.add(m[1]);
-  for (const m of code.matchAll(/\bset\s+([A-Za-z_$][\w$]*)\s*\(/g)) declared.add(m[1]);
+  // A getter, setter or shorthand method NAMES A KEY. It used to be added to
+  // `declared`, and that is too strong: `declared` masks the name everywhere in
+  // the file, so `get armed() { return armed; }` - the exact unbound read this
+  // check exists to catch - was invisible, because the key had vouched for it.
+  // combat-handle.js is a hundred and eighty lines of getters named after the
+  // dependency each one returns, which is the shape that makes this matter.
+  //
+  // So the header is erased from the read stream instead of being declared: the
+  // key stops counting as a read, and stops covering for one. A plain `name:`
+  // key needs no help - the scan's own `(?!\s*:)` already skips it. Shorthand
+  // methods stay in scope because one WAS a real bug (`setPreview` existed only
+  // as a method and the moved code called it as a function), and that failure
+  // shows up at the CALL site, which is untouched by this.
+  code = code
+    .replace(/^(\s{2,})([A-Za-z_$][\w$]*)(\s*\([^)]*\)\s*\{)/gm, '$1__key__$3')
+    .replace(/\b(get|set)\s+([A-Za-z_$][\w$]*)\s*\(/g, '$1 __key__(');
+  declared.add('__key__');
   declared.add('get');
   declared.add('set');
   for (const m of code.matchAll(/\{([^{}]*)\}\s*=/g)) {
