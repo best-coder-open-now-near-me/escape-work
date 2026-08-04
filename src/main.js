@@ -41,6 +41,7 @@ import { createHotbarHost } from './hotbar-host.js';
 import { createFloorEffects } from './floor-effects.js';
 import { showLevelMenu } from './desk.js';
 import { createOocVerbs } from './ooc-verbs.js';
+import { createMouse } from './mouse.js';
 import { createKeyboard } from './keyboard.js';
 import { createExamine } from './examine.js';
 import { createWalking } from './walking.js';
@@ -2113,399 +2114,73 @@ function startGame(level) {
     canvas: document.getElementById('app'),
     focus: grid.playerSpawn,
     aim: (sx, sy) => vision.aim(sx, sy),
-    onAnyLeftPress: () => ui.hideMenu(),
-    // However the view is left - the button, T, a pitch drag, a raw setView -
-    // the rail button repaints, so its lit state can never outlive the view.
-    onTacticalChange: () => tacticalBtn?.refresh(),
-    onLeftClickTile: (tile, point, sx, sy) => {
-      // God-mode click-to-place (spawn/drop/teleport) consumes the click before
-      // any normal handling, reusing the game's own ground raycast.
-      if (pendingGodPick) {
-        const cb = pendingGodPick;
-        pendingGodPick = null;
-        cb(tile, point);
-        return;
-      }
-      if (!sheet || gameOver) return;
-      // In combat a click resolves in the same order the hover affordances do:
-      // the body under the pixel, then a body near the ground point, then the
-      // tile - so what the crosshair and the to-hit readout said is what the
-      // click does.
-      if (inCombat) {
-        // Initiative: you control whoever's turn it is - a party member or a
-        // summon you conjured. combat.actingActor is that body (party.active
-        // can't point at a summon, which lives outside the roster). Clicks
-        // target enemies or drive that unit; no switching (each acts on its
-        // own turn).
-        const actingActor = combat?.actingActor || party?.members[party.active]?.actor || player;
-        // The acting member's OWN tile wins first: a self-cast (purge on
-        // yourself) or a shuffle-in-place must not be stolen by an adjacent
-        // enemy's tall body mesh overlapping the click.
-        if (tile && actingActor && tile.x === actingActor.x && tile.z === actingActor.z) {
-          combat?.handleTileClick(tile, point);
-          return;
-        }
-        // A coworker's body under the cursor is a target (rings mark bodies;
-        // the ground fallback behind a tall mesh is a mis-walk that burns AP).
-        const bodyHit = picking.pick(controls.cameraEntity, sx, sy);
-        // A FRIENDLY body, while a friendly verb is armed (POWERS_PLAN M1).
-        // Gated on `armedIsFriendly` so a click on a teammate means nothing
-        // different from before unless you are actually aiming a buff -
-        // ungated, it would eat the clicks that walk you past your own party.
-        if (combat?.armedIsFriendly
-          && (bodyHit?.kind === 'party' || bodyHit?.kind === 'summon')) {
-          const ally = combat.allyAtPoint(point)
-            || (bodyHit.ref && combat.allyAtPoint({ x: bodyHit.ref.x, z: bodyHit.ref.z }));
-          if (ally && combat.handleAllyClick(ally)) return;
-        }
-        // A teammate's body with NO friendly verb armed: under a shared turn
-        // this grabs the wheel (INITIATIVE_PLAN) - the same body click that
-        // switches the leader out of combat. Steering only ever succeeds on a
-        // member holding the open turn, so outside one the click falls
-        // through to the mis-walk it always was.
-        if ((bodyHit?.kind === 'party' || bodyHit?.kind === 'summon')
-          && combat?.steerMember(bodyHit.ref)) return;
-        if (bodyHit?.kind === 'enemy' && bodyHit.ref.alive) {
-          combat?.handleEnemyClick(bodyHit.ref);
-          return;
-        }
-        // Ground fallback: the same near-a-body test the hover affordances
-        // run (combat.enemyAtPoint), so a click can't route into a walk on a
-        // point where the crosshair was promising a swing. An exact-tile
-        // match here was a third authority on "is this a coworker?" - it said
-        // no on the outer band of a body the cursor said yes to.
-        const near = point && combat?.enemyAtPoint(point);
-        if (near) { combat?.handleEnemyClick(near); return; }
-        // A door, before the tile fallback - otherwise the click walks you at
-        // the door instead of working it. toggleDoor owns the rules from here:
-        // it refuses with a reason when you are not beside it, and bills the
-        // AP when you are.
-        const dk = combatDoorAt(bodyHit, point);
-        if (dk) { toggleDoor(dk); return; }
-        if (!tile) return;
-        combat?.handleTileClick(tile, point);
-        return;
-      }
-      if (modalOpen()) return; // talking: clicks belong to the panel
-      // Layered storeys: a click means what the eye sees - resolve it against
-      // the visible storeys top-down. A stair run routes a climb, another
-      // storey routes a cross-storey walk, and a same-storey hit simply
-      // becomes the tile/point every verb below already reads.
-      if (floors) {
-        if (climbAnim) return; // the flight finishes before the next order
-        // The flight's own boxes win the click before any ground plane: a
-        // pixel on the risers would otherwise resolve to whatever tile the
-        // ray reaches BEHIND the raised steps.
-        const stairHit = picking.pick(controls.cameraEntity, sx, sy);
-        if (stairHit?.kind === 'stair') { routeViaStair(stairHit.ref); return; }
-        const res = layeredPick(sx, sy);
-        if (!res) return;
-        if (res.stair) { routeViaStair(res.stair); return; }
-        if (res.layer !== playerLayer) { walkToLayer(res.tile, res.point, res.layer); return; }
-        tile = res.tile;
-        point = res.point;
-      }
-      // An armed SUMMON aims at the floor, so while it is armed the world is a
-      // placement grid and nothing else: the click posts the role where you
-      // pointed rather than walking there, rummaging the desk behind the point,
-      // or opening a fight with whoever is standing in the way. A refused spot
-      // says why and stays armed (postSummonAt), so the next click can just be
-      // a better one.
-      if (armedOoc && ACTIONS[armedOoc].type === 'summon') {
-        if (tile) postSummonAt(armedOoc, tile.x, tile.z);
-        return;
-      }
-      // A CONE is aimed at a DIRECTION, so the ground is its natural target -
-      // and the ground branch only ever handled summons, so aiming Bulk Mail at
-      // the floor silently walked you there instead. It opens the fight on
-      // whoever the wedge actually catches, which is the same rule the preview
-      // just drew - and an EMPTY wedge fires all the same (designer,
-      // 2026-07-31): it needed a coworker in the way before, which made the
-      // one cone whose whole point is the paper behind it the one attack you
-      // could not fire at the floor.
-      if (armedOoc && ACTIONS[armedOoc].cone && point) {
-        const a = ACTIONS[armedOoc];
-        // From the BODY, like the preview and the in-combat wedge - one
-        // geometry for the whole click (DEGRID M5).
-        const test = coneFrom(a, leadBody(), point.x, point.z);
-        if (!test) { ui.say('Aim somewhere.'); return; } // the cursor is on you
-        const caught = coneCatches(test);
-        if (caught.length) {
-          // The nearest one is the primary; the rest join through the engage
-          // radius exactly as they would for any other opener.
-          caught.sort((p, q) => cheb(player, p) - cheb(player, q));
-          engageWithAction(caught[0], armedOoc, point);
-          return;
-        }
-        fireOocCone(a, test, point.x, point.z);
-        return;
-      }
-      // An armed SHOVE aimed at the office itself works out here too
-      // (designer, 2026-07-30): furniture and partitions topple with no
-      // fight on. Ahead of the entity pick, or the prop mesh under the click
-      // would open its rummage panel instead of taking the shoulder.
-      if (armedOoc && ACTIONS[armedOoc].type === 'shove' && tile && !enemyAt(tile.x, tile.z)
-        && oocShoveAt(tile)) return;
-      // An armed TAKE COVER: crouch before anyone has noticed you.
-      if (armedOoc && ACTIONS[armedOoc].type === 'cover' && tile) {
-        oocTakeCoverAt(tile, point);
-        return;
-      }
-      // Out of combat, the interactable ENTITY under the cursor wins over the
-      // floor tile behind it - what finally makes a click on the tall door
-      // mesh (or a standing enemy) land on the thing you aimed at.
-      const hit = picking.pick(controls.cameraEntity, sx, sy);
-      if (hit && dispatchHit(hit)) return;
-      if (!tile) return;
-      // Ground fallback - also catches flat targets the pick ray skims over: a
-      // door edge clicked on the floor, corpses, dropped items.
-      const en = enemyAt(tile.x, tile.z);
-      const npc = npcAt(tile.x, tile.z);
-      const corpse = loot.corpseAt(tile.x, tile.z);
-      const doorKey = doorNearPoint(point);
-      if (en) attackOrConfront(en);
-      else if (npc) approachAndDo(npc.x, npc.z, () => dialogue.open(npc));
-      else if (doorKey) approachDoor(doorKey);
-      else if (grid.defAt(tile.x, tile.z).loot) {
-        approachAndDo(tile.x, tile.z, () => loot.lootContainer(tile.x, tile.z));
-      } else if (corpse) {
-        approachAndDo(corpse.x, corpse.z, () => loot.lootBody(corpse));
-      } else if (loot.looseAt(tile.x, tile.z).length) {
-        approachAndDo(tile.x, tile.z, () => loot.pickUpAt(tile.x, tile.z));
-      } else moveTo(tile, point);
-    },
-    onHover: (point, sx, sy) => {
-      if (inCombat && combat) {
-        const hit = picking.pick(controls.cameraEntity, sx, sy);
-        // The acting body's OWN tile is the click's first authority (see
-        // onLeftClickTile): a self-cast or a shuffle in place must not be
-        // stolen by an adjacent coworker's tall mesh overlapping the pixel.
-        // The hover had no such rule, so on those pixels the crosshair and
-        // the to-hit readout promised a swing that the click turned into an
-        // in-place shuffle. Same test, same rounding as `screenToTile`, so
-        // the two affordances answer together.
-        const acting = combat.actingActor || party?.members[party.active]?.actor || player;
-        const onOwnTile = !!acting && !!point
-          && Math.round(point.x) === acting.x && Math.round(point.z) === acting.z;
-        // A coworker under the cursor is a TARGET, armed or not - a bare click
-        // swings the basic attack (combat.js), so the cursor has to say so.
-        // combat.handleHover resolves WHO that is (this body pick first, the
-        // ground point as fallback) and WHETHER a click would swing right now
-        // (the click's own gate: your turn, standing still) - and the
-        // crosshair keys off that one answer. Reading the raw pick here showed
-        // a crosshair mid-walk and on AI turns, promising a swing while the
-        // to-hit readout and the click itself refused.
-        const picked = !onOwnTile && hit?.kind === 'enemy' && hit.ref.alive ? hit.ref : null;
-        // The hovered door, resolved ONCE with the click's own predicate
-        // (combatDoorAt) and handed to combat alongside the hover - the
-        // pointer cursor and the threshold ring read this same answer, so
-        // the two affordances light together and die together.
-        const doorKey = combatDoorAt(hit, point);
-        // handleHover still runs with the real point - a cone, a zone and a
-        // summon drop all aim off it, and the shuffle's own move preview is
-        // priced there too. It is `hoverFoe` that stands down, which takes
-        // the crosshair, the glow, the ring and the readout together.
-        const foe = combat.handleHover(point, sx, sy, picked,
-          doorKey ? doorMidpoint(doorKey) : null, onOwnTile);
-        // A coworker wins the cursor; failing that, a door you could work says
-        // so with the same pointer it uses out of combat. The click reads the
-        // very same predicate, so the two cannot disagree.
-        hover.setCursor(foe ? 'crosshair' : (doorKey ? 'pointer' : null));
-        // Hovering a character glows their BODY and names them in the banner -
-        // the DOS2 read, and the same one you already get out of combat. This
-        // used to be held behind Ctrl, which meant the half of the game where
-        // you aim at people was the half that wouldn't show you who you were
-        // aiming at. Ctrl still adds the ground rings under EVERY character
-        // (drawCharacterRings) - that's the at-a-glance read of the whole
-        // board, which is a different question from "what is under my cursor".
-        // A foe the hover resolved through the GROUND fallback (the pick ray
-        // missed the mesh, but the point is on their body) counts as hovered
-        // too: the crosshair is claiming you're aiming at them, so the glow
-        // and the banner have to name the same coworker.
-        const charHit = foe && !picked ? { kind: 'enemy', ref: foe, entity: foe.entity } : hit;
-        const character = charHit && (charHit.kind === 'party' || charHit.kind === 'npc'
-          || (charHit.kind === 'enemy' && charHit.ref.alive));
-        hover.showCharacter(character ? charHit : null, point);
-        return;
-      }
-      if (!sheet || gameOver || modalOpen()) { hover.clear(); oocAim = null; return; }
-      // Layered: the hover point follows the same top-down storey pick as the
-      // click, so the banner and the drop rings describe what the eye is on.
-      if (floors) {
-        const res = layeredPick(sx, sy);
-        if (res) point = res.point;
-      }
-      // The ground point is remembered, not just consumed: an armed summon
-      // draws its drop rings every frame (immediate-mode lines last one), and
-      // hover events only arrive when the mouse actually moves.
-      oocAim = point;
-      hover.hover(point, sx, sy);
-    },
-    // The cursor left the world for the DOM UI: drop the world hover rather
-    // than leaving the last-hovered body glowing and named behind the panel
-    // the player is now using.
-    onHoverLeave: () => {
-      hover.clear();
-      oocAim = null; // no cursor on the floor, no drop rings
-      if (inCombat && combat) combat.handleHover(null, 0, 0);
-    },
-    onRightClickTile: (tile, sx, sy, point) => {
-      if (!sheet || gameOver) return;
-      // In combat, right-click is first the universal "back out": it lowers an
-      // armed action or a pending confirm. Left-click never cancels (it reports
-      // an invalid target), so aiming survives a near-miss.
-      //
-      // With nothing to back out of, it opens the context menu instead - the
-      // Examine verb had no way in during a fight, which is the half of the
-      // game where you most want to know what you're looking at. Only Examine:
-      // every other verb in here spends a turn, and those belong on the action
-      // bar where their AP cost is visible.
-      if (inCombat) {
-        if (combat?.cancelArmed()) return;
-        const chit = picking.pick(controls.cameraEntity, sx, sy);
-        const items = [];
-        // A door you are standing beside. This is a turn-spending verb, so it
-        // wears its price on the label - which is the same rule that keeps
-        // everything else out of this menu and on the bar, honoured rather
-        // than broken. Doors have no bar slot: they are terrain, not kit.
-        const dk = chit?.kind === 'door' ? chit.ref : (point ? doorNearPoint(point) : null);
-        if (dk && atDoor(dk, combat?.actingActor)) {
-          const isOpen = grid.doors.get(dk)?.open;
-          items.push({
-            label: `${isOpen ? 'Pull the door shut' : 'Open the door'} - ${COMBAT_DOOR_AP} AP`,
-            action: () => toggleDoor(dk),
-          });
-        }
-        // A teammate holding the open shared turn gets a steering item - the
-        // in-combat sibling of the out-of-combat "Switch to" below.
-        const wheel = (chit?.kind === 'party' || chit?.kind === 'summon')
-          ? combat?.canSteer(chit.ref) : null;
-        if (wheel) items.push({ label: `Steer ${wheel}`, action: () => combat.steerMember(chit.ref) });
-        const text = examineAt(chit, tile, point);
-        if (text) items.push({ label: 'Examine', action: () => ui.say(text) });
-        if (items.length) ui.showMenu(sx, sy, items);
-        return;
-      }
-      if (modalOpen()) return;
-      // Layered: the menu describes the storey you are ON - a right-click
-      // aimed at another storey stays silent rather than offering verbs the
-      // walk rules would then refuse.
-      if (floors) {
-        if (climbAnim) return;
-        const res = layeredPick(sx, sy);
-        if (!res || res.layer !== playerLayer) return;
-        tile = res.tile;
-        point = res.point;
-      }
-      const hit = picking.pick(controls.cameraEntity, sx, sy);
-      if (hit && hit.kind === 'npc') {
-        ui.showMenu(sx, sy, [
-          { label: `Talk to ${hit.ref.def.name}`, action: () => approachAndDo(hit.ref.x, hit.ref.z, () => dialogue.open(hit.ref)) },
-          { label: 'Examine', action: () => ui.say(examineAt(hit, tile, point)) },
-        ]);
-        return;
-      }
-      if (hit && hit.kind === 'party') {
-        const m = memberOf(hit.ref);
-        // Your own healthy body falls through to the ordinary tile menu.
-        if (m && (m !== partyLeader(party) || m.sheet.hp <= 0)) {
-          const items = [];
-          if (m.sheet.hp <= 0) {
-            items.push({ label: `Help ${m.sheet.name} up`, action: () => approachAndDo(hit.ref.x, hit.ref.z, () => helpUp(m)) });
-          } else {
-            if (hit.ref.def?.dialogue || hit.ref.def?.recruitedDialogue) {
-              items.push({ label: `Talk to ${m.sheet.name}`, action: () => approachAndDo(hit.ref.x, hit.ref.z, () => dialogue.open(hit.ref)) });
-            }
-            const i = party.members.indexOf(m);
-            if (i !== party.active) items.push({ label: `Switch to ${m.sheet.name}`, action: () => switchLeader(i) });
-          }
-          items.push({ label: 'Examine', action: () => ui.say(examineAt(hit, tile, point)) });
-          ui.showMenu(sx, sy, items);
-          return;
-        }
-      }
-      if (!tile) return;
-      const doorKey = (hit && hit.kind === 'door') ? hit.ref : doorNearPoint(point);
-      if (doorKey) {
-        const open = grid.doors.get(doorKey).open;
-        ui.showMenu(sx, sy, [
-          { label: open ? 'Close the door' : 'Open the door', action: () => approachDoor(doorKey) },
-          { label: 'Examine', action: () => ui.say(doorExamine(open)) },
-        ]);
-        return;
-      }
-      const en = (hit && hit.kind === 'enemy' && hit.ref.alive) ? hit.ref : enemyAt(tile.x, tile.z);
-      if (en) {
-        ui.showMenu(sx, sy, [
-          { label: `Confront ${en.def.name}`, action: () => confront(en) },
-          { label: 'Avoid eye contact', action: () => ui.say('You study your shoes intently.') },
-          { label: 'Examine', action: () => ui.say(en.def.examine || 'A coworker, in the way.') },
-        ]);
-      } else if (isWalkable(tile.x, tile.z)) {
-        const surfId = runtime.surfaceAt(tile.x, tile.z);
-        const items = [
-          { label: 'Walk here', action: () => moveTo(tile, point) },
-          { label: 'Examine', action: () => ui.say(examineTile(tile.x, tile.z)) },
-        ];
-        const here = loot.looseAt(tile.x, tile.z);
-        if (here.length) {
-          items.unshift({
-            label: `Pick up ${loot.itemName(here[0].id)}${here.length > 1 ? ` (+${here.length - 1})` : ''}`,
-            action: () => approachAndDo(tile.x, tile.z, () => loot.pickUpAt(tile.x, tile.z)),
-          });
-        }
-        const corpse = loot.corpseAt(tile.x, tile.z);
-        if (corpse) {
-          items.unshift({
-            label: `Loot ${corpse.def.name}'s body`,
-            action: () => approachAndDo(corpse.x, corpse.z, () => loot.lootBody(corpse)),
-          });
-        }
-        // A lighter (Smoker) or a book of matches turns a flammable surface
-        // into an option.
-        if (canIgnite() && surfId && SURFACES[surfId].flammable && !runtime.isBurning(tile.x, tile.z)) {
-          items.unshift({
-            label: igniteVerb(),
-            action: () => approachAndDo(tile.x, tile.z, () => igniteAt(tile.x, tile.z)),
-          });
-        }
-        ui.showMenu(sx, sy, items);
-      } else if (grid.defAt(tile.x, tile.z).ignitable) {
-        const items = [{ label: 'Examine', action: () => ui.say(examineTile(tile.x, tile.z)) }];
-        if (canIgnite() && runtime.ignitable(tile.x, tile.z)) {
-          items.unshift({
-            label: igniteVerb(),
-            action: () => approachAndDo(tile.x, tile.z, () => igniteAt(tile.x, tile.z)),
-          });
-        }
-        items.unshift({
-          label: 'Rummage',
-          action: () => approachAndDo(tile.x, tile.z, () => loot.lootContainer(tile.x, tile.z)),
-        });
-        ui.showMenu(sx, sy, items);
-      } else if (grid.defAt(tile.x, tile.z).explosive) {
-        ui.showMenu(sx, sy, [
-          { label: 'Rummage', action: () => approachAndDo(tile.x, tile.z, () => loot.lootContainer(tile.x, tile.z)) },
-          { label: 'Examine', action: () => ui.say(examineTile(tile.x, tile.z)) },
-        ]);
-      } else {
-        const def = grid.defAt(tile.x, tile.z);
-        const items = [{ label: 'Examine', action: () => ui.say(examineTile(tile.x, tile.z)) }];
-        if (def.shop) {
-          items.unshift({
-            label: `Buy from the ${def.label}`,
-            action: () => approachAndDo(tile.x, tile.z, () => openShopAt(tile.x, tile.z)),
-          });
-        }
-        if (def.loot && !def.shop) {
-          items.unshift({
-            label: 'Rummage',
-            action: () => approachAndDo(tile.x, tile.z, () => loot.lootContainer(tile.x, tile.z)),
-          });
-        }
-        ui.showMenu(sx, sy, items);
-      }
-    },
+    ...createMouse({
+      get sheet() { return sheet; },
+      get player() { return player; },
+      get party() { return party; },
+      get combat() { return combat; },
+      get inCombat() { return inCombat; },
+      get gameOver() { return gameOver; },
+      get climbAnim() { return climbAnim; },
+      get armedOoc() { return armedOoc; },
+      get playerLayer() { return playerLayer; },
+      get pendingGodPick() { return pendingGodPick; },
+      get grid() { return grid; },
+      get hover() { return hover; },
+      get controls() { return controls; },
+      get tacticalBtn() { return tacticalBtn; },
+      get loot() { return loot; },
+      get dialogue() { return dialogue; },
+      floors,
+      picking,
+      SURFACES,
+      get runtime() { return runtime; },
+      get enemies() { return enemies; },
+      get summons() { return summons; },
+      partyLeader,
+      memberOf: (...a) => memberOf(...a),
+      helpUp: (...a) => helpUp(...a),
+      confront: (...a) => confront(...a),
+      isWalkable: (...a) => isWalkable(...a),
+      openShopAt: (...a) => openShopAt(...a),
+      switchLeader: (...a) => switchLeader(...a),
+      canIgnite: (...a) => canIgnite(...a),
+      igniteAt: (...a) => igniteAt(...a),
+      igniteVerb: (...a) => igniteVerb(...a),
+      ui,
+      ACTIONS,
+      COMBAT_DOOR_AP,
+      atDoor,
+      doorMidpoint,
+      coneFrom,
+      cheb: (...a) => cheb(...a),
+      enemyAt: (...a) => enemyAt(...a),
+      npcAt: (...a) => npcAt(...a),
+      leadBody: (...a) => leadBody(...a),
+      modalOpen: (...a) => modalOpen(...a),
+      moveTo: (...a) => moveTo(...a),
+      walkToLayer: (...a) => walkToLayer(...a),
+      layeredPick: (...a) => layeredPick(...a),
+      routeViaStair: (...a) => routeViaStair(...a),
+      approachAndDo: (...a) => approachAndDo(...a),
+      approachDoor: (...a) => approachDoor(...a),
+      combatDoorAt: (...a) => combatDoorAt(...a),
+      doorNearPoint: (...a) => doorNearPoint(...a),
+      toggleDoor: (...a) => toggleDoor(...a),
+      dispatchHit: (...a) => dispatchHit(...a),
+      attackOrConfront: (...a) => attackOrConfront(...a),
+      engageWithAction: (...a) => engageWithAction(...a),
+      fireOocCone: (...a) => fireOocCone(...a),
+      coneCatches: (...a) => coneCatches(...a),
+      oocShoveAt: (...a) => oocShoveAt(...a),
+      oocTakeCoverAt: (...a) => oocTakeCoverAt(...a),
+      postSummonAt: (...a) => postSummonAt(...a),
+      examineAt: (...a) => examineAt(...a),
+      examineTile: (...a) => examineTile(...a),
+      doorExamine: (...a) => doorExamine(...a),
+      setOocAim: (v) => { oocAim = v; },
+      setPendingGodPick: (v) => { pendingGodPick = v; },
+    }),
   });
 
   // Everything the cursor SAYS - the body glow, the cursor shape, the focus
