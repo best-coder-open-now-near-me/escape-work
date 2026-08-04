@@ -21,8 +21,16 @@ import { readFileSync } from 'node:fs';
 
 const MODULES = [
   'src/combat-aim.js', 'src/combat-world.js', 'src/hotbar-host.js',
-  'src/floor-effects.js', 'src/desk.js', 'src/combat-advance.js', 'src/ooc-verbs.js', 'src/party-control.js', 'src/sneak-layer.js',
+  'src/floor-effects.js', 'src/desk.js', 'src/combat-advance.js', 'src/ooc-verbs.js',
+  'src/party-control.js', 'src/sneak-layer.js', 'src/progression-ui.js',
 ];
+// The HOST side of every seam. Nothing here takes a deps bag, so the `d` rules
+// do not apply - but the unbound scan does, and this is the half that has twice
+// kept reading a name the cut took away: `setPreview` once, and `openLevelUpFor`
+// on the progression cut, which stayed wired to the party bar's level-up pip
+// after every declaration of it had moved out. Both are a ReferenceError on a
+// click, and a build reports neither.
+const HOSTS = ['src/main.js'];
 const GLOBALS = new Set([
   'if', 'else', 'return', 'const', 'let', 'var', 'new', 'true', 'false', 'null', 'undefined',
   'for', 'of', 'in', 'function', 'continue', 'break', 'export', 'import', 'from', 'typeof',
@@ -30,6 +38,8 @@ const GLOBALS = new Set([
   'default', 'do', 'while', 'yield', 'instanceof',
   'Math', 'Number', 'Object', 'Array', 'String', 'JSON', 'Set', 'Map', 'Date', 'Infinity', 'NaN',
   'Promise', 'Error', 'console', 'window', 'document', 'localStorage', 'location', 'globalThis',
+  'URLSearchParams', 'Symbol', 'WeakMap', 'WeakSet', 'RegExp', 'Boolean', 'Function',
+  'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'requestAnimationFrame', 'performance',
 ]);
 
 // Two more ways a mechanical rewrite corrupts a module, both of which shipped:
@@ -74,13 +84,16 @@ function shapeMismatch(raw, file) {
 }
 
 let bad = 0;
-for (const file of MODULES) {
+for (const file of [...MODULES, ...HOSTS]) {
   const raw = readFileSync(file, 'utf8');
-  for (const hit of rewriteDamage(raw, file)) { bad += 1; console.log(hit); }
-  for (const hit of shapeMismatch(raw, file)) { bad += 1; console.log(hit); }
+  if (!HOSTS.includes(file)) {
+    for (const hit of rewriteDamage(raw, file)) { bad += 1; console.log(hit); }
+    for (const hit of shapeMismatch(raw, file)) { bad += 1; console.log(hit); }
+  }
   // Strip comments, then every flavour of string literal, so prose cannot
   // masquerade as an identifier.
-  let code = raw.split('\n').map((l) => l.split('//')[0]).join('\n');
+  let code = raw.replace(/^import\s[\s\S]*?from\s*['"][^'"]*['"];?$/gm, '');
+  code = code.split('\n').map((l) => l.split('//')[0]).join('\n');
   code = code.replace(/\/\*[\s\S]*?\*\//g, '');
   // Template literals span lines, so strip them with a dot-all pass - but keep
   // what is INSIDE `${...}`, which is real code. Dropping the whole template
@@ -93,6 +106,7 @@ for (const file of MODULES) {
   const declared = new Set([...code.matchAll(/(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
   // Imported names count as declared - a module that imports `ACTIONS` is not
   // reading an unbound one.
+  for (const m of raw.matchAll(/^import\s+\*\s+as\s+([A-Za-z_$][\w$]*)/gm)) declared.add(m[1]);
   for (const m of raw.matchAll(/^import\s+(?:\{([^}]*)\}|([A-Za-z_$][\w$]*))/gm)) {
     for (const part of (m[1] || m[2] || '').split(',')) {
       const n = part.trim().split(/\s+as\s+/).pop().trim();
@@ -140,7 +154,9 @@ for (const file of MODULES) {
   for (const m of code.matchAll(/^\s{2,}([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/gm)) declared.add(m[1]);
   // `get name()` in an object literal declares a property, not a read.
   for (const m of code.matchAll(/\bget\s+([A-Za-z_$][\w$]*)\s*\(/g)) declared.add(m[1]);
+  for (const m of code.matchAll(/\bset\s+([A-Za-z_$][\w$]*)\s*\(/g)) declared.add(m[1]);
   declared.add('get');
+  declared.add('set');
   for (const m of code.matchAll(/\{([^{}]*)\}\s*=/g)) {
     for (const part of m[1].split(',')) {
       const n = part.split(':').pop().split('=')[0].trim();

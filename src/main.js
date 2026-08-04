@@ -41,6 +41,7 @@ import { createHotbarHost } from './hotbar-host.js';
 import { createFloorEffects } from './floor-effects.js';
 import { showLevelMenu } from './desk.js';
 import { createOocVerbs } from './ooc-verbs.js';
+import { createProgressionUi } from './progression-ui.js';
 import { createSneakLayer } from './sneak-layer.js';
 import { createPartyControl } from './party-control.js';
 
@@ -1774,73 +1775,31 @@ function startGame(level) {
   });
   let partyBarKey = ''; // last rendered roster state (refresh gate)
 
-  // --- level-up allocation -----------------------------------------------------
-  // Points bank on the sheet (stats.gainXp); the player spends them here. Every
-  // member is built by hand - nothing auto-allocates (PROGRESSION_PLAN #7). The
-  // pip by the HUD covers the leader (and the solo case); the party bar carries
-  // a pip per companion.
-  const levelUpPip = ui.createLevelUpPip({ onOpen: openLevelUps });
-  // A short human blurb for a track node's effect, for the screen.
-  function describeNode(effect = {}) {
-    const bits = [];
-    if (effect.attrBonus) for (const [k, v] of Object.entries(effect.attrBonus)) bits.push(`+${v} ${k[0].toUpperCase() + k.slice(1)}`);
-    if (effect.grantsAction) bits.push(`Unlock ${ACTIONS[effect.grantsAction]?.label || effect.grantsAction}`);
-    if (effect.talent) for (const [k, v] of Object.entries(effect.talent)) bits.push(typeof v === 'number' ? `+${v} ${k}` : k);
-    return bits.join(' · ') || 'A perk.';
-  }
-  // The sheet's track as screen view-models (taken / locked / affordable).
-  function trackNodesFor(sheet_) {
-    return classTrack(sheet_).map((n) => ({
-      id: n.id, name: n.name, cost: n.cost || 1, desc: describeNode(n.effect),
-      taken: (sheet_.perks || []).includes(n.id),
-      locked: !!(n.requires && !n.requires.every((r) => (sheet_.perks || []).includes(r))),
-      affordable: (sheet_.classPoints || 0) >= (n.cost || 1),
-    }));
-  }
-  // Read-only character sheet (press C). A plain view-model - main owns the
-  // derived math (damageBonus/deflect) and the perk names.
-  const charSheet = ui.createCharacterSheet({ onLevelUp: () => openLevelUps() });
-  function charSheetVm(s) {
-    return {
-      name: s.name, className: s.className, level: s.level, xp: s.xp, xpNext: s.xpNext,
-      attr: { ...s.attr }, hp: s.hp, maxHp: s.maxHp, maxAp: s.maxAp,
-      damageBonus: damageBonus(s), deflect: deflect(s),
-      equipped: Object.fromEntries(EQUIP_SLOTS.map((slot) => [slot, ITEMS[s.equipped?.[slot]]?.name || null])),
-      talent: s.talent ? { name: s.talent.name } : null,
-      perks: (s.perks || []).map((id) => trackNode(id)?.name || id),
-      attrPoints: s.attrPoints || 0, classPoints: s.classPoints || 0,
-    };
-  }
-  function refreshProgressUi() {
-    if (sheet) { paintHud(sheet); buildHotbar(); } // a learned action joins the bar
-    partyBarKey = ''; // force the bar to re-render its pips next frame
-    levelUpPip.refresh(!inCombat && !gameOver && sheet ? pending(sheet) : 0);
-    if (sheet) charSheet.refresh(charSheetVm(sheet)); // keep an open sheet live
-  }
-  function openLevelUpFor(member, after) {
-    if (!member) { after?.(); return; }
-    ui.showLevelUpScreen(member.sheet, {
-      onSpend: (attr) => { spendAttrPoint(member.sheet, attr); refreshProgressUi(); },
-      onLearn: (nodeId) => { spendClassPoint(member.sheet, nodeId); refreshProgressUi(); },
-      nodesFor: () => trackNodesFor(member.sheet),
-      onDone: () => { refreshProgressUi(); after?.(); },
-    });
-  }
-  // Page through every member still holding points (of either type), one screen
-  // at a time.
-  function openLevelUps() {
-    if (!party) return;
-    // `spendablePoints`, not `pending`: class points keep accruing per level
-    // while a track is finite, so a bought-out member reopened this fullscreen
-    // modal after every victory with nothing purchasable (Q068). The character
-    // sheet and the party bar keep showing `pending` - the points ARE banked,
-    // and hiding them would be a different lie. This is only the decision to
-    // interrupt.
-    const queue = party.members.filter((m) => spendablePoints(m.sheet) > 0);
-    let i = 0;
-    const next = () => (i < queue.length ? openLevelUpFor(queue[i++], next) : refreshProgressUi());
-    next();
-  }
+  const progression = createProgressionUi({
+    get sheet() { return sheet; },
+    get party() { return party; },
+    get inCombat() { return inCombat; },
+    get gameOver() { return gameOver; },
+    ui,
+    ACTIONS,
+    ITEMS,
+    EQUIP_SLOTS,
+    classTrack,
+    trackNode,
+    damageBonus,
+    deflect,
+    pending,
+    spendablePoints,
+    spendAttrPoint,
+    spendClassPoint,
+    paintHud: (...a) => paintHud(...a),
+    buildHotbar: (...a) => buildHotbar(...a),
+    setPartyBarKey: (v) => { partyBarKey = v; },
+  });
+  const {
+    levelUpPip, charSheet, charSheetVm, refreshProgressUi, openLevelUps,
+    openLevelUpFor,
+  } = progression;
   function cycleLeader() {
     if (!party || party.members.length < 2) return;
     for (let step = 1; step < party.members.length; step++) {
