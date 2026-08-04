@@ -193,11 +193,19 @@ test('steering a teammate mid-fight takes the camera with it', async ({ page }) 
   // Pick the member who is NOT the leader by POSITION, not by `party.active`:
   // in combat `makeActive` re-keys `party.active` to whoever holds the floor,
   // so "the inactive one" is often the leader themselves - steering to them
-  // succeeds and proves nothing. `playerPos` is the leader's body by
-  // definition, so the body that isn't standing there is the teammate.
+  // succeeds and proves nothing.
+  //
+  // TILE against tile. This read `playerPos` - the leader's CONTINUOUS body
+  // position - and compared it to `party[i].x/.z`, which are rounded tiles, so
+  // the test was really asking "is this member's tile more than half a tile
+  // from the leader's sub-tile position", and a leader resting 0.53 from their
+  // own tile centre answered YES ABOUT THEMSELVES. It picked index 0, steered
+  // to the leader, and the refusal read as "nobody to steer to". Since DEGRID
+  // a body rests wherever the walk left it, so that was luck rather than a
+  // rule. `playerTile` is the same rounding the roster uses.
   const steered = await page.evaluate(() => {
-    const lead = window.__game.playerPos;
-    const i = window.__game.party.findIndex((m) => Math.hypot(m.x - lead.x, m.z - lead.z) > 0.5);
+    const lead = window.__game.playerTile;
+    const i = window.__game.party.findIndex((m) => m.x !== lead.x || m.z !== lead.z);
     return i >= 0 ? window.__god.switchTo(i) : false;
   });
   expect(steered,

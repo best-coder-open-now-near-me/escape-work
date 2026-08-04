@@ -21,7 +21,7 @@ import { readFileSync } from 'node:fs';
 
 const MODULES = [
   'src/combat-aim.js', 'src/combat-world.js', 'src/hotbar-host.js',
-  'src/floor-effects.js', 'src/desk.js', 'src/combat-advance.js', 'src/ooc-verbs.js',
+  'src/floor-effects.js', 'src/desk.js', 'src/combat-advance.js', 'src/ooc-verbs.js', 'src/party-control.js',
 ];
 const GLOBALS = new Set([
   'if', 'else', 'return', 'const', 'let', 'var', 'new', 'true', 'false', 'null', 'undefined',
@@ -75,8 +75,16 @@ for (const file of MODULES) {
     }
   }
   // Parameters, including destructured ones, and destructuring assignments.
-  for (const m of code.matchAll(/\(([^()]*)\)\s*(?:=>|\{)/g)) {
-    for (const part of m[1].split(',')) {
+  // Parameter lists. A control-flow head looks exactly like one to a naive
+  // regex, and treating `for (const [dx, dz] of DIRS8) {` as params declared
+  // DIRS8 - so a genuinely unbound DIRS8 sailed through and only turned up
+  // when the followers stopped following. Skip any head introduced by a
+  // control keyword, and any head that declares or iterates.
+  for (const m of code.matchAll(/(\w+)?\s*\(([^()]*)\)\s*(?:=>|\{)/g)) {
+    if (/^(?:for|if|while|switch|catch)$/.test(m[1] || '')) continue;
+    const head = m[2];
+    if (/\b(?:const|let|var|of|in)\b/.test(head)) continue;
+    for (const part of head.split(',')) {
       const n = part.split('=')[0].replace(/[{}[\].]/g, ' ').trim().split(/\s+/).pop();
       if (n && /^[A-Za-z_$][\w$]*$/.test(n)) declared.add(n);
     }

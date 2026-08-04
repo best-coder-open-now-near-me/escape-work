@@ -41,6 +41,7 @@ import { createHotbarHost } from './hotbar-host.js';
 import { createFloorEffects } from './floor-effects.js';
 import { showLevelMenu } from './desk.js';
 import { createOocVerbs } from './ooc-verbs.js';
+import { createPartyControl } from './party-control.js';
 
 import { loadRemoteStore, SAVE_KEY_STORAGE } from './remote-store.js';
 import { placeModel, applyCharacterProportions, cloneMaterials, tintMaterials } from './models.js';
@@ -815,6 +816,74 @@ function startGame(level) {
     oocShoveAt,
   } = oocVerbs;
 
+  // Who is the leader, and where everybody else walks (party-control.js).
+  // `sheet` and `player` go in as SETTERS: a leader switch is a thing that
+  // happens, and it should look like one at the call site.
+  const partyControl = createPartyControl({
+    get sheet() { return sheet; },
+    get player() { return player; },
+    get party() { return party; },
+    get summons() { return summons; },
+    get npcs() { return npcs; },
+    get inCombat() { return inCombat; },
+    get gameOver() { return gameOver; },
+    get sneak() { return sneak; },
+    get armedOoc() { return armedOoc; },
+    get pendingAction() { return pendingAction; },
+    get hotbarHost() { return hotbarHost; },
+    get loot() { return loot; },
+    get runtime() { return runtime; },
+    setSheet: (v) => { sheet = v; },
+    setPlayer: (v) => { player = v; },
+    setArmedOoc: (v) => { armedOoc = v; },
+    setPendingAction: (v) => { pendingAction = v; },
+    grid,
+    ui,
+    picking,
+    SURFACES,
+    DIRS8,
+    CompanionActor,
+    // Four consts declared below this wiring - getters, or they would be read
+    // in their dead zone.
+    get controls() { return controls; },
+    get BASE_SPEED() { return BASE_SPEED; },
+    get CATCH_UP() { return CATCH_UP; },
+    get FOLLOW_NEAR() { return FOLLOW_NEAR; },
+    canRecruit: (...a) => canRecruit(...a),
+    charSheet: (...a) => charSheet(...a),
+    charSheetVm: (...a) => charSheetVm(...a),
+    clampPoint: (...a) => clampPoint(...a),
+    clearOocCrouch: (...a) => clearOocCrouch(...a),
+    effectiveSurfDamage: (...a) => effectiveSurfDamage(...a),
+    endSneak: (...a) => endSneak(...a),
+    hazardCostFor: (...a) => hazardCostFor(...a),
+    inAnyCone: (...a) => inAnyCone(...a),
+    isWalkable: (...a) => isWalkable(...a),
+    modalOpen: (...a) => modalOpen(...a),
+    paintHud: (...a) => paintHud(...a),
+    addMember: (...a) => addMember(...a),
+    createCompanionSheet: (...a) => createCompanionSheet(...a),
+    partyLeader: (...a) => partyLeader(...a),
+    sayRecruited: (...a) => sayRecruited(...a),
+    applyDamage: (...a) => applyDamage(...a),
+    findPath: (...a) => findPath(...a),
+    routeOpen: (...a) => routeOpen(...a),
+    smoothPath: (...a) => smoothPath(...a),
+    statusFx: (...a) => statusFx(...a),
+    hasStatus: (...a) => hasStatus(...a),
+    buildHotbar: (...a) => buildHotbar(...a),
+  });
+  const {
+    memberSpeed,
+    downCompanion,
+    helpUp,
+    recruitCompanion,
+    forceLeader,
+    switchLeader,
+    syncLeaderBindings,
+    updateFollowers,
+  } = partyControl;
+
   // --- game flow ----------------------------------------------------------------
   function spawnPlayerModel() {
     // Registered as a `party` interactable like any companion, so a downed
@@ -956,51 +1025,8 @@ function startGame(level) {
 
   // Emergency handoff (the controlled member dropped out of combat): the
   // first living member takes over, no questions asked.
-  function forceLeader() {
-    const i = party.members.findIndex((m) => m.sheet.hp > 0 && m.actor);
-    if (i < 0 || i === party.active) return;
-    const m = party.members[i];
-    clearOocCrouch(true); // the crouch belongs to the sheet that took it
-    party.active = i;
-    sheet = m.sheet;
-    player = m.actor;
-    controls.recenter(); // the survivor stepping up is who the view should find
-    pendingAction = null;
-    armedOoc = null;
-    buildHotbar();
-    paintHud(sheet);
-    loot.refreshPanel(sheet);
-    ui.say(`${m.sheet.name} takes over.`);
-  }
-
   // Combat may have handed control to another member; when the dust settles
   // the out-of-combat bindings follow whoever was active.
-  function syncLeaderBindings() {
-    if (!party) return;
-    const lead = partyLeader(party);
-    if (sheet === lead.sheet || !lead.actor) return;
-    clearOocCrouch(true);
-    sheet = lead.sheet;
-    player = lead.actor;
-    controls.recenter(); // control settled on them - a panned-away view follows
-    pendingAction = null;
-    armedOoc = null;
-    buildHotbar();
-    paintHud(sheet);
-    loot.refreshPanel(sheet);
-  }
-  function downCompanion(m) {
-    m.actor?.clearPath();
-    if (m.actor) m.actor.fx = { kind: 'death', t: 0 };
-    ui.say(`${m.sheet.name} goes down. Breathing, but done for now.`);
-  }
-  function helpUp(m) {
-    if (!m || m.sheet.hp > 0) return;
-    m.sheet.hp = 1;
-    if (m.actor) m.actor.fx = null;
-    ui.say(`You haul ${m.sheet.name} upright. They pretend that was a stretch.`);
-  }
-
   // Every enemy death pays out the same way - combat kill, shove into live
   // water, or a printer taking them along. XP fans out to the whole party;
   // promotions announce themselves.
@@ -1681,20 +1707,6 @@ function startGame(level) {
   // blocking as an NPC - partyAt covers them now), sheet minted at the
   // leader's level, picking re-tagged so hover/clicks read them as one of
   // ours. The entity, model and position stay exactly where they were.
-  function recruitCompanion(npc) {
-    if (!canRecruit(npc)) return;
-    const idx = npcs.indexOf(npc);
-    if (idx >= 0) npcs.splice(idx, 1);
-    npc.recruited = true;
-    const member = addMember(party, createCompanionSheet(npc.def, npc.typeId, sheet.level), npc);
-    if (!member) return;
-    if (npc.entity) {
-      picking.unregister(npc.entity);
-      picking.register(npc.entity, 'party', npc);
-    }
-    sayRecruited(npc.def.name);
-  }
-
   // --- persistent hotbar --------------------------------------------------------
   // Everything the character can DO, in one bar, in and out of a fight.
   //
@@ -1824,42 +1836,6 @@ function startGame(level) {
     let i = 0;
     const next = () => (i < queue.length ? openLevelUpFor(queue[i++], next) : refreshProgressUi());
     next();
-  }
-  function switchLeader(i) {
-    if (!party || inCombat || gameOver || modalOpen()) return;
-    const m = party.members[i];
-    if (!m?.actor || m === partyLeader(party) || m.sheet.hp <= 0) return;
-    // Both calls go BEFORE the rebind, like the two sibling handoffs at
-    // forceLeader and syncLeaderBindings - `clearOocCrouch` reads the module's
-    // `sheet`/`player`, so after the rebind it strips 'covered' off the
-    // INCOMING leader and leaves the real croucher crouched forever, which is
-    // precisely the leak (Q060/Q066). `quiet` because a handoff CONSUMES the
-    // crouch rather than abandoning it, and the "You take point" line below is
-    // already the sentence for this moment.
-    clearOocCrouch(true); // the crouch belongs to the sheet that took it
-    // A SOLO sneak names the leader, and the naming is derived live
-    // (`sneakingMembers` filters on the current leader) while the chip was
-    // stamped at toggle time - so a portrait click used to silently swap who
-    // the sneak meant, leaving the outgoing scout wearing the chip, skipped by
-    // the fight trigger and absent from the spot sweep: un-triggerable and
-    // un-spottable until something else ended the mode (Q061). Ended rather
-    // than handed over, because re-stamping `sneaking` onto the incoming
-    // leader would slip somebody into a sneak while they are being watched,
-    // which is the one thing D8 refuses. Group mode names everybody, so it
-    // survives the handoff untouched.
-    if (sneak?.mode === 'solo') endSneak('You break off. The scout straightens up.');
-    player.clearPath();
-    pendingAction = null;
-    armedOoc = null;
-    party.active = i;
-    sheet = m.sheet;
-    player = m.actor;
-    controls.recenter(); // control moved - a panned-away view follows it back
-    buildHotbar(); // their attacks, their ammo count
-    paintHud(sheet);
-    loot.refreshPanel(sheet);
-    charSheet.refresh(charSheetVm(sheet)); // an open sheet follows control
-    ui.say(`You take point as ${m.sheet.name}.`);
   }
   function cycleLeader() {
     if (!party || party.members.length < 2) return;
@@ -3328,96 +3304,11 @@ function startGame(level) {
   // RUNTIME layer, so a surface that burns away stops slowing anyone. Gum on
   // a shoe slows its owner everywhere. Followers who fall behind walk faster
   // than decorum allows.
-  function memberSpeed(m) {
-    let s = BASE_SPEED
-      * (SURFACES[runtime.surfaceAt(m.actor.x, m.actor.z)]?.slow || 1)
-      // Quiet Shoes (SNEAK M6): the sneak penalty vanishes for its carrier.
-      // Coarse on purpose: while sneaking, the talent restores FULL status
-      // speed - a gummed sneaker with these shoes also walks off the gum for
-      // the duration, an accepted sliver for one line instead of un-merging
-      // the status view.
-      * (m.sheet.talent?.effects?.sneakSpeed && hasStatus(m.sheet, 'sneaking')
-        ? 1 : (statusFx(m.sheet).speedMult ?? 1));
-    const lead = partyLeader(party);
-    if (m !== lead && lead.actor
-      && Math.max(Math.abs(m.actor.x - lead.actor.x), Math.abs(m.actor.z - lead.actor.z)) > FOLLOW_NEAR + 1) {
-      s *= CATCH_UP;
-    }
-    return s;
-  }
   // Followers trail the leader BG-style: when one drifts beyond FOLLOW_NEAR it
   // paths to a free tile beside the leader (distinct per follower), costed by
   // its OWN talents, pass-through for the rest of the party, and never parking
   // on a tile that would hurt it. A small repath cadence keeps Dijkstra off
   // the hot path; per-tile effects land through onMemberStep like any walk.
-  function updateFollowers(dt) {
-    const lead = partyLeader(party);
-    if (!lead.actor?.entity) return;
-    // Solo sneak parks the party where it stands (SNEAK_PLAN D4): the
-    // scout slips ahead alone and the others hold this spot.
-    if (sneak?.mode === 'solo') return;
-    // Where everybody on your side already IS, or is already walking to. The
-    // parking spots below are picked with `isWalkable`, which is deliberately
-    // pass-through for the party (so a follower can route THROUGH a teammate) -
-    // but routing through one and parking on one are different questions, and
-    // asking the movement predicate got the second one wrong. A follower
-    // already standing beside the leader has no reason to repath, so it never
-    // reached the old claim set at all, and the next follower cheerfully
-    // picked the tile it was standing on.
-    const claimed = new Set();
-    const claim = (a) => {
-      if (!a) return;
-      claimed.add(Math.round(a.x) + ',' + Math.round(a.z));
-      const dest = a.path?.[a.path.length - 1];
-      if (dest) claimed.add(Math.round(dest[0]) + ',' + Math.round(dest[1]));
-    };
-    for (const m of party.members) if (m.sheet.hp > 0) claim(m.actor);
-    for (const s of summons) if (s.sheet.hp > 0) claim(s.actor);
-    for (const m of party.members) {
-      if (m === lead || !m.actor?.entity || m.sheet.hp <= 0) continue;
-      m.followT = (m.followT ?? 0) - dt;
-      if (m.followT > 0) continue;
-      m.followT = 0.25;
-      const dist = Math.max(Math.abs(m.actor.x - lead.actor.x), Math.abs(m.actor.z - lead.actor.z));
-      if (dist <= FOLLOW_NEAR) continue; // near enough - let any walk finish
-      // Through the party, around everything else - which is exactly
-      // isWalkable. Spelling it out again here meant a change to what blocks
-      // movement would silently miss the followers (never re-implement it).
-      const open = isWalkable;
-      let spot = null;
-      for (const [dx, dz] of DIRS8) {
-        const sx = lead.actor.x + dx;
-        const sz = lead.actor.z + dz;
-        if (!open(sx, sz) || claimed.has(sx + ',' + sz)) continue;
-        if (effectiveSurfDamage(sx, sz, m.sheet) > 0) continue; // no parking in fire
-        if (inAnyCone(sx, sz)) continue; // and no parking in a watch (SNEAK M5)
-        if (!spot || Math.hypot(sx - m.actor.x, sz - m.actor.z) < Math.hypot(spot[0] - m.actor.x, spot[1] - m.actor.z)) {
-          spot = [sx, sz];
-        }
-      }
-      if (!spot) continue;
-      claimed.add(spot[0] + ',' + spot[1]);
-      const p = findPath(open, m.actor.x, m.actor.z, spot[0], spot[1],
-        (x, z) => hazardCostFor(m.sheet)(x, z) + (inAnyCone(x, z) ? 6 : 0), grid.stepOpen);
-      if (!p || p.length < 2) continue;
-      // A loose spot in the formation tile, not its dead centre - the party
-      // used to park on a perfect grid ring around the leader (the one body
-      // cluster on screen that still LOOKED tiled) while wanderers already
-      // ambled to scattered points. Same jitter as theirs.
-      p[p.length - 1] = clampPoint(
-        spot[0] + (Math.random() - 0.5) * 0.7,
-        spot[1] + (Math.random() - 0.5) * 0.7);
-      const pos = m.actor.entity.getPosition();
-      const spliced = [[pos.x, pos.z], ...p.slice(1)];
-      // Watched cells are walls to the smoother while sneaking, exactly the
-      // hazard rule: never straighten across a cone the route detoured
-      // around (the route's own cells stay open through routeOpen).
-      const base = (x, z) => open(x, z) && effectiveSurfDamage(x, z, m.sheet) <= 0
-        && !inAnyCone(x, z);
-      const s = smoothPath(routeOpen(base, spliced), spliced, grid.edgeOpen);
-      m.actor.setPath(s);
-    }
-  }
   app.on('update', (dt) => {
     // Every party member walks, steps and animates the same way; each one's
     // tile effects run against their own sheet (onMemberStep).
