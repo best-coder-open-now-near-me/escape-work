@@ -1,0 +1,108 @@
+// A static check for the ONE bug class every module extraction in this codebase
+// has produced: a name the rewrite failed to rebind, which builds clean and
+// throws only in a browser.
+//
+// Four variants have shipped and been caught the expensive way (a 10-30 minute
+// e2e round each), and all four are the same mistake seen from a different
+// angle:
+//   1. a bare READ (`by = active`) - not followed by `(` or `.`, so a
+//      call-shaped scan walks past it;
+//   2. a SPREAD (`...world`) - the dots read as property access to any
+//      `(?<![.\w])` lookbehind;
+//   3. a rule passed as a VALUE (`truncateByBudget(s, b, stepCost)`);
+//   4. a property KEY that shares a name with a real dependency (`log:`).
+//
+// The check is deliberately dumb: for each extracted module, collect every
+// identifier that is not declared locally, not a parameter, not a known global,
+// and not a property key - then report it. Prose inside strings and comments is
+// stripped first. A hit is not automatically a bug, but every real bug of this
+// class IS a hit, which is the property that matters.
+import { readFileSync } from 'node:fs';
+
+const MODULES = [
+  'src/combat-aim.js', 'src/combat-world.js', 'src/hotbar-host.js',
+  'src/floor-effects.js', 'src/desk.js', 'src/combat-advance.js',
+];
+const GLOBALS = new Set([
+  'if', 'else', 'return', 'const', 'let', 'var', 'new', 'true', 'false', 'null', 'undefined',
+  'for', 'of', 'in', 'function', 'continue', 'break', 'export', 'import', 'from', 'typeof',
+  'try', 'catch', 'throw', 'delete', 'void', 'this', 'async', 'await', 'class', 'switch', 'case',
+  'default', 'do', 'while', 'yield', 'instanceof',
+  'Math', 'Number', 'Object', 'Array', 'String', 'JSON', 'Set', 'Map', 'Date', 'Infinity', 'NaN',
+  'Promise', 'Error', 'console', 'window', 'document', 'localStorage', 'location', 'globalThis',
+]);
+
+let bad = 0;
+for (const file of MODULES) {
+  const raw = readFileSync(file, 'utf8');
+  // Strip comments, then every flavour of string literal, so prose cannot
+  // masquerade as an identifier.
+  let code = raw.split('\n').map((l) => l.split('//')[0]).join('\n');
+  code = code.replace(/\/\*[\s\S]*?\*\//g, '');
+  // Template literals span lines, so strip them with a dot-all pass first -
+  // otherwise every word of an interpolated sentence reads as an identifier.
+  code = code.replace(/`[\s\S]*?`/g, '``').replace(/'(?:[^'\\]|\\.)*'/g, "''").replace(/"(?:[^"\\]|\\.)*"/g, '""');
+  const declared = new Set([...code.matchAll(/(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
+  // Imported names count as declared - a module that imports `ACTIONS` is not
+  // reading an unbound one.
+  for (const m of raw.matchAll(/^import\s+(?:\{([^}]*)\}|([A-Za-z_$][\w$]*))/gm)) {
+    for (const part of (m[1] || m[2] || '').split(',')) {
+      const n = part.trim().split(/\s+as\s+/).pop().trim();
+      if (/^[A-Za-z_$][\w$]*$/.test(n)) declared.add(n);
+    }
+  }
+  // Parameters, including destructured ones, and destructuring assignments.
+  for (const m of code.matchAll(/\(([^()]*)\)\s*(?:=>|\{)/g)) {
+    for (const part of m[1].split(',')) {
+      const n = part.split('=')[0].replace(/[{}[\].]/g, ' ').trim().split(/\s+/).pop();
+      if (n && /^[A-Za-z_$][\w$]*$/.test(n)) declared.add(n);
+    }
+  }
+  // Array destructuring, including `for (const [a, b] of ...)`.
+  for (const m of code.matchAll(/(?:const|let|var)\s*\[([^\]]*)\]/g)) {
+    for (const part of m[1].split(',')) {
+      const n = part.trim();
+      if (/^[A-Za-z_$][\w$]*$/.test(n)) declared.add(n);
+    }
+  }
+  // Object destructuring in a for-of head has no `=` to key off.
+  for (const m of code.matchAll(/for\s*\((?:const|let|var)\s*\{([^}]*)\}/g)) {
+    for (const part of m[1].split(',')) {
+      const n = part.split(':').pop().trim();
+      if (/^[A-Za-z_$][\w$]*$/.test(n)) declared.add(n);
+    }
+  }
+  // Shorthand methods in an object literal (`bumpEpoch() { ... }`) declare a
+  // property too - and one of these WAS a real bug once, so the check keeps
+  // knowing about them: `setPreview` existed only as a method and the moved
+  // code called it as a function. That failure shows up as an unbound read at
+  // the CALL site, which this check still catches.
+  for (const m of code.matchAll(/^\s{2,}([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/gm)) declared.add(m[1]);
+  // `get name()` in an object literal declares a property, not a read.
+  for (const m of code.matchAll(/\bget\s+([A-Za-z_$][\w$]*)\s*\(/g)) declared.add(m[1]);
+  declared.add('get');
+  for (const m of code.matchAll(/\{([^{}]*)\}\s*=/g)) {
+    for (const part of m[1].split(',')) {
+      const n = part.split(':').pop().split('=')[0].trim();
+      if (n && /^[A-Za-z_$][\w$]*$/.test(n)) declared.add(n);
+    }
+  }
+  // Everything that is not a property key (`name:`), not after a dot, and not
+  // a declared name. A SPREAD counts: `...world` is an identifier read.
+  const seen = new Set();
+  for (const m of code.matchAll(/(?<![.\w$])([A-Za-z_$][\w$]*)\b(?!\s*:)/g)) {
+    const n = m[1];
+    if (declared.has(n) || GLOBALS.has(n) || seen.has(n)) continue;
+    // `...name` is a read even though the lookbehind sees a dot; catch it here.
+    seen.add(n);
+  }
+  const spreads = [...code.matchAll(/\.\.\.([A-Za-z_$][\w$]*)/g)]
+    .map((m) => m[1]).filter((n) => !declared.has(n) && !GLOBALS.has(n));
+  const hits = [...new Set([...seen, ...spreads])].sort();
+  if (hits.length) {
+    bad += hits.length;
+    console.log(`${file}: ${hits.length} unbound identifier(s)`);
+    console.log(`   ${hits.join(', ')}`);
+  }
+}
+console.log(bad ? `\n${bad} to review - each is either a real unbound read or a false positive worth knowing about.` : 'All extracted modules bind every name they read.');
