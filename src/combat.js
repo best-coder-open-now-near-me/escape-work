@@ -8,6 +8,13 @@
 // first), thrown weapons need range and line of sight. Nearby enemies join
 // the fight; enemies have persistent map HP and take surface damage like you
 // do. Fire keeps burning throughout.
+import { createPlayerStrike } from './player-strike.js';
+import { createActionBar } from './action-bar.js';
+import { createClickVerbs } from './click-verbs.js';
+import { createDemolition } from './demolition.js';
+import { createVerbs } from './verbs.js';
+import { createTurnFlow } from './turn-flow.js';
+import { createAiVerbs } from './ai-verbs.js';
 import { createHitResolution, MISS_COLOR } from './hit-resolution.js';
 import { createCoverDenialPlans } from './cover-denial-plans.js';
 import { createSummonDesk } from './summon-desk.js';
@@ -620,8 +627,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // in turn-order.js - pure, and unit tested there. What stays here is what
   // needs a panel, a body or the app: the host answers below, and the four
   // functions they point at (takeTurn, skipTurnFor, expireSummon, applyTurnDot),
-  // which sit together further down under "what the turn engine asks this file".
-  // They are declarations, so naming them here before they are written is fine.
+  // which now come off turn-flow.js, destructured a thousand lines below. They
+  // used to be hoisted DECLARATIONS, so naming them here bare was fine; as
+  // consts they are in their dead zone at this point in the file, and reading
+  // one threw before the first fight could open. Wrapped, the lookup happens
+  // when the turn engine actually asks.
   const turns = createTurnOrder({
     entries: [...members.map(memberSlot), ...engaged.filter((e) => e.alive).map(unitSlot)],
     rng: initRng,
@@ -637,10 +647,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       lose: defeat,
       lifetimeLeft: (s) => slotActor(s)?.summonTurns ?? null,
       spendLifetime: (s) => { slotActor(s).summonTurns -= 1; },
-      expire: expireSummon,
-      dot: applyTurnDot,
-      skip: skipTurnFor,
-      take: takeTurn,
+      expire: (...a) => expireSummon(...a),
+      dot: (...a) => applyTurnDot(...a),
+      skip: (...a) => skipTurnFor(...a),
+      take: (...a) => takeTurn(...a),
       roundStart: () => {
         // A full pass through the order is one round: age summoner cooldowns
         // and the fire/smoke lifecycle a tick.
@@ -1269,160 +1279,33 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     callbacks.onLose();
   }
 
-  // --- player actions ------------------------------------------------------------
-  function performOn(id, en) {
-    const a = ACTIONS[id];
-    // Footwork actions (the kick) need an un-gummed shoe.
-    if (a.footwork && statusFx(active.sheet).noFootwork) {
-      log('You wind up the kick... the gum disagrees. Pick something else.');
-      disarm();
-      refresh();
-      return;
-    }
-    // Rationed attacks (Detain) are rationed HERE too, not only on heals and
-    // summons: the button gate alone left the counter frozen, so Detain fired
-    // as often as the AP allowed while its tooltip went on promising "2 of 2
-    // uses left this fight" forever.
-    if (a.uses && active.usesLeft[id] <= 0) {
-      log(`No ${a.label.toLowerCase()} left this fight.`);
-      disarm();
-      refresh();
-      return;
-    }
-    joinCombat(en); // attacking a bystander drags them into the fight
-    // Spend the cost first: a miss still burns the AP, the paper and the use
-    // (HIT_PLAN #4 - a swing that happened is spent whether or not it landed).
-    // The projectile/lunge also fires either way.
-    // A ranged attack flies; a melee one lunges. Keyed off rangeOf rather than
-    // `ammoCost`, or a staple gun would lunge its owner across four desks into
-    // the target's face - the exact thing holding a ranged weapon is for.
-    if (rangeOf(id)) {
-      if (a.ammoCost) active.sheet.paper -= ammoCostOf(id);
-      // The action says what it looks like in flight; the default is a fired
-      // pellet, flat and quick, and anything that spends paper is lobbed.
-      const flight = a.flight || (a.ammoCost ? 'ball' : 'shot');
-      // Body to body, like hitFx: the shot departs the shooter's actual
-      // stance and lands on the target's, not on their tile centres - the
-      // walk-up just stopped at a trimmed free point, and a ball spawning
-      // half a tile beside the model gives the grid away.
-      fx.projectile(posOf(active), posOf(en), flight);
-    } else {
-      active.actor.lunge(posOf(en).x, posOf(en).z);
-    }
-    faceTarget(active, en.x, en.z); // you face what you swing at
-    active.ap = roundAp(active.ap - a.ap);
-    if (a.uses) active.usesLeft[id] -= 1;
-    // The attack roll: a miss spends the cost above and does nothing else - no
-    // damage, no purge, no rider. Surprise, the attacker's accMod, the
-    // target's dodgeMod (and later, position) are assembled by attackMods.
-    if (!rollAgainst(active, en)) {
-      hitFx(en, 'whiff');
-      fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
-      log(a.missLog || `${a.log} It misses.`);
-      disarm();
-      refresh();
-      return;
-    }
-    // AN ACTION WITH NO DICE IS A PURE EFFECT. Reboot is the case that forced
-    // the rule: power-cycling somebody strips their statuses, it does not
-    // bruise them, and the entry used to carry 4-7 damage that contradicted its
-    // own description. Rolling `rand(undefined, undefined)` here produced NaN,
-    // and NaN damage made hp NaN - never `<= 0`, so the target became
-    // unkillable and the fight could not end. Reading the dice as the SIGNAL
-    // means a dice-less verb resolves as what it is, rather than being a
-    // special case bolted on beside a damage step it never wanted.
-    const hasDice = Number.isFinite(a.min) && Number.isFinite(a.max);
-    let dmg = 0;
-    let died = false;
-    if (hasDice) {
-      dmg = rand(a.min, a.max) + damageBonus(active.sheet); // carried staplers count
-      if (a.ammoCost) dmg += talentFxOf(active).paperDamageBonus || 0;
-      dmg = ambushDmg(dmg);
-      died = en.takeDamage(dmg);
-      // Anything that arrived from over there lands as a projectile hit, not a
-      // punch: light debris thrown away from the shooter.
-      hitFx(en, rangeOf(id) ? 'paper' : 'melee', active);
-      if (died) deathFx(en);
-      fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b', { big: died });
-    }
-    let line = hasDice ? `${a.log} ${dmg} damage!` : a.log;
-    // A purge (reboot) wipes the target's statuses - good and bad alike.
-    if (a.purge && !died) {
-      const woke = hasStatus(en, 'surprised');
-      clearStatuses(en);
-      syncUnitSpeed(en); // the gum goes with it, and so does the limp
-      if (woke) line += ' Their surprise is power-cycled away.';
-    }
-    // A status the action carries lands on a live target (enemies have no
-    // Composure, so no resist). This is the player-action `applies` vector.
-    // A window read BEFORE the apply, so a stun Detain can't land is narrated
-    // rather than swallowed - checking after would see the window this very
-    // application just granted.
-    if (a.applies && !died) {
-      const blocked = blockedBy(en, a.applies);
-      if (applyStatus(en, a.applies)) {
-        statusFxAt(en, a.applies);
-        line += ` ${appliesLine(a, en.def.name)}`;
-      } else if (blocked) line += ` ${immunityLine(blocked, en.def.name)}`;
-    }
-    // The equipped weapon's on-hit proc - but only when this attack IS that
-    // weapon's own swing (swing the gum stapler, fling gum).
-    const proc = weaponProc(active.sheet);
-    if (proc && !died && id === equippedAction(active.sheet)
-      && resolveProc(proc.chance) && applyStatus(en, proc.applies)) {
-      statusFxAt(en, proc.applies);
-      line += ` ${appliesLine(proc, en.def.name)}`;
-    }
-    log(line);
-    if (died) callbacks.onEnemyKilled(en);
-    disarm(); // back to movement mode after the swing
-    refresh();
-    if (!hostilesRemain()) victory();
-  }
-
-  // --- displacement, shared (POWERS_PLAN M2) -------------------------------
-  // Push a body one tile along (dx, dz): onto whatever is behind them, or into
-  // the solid thing that stops them. Lifted out of the shove so a `control`
-  // carrying `displace` moves people by EXACTLY the same rules - the shove's
-  // occupancy check, its wall-slam, its surface damage and its anti-chain
-  // narration were a paragraph of behaviour trapped inside one click handler,
-  // and a second verb that moved bodies would otherwise have grown a second,
-  // subtly different copy of all of it.
-  //
-  // Returns { slammed, died, msg }; the caller logs. It does NOT spend AP or
-  // clear `armed` - displacement is a consequence, not an action.
-  // Who is being displaced, as ONE shape. A shove lands on a coworker or on a
-  // party member, and the two are structurally different - a coworker takes
-  // damage on itself, a member takes it on a sheet - which is the whole reason
-  // there used to be two resolvers (Q4-A, designer 2026-08-02). The rules are
-  // identical; only these six accessors differ.
-  function victimView(v) {
-    if (v && v.sheet) {                       // a party member
-      return {
-        member: true, ref: v, body: v.actor, name: v.sheet.name,
-        get x() { return v.actor.x; },
-        get z() { return v.actor.z; },
-        hurt: (d) => applyDamage(v.sheet, d),
-        // Q1-A: a forced landing honours the victim's own talents, exactly as
-        // walking onto the tile does. The enemy model consults none.
-        hazardAt: (x, z) => world.memberSurfDamage(v.sheet, x, z),
-        statusTarget: v.sheet,
-        onDeath: () => notifyMemberDown(),
-        dmgColor: undefined,
-      };
-    }
-    return {                                   // a coworker
-      member: false, ref: v, body: v, name: v.def.name,
-      get x() { return v.x; },
-      get z() { return v.z; },
-      hurt: (d) => v.takeDamage(d),
-      hazardAt: (x, z) => world.enemySurfDamage(x, z),
-      statusTarget: v,
-      onDeath: () => { deathFx(v); callbacks.onEnemyKilled(v); },
-      dmgColor: '#ffd76b',
-    };
-  }
-
+  // One player swing, and what it did to whoever took it (player-strike.js).
+  const { performOn, victimView } = createPlayerStrike({
+    world,
+    fx,
+    callbacks,
+    get active() { return active; },
+    rand: (...a) => rand(...a),
+    log: (...a) => log(...a),
+    refresh: (...a) => refresh(...a),
+    disarm: (...a) => disarm(...a),
+    victory: (...a) => victory(...a),
+    hitFx: (...a) => hitFx(...a),
+    deathFx: (...a) => deathFx(...a),
+    statusFxAt: (...a) => statusFxAt(...a),
+    faceTarget: (...a) => faceTarget(...a),
+    rollAgainst: (...a) => rollAgainst(...a),
+    resolveProc: (...a) => resolveProc(...a),
+    ammoCostOf: (...a) => ammoCostOf(...a),
+    ambushDmg: (...a) => ambushDmg(...a),
+    joinCombat: (...a) => joinCombat(...a),
+    hostilesRemain: (...a) => hostilesRemain(...a),
+    notifyMemberDown: (...a) => notifyMemberDown(...a),
+    syncUnitSpeed: (...a) => syncUnitSpeed(...a),
+    talentFxOf: (...a) => talentFxOf(...a),
+    appliesLine: (...a) => appliesLine(...a),
+    immunityLine: (...a) => immunityLine(...a),
+  });
   // Put a body somewhere else, and resolve what it hits. ONE resolver for both
   // sides (Q4-A): `aiShoveMember` used to be a hand-written parallel of this,
   // its comment claiming parity, and it had already lost two of the three slam
@@ -1561,202 +1444,32 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Declared below this call; these arrows only run at decide time.
     rangedLines: (...a) => rangedLines(...a),
   });
-  // Put it over. `by` is whoever caused it (for the narration and the facing).
-  function topple(by, plan) {
-    const { def, x, z, lx, lz } = plan;
-    const t = def.topple;
-    // The prop leaves its tile and lands on the next one. setType is the same
-    // call an exploding printer already makes, so the grid, the renderer and
-    // pathfinding all re-read it exactly as they do for destruction.
-    world.setType(x, z, 'floor');
-    world.setType(lx, lz, t.becomes);
-    fx.impact(lx, lz, 'slam', { y: 0.5 });
-    fx.shake(0.11, 0.28); // a bookcase hitting the carpet is worth more than a punch
-    let msg = `${def.label || 'It'} goes over.`;
-    // Whoever is standing in the landing tile wears it - coworker, teammate or
-    // you. A bookcase does not check your badge.
-    msg += dropOnto(by, lx, lz, t.damage);
-    return msg;
-  }
-
-  // Whatever just came down lands on (lx, lz): whoever stands there rolls the
-  // Grit save (TACTICS_PLAN M6, designer: "a strength or whatever equivalent
-  // check ... crushing damage and maybe pinned too"). Pass and they throw
-  // themselves clear - no crush, no daze, no pin. Fail and they wear all of
-  // it: the damage, the existing stun (anti-chain window intact), and PINNED
-  // - rooted under the thing until they work free. Shared by the furniture
-  // topple and the partition topple, so one save rule covers everything that
-  // falls. `forceHit` pins the save too (true = the drop fully lands = the
-  // save fails), so the specs stay deterministic. Returns the narration
-  // fragment, leading space included, or '' for empty carpet.
-  // Land a stun on anybody, and SAY what happened. One helper because the rule
-  // was written twice inside `dropOnto` and the two halves had already drifted:
-  // the coworker branch gated the burst on `applyStatus` and narrated the
-  // refusal through `immunityLine`, the member branch did neither. So a member
-  // stunned inside their own `training-credit` window got the burst played at
-  // them and no explanation, while a coworker in the same window got the honest
-  // line (REVIEW.md 2026-08-02 section 1.9). `aiPullMember` copied the member
-  // half verbatim, so the newest beat inherited the defect.
-  //
-  // Members carry a resist; coworkers do not. That is the only real difference,
-  // and it is the reason the two were written apart in the first place.
-  function landStun(victim, line) {
-    const target = victim.sheet || victim;
-    const name = victim.sheet ? victim.sheet.name : victim.def.name;
-    const resist = victim.sheet ? statusResist(victim.sheet) : 0;
-    const blocked = blockedBy(target, 'stunned');
-    if (applyStatus(target, 'stunned', {}, resist)) {
-      statusFxAt(victim, 'stunned');
-      return line;
-    }
-    return blocked ? ` ${immunityLine(blocked, name)}` : '';
-  }
-
-  function dropOnto(by, lx, lz, range) {
-    const victimUnit = world.liveEnemies().find((e) => e.x === lx && e.z === lz);
-    const victimMember = members.find((m) => m.sheet.hp > 0 && m.actor
-      && m.actor.x === lx && m.actor.z === lz);
-    const dmg = rand(range[0], range[1]);
-    const saved = (grit) => (hits.forceHit !== null ? !hits.forceHit : rollHit(gritSaveChance(grit), rng));
-    let msg = '';
-    if (victimUnit) {
-      if (saved(victimUnit.combat.grit)) { // via unitCombat - the def carries it as attr.grit
-        victimUnit.flinch?.();
-        return ` ${victimUnit.def.name} dives clear.`;
-      }
-      const died = victimUnit.takeDamage(dmg);
-      hitFx(victimUnit, 'slam', by);
-      if (died) deathFx(victimUnit);
-      fx.damageText(lx, lz, `-${dmg}`, '#ffd76b', { big: died });
-      msg += ` It lands on ${victimUnit.def.name}. -${dmg}.`;
-      if (!died) {
-        // `stunned`, not a new knocked-down: toppling inherits the anti-chain
-        // immunity window rather than becoming a second way to lock somebody
-        // out of a fight. Slam a guard into drywall and then drop a cabinet on
-        // them and they get the same "they have had their daze" refusal, from
-        // the same code. The pin is the failed save's own price and carries
-        // no window - see `pinned` in data/statuses.js.
-        msg += landStun(victimUnit, ' They go down under it.');
-        if (applyStatus(victimUnit, 'pinned')) statusFxAt(victimUnit, 'pinned');
-      } else {
-        callbacks.onEnemyKilled(victimUnit);
-      }
-    } else if (victimMember) {
-      if (saved(effectiveAttr(victimMember.sheet).grit)) {
-        victimMember.actor.flinch();
-        return ` ${victimMember.sheet.name} dives clear.`;
-      }
-      const dead = applyDamage(victimMember.sheet, dmg);
-      hitFx(victimMember, 'slam', by);
-      victimMember.actor.flinch();
-      fx.damageText(lx, lz, `-${dmg}`, undefined, { big: dead });
-      msg += ` It lands on ${victimMember.sheet.name}. -${dmg}.`;
-      if (!dead) {
-        msg += landStun(victimMember, ' They go down under it.');
-        if (applyStatus(victimMember.sheet, 'pinned')) statusFxAt(victimMember, 'pinned');
-      } else {
-        notifyMemberDown();
-      }
-    }
-    return msg;
-  }
-
-  // Put a shoulder into the cubicle wall itself (TACTICS_PLAN M6, designer
-  // 2026-07-30): the shove verb aimed across an adjacent partition edge. The
-  // panel comes off its feet and lands FLAT on the far tile - walkable, no
-  // cover: a board, not a bookcase - and whoever stands there rolls the same
-  // Grit save everything falling already demands. Doors never topple; they
-  // are not in the wall sets (grid.wallEdgeBetween). Returns true when the
-  // click was a partition shove (refusals included), false to fall through.
-  function performPartitionTopple(tx, tz) {
-    const a = ACTIONS.shove;
-    const me = { x: active.actor.x, z: active.actor.z };
-    if (Math.abs(tx - me.x) + Math.abs(tz - me.z) !== 1) return false; // square-on, arm's reach
-    if (!world.wallEdgeBetween(me.x, me.z, tx, tz)) return false;
-    if (!world.terrainOpen(tx, tz)) {
-      log('The partition rocks against whatever is behind it, and stays up.');
-      return true;
-    }
-    if (active.ap < a.ap) { log('Not enough AP.'); return true; }
-    active.ap = roundAp(active.ap - a.ap);
-    active.actor.lunge(tx, tz);
-    faceTarget(active, tx, tz);
-    world.toppleEdge(me.x, me.z, tx, tz);
-    world.setType(tx, tz, PARTITION_TOPPLE.becomes);
-    fx.impact(tx, tz, 'slam', { y: 0.3 });
-    fx.shake(0.08, 0.2);
-    log(`You put a shoulder into the partition. It goes over flat.${dropOnto(active, tx, tz, PARTITION_TOPPLE.damage)}`);
-    disarm();
-    refresh();
-    if (!hostilesRemain()) victory();
-    return true;
-  }
-
-  // --- breaking cover down (TACTICS_PLAN M8) --------------------------------
-  // An attack aimed at the FURNITURE: melee and ranged both, per the designer
-  // ("melee could gradually break down a barrier", clarified "melee and
-  // ranged"). Only the cover-grade set carries an HP pool (data/tiles.js), and
-  // at zero the object is REMOVED - not toppled, not substituted: "gone means
-  // gone", because every other verb keeps the barrier in play. Objects do not
-  // dodge `[proposed]`: the swing auto-hits, spends its full cost, and rolls
-  // its normal damage - pricing is what keeps demolition from being free.
-
-  // What the armed attack resolves on at (tx, tz): a breakable prop ON the
-  // tile, or a partition edge - square-on for a swing (the topple's own aim),
-  // or on the clicked tile's face TOWARD the shooter for a shot. Returns
-  // { kind } to commit, { refusal } to explain, null to fall through. Melee
-  // does not walk in for v1 `[proposed]` - the rings only promise reach.
-  const breakPlanAt = (id, tx, tz) => breakPlan(id, active, tx, tz, world);
-
-  // Put the hit in. One resolver for both shapes: spend, swing or shoot,
-  // roll the dice into the pool, and either report the dent (the world
-  // facade leans the mesh - the pool is hidden, the object wears it) or
-  // watch the world facade delete the thing. The crouch behind it needs no
-  // hook: refresh()'s revalidation finds the shield missing.
-  function performBreak(id, plan) {
-    const a = ACTIONS[id];
-    if (active.ap < a.ap) { log('Not enough AP.'); return; }
-    if (a.ammoCost && active.sheet.paper < ammoCostOf(id)) { log('Out of paper.'); return; }
-    const prop = plan.kind === 'prop';
-    const px = prop ? plan.tx : (plan.a[0] + plan.b[0]) / 2;
-    const pz = prop ? plan.tz : (plan.a[1] + plan.b[1]) / 2;
-    const label = prop
-      ? (world.tileDefAt(plan.tx, plan.tz)?.label || 'furniture').toLowerCase()
-      : 'partition';
-    if (a.ammoCost) active.sheet.paper -= ammoCostOf(id);
-    active.ap = roundAp(active.ap - a.ap);
-    if (a.uses) active.usesLeft[id] -= 1;
-    if (rangeOf(id)) {
-      // The prop's break point is real geometry (a tile centre or an edge
-      // midpoint); only the ORIGIN moves to the body.
-      fx.projectile(posOf(active), { x: px, z: pz },
-        a.ammoCost ? 'ball' : 'shot');
-    } else {
-      active.actor.lunge(px, pz);
-    }
-    faceTarget(active, px, pz);
-    const dmg = rand(a.min, a.max) + damageBonus(active.sheet);
-    const left = prop
-      ? world.damageProp(plan.tx, plan.tz, dmg)
-      : world.damageEdge(plan.a[0], plan.a[1], plan.b[0], plan.b[1], dmg);
-    fx.damageText(px, pz, `-${dmg}`, '#ffd76b', { big: left === 0 });
-    fx.impact(px, pz, 'slam', { y: 0.4 });
-    if (left === 0) {
-      fx.shake(0.09, 0.24);
-      log(prop
-        ? `The ${label} comes apart. The office is short one piece of cover.`
-        : 'The partition comes apart. Open plan, the hard way.');
-    } else {
-      log(`You lay into the ${label}. -${dmg}.${left <= dmg ? ' It is coming apart.' : ''}`);
-    }
-    disarm();
-    refresh(); // any crouch behind it revalidates here
-    if (!hostilesRemain()) victory();
-  }
-
-  // --- take cover (TACTICS_PLAN M6) -----------------------------------------
-
-  // Whoever is standing on (x, z) - member, summon or coworker. The take-cover
+  // Putting the office over (demolition.js): toppling, dropping, breaking - the
+  // two ways the office stops being cover, plus the stun a landing inflicts.
+  const {
+    topple, landStun, dropOnto, performPartitionTopple, breakPlanAt, performBreak,
+  } = createDemolition({
+    world,
+    fx,
+    members,
+    callbacks,
+    rng,
+    hits,
+    get active() { return active; },
+    rand: (...a) => rand(...a),
+    log: (...a) => log(...a),
+    refresh: (...a) => refresh(...a),
+    disarm: (...a) => disarm(...a),
+    victory: (...a) => victory(...a),
+    hitFx: (...a) => hitFx(...a),
+    deathFx: (...a) => deathFx(...a),
+    statusFxAt: (...a) => statusFxAt(...a),
+    faceTarget: (...a) => faceTarget(...a),
+    ammoCostOf: (...a) => ammoCostOf(...a),
+    hostilesRemain: (...a) => hostilesRemain(...a),
+    notifyMemberDown: (...a) => notifyMemberDown(...a),
+    immunityLine: (...a) => immunityLine(...a),
+  });
   // verb treats any body as a shield ("any character as cover", designer).
   function unitStandingAt(x, z) {
     const m = members.find((u) => standing(u) && u.actor && u.actor.x === x && u.actor.z === z);
@@ -2111,409 +1824,50 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   }
 
   // --- the mobility verb (POWERS_PLAN M4) ----------------------------------
-  // Repositioning that the AP economy cannot buy. A dash carries you a fixed
-  // DISTANCE for a flat cost; a swap trades places with a teammate across the
-  // room. Both are free of opportunity attacks, and that is the point: until
-  // now the only answer to the threat ring was the Manager's `noProvoke`
-  // talent, which is a passive nobody chooses in the moment. This is the
-  // counterplay as a decision.
-  //
-  // NOT provoking is achieved by NOT calling beginMove: `notifyStep` only
-  // punishes a mover it has a `moveStart` record for, which is the same seam a
-  // shove glide already uses ("forced movement never provokes", TACTICS_PLAN
-  // #9). Granted movement joins forced movement rather than growing a second
-  // exemption the threat code would have to learn.
-  function performDash(id, tx, tz, point) {
-    const a = ACTIONS[id];
-    const problem = mobilityProblem(a, {
-      ap: active.ap,
-      usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
-    });
-    if (problem) { lastClickOutcome = `refused:${problem}`; log(problem); return; }
-    const raw = (tx === active.actor.x && tz === active.actor.z)
-      ? null
-      : world.findPath(active.actor.x, active.actor.z, tx, tz, active.actor);
-    if (!raw || raw.length < 2) { log('No route there.'); return; }
-    const end = point ? world.clampPoint(point.x, point.z) : null;
-    const smoothed = world.smooth(end ? [...raw.slice(0, -1), end] : raw, active.actor);
-    // Truncated by DISTANCE, at a flat cost per tile-length, so the terrain's
-    // `slow` does not tax a dash the way it taxes a walk. A dash that got
-    // shorter through coffee would be a walk with extra steps.
-    const { points, done } = truncateByBudget(smoothed, dashDistanceOf(a), () => 1);
-    if (points.length < 2) { log('Nowhere to go.'); return; }
-    active.ap = roundAp(active.ap - a.ap);
-    if (a.uses) active.usesLeft[id] -= 1;
-    hidePreview();
-    active.actor.setPath(points); // deliberately WITHOUT beginMove - see above
-    log(done ? a.log : `${a.log} You run out of corridor.`);
-    disarm();
-    refresh();
-  }
-
-  // Trade places with a teammate. Both bodies move, neither provokes, and the
-  // swap is legal even when the two tiles could not be walked between - it is
-  // a courier's trick, not a route.
-  function performSwap(id, m) {
-    const a = ACTIONS[id];
-    const problem = mobilityProblem(a, {
-      dist: bodyDist(active, m),
-      los: bodyLos(active, m),
-      ap: active.ap,
-      usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
-      allyHp: m.sheet.hp,
-    });
-    if (problem) { lastClickOutcome = `refused:${problem}`; log(problem); return; }
-    if (m === active) { log('You are already there.'); return; }
-    const mine = { x: active.actor.x, z: active.actor.z };
-    const theirs = { x: m.actor.x, z: m.actor.z };
-    // Trade PLACES, not tile centres: each body takes the other's actual
-    // rest point, so the free-point stances both had survive the trick.
-    const myRest = posOf(active);
-    const theirRest = posOf(m);
-    active.ap = roundAp(active.ap - a.ap);
-    if (a.uses) active.usesLeft[id] -= 1;
-    // pushTo is the existing "move a body without it counting as a walk" call
-    // (the shove's glide). Using it here means the swap cannot provoke and
-    // cannot trigger a per-tile hazard hook mid-flight.
-    // Both bodies changed tiles, so neither crouch survives - the swap is
-    // exactly the "pull the wounded out of cover" verb (TACTICS_PLAN M6);
-    // refresh()'s revalidation would catch it, but breaking here logs it in
-    // the same beat as the trade instead of a surprise line later.
-    breakCrouch(active);
-    breakCrouch(m);
-    active.actor.pushTo(theirs.x, theirs.z, theirRest.x, theirRest.z);
-    m.actor.pushTo(mine.x, mine.z, myRest.x, myRest.z);
-    log(`${a.log} You and ${m.sheet.name} trade places.`);
-    disarm();
-    refresh();
-  }
-
-  // --- the zone verb (POWERS_PLAN M3) --------------------------------------
-  // `leaves` used to be welded to the cone attack, so the only way to put
-  // paper on the floor was to also swing at somebody. Freed into its own verb,
-  // placing a surface becomes a PLAN - fuel you lay before you light it,
-  // caltrops across the doorway they have to come through - and it hands the
-  // fire/conduction simulation a player-driven source instead of only the
-  // hazards the level author painted.
-  //
-  // Which tiles a zone may actually take, given the grid: plain floor only
-  // (leaveSurface's own rule), never under a living body. Shared by the click
-  // and the preview so the tiles you saw are the tiles you get.
-  // The zone's covered tiles - the geometry in combat-geometry.js, the
-  // occupancy question answered here because only combat knows who is standing
-  // where.
-  // Sighted from the aimer's BODY - the same origin the aim range measures
-  // from, so a cell the wash paints is a cell the drop covers.
-  const zoneCells = (a, tx, tz) => zoneCellsFor(a, posOf(active), tx, tz, {
-    canTakeSurface: world.canTakeSurface,
-    hasLos: world.hasLos,
-    occupied: (x, z) => members.some((m) => m.sheet.hp > 0 && m.actor?.x === x && m.actor?.z === z)
-      || world.liveEnemies().some((e) => e.x === x && e.z === z),
+  // The rest of the verbs (verbs.js): the halves that SPEND. Reached from a
+  // click or an AI beat, never from the startCombat sweep.
+  const {
+    performDash, performSwap, zoneCells, performZone, performControl, strike,
+    friendlies, allyAtPoint, allyProblemFor, buffReach, performBuff,
+    handleAllyClick, fireCone,
+  } = createVerbs({
+    world,
+    fx,
+    members,
+    callbacks,
+    get active() { return active; },
+    get armed() { return armed; },
+    get phase() { return phase; },
+    rand: (...a) => rand(...a),
+    log: (...a) => log(...a),
+    refresh: (...a) => refresh(...a),
+    disarm: (...a) => disarm(...a),
+    victory: (...a) => victory(...a),
+    hidePreview: (...a) => hidePreview(...a),
+    canReach: (...a) => canReach(...a),
+    bodyDist: (...a) => bodyDist(...a),
+    bodyLos: (...a) => bodyLos(...a),
+    distToTile: (...a) => distToTile(...a),
+    losToTile: (...a) => losToTile(...a),
+    rollAgainst: (...a) => rollAgainst(...a),
+    hitFx: (...a) => hitFx(...a),
+    deathFx: (...a) => deathFx(...a),
+    statusFxAt: (...a) => statusFxAt(...a),
+    breakCrouch: (...a) => breakCrouch(...a),
+    faceTarget: (...a) => faceTarget(...a),
+    displaceBody: (...a) => displaceBody(...a),
+    performOn: (...a) => performOn(...a),
+    joinCombat: (...a) => joinCombat(...a),
+    charmUnit: (...a) => charmUnit(...a),
+    livingMembers: (...a) => livingMembers(...a),
+    hostilesRemain: (...a) => hostilesRemain(...a),
+    coneTest: (...a) => coneTest(...a),
+    ambushDmg: (...a) => ambushDmg(...a),
+    immunityLine: (...a) => immunityLine(...a),
+    // A module-level const in this file; imported back would be circular.
+    appliesLine: (...a) => appliesLine(...a),
+    setLastClickOutcome: (v) => { lastClickOutcome = v; },
   });
-
-  function performZone(id, tx, tz) {
-    const a = ACTIONS[id];
-    const problem = zoneProblem(a, {
-      dist: distToTile(active, tx, tz),
-      los: losToTile(active, tx, tz),
-      ap: active.ap,
-      usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
-    });
-    if (problem) { lastClickOutcome = `refused:${problem}`; log(problem); return; }
-    const cells = zoneCells(a, tx, tz);
-    active.ap = roundAp(active.ap - a.ap);
-    if (a.uses) active.usesLeft[id] -= 1;
-    faceTarget(active, tx, tz);
-    active.actor.lunge(tx, tz);
-    let laid = 0;
-    for (const [x, z] of cells) {
-      if (world.leaveSurface(x, z, a.leaves, a.leavesTurns || 0)) laid += 1;
-    }
-    // Saying how much of it landed matters more here than on any other verb:
-    // the tiles a zone can take are whatever happens to be plain floor, so the
-    // same click over carpet and over a cubicle row spends the same AP for
-    // very different results, and silence would read as a dud.
-    log(laid ? `${a.log} ${laid} tile${laid > 1 ? 's' : ''} covered.` : `${a.log} Nothing here will take it.`);
-    disarm();
-    refresh();
-  }
-
-  // --- the control verb (POWERS_PLAN M2) -----------------------------------
-  // Control deals NO damage. That is the design rule, not an omission: a power
-  // that stuns AND hits is two powers, and the AP economy (2 AP against a 5-7
-  // pool) cannot price both. It still rolls to hit, because a guaranteed stun
-  // at 2 AP is the degenerate case - and because HIT_PLAN's "a miss spends the
-  // cost and does nothing else" is what keeps the anti-chain window from being
-  // the only counterplay control has.
-  function performControl(id, en) {
-    const a = ACTIONS[id];
-    const ranged = controlIsRanged(a);
-    const problem = controlProblem(a, {
-      dist: bodyDist(active, en),
-      los: bodyLos(active, en),
-      inReach: canReach(active, en),
-      ap: active.ap,
-      usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
-      alive: en.alive,
-    });
-    if (problem) { lastClickOutcome = `refused:${problem}`; log(problem); return; }
-    joinCombat(en);
-    // Spend first, as every other action does: a miss burns the AP and the use
-    // (HIT_PLAN #4).
-    active.ap = roundAp(active.ap - a.ap);
-    if (a.uses) active.usesLeft[id] -= 1;
-    if (ranged) {
-      fx.projectile(posOf(active), posOf(en), 'ball');
-    } else {
-      active.actor.lunge(posOf(en).x, posOf(en).z);
-    }
-    faceTarget(active, en.x, en.z);
-    if (!rollAgainst(active, en)) {
-      hitFx(en, 'whiff');
-      fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
-      log(a.missLog || `${a.log} It does not take.`);
-      disarm();
-      refresh();
-      return;
-    }
-    const plan = controlOutcome(a);
-    let line = a.log || `${a.label}.`;
-    // The status first, THEN the displacement: a control that both roots and
-    // pushes should root them where they LAND, and the reverse order would
-    // also let a lethal slam swallow the status silently.
-    if (plan.applies) {
-      const blocked = blockedBy(en, plan.applies);
-      if (applyStatus(en, plan.applies, {}, 0)) {
-        statusFxAt(en, plan.applies);
-        line += ` ${appliesLine(a, en.def.name)}`;
-        // `charmed` is the one status that changes which SIDE somebody is on
-        // rather than anything about them, so the roster and turn-order move
-        // happens here rather than in an `effects` block the status system
-        // would have to learn a whole new kind of.
-        if (plan.applies === 'charmed') charmUnit(en, STATUSES.charmed.duration);
-      } else if (blocked) line += ` ${immunityLine(blocked, en.def.name)}`;
-    }
-    if (plan.displace) {
-      const dx = Math.sign(en.x - active.actor.x) * plan.displace;
-      const dz = Math.sign(en.z - active.actor.z) * plan.displace;
-      const res = displaceBody(en, dx, dz, { verb: 'send', slamDmg: 0 });
-      if (res.msg) line += ` ${res.msg}`;
-    }
-    log(line);
-    disarm();
-    refresh();
-    if (!hostilesRemain()) victory();
-  }
-
-  // What a landed melee action DOES on arrival. The walk-up path and the
-  // already-in-reach path both route through here, so a control that walked
-  // you in resolves as a control and not as a swing - the one dispatch a new
-  // touch-range verb has to join, instead of a branch in each of the three
-  // places that finish an approach.
-  const strike = (id, en) => (isControl(ACTIONS[id]) ? performControl(id, en) : performOn(id, en));
-
-  // --- the friendly verb (POWERS_PLAN M1) ----------------------------------
-  // Everyone a buff may be aimed at: living party members AND your summons,
-  // yourself included. A summon is a member with a sheet, so healing or
-  // commending one is free of special cases - which is the payoff for
-  // SUMMON_PLAN having made player-side summons real members rather than a
-  // parallel kind of thing.
-  const friendlies = () => livingMembers();
-
-  // The ally whose BODY is nearest this ground point, or null. The friendly
-  // twin of enemyAtPoint, measured against continuous positions for the same
-  // reason: the logical tile is rounded, and at this camera angle a tall mesh
-  // reads a tile off.
-  function allyAtPoint(point) {
-    if (!point) return null;
-    let best = null;
-    for (const m of friendlies()) {
-      const p = posOf(m);
-      const d = Math.hypot(p.x - point.x, p.z - point.z);
-      if (d < 0.7 && (!best || d < best.d)) best = { m, d };
-    }
-    return best?.m || null;
-  }
-
-  // Why an ally-aimed action cannot land on this teammate, or null. ONE
-  // dispatch for the two verbs that point at friends, so the rings, the cursor
-  // and the click ask the same question of both - three call sites each
-  // consulting its own verb's rule is exactly how the crosshair and the
-  // readout came to disagree once already.
-  const allyProblemFor = (id, m) => {
-    const a = ACTIONS[id];
-    const common = {
-      ...buffReach(m),
-      ap: active.ap,
-      usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
-    };
-    if (isMobility(a)) return mobilityProblem(a, { ...common, allyHp: m.sheet.hp });
-    return buffProblem(a, {
-      ...common,
-      hp: m.sheet.hp,
-      maxHp: m.sheet.maxHp,
-      statusCount: statusList(m.sheet).length,
-    });
-  };
-
-  // Distance and line to an ally, in the units buffProblem expects.
-  const buffReach = (m) => ({
-    dist: bodyDist(active, m),
-    // Aiming at yourself never needs a line to yourself - and hasLos on your
-    // own tile is a degenerate trace that has no reason to be asked.
-    los: m === active || bodyLos(active, m),
-  });
-
-  // Commit a buff on an ally. No hit roll: you do not miss a colleague you are
-  // trying to help, and gating a support action behind the same whiff that
-  // gates a swing would make the support class the one that fails at its job
-  // (HIT_PLAN gates DAMAGE, which this deals none of).
-  function performBuff(id, m) {
-    const a = ACTIONS[id];
-    const problem = buffProblem(a, {
-      ...buffReach(m),
-      hp: m.sheet.hp,
-      maxHp: m.sheet.maxHp,
-      statusCount: statusList(m.sheet).length,
-      ap: active.ap,
-      usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
-    });
-    if (problem) { lastClickOutcome = `refused:${problem}`; log(problem); return; }
-    const plan = buffOutcome(a, { hp: m.sheet.hp, maxHp: m.sheet.maxHp });
-    active.ap = roundAp(active.ap - a.ap);
-    if (a.uses) active.usesLeft[id] -= 1;
-    if (m !== active) faceTarget(active, m.actor.x, m.actor.z);
-    const who = m === active ? 'yourself' : m.sheet.name;
-    let line = `${a.log || a.label + '.'}`;
-    if (plan.purges) {
-      clearStatuses(m.sheet);
-      line += m === active
-        ? ' Everything you were carrying clears.'
-        : ` Everything ${m.sheet.name} was carrying clears.`;
-    }
-    if (plan.healed > 0) {
-      m.sheet.hp += plan.healed;
-      hitFx(m, 'heal');
-      fx.damageText(m.actor.x, m.actor.z, `+${plan.healed}`, '#8adf76');
-      line += ` +${plan.healed} HP.`;
-    }
-    // A buff is never resisted - `commended`/`onboarded` are resistable:false,
-    // so the resist argument would be inert anyway, but passing the target's
-    // own Composure would be actively wrong: it would make helping a composed
-    // teammate WORSE than helping a rattled one.
-    if (plan.applies && applyStatus(m.sheet, plan.applies)) {
-      statusFxAt(m, plan.applies);
-      line += ` ${appliesLine(a, who)}`;
-    }
-    log(line);
-    disarm();
-    refresh();
-  }
-
-  // A click on a friendly body while a buff is armed. Mirrors
-  // handleEnemyClick's gate exactly - your turn, standing still - so the two
-  // halves of the board refuse for the same reasons.
-  function handleAllyClick(m) {
-    if (phase !== 'player' || active.actor.moving || !m?.actor || m.sheet.hp <= 0) {
-      lastClickOutcome = phase !== 'player' ? 'gate:phase'
-        : (active.actor.moving ? 'gate:moving' : 'gate:dead');
-      return;
-    }
-    if (!armed || !aimsAtAlly(ACTIONS[armed])) return false;
-    hidePreview();
-    lastClickOutcome = 'acted';
-    if (isMobility(ACTIONS[armed])) performSwap(armed, m);
-    else performBuff(armed, m);
-    return true;
-  }
-
-  // Fire an armed cone attack toward (tx, tz): per-target damage rolls for
-  // every enemy in the wedge with line of sight, then the wedge's plain floor
-  // is carpeted with the action's `leaves` surface.
-  function fireCone(tx, tz) {
-    const a = ACTIONS[armed];
-    if (active.ap < a.ap) { log('Not enough AP.'); return; }
-    const test = coneTest(a, tx, tz);
-    if (!test) { log('Aim somewhere.'); return; }
-    // A rationed cone (All Hands) spends its use here. fireCone never
-    // decremented one because the only cone that existed was unlimited - which
-    // is exactly the bug Detain already had on the single-target path: a
-    // counter that never moves while the tooltip goes on promising uses left.
-    if (a.uses) {
-      if (active.usesLeft[armed] <= 0) { log(`No ${a.label.toLowerCase()} left this fight.`); return; }
-      active.usesLeft[armed] -= 1;
-    }
-    active.ap = roundAp(active.ap - a.ap);
-    active.actor.lunge(tx, tz);
-    faceTarget(active, tx, tz); // the cone points where you aimed it
-    let hits = 0;
-    for (const en of world.liveEnemies()) {
-      // Same body-radius test the ring previewed - what you saw is what lands.
-      const bp = en.entity ? en.entity.getPosition() : { x: en.x, z: en.z };
-      if (!test(bp.x, bp.z, TARGET_R)) continue;
-      if (!bodyLos(active, en)) continue;
-      joinCombat(en); // a bystander caught in the mail joins the fight
-      fx.projectile(posOf(active), { x: bp.x, z: bp.z }, 'plane');
-      // Roll per target. A dodged envelope flies but doesn't land; the wedge's
-      // `leaves` surface still carpets below (HIT_PLAN #4). A surprised target
-      // is easier to catch.
-      if (!rollAgainst(active, en)) {
-        hitFx(en, 'whiff');
-        fx.damageText(en.x, en.z, 'MISS', MISS_COLOR);
-        continue;
-      }
-      // A CONTROL cone (All Hands) lands its status on everyone it catches and
-      // rolls no damage - the verb's rule holds whether it is aimed at one
-      // coworker or a wedge of them. Sharing fireCone rather than forking it is
-      // what keeps the wedge geometry, the LOS test and the per-target roll
-      // identical between the two.
-      if (isControl(a)) {
-        const blocked = blockedBy(en, a.applies);
-        if (a.applies && applyStatus(en, a.applies, {}, 0)) {
-          statusFxAt(en, a.applies);
-          hits += 1;
-        } else if (blocked) {
-          log(immunityLine(blocked, en.def.name));
-        }
-        continue;
-      }
-      const dmg = ambushDmg(rand(a.min, a.max) + damageBonus(active.sheet));
-      const died = en.takeDamage(dmg);
-      hitFx(en, 'paper', active);
-      if (died) deathFx(en);
-      fx.damageText(en.x, en.z, `-${dmg}`, '#ffd76b', { big: died });
-      hits += 1;
-      if (died) callbacks.onEnemyKilled(en);
-    }
-    if (a.leaves) {
-      const R = Math.ceil(a.cone.range);
-      for (let z = Math.floor(test.origin.z) - R; z <= Math.ceil(test.origin.z) + R; z++) {
-        for (let x = Math.floor(test.origin.x) - R; x <= Math.ceil(test.origin.x) + R; x++) {
-          if (!test(x, z)) continue;
-          // No carpeting a tile a party member is standing on.
-          if (members.some((m) => m.sheet.hp > 0 && m.actor?.x === x && m.actor?.z === z)) continue;
-          if (!losToTile(active, x, z)) continue;
-          world.leaveSurface(x, z, a.leaves, a.leavesTurns || 0);
-        }
-      }
-    }
-    log(isControl(a)
-      ? (hits
-        ? `${a.log} ${hits} caught.`
-        : `${a.log} Nobody in the room is having it.`)
-      : (hits
-        ? `${a.log} ${hits} hit${hits > 1 ? 's' : ''}. The paperwork settles everywhere.`
-        : `${a.log} No casualties. Plenty of litter.`));
-    disarm();
-    refresh();
-    if (!hostilesRemain()) victory();
-  }
-
-  // Clicking a coworker with nothing armed is an attack - the basic swing from
-  // whatever is in your hand (stats.equippedAction; bare hands fall back to
-  // 'punch'). The old behavior was a nag ("choose an action first"), which made
-  // the most obvious verb in the game the one thing a click could NOT do. Arming
-  // a power still overrides it; that's what arming is for.
   const defaultAttack = () => equippedAction(active.sheet);
   // What a click on a coworker would use RIGHT NOW: whatever you armed, else
   // that basic swing. Every preview reads this - the target rings, the to-hit
@@ -2521,869 +1875,145 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // the swing that would actually land rather than only the armed case.
   const previewAction = () => (phase === 'player' && active?.sheet ? (armed || defaultAttack()) : null);
 
-  // The verb arms that are more than one line, one function each. Each takes
-  // the resolved action and the caller's `refuse`, which carries the auto-arm
-  // teardown - so a refusal inside an arm still puts down a swing the player
-  // never raised.
-  //
-  // Every arm returns, and the dispatch returns immediately after calling one.
-  // None falls through to the melee tail; that tail is reached only by NOT
-  // matching a kind above it, which is what makes it the default rather than
-  // another arm.
-
-  // The verb landed, and something may have died of it.
-  function finishVerb() {
-    disarm();
-    refresh();
-    if (!hostilesRemain()) victory();
-  }
-
-  // The walk happened and the verb did not. No strike, so nothing can have
-  // died and there is no victory to check - the asymmetry with finishVerb is
-  // the point, not an omission. Saying so out loud is also the point: a silent
-  // stand-down was half of the stuck-walk-up bug's confusion.
-  function closedTheDistance() {
-    disarm();
-    log('You close the distance.');
-    refresh();
-  }
-
-  function clickShove(en, a, refuse) {
-    if (!canReach(active, en, REACH.SHOVE)) {
-      // Out of reach - but the office between you might BE the shove: a
-      // cubicle wall to bring down on them (designer, 2026-07-30)...
-      if (performPartitionTopple(en.x, en.z)) return;
-      // ...or furniture beside you whose fall lands exactly on them. One
-      // gesture: click the coworker behind the cabinet, wear the cabinet.
-      for (const [dx, dz] of AROUND) {
-        const plan = topplePlan(active, active.actor.x + dx, active.actor.z + dz);
-        if (!plan || plan.lx !== en.x || plan.lz !== en.z) continue;
-        if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
-        active.ap = roundAp(active.ap - a.ap);
-        active.actor.lunge(plan.x, plan.z);
-        faceTarget(active, plan.x, plan.z);
-        log(topple(active, plan));
-        finishVerb();
-        return;
-      }
-      refuse('Too far to shove.');
-      return;
-    }
-    if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
-    joinCombat(en); // shoving a bystander is also an opinion they'll return
-    active.ap = roundAp(active.ap - a.ap);
-    active.actor.lunge(posOf(en).x, posOf(en).z);
-    faceTarget(active, en.x, en.z);
-    log(displaceBody(en, Math.sign(en.x - active.actor.x), Math.sign(en.z - active.actor.z)).msg);
-    finishVerb();
-    return;
-  }
-
-  function clickPull(en, a, refuse) {
-    const plan = pullPlanFor(en);
-    if (!plan) { refuse(pullRefusal(en)); return; }
-    if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
-    joinCombat(en);
-    active.ap = roundAp(active.ap - a.ap);
-    performPull(armed, en, plan);
-    return;
-  }
-
-  function clickRanged(en, a, refuse, range) {
-    const thrown = !!a.ammoCost; // a wad and a staple miss differently
-    const far = bodyDist(active, en) > range;
-    const blocked = !bodyLos(active, en);
-    // What the shot would ACTUALLY do from here (TACTICS_PLAN M6): a crouch
-    // behind furniture refuses it outright - free, like every other
-    // refusal - and a human shield takes it instead. Shooting THROUGH one
-    // of your own is a decision this game does not take for you, so a
-    // member-shield also refuses rather than quietly rerouting the damage.
-    const out = shotOutcome(active, en);
-    if (out.blocked) {
-      refuse(`No shot - ${en.def.name} is tucked in behind the ${crouchLabel(out.blocked)}. Find an angle.`);
-      return;
-    }
-    if (out.redirected && out.target.sheet) {
-      refuse(`No shot - you would hit ${nameOf(out.target)}.`);
-      return;
-    }
-    // A THROW refuses where it stands, exactly as it always has: you armed it
-    // deliberately, it is billed in paper, and spending your last sheet at the
-    // end of a walk you did not ask for is worse than being told no.
-    if (thrown) {
-      if (far) { refuse('Too far to throw.'); return; }
-      if (blocked) { refuse('No clear line to throw.'); return; }
-      if (active.sheet.paper < ammoCostOf(armed)) { refuse('Out of paper.'); return; }
-      if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
-      active.actor.faceToward(en.x, en.z);
-      if (out.redirected) log(`${nameOf(out.target)} takes it instead. That is the job.`);
-      strike(armed, out.target);
-      return;
-    }
-    if (!far && !blocked) {
-      if (active.ap < a.ap) { refuse('Not enough AP.'); return; }
-      active.actor.faceToward(en.x, en.z);
-      if (out.redirected) log(`${nameOf(out.target)} takes it instead. That is the job.`);
-      strike(armed, out.target);
-      return;
-    }
-    // A ranged WEAPON closes until it can fire, the same way the melee swing
-    // closes until it can hit. Its basic attack is what a bare click on a
-    // coworker uses (defaultAttack), so refusing here would break the most
-    // obvious verb in the game for anyone holding one: click a coworker two
-    // rooms away with a stapler and you walk over; with a staple gun you
-    // would have stood still and read a refusal. It walks the same route, it
-    // just stops the moment the shot is on rather than at their elbow.
-    // Route to a FIRING position, not to their elbow. routeIntoRange already
-    // ends at the nearest tile the shot is legal from, so there is no
-    // walk-further-then-cut-back step: the route costs the steps it needs and
-    // not one more, by construction.
-    const route = routeIntoRange(en, range);
-    if (!route || route.length < 2) { refuse('No way to get a shot at them.'); return; }
-    const shotBudget = moveBudget(active) - a.ap;
-    // Stop at the first point THIS weapon can fire from, not at the firing
-    // tile's centre: routeIntoRange picks the nearest legal tile, but the
-    // route often crosses into range a step before reaching it - and a
-    // 6-tile straw that walks to a tile it could have fired at from six
-    // tiles back is the "much closer than needed" complaint in its ranged
-    // form.
-    const shotWalk = walkActive(route, shotBudget, null,
-      (px, pz) => verbReaches(armed, en, px, pz));
-    // Same honest split as the melee walk-up: a degenerate route is not an
-    // AP problem, and must not be narrated as one.
-    if (!shotWalk) {
-      refuse(shotBudget > 0.05 ? 'No better shot to walk to.' : 'Not enough AP to get in range.');
-      return;
-    }
-    // Will we be able to fire when the walk finishes? The arrival check
-    // (pendingMelee, in the update loop) is authoritative either way - this
-    // only decides whether to promise the shot or report the walk. Same
-    // predicate the trim above stopped on, so the two cannot disagree.
-    if (shotWalk.done && verbReaches(armed, en, shotWalk.end[0], shotWalk.end[1])) {
-      pendingMelee = { en, action: armed }; // fire on arrival
-    } else {
-      closedTheDistance();
-    }
-    return;
-  }
-
-  function clickMelee(en, a, refuse) {
-    // Everything above dispatched the verbs that DO resolve on a coworker.
-    // Whatever is still here falls through to the melee walk-up, which ends in
-    // `strike` - and `strike` sends anything that is not a control to
-    // `performOn`, which opens with `rand(a.min, a.max)`. An action carrying no
-    // dice (a buff, a heal, a dash) rolls NaN there, and NaN damage used to
-    // make hp NaN: never `<= 0`, so the target could not die and the fight
-    // could not end. `takeDamage` now refuses non-finite amounts, but arriving
-    // there at all means a verb was pointed at the wrong half of the board -
-    // say so instead of walking them into a swing they never defined.
-    // Does this verb point at THIS half of the board? One question, asked of
-    // the one owner (combat-targeting.verbSides), rather than inferred.
-    //
-    // It used to be inferred, from "does this verb carry a payload to deliver"
-    // (`a.purge || a.applies || Number.isFinite(a.amount)`). That answers a
-    // different question, and three friendly verbs answered it yes: Performance
-    // Review and Onboarding carry `applies`, Triage carries `amount: 10`. So
-    // arming any of them and clicking a coworker walked the member into melee,
-    // spent the AP and the use, rolled to hit, and delivered the buff - or the
-    // ten-point heal - to the ENEMY (REVIEW.md 2026-08-02 section 1.3). Human
-    // Resources' entire base kit is two of them.
-    //
-    // A dice-less verb is still admitted when it aims here: Reboot strips
-    // statuses and deals nothing, and `performOn` resolves that as a pure
-    // effect. What is refused now is a verb aimed at the OTHER half, which is
-    // what the old comment already said this gate was for.
-    if (!verbSides(a, rangeOf(armed)).enemies) {
-      refuse(`${a.label} is not aimed at them.`);
-      return;
-    }
-    // melee: walk up if needed, then strike
-    if (canReach(active, en)) {
-      if (active.ap < a.ap) { refuse('Not enough AP to attack.'); return; }
-      active.actor.faceToward(en.x, en.z);
-      strike(armed, en);
-      return;
-    }
-    // walk the cheapest route to a tile the swing is legal from
-    const best = routeBeside(en);
-    // Sealed off, or every stand point beside them is line-blocked (ringed in
-    // partitions): either way there is no swing to walk to, and saying so
-    // beats the AP message this used to wear.
-    if (!best) { refuse('No way to get a swing at them.'); return; }
-    // walk up to their body, not the centre of the neighbouring tile.
-    // The budget is the SAME one an ordinary move spends - allowance first,
-    // then real AP (`moveBudget`) - minus the swing this walk is for. Billing
-    // the walk against bare `ap` ignored the free movement allowance entirely,
-    // so a character wearing it stopped short of a target they could plainly
-    // afford to reach and stood there instead of hitting anyone.
-    const budget = moveBudget(active) - a.ap;
-    const walk = walkActive(best.path, budget, best.point,
-      (px, pz) => verbReaches(armed, en, px, pz));
-    // A null walk has two honest readings, and only one is about AP: with
-    // budget in hand it means the route degenerated to nothing (walkActive's
-    // no-progress guard). Blaming AP for that was this bug's face: "Not
-    // enough AP to reach them" at 5.9 of 6 AP.
-    if (!walk) {
-      refuse(budget > 0.05 ? 'Already as close as the route gets.' : 'Not enough AP to reach them.');
-      return;
-    }
-    // The walk's endpoint is already a free point, so this asks the honest
-    // question directly instead of rounding it back to a tile first: will we
-    // be standing inside reach when the walk finishes? Same predicate the trim
-    // stopped on and the arrival check re-runs, LINE TEST INCLUDED - promising
-    // on distance alone let a partition cancel the strike this walk was for,
-    // silently.
-    if (walk.done && verbReaches(armed, en, walk.end[0], walk.end[1])) {
-      pendingMelee = { en, action: armed }; // strike on arrival
-    } else {
-      closedTheDistance();
-    }
-  }
-
-  function handleEnemyClick(en) {
-    if (phase !== 'player' || active.actor.moving || !en.alive) {
-      // This return is SILENT by design - a click on an AI turn or mid-walk
-      // is simply ignored - which also made it invisible in flake traces:
-      // "the click did nothing and nothing said why". The breadcrumb names
-      // the reason for the e2e suite without changing behavior.
-      lastClickOutcome = phase !== 'player' ? 'gate:phase'
-        : (active.actor.moving ? 'gate:moving' : 'gate:dead');
-      return;
-    }
-    hidePreview();
-    let autoArmed = false;
-    if (!armed) {
-      // Not enough AP for even the basic swing: say so once, rather than
-      // silently walking them into the enemy's face.
-      const id = defaultAttack();
-      if (active.ap < ACTIONS[id].ap) { log('Not enough AP to attack.'); return; }
-      armed = id;
-      autoArmed = true;
-      refresh(); // the bar lights the swing that is about to happen
-    }
-    // A refusal keeps a USER-armed action armed - aim survives a near-miss,
-    // right-click lowers it. The default the click just auto-armed is not
-    // aim: the player never raised it, so a refusal must put it back down.
-    // Left dangling, it sat lit on the bar until a right-click, and anything
-    // waiting for the swing to resolve (the e2e idle() helper) hung forever.
-    const refuse = (msg) => {
-      lastClickOutcome = `refused:${msg}`;
-      log(msg);
-      if (autoArmed) { disarm(); refresh(); }
-    };
-    lastClickOutcome = 'acted'; // overwritten by refuse(); the gate stamped its own
-    const a = ACTIONS[armed];
-    // WHICH verb this click is, from the same classifier the target rings
-    // dispatch on (combat-targeting.verbKind). Two hand-written ladders of
-    // `a.type` tests in slightly different orders is exactly how the rings came
-    // to contradict the click; there is one ladder now, and the arms below are
-    // what each branch DOES.
-    const kind = verbKind(a, rangeOf(armed));
-    // Take Cover clicked on a coworker: they are the shield ("any character
-    // as cover" - crouching behind your enemy is legal, if bold).
-    if (kind === 'cover') { performTakeCover(en.x, en.z); return; }
-    if (kind === 'cone') { fireCone(posOf(en).x, posOf(en).z); return; }
-    // Placing a summon on top of a coworker: the tile is taken, so they report
-    // to the free ground ringing outward from it. Aiming at the enemy you want
-    // them to swarm is a reasonable thing to click.
-    if (kind === 'summon') { placeSummon(en.x, en.z); return; }
-    // Aiming a zone at a coworker is a reasonable thing to click - you want it
-    // under THEM - so it resolves on their tile rather than refusing. Their own
-    // tile is excluded from the footprint (zoneCells), so what lands is the
-    // ring around their feet.
-    if (kind === 'zone') { performZone(armed, posOf(en).x, posOf(en).z); return; }
-    // A RANGED control (a cone, or one carrying `range`) resolves from where
-    // you stand. A touch-range one classifies as 'melee' and falls through to
-    // the walk-up below rather than getting its own copy of it - and `strike`
-    // is what makes the arrival resolve as a control instead of a swing.
-    if (kind === 'control') { performControl(armed, en); return; }
-    if (kind === 'shove') { clickShove(en, a, refuse); return; }
-    if (kind === 'pull') { clickPull(en, a, refuse); return; }
-    if (kind === 'ranged') { clickRanged(en, a, refuse, rangeOf(armed)); return; }
-    clickMelee(en, a, refuse);
-  }
-
-
-  // THE verb's own reach, as one spec: a declared `range` (aimRangeOf - the
-  // shapes powers.js owns) or a plain ranged attack's (stats.rangeOf, which is
-  // where a throw's undeclared THROW_RANGE lives), and null for a touch verb
-  // that walks into melee reach. The aim wash, the target rings and every
-  // walk-up read it, so a power's range means one thing everywhere.
-  // The reach vocabulary - all four now live in combat-geometry.js, bound
-  // here to the world and to whoever is acting. `reachSpecOf`/`actRangeOf` need
-  // neither, so they are re-exported straight through.
-  const verbReaches = (id, en, px, pz) =>
-    verbReachesAt(id, active, en, px, pz, world);
-  const swingPointAt = (en, gx, gz) => swingPointFrom(active, en, gx, gz, world);
-  const hasSwingSpot = (en) => hasSwingSpotFor(active, en, world);
-
-  // The cheapest walkable route to a tile BESIDE `en` from which the swing
-  // actually LANDS, plus the exact point to stop at: { path, point }, or null
-  // when no adjacent tile offers a legal swing. Choosing by path length alone
-  // used to send the walk to the nearest tile even when a partition blocked
-  // every swing from it - the arrival check then cancelled the strike it had
-  // promised, and every re-click regenerated the same dead-end point: a
-  // zero-length walk, reported (falsely) as an AP shortage.
-  function routeBeside(en) {
-    let best = null;
-    for (const [dx, dz] of AROUND) {
-      const gx = en.x + dx;
-      const gz = en.z + dz;
-      const point = swingPointAt(en, gx, gz);
-      if (!point) continue;
-      // Already STANDING on a legal goal tile - out of reach only because the
-      // body rests on its far side - means the "route" is a shuffle inside
-      // this tile; the approach point closes the last half-tile to their
-      // body. findPath returns the one-tile path [[gx,gz]] here, and its
-      // length of 1 used to win the shortest-path contest and then fail the
-      // >= 2 check: the player CLOSEST to the target was the one told there
-      // was no way to reach them.
-      if (gx === active.actor.x && gz === active.actor.z) {
-        return { path: [[gx, gz], [gx, gz]], point };
-      }
-      const p = world.findPath(active.actor.x, active.actor.z, gx, gz, active.actor);
-      if (p && p.length >= 2 && (!best || p.length < best.path.length)) best = { path: p, point };
-    }
-    return best;
-  }
-
-  // The cheapest walkable route to a tile this weapon could FIRE from, or null
-  // if none is reachable. The rule itself is pure and shared with the
-  // out-of-combat twin (pathfinding.js) - only the world bindings differ.
-  //
-  // A target crouched behind furniture (TACTICS_PLAN M6) shrinks the set of
-  // legal firing tiles to the angles its shield does not block - so the
-  // walk-into-range a ranged weapon already does becomes a walk-into-FLANK
-  // for free. A human shield does not shrink it: the shot resolves on the
-  // shield from anywhere (performOn decides whether that is a shot you take).
-  const routeIntoRange = (en, range) => {
-    const s = crouchStateOf(en);
-    const angleClear = (x, z) => {
-      if (!s) return true;
-      // A face held by a BODY does not shrink the set: the shot resolves on
-      // that body from anywhere, and whether to take it is performOn's call.
-      const face = shieldingFace(s.faces, x, z, en.x, en.z);
-      if (!face) return true;
-      return !!unitStandingAt(en.x + face[0], en.z + face[1]);
-    };
-    return routeToFiringPosition({
-      tx: en.x,
-      tz: en.z,
-      range,
-      fromX: active.actor.x,
-      fromZ: active.actor.z,
-      isWalkable: (x, z) => world.isWalkable(x, z),
-      // Candidates are tiles (planning is legitimately tile-shaped), but the
-      // filter must under-promise the CIRCLE the arrival check measures
-      // (verbReaches, body to body): a corner tile inside the old cheb square
-      // but outside the radius would be walked to and then refused.
-      hasLos: (x, z, tx, tz) => dist(x, z, tx, tz) <= range
-        && world.hasLos(x, z, tx, tz) && angleClear(x, z),
-      findPath: (x, z) => world.findPath(active.actor.x, active.actor.z, x, z, active.actor),
-    });
-  };
-
-  // Smooth a raw tile route and walk the ACTIVE member along it, charging by
-  // DISTANCE (stepCost per tile-length) and stopping mid-segment - at any
-  // free point - when `budget` runs out. Optionally swap the final waypoint
-  // for a precise clicked point. Spends their AP. Returns { done, end } or
-  // null if nothing was walkable.
-  // `stopWhen` (optional) ends the walk at the first point along the SMOOTHED
-  // route where it holds - a walk-up stops the moment its verb is live rather
-  // than continuing to the tile beside the target. Trimming after smoothing is
-  // what puts the stop point on the line actually being walked; trimming the
-  // raw tile route would put it back on the grid.
-  function walkActive(rawPath, budget, endPoint = null, stopWhen = null) {
-    if (endPoint) rawPath = [...rawPath.slice(0, -1), endPoint];
-    let s = world.smooth(rawPath, active.actor);
-    if (stopWhen) s = trimToFirst(s, stopWhen) || s;
-    const { points, cost, done } = truncateByBudget(s, Math.max(0, budget), stepCost);
-    // Nothing to walk: no AP spent, the caller prints a refusal - and, now, no
-    // cover lost. `breakCrouch` used to be the FIRST statement here, so a click
-    // this function was going to refuse still stood the member up and took the
-    // `covered` status off them, for free. The hover twin `previewWalk`
-    // deliberately does not break the crouch, which made the same arithmetic
-    // safe to look at and destructive to click (REVIEW.md 2026-08-02 sec 1.8).
-    if (points.length < 2 || cost < 0.05) return null;
-    // Moving is the one thing a crouch does not survive (TACTICS_PLAN M6,
-    // designer default): the commitment ends the moment the walk begins, not
-    // when it lands somewhere else. Which is here - beside `beginMove`, where
-    // the comment above always claimed it was.
-    breakCrouch(active);
-    hidePreview();
-    // Walking spends the AP a pending confirm was priced against, so the
-    // confirm lapses here rather than committing later at a price this member
-    // can no longer pay (which drove AP negative and broke refresh()).
-    pendingConfirm = null;
-    beginMove(active); // a deliberate move - leaving reach can provoke
-    active.actor.setPath(points);
-    billMove(active, cost); // the movement allowance first, then real AP
-    refresh();
-    return { done, end: points[points.length - 1] };
-  }
-
-  function handleTileClick(tile, point = null) {
-    lastClickOutcome = 'tile'; // the click resolved to ground, not a coworker
-    if (phase !== 'player' || active.actor.moving || !tile) return;
-    if (armed) {
-      const a = ACTIONS[armed];
-      // Cones fire at wherever you click - ground included.
-      if (a.cone && point) { fireCone(point.x, point.z); return; }
-      // A summon is placed at the clicked tile (the whole point of arming it).
-      if (a.type === 'summon') { placeSummon(tile.x, tile.z); return; }
-      // A zone lands where you clicked - ground, and only ground.
-      if (isZone(a)) {
-        // The exact clicked point when the pick has one - the zone's disc is
-        // centred where the player aimed (DEGRID M6).
-        performZone(armed, point ? point.x : tile.x, point ? point.z : tile.z);
-        return;
-      }
-      // A buff aimed at the ground resolves to whoever is STANDING there -
-      // yourself included. This branch sits above the purge self-cast below
-      // deliberately: Remote Restart is a `buff` that happens to purge, and
-      // falling through to the attack-purge path would clear your statuses
-      // without spending the use, then narrate it as a reboot.
-      if (aimsAtAlly(a)) {
-        const m = allyAtPoint(point)
-          || friendlies().find((f) => f.actor.x === tile.x && f.actor.z === tile.z);
-        if (m) {
-          if (isMobility(a)) performSwap(armed, m); else performBuff(armed, m);
-          return;
-        }
-        log('Aim at a teammate - or at yourself.');
-        return;
-      }
-      // A dash is aimed at the ground, like a walk - because that is what it
-      // is, bought at a flat price and free of opportunity attacks.
-      if (isMobility(a)) { performDash(armed, tile.x, tile.z, point); return; }
-      // A purge (reboot) can target YOURSELF: wipes your statuses too -
-      // paper-cut bleeding stops, but so does your Deflect.
-      if (a.purge && tile.x === active.actor.x && tile.z === active.actor.z) {
-        if (active.ap < a.ap) { log('Not enough AP.'); return; }
-        active.ap = roundAp(active.ap - a.ap);
-        const hadBleed = hasStatus(active.sheet, 'bleed');
-        clearStatuses(active.sheet);  // reboot wipes every status - Deflect, bleed, gum
-        disarm();
-        log(hadBleed
-          ? 'You turn yourself off and on again. The bleeding stops. So does everything else.'
-          : 'You turn yourself off and on again. All effects cleared. Classic fix.');
-        refresh();
-        return;
-      }
-      // Take Cover aimed at the ground resolves on whatever the tile holds -
-      // furniture or a body - and performTakeCover says why when it is
-      // neither (TACTICS_PLAN M6).
-      if (a.type === 'cover') { performTakeCover(tile.x, tile.z, point); return; }
-      // Shove a PROP over (POWERS_PLAN M6). The same verb, aimed at furniture
-      // instead of a person: walk up, put your shoulder into the bookcase, and
-      // it lands on whoever is behind it. It costs the shove's own AP and
-      // needs the shove's own reach, so nothing new has to be learned.
-      if (a.type === 'shove') {
-        const plan = topplePlan(active, tile.x, tile.z);
-        if (plan) {
-          if (active.ap < a.ap) { log('Not enough AP.'); return; }
-          if (!inReach(posOf(active).x, posOf(active).z, tile.x, tile.z, REACH.SHOVE)) {
-            log('Too far to shove.');
-            return;
-          }
-          active.ap = roundAp(active.ap - a.ap);
-          active.actor.lunge(tile.x, tile.z);
-          faceTarget(active, tile.x, tile.z);
-          log(topple(active, plan));
-          disarm();
-          refresh();
-          if (!hostilesRemain()) victory();
-          return;
-        }
-        // A toppleable prop with nothing behind it just rocks - say so, rather
-        // than falling through to the generic "Invalid target", which reads as
-        // "this prop is not the kind that falls" and is a different (wrong)
-        // lesson.
-        if (isToppleable(world.tileDefAt(tile.x, tile.z))) {
-          log('It rocks, and settles. Nothing behind it to fall into.');
-          return;
-        }
-        // A cubicle wall between you and the clicked tile: the shove knocks
-        // the PARTITION over onto it (designer, 2026-07-30).
-        if (performPartitionTopple(tile.x, tile.z)) return;
-      }
-      // Pull Over aimed at the ground resolves on whoever HOLDS the tile -
-      // the same rule Take Cover reads, and for the same reason: its whole
-      // target class is crouched bodies, and a crouched body is a squashed
-      // pose that is easy to click past (TACTICS_PLAN M8).
-      if (isPull(a)) {
-        const en = world.liveEnemies().find((e) => e.x === tile.x && e.z === tile.z);
-        if (en) { handleEnemyClick(en); return; }
-        log('Aim at a coworker dug in behind cover.');
-        return;
-      }
-      // An attack aimed at the furniture (TACTICS_PLAN M8): a breakable prop
-      // on the tile, or a partition on its face toward you, takes the hit -
-      // melee and ranged both, and "gone means gone" at zero.
-      if (aimsAtProps(a)) {
-        const plan = breakPlanAt(armed, tile.x, tile.z);
-        if (plan?.refusal) { log(plan.refusal); return; }
-        if (plan) { performBreak(armed, plan); return; }
-      }
-      // Aiming: a left click NEVER cancels. Missing the target used to lower
-      // the action (and, with a cone out of AP, could strand you unable to do
-      // either) - so say what went wrong and stay armed. Right-click cancels.
-      log('Invalid target.');
-      return;
-    }
-    if (!world.isWalkable(tile.x, tile.z)) return;
-    pendingMelee = null;
-    pendingCrouch = null;
-    if (point && tile.x === active.actor.x && tile.z === active.actor.z && active.actor.entity) {
-      // shuffling within the current tile is a move too
-      const pos = active.actor.entity.getPosition();
-      walkActive([[pos.x, pos.z], world.clampPoint(point.x, point.z)], moveBudget(active));
-      return;
-    }
-    const p = world.findPath(active.actor.x, active.actor.z, tile.x, tile.z, active.actor);
-    if (!p || p.length < 2) return;
-    walkActive(p, moveBudget(active), point ? world.clampPoint(point.x, point.z) : null);
-  }
-
-  // Hover text for a power. Assembled from the action's own data so a new
-  // action documents itself; `desc` in data/actions.js adds the hand-written
-  // line on top. Live numbers (your damage bonus, paper on hand, uses left)
-  // come from the acting member, so the tip answers "what happens if I press
-  // this, now" rather than quoting the registry.
-  function actionTip(id, a) {
-    const out = [`${a.label} - ${a.ap} AP`];
-    if (a.desc) out.push(a.desc);
-    if (a.min != null && a.max != null) {
-      const bonus = damageBonus(active.sheet);
-      out.push(`Damage ${a.min}-${a.max}${bonus ? ` +${bonus}` : ''}`);
-    }
-    if (a.amount) out.push(`Restores ${a.amount} HP`);
-    if (a.cone) out.push(`Cone - ${a.cone.range} tiles, ${a.cone.halfAngle * 2} degrees wide`);
-    // Range is the whole reason to hold a ranged weapon, so the tip says it -
-    // otherwise the only way to learn a staple gun outreaches a straw by two
-    // tiles is to stand somewhere and be refused.
-    if (rangeOf(id) && !a.cone) out.push(`Range ${rangeOf(id)} tiles - needs a clear line`);
-    if (a.ammoCost) out.push(`Costs ${ammoCostOf(id)} paper (you have ${active.sheet.paper})`);
-    if (a.uses) out.push(`${active.usesLeft[id]} of ${a.uses} uses left this fight`);
-    if (a.applies) out.push(`Applies ${STATUSES[a.applies]?.name || a.applies}`);
-    if (a.purge) out.push('Clears every status - the good ones too');
-    // The one line that says which HALF of the board a verb points at. Without
-    // it a buff is indistinguishable from an attack on the bar, and the first
-    // thing a player does with an unlabelled armed action is click an enemy.
-    if (isFriendly(a)) out.push(`Aim at a teammate or yourself - range ${buffRangeOf(a)}, never misses`);
-    if (isControl(a)) out.push('No damage - it takes their turn or their ground, not their HP');
-    if (a.type === 'cover') {
-      out.push('Aim at furniture, a tile against a partition, or a teammate; you walk over and tuck in (the walk bills as movement)');
-      out.push('Ranged attacks from the shielded side cannot touch you - melee and flanking still can');
-      out.push('Moving breaks it; attacking does not');
-    }
-    if (isPull(a)) {
-      out.push('Aim at an enemy dug in behind cover, from its far side - you reach over and haul them past you, clear of what they were tucked behind');
-      out.push(`Grit save: pass lands them on their feet, fail is ${a.crush[0]}-${a.crush[1]} damage, a skipped turn (${STATUSES.stunned.name}) and pinned`);
-      out.push('Their cover stays standing');
-    }
-    if (isStance(a)) {
-      out.push(`Watches ${watchRadiusOf(a)} tiles until your next turn`);
-      out.push('Spends your reaction when it fires - one per round, shared with opportunity attacks');
-    }
-    if (isMobility(a)) {
-      out.push(aimsAtAlly(a)
-        ? `Trade places with a teammate - range ${mobilityRangeOf(a)}`
-        : `Move up to ${dashDistanceOf(a)} tiles for a flat ${a.ap} AP`);
-      out.push('Provokes no opportunity attacks');
-    }
-    if (isZone(a)) {
-      out.push(`Covers a ${zoneRadiusOf(a) * 2}-tile area with ${a.leaves} - range ${zoneRangeOf(a)}`);
-    }
-    if (a.footwork) out.push('Footwork - gum on your shoe prevents it');
-    return out.join('\n');
-  }
-
-  function pressAction(id) {
-    if (phase !== 'player') return;
-    const a = ACTIONS[id];
-    if (!a) return;
-    // Lowering an armed action must ALWAYS work, even once its slot has gone
-    // unaffordable: spending your AP while a cone was armed used to disable the
-    // only control that could unarm it, stranding you (the slot is inert, and
-    // a ground click just re-tried the cone).
-    if (armed === id) {
-      cancelArmed();
-      refresh();
-      return;
-    }
-    const st = actionState(id);
-    // Same rule the bar renders: unaffordable is uncommittable, except for the
-    // one awaiting its confirm click. It still ANSWERS rather than doing
-    // nothing - the slot stays pressable precisely so it can say why, which is
-    // the bar's own rule and used to be lost the moment a button went dead.
-    if (!st) return;
-    if (!st.affordable && id !== pendingConfirm) { log(st.reason); return; }
-    // ONE live slot at a time (designer, 2026-07-31): pressing a DIFFERENT
-    // slot while one is up - armed, or awaiting its confirm - lowers what was
-    // up and does nothing else; arming the new one takes a second, deliberate
-    // press. Arming straight over the top is how the bar came to show two lit
-    // buttons: an armed attack survived an instant's first press, so the
-    // attack's target rings (a breakable partition included) kept painting
-    // under a bar that read as Deflect Blame.
-    if (armed || (pendingConfirm && pendingConfirm !== id)) {
-      cancelArmed();
-      refresh();
-      return;
-    }
-    // Past the gate, the only confirm that can be pending is this slot's own.
-    const wasPending = pendingConfirm;
-    pendingConfirm = null;
-    if (a.type === 'attack' || a.type === 'shove' || a.type === 'summon' || a.type === 'cover'
-      || isPull(a) || isFriendly(a) || isControl(a) || isZone(a) || isMobility(a) || isPurge(a)) {
-      armed = id; // arm it; clicking a ringed target (or a spot) fires it
-      hidePreview(); // aiming now - the movement trail yields to targets
-      log(a.type === 'summon'
-        ? `${a.label} armed. Click where they should report.`
-        : a.type === 'cover'
-          ? `${a.label} armed. Click something solid - or somebody brave.`
-          : isPull(a)
-          ? `${a.label} armed. Click a coworker dug in behind cover.`
-          : isZone(a)
-          ? `${a.label} armed. Click where it should land.`
-          : isMobility(a) && !aimsAtAlly(a)
-            ? `${a.label} armed. Click where you want to be.`
-            : aimsAtAlly(a)
-          // Naming the SIDE matters on the one verb that points the other way:
-          // armed the same way an attack is, aimed at the opposite half of the
-          // board, and nothing else on the bar behaves like that yet.
-          ? `${a.label} armed. Click a teammate - or yourself.`
-          : `${a.label} armed. Click a target.`);
-      refresh();
-    } else if (INSTANT_CONFIRM.has(a.type)) {
-      // Instant self-actions (Deflect, a heal) used to fire the moment you
-      // touched the button - easy to spend a turn's AP by accident. First
-      // press ARMS it, second press commits (right-click, or the button
-      // again, backs out). Targeted actions already worked this way.
-      if (wasPending !== id) {
-        pendingConfirm = id;
-        log(`${a.label} - click again to confirm.`);
-        refresh();
-        return;
-      }
-      commitInstant(id, a);
-    }
-  }
-
-  // The self-cast actions, once confirmed. Every branch re-checks AP: a
-  // pending confirm survives the movement that happens between the two
-  // clicks (arm Coffee, walk, confirm), so the button being enabled when it
-  // was armed proves nothing about affordability NOW. Committing anyway drove
-  // AP negative, and a negative AP wrecked refresh()'s pip repeat().
-  function commitInstant(id, a) {
-    if (active.ap < a.ap) { log('Not enough AP any more.'); refresh(); return; }
-    if (a.type === 'defend') {
-      if (hasStatus(active.sheet, 'deflecting')) { log('You are already deflecting. Save the AP.'); return; }
-      active.ap = roundAp(active.ap - a.ap);
-      applyStatus(active.sheet, 'deflecting');
-      statusFxAt(active, 'deflecting');
-      log(a.log);
-      refresh();
-    } else if (isStance(a)) {
-      // A stance is the one action that spends nothing NOW and everything
-      // later: it costs the AP up front and then sits on the reaction budget
-      // until the holder's next turn. Re-taking one you already hold is a
-      // refusal rather than a refresh, because the only thing it could buy is
-      // a second reaction, and the round budget is what stops overwatch from
-      // being a blender.
-      if (watching.has(active)) { log('You are already holding that.'); return; }
-      if (a.uses && active.usesLeft[id] <= 0) return;
-      if (a.uses) active.usesLeft[id] -= 1;
-      active.ap = roundAp(active.ap - a.ap);
-      watching.set(active, id);
-      const chip = a.mode === 'guard' ? 'guarding' : 'watching';
-      applyStatus(active.sheet, chip);
-      statusFxAt(active, chip);
-      log(a.log);
-      refresh();
-    } else if (a.type === 'heal') {
-      if (a.uses && active.usesLeft[id] <= 0) return;
-      if (active.sheet.hp >= active.sheet.maxHp) { log('Already at full health. Savor it.'); return; }
-      if (a.uses) active.usesLeft[id] -= 1;
-      active.ap = roundAp(active.ap - a.ap);
-      active.sheet.hp = Math.min(active.sheet.maxHp, active.sheet.hp + a.amount);
-      hitFx(active, 'heal');
-      fx.damageText(active.actor.x, active.actor.z, `+${a.amount}`, '#8adf76');
-      log(a.log);
-      refresh();
-    }
-  }
-
-  // --- targeted summoning -------------------------------------------------------
-  // Post the role AT a spot you pick (Divinity-style placement) rather than
-  // wherever the summoner happens to stand: arm the action, then click a tile
-  // within `range` with a clear line to it. The employees take that tile and
-  // the free tiles ringing outward from it, so a click into open floor puts
-  // them exactly where you wanted them - flanking, or screening a corridor.
-  // Why a spot is unusable, or null when it's good. Shared by the click and the
-  // hover preview so the ring you see is the rule that runs.
-  // The same ladder main.js runs out of combat - with the two legs a FIGHT owns
-  // (the AP pool, the per-fight ration) supplied here and simply absent there.
-  const summonSpotProblem = (a, tx, tz) => spotProblem(a, {
-    ap: active.ap,
-    usesLeft: active.usesLeft[armed],
-    dist: distToTile(active, tx, tz),
-    los: losToTile(active, tx, tz),
-    hasRoomToStand: world.summonSpots(tx, tz, 1).length > 0,
-    // The live headcount. main.js's out-of-combat twin has always passed this;
-    // combat's did not, so the shared rule's cap leg was skipped in a fight -
-    // the rings promised spots a maxed-out req could not fill, and the click
-    // then blamed the FLOOR ("can't find a free desk") for a limit that is
-    // about the roster. The module's own `room` - headcount still free, which
-    // is the number its predicate is written against - not the arrivals count
-    // `resolveSummon` acts on. The two go to zero together, so the ring says
-    // the same thing either way; they are asked separately because they are
-    // separate questions.
-    room: capRoom(a, liveSummonsOf(active.actor)),
+  // What a click in a fight means (click-verbs.js): the verb arms, the
+  // enemy-click dispatcher, the routes a click may walk first, and the
+  // tile-click resolver.
+  const {
+    finishVerb, closedTheDistance, clickShove, clickPull, clickRanged,
+    clickMelee, handleEnemyClick, verbReaches, swingPointAt, hasSwingSpot,
+    routeBeside, routeIntoRange, walkActive, handleTileClick,
+  } = createClickVerbs({
+    world,
+    fx,
+    members,
+    callbacks,
+    get active() { return active; },
+    get armed() { return armed; },
+    get phase() { return phase; },
+    get pendingConfirm() { return pendingConfirm; },
+    get pendingMelee() { return pendingMelee; },
+    get pendingCrouch() { return pendingCrouch; },
+    get lastClickOutcome() { return lastClickOutcome; },
+    log: (...a) => log(...a),
+    refresh: (...a) => refresh(...a),
+    disarm: (...a) => disarm(...a),
+    cancelArmed: (...a) => cancelArmed(...a),
+    victory: (...a) => victory(...a),
+    hidePreview: (...a) => hidePreview(...a),
+    defaultAttack: (...a) => defaultAttack(...a),
+    canReach: (...a) => canReach(...a),
+    bodyDist: (...a) => bodyDist(...a),
+    bodyLos: (...a) => bodyLos(...a),
+    stepCost: (...a) => stepCost(...a),
+    moveBudget: (...a) => moveBudget(...a),
+    billMove: (...a) => billMove(...a),
+    beginMove: (...a) => beginMove(...a),
+    ammoCostOf: (...a) => ammoCostOf(...a),
+    faceTarget: (...a) => faceTarget(...a),
+    breakCrouch: (...a) => breakCrouch(...a),
+    crouchStateOf: (...a) => crouchStateOf(...a),
+    unitStandingAt: (...a) => unitStandingAt(...a),
+    shotOutcome: (...a) => shotOutcome(...a),
+    hostilesRemain: (...a) => hostilesRemain(...a),
+    joinCombat: (...a) => joinCombat(...a),
+    enemyAtPoint: (...a) => enemyAtPoint(...a),
+    previewWalk: (...a) => previewWalk(...a),
+    allyAtPoint: (...a) => allyAtPoint(...a),
+    friendlies: (...a) => friendlies(...a),
+    strike: (...a) => strike(...a),
+    displaceBody: (...a) => displaceBody(...a),
+    topple: (...a) => topple(...a),
+    topplePlan: (...a) => topplePlan(...a),
+    breakPlanAt: (...a) => breakPlanAt(...a),
+    performBreak: (...a) => performBreak(...a),
+    performPartitionTopple: (...a) => performPartitionTopple(...a),
+    performPull: (...a) => performPull(...a),
+    pullPlanFor: (...a) => pullPlanFor(...a),
+    pullRefusal: (...a) => pullRefusal(...a),
+    performTakeCover: (...a) => performTakeCover(...a),
+    performDash: (...a) => performDash(...a),
+    performSwap: (...a) => performSwap(...a),
+    performZone: (...a) => performZone(...a),
+    performControl: (...a) => performControl(...a),
+    performBuff: (...a) => performBuff(...a),
+    placeSummon: (...a) => placeSummon(...a),
+    fireCone: (...a) => fireCone(...a),
+    crouchLabel: (...a) => crouchLabel(...a),
+    nameOf: (...a) => nameOf(...a),
+    setArmed: (v) => { armed = v; },
+    setPendingConfirm: (v) => { pendingConfirm = v; },
+    setPendingMelee: (v) => { pendingMelee = v; },
+    setPendingCrouch: (v) => { pendingCrouch = v; },
+    setLastClickOutcome: (v) => { lastClickOutcome = v; },
   });
-  function placeSummon(tx, tz) {
-    const a = ACTIONS[armed];
-    const problem = summonSpotProblem(a, tx, tz);
-    if (problem) { log(problem); return; }
-    const n = resolveSummon(active.actor, 'player', a, { x: tx, z: tz });
-    if (n <= 0) { log('No room - the employees can\'t find a free desk there.'); return; }
-    if (a.uses) active.usesLeft[armed] -= 1;
-    active.ap = roundAp(active.ap - a.ap);
-    active.actor.lunge(tx, tz);
-    faceTarget(active, tx, tz); // you gesture at where you posted them
-    log(`${a.log} ${arrivalLine(n)}`);
-    disarm();
-    refresh();
-  }
-  // End Turn ends the STEERED member's turn - under a shared turn the floor
-  // passes to the next member still holding it, and only when every holder
-  // has pressed theirs does initiative move on (INITIATIVE_PLAN #2: each
-  // member ends their own; one press must never skip a teammate who hasn't
-  // acted - the accidental group-skip BG3 was criticised for). With a single
-  // holder this is exactly the advance it always was.
-  function endTurnPressed() {
-    if (phase !== 'player') return;
-    advanceTurn();
-  }
-
-  // --- what the turn engine asks this file ------------------------------------
-  // turn-order.js owns the walk: advance, wrap into a round, skip anyone who
-  // cannot act, spend a temp's contract, tick the turn clock. These are the
-  // combat-side answers it calls out for - the ones that need a body, a panel
-  // or the app, and so could never live in a pure module.
-
-  // Somebody's turn opens for real: hand a member control (full AP and their
-  // movement allowance), or arm the AI's working state for a unit. Under a
-  // shared turn `held` is every member holding the floor - EACH gets a full
-  // budget at the top (per-member AP predates spans; several members having
-  // independent pools at once is why this line is a loop and nothing else
-  // changed), and the first is steered.
-  function takeTurn(s, held = [s]) {
-    if (s.member) {
-      for (const h of held) {
-        h.member.ap = h.member.sheet.maxAp; // full AP at the top of your turn
-        h.member.freeAp = freeMoveOf(h.member); // and the movement allowance, if any
-      }
-      makeActive(s.member);
-      phase = 'player';
-      // The turn is not SAID any more - the strip and the lit End Turn carry
-      // it (character-start branch's de-duplication). The one exception is a
-      // SHARED turn: the strip brackets the span visually, but this line is
-      // the only TEXT naming the whole span at once, and the shared-turns
-      // branch landed it without knowing the announcements were going.
-      if (held.length > 1) {
-        log(`Shared turn — ${held.map((h) => h.member.sheet.name).join(', ')}.`);
-      }
-      refresh();
-      return;
-    }
-    phase = 'ai';
-    acting = { unit: s.unit, ap: s.unit.combat.ap, freeAp: freeMoveOf(s.unit), wait: 0.5 };
-    refresh();
-  }
-
-  // The floor moved to another member of the open span - `finish` passing it
-  // on when one member's turn ends, or a steer the player asked for (the party
-  // bar, Tab, a body click - main.js routes them here in combat).
-  function steerTo(s) {
-    if (!s?.member) return;
-    makeActive(s.member);
-    log(`${s.member.sheet.name} has the floor.`);
-    refresh();
-  }
-
-  // A turn spent incapacitated. A member simply loses it and play moves on; an
-  // AI unit HOLDS the turn for a beat, so a dazed coworker visibly stands there
-  // rather than being skipped between frames.
-  function skipTurnFor(s) {
-    log(skipTurnLine(s, slotCarrier(s)));
-    if (s.member) {
-      refresh();
-      return 'advance';
-    }
-    phase = 'ai';
-    acting = { unit: s.unit, ap: 0, freeAp: 0, wait: 0.6 };
-    refresh();
-    return 'hold';
-  }
-
-  // A summon's turns ran out with the fight still on: it leaves mid-battle,
-  // which is the cost of fielding temps. Dismissing an enemy-side one can empty
-  // the enemy list - the engine re-reads the outcome on the next attempt, so
-  // this only has to take the body off the board.
-  function expireSummon(s) {
-    // A BORROWED coworker is RETURNED, not dismissed. They share the lifetime
-    // clock with summons - one clock, nothing to keep in step - but the endings
-    // are opposites: a summon is destroyed, a colleague walks away.
-    if (s.member?.isCharmed) {
-      log(`The session drops. ${s.member.sheet.name} is theirs again.`);
-      releaseCharm(s.member);
-      return;
-    }
-    // The house voice was already they/them here; now it ASKS the character
-    // rather than assuming, which is the whole point of storing the field.
-    const w = pronounsOf(s.member?.sheet);
-    log(`${slotName(s)}'s assignment ends. ${capitalize(w.subject)} `
-      + `${verb(w, 'gather')} ${w.possessive} things and ${verb(w, 'go', 'es')}.`);
-    dismissSummon(s.member || s.unit);
-    refresh();
-  }
-
-  // The line for a turn spent incapacitated - stun reads differently from the
-  // surprise it generalized.
-  function skipTurnLine(s, carrier) {
-    const name = s.member ? s.member.sheet.name : s.unit.def.name;
-    if (hasStatus(carrier, 'stunned')) return `${name} is stuck in mandatory training. Attendance is taken.`;
-    return `${name} is still grabbing their lanyard.`;
-  }
-  // Apply a turn-start dot (burning) to the slot's owner, with the popup and
-  // the death handling. Returns 'fell' if it dropped them - the engine then
-  // moves past the now-empty slot, re-reading the win/lose outcome as it opens
-  // the next one - or 'stands' if the turn should proceed.
-  function applyTurnDot(s, damage) {
-    const actor = s.member ? s.member.actor : s.unit;
-    hitFx(actor, 'fire');
-    fx.damageText(actor.x, actor.z, `-${damage}`, '#ff7a3c');
-    if (s.member) {
-      const dead = applyDamage(s.member.sheet, damage);
-      log(`${s.member.sheet.name} is on fire. -${damage}.`);
-      if (!dead) { refresh(); return 'stands'; }
-      s.member.toppled = true;
-      s.member.actor.clearPath();
-      s.member.actor.fx = { kind: 'death', t: 0 };
-      // Burning to death at the top of your own turn: move the bindings off the
-      // corpse before passing the turn on, or the HUD, the party bar and the
-      // post-combat leader all keep pointing at a downed member through the
-      // enemies' turns (and past a victory landing in that window).
-      if (s.member === active && livingParty().length) makeActive(livingParty()[0]);
-      return 'fell';
-    }
-    const died = s.unit.takeDamage(damage);
-    log(`${s.unit.def.name} is on fire. -${damage}.`);
-    if (!died) { refresh(); return 'stands'; }
-    callbacks.onEnemyKilled(s.unit);
-    return 'fell';
-  }
+  // Pressing a slot (action-bar.js): the tooltip, the press, and the instants
+  // that need a second click.
+  const {
+    actionTip, pressAction, commitInstant, summonSpotProblem, placeSummon,
+  } = createActionBar({
+    world,
+    fx,
+    watching,
+    INSTANT_CONFIRM,
+    get active() { return active; },
+    get armed() { return armed; },
+    get phase() { return phase; },
+    get pendingConfirm() { return pendingConfirm; },
+    log: (...a) => log(...a),
+    refresh: (...a) => refresh(...a),
+    disarm: (...a) => disarm(...a),
+    cancelArmed: (...a) => cancelArmed(...a),
+    hidePreview: (...a) => hidePreview(...a),
+    hitFx: (...a) => hitFx(...a),
+    statusFxAt: (...a) => statusFxAt(...a),
+    faceTarget: (...a) => faceTarget(...a),
+    distToTile: (...a) => distToTile(...a),
+    losToTile: (...a) => losToTile(...a),
+    actionState: (...a) => actionState(...a),
+    ammoCostOf: (...a) => ammoCostOf(...a),
+    liveSummonsOf: (...a) => liveSummonsOf(...a),
+    resolveSummon: (...a) => resolveSummon(...a),
+    setArmed: (v) => { armed = v; },
+    setPendingConfirm: (v) => { pendingConfirm = v; },
+  });
+  // Whose turn it is, and what opening one costs (turn-flow.js). Reached from a
+  // turn, never from the startCombat sweep, so it is wired in place.
+  const {
+    endTurnPressed, takeTurn, steerTo, skipTurnFor, expireSummon, skipTurnLine,
+    applyTurnDot,
+  } = createTurnFlow({
+    world,
+    fx,
+    members,
+    callbacks,
+    applyDamage,
+    get phase() { return phase; },
+    get active() { return active; },
+    get acting() { return acting; },
+    setPhase: (v) => { phase = v; },
+    setActing: (v) => { acting = v; },
+    freeMoveOf: (...a) => freeMoveOf(...a),
+    releaseCharm: (...a) => releaseCharm(...a),
+    advanceTurn: (...a) => advanceTurn(...a),
+    beginTurn: (...a) => beginTurn(...a),
+    livingParty: (...a) => livingParty(...a),
+    makeActive: (...a) => makeActive(...a),
+    refresh: (...a) => refresh(...a),
+    log: (...a) => log(...a),
+    hitFx: (...a) => hitFx(...a),
+    statusesOf: (...a) => statusesOf(...a),
+    carrierOf: (...a) => carrierOf(...a),
+    nameOf: (...a) => nameOf(...a),
+    dismissSummon: (...a) => dismissSummon(...a),
+    slotCarrier: (...a) => slotCarrier(...a),
+    slotActor: (...a) => slotActor(...a),
+    slotName: (...a) => slotName(...a),
+    slotAlive: (...a) => slotAlive(...a),
+    disarm: (...a) => disarm(...a),
+    cancelArmed: (...a) => cancelArmed(...a),
+    syncUnitSpeed: (...a) => syncUnitSpeed(...a),
+    breakCrouch: (...a) => breakCrouch(...a),
+  });
 
   // --- summons ----------------------------------------------------------------
   // Live minions a summoner still has on the board - the cap counts these.
@@ -3415,138 +2045,43 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // summons are player-controlled members - resolveSummon), and pickTarget only
   // ever returns a party-side member, so the hit always lands on a member's
   // sheet (deflect, gum, and the downed/handoff/party-wipe rules).
-  // The attack pools, split the day one entry grew `range` (AI_PLAN M5,
-  // footgun 9): melee lines swing in reach, the ranged line fires at
-  // distance. In reach the melee pool wins outright; a def with ONLY ranged
-  // lines falls back to point-blank fire rather than standing there.
-  const meleeLines = (unit) => unit.combat.attacks.filter((a) => !a.range);
-  const rangedLines = (unit) => unit.combat.attacks.filter((a) => a.range);
-  // What a swing AT CONTACT RANGE may draw from - one owner, because the
-  // reaction swing had its own copy that was just `attacks` and so could fire
-  // the Executive's rifle line as an opportunity attack (Q048). Footgun 9's
-  // rule is "melee in reach, fall back to the whole list only for a def that
-  // owns no melee at all", and every contact swing needs it, not just aiAttack.
-  const swingPool = (unit) => {
-    const melee = meleeLines(unit);
-    return melee.length ? melee : unit.combat.attacks;
-  };
-
-  // A weighted draw over the pool (AI_PLAN M6): a line whose status the
-  // target is not already wearing rolls at STATUS_WEIGHT, so the guard
-  // blinds the shooter on purpose sometimes. The weights are combat-ai's
-  // (pure, tested); the draw rolls the fight's own rng, so seeded bouts
-  // replay.
-  function pickLine(pool, target) {
-    const w = lineWeights(pool, (id) => hasStatus(statusesOf(target), id));
-    let total = 0;
-    for (const x of w) total += x;
-    let roll = rng() * total;
-    for (let i = 0; i < pool.length; i++) {
-      roll -= w[i];
-      if (roll <= 0) return pool[i];
-    }
-    return pool[pool.length - 1];
-  }
-
-  function aiAttack(unit, target) {
-    const atk = pickLine(swingPool(unit), target.member);
-    unit.lunge(posOf(target).x, posOf(target).z);
-    faceTarget(unit, target.actor.x, target.actor.z); // you face what you swing at
-    if (target.member) unitStrikesMember(unit, target.member, atk);
-  }
-
-  // The triage beat's doing (AI_PLAN M6): clamp-add to the ally's pool and
-  // say so. No lunge - she reaches, the fight goes on.
-  function aiSupport(unit, plan, spec) {
-    const ally = plan.ally.ref;
-    const amt = rand(spec.heal[0], spec.heal[1]);
-    ally.hp = Math.min(ally.maxHp, ally.hp + amt);
-    faceTarget(unit, ally.x, ally.z);
-    fx.damageText(ally.x, ally.z, `+${amt}`, '#9fdf8a');
-    log(`${spec.log || `${unit.def.name} patches up a colleague.`} +${amt} to ${ally.def.name}.`);
-    refresh();
-  }
-
-  // The shot (AI_PLAN M5): the plan already ran the gauntlet - range, LOS,
-  // shotOutcome - so this is resolution only. A redirect strikes the human
-  // shield with the same line ("a human shield takes the blocked hit",
-  // TACTICS_PLAN M6 ratified); everything else lands through
-  // unitStrikesMember, the one member-strike sink, so cover's to-hit term,
-  // soak, statuses and the downed rules all apply unchanged.
-  function aiShoot(unit, target, sp) {
-    const victim = sp.so.redirected ? sp.so.target : target.member;
-    faceTarget(unit, bodyOf(victim).x, bodyOf(victim).z);
-    fx.projectile(posOf(unit), posOf(victim), 'shot');
-    if (sp.so.redirected) log(`${victim.sheet.name} is in the way. The shot is theirs now.`);
-    unitStrikesMember(unit, victim, sp.line);
-  }
-
-  // The reinforcement beat's doing. The beat DOES the summon: it used to only
-  // narrate one, because the spawn was a side effect of the readiness check up
-  // in the ladder, so posting the req was free whenever a higher beat won the
-  // turn and billed only when this arm happened to be the one taken. A maxed-out
-  // HR posts nothing and says so.
-  function aiSummon(unit, target, spec) {
-    unit.lunge(posOf(target).x, posOf(target).z);
-    const posted = resolveSummon(unit, 'enemy', spec);
-    log(posted > 0
-      ? (spec.log || `${unit.def.name} calls in reinforcements.`)
-      : `${unit.def.name} calls for backup. Nobody is free.`);
-  }
-
-  // The topple beat's doing - one beat, two aims (AI_PLAN M4). Furniture goes
-  // over through the shared `topple`; a partition comes off its feet and lands
-  // flat on the far tile, on whoever stands there, which is the player's own
-  // performPartitionTopple seen from the other side of the cubicle.
-  function aiTopple(unit, plan) {
-    if (!plan.edge) {
-      unit.lunge(plan.x, plan.z);
-      log(`${unit.def.name} puts a shoulder into the ${plan.def.label || 'furniture'}. ${topple(unit, plan)}`);
-      return;
-    }
-    unit.lunge(plan.tx, plan.tz);
-    faceTarget(unit, plan.tx, plan.tz);
-    world.toppleEdge(unit.x, unit.z, plan.tx, plan.tz);
-    world.setType(plan.tx, plan.tz, PARTITION_TOPPLE.becomes);
-    fx.impact(plan.tx, plan.tz, 'slam', { y: 0.3 });
-    fx.shake(0.08, 0.2);
-    log(`${unit.def.name} puts a shoulder into the partition. It goes over flat.${dropOnto(unit, plan.tx, plan.tz, PARTITION_TOPPLE.damage)}`);
-    engageMemo.clear(); // a retired edge changes routes mid-turn
-  }
-
-  // The shove beat's doing. ONE resolver, both sides (Q4-A): the AI's shove
-  // wears the slam stun and the prop topple it had silently been missing. The
-  // lunge goes first, as it always did - the body has to wind up before it
-  // lands, and displaceBody moves the victim out from under the aim.
-  // `notifyMemberDown` is the victim view's own onDeath - not repeated here.
-  function aiShove(unit, plan) {
-    unit.lunge(plan.victim.actor.x, plan.victim.actor.z);
-    faceTarget(unit, plan.victim.actor.x, plan.victim.actor.z);
-    const res = displaceBody(plan.victim, plan.dx, plan.dz, { by: unit });
-    if (res.msg) log(res.msg);
-  }
-
-  // The break beat's doing. Two kinds behind one beat: a shut door opens by
-  // hand, anything else is battered down by aiBreak. Both change the world
-  // under the reachability memo, which is keyed on tiles and cleared per TURN
-  // because "within a turn the only thing moving is the unit itself" - an
-  // opened door or a demolished barrier breaks that assumption, and without
-  // the clear the unit stays "sealed" for the rest of its own turn and stands
-  // in the doorway it just opened. Returns the wait its animation needs.
-  function aiOpenOrBreak(unit, plan) {
-    let wait = 0.85;
-    if (plan.kind === 'door') {
-      unit.lunge(plan.tx, plan.tz);
-      faceTarget(unit, plan.tx, plan.tz);
-      world.openDoor(plan.key);
-      log(`${unit.def.name} opens the door. It was never locked.`);
-      wait = 0.5;
-    } else {
-      aiBreak(unit, plan);
-    }
-    engageMemo.clear();
-    return wait;
-  }
+  // What the AI does with a beat (ai-verbs.js). Wired here rather than at the
+  // top because everything it supplies is reached only from an AI turn - long
+  // after the startCombat sweep that made the hit-resolution factory's position
+  // load-bearing.
+  const {
+    meleeLines, rangedLines, swingPool, pickLine, aiAttack, aiSupport, aiShoot,
+    aiSummon, aiTopple, aiShove, aiOpenOrBreak,
+  } = createAiVerbs({
+    world,
+    fx,
+    rng,
+    lineWeights,
+    hasStatus,
+    get active() { return active; },
+    engageMemo,
+    rand: (...a) => rand(...a),
+    bodyOf: (...a) => bodyOf(...a),
+    aiBreak: (...a) => aiBreak(...a),
+    dropOnto: (...a) => dropOnto(...a),
+    posOf: (...a) => posOf(...a),
+    log: (...a) => log(...a),
+    refresh: (...a) => refresh(...a),
+    faceTarget: (...a) => faceTarget(...a),
+    statusesOf: (...a) => statusesOf(...a),
+    unitStrikesMember: (...a) => unitStrikesMember(...a),
+    performOn: (...a) => performOn(...a),
+    topple: (...a) => topple(...a),
+    displaceBody: (...a) => displaceBody(...a),
+    resolveSummon: (...a) => resolveSummon(...a),
+    memberAt: (...a) => memberAt(...a),
+    nameOf: (...a) => nameOf(...a),
+    billMove: (...a) => billMove(...a),
+    breakCrouch: (...a) => breakCrouch(...a),
+    carrierOf: (...a) => carrierOf(...a),
+    applyStatus,
+    removeStatus,
+  });
 
   // One AI unit's swing at a member: the roll, the Composure soak, the Deflect
   // stance, any applied status, and the downed/handoff/party-wipe rules. Split

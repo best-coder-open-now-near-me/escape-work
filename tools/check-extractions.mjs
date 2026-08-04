@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs';
 const MODULES = [
   'src/combat-aim.js', 'src/combat-world.js', 'src/hotbar-host.js',
   'src/floor-effects.js', 'src/desk.js', 'src/combat-advance.js', 'src/ooc-verbs.js',
-  'src/party-control.js', 'src/sneak-layer.js', 'src/progression-ui.js', 'src/summon-layer.js', 'src/walking.js', 'src/examine.js', 'src/keyboard.js', 'src/mouse.js', 'src/combat-entry.js', 'src/frame.js', 'src/cover-crouch.js', 'src/summon-desk.js', 'src/cover-denial-plans.js', 'src/hit-resolution.js',
+  'src/party-control.js', 'src/sneak-layer.js', 'src/progression-ui.js', 'src/summon-layer.js', 'src/walking.js', 'src/examine.js', 'src/keyboard.js', 'src/mouse.js', 'src/combat-entry.js', 'src/frame.js', 'src/cover-crouch.js', 'src/summon-desk.js', 'src/cover-denial-plans.js', 'src/hit-resolution.js', 'src/ai-verbs.js', 'src/turn-flow.js', 'src/verbs.js', 'src/demolition.js', 'src/click-verbs.js', 'src/action-bar.js', 'src/player-strike.js',
 ];
 // The HOST side of every seam. Nothing here takes a deps bag, so the `d` rules
 // do not apply - but the unbound scan does, and this is the half that has twice
@@ -85,6 +85,20 @@ function rewriteDamage(raw, file) {
   for (const m of raw.matchAll(/\bd\.([A-Za-z_$][\w$]*)\s*(?:=[^=]|\+=|-=|\|\|=|\?\?=)/g)) {
     hits.push(`${file}: assigns to \`d.${m[1]}\` - a deps bag is read-only, use a named setter`);
   }
+  // The deps bag used as a VALUE, in an operator context. `d` is always an
+  // object, so `d < 0.7`, `d + 1` and `d === x` are never what anyone meant -
+  // they are what is left when a local named `d` gets renamed at its
+  // DECLARATION and not at its uses. That shipped: `const d = Math.hypot(...)`
+  // became `const gap = ...` while the next line still read `if (d < 0.7 ...)`,
+  // so the comparison asked whether the dependency bag was smaller than 0.7,
+  // answered no every time, and `allyAtPoint` stopped finding anybody. Every
+  // friendly verb aimed at a body silently did nothing.
+  //
+  // Bound, legal, builds clean, and invisible to every other rule here.
+  const codeOnly = raw.split('\n').map((l) => l.split('//')[0]).join('\n');
+  for (const m of codeOnly.matchAll(/(?<![.\w$])d\s*(?:[<>]=?|[-+*/%]|={2,3}|!==?)(?!>)/g)) {
+    hits.push(`${file}: uses \`d\` as a value (\`${m[0].trim()}\`) - the deps bag is an object, so this is a rename that missed a use`);
+  }
   return hits;
 }
 
@@ -144,7 +158,11 @@ function unsuppliedDeps(raw, file) {
   const keys = bagKeysFor(factory);
   if (!keys) return [];
   const hits = new Set();
-  for (const m of raw.matchAll(/\bd\.([A-Za-z_$][\w$]*)/g)) {
+  // Prose only, stripped: a module header that EXPLAINS a trap by naming it
+  // ("a `d.applyDamage` resolving against a NUMBER") is documentation, not a
+  // read, and reporting it teaches people to write worse comments.
+  const src = raw.split('\n').map((l) => l.split('//')[0]).join('\n');
+  for (const m of src.matchAll(/\bd\.([A-Za-z_$][\w$]*)/g)) {
     if (!keys.has(m[1])) hits.add(`${file}: reads \`d.${m[1]}\`, which no bag supplies`);
   }
   return [...hits];
@@ -194,22 +212,61 @@ function deadZoneDeps(hostSrc, hostName) {
   return hits;
 }
 
-// A seventh class is KNOWN and deliberately NOT checked here, because every
-// cheap way to express it was noisier than it was worth: a factory whose result
-// is destructured BELOW code that already runs. `canEngage` reads `canReach`,
-// `pickTarget` calls `canEngage`, and startCombat's surprise sweep calls
-// `pickTarget` at the top level of the closure - so wiring the hit-resolution
-// factory after the sweep put `canReach` in its dead zone and startCombat threw
-// on the first fight. combat.js even says it in prose: "everything here must be
-// safe EAGERLY".
+// The seventh, and the one that has now broken this file TWICE: a name
+// destructured from a factory, read EAGERLY somewhere above that destructure.
+// `canReach` went into a `canEngage` the startCombat sweep calls; `expireSummon`
+// went into the turn engine's host object as a bare value. Both had been hoisted
+// function declarations, where naming them early was genuinely fine - combat.js
+// even said so in a comment - and both became consts in a dead zone.
 //
-// The rule that would catch it needs to know which `  foo(...)` lines are top
-// level of the host closure and which are inside a nested function, and a
-// line-shape heuristic cannot: pointed at main.js it reported all seventeen
-// factories against an `if (...) return;` sitting inside an unrelated helper.
-// A check nobody trusts is worse than no check. The mitigation is a rule of
-// thumb instead - wire factories at the TOP of the closure, above anything that
-// executes - and the e2e suite, which caught this one in six tests.
+// The GENERAL rule (does any code that runs above this reach this name?) needs
+// real scope analysis, and a line-shape heuristic for it reported all seventeen
+// of main.js's factories against an `if (...) return;` inside an unrelated
+// helper. That version is not worth having.
+//
+// But the shape that actually shipped both times is line-local and cheap: the
+// name appears ABOVE its own destructure as a BARE VALUE - `expire: expireSummon,`
+// or a shorthand `expireSummon,` - rather than inside a `(...a) =>` wrapper or a
+// getter. An eager read of a not-yet-initialised const, with no scope analysis
+// needed. The fix is always the same wrapper, and the wrapper is why the same
+// line is safe afterwards.
+function eagerBeforeDestructure(hostSrc, hostName) {
+  const lines = hostSrc.split('\n');
+  const hits = [];
+  // name -> line index of the destructure that binds it
+  const bound = new Map();
+  for (let i = 0; i < lines.length; i += 1) {
+    // The closing line of a destructure head: `} = createX({`. Names live
+    // between the `const {` above it and here - NOT in the bag literal below,
+    // which is where a naive back-walk picks up every dependency key.
+    if (!/^\s*\}\s*=\s*create[A-Za-z_$][\w$]*\(\{/.test(lines[i])) continue;
+    let j = i;
+    while (j > 0 && !/^\s*const\s*\{\s*$/.test(lines[j])) j -= 1;
+    for (let k = j + 1; k < i; k += 1) {
+      for (const m of lines[k].matchAll(/([A-Za-z_$][\w$]*)/g)) bound.set(m[1], j);
+    }
+  }
+  // Single-line form: `const { a, b } = createX({`
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = lines[i].match(/^\s*const\s*\{([^}]*)\}\s*=\s*create[A-Za-z_$][\w$]*\(/);
+    if (!m) continue;
+    for (const n of m[1].split(',')) {
+      const t = n.trim();
+      if (/^[A-Za-z_$][\w$]*$/.test(t)) bound.set(t, i);
+    }
+  }
+  for (const [name, at] of bound) {
+    for (let i = 0; i < at; i += 1) {
+      const l = lines[i];
+      if (l.trimStart().startsWith('//')) continue;
+      const bare = new RegExp(`(?::\\s*|^\\s+)${name}\\s*,\\s*$`);
+      if (bare.test(l)) {
+        hits.push(`${hostName}:${i + 1}: reads \`${name}\` as a bare value, but it is destructured from a factory at line ${at + 1} - a dead-zone read (wrap it: \`(...a) => ${name}(...a)\`)`);
+      }
+    }
+  }
+  return hits;
+}
 
 let bad = 0;
 for (const file of [...MODULES, ...HOSTS]) {
@@ -221,6 +278,7 @@ for (const file of [...MODULES, ...HOSTS]) {
   }
   if (HOSTS.includes(file)) {
     for (const hit of deadZoneDeps(raw, file)) { bad += 1; console.log(hit); }
+    for (const hit of eagerBeforeDestructure(raw, file)) { bad += 1; console.log(hit); }
   }
   // Strip comments, then every flavour of string literal, so prose cannot
   // masquerade as an identifier.
