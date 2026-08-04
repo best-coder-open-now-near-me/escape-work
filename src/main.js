@@ -41,6 +41,7 @@ import { createHotbarHost } from './hotbar-host.js';
 import { createFloorEffects } from './floor-effects.js';
 import { showLevelMenu } from './desk.js';
 import { createOocVerbs } from './ooc-verbs.js';
+import { createKeyboard } from './keyboard.js';
 import { createExamine } from './examine.js';
 import { createWalking } from './walking.js';
 import { createSummonLayer } from './summon-layer.js';
@@ -2685,89 +2686,25 @@ function startGame(level) {
     };
   }
 
-  // --- keyboard: hold Alt for the loot overlay, I for the pockets ---------------
-  // Camera pan keys (BG3/DOS2: WASD pans, and BG3 takes the arrows too -
-  // dotesports.com/pcgamesn BG3 camera guides; DOS2 fextralife Controls).
-  // Physical codes, not e.key, so WASD stays WASD on a non-QWERTY layout.
-  // keydown/keyup maintain the held set; the update loop drives the rig from
-  // it every frame, because pans are continuous and key-repeat isn't.
-  const PAN_CODES = {
-    KeyW: 'up', ArrowUp: 'up', KeyS: 'down', ArrowDown: 'down',
-    KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
-  };
-  const panHeld = new Set();
-  window.addEventListener('keydown', (e) => {
-    // Ctrl/meta chords stay the browser's (Ctrl+A, Cmd+D); a plain pan key is
-    // ours. The typed-text surfaces (god panel, the creation name field)
-    // already stop keydown propagation, so typing "was" never pans.
-    if (PAN_CODES[e.code] && !e.ctrlKey && !e.metaKey) {
-      panHeld.add(PAN_CODES[e.code]);
-      // The arrows scroll the page hosting the game (the itch.io iframe) if
-      // left to default; suppressing it is harmless for the letters.
-      e.preventDefault();
-    }
-    if (e.key === 'Alt') {
-      e.preventDefault(); // keep focus off the browser's menu bar
-      hover.setAlt(true); // lights what the cursor is already on, without a re-hover
-      // Held in a fight too: the overlay is how you SEE the doors, and a door
-      // is the one piece of terrain a fight can change. The loot entries it
-      // also carries stay refused with their own message - being able to read
-      // the room beats being able to act on all of it.
-      if (!e.repeat && sheet && !gameOver) loot.showLabels();
-    } else if (e.key === 'Control') {
-      hover.setCtrl(true); // rings under everyone while held (drawCharacterRings)
-    } else if ((e.key === 'i' || e.key === 'I') && sheet && !gameOver) {
-      loot.togglePanel(sheet);
-    } else if (/^[0-9]$/.test(e.key) && sheet && !gameOver && !modalOpen()) {
-      // Number keys press the matching slot of the VISIBLE row, so 1 is always
-      // the leftmost button on screen however many rows the kit needs - and 0
-      // answers for the tenth slot (TACTICS_PLAN M8's row of ten).
-      //
-      // These used to be gated `!inCombat`, which meant a FIGHT - the half of
-      // the game that is nothing but pressing verbs under pressure - was the
-      // half with no keyboard shortcuts at all. The row you learn out of combat
-      // is the row you get in one, which was always the stated point of the
-      // layout living on the sheet.
-      const i = hotbarHost.hotbar?.indexAtKey(e.key === '0' ? 10 : Number(e.key)) ?? -1;
-      if (i >= 0) hotbarHost.pressSlot(i);
-    } else if ((e.key === '[' || e.key === ']') && sheet && !gameOver && !modalOpen()) {
-      // Page the hotbar rows from the keyboard - the pager buttons and the wheel
-      // over the bar do the same thing.
-      hotbarHost.hotbar?.flip(e.key === ']' ? 1 : -1);
-    } else if (e.key === 'Tab' && sheet && !gameOver && !modalOpen()) {
-      // Tab cycles which member you lead out of combat - and, in one, which
-      // member of an open SHARED turn you're steering (INITIATIVE_PLAN). With
-      // no shared turn open the combat cycle refuses, so the key stays inert
-      // on a solo turn rather than falling back to a leader switch.
-      e.preventDefault();
-      if (inCombat) combat?.cycleSteer();
-      else cycleLeader();
-    } else if ((e.key === 'h' || e.key === 'H') && sheet && !gameOver && !modalOpen()) {
-      // Hide, the pair both references ship (SNEAK_PLAN D4): h sneaks the
-      // character you steer and parks the rest; Shift+H sneaks the group.
-      if (!inCombat) toggleSneak(e.shiftKey ? 'group' : 'solo');
-    } else if ((e.key === 'c' || e.key === 'C') && sheet && !gameOver && !modalOpen()) {
-      // The read-only character sheet for whoever you're controlling.
-      charSheet.toggle(charSheetVm(sheet));
-    } else if ((e.key === 't' || e.key === 'T') && sheet && !gameOver && !modalOpen()) {
-      // Overhead tactical view - the same toggle as the rail button.
-      controls.toggleTactical();
-      tacticalBtn?.refresh();
-    } else if (e.key === 'Home' && sheet && !gameOver) {
-      // BG3's recenter key: put the camera back on whoever you're driving
-      // (the acting combatant in a fight, the leader out of one).
-      focusCameraOn(steeredActor());
-    }
-  });
-  window.addEventListener('keyup', (e) => {
-    if (PAN_CODES[e.code]) panHeld.delete(PAN_CODES[e.code]);
-    if (e.key === 'Alt') { hover.setAlt(false); loot.hideLabels(); }
-    if (e.key === 'Control') hover.setCtrl(false);
-  });
-  window.addEventListener('blur', () => {
-    panHeld.clear(); // a key can't be 'still held' across a focus loss
-    loot.hideLabels();
-    hover.releaseModifiers(); // a key can't be 'still held' across a focus loss
+  // What the keys do (keyboard.js). `panHeld` comes back live - the update loop
+  // drives the camera rig from it every frame.
+  const { panHeld } = createKeyboard({
+    get sheet() { return sheet; },
+    get gameOver() { return gameOver; },
+    get inCombat() { return inCombat; },
+    get combat() { return combat; },
+    get tacticalBtn() { return tacticalBtn; },
+    get controls() { return controls; },
+    get hotbarHost() { return hotbarHost; },
+    get charSheet() { return charSheet; },
+    hover,
+    loot,
+    modalOpen: (...a) => modalOpen(...a),
+    cycleLeader: (...a) => cycleLeader(...a),
+    toggleSneak: (...a) => toggleSneak(...a),
+    charSheetVm: (...a) => charSheetVm(...a),
+    focusCameraOn: (...a) => focusCameraOn(...a),
+    steeredActor: (...a) => steeredActor(...a),
   });
 
   // Cosmetic feedback: projectiles, floating numbers, particle bursts, ground
