@@ -1150,7 +1150,6 @@ function startGame(level) {
     get playerLayer() { return playerLayer; },
     get grid() { return grid; },
     legQueue,
-    panHeld,
     floors,
     scene,
     pc,

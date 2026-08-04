@@ -179,7 +179,13 @@ function deadZoneDeps(hostSrc, hostName) {
       // `function` declarations HOIST, so a function passed eagerly from above
       // its own declaration is fine - `onExplosion: handleExplosion` is the
       // house example. Only the let/const family has a dead zone.
-      const decl = hostSrc.search(new RegExp(`^\\s*(?:const|let|var)\\s+${name}\\b`, 'm'));
+      // Destructured declarations count: `const { panHeld } = createKeyboard(...)`
+      // binds `panHeld` exactly as a plain const does, and matching only the
+      // `const name` form let a genuine dead-zone read through - `panHeld` was
+      // passed to a factory a thousand lines above the destructure that binds
+      // it, and the whole game failed to boot.
+      const decl = hostSrc.search(new RegExp(
+        `^\\s*(?:const|let|var)\\s+(?:${name}\\b|[{[][^=]*\\b${name}\\b[^=]*[}\\]]\\s*=)`, 'm'));
       if (decl > end) {
         hits.push(`${hostName}: ${call[1]} is passed \`${name}\` eagerly, but \`${name}\` is declared below the call - a dead-zone read at boot (use a getter or a wrapper)`);
       }
