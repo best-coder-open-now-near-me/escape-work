@@ -41,6 +41,7 @@ import { createHotbarHost } from './hotbar-host.js';
 import { createFloorEffects } from './floor-effects.js';
 import { showLevelMenu } from './desk.js';
 import { createOocVerbs } from './ooc-verbs.js';
+import { createSummonLayer } from './summon-layer.js';
 import { createProgressionUi } from './progression-ui.js';
 import { createSneakLayer } from './sneak-layer.js';
 import { createPartyControl } from './party-control.js';
@@ -423,40 +424,36 @@ function startGame(level) {
   // topple, no body, no loot. Destroying the entity auto-unregisters it from
   // picking (see ARCHITECTURE.md); nulling the node stops the actor's update
   // from animating a body that no longer exists.
-  function dismissSummon(body) {
-    if (!body) return;
-    body.entity?.destroy();
-    body.entity = null;
-    body.visual = null;
-    const i = summons.findIndex((s) => s.actor === body);
-    if (i >= 0) summons.splice(i, 1);
-    const e = enemies.indexOf(body);
-    if (e >= 0) enemies.splice(e, 1);
-  }
-
-  // Clear the whole summon roster at once. Losing and aborting still do this -
-  // a game over or a torn-down fight leaves nothing standing. VICTORY no longer
-  // does: a summon with turns left on its assignment walks out of the fight
-  // with you and joins the next one (see the world clock in the update loop).
-  function despawnSummons() {
-    // Over a COPY - dismissSummon splices the list it is walking.
-    for (const s of [...summons]) dismissSummon(s.actor);
-    summons.length = 0;
-  }
-
-  // Out-of-combat, a summon's assignment is spent by the world clock instead of
-  // by initiative turns - one per fire/smoke turn - so temps don't loiter
-  // forever just because you stopped fighting. Returns nothing; expired
-  // employees show themselves out.
-  function ageSummons() {
-    for (const s of [...summons]) {
-      if (s.actor.summonTurns == null) continue;
-      s.actor.summonTurns -= 1;
-      if (s.actor.summonTurns > 0) continue;
-      ui.toast(`${s.sheet.name}'s assignment ends. They head for the elevators.`);
-      dismissSummon(s.actor);
-    }
-  }
+  // The temp workforce (summon-layer.js): the roster's operations, not the
+  // roster - `summons` is world state like `enemies`, with readers all over
+  // this file, so the array stays here and the module takes a getter for it.
+  const summonLayer = createSummonLayer({
+    get summons() { return summons; },
+    get enemies() { return enemies; },
+    get player() { return player; },
+    get lift() { return lift; },
+    app,
+    ui,
+    picking,
+    CLASSES,
+    ENEMY_TYPES,
+    CompanionActor,
+    EnemyActor,
+    createSheetFrom,
+    placeModel,
+    lookOf,
+    summonRoom,
+    summonSpotProblem,
+    dropCount,
+    dressUp: (...a) => dressUp(...a),
+    freeTilesNear: (...a) => freeTilesNear(...a),
+    leadBody: (...a) => leadBody(...a),
+    hasLos: (...a) => hasLos(...a),
+  });
+  const {
+    dismissSummon, despawnSummons, ageSummons, summonAt, spawnSummonUnits,
+    liveSummonsOf, roomFor, summonDropProblem, summonDropSpots,
+  } = summonLayer;
 
   const enemyAt = (x, z) => enemies.find((e) => e.alive && e.x === x && e.z === z) || null;
   const npcAt = (x, z) => npcs.find((n) => n.x === x && n.z === z) || null;
@@ -466,10 +463,6 @@ function startGame(level) {
   const partyAt = (x, z) => (party
     ? party.members.some((m) => m.actor && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z)
     : (x === player.x && z === player.z));
-  // A living player-team summon on this tile. Summons block enemies (folded
-  // into enemy pathing/occupancy below) but stay pass-through for the party -
-  // isWalkable deliberately ignores them, so members walk right through.
-  const summonAt = (x, z) => summons.some((s) => s.sheet.hp > 0 && s.actor.x === x && s.actor.z === z);
   // NPCs stand on their tile and block movement like any body.
   const isWalkable = (x, z) => grid.terrainOpen(x, z) && !enemyAt(x, z) && !npcAt(x, z);
   // Surface queries, consulting the runtime (fire) before static state.
@@ -699,39 +692,6 @@ function startGame(level) {
   // out-of-combat post (postSummonAt) needs the same spawn path, and a second
   // copy of it would be a second set of rules about who gets a body and a
   // sheet.
-  function spawnSummonUnits(archetypeId, team, summoner, n, at = null) {
-    const def = CLASSES[archetypeId] || ENEMY_TYPES[archetypeId];
-    if (!def) return [];
-    const ally = team === 'player';
-    const out = [];
-    const spots = at
-      ? freeTilesNear(at.x, at.z, n, 0)
-      : freeTilesNear(summoner.x, summoner.z, n, 1);
-    for (const [x, z] of spots) {
-      const actor = ally
-        ? new CompanionActor(x, z, archetypeId, def)
-        : new EnemyActor(x, z, archetypeId, def, { team, summoned: true, summonedBy: summoner });
-      // Who called them is part of the record, not just of the fight they were
-      // called in: a summon that outlives its fight walks into the NEXT one,
-      // and the per-summoner live cap can only see it if the link survives the
-      // trip (SUMMON_PLAN #7). Enemy-side summons carry the same link on the
-      // actor itself.
-      const rec = ally
-        ? { sheet: createSheetFrom(def, { summon: true }), actor, summonedBy: summoner }
-        : actor;
-      (ally ? summons : enemies).push(rec);
-      placeModel(app, `assets/characters/${def.model}.glb`, x, z, {
-        lift, rotY: ally ? 90 : -90, animate: true,
-        onReady: (e) => {
-          dressUp(e, actor, ally ? lookOf(rec.sheet) : actor.def?.look, ally ? rec.sheet.model : actor.def?.model);
-          picking.register(e, ally ? 'summon' : 'enemy', actor);
-        },
-      });
-      out.push(rec);
-    }
-    return out;
-  }
-
   // The out-of-combat verbs (ooc-verbs.js). This cluster WRITES shared state,
   // so those four arrive as named setters - a `setArmedOoc(id)` call is
   // greppable in a way that `armedOoc = id` from anywhere in this file is not.
@@ -1821,24 +1781,6 @@ function startGame(level) {
   // world clock out of combat (ageSummons), so a temp posted between fights
   // sees itself out on its own, and one posted just before a fight walks into
   // it (startCombat's `allies`) with whatever assignment is left.
-  const liveSummonsOf = (summoner) => summons.filter((s) =>
-    s.sheet.hp > 0 && s.actor && s.summonedBy === summoner).length;
-  const roomFor = (a) => summonRoom(a, liveSummonsOf(player));
-  // The same ladder combat runs, minus the two legs a FIGHT owns - there is no
-  // AP pool to spend out here and no per-fight `uses` to ration, so those
-  // fields simply are not supplied.
-  const summonDropProblem = (a, tx, tz) => summonSpotProblem(a, {
-    // The drop range is a circle from the poster's body; the SPOT is a tile.
-    dist: Math.hypot(leadBody().x - tx, leadBody().z - tz),
-    los: hasLos(leadBody(), { x: tx, z: tz }),
-    hasRoomToStand: freeTilesNear(tx, tz, 1, 0).length > 0,
-    room: roomFor(a),
-  });
-  // The tiles the arrivals would land on: the clicked tile first, then the free
-  // ground ringing outward, bounded by `count` and by what the cap has left.
-  const summonDropSpots = (a, tx, tz) => (summonDropProblem(a, tx, tz)
-    ? []
-    : freeTilesNear(tx, tz, dropCount(a, roomFor(a)), 0));
   // First (enemy, member) adjacency in the party - any member can get
   // cornered, and the fight engages around whoever it was.
   function adjacentEnemyToParty() {
