@@ -41,6 +41,8 @@ import { createHotbarHost } from './hotbar-host.js';
 import { createFloorEffects } from './floor-effects.js';
 import { showLevelMenu } from './desk.js';
 import { createOocVerbs } from './ooc-verbs.js';
+import { createFrame } from './frame.js';
+import { createCombatEntry } from './combat-entry.js';
 import { createMouse } from './mouse.js';
 import { createKeyboard } from './keyboard.js';
 import { createExamine } from './examine.js';
@@ -1148,6 +1150,7 @@ function startGame(level) {
     get playerLayer() { return playerLayer; },
     get grid() { return grid; },
     legQueue,
+    panHeld,
     floors,
     scene,
     pc,
@@ -1586,44 +1589,102 @@ function startGame(level) {
   // it (startCombat's `allies`) with whatever assignment is left.
   // First (enemy, member) adjacency in the party - any member can get
   // cornered, and the fight engages around whoever it was.
-  function adjacentEnemyToParty() {
-    for (const m of party?.members || []) {
-      if (!m.actor?.entity || m.sheet.hp <= 0) continue;
-      // A sneaking body starts fights by being SEEN (the sweep), not by
-      // proximity - standing unseen at somebody's shoulder is the whole
-      // assassin fantasy (SNEAK_PLAN D1).
-      if (hasStatus(m.sheet, 'sneaking')) continue;
-      const en = enemies.find((e) =>
-        e.alive && Math.abs(m.actor.x - e.x) <= 1 && Math.abs(m.actor.z - e.z) <= 1
-        // Adjacency THROUGH a sealed doorway is not adjacency. Chebyshev alone
-        // started fights across one - and because doors cannot be opened in
-        // combat and closed doors block sight, the coworker on the far side
-        // could then never be reached, shot or seen, while victory still
-        // required them dead. The fight could not end.
-        //
-        // The test is the SAME one that picks the engaged set, deliberately:
-        // "can these two take part in a fight together" should have one answer,
-        // and using movement's stepOpen here asked a different question. That
-        // rule needs all four edges around a diagonal corner open, which is
-        // right for walking a body through and wrong for two people swinging at
-        // each other past the end of a partition - so it refused fights that
-        // plainly should have started.
-        && canTakePart(m.actor, e));
-      if (en) return { en, member: m };
-    }
-    return null;
-  }
+  // How a fight starts (combat-entry.js): noticing one, opening one, and the
+  // trigger the walk loop polls. `inCombat`/`combat` go in as setters because
+  // opening a fight is a thing that HAPPENS, and the rest of this file reads
+  // them constantly.
+  const { adjacentEnemyToParty, beginCombat, checkCombatTrigger } = createCombatEntry({
+    get sheet() { return sheet; },
+    get player() { return player; },
+    get party() { return party; },
+    get combat() { return combat; },
+    get inCombat() { return inCombat; },
+    get gameOver() { return gameOver; },
+    get enemies() { return enemies; },
+    get summons() { return summons; },
+    get oocCrouch() { return oocCrouch; },
+    get armedOoc() { return armedOoc; },
+    get pendingAction() { return pendingAction; },
+    get grid() { return grid; },
+    get runtime() { return runtime; },
+    get hover() { return hover; },
+    get controls() { return controls; },
+    get hotbarHost() { return hotbarHost; },
+    get sneakLayer() { return sneakLayer; },
+    get vfx() { return vfx; },
+    app,
+    pc,
+    ui,
+    scene,
+    doors,
+    loot,
+    dialogue,
+    shopping,
+    combatRng,
+    ENGAGE_RADIUS,
+    STEALTH,
+    VICTORY_HEAL,
+    startCombat,
+    createCombatWorld,
+    partyLeader,
+    seesBody,
+    coneBoundary,
+    segmentClear,
+    smoothPath,
+    routeOpen,
+    findPath,
+    applyStatus,
+    removeStatus,
+    hasStatus,
+    canTakePart: (...a) => canTakePart(...a),
+    sneakSightOpts: (...a) => sneakSightOpts(...a),
+    watcherOf: (...a) => watcherOf(...a),
+    endSneak: (...a) => endSneak(...a),
+    isWalkable: (...a) => isWalkable(...a),
+    partyAt: (...a) => partyAt(...a),
+    summonAt: (...a) => summonAt(...a),
+    clampPoint: (...a) => clampPoint(...a),
+    approachTo: (...a) => approachTo(...a),
+    floorAt: (...a) => floorAt(...a),
+    slipChanceAt: (...a) => slipChanceAt(...a),
+    stickGum: (...a) => stickGum(...a),
+    sightClear: (...a) => sightClear(...a),
+    smoothFromBody: (...a) => smoothFromBody(...a),
+    freeTilesNear: (...a) => freeTilesNear(...a),
+    hazardCostFor: (...a) => hazardCostFor(...a),
+    enemyHazardCost: (...a) => enemyHazardCost(...a),
+    enemyClearOfHazards: (...a) => enemyClearOfHazards(...a),
+    rawSurfDamage: (...a) => rawSurfDamage(...a),
+    effectiveSurfDamage: (...a) => effectiveSurfDamage(...a),
+    leaveSurfaceAt: (...a) => leaveSurfaceAt(...a),
+    onSummonStep: (...a) => onSummonStep(...a),
+    spawnSummonUnits: (...a) => spawnSummonUnits(...a),
+    dismissSummon: (...a) => dismissSummon(...a),
+    focusCameraOn: (...a) => focusCameraOn(...a),
+    awardKill: (...a) => awardKill(...a),
+    loseGame: (...a) => loseGame(...a),
+    despawnSummons: (...a) => despawnSummons(...a),
+    ageTempSurfaces: (...a) => ageTempSurfaces(...a),
+    syncLeaderBindings: (...a) => syncLeaderBindings(...a),
+    openLevelUps: (...a) => openLevelUps(...a),
+    buildHotbar: (...a) => buildHotbar(...a),
+    paintHud: (...a) => paintHud(...a),
+    refreshHotbarSlots: (...a) => refreshHotbarSlots(...a),
+    modalOpen: (...a) => modalOpen(...a),
+    toggleSneak: (...a) => toggleSneak(...a),
+    sneakingMembers: (...a) => sneakingMembers(...a),
+    sneakSweep: (...a) => sneakSweep(...a),
+    drawSneakCones: (...a) => drawSneakCones(...a),
+    anyWatcherSees: (...a) => anyWatcherSees(...a),
+    bodyOfMember: (...a) => bodyOfMember(...a),
+    inAnyCone: (...a) => inAnyCone(...a),
+    setInCombat: (v) => { inCombat = v; },
+    setCombat: (v) => { combat = v; },
+    setPendingAction: (v) => { pendingAction = v; },
+    setArmedOoc: (v) => { armedOoc = v; },
+    setOocCrouch: (v) => { oocCrouch = v; },
+  });
 
-  // Start (or refuse to start) a fight. `engaged` is everyone joining now,
-  // `primary` the coworker who triggered it (drives the flavor line + facing),
-  // `opening` an optional { actionId, target } fired as the first move when the
-  // fight is kicked off from the persistent hotbar.
-  // --- sneaking (SNEAK_PLAN M2/M3) -------------------------------------------
-  // A held MODE, not a verb: 'solo' sneaks the steered leader and parks the
-  // followers where they stand; 'group' sneaks everyone (D4 - the pair BG3
-  // ships). Detection is the deterministic cone (stealth.seesBody); spotted
-  // means the fight starts (D3). THE RENDERED CONE IS THE RULE: the sweep and
-  // the drawing read the same predicate with the same options.
   const sneakLayer = createSneakLayer({
     get sheet() { return sheet; },
     get party() { return party; },
@@ -1651,178 +1712,6 @@ function startGame(level) {
     sneakingMembers, sneakSightOpts, watcherOf, bodyOfMember, anyWatcherSees,
     endSneak, toggleSneak, inAnyCone, sneakSweep, drawSneakCones,
   } = sneakLayer;
-
-  function beginCombat({ engaged, primary, opening = null }) {
-    if (!sheet || inCombat || gameOver || !player.entity) return;
-    // A fight begun while sneaking judges surprise by SIGHT (SNEAK M4/D6):
-    // capture who saw the initiator BEFORE the sneak state is cleared.
-    let sneakOpened = null;
-    if (sneakLayer.sneak) {
-      const opts = sneakSightOpts();
-      const p = player.entity.getPosition();
-      sneakOpened = {
-        saw: new Set(enemies.filter((en) => en.alive && en.entity
-          && seesBody(watcherOf(en), { x: p.x, z: p.z }, opts))),
-      };
-    }
-    // However the fight found you, the sneak is over (M3) - quietly: the
-    // opener's own line says what happened.
-    endSneak(null);
-    for (const m of party.members) m.actor?.clearPath(); // followers freeze too
-    for (const e of enemies) e.clearPath(); // freeze any in-flight wander
-    pendingAction = null;
-    armedOoc = null;
-    hotbarHost.hotbar?.setArmed(null);
-    dialogue.close();
-    shopping.close(); // the machine can wait; it is not going anywhere
-    inCombat = true;
-    controls.recenter(); // a fight starts AT the party - a panned-away view returns
-    ui.hideMenu();
-    loot.hideLabels(); // no browsing the shelves mid-fight
-    hover.clear();
-    // Everyone close enough joins the brawl (those further than 2 tiles are
-    // surprised and lose their first turn - see combat.js). Bystanders
-    // outside the radius join later if attacked (combat.js joinCombat).
-    player.faceToward(primary.x, primary.z);
-    primary.faceToward(player.x, player.z);
-    const live = engaged.filter((e) => e.alive).length;
-    ui.say(live > 1
-      ? `${primary.def.name} has noticed you. So have ${live - 1} other${live > 2 ? 's' : ''}.`
-      : `${primary.def.name} has noticed you.`);
-    const controller = startCombat({
-      app,
-      party,
-      engaged,
-      opening,
-      sneakOpened,
-      rng: combatRng,
-      // A crouch taken before the fight rides into it (TACTICS_PLAN M6 OOC):
-      // combat owns it from here - the status chip is already on the sheet.
-      preCrouch: (() => { const c = oocCrouch; oocCrouch = null; return c; })(),
-      // Summons that outlived the last fight walk into this one - they're still
-      // on the floor with turns left on the clock, so they fight.
-      allies: summons.filter((s) => s.sheet.hp > 0),
-      // The floor this fight is fought on (combat-world.js). The MUTABLE
-      // bindings go in as getters, not values: a fight outlives a leader
-      // switch, and a facade holding the sheet somebody had when combat opened
-      // would answer every question about the wrong character.
-      world: createCombatWorld({
-        get sheet() { return sheet; },
-        get player() { return player; },
-        get combat() { return combat; },
-        get party() { return party; },
-        get enemies() { return enemies; },
-        get summons() { return summons; },
-        grid,
-        runtime,
-        scene,
-        doors,
-        isWalkable,
-        partyAt,
-        summonAt,
-        clampPoint,
-        approachTo,
-        floorAt,
-        slipChanceAt,
-        stickGum,
-        segmentClear,
-        sightClear,
-        smoothPath,
-        smoothFromBody,
-        routeOpen,
-        freeTilesNear,
-        hazardCostFor,
-        enemyHazardCost,
-        enemyClearOfHazards,
-        rawSurfDamage,
-        effectiveSurfDamage,
-        leaveSurfaceAt,
-        onSummonStep,
-        spawnSummonUnits,
-        // Both of these are ALSO facade keys, which is exactly why they need
-        // naming here: inside the object literal `findPath(...)` no longer
-        // resolves to main.js's function, it resolves to nothing.
-        findPath,
-        dismissSummon,
-      }),
-      fx: vfx,
-      callbacks: {
-        say: ui.say,
-        // Double-click on an initiative row: put the camera on that body.
-        // main.js owns the rig, so combat only names WHO.
-        focusCamera: focusCameraOn,
-        // Combat passes the acting member's sheet (initiative controls who you
-        // drive); default to the leader for any callless use.
-        updateHud: (s = sheet) => paintHud(s || sheet),
-        // Repaint the shared bar. combat.js calls this wherever it used to
-        // rebuild its own: control changing hands, and every refresh() that
-        // moves AP, uses, paper or the armed slot.
-        refreshBar: () => { if (hotbarHost.hotbar && sheet) buildHotbar(); },
-        // One combat round = one fire/smoke turn (combat.js calls this as it
-        // hands the turn back to the player).
-        onRound: () => { runtime.advanceTurn(); ageTempSurfaces(); },
-        onEnemyKilled: awardKill,
-        onWin: () => {
-          inCombat = false;
-          combat = null;
-          // Summons stay. They used to blink out the instant the last coworker
-          // fell, which made a two-turn-old employee feel like a prop; now the
-          // assignment (`lifetimeTurns`) is what ends them, whether that runs
-          // out mid-fight, between fights, or in the next one. combat.js has
-          // already swept any that were killed.
-          syncLeaderBindings(); // control stays with whoever had the floor
-          // A breather after every victory, so back-to-back fights aren't a
-          // death spiral - wounds still carry over, just less brutally. The
-          // whole party catches its breath, and the downed come to at 1 HP.
-          for (const m of party.members) {
-            if (m.sheet.hp > 0) m.sheet.hp = Math.min(m.sheet.maxHp, m.sheet.hp + VICTORY_HEAL);
-            else {
-              m.sheet.hp = 1;
-              if (m.actor) m.actor.fx = null;
-              ui.toast(`${m.sheet.name} comes to.`);
-            }
-          }
-          ui.say(`The floor is yours. You catch your breath. (+${VICTORY_HEAL} HP)`);
-          paintHud(sheet);
-          refreshHotbarSlots(); // the combat-only verbs dim again with the fight over
-          openLevelUps(); // spend the fight's promotions now that it's safe
-        },
-        onLose: () => {
-          inCombat = false;
-          combat = null;
-          despawnSummons();
-          loseGame('The office wins this round. Darkness falls between the cubicles.');
-        },
-      },
-    });
-    // A hotbar opener can kill the last coworker before startCombat even
-    // returns - onWin/onLose already tore the fight down and nulled `combat`,
-    // so binding the returned controller here would resurrect a dead one (and
-    // a later abort would run its cleanup a second time).
-    if (inCombat) combat = controller;
-    // Rebuild the bar NOW that combat's rules own it: the combat-only verbs
-    // (Take Cover, Deflect, the heals) light up the moment a fight starts,
-    // not at whatever next press happened to rebuild the slots - which is
-    // exactly how it used to read: "disabled until I pushed something".
-    refreshHotbarSlots();
-  }
-
-  // Proximity trigger: a coworker adjacent to any party member starts the
-  // fight (walk into range, or get cornered). Everyone within the engage
-  // radius of the cornered member joins.
-  function checkCombatTrigger() {
-    if (!sheet || inCombat || gameOver || !player.entity) return;
-    const hit = adjacentEnemyToParty();
-    if (!hit) return;
-    const { en, member } = hit;
-    const engaged = enemies.filter((e) =>
-      e.alive && Math.max(Math.abs(e.x - member.actor.x), Math.abs(e.z - member.actor.z)) <= ENGAGE_RADIUS
-      // ...and who can actually take part. Somebody inside the radius but
-      // sealed off joins a fight they can never act in, and victory needs
-      // every engaged coworker down - so the fight would never end.
-      && canTakePart(member.actor, e));
-    beginCombat({ engaged, primary: en });
-  }
 
   // Hotbar trigger: an armed attack, aimed at a coworker, opens combat with
   // that move. The clicked target joins even if it's beyond the engage radius
@@ -2437,247 +2326,79 @@ function startGame(level) {
   // its OWN talents, pass-through for the rest of the party, and never parking
   // on a tile that would hurt it. A small repath cadence keeps Dijkstra off
   // the hot path; per-tile effects land through onMemberStep like any walk.
-  app.on('update', (dt) => {
-    // Every party member walks, steps and animates the same way; each one's
-    // tile effects run against their own sheet (onMemberStep).
-    if (party) {
-      for (const m of party.members) {
-        if (!m.actor) continue;
-        m.actor.speed = memberSpeed(m);
-        m.actor.update(dt, (x, z, done, changed) => onMemberStep(m, x, z, done, changed));
-      }
-      if (sheet && !inCombat && !gameOver) updateFollowers(dt);
-      sneakLayer.sweepTick(dt);
-    } else {
-      player.update(dt); // idling on the spawn tile behind the class picker
-    }
-    // Layered levels: ride the climb (the body's height follows its progress
-    // up the flight), chain the next queued route leg when one lands, and
-    // keep the cutaway honest about which storeys cover the leader.
-    if (floors) {
-      if (climbAnim && player.entity) {
-        const pos = player.entity.getPosition();
-        const d = Math.hypot(pos.x - climbAnim.sx, pos.z - climbAnim.sz);
-        const k = Math.min(1, Math.max(0, (d - 0.5) / climbAnim.run));
-        player.entity.setPosition(pos.x, climbAnim.y0 + (climbAnim.y1 - climbAnim.y0) * k, pos.z);
-        // The rig climbs WITH the body: easing the focus height along the
-        // flight is what kills the snap (and half the pop) at the landing.
-        controls.setView({ focusY: climbAnim.y0 - lift + (climbAnim.y1 - climbAnim.y0) * k + 0.3 });
-        if (!player.moving) {
-          playerLayer = climbAnim.toLayer;
-          player.entity.setPosition(pos.x, climbAnim.y1, pos.z);
-          controls.setView({ focusY: floors.baseY[playerLayer] + 0.3 });
-          climbAnim = null;
-        }
-      }
-      if (!climbAnim && legQueue.length && !player.moving && !inCombat) startNextLeg();
-      // The covering test stands down mid-climb: the logical tile reaches the
-      // landing before playerLayer flips, and judging "covered" off that
-      // half-state is what popped the upper floor out and straight back in.
-      if (!climbAnim) {
-        scene.updateCutaway(playerLayer, (l) => {
-          // In-bounds check first: typeAt reads 'wall' outside the map, and a
-          // smaller upper storey must not count as covering the whole ground.
-          const g = floors.layers[l];
-          return player.x >= 0 && player.x < g.width && player.z >= 0 && player.z < g.height
-            && g.typeAt(player.x, player.z) !== null;
-        });
-      }
-    }
-    const world = {
-      paused: inCombat || gameOver,
-      isWalkable,
-      isHazard: enemyIsHazard, // wander avoidance uses the ENEMY hazard model
-      blockedByParty: partyAt,
-      occupied: (x, z, self) =>
-        partyAt(x, z)
-        || summonAt(x, z)
-        || enemies.some((e) => e.alive && e !== self && e.x === x && e.z === z),
-      // The CHANCE, not a pre-rolled verdict: actors.js runs the same
-      // step-rules.slips predicate combat and the party do, so the tread that
-      // saves a wanderer is checked by the same rule that saves you.
-      slipChanceAt,
-      stickGum,
-      // The same two the other side of the door already has: the tile's raw
-      // facts, and what it bills a coworker. An amble runs the floor's rules
-      // now [stated] (designer, 2026-08-03), and it runs them off the same
-      // sheet and the same ENEMY damage model a coworker's combat walk uses -
-      // what hurts a coworker has nothing to do with the player's shoes.
-      floorAt,
-      surfDamage: (x, z) => rawSurfDamage(x, z),
-      // A wander route never crosses hazards, other actors, or a party
-      // member's tile; the enemy's own start tile counts as open. Returns it
-      // smoothed.
-      findWanderPath: (en, tx, tz) => {
-        const open = (x, z) => (x === en.x && z === en.z
-          ? grid.terrainOpen(x, z)
-          : enemyClearOfHazards(x, z) && !partyAt(x, z));
-        const p = findPath(open, en.x, en.z, tx, tz, null, grid.stepOpen);
-        if (!p || p.length < 2) return null;
-        // The wanderer rests at last amble's loose point, not its tile centre
-        // - smooth from the BODY like every other feeder, or the first step of
-        // each amble snaps back toward the centre (setPath's precondition).
-        const pos = en.entity?.getPosition();
-        if (pos) p[0] = [pos.x, pos.z];
-        // amble to a loose spot in the tile, not its dead centre
-        p[p.length - 1] = clampPoint(tx + (Math.random() - 0.5) * 0.7, tz + (Math.random() - 0.5) * 0.7);
-        return smoothPath(routeOpen(open, p), p, grid.edgeOpen);
-      },
-    };
-    let anyoneMoved = false;
-    for (const en of enemies) {
-      const beforeX = en.x;
-      const beforeZ = en.z;
-      en.update(dt, world);
-      if (en.x !== beforeX || en.z !== beforeZ) anyoneMoved = true;
-    }
-    if (anyoneMoved) checkCombatTrigger(); // did someone just corner the player?
-    // Player-team summons walk their combat paths and animate like a member;
-    // each one's tile effects run against its own sheet (onSummonStep). They
-    // only exist mid-fight, so there's no wander to gate.
-    for (const s of summons) {
-      s.actor.update(dt, (x, z, done, changed) => onSummonStep(s, x, z, done, changed));
-    }
-    for (const npc of npcs) npc.update(dt); // idle in place, ease their facing
-    // The bottom narrator box gets general narration only when nothing else
-    // owns the bottom of the screen: not mid-fight (combat has its own log),
-    // not mid-conversation (the dialogue panel is up), not pre-class-pick.
-    // The narration box stays up in combat and in conversation now: examine
-    // text and incidental narration used to vanish entirely during both, which
-    // is what made every examine description look broken.
-    ui.setNarrationGate(!!sheet && !gameOver);
-    // Persistent hotbar: visible only when it can act; ammo counts refresh
-    // when they change (the gate keeps DOM writes off the hot path). Armed
-    // out-of-combat target rings redraw each frame, like combat's own.
-    if (hotbarHost.hotbar) {
-      // Visible whenever it can act - which now includes a fight. Hiding it in
-      // combat was what forced combat.js to build a second bar, and cost the
-      // fight the layout, the pager, the item slots and the number keys.
-      // Whether it CAN act is this file's question; everything downstream of
-      // the answer - visibility, the ammo count, the pocket contents - belongs
-      // to the bar and now lives with it.
-      // `show` is still needed HERE: the out-of-combat aim rings below are
-      // main.js's, and they are gated on the same answer the bar is. It used
-      // to be a local declared inside the block that moved out - deleting the
-      // block took the declaration with it and left the reads behind, which
-      // threw once per frame and killed the update loop, and a dead update
-      // loop is an AI turn that never ends.
-      const show = !!sheet && !gameOver && !modalOpen();
-      hotbarHost.syncFrame(show);
-      // What an armed slot rings depends on what it aims at: a coworker
-      // (every attack and throw), a spot on the floor (a summon), the
-      // hovered furniture/partition (shove - which ALSO rings coworkers,
-      // they're targets too), or the hovered shield (take cover).
-      // The crouch you are in draws whatever is armed - it is not an aim, it
-      // is the state of the character. drawCoverAim is called EVERY frame and
-      // gates itself on its own query, so its eased ring resets the moment
-      // cover stops being the armed verb - gated at the call site, a disarm
-      // would leave the ease pointing at wherever cover was last aimed.
-      if (show && !inCombat) { hover.drawHeldCover(); hover.drawCoverAim(dt); }
-      if (show && !inCombat && armedOoc) {
-        if (ACTIONS[armedOoc].type === 'summon') hover.drawSummonDrop();
-        else if (ACTIONS[armedOoc].cone) hover.drawConeAim();
-        else if (ACTIONS[armedOoc].type === 'cover') { /* drawn above, every frame */ }
-        else if (ACTIONS[armedOoc].type === 'shove') {
-          hover.drawArmedTargets();
-          hover.drawShoveAim();
-        } else hover.drawArmedTargets();
-      }
-    }
-    // Ctrl rings redraw each frame while held (immediate-mode lines last one
-    // frame) - in and out of combat alike.
-    if (hover.ctrlHeld && sheet && !gameOver) hover.drawCharacterRings();
-    // Same deal for the out-of-combat reach ring: immediate-mode, so it has to
-    // be reissued every frame it's meant to be visible.
-    if (hover.glowHeld && sheet && !inCombat && !gameOver && !modalOpen()) hover.drawReachRing();
-    // Party bar: redraw only when the roster state changes (names/HP/active,
-    // plus per-member AP mid-fight); visible only once there's an actual
-    // party to show.
-    if (party) {
-      const cp = inCombat && combat ? combat.party : null;
-      const key = party.members
-        .map((m, i) => `${m.sheet.name}:${m.sheet.hp}/${m.sheet.maxHp}${i === party.active ? '*' : ''}${cp ? ':' + cp[i].ap : ''}:${m.sheet.attrPoints || 0}/${m.sheet.classPoints || 0}p`)
-        .join('|');
-      if (key !== partyBarKey) { partyBarKey = key; partyBar.refresh(party, cp); }
-      partyBar.setVisible(party.members.length > 1 && !gameOver);
-      // The HUD level-up pip tracks the leader's banked points, out of combat.
-      levelUpPip.refresh(!inCombat && !gameOver && !modalOpen() && sheet ? pending(sheet) : 0);
-    }
-    // Fire/smoke age in TURNS. In combat, combat.js advances one per round (via
-    // the onRound callback in beginCombat). Out of combat there are no rounds, so
-    // a real-time clock stands in - about one turn per OOC_TURN_SECONDS.
-    if (!gameOver && !inCombat) {
-      oocTurnClock += dt;
-      while (oocTurnClock >= OOC_TURN_SECONDS) {
-        oocTurnClock -= OOC_TURN_SECONDS;
-        runtime.advanceTurn();
-        // ...and so are the statuses everyone is carrying. Same clock, same
-        // `tickTurn`, same durations as a fight - see advanceStatusTurn.
-        advanceStatusTurn();
-        if (gameOver) break;
-        ageSummons(); // temps you brought out of the last fight are on the clock
-        // ...and so is the litter a power dropped. This clock stands in for
-        // combat's rounds, so it has to spend everything a round spends (see
-        // the onRound callback): without it, a Bulk Mail drift laid in the last
-        // round of a fight froze mid-countdown the moment the fight ended -
-        // permanently repainting the floor, permanently cutting anyone who
-        // crossed it, and leaving a paper pile you could harvest forever.
-        ageTempSurfaces();
-      }
-    }
-    animateSurfaces(dt);
-    // Live statuses wear their look: embers off a burning coworker, drips off
-    // a bleeding one, motes circling whoever is stuck in mandatory training.
-    // What each one emits is DATA (`fx` on the status, data/statuses.js); this
-    // only reports who is carrying what. The tracker throttles itself, and
-    // only asks for the roster on the frames it emits on.
-    if (!gameOver) auras.sync(dt, collectStatusCarriers);
-    // Impaired sight, off whoever you are STEERING - in a fight that's the
-    // member whose turn it is (combat.actingSheet stays pointed at the last
-    // party-side body even on the AI's turn, which is right: you are still
-    // looking through their eyes while the coworkers move), out of one it's the
-    // leader. A blinded companion you are not driving costs you their accuracy,
-    // not your screen.
-    const steeredSheet = inCombat && combat ? combat.actingSheet : sheet;
-    const impair = !gameOver && steeredSheet ? statusFx(steeredSheet) : null;
-    vision.set(impair?.aimSway || 0, impair?.sightBlots || 0);
-    vision.update(dt);
-    // A drifting aim goes stale the moment the mouse stops, so re-ask the world
-    // what the crosshair is on. hover.js's rule is that the preview IS the
-    // click, and the click is sampling a sway that never stops moving.
-    if (vision.strength > 0) controls.refreshHover();
-    // The loot overlay tracks the world while held (the camera keeps easing).
-    if (loot.labelsVisible) {
-      loot.repositionLabels((w) => {
-        const s = worldToScreenCss(controls.cameraEntity, w.x, w.y, w.z);
-        return s.behind ? null : s;
-      });
-    }
-    // Keyboard camera pan (WASD/arrows), gated like the other game keys: it
-    // detaches the rig from the follow target until something recenters it.
-    // Opposed keys cancel per axis rather than fighting.
-    if (panHeld.size && sheet && !gameOver && !modalOpen()) {
-      const rx = (panHeld.has('right') ? 1 : 0) - (panHeld.has('left') ? 1 : 0);
-      const uz = (panHeld.has('up') ? 1 : 0) - (panHeld.has('down') ? 1 : 0);
-      if (rx || uz) {
-        controls.pan(rx, uz, dt);
-        // The world just slid under a stationary cursor - re-ask what the
-        // hover is on, or the glow/banner stay pinned to what WAS there.
-        controls.refreshHover();
-      }
-    }
-    // Follow whoever you're STEERING, keeping them centred in frame. Track the
-    // entity's CONTINUOUS position (actor.x/z is the logical tile, which jumps
-    // a whole tile at a time and makes the camera step along with the walk).
-    // The walls ghost for the same body, or you would be driving a character
-    // the room keeps solid.
-    // (`steeredSheet` above is this same question asked of the SHEET - vision
-    // already read the acting body correctly; only the camera read `player`.)
-    const steeredBody = steeredActor();
-    const pp = steeredBody.entity ? steeredBody.entity.getPosition() : steeredBody;
-    controls.follow({ x: pp.x, z: pp.z }, dt);
-    updateWallFade(controls.cameraEntity, steeredBody.entity ? steeredBody.entity.getPosition() : null);
-  });
+  // What happens every frame (frame.js). The four bindings a frame writes go
+  // back through setters - each is read elsewhere in this file, and a frame is
+  // not their owner.
+  app.on('update', createFrame({
+    get sheet() { return sheet; },
+    get player() { return player; },
+    get party() { return party; },
+    get combat() { return combat; },
+    get inCombat() { return inCombat; },
+    get gameOver() { return gameOver; },
+    get enemies() { return enemies; },
+    get summons() { return summons; },
+    get npcs() { return npcs; },
+    get armedOoc() { return armedOoc; },
+    get climbAnim() { return climbAnim; },
+    get playerLayer() { return playerLayer; },
+    get partyBarKey() { return partyBarKey; },
+    get oocTurnClock() { return oocTurnClock; },
+    get grid() { return grid; },
+    get runtime() { return runtime; },
+    get hover() { return hover; },
+    get controls() { return controls; },
+    get vision() { return vision; },
+    get auras() { return auras; },
+    get hotbarHost() { return hotbarHost; },
+    get levelUpPip() { return levelUpPip; },
+    get partyBar() { return partyBar; },
+    get sneakLayer() { return sneakLayer; },
+    get loot() { return loot; },
+    get lift() { return lift; },
+    floors,
+    legQueue,
+    panHeld,
+    scene,
+    ui,
+    ACTIONS,
+    OOC_TURN_SECONDS,
+    pending,
+    statusFx,
+    findPath,
+    smoothPath,
+    routeOpen,
+    animateSurfaces,
+    updateWallFade,
+    worldToScreenCss,
+    memberSpeed: (...a) => memberSpeed(...a),
+    updateFollowers: (...a) => updateFollowers(...a),
+    onMemberStep: (...a) => onMemberStep(...a),
+    onSummonStep: (...a) => onSummonStep(...a),
+    startNextLeg: (...a) => startNextLeg(...a),
+    checkCombatTrigger: (...a) => checkCombatTrigger(...a),
+    advanceStatusTurn: (...a) => advanceStatusTurn(...a),
+    ageSummons: (...a) => ageSummons(...a),
+    ageTempSurfaces: (...a) => ageTempSurfaces(...a),
+    collectStatusCarriers: (...a) => collectStatusCarriers(...a),
+    steeredActor: (...a) => steeredActor(...a),
+    modalOpen: (...a) => modalOpen(...a),
+    isWalkable: (...a) => isWalkable(...a),
+    isHazard: (...a) => isHazard(...a),
+    enemyIsHazard: (...a) => enemyIsHazard(...a),
+    enemyClearOfHazards: (...a) => enemyClearOfHazards(...a),
+    partyAt: (...a) => partyAt(...a),
+    summonAt: (...a) => summonAt(...a),
+    floorAt: (...a) => floorAt(...a),
+    rawSurfDamage: (...a) => rawSurfDamage(...a),
+    slipChanceAt: (...a) => slipChanceAt(...a),
+    stickGum: (...a) => stickGum(...a),
+    clampPoint: (...a) => clampPoint(...a),
+    setPlayerLayer: (v) => { playerLayer = v; },
+    setClimbAnim: (v) => { climbAnim = v; },
+    setPartyBarKey: (v) => { partyBarKey = v; },
+    setOocTurnClock: (v) => { oocTurnClock = v; },
+  }));
 
   // --- boot -------------------------------------------------------------------------
   ui.addVignette();
