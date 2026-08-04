@@ -2126,72 +2126,6 @@ function startGame(level) {
   // no-op and takes the rules in silence.
   const quiet = () => {};
 
-  // Step-clock statuses: bleed drips its dot, gum wears down. True if it
-  // dropped them.
-  function tickStepOn(ms, actor, x, z, say) {
-    const { damage, expired } = tickStep(ms);
-    let down = false;
-    if (damage > 0) {
-      down = applyDamage(ms, damage);
-      // "You drip on the carpet" is literal - the carpet keeps it. On the
-      // BODY's spot, not the tile centre, so the drip lands under the walker
-      // rather than in the middle of the square they're crossing.
-      const drip = actor.entity ? actor.entity.getPosition() : { x, z };
-      vfx.splat(drip.x, drip.z, { scale: 0.5 });
-      vfx.damageText(x, z, `-${damage}`);
-      say('You drip on the carpet. -1 HP.');
-      syncHudFor(ms);
-    }
-    if (expired.includes('gum')) {
-      say('The gum finally lets go of your sole. Freedom.');
-      syncHudFor(ms);
-    }
-    return down;
-  }
-
-  // Turn-clock statuses OUT of combat (designer, 2026-07-31: "that clock
-  // should've been used from the beginning ... they should all be using the
-  // same thing in and out of combat, its not something new going on here").
-  //
-  // Exactly right, and the clock was already here. `turn-order.js` ticks these
-  // as each combatant's turn opens; out of a fight the world clock below
-  // stands in, and it already spends everything a combat round spends - fire,
-  // smoke, summon assignments, the litter a power dropped. Statuses were the
-  // ONE thing it did not spend, and that omission is what made a turn-clocked
-  // status mean two different things depending on whether dice were out: a
-  // 3-turn buff applied on the map was permanent, and a coworker set alight
-  // outside a fight never burned. Same `tickTurn`, same durations, both sides.
-  //
-  // `hurt(damage)` is how this carrier takes a dot - a sheet and a coworker
-  // count HP differently - and returns whether it dropped them. Returns the
-  // expired ids too, because a caller may need to react to what lapsed.
-  function tickTurnClockOn(carrier, actor, hurt) {
-    const { damage, expired } = tickTurn(carrier);
-    if (damage <= 0) return { down: false, damage, expired };
-    // The dot's look rides the body, not the tile centre, so a status burning
-    // somebody mid-walk lands its number on them.
-    const p = actor?.entity ? actor.entity.getPosition() : actor;
-    vfx.impact(p.x, p.z, 'fire', { y: 0.4 });
-    vfx.damageText(p.x, p.z, `-${damage}`, '#ff7a3c');
-    return { down: hurt(damage), damage, expired };
-  }
-
-  // One out-of-combat turn's worth of status clock, over everyone who can
-  // carry one: the roster, the temps still on assignment, and the coworkers
-  // wandering the floor. Deaths are collected and resolved AFTER the sweep,
-  // the same shape handleExplosion uses - one casualty must not cut the tick
-  // short for everybody else, or the XP for the coworkers it finished off.
-
-  // Surfaces (data/surfaces.js): fire and electrified pools hurt, paper cuts
-  // (and arms you), gum sticks, water and coffee editorialize. The walker's own
-  // talents can shrug the damage off. True if it dropped them.
-
-  // Slippery surfaces: every wet tile entered risks a spill that ends the walk
-  // right there. In combat the movement AP already spent stays spent - that IS
-  // the penalty. slipImmune tread never slips; neither does a gummed shoe - gum
-  // is traction. `wasSlipProof` is sampled BEFORE the step clock ticks, so the
-  // tile a gum wad wears off on still keeps its grip.
-
   // What the floor does to a body (floor-effects.js): the per-step surface
   // effects, the slip roll, and the out-of-combat turn clock. The mutable
   // bindings go in as getters - a floor effect resolves against whoever is
@@ -2215,6 +2149,7 @@ function startGame(level) {
       impact: (...a) => vfx.impact(...a),
       damageText: (...a) => vfx.damageText(...a),
       status: (...a) => vfx.status(...a),
+      splat: (...a) => vfx.splat(...a),
     },
     surfaceImpactKind: (x, z) => surfaceImpactKind(x, z),
     applyDamage,
@@ -2223,7 +2158,8 @@ function startGame(level) {
     statusFx,
     equippedStats,
     slips,
-    tickTurnClockOn,
+    tickStep,
+    tickTurn,
     surfEffect,
     effectiveSurfDamage,
     slipChanceAt,
@@ -2235,7 +2171,9 @@ function startGame(level) {
     clearOocCrouch,
     oocCoverProblem,
   });
-  const { advanceStatusTurn, applySurfaceOn, maybeSlip } = floorFx;
+  const {
+    advanceStatusTurn, applySurfaceOn, maybeSlip, tickStepOn, tickTurnClockOn,
+  } = floorFx;
 
   function onMemberStep(member, x, z, pathDone, changed = true) {
     // Stepping out of an enemy's reach mid-fight provokes it (TACTICS_PLAN M2).

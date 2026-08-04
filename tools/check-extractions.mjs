@@ -56,6 +56,15 @@ function rewriteDamage(raw, file) {
   for (const m of raw.matchAll(/(?:const|let|var)\s+d\s*=/g)) {
     hits.push(`${file}: a local named \`d\` shadows the deps bag`);
   }
+  // The same shadow through a PARAMETER, which is how it actually shipped:
+  // `(d) => d.applyDamage(m.sheet, d)`. The original read `(d) => applyDamage(
+  // m.sheet, d)` and the rewrite prefixed the call without noticing that `d`
+  // was already taken - so `d.applyDamage` became a property of the damage
+  // NUMBER, and every out-of-combat status dot on a party member or a summon
+  // threw. Only a declaration was checked for, and this is a binding.
+  for (const m of raw.matchAll(/\(\s*d\s*\)\s*=>|\(\s*d\s*,|,\s*d\s*\)\s*(?:=>|\{)/g)) {
+    hits.push(`${file}: a parameter named \`d\` shadows the deps bag - ${m[0].trim()}`);
+  }
   return hits;
 }
 
@@ -83,12 +92,51 @@ function shapeMismatch(raw, file) {
   return [...hits];
 }
 
+// The fourth: a `d.<name>` that NO bag supplies. `d` is a bound parameter, so
+// every property off it looks fine to the scan below - it just evaluates to
+// undefined and throws at the call. This is what a cut produces when a function
+// moves INTO a module that used to receive it: `tickTurnClockOn` came off the
+// deps bag the same commit it became a local, and three callers upstairs in the
+// same file kept saying `d.tickTurnClockOn(...)`.
+//
+// The supply side is read from the factory's own call site, not guessed: find
+// `create<Name>({ ... })` in a host and take that literal's top-level keys,
+// including `get x()` and shorthand.
+function bagKeysFor(factory) {
+  const at = BAGS.indexOf(`${factory}({`);
+  if (at < 0) return null; // not wired up anywhere - nothing to check against
+  let i = BAGS.indexOf('{', at);
+  let depth = 0;
+  let end = i;
+  for (; end < BAGS.length; end += 1) {
+    if (BAGS[end] === '{') depth += 1;
+    else if (BAGS[end] === '}') { depth -= 1; if (depth === 0) break; }
+  }
+  const lit = BAGS.slice(i, end + 1);
+  const keys = new Set();
+  for (const m of lit.matchAll(/^\s+(?:get\s+)?([A-Za-z_$][\w$]*)\s*[:(,]/gm)) keys.add(m[1]);
+  for (const m of lit.matchAll(/^\s+([A-Za-z_$][\w$]*),\s*$/gm)) keys.add(m[1]);
+  return keys;
+}
+function unsuppliedDeps(raw, file) {
+  const factory = raw.match(/^export function (create[A-Za-z_$][\w$]*)/m)?.[1];
+  if (!factory) return [];
+  const keys = bagKeysFor(factory);
+  if (!keys) return [];
+  const hits = new Set();
+  for (const m of raw.matchAll(/\bd\.([A-Za-z_$][\w$]*)/g)) {
+    if (!keys.has(m[1])) hits.add(`${file}: reads \`d.${m[1]}\`, which no bag supplies`);
+  }
+  return [...hits];
+}
+
 let bad = 0;
 for (const file of [...MODULES, ...HOSTS]) {
   const raw = readFileSync(file, 'utf8');
   if (!HOSTS.includes(file)) {
     for (const hit of rewriteDamage(raw, file)) { bad += 1; console.log(hit); }
     for (const hit of shapeMismatch(raw, file)) { bad += 1; console.log(hit); }
+    for (const hit of unsuppliedDeps(raw, file)) { bad += 1; console.log(hit); }
   }
   // Strip comments, then every flavour of string literal, so prose cannot
   // masquerade as an identifier.

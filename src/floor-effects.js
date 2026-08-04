@@ -32,21 +32,21 @@ export function createFloorEffects(d) {
     const downed = [];
     for (const m of d.party.members) {
       if (!m.actor || m.sheet.hp <= 0) continue;
-      const r = d.tickTurnClockOn(m.sheet, m.actor, (d) => d.applyDamage(m.sheet, d));
+      const r = tickTurnClockOn(m.sheet, m.actor, (dmg) => d.applyDamage(m.sheet, dmg));
       if (r.damage > 0 || r.expired.length) d.syncHudFor(m.sheet);
       if (r.down) downed.push(m);
     }
     for (const s of [...d.summons]) {
       if (!s.actor || s.sheet.hp <= 0) continue;
       // A temp takes the rules in silence, like everywhere else in this file.
-      if (d.tickTurnClockOn(s.sheet, s.actor, (d) => d.applyDamage(s.sheet, d)).down) {
+      if (tickTurnClockOn(s.sheet, s.actor, (dmg) => d.applyDamage(s.sheet, dmg)).down) {
         d.dismissSummon(s.actor);
       }
     }
     const slain = [];
     for (const en of d.enemies) {
       if (!en.alive) continue;
-      if (d.tickTurnClockOn(en, en, (d) => en.takeDamage(d)).down) slain.push(en);
+      if (tickTurnClockOn(en, en, (dmg) => en.takeDamage(dmg)).down) slain.push(en);
     }
     for (const en of slain) {
       d.vfx.impact(en.x, en.z, 'blood', { y: 0.4 });
@@ -109,6 +109,56 @@ export function createFloorEffects(d) {
     return false;
   }
 
+  // Step-clock statuses: bleed drips its dot, gum wears down. True if it
+  // dropped them.
+  function tickStepOn(ms, actor, x, z, say) {
+    const { damage, expired } = d.tickStep(ms);
+    let down = false;
+    if (damage > 0) {
+      down = d.applyDamage(ms, damage);
+      // "You drip on the carpet" is literal - the carpet keeps it. On the
+      // BODY's spot, not the tile centre, so the drip lands under the walker
+      // rather than in the middle of the square they're crossing.
+      const drip = actor.entity ? actor.entity.getPosition() : { x, z };
+      d.vfx.splat(drip.x, drip.z, { scale: 0.5 });
+      d.vfx.damageText(x, z, `-${damage}`);
+      say('You drip on the carpet. -1 HP.');
+      d.syncHudFor(ms);
+    }
+    if (expired.includes('gum')) {
+      say('The gum finally lets go of your sole. Freedom.');
+      d.syncHudFor(ms);
+    }
+    return down;
+  }
+
+  // Turn-clock statuses OUT of combat (designer, 2026-07-31: "that clock
+  // should've been used from the beginning ... they should all be using the
+  // same thing in and out of combat, its not something new going on here").
+  //
+  // Exactly right, and the clock was already here. `turn-order.js` ticks these
+  // as each combatant's turn opens; out of a fight the world clock below
+  // stands in, and it already spends everything a combat round spends - fire,
+  // smoke, summon assignments, the litter a power dropped. Statuses were the
+  // ONE thing it did not spend, and that omission is what made a turn-clocked
+  // status mean two different things depending on whether dice were out: a
+  // 3-turn buff applied on the map was permanent, and a coworker set alight
+  // outside a fight never burned. Same `tickTurn`, same durations, both sides.
+  //
+  // `hurt(damage)` is how this carrier takes a dot - a sheet and a coworker
+  // count HP differently - and returns whether it dropped them. Returns the
+  // expired ids too, because a caller may need to react to what lapsed.
+  function tickTurnClockOn(carrier, actor, hurt) {
+    const { damage, expired } = d.tickTurn(carrier);
+    if (damage <= 0) return { down: false, damage, expired };
+    // The dot's look rides the body, not the tile centre, so a status burning
+    // somebody mid-walk lands its number on them.
+    const p = actor?.entity ? actor.entity.getPosition() : actor;
+    d.vfx.impact(p.x, p.z, 'fire', { y: 0.4 });
+    d.vfx.damageText(p.x, p.z, `-${damage}`, '#ff7a3c');
+    return { down: hurt(damage), damage, expired };
+  }
+
   function maybeSlip(ms, actor, x, z, wasSlipProof, say) {
     if (d.gameOver) return;
     if (!d.slips({
@@ -125,5 +175,5 @@ export function createFloorEffects(d) {
     else say('The floor was, in fact, wet. You go down. Gracefully? No.');
   }
 
-  return { advanceStatusTurn, applySurfaceOn, maybeSlip };
+  return { advanceStatusTurn, applySurfaceOn, maybeSlip, tickStepOn, tickTurnClockOn };
 }
