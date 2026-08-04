@@ -26,6 +26,7 @@ import {
 } from './powers.js';
 import { createAimPaint } from './aim-paint.js';
 import { createAimView } from './combat-aim.js';
+import { createStrikes } from './combat-strikes.js';
 import { STATUSES } from './data/statuses.js';
 import { blocksSight, PARTITION_TOPPLE } from './data/tiles.js';
 import { PANEL_CHROME, createCombatReadout, apPips } from './ui.js';
@@ -865,6 +866,51 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     aim.clearAim();
   }
 
+  // One body hitting or moving another (combat-strikes.js). Wrapped, not passed
+  // by reference: most of these are declared further down this closure than
+  // this wiring is, so a direct reference reads them in their dead zone.
+  const strikes = createStrikes({
+    get world() { return world; },
+    get members() { return members; },
+    get bout() { return bout; },
+    STATUSES,
+    advanceTurn: (...a) => advanceTurn(...a),
+    applyDamage: (...a) => applyDamage(...a),
+    applyStatus: (...a) => applyStatus(...a),
+    blockedBy: (...a) => blockedBy(...a),
+    damageBonus: (...a) => damageBonus(...a),
+    deathFx: (...a) => deathFx(...a),
+    defeat: (...a) => defeat(...a),
+    deflect: (...a) => deflect(...a),
+    displacePlan: (...a) => displacePlan(...a),
+    effectiveAttr: (...a) => effectiveAttr(...a),
+    equippedAction: (...a) => equippedAction(...a),
+    faceTarget: (...a) => faceTarget(...a),
+    gritSaveChance: (...a) => gritSaveChance(...a),
+    hazardKind: (...a) => hazardKind(...a),
+    hitFx: (...a) => hitFx(...a),
+    livingParty: (...a) => livingParty(...a),
+    log: (...a) => log(...a),
+    makeActive: (...a) => makeActive(...a),
+    notifyMemberDown: (...a) => notifyMemberDown(...a),
+    posOf: (...a) => posOf(...a),
+    rand: (...a) => rand(...a),
+    refresh: (...a) => refresh(...a),
+    rollAgainst: (...a) => rollAgainst(...a),
+    rollHit: (...a) => rollHit(...a),
+    statusFx: (...a) => statusFx(...a),
+    statusFxAt: (...a) => statusFxAt(...a),
+    statusResist: (...a) => statusResist(...a),
+    statusSeverity: (...a) => statusSeverity(...a),
+    surfaceEffect: (...a) => surfaceEffect(...a),
+    swingPool: (...a) => swingPool(...a),
+    topple: (...a) => topple(...a),
+    topplePlan: (...a) => topplePlan(...a),
+    unitStandingAt: (...a) => unitStandingAt(...a),
+    victimView: (...a) => victimView(...a),
+  });
+  const { landStun, displaceBody, dropOnto, unitStrikesMember, opportunityStrike } = strikes;
+
   // --- initiative order --------------------------------------------------------
   // A slot wraps one combatant: `{ member }` (player-controlled) or `{ unit }`
   // (an AI actor - enemy or player-team summon). initiative.js rolls d20 +
@@ -1702,102 +1748,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // `by` is whoever is doing it - the acting member by default, an AI unit when
   // the enemy side shoves - and it decides the narration's subject and who the
   // impact FX are attributed to. Everything else is the same rule.
-  function displaceBody(target, dx, dz, { verb = 'shove', slamDmg = 2, by = active } = {}) {
-    const v = victimView(target);
-    const mine = by === active;                 // the player's own shove?
-    const Who = mine ? 'You' : by.def.name;
-    const says = (s) => (mine ? `You ${s}` : `${Who} ${s.replace(/^(\w+)/, (w) => `${w}s`)}`);
-    const push = displacePlan(v.x, v.z, dx, dz, {
-      isWalkable: world.isWalkable,
-      stepOpen: world.stepOpen,
-      occupied: (x, z) => !!unitStandingAt(x, z) && unitStandingAt(x, z) !== target,
-    });
-    if (!push) return { slammed: false, died: false, msg: '' };
-    const { tx, tz } = push;
-    const bill = (d, x, z, big) => {
-      if (!mine) bout.dmgDealt += d;            // the AI tally counts its own damage
-      fx.damageText(x, z, `-${d}`, v.dmgColor, { big });
-    };
-    if (push.blocked) {
-      // The "something solid" they hit might be a bookcase (POWERS_PLAN M6).
-      // Slamming somebody into a toppleable prop brings it down on them - the
-      // shove already said "into something solid", and this is the rest of
-      // that sentence. The topple's own damage and stun land on whoever is in
-      // the LANDING tile, which the slammed body may or may not be.
-      // The body knocking the prop over is the one being SLAMMED into it, not
-      // the one doing the shoving - `topplePlan` reads the pusher's position to
-      // decide which way the furniture goes.
-      const plan = topplePlan(v.ref, tx, tz);
-      if (plan) {
-        const died0 = slamDmg > 0 ? v.hurt(slamDmg) : false;
-        hitFx(v.ref, 'slam', by);
-        if (slamDmg > 0) bill(slamDmg, v.x, v.z, died0);
-        const msg = `${says(`${verb} ${v.name}`)} into the ${plan.def.label || 'furniture'}. `
-          + `${slamDmg > 0 ? `-${slamDmg}. ` : ''}${topple(by, plan)}`;
-        if (died0) v.onDeath();
-        return { slammed: true, died: died0, msg };
-      }
-      const died = slamDmg > 0 ? v.hurt(slamDmg) : false;
-      hitFx(v.ref, 'slam', by);
-      fx.shake(0.06, 0.2); // a body meeting drywall
-      if (slamDmg > 0) bill(slamDmg, v.x, v.z, died);
-      let msg = `${says(`${verb} ${v.name}`)} into something solid.${slamDmg > 0 ? ` -${slamDmg}.` : ''}`;
-      // A slam into a wall knocks the wind out of them - stunned (they lose
-      // their next turn). The knockdown DOS2 shoves are for.
-      //
-      // The shove is the one UNRATIONED stun in the game (2 AP, no use limit),
-      // so it is the chain the anti-chain window exists to break - and the site
-      // where the victim most needs to be told why the second slam didn't daze.
-      if (!died) {
-        const blocked = blockedBy(v.statusTarget, 'stunned');
-        if (applyStatus(v.statusTarget, 'stunned')) {
-          statusFxAt(v.member ? v.body : v.ref, 'stunned');
-          msg += ` They crumple - ${STATUSES.stunned.name}, they lose their next turn.`;
-        } else if (blocked) msg += ` ${immunityLine(blocked, v.name)}`;
-      }
-      if (died) v.onDeath();
-      return { slammed: true, died, msg };
-    }
-    // Land carried PAST the centre along the push - momentum, not a snap to
-    // grid. Deterministic (no rng draw: the rest point feeds cover octants
-    // and body-to-body sight, so it must replay under a seed), and clamped
-    // so the body still rounds home to the tile the plan chose.
-    const pd = Math.hypot(dx, dz) || 1;
-    const [lpx, lpz] = world.clampPoint(tx + (dx / pd) * 0.22, tz + (dz / pd) * 0.22);
-    v.body.pushTo(tx, tz, lpx, lpz);
-    // The riders that come WITH a hazard tile, not just its number. The facade's
-    // own memberSurfDamage comment states the rule this restores - "the same
-    // tile means the same thing however you got there" - and Q1-A made the
-    // DAMAGE honour it while leaving these behind: a body shoved into fire took
-    // the 4 and never caught, and one shoved onto a drift was cut without being
-    // left bleeding, while walking onto either tile did both.
-    //
-    // Same pure `surfaceEffect` off the same `floorAt` sheet the walk sites
-    // read, so there is no second opinion about what a tile does. `applies`
-    // lands whether or not the tile bites; `bleed` rides the damage, which is
-    // the order main.js's applySurfaceOn uses.
-    const dmg = v.hazardAt(tx, tz);
-    const sfx = surfaceEffect(world.floorAt(tx, tz));
-    if (sfx?.applies && sfx.applies !== 'gum' && applyStatus(v.statusTarget, sfx.applies)) {
-      statusFxAt(v.statusTarget, sfx.applies);
-    }
-    if (dmg > 0) {
-      if (sfx?.bleed) applyStatus(v.statusTarget, 'bleed', { duration: sfx.bleed });
-      const live = world.isElectrified && world.isElectrified(tx, tz);
-      const surf = world.surfaceIdAt(tx, tz);
-      const died = v.hurt(dmg);
-      fx.impact(tx, tz, hazardKind(tx, tz), { y: 0.4 });
-      bill(dmg, tx, tz, died);
-      if (died) v.onDeath();
-      return {
-        slammed: false,
-        died,
-        msg: `${says(`${verb} ${v.name}`)} into the ${live ? 'LIVE water' : surf || 'hazard'}! -${dmg}.`,
-      };
-    }
-    return { slammed: false, died: false, msg: `${says(`${verb} ${v.name}`)} back a step.` };
-  }
-
   // --- toppling (POWERS_PLAN M6) -------------------------------------------
   // Tall freestanding furniture goes over when shoved, and lands on whoever is
   // behind it. The office stops being scenery you fight IN and becomes
@@ -1924,67 +1874,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   //
   // Members carry a resist; coworkers do not. That is the only real difference,
   // and it is the reason the two were written apart in the first place.
-  function landStun(victim, line) {
-    const target = victim.sheet || victim;
-    const name = victim.sheet ? victim.sheet.name : victim.def.name;
-    const resist = victim.sheet ? statusResist(victim.sheet) : 0;
-    const blocked = blockedBy(target, 'stunned');
-    if (applyStatus(target, 'stunned', {}, resist)) {
-      statusFxAt(victim, 'stunned');
-      return line;
-    }
-    return blocked ? ` ${immunityLine(blocked, name)}` : '';
-  }
-
-  function dropOnto(by, lx, lz, range) {
-    const victimUnit = world.liveEnemies().find((e) => e.x === lx && e.z === lz);
-    const victimMember = members.find((m) => m.sheet.hp > 0 && m.actor
-      && m.actor.x === lx && m.actor.z === lz);
-    const dmg = rand(range[0], range[1]);
-    const saved = (grit) => (forceHit !== null ? !forceHit : rollHit(gritSaveChance(grit), rng));
-    let msg = '';
-    if (victimUnit) {
-      if (saved(victimUnit.combat.grit)) { // via unitCombat - the def carries it as attr.grit
-        victimUnit.flinch?.();
-        return ` ${victimUnit.def.name} dives clear.`;
-      }
-      const died = victimUnit.takeDamage(dmg);
-      hitFx(victimUnit, 'slam', by);
-      if (died) deathFx(victimUnit);
-      fx.damageText(lx, lz, `-${dmg}`, '#ffd76b', { big: died });
-      msg += ` It lands on ${victimUnit.def.name}. -${dmg}.`;
-      if (!died) {
-        // `stunned`, not a new knocked-down: toppling inherits the anti-chain
-        // immunity window rather than becoming a second way to lock somebody
-        // out of a fight. Slam a guard into drywall and then drop a cabinet on
-        // them and they get the same "they have had their daze" refusal, from
-        // the same code. The pin is the failed save's own price and carries
-        // no window - see `pinned` in data/statuses.js.
-        msg += landStun(victimUnit, ' They go down under it.');
-        if (applyStatus(victimUnit, 'pinned')) statusFxAt(victimUnit, 'pinned');
-      } else {
-        callbacks.onEnemyKilled(victimUnit);
-      }
-    } else if (victimMember) {
-      if (saved(effectiveAttr(victimMember.sheet).grit)) {
-        victimMember.actor.flinch();
-        return ` ${victimMember.sheet.name} dives clear.`;
-      }
-      const dead = applyDamage(victimMember.sheet, dmg);
-      hitFx(victimMember, 'slam', by);
-      victimMember.actor.flinch();
-      fx.damageText(lx, lz, `-${dmg}`, undefined, { big: dead });
-      msg += ` It lands on ${victimMember.sheet.name}. -${dmg}.`;
-      if (!dead) {
-        msg += landStun(victimMember, ' They go down under it.');
-        if (applyStatus(victimMember.sheet, 'pinned')) statusFxAt(victimMember, 'pinned');
-      } else {
-        notifyMemberDown();
-      }
-    }
-    return msg;
-  }
-
   // Put a shoulder into the cubicle wall itself (TACTICS_PLAN M6, designer
   // 2026-07-30): the shove verb aimed across an adjacent partition edge. The
   // panel comes off its feet and lands FLAT on the far tile - walkable, no
@@ -3948,86 +3837,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // stance, any applied status, and the downed/handoff/party-wipe rules. Split
   // out of aiAttack so an opportunity attack lands by exactly the same rules
   // as a turn attack rather than reimplementing them (TACTICS_PLAN M2).
-  function unitStrikesMember(unit, m, atk) {
-    let dmg = rand(atk.min, atk.max);
-    // The attack roll. A miss skips damage, the deflect interaction, the
-    // flinch, and any applied status; the enemy's AP was already committed
-    // by the caller.
-    // Same assembler as the player's swings, with the roles reversed - the
-    // unit attacks, the member defends (attackMods reads either shape).
-    if (!rollAgainst(unit, m)) {
-      hitFx(m, 'whiff');
-      fx.damageText(m.actor.x, m.actor.z, 'MISS', MISS_COLOR);
-      log(atk.missLog || `${unit.def.name}'s attack goes wide.`);
-      refresh();
-      return;
-    }
-    let line = atk.log;
-    // Composure soaks a flat slice off the hit (one point always lands),
-    // before the Deflect Blame stance (incomingMult) halves whatever is left.
-    const soak = deflect(m.sheet);
-    if (soak > 0) dmg = Math.max(1, dmg - soak);
-    const inMult = statusFx(m.sheet).incomingMult ?? 1;
-    if (inMult < 1) {
-      dmg = Math.max(1, Math.ceil(dmg * inMult));
-      line += ` You deflect - only ${dmg} damage.`;
-    } else {
-      line += ` ${dmg} damage.`;
-    }
-    m.actor.flinch();
-    bout.dmgDealt += dmg;
-    const dead = applyDamage(m.sheet, dmg);
-    hitFx(m, 'melee', unit);
-    // Taking one is worth a flinch from the camera too - small, and only when
-    // it's a body you control, so the office stays still while you swing.
-    fx.shake(dead ? 0.09 : 0.05, 0.2);
-    fx.damageText(m.actor.x, m.actor.z, `-${dmg}`, undefined, { big: dead });
-    // Any status the attack carries lands here (gum, and now stun etc.),
-    // Composure shrugging off some of a resistable one. Not onto a corpse. This
-    // is the side of the anti-chain window that matters most: the Security Guard
-    // and the Regional Executive both stun on an ordinary attack, with nothing
-    // rationing it, so without a window a party member could lose every turn of
-    // a fight in a row.
-    if (atk.applies && !dead) {
-      const blocked = blockedBy(m.sheet, atk.applies);
-      if (applyStatus(m.sheet, atk.applies, {}, statusResist(m.sheet))) {
-        statusFxAt(m, atk.applies);
-        line += ` ${appliesLine(atk, m.sheet.name)}`;
-        // Composure blunted it (statuses.js severity). Say so, once, where the
-        // player is already reading: a stat whose work is invisible is a stat
-        // nobody spends a point on, and "it landed weaker" is not something a
-        // number on the character sheet can show you mid-fight.
-        if (statusSeverity(m.sheet, atk.applies) < 1) line += ' They shrug off the worst of it.';
-      } else if (blocked) line += ` ${immunityLine(blocked, m.sheet.name)}`;
-    }
-    log(line);
-    refresh();
-    if (dead) {
-      m.toppled = true;
-      deathFx(m);
-      m.actor.clearPath();
-      m.actor.fx = { kind: 'death', t: 0 };
-      if (!livingParty().length) { defeat(); return; } // party wipe - the only true loss
-      log(m.isSummon
-        ? `${m.sheet.name} is dismissed - back to the employee pool.`
-        : `${m.sheet.name} is out cold. They'll sit the rest of this one out.`);
-      // Keep `active` (the sheet the HUD reflects, and the post-combat leader)
-      // on a real member still standing - never a summon, which despawns.
-      // This can fire mid-PLAYER-turn (an opportunity attack cut the acting
-      // member down as they walked), so hand off properly: makeActive rebuilds
-      // the survivor's action bar and clears the dead member's armed/pending
-      // state. If it WAS their turn, end it too - otherwise the survivor
-      // inherits the corpse's initiative slot and its leftover AP, then gets a
-      // second full turn when their own slot comes up. During an AI turn the
-      // acting enemy is mid-swing, so only the binding moves.
-      if (m === active) {
-        makeActive(livingParty()[0]);
-        if (phase === 'player') advanceTurn();
-        else refresh();
-      }
-    }
-  }
-
   // --- opportunity attacks (TACTICS_PLAN M2) ---------------------------------
   // Leaving a threatened tile hands the threatener a free swing, so walking
   // out of melee stops being free and kiting stops being strictly dominant.
@@ -4193,56 +4002,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // firing on somebody entering covered ground. The RULES are identical - one
   // basic swing, one reaction spent - so they share the resolution rather than
   // growing a second copy of the roll, the damage and the death handling.
-  function opportunityStrike(attacker, defender, reason = 'flee') {
-    const caught = reason === 'overwatch' ? 'crossing your line' : 'breaking away';
-    if (attacker.sheet) {
-      // A party-side body catches a fleeing enemy.
-      const a = ACTIONS[equippedAction(attacker.sheet)];
-      if (!a) return; // no basic swing to make (shouldn't happen - punch is the floor)
-      attacker.actor.lunge(posOf(defender).x, posOf(defender).z);
-      faceTarget(attacker, defender.x, defender.z);
-      if (!rollAgainst(attacker, defender)) {
-        hitFx(defender, 'whiff');
-        fx.damageText(defender.x, defender.z, 'MISS', MISS_COLOR);
-        log(`${attacker.sheet.name} swings at ${defender.def.name} ${caught} - and misses.`);
-        refresh();
-        return;
-      }
-      const dmg = rand(a.min, a.max) + damageBonus(attacker.sheet);
-      const died = defender.takeDamage(dmg);
-      hitFx(defender, 'melee', attacker);
-      if (died) deathFx(defender);
-      fx.damageText(defender.x, defender.z, `-${dmg}`, '#ffd76b', { big: died });
-      log(`${attacker.sheet.name} catches ${defender.def.name} ${caught}. ${dmg} damage!`);
-      if (died) callbacks.onEnemyKilled(defender);
-      refresh();
-      return;
-    }
-    // An enemy catches a fleeing member (or summon) - same rules as its turn
-    // attack, just reworded so the log reads as a punish, not a swing in turn.
-    // A unit with no attack set has nothing to punish with: `unitCombat`
-    // normalizes that to an empty list rather than undefined, so this is a
-    // check instead of a crash (a CLASS backing an AI unit need not declare
-    // `attacks` at all - see stats.js).
-    if (!attacker.combat.attacks.length) return;
-    // The same contact-range pool aiAttack draws from (Q048). A reaction IS a
-    // swing at somebody who just walked past you, so it cannot come out of the
-    // rifle line; this used to draw uniformly over every line the def owns,
-    // which let the Executive's ranged entry resolve at arm's length.
-    // The draw stays UNWEIGHTED, deliberately: `pickLine`'s status weighting
-    // is a chosen swing, and the comment above already calls this a reflex
-    // rather than a committed one - routing it through pickLine is a separate
-    // question, not a tidy-up.
-    const pool = swingPool(attacker);
-    const base = pool[rand(0, pool.length - 1)];
-    attacker.lunge(posOf(defender).x, posOf(defender).z);
-    unitStrikesMember(attacker, defender, {
-      ...base,
-      log: `${attacker.def.name} catches ${defender.sheet.name} pulling away.`,
-      missLog: `${attacker.def.name} grabs at ${defender.sheet.name} and comes up empty.`,
-    });
-  }
-
   // Route toward the cheapest target-adjacent tile and walk it in ONE smooth
   // run, as far as `budget` allows (1 AP per tile-length) - no more
   // hop-pause-hop. Surface damage lands per tile entered via the actor's
