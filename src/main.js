@@ -40,6 +40,7 @@ import { createCombatWorld } from './combat-world.js';
 import { createHotbarHost } from './hotbar-host.js';
 import { createFloorEffects } from './floor-effects.js';
 import { showLevelMenu } from './desk.js';
+import { createOocVerbs } from './ooc-verbs.js';
 
 import { loadRemoteStore, SAVE_KEY_STORAGE } from './remote-store.js';
 import { placeModel, applyCharacterProportions, cloneMaterials, tintMaterials } from './models.js';
@@ -727,6 +728,92 @@ function startGame(level) {
     }
     return out;
   }
+
+  // The out-of-combat verbs (ooc-verbs.js). This cluster WRITES shared state,
+  // so those four arrive as named setters - a `setArmedOoc(id)` call is
+  // greppable in a way that `armedOoc = id` from anywhere in this file is not.
+  const oocVerbs = createOocVerbs({
+    get sheet() { return sheet; },
+    get player() { return player; },
+    get party() { return party; },
+    get enemies() { return enemies; },
+    get summons() { return summons; },
+    get inCombat() { return inCombat; },
+    get gameOver() { return gameOver; },
+    get armedOoc() { return armedOoc; },
+    get oocCrouch() { return oocCrouch; },
+    get pendingAction() { return pendingAction; },
+    get lastPath() { return lastPath; },
+    get partyBarKey() { return partyBarKey; },
+    setArmedOoc: (v) => { armedOoc = v; },
+    setOocCrouch: (v) => { oocCrouch = v; },
+    setPendingAction: (v) => { pendingAction = v; },
+    setLastPath: (v) => { lastPath = v; },
+    setPartyBarKey: (v) => { partyBarKey = v; },
+    grid,
+    scene,
+    ui,
+    loot,
+    ACTIONS,
+    ENGAGE_RADIUS,
+    PARTITION_TOPPLE,
+    // Three consts declared BELOW this wiring, so they go in behind getters
+    // and wrappers - by-reference would read them in their dead zone.
+    get vfx() { return vfx; },
+    get ORTHO4() { return ORTHO4; },
+    get hotbarHost() { return hotbarHost; },
+    approachTo: (...a) => approachTo(...a),
+    beginCombat: (...a) => beginCombat(...a),
+    bestApproachPath: (...a) => bestApproachPath(...a),
+    canTakePart: (...a) => canTakePart(...a),
+    checkCombatTrigger: (...a) => checkCombatTrigger(...a),
+    clampPoint: (...a) => clampPoint(...a),
+    clearOocCrouch: (...a) => clearOocCrouch(...a),
+    endSneak: (...a) => endSneak(...a),
+    enemyAt: (...a) => enemyAt(...a),
+    enemyBody: (...a) => enemyBody(...a),
+    hasLos: (...a) => hasLos(...a),
+    hazardCost: (...a) => hazardCost(...a),
+    isWalkable: (...a) => isWalkable(...a),
+    leadBody: (...a) => leadBody(...a),
+    memberBodyAt: (...a) => memberBodyAt(...a),
+    modalOpen: (...a) => modalOpen(...a),
+    npcAt: (...a) => npcAt(...a),
+    oocCoverFaces: (...a) => oocCoverFaces(...a),
+    oocTargetOk: (...a) => oocTargetOk(...a),
+    paintHud: (...a) => paintHud(...a),
+    partyAt: (...a) => partyAt(...a),
+    playerReaches: (...a) => playerReaches(...a),
+    roomFor: (...a) => roomFor(...a),
+    smoothFromBody: (...a) => smoothFromBody(...a),
+    spawnSummonUnits: (...a) => spawnSummonUnits(...a),
+    summonDropProblem: (...a) => summonDropProblem(...a),
+    applyStatus: (...a) => applyStatus(...a),
+    approachAndDo: (...a) => approachAndDo(...a),
+    combatOnlyReason: (...a) => combatOnlyReason(...a),
+    coneFrom: (...a) => coneFrom(...a),
+    dropCount: (...a) => dropCount(...a),
+    findPath: (...a) => findPath(...a),
+    isToppleable: (...a) => isToppleable(...a),
+    rangeOf: (...a) => rangeOf(...a),
+    statusList: (...a) => statusList(...a),
+    toppleLanding: (...a) => toppleLanding(...a),
+    walkToExact: (...a) => walkToExact(...a),
+    quiet: (...a) => quiet(...a),
+    arrivalLine: (...a) => arrivalLine(...a),
+    summonRange: (...a) => summonRange(...a),
+  });
+  const {
+    oocCoverProblem,
+    oocTopplePlanAt,
+    oocCoverNames,
+    oocFriendlyOn,
+    postSummonAt,
+    toggleOocArm,
+    engageWithAction,
+    oocTakeCoverAt,
+    oocShoveAt,
+  } = oocVerbs;
 
   // --- game flow ----------------------------------------------------------------
   function spawnPlayerModel() {
@@ -1487,24 +1574,6 @@ function startGame(level) {
   // payload is honoured: a heal is already refused out here by
   // combatOnlyReason ("heal from your pockets"), and keeping this to one
   // payload means it cannot quietly become a second, cheaper buff path.
-  function oocFriendlyOn(id, m) {
-    const a = ACTIONS[id];
-    const carrying = statusList(m.sheet).length;
-    if (!a.purge) { ui.say(`${a.label} is for a fight.`); return; }
-    if (!carrying) {
-      ui.say(`${m.sheet.name} is running clean. Nothing to clear.`);
-      return;
-    }
-    approachAndDo(m.actor.x, m.actor.z, () => {
-      m.sheet.statuses = {};
-      armedOoc = null;
-      hotbarHost.hotbar?.setArmed(null);
-      ui.say(`You power-cycle ${m.sheet.name}. Everything they were carrying clears.`);
-      paintHud(sheet); // the leader's card, for a self-cast
-      partyBarKey = ''; // and the roster bar re-renders next frame
-    });
-  }
-
   // --- left-click verb dispatch (Divinity-style: the target picks the verb) ---
   function attackOrConfront(en) {
     const a = armedOoc && ACTIONS[armedOoc];
@@ -1800,38 +1869,6 @@ function startGame(level) {
       if (m.sheet.hp > 0 && m.actor) { switchLeader(i); return; }
     }
   }
-  function toggleOocArm(id) {
-    if (!sheet || inCombat || gameOver || modalOpen() || !ACTIONS[id]) return;
-    // A slot a fight owns still ARMS nothing, but it says why. Listed-but-inert
-    // was the old behavior of every non-attack (they weren't listed at all),
-    // and a button that does nothing at all is indistinguishable from a bug.
-    const blocked = combatOnlyReason(id);
-    if (blocked) { ui.say(blocked); return; }
-    // ONE live slot at a time, out of a fight exactly as in one (designer,
-    // 2026-07-31): pressing a different slot lowers the armed one and does
-    // nothing else - arming the new one takes a second, deliberate press.
-    // (A combat-only slot above still only explains itself: it could never
-    // arm, so it does not count as reaching for another power.)
-    if (armedOoc && armedOoc !== id) {
-      armedOoc = null;
-      hotbarHost.hotbar?.setArmed(null);
-      ui.say('You stand down.');
-      return;
-    }
-    armedOoc = armedOoc === id ? null : id;
-    hotbarHost.hotbar?.setArmed(armedOoc);
-    if (!armedOoc) { ui.say('You stand down.'); return; }
-    const a = ACTIONS[armedOoc];
-    // What the armed slot is waiting for. A summon aims at the FLOOR, so
-    // "click a coworker" would be aiming instructions for the wrong thing -
-    // and a cone needs no coworker at all, so its hint must not demand one.
-    ui.say(a.type === 'summon'
-      ? `${a.label} ready — click a spot within ${summonRange(a)} tiles to post it.`
-      : a.cone
-        ? `${a.label} ready — point it and click to fire.`
-        : `${a.label} ready — click a coworker to start it.`);
-  }
-
   // --- posting the role with no fight on ----------------------------------------
   // A summon power is not a combat power, it is a power. Post the Role used to
   // be unreachable until a fight was already running - the hotbar listed
@@ -1863,26 +1900,6 @@ function startGame(level) {
   const summonDropSpots = (a, tx, tz) => (summonDropProblem(a, tx, tz)
     ? []
     : freeTilesNear(tx, tz, dropCount(a, roomFor(a)), 0));
-  function postSummonAt(id, tx, tz) {
-    const a = ACTIONS[id];
-    const problem = summonDropProblem(a, tx, tz);
-    if (problem) { ui.say(problem); return; }
-    const spawned = spawnSummonUnits(
-      a.archetype, 'player', player, dropCount(a, roomFor(a)), { x: tx, z: tz },
-    );
-    if (!spawned.length) { ui.say('No room - nobody can find a free desk there.'); return; }
-    for (const rec of spawned) {
-      rec.actor.summonTurns = a.lifetimeTurns ?? null;
-      vfx.impact(rec.actor.x, rec.actor.z, 'toner', { y: 0.5, scale: 0.55 });
-    }
-    player.faceToward(tx, tz); // you gesture at where you posted them
-    ui.say(`${a.log} ${arrivalLine(spawned.length)}`);
-    // One click, one post: the slot disarms so a stray second click walks you
-    // somewhere instead of quietly filling the floor with temps.
-    armedOoc = null;
-    hotbarHost.hotbar?.setArmed(null);
-  }
-
   // First (enemy, member) adjacency in the party - any member can get
   // cornered, and the fight engages around whoever it was.
   function adjacentEnemyToParty() {
@@ -2232,54 +2249,6 @@ function startGame(level) {
   // Hotbar trigger: an armed attack, aimed at a coworker, opens combat with
   // that move. The clicked target joins even if it's beyond the engage radius
   // (a thrown opener can reach further than the auto-engage does).
-  function engageWithAction(en, actionId, point = null) {
-    if (!sheet || inCombat || gameOver || !en?.alive) return;
-    // Pre-flight the opener before any fight begins: an armed misclick on a
-    // coworker nobody can actually reach (sealed behind walls and closed
-    // doors) or throw at would otherwise open an unwinnable stalemate -
-    // combat would start, and neither side could ever close the distance.
-    const a = ACTIONS[actionId];
-    if (rangeOf(actionId)) {
-      if (!oocTargetOk(actionId, en)) {
-        ui.say(a.ammoCost ? 'No line for that throw from here.' : 'No shot at them from here.');
-        return;
-      }
-    } else if (a.cone) {
-      // A cone fires from where you STAND, and its gate IS the wedge - the
-      // same coneFrom the preview drew and the resolution will run, aimed at
-      // the CLICK point when one came through (the armed ground click) and at
-      // the target's body otherwise. The old gate here was a third geometry
-      // (cheb square + tile-to-tile line) that could refuse a body the
-      // preview's wedge plainly clipped (DEGRID M5).
-      const lb = leadBody();
-      const eb = enemyBody(en);
-      const test = coneFrom(a, lb, point ? point.x : eb.x, point ? point.z : eb.z);
-      if (!test || !(test(eb.x, eb.z, 0.5) && hasLos(lb, eb))) {
-        ui.say(`They are not in the way of that ${a.label.toLowerCase()}.`);
-        return;
-      }
-    } else if (a.type === 'shove') {
-      // The ring's own test (oocTargetOk): arm's reach, or the office
-      // standing in for your arms - a partition between you, or adjacent
-      // furniture whose fall lands exactly on them. One test, so the ring
-      // and this refusal cannot drift apart.
-      if (!oocTargetOk(actionId, en)) {
-        ui.say('Too far to shove. Walk your feelings over first.');
-        return;
-      }
-    } else if (!playerReaches(en) && !bestApproachPath(en.x, en.z)) {
-      ui.say('No way to reach them from here.');
-      return;
-    }
-    const engaged = enemies.filter((e) =>
-      e.alive && Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= ENGAGE_RADIUS
-      && canTakePart(player, e)); // same rule as checkCombatTrigger - see there
-    if (!engaged.includes(en)) engaged.push(en);
-    // The aimed point rides into the fight: the opener must fire the wedge
-    // the player SAW, not one re-aimed at the target's tile centre.
-    beginCombat({ engaged, primary: en, opening: { actionId, target: en, point } });
-  }
-
   // A cone fired at an EMPTY wedge, with no fight on. It fires anyway
   // (designer, 2026-07-31: no target needed, in or out of combat) - combat's
   // fireCone already resolves this exact case as a swing with no casualties
@@ -2310,89 +2279,11 @@ function startGame(level) {
   // The same furniture-topple rule combat runs, evaluated from the leader's
   // spot: sign-derived landing, open ground, no free demolition into a wall.
   const ORTHO4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  function oocTopplePlanAt(px, pz) {
-    const def = grid.defAt(px, pz);
-    if (!isToppleable(def)) return null;
-    const landing = toppleLanding(player.x, player.z, px, pz);
-    if (!landing) return null;
-    const [lx, lz] = landing;
-    if (!grid.terrainOpen(lx, lz) || !grid.stepOpen(px, pz, lx, lz)) return null;
-    return { def, x: px, z: pz, lx, lz };
-  }
-
   // An armed SHOVE aimed at the office with no fight on (designer,
   // 2026-07-30): furniture and partitions topple out here too. With a
   // coworker standing where it lands, the topple IS the opener - the fight
   // starts and combat resolves the fall with its own save and pin. Returns
   // true when the click was a shove at the office (refusals included).
-  function oocShoveAt(tile) {
-    const def = grid.defAt(tile.x, tile.z);
-    if (isToppleable(def)) {
-      approachAndDo(tile.x, tile.z, () => {
-        const plan = oocTopplePlanAt(tile.x, tile.z);
-        if (!plan) { ui.say('It rocks, and settles. Nothing behind it to fall into.'); return; }
-        const en = enemyAt(plan.lx, plan.lz);
-        if (en?.alive) { engageWithAction(en, 'shove'); return; }
-        if (npcAt(plan.lx, plan.lz) || partyAt(plan.lx, plan.lz)) {
-          ui.say('Somebody is standing there. Not like this.');
-          return;
-        }
-        grid.setType(plan.x, plan.z, 'floor');
-        scene.refreshTile?.(plan.x, plan.z);
-        grid.setType(plan.lx, plan.lz, plan.def.topple.becomes);
-        scene.refreshTile?.(plan.lx, plan.lz);
-        vfx.impact(plan.lx, plan.lz, 'slam', { y: 0.5 });
-        vfx.shake(0.11, 0.28);
-        ui.say(`${plan.def.label || 'It'} goes over.`);
-        armedOoc = null;
-        hotbarHost.hotbar?.setArmed(null);
-      });
-      return true;
-    }
-    // A partition: the clicked tile is the side it falls ONTO - walk to the
-    // tile across the edge and put a shoulder into it.
-    if (grid.terrainOpen(tile.x, tile.z)) {
-      let side = null;
-      for (const [dx, dz] of ORTHO4) {
-        const sx = tile.x + dx;
-        const sz = tile.z + dz;
-        if (!grid.wallEdgeBetween(sx, sz, tile.x, tile.z)) continue;
-        if (sx === player.x && sz === player.z) { side = { x: sx, z: sz, here: true }; break; }
-        if (!isWalkable(sx, sz)) continue;
-        const p = findPath(isWalkable, player.x, player.z, sx, sz, hazardCost, grid.stepOpen);
-        if (p && p.length >= 2 && (!side || p.length < side.len)) side = { x: sx, z: sz, len: p.length };
-      }
-      if (!side) return false; // no partition faces that tile - not a shove aim
-      const resolve = () => {
-        // Re-verify on arrival - the world had a whole walk to change.
-        if (!grid.wallEdgeBetween(player.x, player.z, tile.x, tile.z)) {
-          ui.say('The wall is not where you left it.');
-          return;
-        }
-        const en = enemyAt(tile.x, tile.z);
-        if (en?.alive) { engageWithAction(en, 'shove'); return; }
-        if (npcAt(tile.x, tile.z) || partyAt(tile.x, tile.z)) {
-          ui.say('Somebody is standing there. Not like this.');
-          return;
-        }
-        const e = grid.removeEdgeBetween(player.x, player.z, tile.x, tile.z);
-        if (!e) return;
-        scene.removeEdgeWall?.(e.o, e.k);
-        grid.setType(tile.x, tile.z, PARTITION_TOPPLE.becomes);
-        scene.refreshTile?.(tile.x, tile.z);
-        vfx.impact(tile.x, tile.z, 'slam', { y: 0.3 });
-        vfx.shake(0.08, 0.2);
-        ui.say('You put a shoulder into the partition. It goes over flat.');
-        armedOoc = null;
-        hotbarHost.hotbar?.setArmed(null);
-      };
-      if (side.here) resolve();
-      else if (!walkToExact(side.x, side.z, resolve)) { ui.say('No way to get at that wall.'); }
-      return true;
-    }
-    return false;
-  }
-
   // An armed TAKE COVER with no fight on: crouch before anyone has noticed
   // you. The crouch rides into the fight that starts (beginCombat hands it to
   // startCombat as preCrouch), which is the whole point of taking it early.
@@ -2428,80 +2319,9 @@ function startGame(level) {
     coverCell: (cx, cz) => (cx === player.x && cz === player.z ? false : oocCoverCell(cx, cz)),
   });
   // Why this spot is not a crouch, or null when it is one.
-  function oocCoverProblem(x, z) {
-    const here = player.x === x && player.z === z;
-    if (!here && (!isWalkable(x, z) || enemyAt(x, z) || npcAt(x, z) || partyAt(x, z))) {
-      return 'No room to tuck in there.';
-    }
-    if (!oocCoverFaces(x, z).length) return 'Nothing there to hide behind.';
-    return null;
-  }
   // What is covering a spot, in words - the out-of-combat twin of combat's
   // `coverNames`, so "You tuck in behind..." names the same things on both
   // sides of a fight starting.
-  function oocCoverNames(x, z) {
-    const seen = [];
-    for (const [ox, oz] of oocCoverFaces(x, z)) {
-      const cx = x + ox;
-      const cz = z + oz;
-      const body = enemyAt(cx, cz) || npcAt(cx, cz) || memberBodyAt(cx, cz);
-      if (body) {
-        const name = body.sheet?.name || body.def?.name || 'them';
-        if (!seen.includes(name)) seen.push(name);
-        continue;
-      }
-      const d = grid.defAt(cx, cz);
-      const label = d && (d.cover || d.solid)
-        ? `the ${(d.label || 'cover').toLowerCase()}` : 'the partition';
-      if (!seen.includes(label)) seen.push(label);
-    }
-    if (!seen.length) return 'cover';
-    if (seen.length === 1) return seen[0];
-    return `${seen.slice(0, -1).join(', ')} and ${seen[seen.length - 1]}`;
-  }
-
-  function oocTakeCoverAt(tile, point = null) {
-    const problem = oocCoverProblem(tile.x, tile.z);
-    if (problem) { ui.say(problem); return; }
-    const commit = () => {
-      // Re-ask on ARRIVAL: a coworker who wandered off during the walk is a
-      // crouch that never happens, not one that lands on empty carpet.
-      if (oocCoverProblem(tile.x, tile.z)) { ui.say('The moment passes - no cover taken.'); return; }
-      oocCrouch = { at: { x: tile.x, z: tile.z } };
-      applyStatus(sheet, 'covered');
-      player.crouched = true; // the held pose (actors.js): torso down onto the legs
-      paintHud(sheet);
-      ui.say(`You tuck in behind ${oocCoverNames(tile.x, tile.z)}.`);
-      armedOoc = null;
-      hotbarHost.hotbar?.setArmed(null);
-    };
-    if (player.x === tile.x && player.z === tile.z) {
-      // Your own tile: a click on a meaningfully different POINT within it is
-      // a sub-tile shuffle to fine-tune the tuck - the marker promised the
-      // point, not the tile. The arrival hook fires on path-finished even
-      // without a tile change (actors.js: `changed || finished`), so the
-      // exact-tile pendingAction resolves like any other walk-then-crouch.
-      const end = point ? clampPoint(point.x, point.z) : null;
-      const pp = player.entity ? player.entity.getPosition() : player;
-      if (end && Math.hypot(end[0] - pp.x, end[1] - pp.z) > 0.1) {
-        clearOocCrouch();
-        pendingAction = { x: tile.x, z: tile.z, run: commit, exact: true };
-        const s = [[pp.x, pp.z], end];
-        player.setPath(s);
-        lastPath = s;
-        return;
-      }
-      commit();
-      return;
-    }
-    // Finish on the POINT you clicked, clamped to clearance - tucked where
-    // you chose, not teleport-parked on the tile centre (designer,
-    // 2026-07-31: "continuous and smooth"). Combat's crouch walk does the
-    // same through walkActive's endpoint.
-    if (!walkToExact(tile.x, tile.z, commit,
-      point ? clampPoint(point.x, point.z) : null)) ui.say('No way in there.');
-  }
-
   // Tile effects (data-driven from TILE_TYPES[..].onEnter) fire per step, for
   // ANY party member walking - each member's own sheet takes the damage, the
   // gum, the ammo. Hazards hit on any step; the exit only fires when it's the

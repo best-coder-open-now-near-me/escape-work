@@ -21,7 +21,7 @@ import { readFileSync } from 'node:fs';
 
 const MODULES = [
   'src/combat-aim.js', 'src/combat-world.js', 'src/hotbar-host.js',
-  'src/floor-effects.js', 'src/desk.js', 'src/combat-advance.js',
+  'src/floor-effects.js', 'src/desk.js', 'src/combat-advance.js', 'src/ooc-verbs.js',
 ];
 const GLOBALS = new Set([
   'if', 'else', 'return', 'const', 'let', 'var', 'new', 'true', 'false', 'null', 'undefined',
@@ -32,16 +32,39 @@ const GLOBALS = new Set([
   'Promise', 'Error', 'console', 'window', 'document', 'localStorage', 'location', 'globalThis',
 ]);
 
+// Two more ways a mechanical rewrite corrupts a module, both of which shipped:
+// a dependency name written INSIDE a string literal (`'player'` became
+// `'d.player'`, a team argument that silently stopped matching), and a local
+// declared with the same name as the deps bag (`const d = grid.defAt(...)`,
+// which shadowed `d` and made every other `d.` on that line a dead-zone read).
+// Neither is an unbound identifier, so the scan below cannot see them.
+function rewriteDamage(raw, file) {
+  const hits = [];
+  for (const m of raw.matchAll(/(['"])d\.[A-Za-z_$][\w$]*\1/g)) {
+    hits.push(`${file}: a dependency name inside a string literal - ${m[0]}`);
+  }
+  for (const m of raw.matchAll(/(?:const|let|var)\s+d\s*=/g)) {
+    hits.push(`${file}: a local named \`d\` shadows the deps bag`);
+  }
+  return hits;
+}
+
 let bad = 0;
 for (const file of MODULES) {
   const raw = readFileSync(file, 'utf8');
+  for (const hit of rewriteDamage(raw, file)) { bad += 1; console.log(hit); }
   // Strip comments, then every flavour of string literal, so prose cannot
   // masquerade as an identifier.
   let code = raw.split('\n').map((l) => l.split('//')[0]).join('\n');
   code = code.replace(/\/\*[\s\S]*?\*\//g, '');
-  // Template literals span lines, so strip them with a dot-all pass first -
-  // otherwise every word of an interpolated sentence reads as an identifier.
-  code = code.replace(/`[\s\S]*?`/g, '``').replace(/'(?:[^'\\]|\\.)*'/g, "''").replace(/"(?:[^"\\]|\\.)*"/g, '""');
+  // Template literals span lines, so strip them with a dot-all pass - but keep
+  // what is INSIDE `${...}`, which is real code. Dropping the whole template
+  // hid a live `summonRange(a)` call in an interpolated sentence, and the
+  // module shipped with it unbound.
+  code = code.replace(/`[\s\S]*?`/g, (lit) => {
+    const inner = [...lit.matchAll(/\$\{([^{}]*)\}/g)].map((m) => m[1]).join(';');
+    return inner ? `(${inner})` : '``';
+  }).replace(/'(?:[^'\\]|\\.)*'/g, "''").replace(/"(?:[^"\\]|\\.)*"/g, '""');
   const declared = new Set([...code.matchAll(/(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
   // Imported names count as declared - a module that imports `ACTIONS` is not
   // reading an unbound one.
