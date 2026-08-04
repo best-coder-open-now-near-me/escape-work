@@ -21,7 +21,7 @@ import { readFileSync } from 'node:fs';
 
 const MODULES = [
   'src/combat-aim.js', 'src/combat-world.js', 'src/hotbar-host.js',
-  'src/floor-effects.js', 'src/desk.js', 'src/combat-advance.js', 'src/ooc-verbs.js', 'src/party-control.js',
+  'src/floor-effects.js', 'src/desk.js', 'src/combat-advance.js', 'src/ooc-verbs.js', 'src/party-control.js', 'src/sneak-layer.js',
 ];
 const GLOBALS = new Set([
   'if', 'else', 'return', 'const', 'let', 'var', 'new', 'true', 'false', 'null', 'undefined',
@@ -80,7 +80,11 @@ for (const file of MODULES) {
   // DIRS8 - so a genuinely unbound DIRS8 sailed through and only turned up
   // when the followers stopped following. Skip any head introduced by a
   // control keyword, and any head that declares or iterates.
-  for (const m of code.matchAll(/(\w+)?\s*\(([^()]*)\)\s*(?:=>|\{)/g)) {
+  // One level of nesting is allowed inside the head, because a DEFAULT VALUE
+  // may be a call: `(body, opts = sneakSightOpts()) =>` has parens in it, and a
+  // flat `[^()]*` cannot span them - so the head never matched and every
+  // parameter in it was reported unbound.
+  for (const m of code.matchAll(/(\w+)?\s*\(((?:[^()]|\([^()]*\))*)\)\s*(?:=>|\{)/g)) {
     if (/^(?:for|if|while|switch|catch)$/.test(m[1] || '')) continue;
     const head = m[2];
     if (/\b(?:const|let|var|of|in)\b/.test(head)) continue;

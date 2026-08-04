@@ -41,6 +41,7 @@ import { createHotbarHost } from './hotbar-host.js';
 import { createFloorEffects } from './floor-effects.js';
 import { showLevelMenu } from './desk.js';
 import { createOocVerbs } from './ooc-verbs.js';
+import { createSneakLayer } from './sneak-layer.js';
 import { createPartyControl } from './party-control.js';
 
 import { loadRemoteStore, SAVE_KEY_STORAGE } from './remote-store.js';
@@ -827,7 +828,7 @@ function startGame(level) {
     get npcs() { return npcs; },
     get inCombat() { return inCombat; },
     get gameOver() { return gameOver; },
-    get sneak() { return sneak; },
+    get sneak() { return sneakLayer.sneak; },
     get armedOoc() { return armedOoc; },
     get pendingAction() { return pendingAction; },
     get hotbarHost() { return hotbarHost; },
@@ -1200,7 +1201,7 @@ function startGame(level) {
     // (SNEAK_PLAN D10). Doors stay exempt - they go through their own path,
     // and a sneak that ends at every door is no sneak in an office.
     const act = () => {
-      if (sneak) endSneak('No staying quiet through this.');
+      if (sneakLayer.sneak) endSneak('No staying quiet through this.');
       run();
     };
     if (Math.abs(player.x - x) <= 1 && Math.abs(player.z - z) <= 1) {
@@ -1618,7 +1619,7 @@ function startGame(level) {
     // (the adjacency trigger), and a sneaker deliberately never triggers on
     // proximity (D1) - so the click that would have bumped them swings
     // instead, and the fight opens on the ambusher's terms.
-    if (sneak && playerReaches(en)) {
+    if (sneakLayer.sneak && playerReaches(en)) {
       engageWithAction(en, equippedAction(sheet));
       return;
     }
@@ -1916,146 +1917,40 @@ function startGame(level) {
   // ships). Detection is the deterministic cone (stealth.seesBody); spotted
   // means the fight starts (D3). THE RENDERED CONE IS THE RULE: the sweep and
   // the drawing read the same predicate with the same options.
-  let sneak = null; // null | { mode: 'solo' | 'group' }
-  const sneakingMembers = () => {
-    if (!sneak || !party) return [];
-    const lead = partyLeader(party);
-    return party.members.filter((m) => m.actor?.entity && m.sheet.hp > 0
-      && (sneak.mode === 'group' || m === lead));
-  };
-  const sneakSightOpts = () => ({
-    // Forgettable Face (SNEAK M6): the steered sheet's talent narrows every
-    // cone watching the party.
-    halfAngle: Math.max(10,
-      STEALTH.CONE_HALF_ANGLE - (sheet?.talent?.effects?.coneShrink || 0)),
-    range: STEALTH.CONE_RANGE,
-    sightClearLow: (x, z) => grid.sightOpenCellLow(x, z) && !runtime.isSmoke(x, z),
-    edgeOpenLow: grid.sightOpenLow,
+  const sneakLayer = createSneakLayer({
+    get sheet() { return sheet; },
+    get party() { return party; },
+    get enemies() { return enemies; },
+    get oocCrouch() { return oocCrouch; },
+    get inCombat() { return inCombat; },
+    get gameOver() { return gameOver; },
+    get grid() { return grid; },
+    get runtime() { return runtime; },
+    app,
+    pc,
+    ui,
+    STEALTH,
+    ENGAGE_RADIUS,
+    partyLeader: (...a) => partyLeader(...a),
+    applyStatus: (...a) => applyStatus(...a),
+    removeStatus: (...a) => removeStatus(...a),
+    seesBody: (...a) => seesBody(...a),
+    coneBoundary: (...a) => coneBoundary(...a),
+    modalOpen: (...a) => modalOpen(...a),
+    canTakePart: (...a) => canTakePart(...a),
+    beginCombat: (...a) => beginCombat(...a),
   });
-  // The watcher's eyes: continuous body, facing = the VISUAL yaw. Unusual on
-  // purpose - facing rules elsewhere refuse the eased tween (TACTICS #5), but
-  // the cone is drawn from the model and D2 says the cone you can see is the
-  // rule, so here the tween IS the truth the player reads.
-  const watcherOf = (en) => {
-    const p = en.entity.getPosition();
-    const r = en.yaw * (Math.PI / 180);
-    return { x: p.x, z: p.z, facing: { x: Math.sin(r), z: Math.cos(r) } };
-  };
-  const bodyOfMember = (m) => {
-    const p = m.actor.entity.getPosition();
-    return { x: p.x, z: p.z };
-  };
-  const anyWatcherSees = (body, opts = sneakSightOpts()) =>
-    enemies.some((en) => en.alive && en.entity && seesBody(watcherOf(en), body, opts));
-  function endSneak(line = null) {
-    if (!sneak) return;
-    sneak = null;
-    for (const m of party?.members || []) {
-      removeStatus(m.sheet, 'sneaking');
-      // The pose belongs to the sneak unless a held crouch owns it.
-      if (m.actor && !(m.sheet === sheet && oocCrouch)) m.actor.crouched = false;
-    }
-    if (line) ui.say(line);
-  }
-  function toggleSneak(mode) {
-    if (!sheet || inCombat || gameOver || modalOpen()) return;
-    if (sneak) { endSneak('You straighten up.'); return; }
-    const lead = partyLeader(party);
-    const would = party.members.filter((m) => m.actor?.entity && m.sheet.hp > 0
-      && (mode === 'group' || m === lead));
-    // D8 (DOS2-confirmed): no slipping into a sneak somebody is watching.
-    if (would.some((m) => anyWatcherSees(bodyOfMember(m)))) {
-      ui.say('Someone is watching. Break their line of sight first.');
-      return;
-    }
-    sneak = { mode };
-    for (const m of would) {
-      applyStatus(m.sheet, 'sneaking');
-      m.actor.crouched = true;
-    }
-    if (mode === 'solo') {
-      for (const m of party.members) if (!would.includes(m)) m.actor?.clearPath();
-    }
-    ui.say(mode === 'group'
-      ? 'The whole department goes quiet.'
-      : `${lead.sheet.name} slips low. The others hold here.`);
-  }
-  // Group sneak's followers price watched ground like a hazard (SNEAK M5).
-  // The cheap wedge test only (range + angle, no trace): a follower that
-  // routes around ground that MIGHT see it beats one that path-lawyers the
-  // desk line and clips a cone with its shoulder.
-  const inAnyCone = (x, z) => {
-    if (!sneak) return false;
-    const opts = sneakSightOpts();
-    const cosLim = Math.cos(opts.halfAngle * (Math.PI / 180));
-    return enemies.some((en) => {
-      if (!en.alive || !en.entity) return false;
-      const w = watcherOf(en);
-      const dx = x - w.x;
-      const dz = z - w.z;
-      const d = Math.hypot(dx, dz);
-      if (d > opts.range) return false;
-      if (d < 1e-6) return true;
-      return (dx * w.facing.x + dz * w.facing.z) / d >= cosLim;
-    });
-  };
-  // The sweep (M3): every body against every cone, on the follower cadence.
-  // First seen body busts the sneak and starts the fight with the spotter as
-  // primary - exactly the bump-into-them opener, minus the bumping.
-  let sneakSweepT = 0;
-  function sneakSweep() {
-    const opts = sneakSightOpts();
-    for (const en of enemies) {
-      if (!en.alive || !en.entity) continue;
-      const w = watcherOf(en);
-      for (const m of sneakingMembers()) {
-        if (!seesBody(w, bodyOfMember(m), opts)) continue;
-        const who = m.sheet.name;
-        endSneak(null);
-        ui.say(`${en.def.name} spots ${who}!`);
-        const engaged = enemies.filter((e) => e.alive
-          && Math.max(Math.abs(e.x - m.actor.x), Math.abs(e.z - m.actor.z)) <= ENGAGE_RADIUS
-          && canTakePart(m.actor, e));
-        if (!engaged.includes(en)) engaged.push(en);
-        beginCombat({ engaged, primary: en });
-        return;
-      }
-    }
-  }
-  // The cones, drawn only while sneaking (both references confirmed) -
-  // immediate-mode lines like every combat affordance, from coneBoundary's
-  // rays, which run the SAME crouch-height trace the sweep does: a cone
-  // visibly stops at the desk it cannot see over.
-  const CONE_COLOR = () => new pc.Color(0.92, 0.28, 0.2, 0.55);
-  function drawSneakCones() {
-    const opts = sneakSightOpts();
-    const y = 0.15;
-    for (const en of enemies) {
-      if (!en.alive || !en.entity) continue;
-      const w = watcherOf(en);
-      const pts = coneBoundary(w, opts);
-      const eye = new pc.Vec3(w.x, y, w.z);
-      let prev = eye;
-      for (const [px, pz] of pts) {
-        const v = new pc.Vec3(px, y, pz);
-        app.drawLine(prev, v, CONE_COLOR());
-        prev = v;
-      }
-      app.drawLine(prev, eye, CONE_COLOR());
-      // A few interior rays so the wedge reads as a watched AREA, not an
-      // outline that could pass for a wall.
-      for (let i = 2; i < pts.length - 1; i += 4) {
-        app.drawLine(eye, new pc.Vec3(pts[i][0], y, pts[i][1]), CONE_COLOR());
-      }
-    }
-  }
+  const {
+    sneakingMembers, sneakSightOpts, watcherOf, bodyOfMember, anyWatcherSees,
+    endSneak, toggleSneak, inAnyCone, sneakSweep, drawSneakCones,
+  } = sneakLayer;
 
   function beginCombat({ engaged, primary, opening = null }) {
     if (!sheet || inCombat || gameOver || !player.entity) return;
     // A fight begun while sneaking judges surprise by SIGHT (SNEAK M4/D6):
     // capture who saw the initiator BEFORE the sneak state is cleared.
     let sneakOpened = null;
-    if (sneak) {
+    if (sneakLayer.sneak) {
       const opts = sneakSightOpts();
       const p = player.entity.getPosition();
       sneakOpened = {
@@ -3319,14 +3214,7 @@ function startGame(level) {
         m.actor.update(dt, (x, z, done, changed) => onMemberStep(m, x, z, done, changed));
       }
       if (sheet && !inCombat && !gameOver) updateFollowers(dt);
-      if (sneak && !inCombat && !gameOver) {
-        sneakSweepT -= dt;
-        if (sneakSweepT <= 0) {
-          sneakSweepT = 0.25;
-          sneakSweep();
-        }
-        if (sneak) drawSneakCones(); // the sweep may just have ended it
-      }
+      sneakLayer.sweepTick(dt);
     } else {
       player.update(dt); // idling on the spawn tile behind the class picker
     }
@@ -3696,7 +3584,7 @@ function startGame(level) {
     get playerMoving() { return !!player?.moving || legQueue.length > 0 || !!climbAnim; },
     // Sneak state for the suite: the mode, and whether any watcher currently
     // sees the leader's body - the same predicate the sweep runs.
-    get sneak() { return sneak ? { mode: sneak.mode } : null; },
+    get sneak() { return sneakLayer.sneak ? { mode: sneakLayer.sneak.mode } : null; },
     get leaderSeen() {
       if (!player?.entity) return false;
       const p = player.entity.getPosition();
