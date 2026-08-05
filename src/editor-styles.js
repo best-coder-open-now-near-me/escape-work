@@ -86,11 +86,15 @@ export function installEditorStyles() {
     #editor-resize { display: flex; flex-direction: column; gap: 7px; padding: 9px 0 2px; border-top: 1px solid #3a3a52; }
     .editor-inspector-section-heading { display: flex; align-items: baseline; justify-content: space-between; font-size: 11px; font-weight: 700; }
     #ed-size { color: #8adf76; font-variant-numeric: tabular-nums; }
-    .editor-resize-axis, .editor-resize-anchor { display: flex; align-items: center; gap: 7px; }
-    .editor-resize-axis > span, .editor-resize-anchor > span { flex: 1; color: #a9a9ba; }
-    .editor-resize-axis > button { width: 42px; }
-    .editor-resize-anchor-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; width: 144px; }
-    .editor-resize-anchor-button[aria-pressed="true"] { border-color: #8adf76 !important; color: #d9f7cf; }
+    .editor-resize-axis { display: grid; grid-template-columns: 36px 36px minmax(0, 1fr) 36px 36px; align-items: center; gap: 4px; }
+    .editor-resize-axis-button { width: 36px; padding: 6px 0 !important; font-weight: 700; }
+    .editor-resize-add { border-color: #426942 !important; color: #b9edab; }
+    .editor-resize-remove { border-color: #6e414b !important; color: #f2b6c1; }
+    .editor-resize-axis-key { display: flex; align-items: baseline; justify-content: center; gap: 6px; min-width: 0; padding: 6px; border: 1px solid #3a3a52; border-radius: 5px; background: rgba(16, 16, 29, .62); font-variant-numeric: tabular-nums; }
+    .editor-resize-axis-key b { font-size: 12px; }
+    .editor-resize-axis-size { color: #e9e9ef; }
+    .editor-resize-axis[data-axis="x"] .editor-resize-axis-key { border-color: #356a7b; color: #85dff6; }
+    .editor-resize-axis[data-axis="y"] .editor-resize-axis-key { border-color: #756036; color: #f0cd7d; }
     #ed-status { position: static !important; max-width: none !important; padding: 0 !important; border: 0 !important; background: transparent !important; box-shadow: none !important; }
     #ed-status b { color: #8adf76; }
     #ed-filter { width: 100%; min-width: 0 !important; box-sizing: border-box; margin: 0 8px 2px; }

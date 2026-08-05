@@ -2097,10 +2097,6 @@ export function startEditor(app, levelData, stashKey) {
   }
 
   // --- canvas size ------------------------------------------------------------
-  // The old eight controls required mentally translating whether each one grew
-  // at the near or far edge. Pinning an edge makes that choice visible first;
-  // the steppers then only answer the simple question: one row/column more or
-  // less.
   const resizePanel = document.createElement('section');
   resizePanel.id = 'editor-resize';
   const resizeHeading = document.createElement('div');
@@ -2109,65 +2105,52 @@ export function startEditor(app, levelData, stashKey) {
   const sizeLabel = document.createElement('span');
   sizeLabel.id = 'ed-size';
   resizeHeading.appendChild(sizeLabel);
-  function updateSizeLabel() { sizeLabel.textContent = `${width}×${height}`; }
-  const resizeAnchor = { x: 'left', z: 'top' };
-  const resizeAnchors = new Map();
-  const resizeAtPinnedEdge = (axis, amount) => {
+  const axisSizeLabels = new Map();
+  function updateSizeLabel() {
+    sizeLabel.textContent = `${width}×${height}`;
+    axisSizeLabels.get('x').textContent = width;
+    axisSizeLabels.get('y').textContent = height;
+  }
+  const resizeAtEdge = (axis, edge, amount) => {
     if (axis === 'x') {
-      if (resizeAnchor.x === 'left') resize(amount, 0); else shift(amount, 0);
-    } else if (resizeAnchor.z === 'top') resize(0, amount); else shift(0, amount);
+      if (edge === 'left') shift(amount, 0); else resize(amount, 0);
+    } else if (edge === 'top') shift(0, amount); else resize(0, amount);
   };
-  const resizeAxis = (axis, label, minusId, plusId) => {
+  const resizeAxis = (axis, edgeNames) => {
     const row = document.createElement('div');
     row.className = 'editor-resize-axis';
-    const name = document.createElement('span');
-    name.textContent = label;
-    row.appendChild(name);
-    const minus = btn(minusId, '-', row);
-    minus.title = `Remove one ${label.toLowerCase()}`;
-    minus.setAttribute('aria-label', `Remove one ${label.toLowerCase()}`);
-    minus.onclick = () => resizeAtPinnedEdge(axis, -1);
-    const plus = btn(plusId, '+', row);
-    plus.title = `Add one ${label.toLowerCase()}`;
-    plus.setAttribute('aria-label', `Add one ${label.toLowerCase()}`);
-    plus.onclick = () => resizeAtPinnedEdge(axis, 1);
-    return row;
-  };
-  const anchorAxis = (axis, label, first, second) => {
-    const row = document.createElement('div');
-    row.className = 'editor-resize-anchor';
-    const name = document.createElement('span');
-    name.textContent = label;
-    const controls = document.createElement('div');
-    controls.className = 'editor-resize-anchor-controls';
-    const add = (value, text) => {
-      const button = btn(`ed-resize-pin-${value}`, text, controls);
-      button.classList.add('editor-resize-anchor-button');
-      button.setAttribute('aria-pressed', 'false');
-      button.title = `Keep the ${text.toLowerCase()} edge fixed while resizing`;
-      button.onclick = () => {
-        resizeAnchor[axis] = value;
-        for (const item of resizeAnchors.values()) {
-          item.button.setAttribute('aria-pressed', resizeAnchor[item.axis] === item.value ? 'true' : 'false');
-        }
-      };
-      resizeAnchors.set(value, { axis, value, button });
+    row.dataset.axis = axis;
+    const [near, far] = edgeNames;
+    const addButton = (edge, operation) => {
+      const symbol = operation === 'add' ? '+' : '-';
+      const amount = operation === 'add' ? 1 : -1;
+      const button = btn(`ed-resize-${axis}-${edge}-${operation}`, symbol, row);
+      const noun = axis === 'x' ? 'column' : 'row';
+      button.classList.add('editor-resize-axis-button', `editor-resize-${operation}`);
+      button.title = `${operation === 'add' ? 'Add' : 'Remove'} one ${noun} at the ${edge} edge`;
+      button.setAttribute('aria-label', button.title);
+      button.onclick = () => resizeAtEdge(axis, edge, amount);
     };
-    add(first, `${first[0].toUpperCase()}${first.slice(1)}`);
-    add(second, `${second[0].toUpperCase()}${second.slice(1)}`);
-    row.append(name, controls);
+    addButton(near, 'add');
+    addButton(near, 'remove');
+    const key = document.createElement('span');
+    key.className = 'editor-resize-axis-key';
+    const name = document.createElement('b');
+    name.textContent = axis.toUpperCase();
+    const dimension = document.createElement('span');
+    dimension.className = 'editor-resize-axis-size';
+    axisSizeLabels.set(axis, dimension);
+    key.append(name, dimension);
+    row.appendChild(key);
+    addButton(far, 'remove');
+    addButton(far, 'add');
     return row;
   };
   resizePanel.append(
     resizeHeading,
-    resizeAxis('x', 'Columns', 'ed-resize-column-remove', 'ed-resize-column-add'),
-    resizeAxis('z', 'Rows', 'ed-resize-row-remove', 'ed-resize-row-add'),
-    anchorAxis('x', 'Pin horizontally', 'left', 'right'),
-    anchorAxis('z', 'Pin vertically', 'top', 'bottom'),
+    resizeAxis('x', ['left', 'right']),
+    resizeAxis('y', ['top', 'bottom']),
   );
-  for (const item of resizeAnchors.values()) {
-    item.button.setAttribute('aria-pressed', resizeAnchor[item.axis] === item.value ? 'true' : 'false');
-  }
   levelRow.appendChild(resizePanel);
 
   // load a shipped level as a base

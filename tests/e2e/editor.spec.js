@@ -178,21 +178,25 @@ test('palette categories collapse, expand, and reveal filter matches', async ({ 
   await expect(work).toHaveAttribute('aria-expanded', 'true');
 });
 
-test('the inspector holds diagnostics and canvas resizing pins an edge', async ({ page }) => {
+test('the inspector holds diagnostics and canvas edges resize directly', async ({ page }) => {
   await page.goto('/#editor');
   await page.waitForFunction(() => window.__editor, null, { timeout: 90_000 });
   await waitForSmoothFrames(page);
 
   await expect(page.locator('#editor-inspector #editor-analysis')).toHaveCount(1);
   await expect(page.locator('#editor-shell > #editor-analysis')).toHaveCount(0);
-  await expect(page.locator('#ed-resize-pin-left')).toHaveAttribute('aria-pressed', 'true');
-  await page.click('#ed-resize-pin-right');
-  await expect(page.locator('#ed-resize-pin-right')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#ed-resize-x-left-add')).toHaveAttribute('aria-label', 'Add one column at the left edge');
+  await expect(page.locator('#ed-resize-y-bottom-add')).toHaveAttribute('aria-label', 'Add one row at the bottom edge');
 
   const before = await page.evaluate(() => window.__editor.size);
-  await page.click('#ed-resize-column-add');
+  await page.click('#ed-resize-x-left-add');
   await expect.poll(
     () => page.evaluate(() => window.__editor.size),
     { timeout: 30_000 },
   ).toEqual({ width: before.width + 1, height: before.height });
+  await page.click('#ed-resize-y-bottom-add');
+  await expect.poll(
+    () => page.evaluate(() => window.__editor.size),
+    { timeout: 30_000 },
+  ).toEqual({ width: before.width + 1, height: before.height + 1 });
 });
