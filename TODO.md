@@ -14,8 +14,8 @@ same thing, the queue is authoritative; the Phase entry is history.
 
 ## Questions for the designer
 
-Both questions raised on 2026-08-03 are ANSWERED (designer, 2026-08-03) and
-both are closed out below. Nothing here is waiting on anyone.
+The two questions raised on 2026-08-03 are ANSWERED (designer, 2026-08-03)
+and closed out below. One implementation question remains open.
 
 **1. Two saves, one desk: which run wins? (Q017) — ANSWERED: option A.**
 
@@ -38,9 +38,19 @@ off and fires rather than trading punches in the scrum. Doctrine #11 working
 as written. Left as shipped. If it ever reads as slippery rather than smart
 that is a re-open of A4, not a bug, and the one-line gate is easy to remove.
 
+**3. Should the editor's cover preview mean fight cover or enclosure? - OPEN.**
+
+`[proposed]` - the preview currently counts every solid, including walls, while
+the combat rule only counts a solid that can shield a body. **A (recommended):**
+derive the preview from `shieldsCell`, so authors see the cover a fight will
+actually grant. **B:** keep the current enclosure reading, where outer walls
+also count as shelter. A aligns the editor with play; B preserves a broader,
+non-combat preview. No implementation should choose between them until the
+designer answers.
+
 ## The 20 remaining HIGH findings — superseded
 
-Folded into THE QUEUE below, which covers all 227 standing findings rather than
+Folded into THE QUEUE below, which covers all 228 standing findings rather than
 only the 24 high ones. Splitting the highs into their own list was how the other
 203 went back to being prose - the exact failure the queue exists to stop.
 
@@ -65,27 +75,27 @@ How to read it:
   those as leads. Of eight refutations in this pass, six were right about the
   code and wrong about the consequence.
 
-**228 entries** — 24 high / 106 medium / 98 low. **131 ticked, 97 open**
-(high **24/24 — the band is clear**, medium 56/106, low 51/98).
+**228 entries** — 24 high / 106 medium / 98 low. **175 ticked, 53 open**
+(high **24/24 — the band is clear**, medium 88/106, low 63/98).
 
 **Zero `[bug]` findings are open.** All 13 that remained were closed on
-2026-08-03; what is left is 22 test-gap and 76 cleanup (duplication,
+2026-08-03; what is left is 12 test-gap and 41 cleanup (duplication,
 inconsistency, doc-drift, soc / dead-code / god-method / design). Nothing on
 this list is currently known to misbehave in the played game.
 
 **Every HIGH finding is closed, and no `[bug]` is open at any severity.** What
-remains is 21 test-gap and 76 cleanup, all medium or low.
+remains is 12 test-gap and 41 cleanup, all medium or low.
 
 *A caution for whoever reads that as "the review is nearly done": the count is
 of FINDINGS, not of work. The three biggest things on the list — `startCombat`
 and `startGame` (Q037/Q042/Q039) and the `drawTargets` body pass (Q901) — are
 one line each here and are each larger than most of the rows above them.*
 
-*Counted from the boxes rather than carried forward, 2026-08-03. This line had
+*Counted from the boxes rather than carried forward, 2026-08-05. This line had
 said "227 standing … 31 ticked" for several passes while the boxes below said
 115 — the queue's own tally had become the prose it exists to replace. It is
 228 not 227 because Q003's second clause was re-queued as Q902. Recount before
-quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
+quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
 
 
 ### HIGH
@@ -191,8 +201,9 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
 
 
 
-- [ ] **Q901** `src/combat.js` [god-method] **(new 2026-08-02, the remainder of Q022)**<br>      ↳ **MOVED, and the warning in this entry was worth its weight.** `drawTargets`'s body pass now lives in `combat-aim.js` with the rest of the aim view rather than in the closure. The entry predicted "expect at least one more of those in here" about fall-through arms; what actually bit was different and worse - three runtime errors that all BUILT CLEAN and only failed in a browser: setters that were object-literal methods (so moved code called undefined names and the frame loop died, stalling every AI turn), `findPath` being both a facade key and an outer function, and `[...party.members]` hiding from the rewrite because the spread's dots read as property access. **The body pass is not yet SPLIT** - it moved intact. Splitting it is still open, and still wants a real look rather than another mechanical cut.
-  `drawTargets`'s BODY pass, ~195 lines: the cone polyline, the melee reach ring,
+- [ ] **Q901** `src/combat-aim.js:485` [god-method] **(new 2026-08-02, the remainder of Q022)**<br>      ↳ **MOVED, not yet split.** The roughly 200-line body/enemy target pass now lives with the aim view. It still shares hover, easing, and enemy iteration state, so the remaining work is a state-ownership design rather than a mechanical extraction.
+  **Current location:** `src/combat-aim.js:485`; the combined body/enemy pass is
+  about 200 lines: the cone polyline, melee reach ring,
   the shove/topple/partition/break rings and the per-enemy ring loop. Unlike the
   ground arms these are NOT independent - they share `hoverFoe`, `coverEase` and
   the enemy iteration, so splitting them means deciding what owns that state, not
@@ -352,7 +363,7 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q034** `src/tactics.js:259` [duplication] **(carried)** "Does this shielded face point at the attacker?" is implemented three times, and REVIEW.md records it as having one owner<br>      ↳ DONE — tactics.shieldingFace; facesShieldFrom derives from it; 4 tests
 - [x] **Q035** `src/combat.js:4530` [god-method] **(carried)** `update()` is a 278-line god frame-driver braiding six responsibilities, and it grew with the AI work<br>      ↳ **PARTLY DONE** — the same function as Q003 and closed by the same split; see there. The braiding is what came apart: the frame's own bookkeeping, the player half's two walk-up finishers, and the AI half's gather/decide/act are now four separate reads.
 - [x] **Q036** `src/combat.js:3176` [god-method] **(carried)** `handleEnemyClick` is a 243-line dispatcher with nine inline verb arms, each re-implementing the same AP check, arming teardown and victory check<br>      ↳ **DONE — 253 → 62 lines**, six pieces named: `clickShove` (30), `clickPull` (9), `clickRanged` (77), `clickMelee` (72), plus the two epilogues the arms were repeating - `finishVerb` and `closedTheDistance`. The head is now the gates, the auto-arm, the `refuse` closure and one line per kind. **The finding's own count was wrong and it is worth recording which way.** It says nine arms each re-implementing the AP check, the arming teardown and the victory check. Measured: five copies of the one-line AP guard, two of the victory epilogue, two of the walk-only one. The five one-line arms (cover, cone, summon, zone, control) re-implement nothing - they delegate and return. And the AP guard stays a legible one-liner rather than becoming a helper, because `if (!afford(a, refuse)) return;` costs what `if (active.ap < a.ap) { refuse('Not enough AP.'); return; }` costs and buys only indirection. **What the finding missed:** two `disarm()` sites deliberately DON'T check victory - they are the walk-only branch, where no strike happened so nothing can have died. That asymmetry now has a name (`closedTheDistance` vs `finishVerb`) and a comment saying it is deliberate, which is the part a future reader would otherwise 'fix'.
-- [ ] **Q037** `src/combat.js:76` [god-method] **(carried)** The two god closures measured: `startCombat` is 5,065 lines / 176 inner functions / 21 shared mutable variables, `startGame` 4,214 / 159 / 26 — and combat.js grew 493 lines on this branch<br>      ↳ **CUT, not closed — 2026-08-03, and the numbers are the point.** `startCombat` 5,506 → 4,965 lines, 108 → 92 inner functions, **21 → 13 shared mutable variables**; `startGame` 4,407 → 4,133, 87 → 83, **26 → 22**. Files: `combat.js` 5,590 → 5,050, `main.js` 4,802 → 4,531. Four modules came out, all node-importable: `combat-aim.js`, `combat-world.js`, `hotbar-host.js`, and the AI turn's two halves in `combat-ai.js`.
+- [ ] **Q037** `src/combat.js:97` [god-method] **(carried)** `startCombat` and `startGame` remain the central mutable combat/run closures: about 2,962 and 2,653 lines from their entry points, respectively.<br>      ↳ **PARTLY DONE.** The historical measurements below record the successful extractions; they are not current size metrics. The remaining work is to assign ownership of the shared combat and run state before attempting another extraction.
       **The method, because it is the transferable part:** don't cut by size, cut by STATE OWNERSHIP. Measure which shared variables a cluster writes and which are written by anything else; a cluster whose variables nobody outside touches is already a module living in the wrong scope, and moving it is mechanical. The aim view owned 8 of the 21; the hotbar host owned 4 of the 26. That is why both moved in one pass each with no design argument to have.
       **Later the same day, one more slice:** `floor-effects.js` - what the floor does to a body (the per-step surface effects, the slip roll, the out-of-combat turn clock). `startGame` 4,133 → 4,074 lines, 83 → 80 functions.
 
@@ -363,12 +374,14 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
 
       **The lesson is about the size of the BAG, not the size of the cut.** The five clean extractions had 10-37 deps that were mostly world callbacks. This one reached into the live turn state from four directions, and each miss cost a 10-30 minute e2e round to find. A cluster that WRITES no shared state can still READ so much of it that moving it is not a lift - and reads are exactly what the "writes nothing shared" test does not measure. **Measure reads as well as writes before committing to a cut**, and treat a bag that needs `active`/`phase` as a redesign rather than a move.
 
-      **Still open, and this is the honest remainder:** 13 and 22 variables are still shared, and the ones that are left are the hard ones - `phase`, `armed`, `acting`, `active` in combat; `sheet`, `player`, `party`, `inCombat` in main. Those are genuinely global to a fight and a run, and the next cut has to decide what OWNS them rather than where they live. That is a design question, not a mechanical one.
+      **Still open:** the remaining state includes `phase`, `armed`, `acting` and
+      `active` in combat, and `sheet`, `player`, `party` and `inCombat` in the
+      run. Another extraction needs an owner for that state, not a size target.
 - [x] **Q038** `src/looting.js:292` [god-method] **(carried)** `looting.js lootEntries` is a 120-line function running five unrelated scans, three full grid sweeps and an inline flood fill — in a module kept out of node by a single renderer import<br>      ↳ **DONE — 120 → 12 lines**, and the last clause was already stale. Five scans, five names: `looseEntries`, `propEntries`, `bodyEntries`, `paperEntries`, and the host's own `extraEntries`; `lootEntries` is now the concatenation, in the order the labels were built in before they were named (the overlay renders in list order and nothing has said which way it should be, so the order is preserved rather than tidied). **The three grid sweeps are two.** Containers and machines ask the same tile the same question and now share one pass - two lists, one sweep, so the container-before-machine order survives. The third is the flood fill's own, and it stays: folding it in would cost the extraction below for one pass over a window that is at most 21x21. That is a trade, not a leftover. **The flood fill is now pure and tested** - `paperPatches(grid, inWindow, harvestable)` at module scope, 8 unit tests, each verified against a mutant: 8-connecting the fill, taking the seed tile as the patch centre, and gating the window on the seed only are all caught by exactly the test that claims to cover them. **On the stale clause:** looting.js has imported under node since 52741dc; what keeps the rest of it out is that `createLooting` builds DOM panels the moment it is constructed. That is why the fill went to module scope rather than staying an inner function - same reason, same seam, as Q902.
-- [ ] **Q039** `src/main.js:304` [god-method] **(carried)** `startGame` has grown to a 4,214-line closure with 88 inner functions and 141 closure variables<br>      ↳ **CUT — see Q037 for the method and the numbers.** `startGame` 4,407 → 4,133 lines, 87 → 83 inner functions, 26 → 22 shared variables. Two pieces left it: the 199-line world facade `beginCombat` built inline (now `combat-world.js`, which is also Q041's other half) and the hotbar's DOM binding (`hotbar-host.js`), which held four variables exactly one function wrote.
+- [ ] **Q039** `src/main.js:269` [god-method] **(carried)** `startGame` is still a roughly 2,653-line closure from its entry point and owns the run's shared state.<br>      ↳ **PARTLY DONE — see Q037.** `combat-world.js` and `hotbar-host.js` left the closure; the prior function and variable counts are historical, not current metrics.
 - [x] **Q040** `src/combat.js:3536` [inconsistency] **(carried)** `verbKind` has only two consumers while five more hand-written `a.type` ladders are live — the exact drift TODO.md Phase 5 says to watch for<br>      ↳ DONE — attackOrConfront asks verbSides; three of five ladders now collapsed
 - [x] **Q041** `src/combat-plans.js:54` [soc] **(carried)** Pure plan modules take a parameter literally named `world` that is combat's host facade, so the contract is duck-typed and unit tests structurally cannot check it<br>      ↳ **THE PROVIDER SIDE IS REACHABLE NOW (2026-08-03).** `world-contract.test.js` pins what the pure rules NEED off the bag and says in its own header that it deliberately cannot check the other side - "main.js is the entry point and importable.test.js excludes it on purpose, so the provider side cannot be reached from node". The facade was a 199-line literal inside `beginCombat`; it is `combat-world.js` now, a plain function returning a plain object, so a test can build one and ask whether it still carries the keys the rules read. **The test itself is not written yet** - that is what is left of this finding.<br>      ↳ **DONE — `world-provider.test.js`.** The consumer half pinned what each rule NEEDS off the bag and said in its header that the provider side "cannot be reached from node". It can now: `combat-world.js` is a plain function returning a plain object. The new tests deliberately do NOT restate the key lists - two lists that must agree is the drift this finding is about - they drive the REAL facade through the REAL rules, so a key dropped from the provider fails the same way it would in a fight. Red-first checked: deleting `stepOpen` fails 3, `tileDefAt` or `approach` fails 2.
-- [ ] **Q042** `src/combat.js:76` [soc] **(carried)** `startCombat` is one 5,140-line closure - up ~440 lines on this branch - with `armed` mutated at 31 sites across eight subsystems
+- [ ] **Q042** `src/combat.js:97` [soc] **(carried)** `startCombat` remains a large closure with `armed` shared across targeting, input, rendering, and turn resolution; give that state an explicit owner.
 - [x] **Q043** `src/editor.js:516` [soc] **(carried)** `editor.js startEditor` is a 641-line god closure, and it hardcodes the tile-category list in system code — adding a category means editing the editor<br>      ↳ **PARTLY DONE** — the tile-category ORDER is now content (`TILE_CATEGORIES` in data/tiles.js), lint both directions, and the live drift it was hiding is fixed: `snack-machine` declares `furniture`, which the editor's list never named, so its brush sorted silently to the end of the palette. **Still open:** `startEditor` is a 641-line closure - the size half of this entry.
 - [x] **Q044** `src/tile-renderer.js:12` [test-gap] **(carried)** Four modules still read `const pc = window.pc` at module scope, the pattern already fixed in actors.js/models.js/shading.js<br>      ↳ DONE — all ten deferred; 67 of 68 modules now import under node, gated by a test
 - [x] **Q045** `src/actors.js:68` [bug] A character whose .glb fails to load teleports to the world origin, because the magenta fallback holder has no child and `GridActor` drives `visual === entity`<br>      ↳ DONE — and the fix belongs in `models.js`, not actors.js where the finding is filed: `placeModel`'s SUCCESS path establishes "the holder is the body, `children[0]` is the visual", and `placeFallback` was the one branch that broke the contract. Made the box a child. The symptom is worse than "renders at the origin": the logical tile follows the body, so its per-tile effects fire at (0,0), and a walk issued to it never arrives because `moving` never clears — in a fight, a turn waiting on that arrival hangs.
@@ -405,7 +418,7 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q075** `src/combat.js:2184` [dead-code] The ratified ranged-kit disengage shove is implemented and unit-tested but never wired — no caller passes `disengage`<br>      ↳ DONE — same finding as Q047, closed by the same one-line wiring. **The [dead-code] framing invited the opposite remedy and it would have been wrong:** pruning the unreached branch would have deleted a [ratified] decision (AI_PLAN A4). Dead code that implements a ratified decision is a MISSING CALLER, never a deletion.
 - [ ] **Q076** `src/data/items.js:373` [dead-code] Two of five loot tables are unreachable on the shipped campaign, and `night-thermos` is unobtainable in the whole game
 - [x] **Q077** `/home/user/escape-work/ARCHITECTURE.md:444` [doc-drift] ARCHITECTURE.md still documents the pre-branch enemy targeting rule ("nearest living member, ties to the bloodied one")<br>      ↳ DONE — and worth recording WHY it survived so long: the sentence is exactly `pickTarget` at `focus: 0`, so it was true of the shipped game and merely no longer the rule. The entry now names the engageable tier and the four blended terms.
-- [ ] **Q078** `/home/user/escape-work/src/main.js:141` [doc-drift] The `?seed=` comment added by AI M1 asserts an initiative-rng gap the code does not have, and credits the seed with slips it does not cover
+- [ ] **Q078** `tests/e2e/helpers.js:92` [doc-drift] The e2e seed-helper comment overclaims that `?seed=` controls slips and every in-fight roll; the corrected main.js comment is no longer the issue.
 - [x] **Q079** `src/data/enemies.js:7` [doc-drift] `aggression` is documented as fight-initiation behaviour but is only a dot colour; the documented `'green'` value is used by nobody<br>      ↳ DONE — both halves confirmed against the code: `aggression` is read at exactly one site (`hover.js` AGGRO) and by nothing else, and no entry in the file carries `'green'`. The header says DISPLAY SIGNAL now, names `checkCombatTrigger` as what actually starts fights, and says out loud that the dot table falls back to red — so adding 'green' back is a hover.js change, not a data one.
 - [x] **Q080** `src/combat.js:2699` [duplication] `aiShoveMember` re-states the shove's slam damage as a bare literal `2`, 617 lines from the `slamDmg = 2` default it claims to match<br>      ↳ **DONE — already fixed, verified not assumed.** `aiShoveMember` no longer exists: it was folded into `displaceBody` in an earlier pass, and the comment there records why (the copy had already lost the stun and the prop topple). `slamDmg = 2` is the sole owner; searched for a second literal and there is none.
 - [x] **Q081** `src/combat.js:2645` [duplication] aiPullMember drops the hazard-landing damage performPull applies, so an AI pull into live water or fire costs the member nothing<br>      ↳ DONE — billed through memberSurfDamage
@@ -420,7 +433,7 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q090** `src/main.js:3758` [duplication] main.js's memberSpeed re-derives walk speed instead of using step-rules.speedUnderStatus, and adds a surface term the other two callers do not have<br>      ↳ **DONE, and half of it was not a bug.** The `speedMult` re-derivation was a fourth copy of a one-line rule and now calls `step-rules.speedUnderStatus`; Quiet Shoes needed its own ANSWER (`{}` while sneaking), not its own arithmetic. **The surface term stays, deliberately:** out of combat a sticky floor is paid in wall-clock, in a fight it is paid in AP through `surfaceStepCost` - slowing the animation as well would charge for it twice. Documented in place so the next reader does not "fix" it.
 - [ ] **Q091** `src/main.js:2616` [duplication] The out-of-combat crouch is a full parallel implementation of combat's, refusal strings included<br>      ↳ **PARTLY DONE — the refusal ladder is shared, the rest is not.** Both sides call `tactics.crouchProblem` now, so the two refusal strings and their ORDER have one home: a spot cannot refuse "nothing to hide behind" on the map and quietly become a legal crouch the moment initiative rolls. What legitimately differs comes in as two answers (`roomFree`, `faces`) rather than two implementations. **Still parallel:** the cover predicate either side (`oocCoverCell` vs `coverCellFor` - same def rule since Q083, different body test) and the perform half. Left open rather than closed, because the remainder is a real design question about whether the map should own a crouch at all.
 - [x] **Q092** `src/ui/screens.js:87` [duplication] The level-up screen re-derives the banked-points sum that `pendingPoints` owns — a fifth surface, on the screen where points are spent<br>      ↳ **DONE.** The level-up screen called `pendingPoints` instead of re-deriving `ap + cp` - the fifth surface for that sum, and the one place where getting it wrong is visible while the player is spending. It still reads `ap` and `cp` separately, because the two rows are labelled separately; only the total is shared.
-- [ ] **Q093** `src/god.js:109` [god-method] `god.js buildPanel` is a 595-line god closure with 23 inner functions and six shared mutable variables, and the e2e suite depends on its verbs
+- [ ] **Q093** `src/god.js:118` [god-method] `god.js buildPanel` remains an approximately 617-line closure with the debug panel's shared state and e2e-facing verbs.
 - [x] **Q094** `/home/user/escape-work/src/combat.js:2184` [inconsistency] AI_PLAN A4's ratified "a RANGED unit may shove to disengage" carve-out is never wired: the only production caller omits `disengage`<br>      ↳ DONE — same finding as Q047. The doc side checks out verbatim: AI_PLAN A4 carries `[ratified]` with provenance ("Q3 answered A", designer 2026-08-01) and doctrine #11 leans on the carve-out by name. The state this closes is the worst of the three available: ratified, documented in two places INCLUDING the ladder's own comment, and absent from the game.
 - [x] **Q095** `src/combat-ai.js:75` [inconsistency] HR's triage heal has no line-of-sight test and measures tiles, where the player's identical verb requires a clear line and body distance<br>      ↳ **DONE — [stated]** (designer, 2026-08-05: "same rules both sides"). Combat passes triage the same continuous `bodyDist` and `bodyLos` gate a player's ally buff asks; self remains legal without a degenerate line trace. `aiSupportPlan` keeps a tile-distance fallback for plain fixtures, but the played fight always supplies the shared gate. The unit test now makes a wounded ally behind a blocked line ineligible, even when they are the worst-off candidate.
 - [x] **Q096** `src/combat-plans.js:76` [inconsistency] The AI's shove reaches further than the player's and works straight through a partition<br>      ↳ **DONE — [ratified]** (designer, 2026-08-05: "a for both q096 and q097, not sure why wed want it any other way"). `aiShovePlan` takes the player's own gate (`canReach` at REACH.SHOVE) instead of bare tile adjacency. `AROUND` asks only "is that tile next to mine", so a coworker could shove from a diagonal the player could not, and straight across a partition edge the corner rule refuses. Doctrine #9 - forced movement never provokes, so shove is the safe disengage - is a rule about the VERB, and should not reach further in one pair of hands than the other.
@@ -438,24 +451,24 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q108** `src/statuses.js:182` [inconsistency] The step clock has no caller for AI units or wandering coworkers, so a gum wad is permanent on them — ARCHITECTURE.md's "the step clock ticks per tile walked, wherever you are" is false for half the actors<br>      ↳ DONE — the AI walk hook ticks it (Q2-A)
 - [x] **Q109** `src/floors.js:59` [soc] floors.js identifies stairs by the literal tile id 'stairway' although the tile def already carries a `stairs: true` flag<br>      ↳ DONE — same finding as Q110, closed once. Reads `defAt(x, z).stairs`, the flag `scene.js:77` already uses. No symptom today because `stairway` is the only tile carrying it; the cost was two owners of "what is a staircase", so a second stair tile added as pure data would have RENDERED as a flight while having no run, no entry and no landing.
 - [x] **Q110** `src/floors.js:59` [soc] `floors.js` finds stair runs by hardcoded tile id `'stairway'` while `tiles.js` declares a `stairs: true` flag for exactly that purpose<br>      ↳ DONE — duplicate of Q109, same one-line change.
-- [ ] **Q111** `src/hover.js:202` [soc] Out of combat, an armed verb leaves every non-enemy target with no affordance at all — while the click still performs it
-- [ ] **Q112** `src/ui/hud.js:319` [soc] The hotbar computes the ammo-affordability rule itself, never surfaces the reason, and does not disable the slot its own header says is disabled
-- [ ] **Q113** `/home/user/escape-work/AI_PLAN.md:1018` [test-gap] AI_PLAN's "As landed" claims M2-M6 shipped "as specified" while every e2e spec those milestones name is absent
-- [ ] **Q114** `AI_PLAN.md:1013` [test-gap] None of the six e2e specs AI_PLAN names for M1-M6 shipped, and the combat.js half of every new beat has zero coverage — while the doc records the milestones "as specified"
+- [ ] **Q111** `src/hover.js:211` [soc] With an armed out-of-combat action, valid non-enemy targets still fall back to the default cursor even though clicking can consume the action; enemy and ground affordances are already covered.
+- [ ] **Q112** `src/ui/hud.js:319` [soc] The HUD still owns a separate food/ammo affordance path (`fed` plus `setInert`), while `hotbar-model` owns action affordability and refusal reasons; make the presentation follow one owner.
+- [x] **Q113** `/home/user/escape-work/AI_PLAN.md:1018` [test-gap] AI_PLAN's "As landed" claims M2-M6 shipped "as specified" while every e2e spec those milestones name is absent<br>      ↳ CLOSED - the named e2e coverage now exists. Remaining AI_PLAN inaccuracies are tracked as doc drift (Q180, Q181, Q183).
+- [x] **Q114** `AI_PLAN.md:1013` [test-gap] None of the six e2e specs AI_PLAN names for M1-M6 shipped, and the combat.js half of every new beat has zero coverage — while the doc records the milestones "as specified"<br>      ↳ CLOSED - the premise is obsolete: the AI turn's perform half has unit coverage and the named e2e specs ship. See Q902 and Q113.
 - [x] **Q115** `playwright.config.js:6` [test-gap] playwright.config.js raises the per-test budget to 120 s but leaves expect.timeout at Playwright's 5 s default, which 52 of the 174 expect.poll sites rely on<br>      ↳ **DONE — one `E2E_TIMEOUT` owns both the test and assertion budgets.** The test budget cannot extend Playwright's independent `expect` default: `cover.spec.js:177` waited 5 seconds inside a 300-second test despite passing solo in 48.8 seconds. Ordinary assertions now receive the suite's 120-second budget instead of manufacturing a failure that reads like a gameplay regression.
 - [x] **Q116** `src/ui/chrome.js:90` [test-gap] `ui/chrome.js` touches `window` at module scope, so every module importing `ui.js` — including `dialogue.js` and its exported pure rule — cannot be imported under node<br>      ↳ DONE — bound on first use; 11 modules unlocked
-- [ ] **Q117** `tests/e2e/helpers.js:92` [test-gap] __combat.bout - the AI regression tripwire milestone 1 exists to provide - is read by no test, and the ?seed= lane that makes it reproducible is exercised by no test
+- [x] **Q117** `tests/e2e/helpers.js:92` [test-gap] __combat.bout - the AI regression tripwire milestone 1 exists to provide - is read by no test, and the ?seed= lane that makes it reproducible is exercised by no test<br>      ↳ CLOSED - `ai.spec.js` and `enemy-kit.spec.js` read `__combat.bout.beats`, and seeded boot helpers exercise the reproducible lane.
 - [ ] **Q118** `tests/e2e/summons.spec.js:45` [test-gap] The HR summon-cap assertion passes vacuously: it sleeps 1500 ms and asserts <= 2 without ever establishing that HR got another turn
-- [ ] **Q119** `tests/unit/combat-ai.test.js:21` [test-gap] firingTileRoutes' self-tile walkability exemption is unasserted, because the test's fake world declares the unit's own tile walkable and the real one never does
+- [x] **Q119** `tests/unit/combat-ai.test.js:21` [test-gap] firingTileRoutes' self-tile walkability exemption is unasserted, because the test's fake world declares the unit's own tile walkable and the real one never does<br>      ↳ CLOSED - the self-tile case now asserts the degenerate route against a world where ordinary pathing excludes the occupied tile.
 - [ ] **Q120** `tests/unit/combat-ai.test.js:139` [test-gap] AI.W_PATH - "the baseline everything trades against" - is pinned by no assertion; the three "the cheap route wins" checks pass on fixture array order
 - [ ] **Q121** `tests/unit/combat-ai.test.js:429` [test-gap] The lineWeights assertion compares the result against AI.STATUS_WEIGHT itself, so setting the knob to 1 disables the M6 status weighting with the suite still green
 - [ ] **Q122** `tests/unit/combat-ai.test.js:123` [test-gap] scoreDestination's backstab term and slip term are never exercised - no test passes `facing` or `slipChanceAt`, so both weights can be zeroed with the suite green
 - [ ] **Q123** `tests/unit/combat-ai.test.js:79` [test-gap] pickTarget's kill-securability and fragility terms mutually mask - neither is individually pinned, so the M2 kill term can be deleted with every test green
-- [ ] **Q124** `tests/unit/combat-ai.test.js:239` [test-gap] The advanceRoute "not adjacent means nothing to spend on" test is tautological - its `approach` stub ignores the target, so the adjacency guard is never reached
-- [ ] **Q125** `tests/unit/combat-plans.test.js:211` [test-gap] Five more branches of the new AI code survive mutation: the hazard and OA de-dup Sets, the firing-fan's nearest-first sort, aiEdgeTopplePlan's terrainOpen leg, and two aiSupportPlan guards
+- [ ] **Q124** `tests/unit/combat-ai.test.js:239` [test-gap] Advance-route coverage now exercises adjacent shuffles and refusals, but the no-route/non-adjacent fixture still uses a target-insensitive `approach` stub; make the fake prove the intended guard rather than only its output.
+- [ ] **Q125** `tests/unit/combat-plans.test.js:211` [test-gap] The suite now covers several plan branches; remaining mutation gaps include `aiEdgeTopplePlan` with `terrainOpen` false and the unpinned AI-support guards.
 - [ ] **Q126** `tests/unit/levels.test.js:201` [test-gap] No lint requires `leavesTurns` alongside `leaves`, so the permanent-terrain bug can recur silently
-- [ ] **Q127** `tests/unit/levels.test.js:435` [test-gap] The levels lint checks a tiered placement's char against the level's own tiles legend but not against the tile registry's canonical chars
-- [ ] **Q128** `tests/unit/levels.test.js:25` [test-gap] `levels/dev/*.json` is registered, playable from the floor-select menu, and covered by none of the eight per-file level lints
+- [x] **Q127** `tests/unit/levels.test.js:435` [test-gap] The levels lint checks a tiered placement's char against the level's own tiles legend but not against the tile registry's canonical chars<br>      ↳ CLOSED - canonical-char enforcement was intentionally relaxed; the legend remains the authored source of truth for tiered placements.
+- [x] **Q128** `tests/unit/levels.test.js:25` [test-gap] `levels/dev/*.json` is registered, playable from the floor-select menu, and covered by none of the eight per-file level lints<br>      ↳ CLOSED - dev levels are included in the registered-file and per-level lint passes.
 - [x] **Q129** `tests/unit/pathfinding.test.js:283` [test-gap] Test asserts only that rounded-bend VERTICES are legal, never the legs between them - which is the property roundBends actually breaks<br>      ↳ DONE — three tests sample every LEG of a smoothed walk, not just its vertices
 
 ### LOW
@@ -516,7 +529,7 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
 - [ ] **Q183** `/home/user/escape-work/AI_PLAN.md:483` [doc-drift] AI_PLAN's published `AI` tunables block and scored-choice signatures do not match the shipped ones
 - [ ] **Q184** `/home/user/escape-work/POWERS_PLAN.md:735` [doc-drift] POWERS_PLAN's "Open after M9: the enemy HR Representative" still says the support-enemy option is blocked by risk 7; AI_PLAN M6 shipped it
 - [x] **Q185** `/home/user/escape-work/src/data/enemies.js:3` [doc-drift] `data/enemies.js`'s header still says attack lines are "picked at random each enemy turn"<br>      ↳ DONE — three errors in one clause, not one: it is per SWING not per turn, the draw is WEIGHTED (`pickLine` over `combat-ai.lineWeights`, STATUS_WEIGHT for a line whose status the target is not wearing), and it predates M5's pool split so it implied one flat pool where there are two that are never drawn from together.
-- [ ] **Q186** `TODO.md:733` [doc-drift] TODO.md's open "Collapse the two action bars" item describes code that no longer exists, and contradicts the DONE item above it
+- [x] **Q186** `TODO.md` [doc-drift] TODO.md's open "Collapse the two action bars" item describes code that no longer exists, and contradicts the DONE item above it<br>      ↳ CLOSED - the obsolete Phase 5 duplicate was removed; the one-bar completion record is the only action-bar status kept there.
 - [x] **Q187** `src/combat.js:4343` [doc-drift] `bout.oaCount` counts both sides' opportunity attacks, not "enemies' own provokes" as M3's acceptance reads it<br>      ↳ **DONE, and fixed as CODE rather than as doc.** The finding is filed doc-drift, but the counter exists to serve one acceptance criterion — M3's "oaCount (enemies' own provokes) down" — and counting both sides makes it unfit for that: mixed, it can RISE while the AI gets strictly better, because a player's mistakes land in the AI's score. Gated on `aiAllies()`, the owner Q011 established for side, so a charmed coworker counts as yours. Overwatch stays outside the count deliberately (a held stance that fires is not a provoke, and no routing choice avoids it) and that is now written down. Free to correct now precisely because Q117 is true — nothing reads the tally yet.
 - [ ] **Q188** `src/data/actions.js:13` [doc-drift] data/actions.js documents a `heal` action type nothing uses and omits four types that exist; three dead `heal` branches remain in code
 - [x] **Q189** `src/data/statuses.js:193` [doc-drift] The take-cover status's doc block is stranded above `sneaking`, so `covered` is undocumented and `sneaking` wears two comments<br>      ↳ DONE — the crouch block moved down to sit on `covered`, where it was describing all along, and `sneaking` keeps only its own. Fixed while in the file for Q175; the two entries were adjacent in more than the queue.
@@ -524,22 +537,22 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
 - [ ] **Q191** `src/shop.js:17` [doc-drift] shop.js names `matches` and `half-sandwich` as the items worth nothing; both carry a `value` and one is stocked by a merchant
 - [x] **Q192** `src/stats.js:423` [doc-drift] `weaponProc`'s doc comment sits above `moveCostOf`, so both functions are misdocumented<br>      ↳ DONE — fixed while in the file for Q054, which is the finding that made it matter: the stranded block is part of why `moveCostOf` looked complete.
 - [ ] **Q193** `src/ui/hud.js:32` [doc-drift] The HUD status chip drops the remaining count its own comment and data/statuses.js both promise
-- [ ] **Q194** `src/ui/hud.js:490` [doc-drift] Two doc comments left stranded by the `ui/` split describe functions that live in other files
+- [ ] **Q194** `src/ui/hud.js:513` [doc-drift] One comment left stranded by the `ui/` split still describes the allocation screen after the HUD module's final function.
 - [ ] **Q195** `src/ui/panels.js:344` [doc-drift] The shop view's documented shape omits `id`, the field the sell button's own guard depends on
-- [ ] **Q196** `src/combat-geometry.js:25` [duplication] `cheb` is defined twice, in tactics.js and combat-geometry.js, both exported
+- [x] **Q196** `src/combat-geometry.js:25` [duplication] `cheb` is defined twice, in tactics.js and combat-geometry.js, both exported<br>      ↳ CLOSED - duplicate report of Q197; retain Q197 as the one actionable entry.
 - [ ] **Q197** `src/combat-geometry.js:25` [duplication] cheb is defined and exported twice, from tactics.js and combat-geometry.js, with its own test in each suite
 - [ ] **Q198** `src/combat-geometry.js:37` [duplication] The four/eight-neighbour offset arrays are declared in seven places under five names
 - [x] **Q199** `src/combat.js:2699` [duplication] `aiShoveMember` duplicates `displaceBody`'s slam literal and silently drops the stun the player's identical slam applies<br>      ↳ DONE — merged into displaceBody behind victimView (Q4-A)
-- [ ] **Q200** `src/combat.js:761` [duplication] combat.js re-implements tactics.facesShieldFrom as a private shieldingFaceFrom
+- [x] **Q200** `src/combat.js:761` [duplication] combat.js re-implements tactics.facesShieldFrom as a private shieldingFaceFrom<br>      ↳ CLOSED - no private `shieldingFaceFrom` implementation remains in combat.js.
 - [ ] **Q201** `src/combat.js:2421` [duplication] "Name the thing covering you" exists three times, twice inside combat.js, with different formatting
 - [ ] **Q202** `src/combat.js:2171` [duplication] "Is a living member standing here?" is written six times inside combat.js in three shapes
-- [ ] **Q203** `src/main.js:3487` [duplication] `ORTHO4` is declared and then re-inlined as a literal 977 lines later
+- [x] **Q203** `src/main.js:3487` [duplication] `ORTHO4` is declared and then re-inlined as a literal 977 lines later<br>      ↳ CLOSED - the claimed inline duplicate is not present; broader neighbour-array duplication remains Q198.
 - [ ] **Q204** `src/main.js:152` [duplication] mulberry32's mixer is now implemented twice — a new copy in main.js beside the existing one in combat.js
 - [ ] **Q205** `src/main.js:667` [duplication] "Whose sheet am I steering?" is written four ways in main.js, while the actor half has a single named owner
 - [ ] **Q206** `src/main.js:2472` [duplication] The "who joins this fight" filter is written three times in main.js, one of them commented as a copy
 - [ ] **Q207** `src/main.js:2495` [duplication] The cone's "don't carpet a teammate" guard is spelled two ways, and the out-of-combat one misses summons
 - [ ] **Q208** `src/main.js:1940` [duplication] liveSummonsOf exists in two modules counting two different populations
-- [ ] **Q209** `src/stealth.js:13` [duplication] `stealth.facingFromYaw` has no production importer, and main.js re-implements it inline in the one place that needs it
+- [ ] **Q209** `src/stealth.js:13` [dead-code] `stealth.facingFromYaw` has no production importer. The alleged main.js duplicate is not present; remove the unused export unless a real caller needs it.
 - [ ] **Q210** `src/ui/screens.js:64` [duplication] The four attributes' labels and blurbs are written out three times across `ui/`, and only one copy derives its key list from `ATTR_KEYS`
 - [x] **Q211** `src/combat.js:4444` [inconsistency] The destination scorer asks aiCrouchCovered without the bodyAt test the crouch beat supplies, so it scores tiles by a narrower cover rule than the one it will find on arrival<br>      ↳ **DONE.** The scorer omitted `bodyAt`, grading tiles by props alone while the crouch beat it walks there to take counts standing bodies too - so a unit walked past cover it was about to be offered, and a destination scorer that grades by a narrower rule than the one it will meet is choosing on the wrong map. Same predicate both sides now.
 - [x] **Q212** `src/data/statuses.js:212` [inconsistency] `fx.burst: 'none'` is not in the runtime's vocabulary — it falls through to the loudest burst ('pop')<br>      ↳ DONE — the burst half of Q053, closed by the same change: `statusBurst`'s 'pop' arm was a bare `else`, so it is now `else if (mode === 'pop')` and an unknown mode shows nothing. The harmful/harmless default still covers OMITTING the key, which is the case that should keep working.
@@ -551,7 +564,7 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q218** `src/ui/hud.js:430` [inconsistency] The party-bar HP bar neither clamps nor divide-guards its width, while the profile card two hundred lines above does both<br>      ↳ **DONE — one `hpFracOf`.** The party bar neither clamped nor divide-guarded while the profile card two hundred lines above did both. The divide-guard is the half that mattered: `maxHp` of 0 (a half-built or wiped sheet, for one frame) produced `NaN%`, and a browser handed `NaN%` silently keeps the previous width - so the bar FREEZES at its last value rather than looking broken.
 - [x] **Q219** `src/grid.js:159` [other] doorKeyBetween and wallEdgeOpen silently answer a diagonal pair with an x-axis edge instead of refusing it<br>      ↳ **DONE, with a test.** `doorKeyBetween(0,0,1,1)` returned `'v:1,0'` - a real edge, between two cells that share none, because the first `nx > x` test won and the diagonal fell through it. Both lookups refuse a diagonal now (`null`, and `false` for the open test), which is what "these cells share no edge" means.
 - [ ] **Q220** `src/looting.js:330` [soc] The Alt-overlay loot icon table is a hardcoded content list in systems code, and it has already drifted — break-room containers get the generic box
-- [ ] **Q221** `src/scene.js:172` [soc] `updateWallFade` restores un-ghosted walls to the hardcoded `tileMats.wall`, not the material the tile was drawn with
+- [ ] **Q221** `src/scene.js:172` [soc] `updateWallFade` still falls back to hardcoded `tileMats.wall` when an opaque solid lacks its own material. Door solids now preserve `solidMat`, narrowing the remaining risk to other custom wall materials.
 - [ ] **Q222** `playwright.config.js:45` [test-gap] Playwright reuses an existing server on port 8173, so a locally-running stale build is tested and never rebuilt
 - [x] **Q223** `tests/unit/combat-ai.test.js:1` [test-gap] src/dialogue.js exports nodeOptions as a deliberately pure rule and has no unit test, because a top-level `import * as ui` makes the module unimportable under node<br>      ↳ DONE — dialogue.test.js, 6 tests
 - [x] **Q224** `tests/unit/floors.test.js:97` [test-gap] floors.test.js's facade test exercises 3 of 21 forwarded members, so the missing methods are unpinned<br>      ↳ DONE — the contract test derives the set from a real grid
@@ -761,10 +774,10 @@ resolves the acting actor's own tile first.
   `displaceBody` behind a `victimView` adapter.
 
 ---
-## Questions for the designer
+## Editor preview context
 
-- **Does the editor's cover preview mean the same thing the game does?** They
-  currently disagree, and both readings are defensible.
+The open question above exists because the editor's cover preview and combat
+currently disagree, and both readings are defensible.
 
   The game's rule (TACTICS_PLAN M6a) is one threshold for two questions: a solid
   short enough to shoot OVER is a solid you can crouch behind, and a `#` wall is
@@ -1345,8 +1358,8 @@ killing anyone, and therefore the correct play every time.
       enter `tempSurfaces` and both expiry clocks skip them entirely. Related
       dead constant: `PAPER_CAP = Infinity` (`stats.js:12`), like `INV_CAP` —
       wants a real number if paper becomes a real economy.
-- [ ] `hover.clear()` must reset `hoverTarget` so Ctrl/Alt can't re-light a
-      stale body (`hover.js:257`).
+- [x] **DONE.** `hover.clear()` resets `hoverTarget`; modifier keys cannot
+      restore a stale body highlight.
 - [ ] Gate the party-bar level-up pip and character-sheet Level Up button on
       `!inCombat` (`main.js:1328`, `ui/hud.js:370`).
 - [ ] **Burnt paper leaves the grid permanently wrong — visual gone, surface
@@ -1380,27 +1393,6 @@ killing anyone, and therefore the correct play every time.
       below. The pockets panel's live Use button needed no change: the
       complaint was that the UI offered what the rules refused, and the rules
       were the wrong half. Covered by `combat-bar.spec.js`.
-- [ ] **Let consumables be used in combat** — confirmed intended; the current
-      refusal is a bug, not a design choice. `useItem` refuses outright while
-      `isInCombat()` (`looting.js:200`) and every path routes through it (the
-      pockets panel's `onUse`, and `useItemById` behind a hotbar press), which
-      disables the entire consumable economy in the only place it matters: all
-      eight items are heals (`half-sandwich` 3, `cold-coffee` 2, `energy-drink`
-      4, `candy-bar` 3, `vending-crisps` 2, `stale-danish` 4, `mystery-flavor`
-      6), and healing exists to survive fights. Note the gate carries no
-      comment, unlike its two neighbours which state their reasons — `dropItem`
-      ("a dropped stapler would silently change your damage bonus") and the
-      equip gate — so it reads as copied alongside them rather than decided.
-      Work: drop the `isInCombat()` line from `useItem`, give the use an AP
-      cost (recommend reusing the shove's 2 AP for a first pass — everything
-      else in a turn is billed, and a free full heal every round would be the
-      strongest verb in the game), and surface item slots on the combat action
-      bar so the hotbar's consumables are pressable in a fight. Leave
-      `dropItem` and equipping gated — those two have stated reasons.
-      Independently wrong today: the pockets panel opens in combat (`I` is
-      gated only on `sheet && !gameOver`, `main.js:2292`) and renders a live
-      **Use** button with no combat gate (`ui/panels.js:165`), so the UI offers
-      an action the rules refuse.
 - [x] **DONE.** `toggleDoor` works in a fight for **1 AP** - cheaper than a
       verb, because the walk to reach it is already billed as movement and this
       is the handle, not the journey. The rule is adjacency, not auto-walk
@@ -1412,16 +1404,6 @@ killing anyone, and therefore the correct play every time.
       lights the overlay in a fight, since that is how you SEE a door. New
       `__game.doorOpen(key)` seam: doors sit on EDGES, so `tileAt` could never
       answer it. Covered by `combat-bar.spec.js`.
-- [ ] **Let doors be used in combat.** Blocked at four independent layers:
-      `toggleDoor` early-returns on `inCombat` (`main.js:850`, no comment
-      explaining it); the in-combat click path never reaches `dispatchHit`,
-      the only route to `approachDoor` (`main.js:1972+`); the Alt overlay that
-      carries door entries is gated `!inCombat` (`main.js:2289`) and hidden at
-      combat start (`main.js:1523`); and the in-combat right-click menu offers
-      only Examine (`main.js:2105`). Net effect: closed doors are the game's
-      only true line-of-sight blocker and the player can neither open nor close
-      one during the half of the game that is about positioning — while
-      `examineAt` still cheerfully describes the door they cannot touch.
 - [ ] **Ring non-enemy combat targets.** `drawTargets` (`combat.js:919-1050`)
       rings only zone cells, summon spots, allies, live enemies and the caster
       — never doors, and never **props**, even though props are valid combat
@@ -1583,31 +1565,12 @@ Still open, and genuinely optional:
       you most want to reassign would be the one you cannot) - `toBeEnabled()`
       passes instantly against it, so `clickAction` waits on the attribute.
       Covered by `combat-bar.spec.js`.
-- [ ] **Collapse the two action bars into one.** The combat bar and the
-      persistent hotbar are parallel implementations of the same widget,
-      swapped by mode (`main.js:2538` hides `#hotbar` while `inCombat`, and
-      `combat.js:1092 buildActionBar` builds its own). Duplicated: two builders
-      with different id conventions (`#act-<id>` vs
-      `#hotbar-act-<id>`/`#hotbar-item-<id>`, so e2e must know both); two
-      affordability rule sites (combat's `refresh()` computes
-      `active.ap >= a.ap && (!a.uses || …) && (!a.ammoCost || …)` inline,
-      main.js's `slotVm` computes its own); two tooltip builders (`actionTip`
-      vs the hotbar's); two arming states (`armed` vs `armedOoc`) with two
-      ring-drawing paths; and two ordering rules (`actionIdsOf`/`scrambled` vs
-      `layoutOf`/`defaultLayout`). The player-facing cost is the asymmetry: the
-      hotbar's arranged layout, pager rows, item slots, right-click reassign
-      and number-key shortcuts all vanish in combat — keys `1-9` are gated
-      `!inCombat` (`main.js:2294`), so a fight has no keyboard shortcuts at
-      all. `ui.js`'s own header names the seam: "combat.js and the editor
-      import the palette too — they build their own DOM but must not look like
-      a different game." Pairs with the Phase 2 consumables fix: the unified
-      bar is where combat's item slots land.
 - [x] **DONE, and it was already done in the code** — `standTilePath` had
       grown its own copy of the special case. Both now live in
       `combat-ai.standTilePath` with the reasoning attached, and a unit test
       pins the degenerate self-path that stops adjacent units shuffling
       between two tiles forever.
-- [ ] *Checked, genuinely not duplication — leave alone:* `initiative.js` vs
+- [x] **Checked - not duplication.** Leave alone: `initiative.js` vs
       `turn-order.js` (the latter imports the former; "what is the order?" vs
       "whose turn is it?"), `shop.js` vs `shopping.js` (the pure/runtime split
       `looting.js` is supposed to copy), and `ui.js` vs `ui/` (a re-export
