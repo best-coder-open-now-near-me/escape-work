@@ -2183,7 +2183,7 @@ export function startEditor(app, levelData, stashKey) {
   resizePanel.append(
     resizeHeading,
     resizeAxis('x', ['left', 'right']),
-    resizeAxis('y', ['top', 'bottom']),
+    resizeAxis('y', ['bottom', 'top']),
   );
   levelRow.appendChild(resizePanel);
 

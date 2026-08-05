@@ -193,7 +193,7 @@ test('the inspector holds diagnostics and canvas edges resize directly', async (
   await expect(page.locator('#editor-resize [data-axis="x"] .editor-resize-axis-key')).toHaveText('X(24)');
   await expect(page.locator('#editor-resize [data-axis="y"] .editor-resize-axis-key')).toHaveText('Y(18)');
   await expect(page.locator('#ed-resize-x-left-add')).toHaveAttribute('aria-label', 'Add one column at the left edge');
-  await expect(page.locator('#ed-resize-y-bottom-add')).toHaveAttribute('aria-label', 'Add one row at the bottom edge');
+  await expect(page.locator('#ed-resize-y-top-add')).toHaveAttribute('aria-label', 'Add one row at the top edge');
 
   const before = await page.evaluate(() => window.__editor.size);
   await page.click('#ed-resize-x-left-add');
@@ -201,7 +201,7 @@ test('the inspector holds diagnostics and canvas edges resize directly', async (
     () => page.evaluate(() => window.__editor.size),
     { timeout: 30_000 },
   ).toEqual({ width: before.width + 1, height: before.height });
-  await page.click('#ed-resize-y-bottom-add');
+  await page.click('#ed-resize-y-top-add');
   await expect.poll(
     () => page.evaluate(() => window.__editor.size),
     { timeout: 30_000 },
