@@ -99,8 +99,8 @@ How to read it:
   those as leads. Of eight refutations in this pass, six were right about the
   code and wrong about the consequence.
 
-**241 entries** — 24 high / 119 medium / 98 low. **179 ticked, 62 open**
-(high **24/24 — the band is clear**, medium 92/119, low 63/98).
+**241 entries** — 24 high / 119 medium / 98 low. **182 ticked, 59 open**
+(high **24/24 — the band is clear**, medium 93/119, low 65/98).
 
 **Known `[bug]` findings are open again.** The editor overhaul regressed Q163
 and Q164 and exposed five more editor lifecycle/invariant findings below. The
@@ -269,9 +269,11 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
   esbuild 0.24.2 was in the affected range for GHSA-67mh-4wv8-2f99. Upgraded to
   0.25.12; npm reports zero known vulnerabilities.
 
-- [ ] **Q916** `src/editor.js:2665` [security] **(new 2026-08-05, review)**
+- [x] **Q916** `src/editor.js:2665` [security] **(new 2026-08-05, review)**
   An editable or imported level name is inserted into `innerHTML` without
   escaping, allowing imported level content to execute in the editor origin.
+  ↳ DONE — the status rebuilds semantic nodes and assigns `textContent`; an E2E
+  payload remains visible text and creates no element or script side effect.
 
 - [ ] **Q917** `src/controls.js:118`, `src/editor.js:1410` [bug] **(new 2026-08-05, review)**
   Alt+Shift+left is consumed as orbit before the editor's documented region
@@ -597,8 +599,8 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q160** `src/combat.js:631` [bug] `guardStandingAt` has no side test, so an enemy holding Hold the Line shields a party member and vice versa<br>      ↳ **DONE.** Confirmed: `guardStandingAt` asked only "is somebody holding a guard stance on this tile", so an enemy holding the line was cover for the party member they were holding it against, and the party's own guard did the coworkers the same favour. It takes the DEFENDER now and reads sides live (`aiAllies`), the same rule the pincer test uses - so a charmed coworker shields the player this turn. `tactics` 8/8.
 - [x] **Q161** `src/combat.js:341` [bug] billMove rounds the free-AP deduction, so a 0.05-cost move never depletes the freeMoveAp allowance<br>      ↳ **DONE.** Confirmed as a rounding ratchet: the allowance's running total went through `roundAp` (tenths), so a step costing 0.05 took 0.05 off 1.0 and rounded 0.95 straight back to 1.0 - unlimited free movement in 0.05 doses. The allowance keeps its exact remainder now and only the AP tag rounds it (`fmtAp`); float dust below 1e-9 snaps to zero. Real AP still rounds, which is the currency the player reads and errs toward charging.
 - [x] **Q162** `src/creation.js:171` [bug] createCharacter banks a point per spend but spendAttrPoint silently refuses unknown attribute names, leaving free points on the sheet<br>      ↳ **DONE, with a red-first test.** Confirmed: the points are banked before the spends run, and `spendAttrPoint` refuses an attribute name it does not know - leaving the point banked. So a malformed draft did not hand out free attributes (which the banking-first order was written to prevent) but did hand out free POINTS, spendable on anything at the next level-up. A refused spend takes its point back now.
-- [ ] **Q163** `src/editor.js:595` [bug] The editor's localStorage writes are unguarded, so in a storage-blocked browser "Exit editor" cannot exit<br>      ↳ **REGRESSED 2026-08-05.** The overhaul again calls storage directly from Playtest, Reset and Exit. Restore the guarded stash/remove behavior and its tests.
-- [ ] **Q164** `src/editor.js:400` [bug] Any editor resize button silently deletes every row/column past MAX_SIZE on a level larger than 40<br>      ↳ **REGRESSED 2026-08-05.** Both axes are again clamped unconditionally in the current resize path. Restore direction-aware bounds and cover oversized imported maps.
+- [x] **Q163** `src/editor.js:595` [bug] The editor's localStorage writes are unguarded, so in a storage-blocked browser "Exit editor" cannot exit<br>      ↳ **DONE AGAIN 2026-08-05.** Playtest reports a failed handoff and stays put; Reset and Exit swallow removal failure and continue. E2E denies both storage writes and proves Exit leaves.
+- [x] **Q164** `src/editor.js:400` [bug] Any editor resize button silently deletes every row/column past MAX_SIZE on a level larger than 40<br>      ↳ **DONE AGAIN 2026-08-05.** One direction-aware dimension rule now serves near- and far-edge resize. E2E imports a 41-wide map and proves both height paths preserve all 41 columns.
 - [x] **Q165** `src/main.js:1473` [bug] `examineTile` calls any tile with a body standing on it "a cubicle wall"<br>      ↳ **DONE.** Confirmed, and the cause is one word: `examineTile` gated on `isWalkable`, which also refuses a tile somebody is STANDING on. So examining the floor under a coworker fell through the entire solid ladder and came out at the last-resort "A cubicle wall. It has seen things." - on plain carpet. It asks `grid.terrainOpen` now. What is underfoot does not change because somebody is on it.
 - [x] **Q166** `src/shading.js:294` [bug] `makeSpriteMaterial` has no failed-texture fallback, so a missing foliage PNG renders as a solid tinted rectangle<br>      ↳ **DONE.** Confirmed: the card's alpha comes ENTIRELY from the opacity map, so a texture that fails to load leaves the material at a uniform opacity of 1 and the plane renders as a solid tinted rectangle - a missing bush PNG becoming a flat green slab across the office, which reads as a broken level rather than a missing file. The error handler makes it invisible now; the console warning is still how you find out.
 - [x] **Q167** `src/statuses.js:163` [bug] A status id that leaves the registry is immortal on an existing save: never ticked, never expired, invisible to both sweep options<br>      ↳ **DONE, with a red-first test.** Confirmed and worse than "never ticked": the tick skipped an unknown id, and BOTH sweep options passed over it too - `harmfulOnly` reads `def.harmful`, the combat-end sweep reads `def.clock`, and an absent def fails both, so each spared what it could not classify. The one id no sweep could classify was the one id no sweep would take, and `hasStatus` went on answering yes forever. Dropped on sight by the tick and by any sweep.

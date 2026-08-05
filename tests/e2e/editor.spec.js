@@ -231,3 +231,68 @@ test('level metadata is labelled and Frame level fits the editor canvas', async 
     };
   }), { timeout: 30_000 }).toEqual({ topDown: true, fitsWideMaps: true, centered: true });
 });
+
+test('resizing one axis preserves an oversized imported axis', async ({ page }) => {
+  await page.goto('/#editor');
+  await page.waitForFunction(() => window.__editor, null, { timeout: 90_000 });
+  await waitForSmoothFrames(page);
+
+  const wide = {
+    name: 'Wide Import',
+    depth: 1,
+    tiles: { '.': 'floor', '>': 'exit' },
+    actors: { '@': 'player' },
+    map: [
+      `@${'.'.repeat(40)}`,
+      '.'.repeat(41),
+      '.'.repeat(41),
+      `${'.'.repeat(40)}>`,
+    ],
+  };
+  await page.click('#ed-export');
+  await page.locator('#export-json').fill(JSON.stringify(wide));
+  await page.click('#export-load');
+  await expect.poll(() => page.evaluate(() => window.__editor.size)).toEqual({ width: 41, height: 4 });
+
+  // Far-edge resize and near-edge shift used separate implementations; both
+  // used to clamp the untouched 41-wide axis down to 40.
+  await page.click('#ed-resize-y-bottom-add');
+  await expect.poll(() => page.evaluate(() => window.__editor.size)).toEqual({ width: 41, height: 5 });
+  await page.click('#ed-resize-y-top-add');
+  await expect.poll(() => page.evaluate(() => window.__editor.size)).toEqual({ width: 41, height: 6 });
+});
+
+test('level names render as text rather than editor-origin markup', async ({ page }) => {
+  await page.goto('/#editor');
+  await page.waitForFunction(() => window.__editor, null, { timeout: 90_000 });
+  await waitForSmoothFrames(page);
+
+  const payload = '<img src=x onerror="window.__editorInjected=1">';
+  await page.getByLabel('Level name').fill(payload);
+  await expect(page.locator('#ed-status')).toContainText(payload);
+  await expect(page.locator('#ed-status img')).toHaveCount(0);
+  expect(await page.evaluate(() => window.__editorInjected)).toBeUndefined();
+});
+
+test('storage denial reports Playtest failure but cannot trap Exit', async ({ page }) => {
+  await page.addInitScript(() => {
+    Storage.prototype.setItem = () => { throw new DOMException('blocked', 'SecurityError'); };
+    Storage.prototype.removeItem = () => { throw new DOMException('blocked', 'SecurityError'); };
+  });
+  const messages = [];
+  page.on('dialog', async (dialog) => {
+    messages.push(dialog.message());
+    if (dialog.type() === 'confirm') await dialog.accept();
+    else await dialog.dismiss();
+  });
+  await page.goto('/#editor');
+  await page.waitForFunction(() => window.__editor, null, { timeout: 90_000 });
+  await waitForSmoothFrames(page);
+
+  await page.click('#ed-playtest');
+  await expect.poll(() => messages.some((message) => message.includes('will not store the level'))).toBe(true);
+  await expect(page).toHaveURL(/#editor/);
+
+  await page.click('#ed-exit');
+  await expect(page).not.toHaveURL(/#editor/);
+});

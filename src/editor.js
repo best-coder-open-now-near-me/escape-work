@@ -916,10 +916,18 @@ export function startEditor(app, levelData, stashKey) {
   // right and bottom edges, so adding a corridor to the north meant repainting
   // the whole floor one row down. Shifting rows is easy; the edge runs are the
   // real work, since every wall and door key is an absolute coordinate.
+  // A loaded level may be larger than the editor's authoring ceiling. A resize
+  // on one axis must never clamp the untouched axis and delete imported work;
+  // oversized axes may shrink, but they cannot grow until back under the cap.
+  const resizedDimension = (current, delta) => {
+    if (!delta) return current;
+    if (delta < 0) return Math.max(MIN_SIZE, current + delta);
+    return current >= MAX_SIZE ? current : Math.min(MAX_SIZE, current + delta);
+  };
   function shift(dx, dz) {
     if (!dx && !dz) return;
-    const nw = Math.min(MAX_SIZE, Math.max(MIN_SIZE, width + dx));
-    const nh = Math.min(MAX_SIZE, Math.max(MIN_SIZE, height + dz));
+    const nw = resizedDimension(width, dx);
+    const nh = resizedDimension(height, dz);
     if (nw === width && nh === height) return;
     pushHistory();
     const blank = charOfType('floor');
@@ -945,8 +953,8 @@ export function startEditor(app, levelData, stashKey) {
   }
 
   function resize(dw, dh) {
-    const nw = Math.min(MAX_SIZE, Math.max(MIN_SIZE, width + dw));
-    const nh = Math.min(MAX_SIZE, Math.max(MIN_SIZE, height + dh));
+    const nw = resizedDimension(width, dw);
+    const nh = resizedDimension(height, dh);
     if (nw === width && nh === height) return;
     pushHistory();
     const ow = Math.min(nw, width);
@@ -2310,6 +2318,18 @@ export function startEditor(app, levelData, stashKey) {
   // iteration. It changes nothing about WHAT you playtest with - same fresh
   // level-1 solo character - it just stops asking you to make it every time.
   const PLAYTEST_CLASS_KEY = 'escape-work.playtest.class';
+  // Playtest cannot proceed without handing the document across the reload;
+  // Reset and Exit must still work when storage is blocked. Keep those two
+  // policies explicit rather than allowing a storage exception to choose.
+  const stashForPlaytest = (json) => {
+    try {
+      localStorage.setItem(stashKey, json);
+      return true;
+    } catch { return false; }
+  };
+  const clearPlaytestStash = () => {
+    try { localStorage.removeItem(stashKey); } catch { /* nowhere to remove from */ }
+  };
   const frameLevelButton = btn('ed-frame-level', 'Frame level', commands);
   frameLevelButton.title = 'Fit the entire level in the editor view (F).';
   frameLevelButton.setAttribute('aria-keyshortcuts', 'F');
@@ -2320,7 +2340,10 @@ export function startEditor(app, levelData, stashKey) {
     const errs = validateNow().filter((f) => f.level === 'error');
     // eslint-disable-next-line no-alert
     if (errs.length && !window.confirm(`This floor cannot be finished:\n\n${errs.map((f) => `• ${f.message}`).join('\n')}\n\nPlaytest anyway?`)) return;
-    localStorage.setItem(stashKey, toJson());
+    if (!stashForPlaytest(toJson())) {
+      window.alert('This browser will not store the level, so there is nothing to playtest. Export the JSON instead.');
+      return;
+    }
     dirty = false; // the stash IS a save - leaving for it is not losing work
     clearDraft();
     let last = null;
@@ -2392,11 +2415,11 @@ export function startEditor(app, levelData, stashKey) {
   };
   dangerBtn('ed-reset', 'Reset',
     'Discard the level you are editing and reload?\n\nUnsaved painting since your last Playtest will be lost.',
-    () => { localStorage.removeItem(stashKey); clearDraft(); location.reload(); });
+    () => { clearPlaytestStash(); clearDraft(); location.reload(); });
   dangerBtn('ed-exit', 'Exit editor',
     'Leave the editor?\n\nUnsaved painting since your last Playtest will be lost.',
     () => {
-      localStorage.removeItem(stashKey);
+      clearPlaytestStash();
       clearDraft();
       location.hash = '';
       location.reload();
@@ -2662,11 +2685,13 @@ export function startEditor(app, levelData, stashKey) {
     const ch = charByType[brush];
     const errors = findings.filter((f) => f.level === 'error').length;
     const warnings = findings.filter((f) => f.level === 'warn').length;
-    status.innerHTML = `<strong>${levelName || 'Untitled Floor'}</strong>`
-      + `<span>${width}×${height} · ${brushLabel()}`
+    const name = document.createElement('strong');
+    name.textContent = levelName || 'Untitled Floor';
+    const detail = document.createElement('span');
+    detail.textContent = `${width}×${height} · ${brushLabel()}`
       + (editorMode === 'paint' && ch ? ` · writes “${ch}”` : '')
-      + (errors ? ` · ${errors} error${errors === 1 ? '' : 's'}` : warnings ? ` · ${warnings} warning${warnings === 1 ? '' : 's'}` : ' · ready')
-      + '</span>';
+      + (errors ? ` · ${errors} error${errors === 1 ? '' : 's'}` : warnings ? ` · ${warnings} warning${warnings === 1 ? '' : 's'}` : ' · ready');
+    status.replaceChildren(name, detail);
     updateInspector();
   }
 
