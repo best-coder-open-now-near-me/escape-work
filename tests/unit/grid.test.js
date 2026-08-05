@@ -337,3 +337,26 @@ test('a level with no props array behaves exactly as before', () => {
   assert.equal(g.rotAt(2, 0), TILE_TYPES.desk.rotY || 0);
   assert.deepEqual(g.props, []);
 });
+
+test('a diagonal pair shares no edge, and both lookups say so (Q219)', () => {
+  // They used to answer anyway: the first `nx > x` test won, so (0,0)->(1,1)
+  // came back as the vertical edge at (1,0) - a real edge, between two cells
+  // that share none. A caller passing a diagonal has a bug, and an answer that
+  // sounds plausible is exactly what hides it.
+  const g = parseLevel({
+    name: 'Edge Lab',
+    tiles: { '#': 'wall', '.': 'floor' },
+    actors: { '@': 'player' },
+    map: [
+      '#####',
+      '#@..#',
+      '#...#',
+      '#####',
+    ],
+  });
+  assert.equal(g.doorBetween(1, 1, 2, 2), null, 'no door on a diagonal');
+  assert.equal(g.wallEdgeBetween(1, 1, 2, 2), null, 'no wall edge on a diagonal');
+  // ...and the orthogonal neighbours still answer normally.
+  assert.equal(g.doorBetween(1, 1, 2, 1), null); // no door painted, but a legal ask
+  assert.notEqual(g.terrainOpen(2, 1), undefined);
+});

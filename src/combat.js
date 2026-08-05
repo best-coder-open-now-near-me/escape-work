@@ -577,6 +577,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     advanceRoute: (...a) => advanceRoute(...a),
     aiAllies: (...a) => aiAllies(...a),
     aiCrouchCovered: (...a) => aiCrouchCovered(...a),
+    unitStandingAt: (...a) => unitStandingAt(...a),
+    standing: (...a) => standing(...a),
     applyStatus: (...a) => applyStatus(...a),
     beginMove: (...a) => beginMove(...a),
     deathFx: (...a) => deathFx(...a),
@@ -840,6 +842,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       conePolyline: (a, t) => conePolyline(a, t),
       toppleRings: (x, z, o) => toppleRings(x, z, o),
       topplePlan: (u, x, z) => topplePlan(u, x, z),
+      // The tile click's own reach test, so the ring cannot promise a topple
+      // the click then refuses as "Too far to shove" (Q100).
+      toppleReaches: (x, z) => inReach(posOf(active).x, posOf(active).z, x, z, REACH.SHOVE),
       partitionRings: (x, z, w) => partitionRings(x, z, w),
       breakRings: (a, x, z, r, o) => breakRings(a, x, z, r, o),
       breakPlanAt: (id, x, z) => breakPlanAt(id, x, z),

@@ -156,7 +156,15 @@ export function parseLevel(level) {
   const doors = new Map(); // 'h:x,z' | 'v:x,z' -> { open }
   for (const k of hDoorSet) doors.set('h:' + k, { open: false });
   for (const k of vDoorSet) doors.set('v:' + k, { open: false });
+  // Both of the edge lookups below take two 4-ADJACENT cells, and both used to
+  // answer a diagonal pair anyway: the first `nx > x` test won, so (0,0)->(1,1)
+  // came back as the vertical edge at (1,0) - a real edge, between two cells
+  // that share none. A caller passing a diagonal has a bug, and the answer
+  // sounded plausible enough to hide it. `null` is what "these cells share no
+  // edge" means, and it is what both say now.
+  const orthogonal = (x, z, nx, nz) => (x === nx) !== (z === nz);
   const doorKeyBetween = (x, z, nx, nz) => {
+    if (!orthogonal(x, z, nx, nz)) return null;
     if (nx > x) return 'v:' + nx + ',' + z;
     if (nx < x) return 'v:' + x + ',' + z;
     if (nz > z) return 'h:' + x + ',' + nz;
@@ -176,6 +184,9 @@ export function parseLevel(level) {
   // Is the shared edge between two 4-adjacent cells free of a wall? (Static -
   // this is what conduction pools flood against.)
   const wallEdgeOpen = (x, z, nx, nz) => {
+    // A diagonal pair shares no edge, so there is no edge to be free: `false`
+    // is the conservative answer, and conduction only ever steps orthogonally.
+    if (!orthogonal(x, z, nx, nz)) return false;
     if (nx > x) return !vWalls.has(nx + ',' + z);
     if (nx < x) return !vWalls.has(x + ',' + z);
     if (nz > z) return !hWalls.has(x + ',' + nz);

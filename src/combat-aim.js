@@ -579,6 +579,8 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
       for (const { x, z, plan } of ask.toppleRings(b.x, b.z, {
         isToppleableAt: (px, pz) => ask.isToppleable(world.tileDefAt(px, pz)),
         planAt: (px, pz) => ask.topplePlan(view.active, px, pz),
+        // The same continuous-body reach the tile click applies.
+        reaches: (px, pz) => ask.toppleReaches(px, pz),
       })) {
         const canDrop = !!plan && afford;
         drawRing(x, z, 0.42, canDrop ? OK : FAR);

@@ -776,6 +776,7 @@ function startGame(level) {
     oocCoverFaces: (...a) => oocCoverFaces(...a),
     oocTargetOk: (...a) => oocTargetOk(...a),
     paintHud: (...a) => paintHud(...a),
+    summonAt: (...a) => summonAt(...a),
     partyAt: (...a) => partyAt(...a),
     playerReaches: (...a) => playerReaches(...a),
     roomFor: (...a) => roomFor(...a),
@@ -806,6 +807,7 @@ function startGame(level) {
     engageWithAction,
     oocTakeCoverAt,
     oocShoveAt,
+    oocShoveSide,
   } = oocVerbs;
 
   // Who is the leader, and where everybody else walks (party-control.js).
@@ -2167,9 +2169,11 @@ function startGame(level) {
           const plan = oocTopplePlanAt(x, z);
           return { x, z, usable: !!plan, landing: plan ? [plan.lx, plan.lz] : null };
         }
-        // A partition-far tile: the aim IS the landing.
-        if (grid.terrainOpen(x, z)
-          && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => grid.wallEdgeBetween(x + dx, z + dz, x, z))) {
+        // A partition-far tile: the aim IS the landing. It asks the CLICK's own
+        // question (`oocShoveSide`) rather than "is there a wall edge nearby" -
+        // the weaker test lit the ring for a partition whose far side is solid
+        // wall, where the click then refused by silently doing nothing.
+        if (grid.terrainOpen(x, z) && oocShoveSide(x, z)) {
           return { x, z, usable: true, landing: [x, z] };
         }
         return null;

@@ -151,7 +151,7 @@ export function ringsAtBodies(a, range = 0) {
 // cabinet on somebody is strictly the better move where it is available - it
 // damages, it stuns, and it leaves cover the other side has to walk around - so
 // the affordance for it should not be "the player happened to try it".
-export function toppleRings(bx, bz, { isToppleableAt, planAt }) {
+export function toppleRings(bx, bz, { isToppleableAt, planAt, reaches = null }) {
   const out = [];
   for (let dx = -1; dx <= 1; dx++) {
     for (let dz = -1; dz <= 1; dz++) {
@@ -159,7 +159,14 @@ export function toppleRings(bx, bz, { isToppleableAt, planAt }) {
       const px = bx + dx;
       const pz = bz + dz;
       if (!isToppleableAt(px, pz)) continue;
-      out.push({ x: px, z: pz, plan: planAt(px, pz) });
+      // TILE adjacency finds the candidates; the CLICK then measures reach from
+      // the body's continuous position, and since DEGRID a body rests wherever
+      // its walk left it. A diagonal prop one tile away can be further than
+      // REACH.SHOVE in a straight line - so the ring drew green and the click
+      // answered "Too far to shove". `reaches` is the click's own test, handed
+      // in, so a ring can only promise what the click will do.
+      const plan = reaches && !reaches(px, pz) ? null : planAt(px, pz);
+      out.push({ x: px, z: pz, plan });
     }
   }
   return out;

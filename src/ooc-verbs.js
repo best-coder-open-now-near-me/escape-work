@@ -20,8 +20,13 @@ export function createOocVerbs(d) {
   function oocCoverProblem(x, z) {
     return crouchProblem({
       here: d.player.x === x && d.player.z === z,
+      // Summons count as bodies here, exactly as they do in a fight: combat
+      // asks `unitStandingAt`, which includes them. Out here the list was
+      // spelled out by hand and left them off, so a temp you had just posted
+      // was the one body you could crouch on top of - and the moment a fight
+      // started, the same tile refused.
       roomFree: d.isWalkable(x, z)
-        && !d.enemyAt(x, z) && !d.npcAt(x, z) && !d.partyAt(x, z),
+        && !d.enemyAt(x, z) && !d.npcAt(x, z) && !d.partyAt(x, z) && !d.summonAt(x, z),
       faces: d.oocCoverFaces(x, z).length,
     });
   }
@@ -217,6 +222,30 @@ export function createOocVerbs(d) {
       point ? d.clampPoint(point.x, point.z) : null)) d.ui.say('No way in there.');
   }
 
+  // Which side of a partition you would put your shoulder into, to drop it onto
+  // (tx, tz) - the tile you are standing on if you are already there, else the
+  // cheapest walk-up. Null when no partition faces that tile, or when the only
+  // ones that do have a far side you cannot stand on.
+  //
+  // The aim ring reads this too, and that is the point of it being a function.
+  // The ring used to ask a WEAKER question - "does any wall edge touch this
+  // tile" - so it lit for a partition whose far side is solid wall, and the
+  // click then refused by returning false, which says nothing at all. A ring
+  // that promises a verb the click will not perform is worse than no ring.
+  function oocShoveSide(tx, tz) {
+    let side = null;
+    for (const [dx, dz] of d.ORTHO4) {
+      const sx = tx + dx;
+      const sz = tz + dz;
+      if (!d.grid.wallEdgeBetween(sx, sz, tx, tz)) continue;
+      if (sx === d.player.x && sz === d.player.z) return { x: sx, z: sz, here: true };
+      if (!d.isWalkable(sx, sz)) continue;
+      const p = d.findPath(d.isWalkable, d.player.x, d.player.z, sx, sz, d.hazardCost, d.grid.stepOpen);
+      if (p && p.length >= 2 && (!side || p.length < side.len)) side = { x: sx, z: sz, len: p.length };
+    }
+    return side;
+  }
+
   function oocShoveAt(tile) {
     const def = d.grid.defAt(tile.x, tile.z);
     if (d.isToppleable(def)) {
@@ -244,16 +273,7 @@ export function createOocVerbs(d) {
     // A partition: the clicked tile is the side it falls ONTO - walk to the
     // tile across the edge and put a shoulder into it.
     if (d.grid.terrainOpen(tile.x, tile.z)) {
-      let side = null;
-      for (const [dx, dz] of d.ORTHO4) {
-        const sx = tile.x + dx;
-        const sz = tile.z + dz;
-        if (!d.grid.wallEdgeBetween(sx, sz, tile.x, tile.z)) continue;
-        if (sx === d.player.x && sz === d.player.z) { side = { x: sx, z: sz, here: true }; break; }
-        if (!d.isWalkable(sx, sz)) continue;
-        const p = d.findPath(d.isWalkable, d.player.x, d.player.z, sx, sz, d.hazardCost, d.grid.stepOpen);
-        if (p && p.length >= 2 && (!side || p.length < side.len)) side = { x: sx, z: sz, len: p.length };
-      }
+      const side = oocShoveSide(tile.x, tile.z);
       if (!side) return false; // no partition faces that tile - not a shove aim
       const resolve = () => {
         // Re-verify on arrival - the world had a whole walk to change.
@@ -296,5 +316,6 @@ export function createOocVerbs(d) {
     engageWithAction,
     oocTakeCoverAt,
     oocShoveAt,
+    oocShoveSide,
   };
 }

@@ -77,6 +77,17 @@ export function createAiAdvance(d) {
         shieldFaceAt: ranged ? (gx, gz) => d.aiCrouchCovered(gx, gz, tb.x, tb.z, {
           tileDefAt: d.world.tileDefAt,
           stepOpen: d.world.stepOpen,
+          // The SAME `bodyAt` the crouch beat supplies on arrival. Without it
+          // this scored tiles by props alone, so a spot shielded by a standing
+          // body scored as open ground - the unit walked past the cover it was
+          // about to be offered, and the beat it walked there to take then
+          // found a shield the scorer never counted. A destination scorer that
+          // grades by a narrower rule than the one it will meet is choosing on
+          // the wrong map.
+          bodyAt: (x, z) => {
+            const o = d.unitStandingAt(x, z);
+            return !!o && o !== unit && d.standing(o);
+          },
         }) : null,
         nearestThreatDist: backline ? (ax, az) => d.livingMembers()
           .reduce((best_, m) => {
