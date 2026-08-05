@@ -47,7 +47,7 @@ export function installEditorStyles() {
       transform-origin: 0 50%;
     }
     .editor-orientation-axis[data-axis="x"] { transform: translateY(-50%); color: #f18d99; }
-    .editor-orientation-axis[data-axis="y"] { transform: translateY(-50%) rotate(90deg); color: #8adf76; }
+    .editor-orientation-axis[data-axis="y"] { transform: translateY(-50%) rotate(-90deg); color: #8adf76; }
     .editor-orientation-axis::before { content: ''; position: absolute; inset: 0; background: currentColor; }
     .editor-orientation-axis::after {
       content: ''; position: absolute; top: 50%; right: -1px; width: 6px; height: 6px;
