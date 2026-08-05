@@ -199,12 +199,11 @@ export function createCombatWorld(d) {
     // the step clock, leaves no footprints and provokes nobody - the one
     // body on the floor the floor cannot touch (Q907).
     //
-    // Routed at `onSummonStep` rather than a fourth copy of the rules,
-    // because a borrowed body is exactly a summon's case: player-side, and
-    // silent, since the surface lines are written in the player's voice and
-    // somebody you are driving is not you. The carrier comes from combat so
-    // `notifyStep` can resolve it - a fresh literal would not.
-    borrowedStep: (carrier, x, z, done, changed) => d.onSummonStep(carrier, x, z, done, changed),
+    // Routed through the shared player-side step pipeline, using the temporary
+    // ally lifecycle policy rather than opening a third rule path. The carrier
+    // comes from combat so `notifyStep` can resolve it - a fresh literal could
+    // not. Narration remains the current temporary-ally policy, not doctrine.
+    borrowedStep: (carrier, x, z, done, changed) => d.onTemporaryAllyStep(carrier, x, z, done, changed),
     // The tiles a summon aimed at (tx,tz) would actually land on - the
     // placement preview draws these rings, and spawnSummon fills them, so
     // what you see is where they stand.

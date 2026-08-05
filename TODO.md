@@ -15,7 +15,7 @@ same thing, the queue is authoritative; the Phase entry is history.
 ## Questions for the designer
 
 The two questions raised on 2026-08-03 are ANSWERED (designer, 2026-08-03)
-and closed out below. Two implementation questions remain open.
+and closed out below. Four implementation questions remain open.
 
 **1. Two saves, one desk: which run wins? (Q017) — ANSWERED: option A.**
 
@@ -60,9 +60,30 @@ A keeps the ratified inventory limit meaningful; B preserves unrestricted party
 redistribution. No implementation should choose between them until the designer
 answers.
 
+**5. Should temporary player-side allies cross floor exits while their assignment lasts? - OPEN.**
+
+`[proposed]` - a summon now survives a fight, but is omitted from
+`serializeProgress`, so a floor transition silently drops it even with turns
+left. **A (recommended):** carry player-side temporary allies into the next
+floor with their remaining duration, placing them at the party's entry and
+serializing only the state needed to reconstruct them. **B:** dismiss them at
+the exit with an explicit line. A makes an unexpired ally travel with the party;
+B keeps the current bounded-save shape but turns a silent disappearance into a
+visible rule. No implementation should choose between them until the designer
+answers.
+
+**6. Should temporary player-side ally movement be narrated? - OPEN.**
+
+`[proposed]` - current floor messages say "You ...", so temporary allies pass a
+no-op and their floor effects are silent. **A (recommended):** make messages
+body-aware (for example, "Employee slips in the water"), so the player can see
+what happened to a controlled ally. **B:** keep them silent. A makes shared
+movement consequences legible; B preserves the current narrator voice. No
+implementation should choose between them until the designer answers.
+
 ## The 20 remaining HIGH findings — superseded
 
-Folded into THE QUEUE below, which covers all 232 standing findings rather than
+Folded into THE QUEUE below, which covers all 234 standing findings rather than
 only the 24 high ones. Splitting the highs into their own list was how the other
 203 went back to being prose - the exact failure the queue exists to stop.
 
@@ -87,16 +108,16 @@ How to read it:
   those as leads. Of eight refutations in this pass, six were right about the
   code and wrong about the consequence.
 
-**232 entries** — 24 high / 110 medium / 98 low. **176 ticked, 56 open**
-(high **24/24 — the band is clear**, medium 89/110, low 63/98).
+**234 entries** — 24 high / 112 medium / 98 low. **176 ticked, 58 open**
+(high **24/24 — the band is clear**, medium 89/112, low 63/98).
 
 **Zero `[bug]` findings are open.** All 13 that remained were closed on
-2026-08-03; what is left is 14 test-gap and 42 cleanup (duplication,
+2026-08-03; what is left is 14 test-gap and 44 cleanup (duplication,
 inconsistency, doc-drift, soc / dead-code / god-method / design). Nothing on
 this list is currently known to misbehave in the played game.
 
 **Every HIGH finding is closed, and no `[bug]` is open at any severity.** What
-remains is 14 test-gap and 42 cleanup, all medium or low.
+remains is 14 test-gap and 44 cleanup, all medium or low.
 
 *A caution for whoever reads that as "the review is nearly done": the count is
 of FINDINGS, not of work. The three biggest things on the list — `startCombat`
@@ -168,8 +189,8 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
   `charmUnit` borrows an EnemyActor and makes it a player-driven member, but
   combat's `members` is a COPY of the roster (`party.members.map(asMember)`), so
   the borrowed body never reaches main.js's `party.members` or `summons`. Which
-  means: `onMemberStep` does not cover it, `onSummonStep` does not cover it, and
-  combat sets `unit.onTile` only in `aiAdvance` - which a player-driven body
+  means: `onMemberStep` does not cover it, no temporary-ally route covers it,
+  and combat sets `unit.onTile` only in `aiAdvance` - which a player-driven body
   never runs. Drive a borrowed coworker through fire, live water, a cable or a
   paper drift and they take no damage, catch no `burning`, gain no `bleed`, pick
   up no gum, never slip, never tick the step clock and leave no footprints.
@@ -188,14 +209,15 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
   `world.paused` return - the only hook that reaches a body main.js drives
   through its enemy loop while a fight is on.
 
-  The steps route to main.js's `onSummonStep`, not to a fourth copy of the
-  rules. A borrowed body is exactly a summon's case: player-side, and silent,
-  because the surface lines are written in the player's voice and somebody you
-  are driving is not you. It gets the step clock, surface damage through its own
-  sheet, the applied status, bleed, gum, slips, footprints and `notifyStep` -
-  and combat hands over its OWN carrier so notifyStep can resolve it, which a
-  fresh literal could not. `releaseCharm` hands the seam back, or aiAdvance
-  would be assigning over it the moment they return to their side.
+  The steps now route through `player-side-step.js`, the same coordinator real
+  members, summons, and borrowed coworkers use. It owns tile effects, the step
+  clock, surface damage, statuses, slips, footprints, and `notifyStep`; each
+  caller supplies only its exit and downed-body policy. Combat hands over its
+  OWN carrier so `notifyStep` can resolve it, which a fresh literal could not.
+  `releaseCharm` hands the seam back, or aiAdvance would be assigning over it
+  the moment they return to their side. The current temporary-ally exit and
+  narration behavior is compatibility policy, not attributed design; Questions
+  5 and 6 keep those decisions open.
 
   The routing half: `findPath` and `smooth` ask the fight who is walking
   (`actingActor`/`actingSheet`) before falling back to the leader's sheet. The
@@ -215,7 +237,7 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
   The importability suite constructs `SRC` from `new URL(...).pathname`, which
   is a URL pathname rather than a Windows filesystem path. On Windows that
   makes the scan target `E:\\E:\\GodotGames\\escape-work\\src\\`, so
-  `npm.cmd test` finishes with 876 passing tests and this one `ENOENT` failure.
+  `npm.cmd test` finishes with 879 passing tests and this one `ENOENT` failure.
   Convert the URL with `fileURLToPath` before passing it to `readdirSync`.
 
 - [ ] **Q909** `tests/e2e/equipment.spec.js:28` [test-gap] **(new 2026-08-05, review)**
@@ -235,6 +257,17 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q911** `src/main.js.orig` [dead-code] **(new 2026-08-05, review)**
   DONE — removed the tracked 2,868-line backup. It was not imported, built, or
   tested; Git history is the owner of that obsolete copy.
+
+- [ ] **Q912** `src/party.js`, `src/main.js` [design] **(new 2026-08-05, Q907 follow-up)**
+  Player-side temporary allies survive a fight but disappear at a floor
+  transition because progress saves serialize only the party. Question 5 owns
+  whether an unexpired ally travels, is reconstructed from saved state, or is
+  explicitly dismissed at the exit.
+
+- [ ] **Q913** `src/player-side-step.js`, `src/main.js` [design] **(new 2026-08-05, Q907 follow-up)**
+  The shared player-side step pipeline preserves temporary-ally silence because
+  its messages use second-person prose. Question 6 owns whether the narrator
+  becomes body-aware or temporary ally effects remain silent.
 
 
 

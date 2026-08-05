@@ -144,7 +144,7 @@ export function createCombatEntry(d) {
         rawSurfDamage: d.rawSurfDamage,
         effectiveSurfDamage: d.effectiveSurfDamage,
         leaveSurfaceAt: d.leaveSurfaceAt,
-        onSummonStep: d.onSummonStep,
+        onTemporaryAllyStep: d.onTemporaryAllyStep,
         spawnSummonUnits: d.spawnSummonUnits,
         // Both of these are ALSO facade keys, which is exactly why they need
         // naming here: inside the object literal `findPath(...)` no longer

@@ -117,11 +117,10 @@ export function createFrame(d) {
       if (en.x !== beforeX || en.z !== beforeZ) anyoneMoved = true;
     }
     if (anyoneMoved) d.checkCombatTrigger(); // did someone just corner the player?
-    // Player-team summons walk their combat paths and animate like a member;
-    // each one's tile effects run against its own sheet (onSummonStep). They
-    // only exist mid-fight, so there's no wander to gate.
+    // Temporary player-side allies walk their combat paths and animate like a
+    // member; each one's tile effects run through the shared step pipeline.
     for (const s of d.summons) {
-      s.actor.update(dt, (x, z, done, changed) => d.onSummonStep(s, x, z, done, changed));
+      s.actor.update(dt, (x, z, done, changed) => d.onTemporaryAllyStep(s, x, z, done, changed));
     }
     for (const npc of d.npcs) npc.update(dt); // idle in place, ease their facing
     // The bottom narrator box gets general narration only when nothing else

@@ -39,6 +39,7 @@ import { createApp, buildLevel, buildLayeredLevel } from './scene.js';
 import { createCombatWorld } from './combat-world.js';
 import { createHotbarHost } from './hotbar-host.js';
 import { createFloorEffects } from './floor-effects.js';
+import { createPlayerSideStepper } from './player-side-step.js';
 import { showLevelMenu } from './desk.js';
 import { createOocVerbs } from './ooc-verbs.js';
 import { createFrame } from './frame.js';
@@ -1684,7 +1685,7 @@ function startGame(level) {
     rawSurfDamage: (...a) => rawSurfDamage(...a),
     effectiveSurfDamage: (...a) => effectiveSurfDamage(...a),
     leaveSurfaceAt: (...a) => leaveSurfaceAt(...a),
-    onSummonStep: (...a) => onSummonStep(...a),
+    onTemporaryAllyStep: (...a) => onTemporaryAllyStep(...a),
     spawnSummonUnits: (...a) => spawnSummonUnits(...a),
     dismissSummon: (...a) => dismissSummon(...a),
     focusCameraOn: (...a) => focusCameraOn(...a),
@@ -1829,20 +1830,12 @@ function startGame(level) {
   // pre-combat LEADER's card, so the damage appeared to hit nobody.
   const syncHudFor = (s) => { if (s && s === hudSheetNow()) paintHud(s); };
 
-  // --- the per-tile rules, written once ----------------------------------------
-  // Everything a body ON YOUR SIDE meets by standing somewhere: the step clock,
-  // the surface under it, and the chance the floor takes its feet away. Members
-  // and the temps you summon obey all three.
+  // Player-side bodies share one step pipeline: tile effects, opportunity
+  // attacks, step-clock statuses, surfaces, slips, and footprints. The caller
+  // supplies only lifecycle policy: can it exit, and what does 0 HP mean?
   //
-  // These were hand-copied into onSummonStep, and the copy had already lost
-  // two of them: a summon could not slip on water, and never caught a surface's
-  // turn-clock status - so marching one through a puddle and into a fire
-  // skipped both the spill and the burning that the same route lands on any
-  // member. New effects are added HERE now, and reach both callers.
-  //
-  // `say` is the one thing that legitimately differs: the lines are written in
-  // the player's voice, and a temp is not the player - so a summon passes a
-  // no-op and takes the rules in silence.
+  // Temporary allies currently pass `quiet` to preserve their existing
+  // narration behavior. That is compatibility policy, not a design assertion.
   const quiet = () => {};
 
   // What the floor does to a body (floor-effects.js): the per-step surface
@@ -1895,19 +1888,38 @@ function startGame(level) {
   });
   const {
     advanceStatusTurn, applySurfaceOn, maybeSlip, tickStepOn, tickTurnClockOn,
-    isBleeding, surfaceImpactKind, leaveFootprint,
+    isBleeding, leaveFootprint,
   } = floorFx;
 
+  const stepPlayerSide = createPlayerSideStepper({
+    tileEffectAt: (x, z) => grid.defAt(x, z).onEnter,
+    notifyStep: (body, x, z) => {
+      if (inCombat && combat) combat.notifyStep(body, x, z);
+    },
+    get gameOver() { return gameOver; },
+    applyDamage,
+    statusFx,
+    tickStepOn,
+    applySurfaceOn,
+    maybeSlip,
+    leaveFootprint,
+    syncHudFor,
+    // `vfx` is declared below this point. These wrappers defer its lookup until
+    // a step actually needs it, avoiding the temporal-dead-zone trap.
+    vfx: {
+      impact: (...a) => vfx.impact(...a),
+      damageText: (...a) => vfx.damageText(...a),
+    },
+  });
+
   function onMemberStep(member, x, z, pathDone, changed = true) {
-    // Stepping out of an enemy's reach mid-fight provokes it (TACTICS_PLAN M2).
-    // Combat owns the rule and the bookkeeping; this just reports the step.
-    if (changed && inCombat && combat) combat.notifyStep(member, x, z);
-    const ms = member.sheet;
-    const actor = member.actor;
     const isLeader = member === partyLeader(party);
-    const fx = grid.defAt(x, z).onEnter;
-    if (fx) {
-      if (fx.effect === 'exit' && pathDone && !inCombat && isLeader) {
+    if (!stepPlayerSide(member, x, z, {
+      pathDone,
+      changed,
+      canExit: !inCombat && isLeader,
+      onExit: () => {
+        const { sheet: ms, actor } = member;
         gameOver = true;
         actor.clearPath();
         // Mid-campaign exits lead to the next floor (the party - wounds, XP,
@@ -1939,42 +1951,11 @@ function startGame(level) {
           if (!playtesting && campaignSaveIsOurs) clearProgress();
           ui.showWinScreen({ level: ms.level, defeated: enemies.filter((e) => !e.alive).length });
         }
-        return;
-      }
-      if (fx.effect === 'damage' && changed) {
-        const dead = applyDamage(ms, fx.amount);
-        actor.flinch();
-        vfx.impact(x, z, 'slam', { y: 0.35, scale: 0.8 });
-        vfx.damageText(x, z, `-${fx.amount}`);
-        ui.say(fx.message);
-        syncHudFor(ms);
-        if (dead) {
-          downOrLose(member, 'Done in by the office itself. The floor was, in fact, wet.');
-          return;
-        }
-      }
-    }
-    // Capture slip-proofing BEFORE the step clock ticks, so the tile a gum wad
-    // wears off on still keeps its traction.
-    const wasSlipProof = !!statusFx(ms).slipProof;
-    if (changed) {
-      if (tickStepOn(ms, actor, x, z, ui.say)) {
-        downOrLose(member, 'Death by a thousand paper cuts. Well - several.');
-        return;
-      }
-      if (applySurfaceOn(ms, actor, x, z, ui.say)) {
-        downOrLose(member, 'Done in by the office itself. Facilities sends their regards.');
-        return;
-      }
-      maybeSlip(ms, actor, x, z, wasSlipProof, ui.say);
-    }
-    // The trail you leave behind. A drift of shredded TPS reports CUTS
-    // (data/surfaces.js), so crossing one is exactly how a walker starts
-    // bleeding - and from that tile on they stamp bloody prints across the
-    // office, darkest on the paper itself. Wet and coffee-soaked soles print
-    // too, for a few tiles, until the shoe dries out. fx.js owns the shoe
-    // state; this only reports the step and what's underfoot.
-    if (changed && !gameOver) leaveFootprint(actor, ms, x, z);
+      },
+      onDown: (message) => downOrLose(member, message),
+      say: ui.say,
+    })) return;
+
     // Walk-up interactions (lighting trash cans) fire on deliberate arrival.
     // An `exact` action (a crouch spot, a partition shove side) fires only on
     // its precise tile - "within reach" would settle for a diagonal that
@@ -1990,31 +1971,13 @@ function startGame(level) {
     checkCombatTrigger();
   }
 
-  // A player summon's per-tile effects during its combat moves - the member
-  // stepping's smaller cousin. Surface damage, gum and paper land on the
-  // summon's own sheet; there's no exit, no leader, no bleed-to-lose. A summon
-  // that falls just topples - combat.notifyMemberDown skips its initiative slot
-  // and hands you a survivor if it was the one you were driving.
-  function onSummonStep(s, x, z, done, changed) {
-    if (!changed) return;
-    // A summon breaking away from an enemy provokes just like a member does.
-    if (inCombat && combat) combat.notifyStep(s, x, z);
-    const ms = s.sheet;
-    const actor = s.actor;
-    const wasSlipProof = !!statusFx(ms).slipProof;
-    // The same three rules a member's feet obey, in the same order - the temp
-    // just takes them without the narration (the lines are the player's voice).
-    if (tickStepOn(ms, actor, x, z, quiet)) {
-      if (inCombat && combat) combat.notifyMemberDown();
-      return;
-    }
-    if (applySurfaceOn(ms, actor, x, z, quiet)) {
-      if (inCombat && combat) combat.notifyMemberDown();
-      return;
-    }
-    maybeSlip(ms, actor, x, z, wasSlipProof, quiet);
-    // A temp bleeds on the carpet like anybody else.
-    if (!gameOver) leaveFootprint(actor, ms, x, z);
+  function onTemporaryAllyStep(s, x, z, done, changed) {
+    stepPlayerSide(s, x, z, {
+      pathDone: done,
+      changed,
+      onDown: () => { if (inCombat && combat) combat.notifyMemberDown(); },
+      say: quiet,
+    });
   }
 
   // --- input --------------------------------------------------------------------
@@ -2404,7 +2367,7 @@ function startGame(level) {
     memberSpeed: (...a) => memberSpeed(...a),
     updateFollowers: (...a) => updateFollowers(...a),
     onMemberStep: (...a) => onMemberStep(...a),
-    onSummonStep: (...a) => onSummonStep(...a),
+    onTemporaryAllyStep: (...a) => onTemporaryAllyStep(...a),
     startNextLeg: (...a) => startNextLeg(...a),
     checkCombatTrigger: (...a) => checkCombatTrigger(...a),
     advanceStatusTurn: (...a) => advanceStatusTurn(...a),

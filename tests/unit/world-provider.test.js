@@ -87,7 +87,7 @@ const deps = () => ({
   freeTilesNear: () => [],
   spawnSummonUnits: () => [],
   dismissSummon: () => {},
-  onSummonStep: () => {},
+  onTemporaryAllyStep: () => {},
 });
 
 const body = (x, z) => ({ x, z, actor: { x, z } });
