@@ -24,7 +24,8 @@ import { parseLevel, parseWallRuns, compressWallRuns, TYPE_ALIASES } from './gri
 import { lintLevel } from './level-lint.js';
 import { parseFloors } from './floors.js';
 import * as preview from './level-preview.js';
-import { toast, PANEL_CHROME, BUTTON_CHROME } from './ui.js';
+import { installEditorStyles } from './editor-styles.js';
+import { toast, BUTTON_CHROME } from './ui.js';
 
 const pc = globalThis.window?.pc;
 
@@ -59,6 +60,7 @@ const MIN_SIZE = 4;
 const MAX_SIZE = 40;
 
 export function startEditor(app, levelData, stashKey) {
+  installEditorStyles();
   // --- editable state ---------------------------------------------------------
   let rows = [];
   let width = 0;
@@ -89,6 +91,13 @@ export function startEditor(app, levelData, stashKey) {
   let storeys = [];   // parked { rows, hWalls, vWalls, hDoors, vDoors, propRot, height }
   let active = 0;
   const STOREY_DEFAULT_H = 2.1; // matches floors.js STOREY_H
+  const cloneStorey = (st) => ({
+    rows: st.rows.map((r) => r.slice()),
+    hWalls: new Set(st.hWalls), vWalls: new Set(st.vWalls),
+    hDoors: new Set(st.hDoors), vDoors: new Set(st.vDoors),
+    propRot: new Map(st.propRot),
+    height: st.height ?? STOREY_DEFAULT_H,
+  });
   const captureStorey = () => ({
     rows: rows.map((r) => r.slice()),
     hWalls: new Set(hWalls), vWalls: new Set(vWalls),
@@ -512,6 +521,7 @@ export function startEditor(app, levelData, stashKey) {
     const layerDefs = Array.isArray(data.layers) && data.layers.length
       ? data.layers
       : [{ map: data.map, walls: data.walls, doors: data.doors, height: undefined }];
+    selection = null;
     const ground = layerDefs[0];
     height = ground.map.length;
     width = Math.max(...ground.map.map((r) => r.length));
@@ -621,21 +631,30 @@ export function startEditor(app, levelData, stashKey) {
   let history = [];
   let future = [];
   let dirty = false;
+  const documentStoreys = () => {
+    const source = storeys.length ? storeys : [captureStorey()];
+    return source.map((st, i) => cloneStorey(i === active ? captureStorey() : st));
+  };
   const snapshot = () => ({
-    rows: rows.map((r) => r.slice()),
-    hWalls: new Set(hWalls), vWalls: new Set(vWalls),
-    hDoors: new Set(hDoors), vDoors: new Set(vDoors),
-    propRot: new Map(propRot),
-    width, height, levelName, levelNext, levelDepth,
+    // History owns the WHOLE document. The previous flat-map snapshot could
+    // undo a brush stroke, but not an add/remove-storey command that had
+    // changed the document around the active map.
+    storeys: documentStoreys(), active,
+    levelName, levelNext, levelDepth,
+    tierChars: new Map(tierChars), tierCharIds: { ...tierCharIds },
+    reservedChars: new Set(reservedChars), tileByChar: { ...tileByChar }, charByType: { ...charByType },
   });
   const restore = (s) => {
-    rows = s.rows.map((r) => r.slice());
-    hWalls = new Set(s.hWalls); vWalls = new Set(s.vWalls);
-    hDoors = new Set(s.hDoors); vDoors = new Set(s.vDoors);
-    propRot = new Map(s.propRot);
-    width = s.width; height = s.height;
+    storeys = s.storeys.map(cloneStorey);
+    active = Math.min(s.active, storeys.length - 1);
+    adoptStorey(storeys[active]);
+    selection = null;
     levelName = s.levelName; levelNext = s.levelNext; levelDepth = s.levelDepth;
+    tierChars = new Map(s.tierChars); tierCharIds = { ...s.tierCharIds };
+    reservedChars = new Set(s.reservedChars); tileByChar = { ...s.tileByChar }; charByType = { ...s.charByType };
     renderAll();
+    syncMetaFields?.();
+    renderStoreyTabs?.();
   };
   // A gesture ARMS a snapshot; the first mutation inside it commits. Pushing
   // eagerly on press meant a click on empty space created an undo step that
@@ -658,12 +677,14 @@ export function startEditor(app, levelData, stashKey) {
     if (!history.length) { toast('Nothing to undo.'); return; }
     future.push(snapshot());
     restore(history.pop());
+    markDirty();
     toast(`Undo. (${history.length} step${history.length === 1 ? '' : 's'} left)`);
   }
   function redo() {
     if (!future.length) { toast('Nothing to redo.'); return; }
     history.push(snapshot());
     restore(future.pop());
+    markDirty();
     toast('Redo.');
   }
 
@@ -685,6 +706,107 @@ export function startEditor(app, levelData, stashKey) {
 
   // --- painting -------------------------------------------------------------------
   let brush = 'wall'; // a tile type id, 'player', or 'enemy:<typeId>'
+  // Selection is deliberately separate from the document and the brush. It
+  // must never create undo noise, dirty a draft, or repaint a cell merely
+  // because the author wanted to inspect it.
+  let editorMode = 'select'; // 'select' | 'paint'
+  let selectEdges = false;
+  let selection = null; // { kind: 'cell' | 'edge', x, z, o? }
+  function selectCell(tile) {
+    if (!tile || tile.x < 0 || tile.x >= width || tile.z < 0 || tile.z >= height) return;
+    selection = { kind: 'cell', x: tile.x, z: tile.z };
+    updateInspector();
+  }
+  function selectEdge(edge) {
+    if (!edge || !edgeInRange(edge.o, edge.x, edge.z)) return;
+    selection = { kind: 'edge', ...edge };
+    updateInspector();
+  }
+  function rotatePropAt(x, z, delta = 90) {
+    const type = tileByChar[rows[z]?.[x]];
+    const def = type && TILE_TYPES[type];
+    if (!def?.model) return false;
+    pushHistory();
+    const key = x + ',' + z;
+    const next = (((propRot.get(key) ?? (def.rotY || 0)) + delta) % 360 + 360) % 360;
+    if (next === (def.rotY || 0)) propRot.delete(key); else propRot.set(key, next);
+    renderCell(x, z);
+    markDirty();
+    updateInspector();
+    return true;
+  }
+  function updateInspector() {
+    if (!selectionInfo) return;
+    selectionInfo.innerHTML = '';
+    if (!selection) {
+      selectionInfo.innerHTML = '<div id="editor-selection-empty">No selection.</div>';
+      return;
+    }
+    const card = document.createElement('div');
+    card.className = 'editor-inspector-card';
+    const facts = document.createElement('dl');
+    facts.className = 'editor-inspector-facts';
+    const fact = (label, value) => {
+      const dt = document.createElement('dt');
+      dt.textContent = label;
+      const dd = document.createElement('dd');
+      dd.textContent = value;
+      facts.append(dt, dd);
+    };
+    const actions = document.createElement('div');
+    actions.className = 'editor-inspector-actions';
+    if (selection.kind === 'edge') {
+      card.innerHTML = `<h3>${selection.o.toUpperCase()} edge ${selection.x},${selection.z}</h3>`;
+      const set = selection.o === 'h' ? hWalls : vWalls;
+      const doors = selection.o === 'h' ? hDoors : vDoors;
+      fact('Contains', doors.has(selection.x + ',' + selection.z) ? 'Door' : set.has(selection.x + ',' + selection.z) ? 'Partition' : 'Open edge');
+      const remove = document.createElement('button');
+      remove.textContent = 'Clear edge';
+      Object.assign(remove.style, BUTTON_CHROME, { padding: '6px 8px', borderRadius: '5px' });
+      remove.onclick = () => { beginStroke(); paintEdge(selection, false); updateInspector(); };
+      actions.appendChild(remove);
+    } else {
+      const { x, z } = selection;
+      const ch = rows[z]?.[x];
+      card.innerHTML = `<h3>Tile ${x},${z}</h3>`;
+      if (ch === undefined) {
+        fact('State', 'Outside this storey');
+      } else if (ch === ' ') {
+        fact('State', 'Void / airspace');
+      } else if (ch === PLAYER_CHAR) {
+        fact('Placement', 'Player start');
+        fact('Ground', 'Implicit floor');
+      } else if (actorIdByChar[ch] || tierCharIds[ch]) {
+        fact('Placement', tierChars.get(ch) || actorIdByChar[ch]);
+        fact('Ground', 'Implicit floor');
+      } else {
+        const type = tileByChar[ch] || 'floor';
+        const def = TILE_TYPES[type] || TILE_TYPES.floor;
+        fact('Terrain', def.label || type);
+        fact('Movement', def.solid ? 'Blocked' : 'Walkable');
+        fact('Sight', def.solid && (def.tall || (def.height ?? 1) >= SIGHT_BLOCK_HEIGHT) ? 'Blocked' : 'Open');
+        if (def.surface) fact('Surface', def.surface);
+        if (def.model) fact('Rotation', `${propRot.get(x + ',' + z) ?? def.rotY ?? 0} degrees`);
+        if (def.model) {
+          const rotate = document.createElement('button');
+          rotate.textContent = 'Rotate';
+          Object.assign(rotate.style, BUTTON_CHROME, { padding: '6px 8px', borderRadius: '5px' });
+          rotate.onclick = () => rotatePropAt(x, z);
+          actions.appendChild(rotate);
+        }
+      }
+      if (ch !== undefined && ch !== ' ') {
+        const clear = document.createElement('button');
+        clear.textContent = 'Clear tile';
+        Object.assign(clear.style, BUTTON_CHROME, { padding: '6px 8px', borderRadius: '5px' });
+        clear.onclick = () => { beginStroke(); paint({ x, z }, charOfType('floor')); updateInspector(); };
+        actions.appendChild(clear);
+      }
+    }
+    card.appendChild(facts);
+    if (actions.children.length) card.appendChild(actions);
+    selectionInfo.appendChild(card);
+  }
   // Characters this level has minted for tiered placements it PAINTED (as
   // opposed to ones it inherited on load, which live in `tierChars`). Both end
   // up in the same export legend; they are tracked together.
@@ -925,7 +1047,18 @@ export function startEditor(app, levelData, stashKey) {
   function showGhost(g) {
     if (!g) { hideGhost(); return; }
     ensureGhosts();
-    if (brush === 'partition' || brush === 'door') {
+    if (editorMode === 'select' && selectEdges) {
+      const e = nearestEdge(g);
+      ghost.enabled = false;
+      if (!e || !edgeInRange(e.o, e.x, e.z)) { ghostEdge.enabled = false; hoverCell = null; setStatus(); return; }
+      ghostEdge.enabled = true;
+      if (e.o === 'h') { ghostEdge.setLocalScale(1, 0.16, 0.12); ghostEdge.setPosition(e.x, 0.1, e.z - 0.5); }
+      else { ghostEdge.setLocalScale(0.12, 0.16, 1); ghostEdge.setPosition(e.x - 0.5, 0.1, e.z); }
+      hoverCell = { x: Math.round(g.x), z: Math.round(g.z), edge: e };
+      setStatus();
+      return;
+    }
+    if (editorMode === 'paint' && (brush === 'partition' || brush === 'door')) {
       const e = nearestEdge(g);
       ghost.enabled = false;
       if (!e || !edgeInRange(e.o, e.x, e.z)) { ghostEdge.enabled = false; hoverCell = null; setStatus(); return; }
@@ -962,7 +1095,7 @@ export function startEditor(app, levelData, stashKey) {
   // the four that a room-painting session actually wants, all riding modifiers
   // on the existing click handler rather than a mode you have to remember you
   // are in.
-  const isEdgeBrush = () => brush === 'partition' || brush === 'door';
+  const isEdgeBrush = () => editorMode === 'paint' && (brush === 'partition' || brush === 'door');
 
   // Walk the integer line between two cells. A drag samples per mousemove with
   // no interpolation, so a fast swipe left gaps in the painted line.
@@ -1275,6 +1408,10 @@ export function startEditor(app, levelData, stashKey) {
     onLeftClickTile: (t, g, sx, sy, m = {}) => {
       if (m.alt && m.shift && t) { anchor = t; capturing = true; previewRect(t); return; } // capture a region
       if (m.alt && t) { eyedrop(t); return; }         // read, don't write
+      if (editorMode === 'select') {
+        if (selectEdges) selectEdge(nearestEdge(g)); else selectCell(t);
+        return;
+      }
       if (brush === 'stamp') { stampAt(t); return; }
       if (isEdgeBrush()) { paintEdge(nearestEdge(g), true); return; }
       if (!t) return;
@@ -1290,6 +1427,7 @@ export function startEditor(app, levelData, stashKey) {
       lastPainted = t;
     },
     onLeftDragTile: (t, g, m = {}) => {
+      if (editorMode === 'select') return;
       if (m.alt) return;
       if (isEdgeBrush()) { paintEdge(nearestEdge(g), true); return; }
       if (!t) return;
@@ -1400,80 +1538,71 @@ export function startEditor(app, levelData, stashKey) {
   }
 
   // --- editor UI ----------------------------------------------------------------------
+  // The map gets the screen it needs. Tools, inspection and analysis are
+  // separate regions around it instead of one expanding panel over the work.
   const bar = document.createElement('div');
-  bar.id = 'editor-bar';
-  Object.assign(bar.style, PANEL_CHROME, {
-    position: 'fixed', left: '50%', bottom: '14px', transform: 'translateX(-50%)',
-    zIndex: '30', display: 'flex', flexDirection: 'column', gap: '7px',
-    maxWidth: '96vw', borderRadius: '10px', padding: '9px',
-    font: '12px system-ui, sans-serif', alignItems: 'stretch',
-    userSelect: 'none', // or drag-painting selects the button labels
-  });
-  // TWO surfaces, not one. Everything used to be appended to a single element
-  // capped at 42vh with `overflow-y: auto` - so Playtest, Export, Reset, Exit,
-  // the size controls and the level loader were the LAST children of the list
-  // you scroll through most, and the selected brush was frequently scrolled out
-  // of sight. The palette scrolls; the commands never do.
+  bar.id = 'editor-shell';
+  bar.dataset.toolsOpen = 'false';
+  bar.dataset.inspectorOpen = 'false';
+  const topbar = document.createElement('div');
+  topbar.id = 'editor-topbar';
+  topbar.className = 'editor-surface';
+  const identity = document.createElement('div');
+  identity.id = 'editor-identity';
+  const status = document.createElement('div');
+  status.id = 'ed-status';
+  identity.appendChild(status);
+  const toolPanel = document.createElement('section');
+  toolPanel.id = 'editor-tools';
+  toolPanel.className = 'editor-surface';
+  const toolHeading = document.createElement('div');
+  toolHeading.id = 'editor-tools-heading';
+  toolHeading.innerHTML = '<span>Tools</span><small>Paint and place</small>';
+  const toolMode = document.createElement('div');
+  toolMode.id = 'editor-tool-mode';
+  const inspector = document.createElement('aside');
+  inspector.id = 'editor-inspector';
+  inspector.className = 'editor-surface';
+  const inspectorHeading = document.createElement('div');
+  inspectorHeading.id = 'editor-inspector-heading';
+  inspectorHeading.innerHTML = '<span>Inspector</span><small>Selection and level</small>';
+  const inspectorBody = document.createElement('div');
+  inspectorBody.id = 'editor-inspector-body';
+  const selectionInfo = document.createElement('div');
+  selectionInfo.id = 'editor-selection';
+  const analysis = document.createElement('section');
+  analysis.id = 'editor-analysis';
+  analysis.className = 'editor-surface';
+  const analysisHeading = document.createElement('div');
+  analysisHeading.id = 'editor-analysis-heading';
+  analysisHeading.textContent = 'Analysis';
+  const problems = document.createElement('div');
+  problems.id = 'editor-problems';
+
+  // Palette construction remains registry-driven; the shell simply gives it a
+  // dedicated scroll region rather than making it compete with commands.
   const palette = document.createElement('div');
   palette.id = 'editor-palette';
-  Object.assign(palette.style, {
-    display: 'flex', gap: '5px', flexWrap: 'wrap', justifyContent: 'center',
-    alignItems: 'center', maxHeight: '22vh', overflowY: 'auto',
-  });
   const commands = document.createElement('div');
   commands.id = 'editor-commands';
-  Object.assign(commands.style, {
-    display: 'flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'center',
-    alignItems: 'center', borderTop: '1px solid #3a3a52', paddingTop: '7px',
-  });
-  // Two more rows for the controls you touch per SESSION rather than per
-  // minute - level identity, storeys, size, overlays. They collapse by default:
-  // with everything on one row the bar wrapped to four lines and covered the
-  // middle of the map, so clicking the centre tile hit a button instead of the
-  // floor. (Found by a test that paints the map centre, which is exactly the
-  // thing a real author does.)
-  const rowStyle = {
-    display: 'none', gap: '6px', flexWrap: 'wrap', justifyContent: 'center',
-    alignItems: 'center', paddingTop: '6px',
-  };
   const levelRow = document.createElement('div');
   levelRow.id = 'editor-level-row';
-  Object.assign(levelRow.style, rowStyle);
   const viewRow = document.createElement('div');
   viewRow.id = 'editor-view-row';
-  Object.assign(viewRow.style, rowStyle);
-  const groupToggle = (id, label, row, title) => {
-    const b = document.createElement('button');
-    b.id = id;
-    b.textContent = label;
-    b.title = title;
-    b.setAttribute('aria-expanded', 'false');
-    Object.assign(b.style, BUTTON_CHROME, {
-      padding: '9px 11px', borderRadius: '7px', minHeight: '40px', cursor: 'pointer',
-    });
-    b.onclick = () => {
-      const open = row.style.display === 'none';
-      row.style.display = open ? 'flex' : 'none';
-      b.setAttribute('aria-expanded', open ? 'true' : 'false');
-      b.style.borderColor = open ? '#8adf76' : '#3a3a52';
-    };
-    return b;
-  };
   const btn = (id, label, host = palette) => {
     const b = document.createElement('button');
     b.id = id;
     b.textContent = label;
     Object.assign(b.style, BUTTON_CHROME, {
-      // 40px of target rather than ~30: the game's own hotbar slots are 44px
-      // (ui/hud.js) and the editor was the one surface below the house floor.
-      padding: '9px 11px', borderRadius: '7px', minHeight: '40px', cursor: 'pointer',
+      padding: '7px 9px', borderRadius: '5px', minHeight: '32px', cursor: 'pointer',
     });
+    b.classList.add('editor-command');
     host.appendChild(b);
     return b;
   };
   const divider = (host = commands) => {
     const s = document.createElement('div');
-    Object.assign(s.style, { width: '1px', alignSelf: 'stretch', background: '#3a3a52', margin: '0 4px' });
+    Object.assign(s.style, { width: '1px', alignSelf: 'stretch', background: '#3a3a52', margin: '0 2px' });
     host.appendChild(s);
   };
 
@@ -1504,26 +1633,55 @@ export function startEditor(app, levelData, stashKey) {
   const brushButtons = [];
   const buttonOf = new Map(); // brush id -> its button, for hotkeys and recents
   const recent = [];
+  let selectCellBtn = null;
+  let selectEdgeBtn = null;
+  function renderToolMode() {
+    for (const [button, active] of [
+      [selectCellBtn, editorMode === 'select' && !selectEdges],
+      [selectEdgeBtn, editorMode === 'select' && selectEdges],
+    ]) {
+      if (!button) continue;
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+    for (const button of brushButtons) {
+      const active = editorMode === 'paint' && buttonOf.get(brush) === button;
+      button.style.borderColor = active ? '#8adf76' : '#3a3a52';
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+  }
+  function selectMode(edges = false) {
+    editorMode = 'select';
+    selectEdges = edges;
+    renderToolMode();
+    setStatus();
+  }
   function selectBrush(id, button) {
     brush = id;
+    editorMode = 'paint';
+    selectEdges = false;
+    renderToolMode();
     setStatus();
     if (collapsed) applyCollapse(); // the collapsed strip names the armed brush
-    for (const b of brushButtons) {
-      b.style.borderColor = '#3a3a52';
-      b.setAttribute('aria-pressed', 'false');
-    }
     // Colour was the ONLY channel signalling the armed brush, on one of ninety
     // buttons, often scrolled out of view. It still is a channel; it is no
     // longer the only one - the status strip names the brush, and the button
     // carries aria-pressed the way the game's own toggle does (ui/hud.js).
-    button.style.borderColor = '#8adf76';
-    button.setAttribute('aria-pressed', 'true');
     const at = recent.indexOf(id);
     if (at !== -1) recent.splice(at, 1);
     recent.unshift(id);
     if (recent.length > 8) recent.pop();
     renderRecent();
   }
+
+  selectCellBtn = btn('ed-mode-select', 'Select', toolMode);
+  selectCellBtn.classList.add('editor-mode');
+  selectCellBtn.title = 'Inspect a tile without changing it.';
+  selectCellBtn.onclick = () => selectMode(false);
+  selectEdgeBtn = btn('ed-mode-edge-select', 'Edge', toolMode);
+  selectEdgeBtn.classList.add('editor-mode');
+  selectEdgeBtn.title = 'Inspect a partition or door edge without changing it.';
+  selectEdgeBtn.onclick = () => selectMode(true);
+  renderToolMode();
 
   // Filtering ninety text-only buttons beats scanning them. Matches label and
   // id, hides the rest live, and hides a category row that has nothing left.
@@ -1633,7 +1791,10 @@ export function startEditor(app, levelData, stashKey) {
       b.title = tileTooltip(id, def);
       b.onclick = () => selectBrush(id, b);
       brushButtons.push(b); buttonOf.set(id, b);
-      if (id === brush) { b.style.borderColor = '#8adf76'; b.setAttribute('aria-pressed', 'true'); }
+      if (editorMode === 'paint' && id === brush) {
+        b.style.borderColor = '#8adf76';
+        b.setAttribute('aria-pressed', 'true');
+      }
     }
     palette.appendChild(row);
   }
@@ -1716,6 +1877,9 @@ export function startEditor(app, levelData, stashKey) {
     return Number.isInteger(n) && n > 1 ? n : null;
   };
   palette.appendChild(actorRow);
+  // The selection tool starts armed. Apply the inactive state after every
+  // registry brush exists so visual, keyboard, and accessibility state agree.
+  renderToolMode();
 
   // --- overlay toggles ----------------------------------------------------------
   const overlayBox = document.createElement('div');
@@ -1791,11 +1955,14 @@ export function startEditor(app, levelData, stashKey) {
     storeys[active] = captureStorey();
     active = i;
     adoptStorey(storeys[i]);
+    selection = null;
     renderAll();
     renderStoreyTabs();
+    validateNow();
     toast(`Storey ${i}${i === 0 ? ' (ground)' : ''}`);
   }
   function addStorey() {
+    pushHistory();
     storeys[active] = captureStorey();
     // A new storey starts EMPTY - all void. An upper floor is mostly airspace
     // with a band of floor around it, so blank-as-void is the useful default
@@ -1806,8 +1973,8 @@ export function startEditor(app, levelData, stashKey) {
       propRot: new Map(),
       height: STOREY_DEFAULT_H,
     });
-    pushHistory();
     switchStorey(storeys.length - 1);
+    markDirty();
     toast('Added a storey. It starts as open air - paint the floor you want.');
   }
   function removeStorey() {
@@ -1818,6 +1985,7 @@ export function startEditor(app, levelData, stashKey) {
     storeys.splice(active, 1);
     active = Math.min(active, storeys.length - 1);
     adoptStorey(storeys[active]);
+    selection = null;
     renderAll();
     renderStoreyTabs();
     markDirty();
@@ -1934,7 +2102,6 @@ export function startEditor(app, levelData, stashKey) {
   btn('ed-grow-h-top', '+row ↑', levelRow).onclick = () => shift(0, 1);
   btn('ed-shrink-h-top', '−row ↑', levelRow).onclick = () => shift(0, -1);
   levelRow.appendChild(sizeLabel);
-  commands.appendChild(filterBox);
 
   divider();
 
@@ -2013,7 +2180,7 @@ export function startEditor(app, levelData, stashKey) {
   btn('ed-playtest', '▶ Playtest', commands).onclick = () => {
     // Refuse to launch something that cannot be finished. The lint already
     // knows; walking into a floor with no exit to discover it is a wasted trip.
-    const errs = findings.filter((f) => f.level === 'error');
+    const errs = validateNow().filter((f) => f.level === 'error');
     // eslint-disable-next-line no-alert
     if (errs.length && !window.confirm(`This floor cannot be finished:\n\n${errs.map((f) => `• ${f.message}`).join('\n')}\n\nPlaytest anyway?`)) return;
     localStorage.setItem(stashKey, toJson());
@@ -2116,6 +2283,7 @@ export function startEditor(app, levelData, stashKey) {
     }
     if (mod) return; // leave the browser's own chords alone
     const k = e.key.toLowerCase();
+    if (k === 'v') { e.preventDefault(); selectMode(false); toast('Selection tool.'); return; }
     // Overhead. `controls` has had this since the game shipped it on the HUD
     // rail and the T key; the editor - where precise clicking matters most -
     // never offered it. Its own comment is the argument: overhead is where tile
@@ -2184,58 +2352,72 @@ export function startEditor(app, levelData, stashKey) {
     return '';
   });
   palette.appendChild(recentRow);
-  // --- collapse ------------------------------------------------------------
-  // The bar sits ON the map it edits and had no way to get out of the way. With
-  // the command row this session grew - New, undo/redo, storeys, metadata,
-  // filter, tier - it was covering better than half the viewport, which is not
-  // a cosmetic problem: clicks land on buttons instead of on the floor.
+  // --- shell visibility ------------------------------------------------------
+  // The compact layout keeps drawers closed until requested, leaving the map
+  // reachable even on a phone-sized viewport.
   const COLLAPSE_KEY = 'escape-work.editor.collapsed';
   const collapseBtn = document.createElement('button');
   collapseBtn.id = 'ed-collapse';
   Object.assign(collapseBtn.style, BUTTON_CHROME, {
-    padding: '4px 10px', borderRadius: '7px', cursor: 'pointer',
-    alignSelf: 'center', minHeight: '22px', fontSize: '11px', opacity: '.85',
+    padding: '6px 9px', borderRadius: '5px', cursor: 'pointer', minHeight: '32px',
   });
+  collapseBtn.classList.add('editor-command', 'editor-panel-toggle');
+  const inspectorToggle = document.createElement('button');
+  inspectorToggle.id = 'ed-inspector-toggle';
+  inspectorToggle.textContent = 'Inspect';
+  inspectorToggle.title = 'Show or hide the inspector';
+  Object.assign(inspectorToggle.style, BUTTON_CHROME, {
+    padding: '6px 9px', borderRadius: '5px', cursor: 'pointer', minHeight: '32px',
+  });
+  inspectorToggle.classList.add('editor-command', 'editor-panel-toggle');
   let collapsed = false;
+  const isCompactEditor = () => window.matchMedia?.('(max-width: 980px)').matches;
   function applyCollapse() {
-    palette.style.display = collapsed ? 'none' : 'flex';
-    commands.style.display = collapsed ? 'none' : 'flex';
-    if (collapsed) { levelRow.style.display = 'none'; viewRow.style.display = 'none'; }
-    collapseBtn.textContent = collapsed ? `▲ show tools — ${brushLabel()}` : '▼ hide tools';
-    collapseBtn.title = collapsed
-      ? 'Show the palette and commands (or press Tab)'
-      : 'Get the bar off the map (or press Tab)';
+    toolPanel.style.display = collapsed ? 'none' : 'flex';
+    bar.classList.toggle('tools-collapsed', collapsed);
+    if (collapsed) bar.dataset.toolsOpen = 'false';
+    else if (!isCompactEditor()) bar.dataset.toolsOpen = 'true';
+    const toolsVisible = !collapsed && (!isCompactEditor() || bar.dataset.toolsOpen === 'true');
+    collapseBtn.textContent = toolsVisible ? 'Hide tools' : 'Show tools';
+    collapseBtn.title = toolsVisible
+      ? 'Hide the tool rail (or press Tab)'
+      : 'Show the tool rail (or press Tab)';
     try { localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : ''); } catch { /* ignore */ }
   }
-  function toggleCollapse() { collapsed = !collapsed; applyCollapse(); }
+  function toggleCollapse() {
+    if (isCompactEditor()) {
+      collapsed = false;
+      const open = bar.dataset.toolsOpen !== 'true';
+      bar.dataset.toolsOpen = open ? 'true' : 'false';
+      if (open) {
+        bar.dataset.inspectorOpen = 'false';
+        inspectorToggle.textContent = 'Inspect';
+      }
+    } else {
+      collapsed = !collapsed;
+    }
+    applyCollapse();
+  }
   collapseBtn.onclick = toggleCollapse;
+  inspectorToggle.onclick = () => {
+    const open = bar.dataset.inspectorOpen !== 'true';
+    bar.dataset.inspectorOpen = open ? 'true' : 'false';
+    if (open && isCompactEditor()) bar.dataset.toolsOpen = 'false';
+    inspectorToggle.textContent = open ? 'Hide inspect' : 'Inspect';
+  };
   try { collapsed = localStorage.getItem(COLLAPSE_KEY) === '1'; } catch { /* ignore */ }
 
-  commands.appendChild(groupToggle('ed-group-level', 'level ▾', levelRow,
-    'Name, depth, next floor, storeys and map size'));
-  commands.appendChild(groupToggle('ed-group-view', 'view ▾', viewRow,
-    'Overlays: reach, cover, fights, surprise, notice, wander, fire, budget'));
-  bar.appendChild(collapseBtn);
-  bar.appendChild(palette);
-  bar.appendChild(commands);
-  bar.appendChild(levelRow);
-  bar.appendChild(viewRow);
+  topbar.append(identity, commands, collapseBtn, inspectorToggle);
+  toolPanel.append(toolHeading, toolMode, filterBox, palette);
+  inspectorBody.append(selectionInfo, levelRow);
+  inspector.append(inspectorHeading, inspectorBody);
+  analysis.append(analysisHeading, viewRow, problems);
+  bar.append(topbar, toolPanel, inspector, analysis);
   document.body.appendChild(bar);
   applyCollapse();
 
-  // --- status strip -----------------------------------------------------------
-  // Everything the editor knows about the current moment, in the corner the
-  // game's empty HUD pill was wasting. It is deliberately OUTSIDE the palette:
-  // the palette scrolls, and a readout you have to scroll to is not a readout.
-  const status = document.createElement('div');
-  status.id = 'ed-status';
-  Object.assign(status.style, PANEL_CHROME, {
-    position: 'fixed', left: '12px', bottom: '14px', zIndex: '31',
-    padding: '7px 11px', borderRadius: '9px', font: '12px system-ui, sans-serif',
-    pointerEvents: 'none', maxWidth: '46vw', lineHeight: '1.45',
-  });
-  document.body.appendChild(status);
   function brushLabel() {
+    if (editorMode === 'select') return selectEdges ? 'edge inspection' : 'selection';
     if (brush === 'partition') return 'partition (edge)';
     if (brush === 'door') return 'door (edge)';
     if (brush === 'stamp') return clipboard ? `stamp ${clipboard.w}×${clipboard.h}` : 'stamp';
@@ -2276,48 +2458,78 @@ export function startEditor(app, levelData, stashKey) {
   // Same module the suite calls (src/level-lint.js), debounced.
   let lintTimer = null;
   let findings = [];
+  function collectFindings() {
+    try {
+      const data = JSON.parse(toJson());
+      if (!data.layers) return lintLevel(data);
+      // A layered document needs BOTH checks: parseFloors verifies the stairs
+      // and upper-storey constraints, while its ground storey still needs the
+      // same real spawn/exit route every playable floor needs.
+      parseFloors(data);
+      const ground = data.layers[0];
+      return lintLevel({ ...data, map: ground.map, walls: ground.walls, doors: ground.doors })
+        .map((finding) => ({
+          ...finding,
+          target: finding.target ? { ...finding.target, storey: 0 } : undefined,
+        }));
+    } catch (e) {
+      return [{ level: 'error', rule: 'parse', message: e?.message || 'The level cannot be read.' }];
+    }
+  }
+  function focusFinding(finding) {
+    const target = finding.target;
+    if (!target) { toast(finding.message); return; }
+    if (target.storey != null && target.storey !== active) switchStorey(target.storey);
+    if (target.kind === 'edge') selectEdge(target); else selectCell(target);
+  }
+  function renderProblems() {
+    problems.innerHTML = '';
+    if (!findings.length) {
+      const clear = document.createElement('div');
+      clear.id = 'editor-problems-empty';
+      clear.textContent = 'No current problems. This floor is ready to playtest.';
+      problems.appendChild(clear);
+      return;
+    }
+    for (const finding of findings) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'editor-problem';
+      row.dataset.level = finding.level;
+      Object.assign(row.style, BUTTON_CHROME);
+      const dot = document.createElement('span');
+      dot.className = 'editor-problem-dot';
+      dot.textContent = finding.level === 'error' ? 'Error' : 'Warning';
+      const message = document.createElement('span');
+      message.textContent = finding.message;
+      row.append(dot, message);
+      row.onclick = () => focusFinding(finding);
+      problems.appendChild(row);
+    }
+  }
+  function validateNow() {
+    clearTimeout(lintTimer);
+    findings = collectFindings();
+    drawOverlay();
+    renderProblems();
+    setStatus();
+    return findings;
+  }
   function runLint() {
     clearTimeout(lintTimer);
-    lintTimer = setTimeout(() => {
-      try {
-        const data = JSON.parse(toJson());
-        if (data.layers) {
-          // Layered levels get their own checks: parseFloors throws named
-          // errors for an unclimbable run or an occupied landing, which is the
-          // whole reason stairs are generated rather than hand-drawn.
-          findings = [];
-          try {
-            parseFloors(data);
-          } catch (e) {
-            findings = [{ level: 'error', rule: 'storeys', message: e.message }];
-          }
-        } else {
-          findings = lintLevel(data);
-        }
-      } catch { findings = []; }
-      drawOverlay();
-      setStatus();
-    }, 350);
-  }
-  function lintHtml() {
-    if (!findings.length) return '<br><span style="color:#8adf76">✓ playable</span>';
-    const errs = findings.filter((f) => f.level === 'error');
-    const warns = findings.filter((f) => f.level === 'warn');
-    const line = (f) => `<br><span style="color:${f.level === 'error' ? '#ff8f9e' : '#f0c674'}">`
-      + `${f.level === 'error' ? '✕' : '!'} ${f.message}</span>`;
-    // Errors in full - they stop the floor working. Warnings collapse past two,
-    // or a messy work-in-progress buries the readout it shares a box with.
-    return errs.map(line).join('') + warns.slice(0, 2).map(line).join('')
-      + (warns.length > 2 ? `<br><span style="color:#f0c674">! +${warns.length - 2} more</span>` : '');
+    lintTimer = setTimeout(validateNow, 250);
   }
 
   function setStatus() {
     const ch = charByType[brush];
-    status.innerHTML = `<b>${levelName || 'Untitled Floor'}</b> &nbsp; ${width}×${height}`
-      + `<br>brush: <b style="color:#8adf76">${brushLabel()}</b>`
-      + (ch ? ` <span style="opacity:.6">writes “${ch}”</span>` : '')
-      + underCursor()
-      + lintHtml();
+    const errors = findings.filter((f) => f.level === 'error').length;
+    const warnings = findings.filter((f) => f.level === 'warn').length;
+    status.innerHTML = `<strong>${levelName || 'Untitled Floor'}</strong>`
+      + `<span>${width}×${height} · ${brushLabel()}`
+      + (editorMode === 'paint' && ch ? ` · writes “${ch}”` : '')
+      + (errors ? ` · ${errors} error${errors === 1 ? '' : 's'}` : warnings ? ` · ${warnings} warning${warnings === 1 ? '' : 's'}` : ' · ready')
+      + '</span>';
+    updateInspector();
   }
 
   // levels/<id>.json - the id is the filename, and the lint derives it from
@@ -2325,7 +2537,16 @@ export function startEditor(app, levelData, stashKey) {
   const suggestedId = () => (levelName || 'untitled')
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'untitled';
 
+  // Flat and layered documents deliberately share every load path. The old
+  // editor could export a multi-storey level but then reject that same JSON
+  // from both Import and draft recovery because it only looked for `map`.
+  const isLevelDocument = (data) =>
+    (Array.isArray(data?.map) && data.map.length > 0)
+    || (Array.isArray(data?.layers) && data.layers.length > 0
+      && data.layers.every((layer) => Array.isArray(layer?.map) && layer.map.length > 0));
+
   function showExport() {
+    validateNow();
     // One modal at a time - a second Export click used to stack another
     // full-screen overlay with duplicate #export-modal / #export-json ids,
     // and Close only dismissed the top one.
@@ -2386,7 +2607,7 @@ export function startEditor(app, levelData, stashKey) {
     div.querySelector('#export-load').onclick = () => {
       let parsed;
       try { parsed = JSON.parse(ta.value); } catch (e) { toast(`That is not valid JSON: ${e.message}`); return; }
-      if (!Array.isArray(parsed?.map) || !parsed.map.length) { toast('That JSON has no `map` array.'); return; }
+      if (!isLevelDocument(parsed)) { toast('That JSON has no usable map or storey layers.'); return; }
       try {
         pushHistory();
         loadLevel(parsed);
@@ -2399,6 +2620,23 @@ export function startEditor(app, levelData, stashKey) {
     div.querySelector('#export-close').onclick = () => div.remove();
   }
 
+  const exposeEditor = () => ({
+    get map() { return rows.map((r) => r.join('')); },
+    get size() { return { width, height }; },
+    get brush() { return brush; },
+    get mode() { return editorMode; },
+    get selection() { return selection && { ...selection }; },
+    get walls() { return compressWallRuns(hWalls, vWalls); },
+    get doors() { return compressWallRuns(hDoors, vDoors); },
+    carpetAt: (x, z) => carpet.get(x + ',' + z) || null,
+    project(x, z) {
+      const s = worldToScreenCss(controls.cameraEntity, x, 0, z);
+      return { x: s.x, y: s.y };
+    },
+    charAt: (x, z) => rows[z]?.[x],
+    toJson,
+  });
+
   // Prefer an autosaved draft over the level we were handed. The editor used to
   // have exactly one persistence slot - the playtest stash, written only when
   // you press Playtest - so a crash or a stray reload lost everything since
@@ -2408,7 +2646,7 @@ export function startEditor(app, levelData, stashKey) {
     const draft = localStorage.getItem(DRAFT_KEY);
     if (draft) {
       const parsed = JSON.parse(draft);
-      if (parsed?.map?.length) { loadLevel(parsed); restoredDraft = true; }
+      if (isLevelDocument(parsed)) { loadLevel(parsed); restoredDraft = true; }
     }
   } catch { /* a corrupt draft is not worth refusing to open the editor over */ }
   if (!restoredDraft) loadLevel(levelData);
@@ -2417,29 +2655,16 @@ export function startEditor(app, levelData, stashKey) {
   // the bottom-left as a bordered pill with nothing in it. Take the corner.
   const gameHud = document.getElementById('hud');
   if (gameHud) gameHud.style.display = 'none';
-  setStatus();
+  validateNow();
+  window.__editor = exposeEditor();
   if (restoredDraft) {
     dirty = true; // it is unsaved by definition - it never reached a stash
     toast(`Restored your unsaved draft of “${levelName}”. Reset discards it.`);
   } else {
-    toast('Left-click paints · right-click erases · partition works on tile EDGES · Ctrl+Z undoes');
+    toast('Floor ready.');
   }
 
-  // Read-only handle for tests and console poking.
-  window.__editor = {
-    get map() { return rows.map((r) => r.join('')); },
-    get size() { return { width, height }; },
-    get brush() { return brush; },
-    get walls() { return compressWallRuns(hWalls, vWalls); },
-    get doors() { return compressWallRuns(hDoors, vDoors); },
-    carpetAt: (x, z) => carpet.get(x + ',' + z) || null,
-    // World point -> CSS-pixel screen point, so tests can click precise
-    // ground points (mouse events arrive in CSS pixels).
-    project(x, z) {
-      const s = worldToScreenCss(controls.cameraEntity, x, 0, z);
-      return { x: s.x, y: s.y };
-    },
-    charAt: (x, z) => rows[z]?.[x],
-    toJson,
-  };
+  // Reassign after the boot notice as well: the test surface is intentionally
+  // a fresh read-only facade, never a reference to the editor's document.
+  window.__editor = exposeEditor();
 }

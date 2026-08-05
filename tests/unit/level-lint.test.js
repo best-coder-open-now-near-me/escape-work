@@ -138,6 +138,24 @@ test('a door with a solid side is flagged', () => {
   assert.ok(rules(d).includes('dead-door'));
 });
 
+test('actionable findings include the cell or edge the editor should inspect', () => {
+  const blocked = OK();
+  blocked.map = [
+    '#######',
+    '#..#..#',
+    '#.@#.>#',
+    '#..#..#',
+    '#######',
+  ];
+  const route = lintLevel(blocked).find((f) => f.rule === 'exit-unreachable');
+  assert.deepEqual(route?.target, { kind: 'cell', x: 5, z: 2 });
+
+  const door = OK();
+  door.doors = ['H 1 1'];
+  const deadDoor = lintLevel(door).find((f) => f.rule === 'dead-door');
+  assert.deepEqual(deadDoor?.target, { kind: 'edge', o: 'h', x: 1, z: 1 });
+});
+
 test('every shipped level is playable by these rules', async () => {
   const { readdirSync, readFileSync } = await import('node:fs');
   const files = readdirSync('levels').filter((f) => f.endsWith('.json'));

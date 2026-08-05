@@ -100,3 +100,60 @@ test('loading a shipped level and exporting it keeps its companions', async ({ p
       `exported legend entry "${c}" (${out.tiles[c]}) is actually used`).toBe(true);
   }
 });
+
+test('the map opens in safe selection mode and analysis can focus an invalid route', async ({ page }) => {
+  await page.goto('/#editor');
+  await page.waitForFunction(() => window.__editor, null, { timeout: 90_000 });
+  await waitForSmoothFrames(page);
+
+  await expect(page.locator('#ed-mode-select')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#brush-wall')).toHaveAttribute('aria-pressed', 'false');
+  const before = await page.evaluate(() => window.__editor.charAt(11, 8));
+  const centre = await page.evaluate(() => window.__editor.project(11, 8));
+  await page.mouse.click(centre.x, centre.y);
+  await expect.poll(
+    () => page.evaluate(() => window.__editor.selection),
+    { timeout: 30_000 },
+  ).toEqual({ kind: 'cell', x: 11, z: 8 });
+  expect(await page.evaluate(() => window.__editor.charAt(11, 8))).toBe(before);
+
+  const broken = {
+    name: 'Broken Route',
+    depth: 1,
+    tiles: { '.': 'floor', '#': 'wall', '>': 'exit' },
+    actors: { '@': 'player' },
+    map: ['#######', '#..#..#', '#.@#.>#', '#..#..#', '#######'],
+  };
+  await page.click('#ed-export');
+  await page.locator('#export-json').fill(JSON.stringify(broken));
+  await page.click('#export-load');
+  const blockedRoute = page.locator('#editor-problems .editor-problem')
+    .filter({ hasText: 'cannot be walked to' });
+  await expect(blockedRoute).toHaveCount(1);
+  await blockedRoute.click();
+  await expect.poll(
+    () => page.evaluate(() => window.__editor.selection),
+    { timeout: 30_000 },
+  ).toEqual({ kind: 'cell', x: 5, z: 2 });
+  await expect(page.locator('#editor-selection')).toContainText('5,2');
+});
+
+test('storey creation and undo restore the entire level document', async ({ page }) => {
+  await page.goto('/#editor');
+  await page.waitForFunction(() => window.__editor, null, { timeout: 90_000 });
+  await waitForSmoothFrames(page);
+
+  await page.click('#ed-storey-add');
+  await expect.poll(
+    () => page.evaluate(() => JSON.parse(window.__editor.toJson()).layers?.length ?? 0),
+    { timeout: 30_000 },
+  ).toBe(2);
+  await page.keyboard.press('Control+z');
+  await expect.poll(
+    () => page.evaluate(() => {
+      const out = JSON.parse(window.__editor.toJson());
+      return { layers: out.layers?.length ?? 0, hasMap: Array.isArray(out.map) };
+    }),
+    { timeout: 30_000 },
+  ).toEqual({ layers: 0, hasMap: true });
+});

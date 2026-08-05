@@ -19,11 +19,13 @@
 import { parseLevel } from './grid.js';
 import { findPath } from './pathfinding.js';
 
-// A finding is { level: 'error' | 'warn', rule, message }. Errors mean the floor
-// cannot be finished or will not load; warnings mean it will play but somebody
-// probably did not mean it.
-const err = (rule, message) => ({ level: 'error', rule, message });
-const warn = (rule, message) => ({ level: 'warn', rule, message });
+// A finding is { level: 'error' | 'warn', rule, message, target? }. `target`
+// is optional because some format failures have no honest map location; when
+// present it is a { kind: 'cell' | 'edge', x, z, o? } the editor can select.
+const finding = (level, rule, message, target = null) =>
+  target ? { level, rule, message, target } : { level, rule, message };
+const err = (rule, message, target) => finding('error', rule, message, target);
+const warn = (rule, message, target) => finding('warn', rule, message, target);
 
 // Walk the map for the first cell of a type. Levels are <=40x40, so a scan is
 // cheaper than an index that has to be kept honest.
@@ -60,14 +62,17 @@ export function lintLevel(data) {
     }
   }
   const declared = new Set([...Object.keys(tiles), ...Object.keys(actors)]);
-  const undeclared = new Set();
-  for (const row of data.map) {
-    for (const ch of row) if (ch !== ' ' && !declared.has(ch)) undeclared.add(ch);
+  const undeclared = new Map();
+  for (let z = 0; z < data.map.length; z++) {
+    for (let x = 0; x < data.map[z].length; x++) {
+      const ch = data.map[z][x];
+      if (ch !== ' ' && !declared.has(ch) && !undeclared.has(ch)) undeclared.set(ch, { kind: 'cell', x, z });
+    }
   }
-  for (const ch of undeclared) {
+  for (const [ch, target] of undeclared) {
     // parseLevel defaults an unknown tile char to floor, so this ships as
     // invisible walkable floor rather than as an error.
-    out.push(err('undeclared-char', `Map character "${ch}" is in no legend - it would load as blank floor.`));
+    out.push(err('undeclared-char', `Map character "${ch}" is in no legend - it would load as blank floor.`, target));
   }
 
   let g;
@@ -92,7 +97,8 @@ export function lintLevel(data) {
       g.terrainOpen, g.playerSpawn.x, g.playerSpawn.z, exit.x, exit.z, null, stepPassableOf(g));
     if (!route) {
       out.push(err('exit-unreachable',
-        `The exit at ${exit.x},${exit.z} cannot be walked to from the start. Something is sealing it off.`));
+      `The exit at ${exit.x},${exit.z} cannot be walked to from the start. Something is sealing it off.`,
+      { kind: 'cell', x: exit.x, z: exit.z }));
     }
   }
 
@@ -115,7 +121,8 @@ export function lintLevel(data) {
     }
     if (free < 2) {
       out.push(warn('cramped-spawn',
-        `The start has ${free} free neighbour${free === 1 ? '' : 's'}; the party needs 2 to stand apart.`));
+        `The start has ${free} free neighbour${free === 1 ? '' : 's'}; the party needs 2 to stand apart.`,
+        { kind: 'cell', x, z }));
     }
   }
 
@@ -136,7 +143,8 @@ export function lintLevel(data) {
         const openB = g.terrainOpen(b.x, b.z);
         if (!openA || !openB) {
           out.push(warn('dead-door',
-            `The door at ${o} ${x},${z} has ${(!openA && !openB) ? 'no' : 'only one'} walkable side.`));
+            `The door at ${o} ${x},${z} has ${(!openA && !openB) ? 'no' : 'only one'} walkable side.`,
+            { kind: 'edge', o: o.toLowerCase(), x, z }));
         }
       }
     }
@@ -162,14 +170,18 @@ export function lintLevel(data) {
       }
     }
     let orphaned = 0;
+    let firstOrphan = null;
     for (let z = 0; z < g.height; z++) {
       for (let x = 0; x < g.width; x++) {
-        if (g.terrainOpen(x, z) && !seen.has(x + ',' + z)) orphaned++;
+        if (g.terrainOpen(x, z) && !seen.has(x + ',' + z)) {
+          orphaned++;
+          if (!firstOrphan) firstOrphan = { kind: 'cell', x, z };
+        }
       }
     }
     if (orphaned) {
       out.push(warn('orphaned-floor',
-        `${orphaned} walkable tile${orphaned === 1 ? '' : 's'} cannot be reached from the start.`));
+        `${orphaned} walkable tile${orphaned === 1 ? '' : 's'} cannot be reached from the start.`, firstOrphan));
     }
   }
 
