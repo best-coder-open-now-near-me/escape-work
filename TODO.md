@@ -15,7 +15,7 @@ same thing, the queue is authoritative; the Phase entry is history.
 ## Questions for the designer
 
 The two questions raised on 2026-08-03 are ANSWERED (designer, 2026-08-03)
-and closed out below. One implementation question remains open.
+and closed out below. Two implementation questions remain open.
 
 **1. Two saves, one desk: which run wins? (Q017) — ANSWERED: option A.**
 
@@ -48,9 +48,21 @@ also count as shelter. A aligns the editor with play; B preserves a broader,
 non-combat preview. No implementation should choose between them until the
 designer answers.
 
+**4. Should handing an item to a party member obey their capacity? - OPEN.**
+
+`[proposed]` - Q904 ratified capacity as an admission rule for pickup and stow,
+but party hand-offs still remove the item from the sender and push it directly
+into the recipient's bag. **A (recommended):** refuse a hand-off to a full
+recipient and leave the item with its sender, so every added inventory item
+obeys the same capacity rule. **B:** make hand-offs an explicit exception, then
+update the stale "pockets are unlimited" comments and document the exception.
+A keeps the ratified inventory limit meaningful; B preserves unrestricted party
+redistribution. No implementation should choose between them until the designer
+answers.
+
 ## The 20 remaining HIGH findings — superseded
 
-Folded into THE QUEUE below, which covers all 228 standing findings rather than
+Folded into THE QUEUE below, which covers all 232 standing findings rather than
 only the 24 high ones. Splitting the highs into their own list was how the other
 203 went back to being prose - the exact failure the queue exists to stop.
 
@@ -75,16 +87,16 @@ How to read it:
   those as leads. Of eight refutations in this pass, six were right about the
   code and wrong about the consequence.
 
-**228 entries** — 24 high / 106 medium / 98 low. **175 ticked, 53 open**
-(high **24/24 — the band is clear**, medium 88/106, low 63/98).
+**232 entries** — 24 high / 110 medium / 98 low. **176 ticked, 56 open**
+(high **24/24 — the band is clear**, medium 89/110, low 63/98).
 
 **Zero `[bug]` findings are open.** All 13 that remained were closed on
-2026-08-03; what is left is 12 test-gap and 41 cleanup (duplication,
+2026-08-03; what is left is 14 test-gap and 42 cleanup (duplication,
 inconsistency, doc-drift, soc / dead-code / god-method / design). Nothing on
 this list is currently known to misbehave in the played game.
 
 **Every HIGH finding is closed, and no `[bug]` is open at any severity.** What
-remains is 12 test-gap and 41 cleanup, all medium or low.
+remains is 14 test-gap and 42 cleanup, all medium or low.
 
 *A caution for whoever reads that as "the review is nearly done": the count is
 of FINDINGS, not of work. The three biggest things on the list — `startCombat`
@@ -198,6 +210,31 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
   slot that posted it and let HR reinforce over its own cap.
 
   The recorded trap was respected: no `sheet` was hung on the unit.
+
+- [ ] **Q908** `tests/unit/importable.test.js:19` [test-gap] **(new 2026-08-05, review)**
+  The importability suite constructs `SRC` from `new URL(...).pathname`, which
+  is a URL pathname rather than a Windows filesystem path. On Windows that
+  makes the scan target `E:\\E:\\GodotGames\\escape-work\\src\\`, so
+  `npm.cmd test` finishes with 876 passing tests and this one `ENOENT` failure.
+  Convert the URL with `fileURLToPath` before passing it to `readdirSync`.
+
+- [ ] **Q909** `tests/e2e/equipment.spec.js:28` [test-gap] **(new 2026-08-05, review)**
+  The test still asserts that unequipping always succeeds because pockets are
+  unlimited. It loads 40 items into the Office Drone's 30-slot bag and expects
+  the weapon to stow as item 41; Q904 now correctly refuses the stow and leaves
+  the weapon equipped. Replace the stale expectation with the ratified over-cap
+  admission rule, then drain space and prove unequipping succeeds.
+
+- [ ] **Q910** `src/looting.js:149`, `src/main.js:428` [design] **(new 2026-08-05, review)**
+  Party hand-offs currently bypass `inventoryCapOf`: the sender loses the item
+  and the recipient's `take` callback pushes it into their inventory directly.
+  The two comments still state that pockets are unlimited. Question 4 records
+  the unresolved capacity policy; implement and test the chosen rule, then make
+  the comments describe it accurately.
+
+- [x] **Q911** `src/main.js.orig` [dead-code] **(new 2026-08-05, review)**
+  DONE — removed the tracked 2,868-line backup. It was not imported, built, or
+  tested; Git history is the owner of that obsolete copy.
 
 
 
