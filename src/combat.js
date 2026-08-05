@@ -2548,7 +2548,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
           maxHp: e.maxHp,
           expiring: (e.summonTurns ?? Infinity) <= 1,
           ref: e,
-        }))),
+        })), {
+          // The player's ally buff measures body-to-body and traces a line;
+          // triage gets the same gate, with self as the one degenerate line.
+          canSupport: (a) => a.ref === u || (
+            bodyDist(u, a.ref) <= (sup.range ?? Infinity) && bodyLos(u, a.ref)
+          ),
+        }),
       topplePlan: aiTopplePlan,
       edgeTopplePlan: aiEdgeToppleFor,
       pullPlan: aiPullPlanFor,

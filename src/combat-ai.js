@@ -61,10 +61,12 @@ export function lineWeights(pool, wearing) {
 // Who a support unit patches this turn (AI_PLAN M6): the worst-off ally
 // under the heal threshold, within the descriptor's range - self included,
 // mirroring the player's triage ("hr heal is for anyone", POWERS_PLAN 19).
-// Allies arrive as plain { x, z, hp, maxHp, expiring, ref }; a temp about
-// to despawn is skipped (healing a body that vanishes next round reads as
-// AI stupidity, not mercy).
-export function aiSupportPlan(bx, bz, spec, allies, { healAt = AI.HEAL_AT } = {}) {
+// `canSupport` lets combat provide the player's exact continuous distance and
+// line-of-sight gate; the tile-distance fallback keeps this pure rule callable
+// with plain test fixtures. Allies arrive as { x, z, hp, maxHp, expiring, ref };
+// a temp about to despawn is skipped (healing a body that vanishes next round
+// reads as AI stupidity, not mercy).
+export function aiSupportPlan(bx, bz, spec, allies, { healAt = AI.HEAL_AT, canSupport = null } = {}) {
   if (!spec) return null;
   let best = null;
   for (const a of allies) {
@@ -72,7 +74,7 @@ export function aiSupportPlan(bx, bz, spec, allies, { healAt = AI.HEAL_AT } = {}
     if (!(a.maxHp > 0)) continue;
     const frac = a.hp / a.maxHp;
     if (frac >= healAt) continue;
-    if (dist(bx, bz, a.x, a.z) > (spec.range ?? Infinity)) continue;
+    if (canSupport ? !canSupport(a) : dist(bx, bz, a.x, a.z) > (spec.range ?? Infinity)) continue;
     if (!best || frac < best.frac) best = { ally: a, frac };
   }
   return best;

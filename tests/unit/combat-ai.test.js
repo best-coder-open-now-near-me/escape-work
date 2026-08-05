@@ -423,6 +423,14 @@ test('the worst-off ally in range gets the heal; expiring temps do not', async (
   assert.equal(aiSupportPlan(0, 0, spec, [hurt, worse, fine, ghost, far]).ally.ref, 'worse');
   // Nobody under the threshold in range: no plan, the ladder moves on.
   assert.equal(aiSupportPlan(0, 0, spec, [fine, far]), null);
+  // Combat supplies its body-distance and line-of-sight gate, so a more badly
+  // hurt ally behind a partition cannot be triaged through it.
+  assert.equal(aiSupportPlan(0, 0, spec, [hurt, worse], {
+    canSupport: (a) => a.ref !== 'worse',
+  }).ally.ref, 'hurt');
+  assert.equal(aiSupportPlan(0, 0, spec, [worse], {
+    canSupport: () => false,
+  }), null);
 
   // The line weights: a status the target lacks doubles the line's chances;
   // one they already wear rolls flat.
