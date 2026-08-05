@@ -3,11 +3,16 @@
 // read-only handles for assertions (see ARCHITECTURE.md).
 import { defineConfig } from '@playwright/test';
 
+// Keep test and assertion budgets aligned. A per-test timeout does not extend
+// Playwright's independent default for expect(), which otherwise remains 5s.
+const E2E_TIMEOUT = 120_000;
+
 export default defineConfig({
   testDir: 'tests/e2e',
   // Generous: CI renders through software GL, where boot alone can eat 30s+
   // of shader compilation. Locally everything exits early.
-  timeout: 120_000,
+  timeout: E2E_TIMEOUT,
+  expect: { timeout: E2E_TIMEOUT },
   retries: process.env.CI ? 1 : 0,
   // A red run should cost minutes, not half an hour. Every test boots the whole
   // engine under software GL (~40s each), so letting a broken build grind
