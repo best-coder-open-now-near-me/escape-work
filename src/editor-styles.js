@@ -44,10 +44,10 @@ export function installEditorStyles() {
     }
     .editor-orientation-axis {
       position: absolute; top: 50%; left: 50%; width: 23px; height: 2px;
-      transform-origin: 0 50%; color: #85dff6;
+      transform-origin: 0 50%;
     }
-    .editor-orientation-axis[data-axis="x"] { transform: translateY(-50%); }
-    .editor-orientation-axis[data-axis="y"] { transform: translateY(-50%) rotate(90deg); color: #f0cd7d; }
+    .editor-orientation-axis[data-axis="x"] { transform: translateY(-50%); color: #f18d99; }
+    .editor-orientation-axis[data-axis="y"] { transform: translateY(-50%) rotate(90deg); color: #8adf76; }
     .editor-orientation-axis::before { content: ''; position: absolute; inset: 0; background: currentColor; }
     .editor-orientation-axis::after {
       content: ''; position: absolute; top: 50%; right: -1px; width: 6px; height: 6px;
@@ -120,13 +120,11 @@ export function installEditorStyles() {
     #ed-size { color: #8adf76; font-variant-numeric: tabular-nums; }
     .editor-resize-axis { display: grid; grid-template-columns: 36px 36px minmax(0, 1fr) 36px 36px; align-items: center; gap: 4px; }
     .editor-resize-axis-button { width: 36px; padding: 6px 0 !important; font-weight: 700; }
-    .editor-resize-add { border-color: #426942 !important; color: #b9edab; }
-    .editor-resize-remove { border-color: #6e414b !important; color: #f2b6c1; }
     .editor-resize-axis-key { display: flex; align-items: baseline; justify-content: center; gap: 6px; min-width: 0; padding: 6px; border: 1px solid #3a3a52; border-radius: 5px; background: rgba(16, 16, 29, .62); font-variant-numeric: tabular-nums; }
     .editor-resize-axis-key b { font-size: 12px; }
     .editor-resize-axis-size { color: #e9e9ef; }
-    .editor-resize-axis[data-axis="x"] .editor-resize-axis-key { border-color: #356a7b; color: #85dff6; }
-    .editor-resize-axis[data-axis="y"] .editor-resize-axis-key { border-color: #756036; color: #f0cd7d; }
+    .editor-resize-axis[data-axis="x"] .editor-resize-axis-key { border-color: #7a3a4a; color: #f18d99; }
+    .editor-resize-axis[data-axis="y"] .editor-resize-axis-key { border-color: #426942; color: #8adf76; }
     #ed-status { position: static !important; max-width: none !important; padding: 0 !important; border: 0 !important; background: transparent !important; box-shadow: none !important; }
     #ed-status b { color: #8adf76; }
     #ed-filter { width: 100%; min-width: 0 !important; box-sizing: border-box; margin: 0 8px 2px; }

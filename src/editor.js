@@ -2142,8 +2142,8 @@ export function startEditor(app, levelData, stashKey) {
   const axisSizeLabels = new Map();
   function updateSizeLabel() {
     sizeLabel.textContent = `${width}×${height}`;
-    axisSizeLabels.get('x').textContent = width;
-    axisSizeLabels.get('y').textContent = height;
+    axisSizeLabels.get('x').textContent = `(${width})`;
+    axisSizeLabels.get('y').textContent = `(${height})`;
   }
   const resizeAtEdge = (axis, edge, amount) => {
     if (axis === 'x') {
@@ -2160,7 +2160,7 @@ export function startEditor(app, levelData, stashKey) {
       const amount = operation === 'add' ? 1 : -1;
       const button = btn(`ed-resize-${axis}-${edge}-${operation}`, symbol, row);
       const noun = axis === 'x' ? 'column' : 'row';
-      button.classList.add('editor-resize-axis-button', `editor-resize-${operation}`);
+      button.classList.add('editor-resize-axis-button');
       button.title = `${operation === 'add' ? 'Add' : 'Remove'} one ${noun} at the ${edge} edge`;
       button.setAttribute('aria-label', button.title);
       button.onclick = () => resizeAtEdge(axis, edge, amount);
