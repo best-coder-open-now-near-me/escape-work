@@ -1447,6 +1447,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     crouchStateOf: (...a) => crouchStateOf(...a),
     crouchFacesOf: (...a) => crouchFacesOf(...a),
     nameOf: (...a) => nameOf(...a),
+    canReach: (...a) => canReach(...a),
     // Declared below this call; these arrows only run at decide time.
     rangedLines: (...a) => rangedLines(...a),
   });

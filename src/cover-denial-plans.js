@@ -28,6 +28,8 @@
 // `rangedLines` is read through a wrapper because it is declared below the call
 // site in combat.js; these arrows only ever run at decide time, so the lookup
 // happens long after. That was true before the cut and is why it was safe then.
+import { REACH } from './stats.js';
+
 export function createCoverDenialPlans(d) {
   const topplePlan = (from, px, pz) => {
     const b = d.bodyOf(from);
@@ -77,6 +79,8 @@ export function createCoverDenialPlans(d) {
     // definition here. It is declared below this one, which is safe because
     // this arrow only ever runs at decide time.
     disengage: d.rangedLines(unit).length > 0,
+    // The same reach the player's shove is gated on.
+    reaches: (victim) => d.canReach(unit, victim, REACH.SHOVE),
   });
   const aiPullPlanFor = (unit) => d.aiPullPlanShared(
     unit,

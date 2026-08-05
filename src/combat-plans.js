@@ -75,13 +75,22 @@ export function aiTopplePlan(bx, bz, { tileDefAt, terrainOpen, stepOpen }, victi
 // Adjacent-only, like the topple's own aim; `victimAt` is the caller's side
 // test, `hazardAt` its "would landing there hurt" test.
 export function aiShovePlan(bx, bz, { isWalkable, stepOpen, occupied }, victimAt,
-  { hazardAt = null, disengage = false } = {}) {
+  { hazardAt = null, disengage = false, reaches = null } = {}) {
   const world = { isWalkable, stepOpen, occupied };
   for (const [dx, dz] of AROUND) {
     const vx = bx + dx;
     const vz = bz + dz;
     const victim = victimAt(vx, vz);
     if (!victim) continue;
+    // The PLAYER's shove gate, applied to the AI's (`canReach` at REACH.SHOVE)
+    // [ratified] (designer, 2026-08-05: "a for both q096 and q097"). Tile
+    // adjacency alone let a coworker shove from a diagonal the player could not
+    // and straight across a partition edge, because `AROUND` asks only "is that
+    // tile next to mine" while the player's gate measures body to body and
+    // honours the corner rule. Doctrine #9 - forced movement never provokes,
+    // so shove is the safe disengage - is a rule about the VERB; it should not
+    // reach further in one pair of hands than the other.
+    if (reaches && !reaches(victim)) continue;
     const plan = displacePlan(vx, vz, dx, dz, world);
     if (!plan) continue;
     // The victim goes to `hazardAt` because the caller's test is about THIS
@@ -186,7 +195,17 @@ export function breakPlan(id, attacker, tx, tz, { tileDefAt, edgeHpBetween, hasL
 
   if (isBreakable(tileDefAt(tx, tz))) {
     if (range) {
-      if (cheb(ax, az, tx, tz) > range) return { refusal: 'Too far.' };
+      // EUCLIDEAN, from the body, exactly as the same weapon's range is
+      // measured at a coworker (`bodyDist` at the click, DEGRID D4: a range is
+      // a true-distance circle from where the model actually stands)
+      // [ratified] (designer, 2026-08-05: "a for both q096 and q097").
+      //
+      // This measured Chebyshev off the rounded TILE, so one `range: 4` weapon
+      // meant two different distances depending on what you aimed it at: a
+      // body at (3,3) is 4.24 away and refused, a prop on the same tile is
+      // Chebyshev 3 and allowed. The corners of the square were reachable for
+      // props and not for people.
+      if (dist(me.x, me.z, tx, tz) > range) return { refusal: 'Too far.' };
       if (!hasLos(ax, az, tx, tz)) return { refusal: 'No clear line to it.' };
     } else if (!inReach(me.x, me.z, tx, tz, reachOfUnit(attacker), stepOpen)) {
       return { refusal: 'Too far to swing at it.' };
