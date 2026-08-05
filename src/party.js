@@ -43,11 +43,19 @@ export function addMember(party, sheet, actor = null) {
   return member;
 }
 
-// XP fan-out: every living member earns the full amount - nobody lags, no
-// split bookkeeping. Returns the members who levelled up, so the caller can
-// announce each promotion.
+// XP fan-out: every member earns the full amount - nobody lags, no split
+// bookkeeping. DOWNED members included (Q107-A, designer 2026-08-05): going
+// down costs you the fight, not the campaign. This used to pay only the
+// standing, which was harmless when three automatic revives put you back on
+// your feet mid-fight - all three are struck now, so the same filter had
+// quietly become "miss the whole fight's XP and fall a level behind, which
+// gets you downed more easily, which..." - the spiral "nobody lags" exists to
+// prevent. (A promotion earned while down banks its points but does NOT heal -
+// see gainXp - so this pays XP, never a hidden revive.)
+// Returns the members who levelled up, so the caller can announce each
+// promotion.
 export function gainXpAll(party, amount) {
-  return party.members.filter((m) => m.sheet.hp > 0 && gainXp(m.sheet, amount));
+  return party.members.filter((m) => gainXp(m.sheet, amount));
 }
 
 // A companion's sheet, promoted to match the leader's level so recruits are

@@ -30,16 +30,35 @@ test('addMember appends until the cap, then refuses', () => {
   assert.equal(party.members.length, PARTY_CAP);
 });
 
-test('gainXpAll pays every living member in full and reports promotions', () => {
+test('gainXpAll pays every member in full, downed included (Q107-A)', () => {
+  // "Nobody lags" holds literally: going down costs you the fight, not the
+  // campaign. With every automatic revive struck, the old living-only filter
+  // had become a compounding penalty - miss the fight's XP, fall behind, get
+  // downed more easily next time.
   const party = createParty(createSheet('office-drone'));
   const buddy = addMember(party, createSheet('it-support'));
   const down = addMember(party, createSheet('mail-room'));
-  down.sheet.hp = 0; // downed members earn nothing
+  down.sheet.hp = 0;
   const promoted = gainXpAll(party, 10); // level 2 lands at 10 xp
   assert.equal(leader(party).sheet.level, 2);
   assert.equal(buddy.sheet.level, 2);
-  assert.equal(down.sheet.level, 1);
-  assert.deepEqual(promoted, [leader(party), buddy]);
+  assert.equal(down.sheet.level, 2, 'the downed member levels with the party');
+  assert.deepEqual(promoted, [leader(party), buddy, down]);
+});
+
+test('a promotion earned while down banks its points but is not a revive', () => {
+  // gainXp's full-heal is for the standing: the only way up is still a hand
+  // up (main.js helpUp). Without this gate, paying downed members would have
+  // reintroduced the automatic revive through the XP path.
+  const party = createParty(createSheet('office-drone'));
+  const down = addMember(party, createSheet('mail-room'));
+  down.sheet.hp = 0;
+  const standingHp = leader(party).sheet.hp = 3; // hurt, but up
+  gainXpAll(party, 10);
+  assert.equal(down.sheet.hp, 0, 'still down');
+  assert.equal(down.sheet.attrPoints, 1, 'the level is banked all the same');
+  assert.ok(leader(party).sheet.hp > standingHp, 'the standing still get the promotion heal');
+  assert.equal(leader(party).sheet.hp, leader(party).sheet.maxHp);
 });
 
 test('livingMembers filters the downed', () => {

@@ -19,10 +19,9 @@ import { createHitResolution, MISS_COLOR } from './hit-resolution.js';
 import { createCoverDenialPlans } from './cover-denial-plans.js';
 import { createSummonDesk } from './summon-desk.js';
 import { createCrouch } from './cover-crouch.js';
-import { ACTIONS, arrivalLine, summonSpec } from './data/actions.js';
+import { ACTIONS, UNIVERSAL_ACTIONS, arrivalLine, summonSpec } from './data/actions.js';
 import { SURFACES } from './data/surfaces.js';
-import { throwablesFor as throwableIdsFor, UNIVERSAL_ACTIONS,
-} from './hotbar-model.js';
+import { throwablesFor as throwableIdsFor } from './hotbar-model.js';
 import { truncateByBudget, routeToFiringPosition, trimToFirst } from './pathfinding.js';
 import { pronounsOf, capitalize, verb } from './creation.js';
 import { createSheetFrom, damageBonus, applyDamage, deflect, soakHit, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, gritSaveChance, roundAp, fmtAp, MOVE, REACH } from './stats.js';

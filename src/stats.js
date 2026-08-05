@@ -526,7 +526,7 @@ export function equippedAction(sheet) {
 //
 // The order is by WHERE A POWER CAME FROM, cheapest and most-used first:
 //   1. the basic attack   - the class's own swing (the punch when it has none)
-//   2. shove              - everyone has it, it costs nothing to know
+//   2. universal verbs    - shove, take-cover, pull: everyone has them
 //   3. throwables         - paper ball, then anything folded from it
 //   4. class powers       - the rest of the class list, in the class's order
 //   5. talent powers      - what a talent or a spent class point granted
@@ -534,7 +534,7 @@ export function equippedAction(sheet) {
 // Within a bucket, ties keep the order they arrived in, so a class list stays
 // readable as the class wrote it.
 const ORDER_BASIC = 0;
-const ORDER_SHOVE = 1;
+const ORDER_UNIVERSAL = 1;
 const ORDER_THROW = 2;
 const ORDER_CLASS = 3;
 const ORDER_TALENT = 4;
@@ -579,15 +579,18 @@ function actionBuckets(sheet) {
  * what a character can reach; this only decides where each one sits), and the
  * return is a new array, deduplicated: a class that lists the swing its weapon
  * also brings would otherwise render the same button twice, under one DOM id.
- * Ids not accounted for by any bucket - shove and the throwables, which belong
- * to nobody in particular - fall into their own.
+ * Ids not accounted for by any bucket - the universal verbs and the
+ * throwables, which belong to nobody in particular - fall into their own.
  */
 export function orderedActionIds(sheet, ids) {
   const bucket = actionBuckets(sheet);
   const rank = (id) => {
     if (bucket.has(id)) return bucket.get(id);
     const a = ACTIONS[id];
-    if (a?.type === 'shove') return ORDER_SHOVE;
+    // The action's own flag, not a type check: recognising universality by
+    // `type === 'shove'` is how Take Cover and Pull - universal verbs both -
+    // spent their time filed with the class powers (Q217-A).
+    if (a?.universal === true) return ORDER_UNIVERSAL;
     if (a?.ammoCost) return ORDER_THROW;
     return ORDER_CLASS; // an id from somewhere new: with the powers, not adrift
   };
@@ -751,6 +754,13 @@ export function rollHit(chance, rng = Math.random) {
 // heal and BANK attribute points; the player spends them on the level-up screen
 // (companions included - nothing auto-allocates). Damage no longer rises
 // automatically - it comes from spending those points into Savvy.
+//
+// The heal skips anyone DOWN: a downed member earns the level (gainXpAll pays
+// everybody, Q107-A) but a promotion is not a revive. Every automatic revive
+// in the game has been struck one by one - the stairwell heal, the victory
+// heal - and the one that remains is an item spent by walking over and
+// offering a hand up (main.js helpUp). A full-heal at 0 HP would be the next
+// hidden one, arriving through the XP path this time.
 export function gainXp(sheet, amount) {
   sheet.xp += amount;
   let promoted = false;
@@ -760,7 +770,7 @@ export function gainXp(sheet, amount) {
     sheet.level += 1;
     sheet.attrPoints = (sheet.attrPoints || 0) + PROGRESSION.ATTR_PER_LEVEL;
     sheet.classPoints = (sheet.classPoints || 0) + PROGRESSION.CP_PER_LEVEL;
-    sheet.hp = sheet.maxHp;
+    if (sheet.hp > 0) sheet.hp = sheet.maxHp;
     promoted = true;
   }
   return promoted;

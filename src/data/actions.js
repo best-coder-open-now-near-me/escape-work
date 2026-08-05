@@ -346,8 +346,16 @@ export const ACTIONS = {
   },
 
   // --- universal ----------------------------------------------------------------
+  // `universal: true` is what puts a verb on EVERY character's bar (the
+  // UNIVERSAL_ACTIONS export below) and files it in the bar's universal
+  // bucket (stats.orderedActionIds). One flag, because the three verbs used
+  // to be claimed universal three different ways - a hand-kept list in
+  // hotbar-model, a `type === 'shove'` check in the sorter, and this section
+  // header - and only shove satisfied all three: Take Cover and Pull sorted
+  // in with the class powers as if a class had granted them (Q217-A).
   shove: {
     type: 'shove',
+    universal: true,
     ap: 2,
     label: 'Shove',
     icon: '👐',
@@ -360,6 +368,7 @@ export const ACTIONS = {
   // movement by the same engine every step uses, and this is the tuck itself.
   'take-cover': {
     type: 'cover',
+    universal: true,
     ap: 1,
     label: 'Take Cover',
     icon: '🧎',
@@ -375,6 +384,7 @@ export const ACTIONS = {
   // arrived at from the other side of the cover).
   pull: {
     type: 'pull',
+    universal: true,
     ap: 2,
     label: 'Pull Over',
     icon: '🫳',
@@ -663,6 +673,14 @@ export const ACTIONS = {
     missLog: 'The dart banks left and augers into a monitor.',
   },
 };
+
+// The verbs EVERY character has, whatever their class - derived from the flag
+// so the list and the flag cannot disagree. This lived in hotbar-model.js as a
+// hand-written array while the bar's sorter recognised universality by
+// `type === 'shove'`; two definitions of "universal" is how two of the three
+// verbs ended up filed as class powers (Q217-A). Order here is bar order.
+export const UNIVERSAL_ACTIONS = Object.keys(ACTIONS)
+  .filter((id) => ACTIONS[id].universal === true);
 
 // How a posting's arrivals are announced. One line, shared by the in-combat
 // posting (combat.js placeSummon) and the out-of-combat one (main.js

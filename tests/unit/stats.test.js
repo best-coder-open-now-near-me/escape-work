@@ -9,7 +9,7 @@ import * as stats from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
 import { ITEMS } from '../../src/data/items.js';
-import { ACTIONS } from '../../src/data/actions.js';
+import { ACTIONS, UNIVERSAL_ACTIONS } from '../../src/data/actions.js';
 
 test('createSheet copies class stats and starts clean', () => {
   const s = createSheet('office-drone');
@@ -1016,6 +1016,18 @@ test('the same id twice is one button, and an unknown id is none', () => {
   const s = createSheet('office-drone');
   const ids = orderedActionIds(s, ['attack', 'attack', 'shove', 'no-such-action']);
   assert.deepEqual(ids, ['attack', 'shove']);
+});
+
+test('all three universal verbs share the bucket beside the basic attack (Q217-A)', () => {
+  // Universality is the action's own flag, and the list every bar splices in
+  // derives from it. The sorter used to recognise it by `type === 'shove'`,
+  // which filed Take Cover and Pull with the class powers - the bar offered
+  // two universal verbs as if a class had granted them.
+  assert.deepEqual(UNIVERSAL_ACTIONS, ['shove', 'take-cover', 'pull']);
+  const s = createSheet('office-drone');
+  const ids = orderedActionIds(s, [...s.actions, equippedAction(s), ...UNIVERSAL_ACTIONS, 'paper-ball']);
+  assert.deepEqual(ids.slice(0, 4), ['attack', 'shove', 'take-cover', 'pull']);
+  assert.ok(ids.indexOf('pull') < ids.indexOf('paper-ball'), 'universal verbs precede the throws');
 });
 
 test('THROW_RANGE is a shared constant, not a per-module copy', () => {

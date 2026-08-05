@@ -14,7 +14,7 @@
 // member's AP, uses and paper), and out of one it gets them from this module.
 // Same slot, same fields, two rule-owners.
 
-import { ACTIONS } from './data/actions.js';
+import { ACTIONS, UNIVERSAL_ACTIONS } from './data/actions.js';
 import { ITEMS } from './data/items.js';
 import { orderedActionIds, equippedAction, ammoCostOf } from './stats.js';
 
@@ -29,11 +29,9 @@ import { orderedActionIds, equippedAction, ammoCostOf } from './stats.js';
 // The ORDER is stats.orderedActionIds - the same one combat's bar renders, so
 // the kit reads the same in and out of a fight. A throwable the character can't
 // fold (needsTalent) is not theirs to list.
-// The verbs EVERY character has, whatever their class - the ones the bar adds
-// on top of a kit. One list, because it was written out at both bars and a
-// third verb (`pull`) had to be added to each by hand; the next one would have
-// had the same chance of landing in only one of them.
-export const UNIVERSAL_ACTIONS = ['shove', 'take-cover', 'pull'];
+// The universal verbs ride in from data/actions.js, derived from the actions'
+// own `universal: true` - the hand-written copy of the list that used to live
+// here was one of the two extra definitions of "universal" Q217 was about.
 
 export function actionIdsFor(s) {
   if (!s) return [];
