@@ -8,8 +8,8 @@
     "build": "node build.mjs",
     "serve": "node build.mjs && node serve.mjs --port 8000",
     "test": "node --test tests/unit/*.test.js",
-    "test:e2e": "playwright test",
-    "test:e2e:smoke": "playwright test smoke.spec.js editor.spec.js",
+    "test:e2e": "node tests/e2e/run-playwright.mjs",
+    "test:e2e:smoke": "node tests/e2e/run-playwright.mjs smoke.spec.js editor.spec.js",
     "check:extractions": "node tools/check-extractions.mjs"
   },
   "dependencies": {
@@ -17,6 +17,6 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
-    "esbuild": "^0.24.0"
+    "esbuild": "^0.25.0"
   }
 }

@@ -8,8 +8,9 @@ name: CI
 # that ever stops mattering, widen the `if:` on the e2e job - there is no
 # longer a budget reason not to.
 #
-# Put `[quick]` in the commit message for a change you will SEE - a colour, a
-# material, a model swap, copy. The browser tests never checked pixels anyway
+# Put `[quick]` in the PR title (or, on main, the commit message) for a change
+# you will SEE - a colour, a material, a model swap, copy. The browser tests
+# never checked pixels anyway
 # (they assert state and clicks), so for anything visual, playing it for five
 # seconds is the better instrument and this pipeline is just latency. `[quick]`
 # leaves the unit suite running - it costs seconds, and it catches the class of
@@ -78,9 +79,9 @@ jobs:
 
       # The critical path through a REAL browser, on every push. One boot
       # shared across its steps, so it costs about one ordinary e2e test.
-      # `[quick]` in the commit message skips it - see the header.
+      # `[quick]` in the PR title (or main commit) skips it - see the header.
       - name: Cache Playwright browser
-        if: ${{ !contains(github.event.head_commit.message, '[quick]') }}
+        if: ${{ !contains(github.event.head_commit.message, '[quick]') && !contains(github.event.pull_request.title, '[quick]') }}
         id: pw-cache
         uses: actions/cache@v4
         with:
@@ -88,11 +89,11 @@ jobs:
           key: pw-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright Chromium
-        if: ${{ !contains(github.event.head_commit.message, '[quick]') && steps.pw-cache.outputs.cache-hit != 'true' }}
+        if: ${{ !contains(github.event.head_commit.message, '[quick]') && !contains(github.event.pull_request.title, '[quick]') && steps.pw-cache.outputs.cache-hit != 'true' }}
         run: npx playwright install --with-deps chromium
 
       - name: Install browser system deps
-        if: ${{ !contains(github.event.head_commit.message, '[quick]') && steps.pw-cache.outputs.cache-hit == 'true' }}
+        if: ${{ !contains(github.event.head_commit.message, '[quick]') && !contains(github.event.pull_request.title, '[quick]') && steps.pw-cache.outputs.cache-hit == 'true' }}
         run: npx playwright install-deps chromium
 
       # The editor specs ride the fast gate with the smoke ones. They are the
@@ -101,7 +102,7 @@ jobs:
       # regression, which is the wrong side of it for a tool that edits the
       # files everything else is measured against.
       - name: Smoke + editor tests
-        if: ${{ !contains(github.event.head_commit.message, '[quick]') }}
+        if: ${{ !contains(github.event.head_commit.message, '[quick]') && !contains(github.event.pull_request.title, '[quick]') }}
         run: npm run test:e2e:smoke
 
   e2e:

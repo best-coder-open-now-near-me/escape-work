@@ -45,38 +45,32 @@ lets do that". The preview derives from `shieldsCell`, so authors see the
 cover a fight will actually grant. The old enclosure reading, where outer
 walls also counted as shelter, is rejected for this overlay.
 
-**4. Should handing an item to a party member obey their capacity? - OPEN.**
+**4. Should handing an item to a party member obey their capacity? - ANSWERED: option A.**
 
-`[proposed]` - Q904 ratified capacity as an admission rule for pickup and stow,
+`[ratified]` - designer, 2026-08-05: "that all seems good, lets do it", approving
+the recommended resolution order and its three stated design recommendations.
+Q904 ratified capacity as an admission rule for pickup and stow,
 but party hand-offs still remove the item from the sender and push it directly
-into the recipient's bag. **A (recommended):** refuse a hand-off to a full
-recipient and leave the item with its sender, so every added inventory item
-obeys the same capacity rule. **B:** make hand-offs an explicit exception, then
-update the stale "pockets are unlimited" comments and document the exception.
-A keeps the ratified inventory limit meaningful; B preserves unrestricted party
-redistribution. No implementation should choose between them until the designer
-answers.
+into the recipient's bag. Refuse a hand-off to a full recipient and leave the
+item with its sender, so every added inventory item obeys the same capacity rule.
 
-**5. Should temporary player-side allies cross floor exits while their assignment lasts? - OPEN.**
+**5. Should temporary player-side allies cross floor exits while their assignment lasts? - ANSWERED: option A.**
 
-`[proposed]` - a summon now survives a fight, but is omitted from
+`[ratified]` - designer, 2026-08-05: "that all seems good, lets do it", approving
+the recommended resolution order and its three stated design recommendations.
+A summon now survives a fight, but is omitted from
 `serializeProgress`, so a floor transition silently drops it even with turns
-left. **A (recommended):** carry player-side temporary allies into the next
+left. Carry player-side temporary allies into the next
 floor with their remaining duration, placing them at the party's entry and
-serializing only the state needed to reconstruct them. **B:** dismiss them at
-the exit with an explicit line. A makes an unexpired ally travel with the party;
-B keeps the current bounded-save shape but turns a silent disappearance into a
-visible rule. No implementation should choose between them until the designer
-answers.
+serializing only the state needed to reconstruct them.
 
-**6. Should temporary player-side ally movement be narrated? - OPEN.**
+**6. Should temporary player-side ally movement be narrated? - ANSWERED: option A.**
 
-`[proposed]` - current floor messages say "You ...", so temporary allies pass a
-no-op and their floor effects are silent. **A (recommended):** make messages
-body-aware (for example, "Employee slips in the water"), so the player can see
-what happened to a controlled ally. **B:** keep them silent. A makes shared
-movement consequences legible; B preserves the current narrator voice. No
-implementation should choose between them until the designer answers.
+`[ratified]` - designer, 2026-08-05: "that all seems good, lets do it", approving
+the recommended resolution order and its three stated design recommendations.
+Current floor messages say "You ...", so temporary allies pass a no-op and their
+floor effects are silent. Make messages body-aware (for example, "Employee slips
+in the water"), so the player can see what happened to a controlled ally.
 
 ## The 20 remaining HIGH findings — superseded
 
@@ -105,16 +99,12 @@ How to read it:
   those as leads. Of eight refutations in this pass, six were right about the
   code and wrong about the consequence.
 
-**234 entries** — 24 high / 112 medium / 98 low. **176 ticked, 58 open**
-(high **24/24 — the band is clear**, medium 89/112, low 63/98).
+**241 entries** — 24 high / 119 medium / 98 low. **179 ticked, 62 open**
+(high **24/24 — the band is clear**, medium 92/119, low 63/98).
 
-**Zero `[bug]` findings are open.** All 13 that remained were closed on
-2026-08-03; what is left is 14 test-gap and 44 cleanup (duplication,
-inconsistency, doc-drift, soc / dead-code / god-method / design). Nothing on
-this list is currently known to misbehave in the played game.
-
-**Every HIGH finding is closed, and no `[bug]` is open at any severity.** What
-remains is 14 test-gap and 44 cleanup, all medium or low.
+**Known `[bug]` findings are open again.** The editor overhaul regressed Q163
+and Q164 and exposed five more editor lifecycle/invariant findings below. The
+HIGH band remains clear; the live behavior work is medium or low.
 
 *A caution for whoever reads that as "the review is nearly done": the count is
 of FINDINGS, not of work. The three biggest things on the list — `startCombat`
@@ -230,19 +220,22 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
 
   The recorded trap was respected: no `sheet` was hung on the unit.
 
-- [ ] **Q908** `tests/unit/importable.test.js:19` [test-gap] **(new 2026-08-05, review)**
+- [x] **Q908** `tests/unit/importable.test.js:19` [test-gap] **(new 2026-08-05, review)**
   The importability suite constructs `SRC` from `new URL(...).pathname`, which
   is a URL pathname rather than a Windows filesystem path. On Windows that
   makes the scan target `E:\\E:\\GodotGames\\escape-work\\src\\`, so
   `npm.cmd test` finishes with 879 passing tests and this one `ENOENT` failure.
   Convert the URL with `fileURLToPath` before passing it to `readdirSync`.
+  ↳ DONE — the current test uses `fileURLToPath`; 883/883 pass on Windows.
 
-- [ ] **Q909** `tests/e2e/equipment.spec.js:28` [test-gap] **(new 2026-08-05, review)**
+- [x] **Q909** `tests/e2e/equipment.spec.js:28` [test-gap] **(new 2026-08-05, review)**
   The test still asserts that unequipping always succeeds because pockets are
   unlimited. It loads 40 items into the Office Drone's 30-slot bag and expects
   the weapon to stow as item 41; Q904 now correctly refuses the stow and leaves
   the weapon equipped. Replace the stale expectation with the ratified over-cap
   admission rule, then drain space and prove unequipping succeeds.
+  ↳ DONE — the spec now proves both the refusal and the successful stow after
+  the bag drains below capacity.
 
 - [ ] **Q910** `src/looting.js:149`, `src/main.js:428` [design] **(new 2026-08-05, review)**
   Party hand-offs currently bypass `inventoryCapOf`: the sender loses the item
@@ -265,6 +258,37 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
   The shared player-side step pipeline preserves temporary-ally silence because
   its messages use second-person prose. Question 6 owns whether the narrator
   becomes body-aware or temporary ally effects remain silent.
+
+- [x] **Q914** `tests/e2e/run-playwright.mjs` [test-gap] **(new 2026-08-05, review)**
+  Green Playwright runs left the invoking Windows shell attached indefinitely.
+  The runner now owns the direct build/server process, waits on Playwright's
+  process exit rather than inherited stdio closure, and stops its exact server
+  handle. The 13-test npm smoke/editor command returns cleanly.
+
+- [x] **Q915** `package.json` [security] **(new 2026-08-05, review)**
+  esbuild 0.24.2 was in the affected range for GHSA-67mh-4wv8-2f99. Upgraded to
+  0.25.12; npm reports zero known vulnerabilities.
+
+- [ ] **Q916** `src/editor.js:2665` [security] **(new 2026-08-05, review)**
+  An editable or imported level name is inserted into `innerHTML` without
+  escaping, allowing imported level content to execute in the editor origin.
+
+- [ ] **Q917** `src/controls.js:118`, `src/editor.js:1410` [bug] **(new 2026-08-05, review)**
+  Alt+Shift+left is consumed as orbit before the editor's documented region
+  capture handler receives it, leaving capture/stamp unreachable through UI.
+
+- [ ] **Q918** `src/editor.js:874`, `src/editor.js:919` [bug] **(new 2026-08-05, review)**
+  Coordinate-keyed prop rotations are neither remapped by top/left resize nor
+  cleared consistently by repaint/trim, so rotations move to or resurrect on
+  the wrong prop.
+
+- [ ] **Q919** `src/editor.js:1238` [bug] **(new 2026-08-05, review)**
+  Region stamping bypasses wall/door mutual exclusion and can export the same
+  edge in both collections.
+
+- [ ] **Q920** `src/editor.js:919` [inconsistency] **(new 2026-08-05, review)**
+  Top/left shrink can remove actors without the warning right/bottom shrink
+  provides.
 
 
 
@@ -449,7 +473,7 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q040** `src/combat.js:3536` [inconsistency] **(carried)** `verbKind` has only two consumers while five more hand-written `a.type` ladders are live — the exact drift TODO.md Phase 5 says to watch for<br>      ↳ DONE — attackOrConfront asks verbSides; three of five ladders now collapsed
 - [x] **Q041** `src/combat-plans.js:54` [soc] **(carried)** Pure plan modules take a parameter literally named `world` that is combat's host facade, so the contract is duck-typed and unit tests structurally cannot check it<br>      ↳ **THE PROVIDER SIDE IS REACHABLE NOW (2026-08-03).** `world-contract.test.js` pins what the pure rules NEED off the bag and says in its own header that it deliberately cannot check the other side - "main.js is the entry point and importable.test.js excludes it on purpose, so the provider side cannot be reached from node". The facade was a 199-line literal inside `beginCombat`; it is `combat-world.js` now, a plain function returning a plain object, so a test can build one and ask whether it still carries the keys the rules read. **The test itself is not written yet** - that is what is left of this finding.<br>      ↳ **DONE — `world-provider.test.js`.** The consumer half pinned what each rule NEEDS off the bag and said in its header that the provider side "cannot be reached from node". It can now: `combat-world.js` is a plain function returning a plain object. The new tests deliberately do NOT restate the key lists - two lists that must agree is the drift this finding is about - they drive the REAL facade through the REAL rules, so a key dropped from the provider fails the same way it would in a fight. Red-first checked: deleting `stepOpen` fails 3, `tileDefAt` or `approach` fails 2.
 - [ ] **Q042** `src/combat.js:97` [soc] **(carried)** `startCombat` remains a large closure with `armed` shared across targeting, input, rendering, and turn resolution; give that state an explicit owner.
-- [x] **Q043** `src/editor.js:516` [soc] **(carried)** `editor.js startEditor` is a 641-line god closure, and it hardcodes the tile-category list in system code — adding a category means editing the editor<br>      ↳ **PARTLY DONE** — the tile-category ORDER is now content (`TILE_CATEGORIES` in data/tiles.js), lint both directions, and the live drift it was hiding is fixed: `snack-machine` declares `furniture`, which the editor's list never named, so its brush sorted silently to the end of the palette. **Still open:** `startEditor` is a 641-line closure - the size half of this entry.
+- [ ] **Q043** `src/editor.js:516` [soc] **(carried)** `editor.js startEditor` is a 641-line god closure, and it hardcodes the tile-category list in system code — adding a category means editing the editor<br>      ↳ **PARTLY DONE** — the tile-category ORDER is now content (`TILE_CATEGORIES` in data/tiles.js), lint both directions, and the live drift it was hiding is fixed: `snack-machine` declares `furniture`, which the editor's list never named, so its brush sorted silently to the end of the palette. **REOPENED 2026-08-05:** the current `startEditor` is roughly 2,749 lines and now owns document transforms, persistence, history, rendering, controls and DOM construction. Extract the document-state owner before another UI split.
 - [x] **Q044** `src/tile-renderer.js:12` [test-gap] **(carried)** Four modules still read `const pc = window.pc` at module scope, the pattern already fixed in actors.js/models.js/shading.js<br>      ↳ DONE — all ten deferred; 67 of 68 modules now import under node, gated by a test
 - [x] **Q045** `src/actors.js:68` [bug] A character whose .glb fails to load teleports to the world origin, because the magenta fallback holder has no child and `GridActor` drives `visual === entity`<br>      ↳ DONE — and the fix belongs in `models.js`, not actors.js where the finding is filed: `placeModel`'s SUCCESS path establishes "the holder is the body, `children[0]` is the visual", and `placeFallback` was the one branch that broke the contract. Made the box a child. The symptom is worse than "renders at the origin": the logical tile follows the body, so its per-tile effects fire at (0,0), and a walk issued to it never arrives because `moving` never clears — in a fight, a turn waiting on that arrival hangs.
 
@@ -573,8 +597,8 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q160** `src/combat.js:631` [bug] `guardStandingAt` has no side test, so an enemy holding Hold the Line shields a party member and vice versa<br>      ↳ **DONE.** Confirmed: `guardStandingAt` asked only "is somebody holding a guard stance on this tile", so an enemy holding the line was cover for the party member they were holding it against, and the party's own guard did the coworkers the same favour. It takes the DEFENDER now and reads sides live (`aiAllies`), the same rule the pincer test uses - so a charmed coworker shields the player this turn. `tactics` 8/8.
 - [x] **Q161** `src/combat.js:341` [bug] billMove rounds the free-AP deduction, so a 0.05-cost move never depletes the freeMoveAp allowance<br>      ↳ **DONE.** Confirmed as a rounding ratchet: the allowance's running total went through `roundAp` (tenths), so a step costing 0.05 took 0.05 off 1.0 and rounded 0.95 straight back to 1.0 - unlimited free movement in 0.05 doses. The allowance keeps its exact remainder now and only the AP tag rounds it (`fmtAp`); float dust below 1e-9 snaps to zero. Real AP still rounds, which is the currency the player reads and errs toward charging.
 - [x] **Q162** `src/creation.js:171` [bug] createCharacter banks a point per spend but spendAttrPoint silently refuses unknown attribute names, leaving free points on the sheet<br>      ↳ **DONE, with a red-first test.** Confirmed: the points are banked before the spends run, and `spendAttrPoint` refuses an attribute name it does not know - leaving the point banked. So a malformed draft did not hand out free attributes (which the banking-first order was written to prevent) but did hand out free POINTS, spendable on anything at the next level-up. A refused spend takes its point back now.
-- [x] **Q163** `src/editor.js:595` [bug] The editor's localStorage writes are unguarded, so in a storage-blocked browser "Exit editor" cannot exit<br>      ↳ **DONE.** Confirmed - these were the last unguarded `localStorage` touches in the codebase. The worst is Exit: the `removeItem` throw ate the two lines that actually LEAVE, so in a storage-blocked browser the one button whose job is to get you out of the editor could not, with no error and nothing to try next. Reset and Exit swallow it; Playtest is the one case worth reporting, because without the stash there is nothing to boot - it says so and stays put rather than reloading into the shipped level as though it had worked. `editor` 2/2.
-- [x] **Q164** `src/editor.js:400` [bug] Any editor resize button silently deletes every row/column past MAX_SIZE on a level larger than 40<br>      ↳ **DONE.** Confirmed: `resize` clamped BOTH axes to `MAX_SIZE` unconditionally, and the editor happily loads a level bigger than that - so on a 60x60, pressing any resize button, including one for the other axis, silently deleted every row and column past 40 before it grew anything. The clamp binds only in the direction asked for: growth still stops at MAX_SIZE, shrinking still stops at MIN_SIZE, and an axis with no delta is not touched at all. `editor` 2/2.
+- [ ] **Q163** `src/editor.js:595` [bug] The editor's localStorage writes are unguarded, so in a storage-blocked browser "Exit editor" cannot exit<br>      ↳ **REGRESSED 2026-08-05.** The overhaul again calls storage directly from Playtest, Reset and Exit. Restore the guarded stash/remove behavior and its tests.
+- [ ] **Q164** `src/editor.js:400` [bug] Any editor resize button silently deletes every row/column past MAX_SIZE on a level larger than 40<br>      ↳ **REGRESSED 2026-08-05.** Both axes are again clamped unconditionally in the current resize path. Restore direction-aware bounds and cover oversized imported maps.
 - [x] **Q165** `src/main.js:1473` [bug] `examineTile` calls any tile with a body standing on it "a cubicle wall"<br>      ↳ **DONE.** Confirmed, and the cause is one word: `examineTile` gated on `isWalkable`, which also refuses a tile somebody is STANDING on. So examining the floor under a coworker fell through the entire solid ladder and came out at the last-resort "A cubicle wall. It has seen things." - on plain carpet. It asks `grid.terrainOpen` now. What is underfoot does not change because somebody is on it.
 - [x] **Q166** `src/shading.js:294` [bug] `makeSpriteMaterial` has no failed-texture fallback, so a missing foliage PNG renders as a solid tinted rectangle<br>      ↳ **DONE.** Confirmed: the card's alpha comes ENTIRELY from the opacity map, so a texture that fails to load leaves the material at a uniform opacity of 1 and the plane renders as a solid tinted rectangle - a missing bush PNG becoming a flat green slab across the office, which reads as a broken level rather than a missing file. The error handler makes it invisible now; the console warning is still how you find out.
 - [x] **Q167** `src/statuses.js:163` [bug] A status id that leaves the registry is immortal on an existing save: never ticked, never expired, invisible to both sweep options<br>      ↳ **DONE, with a red-first test.** Confirmed and worse than "never ticked": the tick skipped an unknown id, and BOTH sweep options passed over it too - `harmfulOnly` reads `def.harmful`, the combat-end sweep reads `def.clock`, and an absent def fails both, so each spared what it could not classify. The one id no sweep could classify was the one id no sweep would take, and `hasStatus` went on answering yes forever. Dropped on sight by the tick and by any sweep.
@@ -589,7 +613,7 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
 - [ ] **Q176** `src/statuses.js:184` [dead-code] `clearStatuses`'s `clock` and `harmfulOnly` options have no production caller, and the doc above them describes a combat-end sweep that no longer exists
 - [x] **Q177** `src/ui/creation.js:277` [dead-code] `ui/creation.js` imports `draftName` and never calls it — the summary re-derives the display name by hand<br>      ↳ **DONE, and it was not merely a stray import — the two answers DISAGREE.** `draftName` runs `cleanName`, which collapses internal whitespace and falls back to the job when the field is blank; the hand-rolled `(draft.name || '').trim()` does neither. So an empty name box previewed ", they/them, Intern." while the character actually created was named Intern — a preview lying about its own outcome, on the screen whose only job is to show you what you are about to get. The summary calls `draftName(draft)` now, which is what the import was always for.
 - [x] **Q178** `src/ui/hud.js:486` [dead-code] `createTacticalButton().setVisible` and `createLevelUpPip().setVisible` have no callers anywhere<br>      ↳ DONE — both verified dead (the two live `setVisible` calls in main.js are the hotbar's and the party bar's) and both deleted. Checked the trap first, because "dead code" and "a call somebody forgot to make" look identical: the pip is genuinely hidden today, by main.js folding `!modalOpen()` into the COUNT it passes to `refresh()`, which drives the memo instead of going behind it — so the deleted arm was the second of two ways to hide one pip, and the worse one.
-- [ ] **Q179** `.github/workflows/ci.yml:83` [doc-drift] CI's `[quick]` lever is inert on every branch, the exact defect the same file documents as forced-fixed for `[e2e]`
+- [x] **Q179** `.github/workflows/ci.yml:83` [doc-drift] CI's `[quick]` lever is inert on every branch, the exact defect the same file documents as forced-fixed for `[e2e]`<br>      ↳ DONE — PR-title `[quick]` now gates all four browser cache/install/run steps; main still accepts the commit-message form.
 - [ ] **Q180** `/home/user/escape-work/AI_PLAN.md:629` [doc-drift] AI_PLAN's architecture section places `entrenchPlan`, `shootPlan` and `supportPlan` in `combat-plans.js`; none of the three exists there
 - [ ] **Q181** `/home/user/escape-work/AI_PLAN.md:136` [doc-drift] AI_PLAN's file:line citations are stale throughout, including the "Do not touch" list and the Brief that milestone 7's executor is told to follow
 - [ ] **Q182** `/home/user/escape-work/AI_PLAN.md:202` [doc-drift] Three `[ratified]` tags in AI_PLAN cite nothing, and the twelve-arm ladder order — the doc's declared centerpiece — carries no tag at all
@@ -632,7 +656,7 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q219** `src/grid.js:159` [other] doorKeyBetween and wallEdgeOpen silently answer a diagonal pair with an x-axis edge instead of refusing it<br>      ↳ **DONE, with a test.** `doorKeyBetween(0,0,1,1)` returned `'v:1,0'` - a real edge, between two cells that share none, because the first `nx > x` test won and the diagonal fell through it. Both lookups refuse a diagonal now (`null`, and `false` for the open test), which is what "these cells share no edge" means.
 - [ ] **Q220** `src/looting.js:330` [soc] The Alt-overlay loot icon table is a hardcoded content list in systems code, and it has already drifted — break-room containers get the generic box
 - [ ] **Q221** `src/scene.js:172` [soc] `updateWallFade` still falls back to hardcoded `tileMats.wall` when an opaque solid lacks its own material. Door solids now preserve `solidMat`, narrowing the remaining risk to other custom wall materials.
-- [ ] **Q222** `playwright.config.js:45` [test-gap] Playwright reuses an existing server on port 8173, so a locally-running stale build is tested and never rebuilt
+- [x] **Q222** `playwright.config.js:45` [test-gap] Playwright reuses an existing server on port 8173, so a locally-running stale build is tested and never rebuilt<br>      ↳ DONE — the runner always builds and starts its own direct server; an occupied port fails instead of reusing unknown content.
 - [x] **Q223** `tests/unit/combat-ai.test.js:1` [test-gap] src/dialogue.js exports nodeOptions as a deliberately pure rule and has no unit test, because a top-level `import * as ui` makes the module unimportable under node<br>      ↳ DONE — dialogue.test.js, 6 tests
 - [x] **Q224** `tests/unit/floors.test.js:97` [test-gap] floors.test.js's facade test exercises 3 of 21 forwarded members, so the missing methods are unpinned<br>      ↳ DONE — the contract test derives the set from a real grid
 - [ ] **Q225** `tests/unit/hit.test.js:48` [test-gap] hit.test.js - the seeded roll->damage->status test - contains an assertion that cannot fail, a self-comparison, and a hand-copy of combat.js's private damage formula

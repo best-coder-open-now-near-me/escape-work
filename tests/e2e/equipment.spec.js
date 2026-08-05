@@ -25,11 +25,11 @@ test('equip a weapon from the pockets, then stow it back', async ({ page }) => {
   expect(await page.evaluate(() => window.__game.stats.inventory.includes('red-stapler'))).toBe(true);
 });
 
-test('unequip always succeeds - there is no carry limit to refuse for', async ({ page }) => {
+test('unequip obeys capacity, then succeeds after the bag drains', async ({ page }) => {
   test.setTimeout(300_000);
   await bootAndPick(page, 'office-drone');
-  // A weapon in hand and a deliberately enormous bag. This used to be refused
-  // at ten items; pockets are unlimited now, so gear always has somewhere to go.
+  // The Office Drone has 30 slots. Existing over-cap contents stay intact, but
+  // stowing another item is an admission and must be refused.
   await page.evaluate(() => {
     const s = window.__god.player;
     s.equipped.weapon = 'red-stapler';
@@ -38,8 +38,18 @@ test('unequip always succeeds - there is no carry limit to refuse for', async ({
   await page.keyboard.press('i');
   await expect(page.locator('#inventory-panel')).toBeVisible();
   await page.click('#equip-unequip-weapon');
+  await expect(page.locator('#subtitle')).toContainText('Pockets are full');
+  await expect.poll(() => page.evaluate(() => window.__game.stats.equipped.weapon)).toBe('red-stapler');
+  expect(await page.evaluate(() => window.__game.stats.inventory.length)).toBe(40);
+
+  // Once there is room, the same verb succeeds and fills the last free slot.
+  await page.evaluate(() => { window.__god.player.inventory.length = 29; });
+  await page.keyboard.press('i');
+  await page.keyboard.press('i');
+  await expect(page.locator('#inventory-panel')).toBeVisible();
+  await page.click('#equip-unequip-weapon');
   await expect.poll(() => page.evaluate(() => window.__game.stats.equipped.weapon)).toBe(null);
-  expect(await page.evaluate(() => window.__game.stats.inventory.length)).toBe(41);
+  expect(await page.evaluate(() => window.__game.stats.inventory.length)).toBe(30);
 });
 
 test('a basic weapon attack is always on the bar; the weapon defines it', async ({ page }) => {
