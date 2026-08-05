@@ -1632,6 +1632,7 @@ export function startEditor(app, levelData, stashKey) {
   const stairTypes = [];
   const brushButtons = [];
   const buttonOf = new Map(); // brush id -> its button, for hotkeys and recents
+  const paletteSections = new Map(); // category -> { root, toggle, body, expanded }
   const recent = [];
   let selectCellBtn = null;
   let selectEdgeBtn = null;
@@ -1661,6 +1662,8 @@ export function startEditor(app, levelData, stashKey) {
     selectEdges = false;
     renderToolMode();
     setStatus();
+    const section = paletteSections.get(button.closest('[data-cat]')?.dataset.cat);
+    if (section) setPaletteSectionExpanded(section, true);
     if (collapsed) applyCollapse(); // the collapsed strip names the armed brush
     // Colour was the ONLY channel signalling the armed brush, on one of ninety
     // buttons, often scrolled out of view. It still is a channel; it is no
@@ -1699,9 +1702,10 @@ export function startEditor(app, levelData, stashKey) {
       const hit = !q || b.textContent.toLowerCase().includes(q) || b.id.slice(6).includes(q);
       b.style.display = hit ? '' : 'none';
     }
-    for (const row of palette.querySelectorAll('[data-cat]')) {
-      const any = [...row.querySelectorAll('button')].some((b) => b.style.display !== 'none');
-      row.style.display = any ? '' : 'none';
+    for (const section of paletteSections.values()) {
+      const any = [...section.body.querySelectorAll('button')].some((b) => b.style.display !== 'none');
+      section.root.style.display = any ? '' : 'none';
+      setPaletteSectionVisible(section, q ? any : section.expanded);
     }
   };
 
@@ -1771,23 +1775,44 @@ export function startEditor(app, levelData, stashKey) {
   }
   const cats = [...byCategory.keys()]
     .sort((a, b) => (CATEGORY_ORDER.indexOf(a) + 1 || 99) - (CATEGORY_ORDER.indexOf(b) + 1 || 99));
+  function setPaletteSectionVisible(section, visible) {
+    section.toggle.setAttribute('aria-expanded', visible ? 'true' : 'false');
+    section.expander.textContent = visible ? '-' : '+';
+    section.body.hidden = !visible;
+  }
+  function setPaletteSectionExpanded(section, expanded) {
+    section.expanded = expanded;
+    setPaletteSectionVisible(section, expanded || Boolean(filterBox.value.trim()));
+  }
+  function createPaletteSection(cat, expanded = false) {
+    const root = document.createElement('section');
+    root.className = 'editor-palette-section';
+    root.dataset.cat = cat;
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.id = 'ed-category-' + cat;
+    toggle.className = 'editor-palette-section-toggle';
+    toggle.title = `Show or hide ${cat} brushes`;
+    const label = document.createElement('span');
+    label.textContent = cat;
+    const expander = document.createElement('span');
+    expander.className = 'editor-palette-section-expander';
+    expander.setAttribute('aria-hidden', 'true');
+    const body = document.createElement('div');
+    body.className = 'editor-palette-section-content';
+    toggle.append(label, expander);
+    root.append(toggle, body);
+    const section = { root, toggle, body, expander, expanded };
+    toggle.onclick = () => setPaletteSectionExpanded(section, !section.expanded);
+    setPaletteSectionVisible(section, expanded);
+    paletteSections.set(cat, section);
+    return section;
+  }
   for (const cat of cats) {
-    const row = document.createElement('div');
-    row.dataset.cat = cat;
-    Object.assign(row.style, {
-      display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center',
-      width: '100%', justifyContent: 'center',
-    });
-    const tag = document.createElement('span');
-    tag.textContent = cat;
-    Object.assign(tag.style, {
-      opacity: '.5', letterSpacing: '1px', textTransform: 'uppercase',
-      fontSize: '10px', minWidth: '68px', textAlign: 'right',
-    });
-    row.appendChild(tag);
+    const section = createPaletteSection(cat, cat === 'basics');
     for (const id of byCategory.get(cat)) {
       const def = TILE_TYPES[id];
-      const b = btn('brush-' + id, def.label || id.replace(/-/g, ' '), row);
+      const b = btn('brush-' + id, def.label || id.replace(/-/g, ' '), section.body);
       b.title = tileTooltip(id, def);
       b.onclick = () => selectBrush(id, b);
       brushButtons.push(b); buttonOf.set(id, b);
@@ -1796,7 +1821,7 @@ export function startEditor(app, levelData, stashKey) {
         b.setAttribute('aria-pressed', 'true');
       }
     }
-    palette.appendChild(row);
+    palette.appendChild(section.root);
   }
   {
     const b = btn('brush-player', 'player start');
@@ -1827,23 +1852,9 @@ export function startEditor(app, levelData, stashKey) {
     stampBtn.click();
   }
 
-  const actorRow = document.createElement('div');
-  actorRow.dataset.cat = 'actors';
-  Object.assign(actorRow.style, {
-    display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center',
-    width: '100%', justifyContent: 'center',
-  });
-  {
-    const tag = document.createElement('span');
-    tag.textContent = 'actors';
-    Object.assign(tag.style, {
-      opacity: '.5', letterSpacing: '1px', textTransform: 'uppercase',
-      fontSize: '10px', minWidth: '68px', textAlign: 'right',
-    });
-    actorRow.appendChild(tag);
-  }
+  const actorSection = createPaletteSection('actors');
   for (const [id, def] of Object.entries(ENEMY_TYPES)) {
-    const b = btn('brush-' + id, def.name, actorRow);
+    const b = btn('brush-' + id, def.name, actorSection.body);
     b.title = `${def.name} — native tier ${def.level || 1}.\nFloors do NOT scale enemies: set the tier field to place a tougher one.`;
     b.onclick = () => selectBrush('enemy:' + id, b);
     brushButtons.push(b); buttonOf.set('enemy:' + id, b);
@@ -1852,7 +1863,7 @@ export function startEditor(app, levelData, stashKey) {
   // placed, so a second recruitable coworker meant hand-editing JSON.
   for (const reg of [COMPANIONS, NPCS]) {
     for (const [id, def] of Object.entries(reg)) {
-      const b = btn('brush-' + id, def.name || id, actorRow);
+      const b = btn('brush-' + id, def.name || id, actorSection.body);
       b.title = `${def.name || id} — ${reg === COMPANIONS ? 'a recruitable coworker' : 'a talkable coworker'}. Never fights on the office's side.`;
       b.onclick = () => selectBrush('actor:' + id, b);
       brushButtons.push(b); buttonOf.set('actor:' + id, b);
@@ -1871,12 +1882,12 @@ export function startEditor(app, levelData, stashKey) {
   Object.assign(tierField.style, BUTTON_CHROME, {
     padding: '7px 8px', borderRadius: '7px', width: '58px', cursor: 'text',
   });
-  actorRow.appendChild(tierField);
+  actorSection.body.appendChild(tierField);
   const brushTier = () => {
     const n = parseInt(tierField.value, 10);
     return Number.isInteger(n) && n > 1 ? n : null;
   };
-  palette.appendChild(actorRow);
+  palette.appendChild(actorSection.root);
   // The selection tool starts armed. Apply the inactive state after every
   // registry brush exists so visual, keyboard, and accessibility state agree.
   renderToolMode();

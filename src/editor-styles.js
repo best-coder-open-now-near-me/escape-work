@@ -43,9 +43,17 @@ export function installEditorStyles() {
     #editor-tools-heading small, #editor-inspector-heading small { opacity: .6; font-weight: 400; }
     #editor-tool-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; padding: 8px; }
     #editor-palette { display: flex; flex: 1; flex-direction: column; flex-wrap: nowrap; align-items: stretch; justify-content: flex-start; gap: 6px; min-height: 0; overflow: auto; padding: 0 8px 10px; }
-    #editor-palette [data-cat] { display: grid !important; grid-template-columns: 74px repeat(2, minmax(0, 1fr)); gap: 5px !important; align-items: center; width: 100% !important; }
-    #editor-palette [data-cat] > span { grid-column: 1; min-width: 0 !important; text-align: left !important; }
-    #editor-palette [data-cat] > button { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .editor-palette-section { width: 100%; border-bottom: 1px solid #34344a; padding: 1px 0 6px; }
+    .editor-palette-section-toggle {
+      display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 28px;
+      padding: 6px 2px 4px; border: 0; border-radius: 0; background: transparent; color: #aaa9b8;
+      cursor: pointer; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-align: left; text-transform: uppercase;
+    }
+    .editor-palette-section-toggle:hover { color: #f0f0f5; }
+    .editor-palette-section-expander { color: #8adf76; font-size: 15px; font-weight: 400; line-height: 1; }
+    .editor-palette-section-content { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+    .editor-palette-section-content > button { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .editor-palette-section-content > input { min-width: 0 !important; width: 100% !important; box-sizing: border-box; }
     #ed-recent { width: auto !important; justify-content: flex-start !important; padding: 0 8px 4px; }
     #ed-recent > span { min-width: auto !important; text-align: left !important; }
     #editor-inspector {

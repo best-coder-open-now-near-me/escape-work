@@ -157,3 +157,23 @@ test('storey creation and undo restore the entire level document', async ({ page
     { timeout: 30_000 },
   ).toEqual({ layers: 0, hasMap: true });
 });
+
+test('palette categories collapse, expand, and reveal filter matches', async ({ page }) => {
+  await page.goto('/#editor');
+  await page.waitForFunction(() => window.__editor, null, { timeout: 90_000 });
+  await waitForSmoothFrames(page);
+
+  const basics = page.locator('#ed-category-basics');
+  const work = page.locator('#ed-category-work');
+  await expect(basics).toHaveAttribute('aria-expanded', 'true');
+  await expect(work).toHaveAttribute('aria-expanded', 'false');
+
+  await page.locator('#ed-filter').fill('desk corner');
+  await expect(work).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#brush-desk-corner')).toBeVisible();
+  await page.locator('#ed-filter').fill('');
+  await expect(work).toHaveAttribute('aria-expanded', 'false');
+
+  await work.click();
+  await expect(work).toHaveAttribute('aria-expanded', 'true');
+});
