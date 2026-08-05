@@ -11,7 +11,7 @@ export function installEditorStyles() {
     #editor-shell {
       position: fixed; inset: 0; z-index: 30; pointer-events: none;
       display: grid; grid-template-columns: 270px minmax(0, 1fr) 310px;
-      grid-template-rows: 52px minmax(0, 1fr) auto;
+      grid-template-rows: 52px minmax(0, 1fr);
       gap: 10px; padding: 10px; box-sizing: border-box;
       color: #f0f0f5; font: 12px system-ui, sans-serif;
     }
@@ -30,9 +30,9 @@ export function installEditorStyles() {
     #editor-identity strong, #editor-identity span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #editor-identity span { opacity: .62; font-size: 11px; margin-top: 1px; }
     #editor-commands { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
-    #editor-tools, #editor-inspector, #editor-analysis { pointer-events: auto; }
+    #editor-tools, #editor-inspector { pointer-events: auto; }
     #editor-tools {
-      grid-column: 1; grid-row: 2 / 4; display: flex; flex-direction: column;
+      grid-column: 1; grid-row: 2; display: flex; flex-direction: column;
       min-height: 0; overflow: hidden; border-radius: 8px;
     }
     #editor-tools-heading, #editor-inspector-heading, #editor-analysis-heading {
@@ -60,7 +60,7 @@ export function installEditorStyles() {
       grid-column: 3; grid-row: 2; display: flex; flex-direction: column;
       min-height: 0; overflow: hidden; border-radius: 8px;
     }
-    #editor-inspector-body { min-height: 0; overflow: auto; padding: 9px; }
+    #editor-inspector-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 9px; }
     #editor-selection-empty { color: #a9a9ba; line-height: 1.45; padding: 5px 1px 12px; }
     .editor-inspector-card { border-bottom: 1px solid #3a3a52; padding: 0 0 11px; margin: 0 0 10px; }
     .editor-inspector-card h3 { margin: 0 0 8px; font-size: 13px; }
@@ -72,17 +72,25 @@ export function installEditorStyles() {
     #editor-level-row > * { max-width: 100%; }
     #editor-storeys { flex-wrap: wrap; }
     #editor-analysis {
-      grid-column: 2 / 4; grid-row: 3; max-height: 235px; min-height: 68px;
-      overflow: hidden; border-radius: 8px;
+      flex: 0 0 auto; max-height: 190px; overflow: hidden;
+      border-top: 1px solid #3a3a52; background: rgba(27, 27, 42, .78);
     }
-    #editor-analysis-heading { padding-bottom: 7px; }
+    #editor-analysis-heading { padding: 8px 10px 6px; border-bottom: 0; font-size: 11px; }
     #editor-view-row { display: flex !important; gap: 5px !important; flex-wrap: wrap; padding: 7px 10px 0; }
-    #editor-problems { max-height: 120px; overflow: auto; padding: 7px 10px 10px; }
+    #editor-problems { max-height: 88px; overflow: auto; padding: 7px 10px 10px; }
     .editor-problem { display: flex; align-items: flex-start; width: 100%; gap: 7px; margin: 3px 0; padding: 6px 7px; text-align: left; border-radius: 5px; }
     .editor-problem[data-level="error"] { border-color: #7a3a4a; color: #ffd9e0; }
     .editor-problem[data-level="warn"] { border-color: #76643a; color: #ffe7a3; }
     .editor-problem-dot { flex: 0 0 auto; font-weight: 700; }
     #editor-problems-empty { color: #8adf76; padding: 3px 0; }
+    #editor-resize { display: flex; flex-direction: column; gap: 7px; padding: 9px 0 2px; border-top: 1px solid #3a3a52; }
+    .editor-inspector-section-heading { display: flex; align-items: baseline; justify-content: space-between; font-size: 11px; font-weight: 700; }
+    #ed-size { color: #8adf76; font-variant-numeric: tabular-nums; }
+    .editor-resize-axis, .editor-resize-anchor { display: flex; align-items: center; gap: 7px; }
+    .editor-resize-axis > span, .editor-resize-anchor > span { flex: 1; color: #a9a9ba; }
+    .editor-resize-axis > button { width: 42px; }
+    .editor-resize-anchor-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; width: 144px; }
+    .editor-resize-anchor-button[aria-pressed="true"] { border-color: #8adf76 !important; color: #d9f7cf; }
     #ed-status { position: static !important; max-width: none !important; padding: 0 !important; border: 0 !important; background: transparent !important; box-shadow: none !important; }
     #ed-status b { color: #8adf76; }
     #ed-filter { width: 100%; min-width: 0 !important; box-sizing: border-box; margin: 0 8px 2px; }
@@ -93,7 +101,7 @@ export function installEditorStyles() {
     #editor-shell .editor-mode[aria-pressed="true"] { border-color: #8adf76 !important; color: #d9f7cf; }
     #editor-shell .editor-panel-toggle { display: none; }
     @media (max-width: 980px) {
-      #editor-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: 90px minmax(0, 1fr) auto; padding: 8px; }
+      #editor-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: 90px minmax(0, 1fr); padding: 8px; }
       #editor-topbar {
         grid-column: 1; display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
         grid-template-rows: 32px 34px; align-items: center; gap: 5px;
@@ -109,7 +117,7 @@ export function installEditorStyles() {
       #editor-tools { left: 8px; transform: translateX(calc(-100% - 16px)); }
       #editor-inspector { right: 8px; transform: translateX(calc(100% + 16px)); }
       #editor-shell[data-tools-open="true"] #editor-tools, #editor-shell[data-inspector-open="true"] #editor-inspector { transform: translateX(0); }
-      #editor-analysis { grid-column: 1; max-height: 180px; }
+      #editor-analysis { max-height: 165px; }
       #editor-shell .editor-panel-toggle { display: inline-flex; }
     }
   `;

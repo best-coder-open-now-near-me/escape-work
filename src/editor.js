@@ -1572,7 +1572,6 @@ export function startEditor(app, levelData, stashKey) {
   selectionInfo.id = 'editor-selection';
   const analysis = document.createElement('section');
   analysis.id = 'editor-analysis';
-  analysis.className = 'editor-surface';
   const analysisHeading = document.createElement('div');
   analysisHeading.id = 'editor-analysis-heading';
   analysisHeading.textContent = 'Analysis';
@@ -2097,24 +2096,79 @@ export function startEditor(app, levelData, stashKey) {
     nextField.value = levelNext || '';
   }
 
-  divider();
-
-  // size controls
+  // --- canvas size ------------------------------------------------------------
+  // The old eight controls required mentally translating whether each one grew
+  // at the near or far edge. Pinning an edge makes that choice visible first;
+  // the steppers then only answer the simple question: one row/column more or
+  // less.
+  const resizePanel = document.createElement('section');
+  resizePanel.id = 'editor-resize';
+  const resizeHeading = document.createElement('div');
+  resizeHeading.className = 'editor-inspector-section-heading';
+  resizeHeading.textContent = 'Canvas';
   const sizeLabel = document.createElement('span');
   sizeLabel.id = 'ed-size';
-  Object.assign(sizeLabel.style, { padding: '0 4px', opacity: '.8' });
+  resizeHeading.appendChild(sizeLabel);
   function updateSizeLabel() { sizeLabel.textContent = `${width}×${height}`; }
-  btn('ed-shrink-w', '−col', levelRow).onclick = () => resize(-1, 0);
-  btn('ed-grow-w', '+col', levelRow).onclick = () => resize(1, 0);
-  btn('ed-shrink-h', '−row', levelRow).onclick = () => resize(0, -1);
-  btn('ed-grow-h', '+row', levelRow).onclick = () => resize(0, 1);
-  btn('ed-grow-w-left', '+col ←', levelRow).onclick = () => shift(1, 0);
-  btn('ed-shrink-w-left', '−col ←', levelRow).onclick = () => shift(-1, 0);
-  btn('ed-grow-h-top', '+row ↑', levelRow).onclick = () => shift(0, 1);
-  btn('ed-shrink-h-top', '−row ↑', levelRow).onclick = () => shift(0, -1);
-  levelRow.appendChild(sizeLabel);
-
-  divider();
+  const resizeAnchor = { x: 'left', z: 'top' };
+  const resizeAnchors = new Map();
+  const resizeAtPinnedEdge = (axis, amount) => {
+    if (axis === 'x') {
+      if (resizeAnchor.x === 'left') resize(amount, 0); else shift(amount, 0);
+    } else if (resizeAnchor.z === 'top') resize(0, amount); else shift(0, amount);
+  };
+  const resizeAxis = (axis, label, minusId, plusId) => {
+    const row = document.createElement('div');
+    row.className = 'editor-resize-axis';
+    const name = document.createElement('span');
+    name.textContent = label;
+    row.appendChild(name);
+    const minus = btn(minusId, '-', row);
+    minus.title = `Remove one ${label.toLowerCase()}`;
+    minus.setAttribute('aria-label', `Remove one ${label.toLowerCase()}`);
+    minus.onclick = () => resizeAtPinnedEdge(axis, -1);
+    const plus = btn(plusId, '+', row);
+    plus.title = `Add one ${label.toLowerCase()}`;
+    plus.setAttribute('aria-label', `Add one ${label.toLowerCase()}`);
+    plus.onclick = () => resizeAtPinnedEdge(axis, 1);
+    return row;
+  };
+  const anchorAxis = (axis, label, first, second) => {
+    const row = document.createElement('div');
+    row.className = 'editor-resize-anchor';
+    const name = document.createElement('span');
+    name.textContent = label;
+    const controls = document.createElement('div');
+    controls.className = 'editor-resize-anchor-controls';
+    const add = (value, text) => {
+      const button = btn(`ed-resize-pin-${value}`, text, controls);
+      button.classList.add('editor-resize-anchor-button');
+      button.setAttribute('aria-pressed', 'false');
+      button.title = `Keep the ${text.toLowerCase()} edge fixed while resizing`;
+      button.onclick = () => {
+        resizeAnchor[axis] = value;
+        for (const item of resizeAnchors.values()) {
+          item.button.setAttribute('aria-pressed', resizeAnchor[item.axis] === item.value ? 'true' : 'false');
+        }
+      };
+      resizeAnchors.set(value, { axis, value, button });
+    };
+    add(first, `${first[0].toUpperCase()}${first.slice(1)}`);
+    add(second, `${second[0].toUpperCase()}${second.slice(1)}`);
+    row.append(name, controls);
+    return row;
+  };
+  resizePanel.append(
+    resizeHeading,
+    resizeAxis('x', 'Columns', 'ed-resize-column-remove', 'ed-resize-column-add'),
+    resizeAxis('z', 'Rows', 'ed-resize-row-remove', 'ed-resize-row-add'),
+    anchorAxis('x', 'Pin horizontally', 'left', 'right'),
+    anchorAxis('z', 'Pin vertically', 'top', 'bottom'),
+  );
+  for (const item of resizeAnchors.values()) {
+    item.button.setAttribute('aria-pressed', resizeAnchor[item.axis] === item.value ? 'true' : 'false');
+  }
+  levelRow.appendChild(resizePanel);
 
   // load a shipped level as a base
   const select = document.createElement('select');
@@ -2421,9 +2475,9 @@ export function startEditor(app, levelData, stashKey) {
   topbar.append(identity, commands, collapseBtn, inspectorToggle);
   toolPanel.append(toolHeading, toolMode, filterBox, palette);
   inspectorBody.append(selectionInfo, levelRow);
-  inspector.append(inspectorHeading, inspectorBody);
   analysis.append(analysisHeading, viewRow, problems);
-  bar.append(topbar, toolPanel, inspector, analysis);
+  inspector.append(inspectorHeading, inspectorBody, analysis);
+  bar.append(topbar, toolPanel, inspector);
   document.body.appendChild(bar);
   applyCollapse();
 
