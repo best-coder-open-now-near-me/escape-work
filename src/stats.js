@@ -805,22 +805,18 @@ export const pendingPoints = (sheet) => (sheet?.attrPoints || 0) + (sheet?.class
 export const spendablePoints = (sheet) => (sheet?.attrPoints || 0)
   + (classTrack(sheet || {}).some((n) => nodeAvailable(sheet, n)) ? (sheet?.classPoints || 0) : 0);
 
-// How much this character can carry. A STAT drives it [stated] (designer,
-// 2026-08-03: "we'll make inventory limit based on a stat, so it needs a
-// variable cap"), which is why it is a function of the sheet and not the module
-// constant it used to be: the cap moves with the character, and the leader the
-// pockets panel is showing changes under it.
+// How much this character can carry. The cap follows effective Grit: five
+// guaranteed slots plus one per point. A five-Grit sheet retains the former
+// ten-item baseline, while gear that grants Grit carries its capacity with it.
 //
-// Infinity until the stat is chosen, so nothing changes today - every caller
-// asks the same question it always did and gets the same answer. WHICH stat,
-// and what the numbers are, is the designer's call and not guessed here.
-//
-// One thing the callers do NOT yet handle, and it needs an answer before a
-// finite cap ships: nothing reconciles a bag that is ALREADY over the cap. The
-// guards below are all on the way IN (picking up, unequipping), because with an
-// infinite cap there was no other direction. A cap that can fall - a swapped
-// leader, a lost point, a bag unequipped - can strand a character over it.
-export const inventoryCapOf = (_sheet) => Infinity;
+// This is deliberately an admission gate, never a reconciliation pass. If a
+// cap falls below what is already in the bag, nothing drops; the existing guard
+// sites simply refuse further pickups and stowing until the bag drains.
+export function inventoryCapOf(sheet) {
+  if (!sheet) return 0;
+  const grit = (sheet.attr?.grit || 0) + (equippedStats(sheet).attrBonus.grit || 0);
+  return Math.max(0, 5 + grit);
+}
 
 // Spend one banked attribute point raising `attr` by 1, then re-derive. Returns
 // false (and changes nothing) if the pool is empty or the attribute unknown.

@@ -236,26 +236,16 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
   lootEntries, not by a failure; the arm may well be right.
 <br>      ↳ **DONE — `paperLabel` at module scope, four tests.** The arm the entry called "the interesting one" is pinned: the chip floats at the patch CENTRE, the click walks to the nearest patch TILE, and those are deliberately different points. The test that matters is a horseshoe of paper whose centroid lands in the mouth on bare floor - a click that walked to the chip would harvest nothing - and it asserts its own fixture still has a centre OFF the patch, so it cannot quietly stop testing anything. Red-first: routing the walk to the centre fails 3 of the 4. The finding guessed "the arm may well be right", and it was; what was missing was anything that would notice if it stopped being.
 - [ ] **Q904** `src/stats.js` [design] **(new 2026-08-03, from the Q136 answer)**
-  The carry cap is a stat **[stated]** (designer, 2026-08-03) and the seam now
-  carries a variable one, but two things are open and the second is not a
-  number, it is a rule.
+  **[ratified]** (designer, 2026-08-05: "both recommendations are fine").
+  Capacity follows effective Grit, and a bag that later exceeds its cap remains
+  intact while pickup and stow gates refuse additions until it drains. Equipped
+  Grit counts too, so a capacity-granting item carries its own room. This is an
+  admission rule, never an automatic drop rule.
 
-  **Which stat, and what the numbers are.** `inventoryCapOf` returns Infinity
-  and is the one place to change. Grit is the obvious reading of "how much can
-  you carry" against the four office attributes, but nothing has said so, so it
-  is not written in.
-
-  **Nothing reconciles a bag that is already OVER the cap.** Every guard today
-  is on the way IN - picking up, unequipping - because with an infinite cap
-  there was no other direction to guard. A cap that can FALL has several: a
-  leader switch to somebody with less of the stat, a lost point, a debuff,
-  unequipping whatever was raising it. The options are real design forks, not
-  implementation detail: refuse the thing that would lower the cap; allow the
-  bag over cap and block additions until it drains; or spill the excess to the
-  floor. The third is what the old overflow arm did, and the note that removed
-  the finite cap called exactly that "friction without a decision attached -
-  you never chose WHAT to leave behind, the tenth item just fell out". Worth
-  deciding before a finite cap ships rather than after.
+  **[proposed] Calibration awaiting a verdict:** 5 + Grit. It retains the
+  former ten-item baseline for the five-Grit Office Drone, and the current
+  classes span 8-13 slots. It is implemented so the full rule can be played,
+  but its number is not laundered into a ratified design decision.
 
 - [x] **Q905** `tests/e2e/cover.spec.js:21` [test-gap] **(new 2026-08-03, from the throwing.spec fix)**
   Two more copies of the unpinned `clickManager` - cover.spec.js:21 (four call
@@ -477,7 +467,7 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q133** `src/pathfinding.js:16` [bug] **(carried)** findPath has no explored-node cap and hangs on an unbounded or non-integer target<br>      ↳ DONE — MAX_EXPLORED cap; hang becomes a null. Unreachable via the shipped grid - kept because the cost is an integer compare and the failure it replaces is a frozen tab
 - [x] **Q134** `src/stats.js:823` [bug] **(carried)** `stats.applyDamage` has no non-finite guard, while its actor-side twin `EnemyActor.takeDamage` does<br>      ↳ DONE — the same non-finite guard EnemyActor.takeDamage carries
 - [x] **Q135** `src/statuses.js:113` [bug] **(carried)** `applyStatus` reads a missing `sev` as 0 while every other site reads it as 1, so a resisted re-apply weakens a pre-severity entry<br>      ↳ DONE — no-entry vs entry-without-sev distinguished; 3 tests
-- [x] **Q136** `src/looting.js:124` [dead-code] **(carried)** INV_CAP = Infinity leaves the overflow and "pockets full" branches in looting.js unreachable<br>      ↳ **CLOSED BY A DESIGN ANSWER, and not the one this entry asked for.** The finding called the arms dead code; the recommendation put to the designer was to delete them and commit to uncapped pockets. Both lose. **[stated]** (designer, 2026-08-03): "we'll make inventory limit based on a stat, so it needs a variable cap". So the arms are not dead code - they are the guard sites a finite cap will run through, and the thing actually wrong with them was that the cap was a module CONSTANT. It is now `stats.inventoryCapOf(sheet)`, asked per call: the limit rides the character, and the character the pockets panel is showing changes under it. `createInventoryPanel` took the cap once at construction and printed it in the header forever - that was the one place a variable cap could not have reached, and it takes `capOf` now and asks per refresh. `inventoryCapOf` answers Infinity until the stat is picked, so today's behaviour is unchanged. Which stat and what numbers are the designer's, and are not guessed here: Q904.
+- [x] **Q136** `src/looting.js:124` [dead-code] **(carried)** INV_CAP = Infinity leaves the overflow and "pockets full" branches in looting.js unreachable<br>      ↳ **CLOSED BY A DESIGN ANSWER, and not the one this entry asked for.** The finding called the arms dead code; the recommendation put to the designer was to delete them and commit to uncapped pockets. Both lose. **[stated]** (designer, 2026-08-03): "we'll make inventory limit based on a stat, so it needs a variable cap". So the arms are not dead code - they are the guard sites a finite cap will run through, and the thing actually wrong with them was that the cap was a module CONSTANT. It is now `stats.inventoryCapOf(sheet)`, asked per call: the limit rides the character, and the character the pockets panel is showing changes under it. `createInventoryPanel` took the cap once at construction and printed it in the header forever - that was the one place a variable cap could not have reached, and it takes `capOf` now and asks per refresh. **[ratified]** (designer, 2026-08-05): Grit is the stat, and an over-cap bag blocks new additions rather than dropping items; Q904 records the calibration.
 - [x] **Q137** `/home/user/escape-work/AI_PLAN.md:458` [doc-drift] **(carried)** AI_PLAN's state machine and footgun 8 both say the stall backstop burns real AP; the shipped backstop burns nothing<br>      ↳ **DONE** — both sites. The plan said the stall backstop burns real AP; the shipped `pass` beat bills nothing and simply ends the turn, which already strands whatever AP and allowance are left. Footgun 8 reworded to match, and its stale `combat-ai.js:163` pointer dropped.
 - [x] **Q138** `/home/user/escape-work/AI_PLAN.md:9` [doc-drift] **(carried)** AI_PLAN.md still opens with "No code yet" while its own As-landed section reports six shipped milestones<br>      ↳ **DONE** — "No code yet" replaced with what actually shipped: milestones 1-6 on 2026-08-01/02, milestone 7 open by design, pointing at the doc's own **As landed** section.
 - [x] **Q139** `/home/user/escape-work/ARCHITECTURE.md:110` [doc-drift] **(carried)** ARCHITECTURE.md's `combat-plans.js` entry lists "take cover" as one of its plans; the take-cover plan was deleted<br>      ↳ **DONE** — and the list was short as well as wrong: `take cover` is a tombstone in combat-plans.js, and `shove` is a shipped plan the map never named. Now `topple, shove, break, pull, displace`.

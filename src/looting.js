@@ -12,15 +12,12 @@ import { PAPER_CAP, equipItem, unequipItem, inventoryCapOf } from './stats.js';
 import { placeDroppedItem } from './tile-renderer.js';
 import * as ui from './ui.js';
 
-// The carry limit is a STAT [stated] (designer, 2026-08-03: "we'll make
-// inventory limit based on a stat, so it needs a variable cap"), so it is asked
-// of the sheet at every guard site rather than read from a constant here - and
-// the sheet in question is whoever is leading right now, which changes.
+// The carry limit is effective Grit [ratified] (designer, 2026-08-05), so it is
+// asked of the sheet at every guard site rather than read from a constant here -
+// and the sheet in question is whoever is leading right now, which changes.
 //
-// `stats.inventoryCapOf` answers Infinity until the stat is picked, so today's
-// behaviour is unchanged and the guards below are all live paths waiting on a
-// number rather than dead code. They were briefly on the books as dead code to
-// delete (Q136); this is the answer to that, and it is the opposite one.
+// A bag already over its changed cap remains intact. These are admission gates:
+// they refuse the next pickup or stow until the player drains the excess.
 
 // Contiguous paper drifts, 4-connected, as { tiles, cx, cz } - the tiles the
 // patch covers and its centre, which is where its Alt label floats.

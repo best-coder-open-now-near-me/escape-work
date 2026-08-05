@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { COMPANIONS } from '../../src/data/companions.js';
 import {
-  createSheet, grantTalent, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, spendablePoints, pendingPoints, scaleEnemy, statusResist, accuracy, dodge, accFromSavvy, dodgeFromHustle, dmgFromSavvy, deflectFromComposure, soakHit, hitChance, rollHit, unitCombat, equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, gritSaveChance, SAVE,
+  createSheet, grantTalent, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, spendablePoints, pendingPoints, scaleEnemy, statusResist, accuracy, dodge, accFromSavvy, dodgeFromHustle, dmgFromSavvy, deflectFromComposure, soakHit, hitChance, rollHit, unitCombat, equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, inventoryCapOf, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, gritSaveChance, SAVE,
 } from '../../src/stats.js';
 import * as stats from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
@@ -610,6 +610,26 @@ test('unequipItem returns gear to the bag, and refuses when the bag is full', ()
   s.inventory = new Array(10).fill('paper-wad'); // at INV_CAP
   assert.equal(unequipItem(s, 'weapon', 10), false);
   assert.equal(s.equipped.weapon, 'red-stapler'); // still equipped
+});
+
+test('inventory capacity follows Grit and leaves an over-cap bag intact', () => {
+  const s = createSheet('office-drone');
+  assert.equal(inventoryCapOf(s), 10); // 5 guaranteed slots + the Drone's 5 Grit
+  s.attr.grit = 6;
+  assert.equal(inventoryCapOf(s), 11);
+
+  s.inventory = new Array(10).fill('paper-wad');
+  s.equipped.weapon = 'red-stapler';
+  assert.equal(unequipItem(s, 'weapon', inventoryCapOf(s)), true);
+  assert.equal(s.inventory.length, 11);
+
+  // Model a later cap loss: no automatic drop, but no further stowing either.
+  s.attr.grit = 4;
+  assert.equal(inventoryCapOf(s), 9);
+  assert.equal(s.inventory.length, 11);
+  s.equipped.weapon = 'stapler';
+  assert.equal(unequipItem(s, 'weapon', inventoryCapOf(s)), false);
+  assert.equal(s.equipped.weapon, 'stapler');
 });
 
 test('equipping a dmg-only weapon leaves maxHp and deflect untouched', () => {
