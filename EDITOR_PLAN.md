@@ -91,7 +91,7 @@ work), cutting stamps first if the round needs to shrink.
 | 3 | Verticality is required: tall single-level spaces with multifloor play | `[stated]` | designer, 2026-08-01: "a lobby with a lot of height, multifloor in what is really a single 'floor' level" |
 | 4 | Verticality model: stacked full-storey layers, each authored as an ordinary flat map, with one height setting per layer | `[ratified]` | designer-proposed 2026-08-01 ("full floors with one layer/height setting"), embodied by the spike, approved on sight ("this looks great!", 2026-08-01) |
 | 5 | Format: optional `"layers"` array, one entry per floor, bottom-up; a level without it is a single ground layer | `[ratified]` | shipped in the spike (merged 2026-08-01) and now written as well as read by the editor (M4). Documented in `levels/README.md`. `height` on layer *i* is the rise ABOVE storey *i*, not its own ceiling |
-| 6 | Stairs: a marker run on the lower layer; the staircase — geometry, orientation, the connection — is generated, and the opening above is validated loudly rather than carved silently | `[ratified]` | designer-proposed 2026-08-01 ("a procedurally generated staircase tile/space on each layer"); shipped in the spike and approved with it |
+| 6 | Storey connections are authored as drop points on their participating storeys. The generator carves and renders the staircase/portal from those points as needed; there is no global staircase setting or stored stair geometry. Invalid openings still fail loudly rather than being carved silently. | `[ratified]` | Designer, 2026-08-05: "more a drop point for each storey as connection points to carve from. then we can generate them as needed." This supersedes the earlier lower-storey marker-run wording. |
 | 7 | Movement: within a layer as today; between layers only via stair portals; no hop/fall/jump in v1 | `[proposed]` | cheap reversible default; shoving someone off the balcony is a tempting later verb, not v1 |
 | 8 | Cross-layer combat is LOS + reach only; no high/low-ground stat modifier | `[ratified]` | Q2, closed 2026-08-02: designer approved option A verbatim ("i approve your recommendation"). Keeps the `[stated]` "tactics stay as shipped" record intact (TODO.md) |
 | 9 | Editor QoL for v1: undo/redo, region stamps, actor brushes, save-to-disk | `[ratified]` | Q3 answered by IQ1 ("painter", 2026-08-02). All four shipped, plus fill/line/rect/eyedropper, a live playability lint, a metadata strip and per-placement rotation |
@@ -125,14 +125,20 @@ actors carry a `layer` index, within-layer queries go to that layer's grid,
 and only the genuinely cross-layer questions (sight, targeting, stair
 traversal) know more than one floor exists.
 
-**Stairs.** The designer authors a single stair marker tile on the *lower*
-layer. Generation does the rest: carve the stairwell opening in the layer
-above (a load-time validation error if that space is occupied — never a
-silent head-bonk), orient the run from the open neighbours on both floors,
-emit the ramp geometry and the portal edge that pathfinding uses. Default
-footprint: two tiles of run per storey `[proposed]` — a single-tile storey
-climb reads as a ladder. Dijkstra needs no new theory: per-layer graphs
-joined by portal edges, and AI routes through stairs for free.
+**Storey connections.** The author drops a connection point on every storey
+that participates in a vertical route. Generation does the rest: carve the
+required openings, choose and render the staircase geometry, and emit the
+portal edges pathfinding uses. It must refuse an occupied or otherwise
+invalid opening at validation time -- never silently delete authored space.
+The points are the durable authoring data; generated stair geometry is not.
+
+The exact rule for pairing several connection points is intentionally still
+open. The settled v1 shape is one or more visible points placed on the
+participating storeys, not a level-wide staircase setting and not manually
+painted stair runs. Once the intended multi-stairwell workflow is chosen, the
+format can give paired points a shared connection identity without changing
+the editor's basic interaction. Dijkstra needs no new theory: per-storey
+graphs joined by generated portal edges, and AI routes through them for free.
 
 **Combat and LOS.** Within a layer, every shipped rule applies verbatim.
 Across layers, one new primitive carries the load: a 3D sightline sampled
