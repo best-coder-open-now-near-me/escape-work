@@ -15,6 +15,8 @@
 // Why not `stealth.js`: that module is the pure rule - given an eye, a body and
 // a cone, is it seen. This is the layer that knows there IS a party, that
 // enemies wander, and that being spotted starts a fight.
+import { engagedAround } from './combat-geometry.js';
+
 export function createSneakLayer(d) {
   let sneak = null; // null | { mode: 'solo' | 'group' }
   let sweepT = 0;
@@ -117,10 +119,7 @@ export function createSneakLayer(d) {
         const who = m.sheet.name;
         endSneak(null);
         d.ui.say(`${en.def.name} spots ${who}!`);
-        const engaged = d.enemies.filter((e) => e.alive
-          && Math.max(Math.abs(e.x - m.actor.x), Math.abs(e.z - m.actor.z)) <= d.ENGAGE_RADIUS
-          && d.canTakePart(m.actor, e));
-        if (!engaged.includes(en)) engaged.push(en);
+        const engaged = engagedAround(d.enemies, m.actor, d.ENGAGE_RADIUS, d.canTakePart, en);
         d.beginCombat({ engaged, primary: en });
         return;
       }

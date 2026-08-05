@@ -10,16 +10,30 @@
 // setters for that reason: a leader switch is a thing that HAPPENS, and it
 // should look like one at the call site.
 export function createPartyControl(d) {
+  // How fast this member's body actually walks.
+  //
+  // The status half is step-rules.speedUnderStatus, the same one actors.js and
+  // combat.js use - it was written out here as a bare `speedMult` read, which
+  // is a fourth copy of a one-line rule that is going to grow a second term
+  // eventually. Quiet Shoes does not need its own arithmetic, only its own
+  // ANSWER to "which effects apply": none, while its carrier is sneaking.
+  //
+  // The SURFACE term is deliberately only here, and that is not an oversight.
+  // Out of combat a sticky floor is paid in wall-clock - you wade through the
+  // spilled coffee. In a fight the same floor is paid in AP instead, through
+  // `surfaceStepCost`, because a fight bills movement by distance and slowing
+  // the animation would charge for it twice.
   function memberSpeed(m) {
-    let s = d.BASE_SPEED
-      * (d.SURFACES[d.runtime.surfaceAt(m.actor.x, m.actor.z)]?.slow || 1)
-      // Quiet Shoes (SNEAK M6): the sneak penalty vanishes for its carrier.
-      // Coarse on purpose: while sneaking, the talent restores FULL status
-      // speed - a gummed sneaker with these shoes also walks off the gum for
-      // the duration, an accepted sliver for one line instead of un-merging
-      // the status view.
-      * (m.sheet.talent?.effects?.sneakSpeed && d.hasStatus(m.sheet, 'sneaking')
-        ? 1 : (d.statusFx(m.sheet).speedMult ?? 1));
+    // Quiet Shoes (SNEAK M6): the sneak penalty vanishes for its carrier.
+    // Coarse on purpose: while sneaking, the talent restores FULL status
+    // speed - a gummed sneaker with these shoes also walks off the gum for
+    // the duration, an accepted sliver for one line instead of un-merging
+    // the status view.
+    const effects = m.sheet.talent?.effects?.sneakSpeed && d.hasStatus(m.sheet, 'sneaking')
+      ? {}
+      : d.statusFx(m.sheet);
+    let s = d.speedUnderStatus(d.BASE_SPEED, effects)
+      * (d.SURFACES[d.runtime.surfaceAt(m.actor.x, m.actor.z)]?.slow || 1);
     const lead = d.partyLeader(d.party);
     if (m !== lead && lead.actor
       && Math.max(Math.abs(m.actor.x - lead.actor.x), Math.abs(m.actor.z - lead.actor.z)) > d.FOLLOW_NEAR + 1) {

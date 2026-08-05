@@ -195,3 +195,26 @@ export function edgeShieldedTile(tx, tz, { isWalkable, stepOpen }) {
   return isWalkable(tx, tz)
     && ORTHO.some(([dx, dz]) => !stepOpen(tx, tz, tx + dx, tz + dz));
 }
+
+// Who joins this fight: every living coworker within `radius` of the body the
+// fight opens around, who can actually take part in it.
+//
+// The second half is not a refinement, it is what stops a fight from being
+// unwinnable. Chebyshev distance alone pulls in somebody sealed behind a closed
+// door - and doors cannot be opened in combat and closed doors block sight, so
+// that coworker can never be reached, shot or seen while victory still requires
+// them down. `canTakePart` is the caller's side test, because only combat knows
+// which bodies are on which side.
+//
+// `primary` is the one the fight is ABOUT - the coworker you clicked, the one
+// who spotted you - and it joins whether or not it made the radius, because a
+// thrown opener reaches further than the auto-engage does. Three of the four
+// call sites had written that line out themselves; it belongs with the filter
+// that makes it necessary.
+export function engagedAround(enemies, origin, radius, canTakePart, primary = null) {
+  const engaged = enemies.filter((e) => e.alive
+    && Math.max(Math.abs(e.x - origin.x), Math.abs(e.z - origin.z)) <= radius
+    && canTakePart(origin, e));
+  if (primary && !engaged.includes(primary)) engaged.push(primary);
+  return engaged;
+}

@@ -18,7 +18,10 @@
 // as values: a fight outlives a leader switch, and a facade holding the sheet
 // somebody had when combat opened would answer every question about the wrong
 // character.
+import { createWorldEdits } from './world-edits.js';
+
 export function createCombatWorld(d) {
+  const edits = createWorldEdits(d.grid, d.scene);
   return {
     isWalkable: d.isWalkable,
     doorsBeside: (x, z) => d.doors.doorsBeside(x, z),
@@ -132,20 +135,15 @@ export function createCombatWorld(d) {
     // destroyed one - no new invalidation path.
     tileDefAt: (x, z) => d.grid.defAt(x, z),
     terrainOpen: (x, z) => d.grid.terrainOpen(x, z),
-    setType: (x, z, type) => {
-      d.grid.setType(x, z, type);
-      d.scene.refreshTile?.(x, z);
-  },
+    // The grid+mesh pairing is world-edits.js, shared with the out-of-combat
+    // shove that used to write it out by hand.
+    setType: (...a) => edits.setType(...a),
     // Partition toppling (TACTICS_PLAN M6): is a plain wall edge standing
     // between these cells, and knock it out of the world - grid rule and
     // mesh together, the same pairing setType already is. Doors never
     // appear in the wall sets, so they are untoppleable by construction.
     wallEdgeBetween: (x, z, nx, nz) => !!d.grid.wallEdgeBetween(x, z, nx, nz),
-    toppleEdge: (x, z, nx, nz) => {
-      const e = d.grid.removeEdgeBetween(x, z, nx, nz);
-      if (e) d.scene.removeEdgeWall?.(e.o, e.k);
-      return !!e;
-  },
+    toppleEdge: (...a) => edits.toppleEdge(...a),
     // Breaking cover down (TACTICS_PLAN M8). Grid keeps the pool, this
     // pairs the grid rule with the mesh exactly as setType/toppleEdge do:
     // a surviving prop leans (the damaged tell - the pool is hidden by

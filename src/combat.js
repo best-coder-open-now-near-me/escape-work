@@ -31,6 +31,7 @@ import {
   statusSeverity, tickStep,
 } from './statuses.js';
 import { toHitTerms, provokedBy, positionMods, inReach, dist, dirOctant, shieldedFaces, TACTICS, shieldingFace,
+  crouchProblem,
 } from './tactics.js';
 import {
   buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, aimsAtAnyone, isPurge, coneFrom, conePolyline, aimRangeOf, rangeTiles, isBreakable, aimsAtProps, isPull,
@@ -1447,7 +1448,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Putting the office over (demolition.js): toppling, dropping, breaking - the
   // two ways the office stops being cover, plus the stun a landing inflicts.
   const {
-    topple, landStun, dropOnto, performPartitionTopple, breakPlanAt, performBreak,
+    breakDown, topple, landStun, dropOnto, performPartitionTopple, breakPlanAt,
+    performBreak,
   } = createDemolition({
     world,
     fx,
@@ -1537,17 +1539,19 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   //
   // A spot is legal when you could stand on it and at least one of its faces
   // is shielded. What is doing the shielding never comes up.
+  // The fight half of tactics.crouchProblem - same ladder, same words as the
+  // out-of-combat crouch, which is what stops a spot from refusing on the map
+  // and accepting the moment initiative rolls.
   function coverSpotProblem(tx, tz) {
-    const here = active.actor.x === tx && active.actor.z === tz;
     const occupant = unitStandingAt(tx, tz);
-    if (!here && (!world.isWalkable(tx, tz) || (occupant && occupant !== active))) {
-      return 'No room to tuck in there.';
-    }
-    if (!shieldedFaces(tx, tz, {
-      edgeOpen: world.stepOpen,
-      coverCell: coverCellFor(active),
-    }).length) return 'Nothing there to hide behind.';
-    return null;
+    return crouchProblem({
+      here: active.actor.x === tx && active.actor.z === tz,
+      roomFree: world.isWalkable(tx, tz) && !(occupant && occupant !== active),
+      faces: shieldedFaces(tx, tz, {
+        edgeOpen: world.stepOpen,
+        coverCell: coverCellFor(active),
+      }).length,
+    });
   }
 
   function performTakeCover(tx, tz, point = null) {
@@ -1799,21 +1803,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function aiBreak(unit, plan) {
     const line = unit.combat.attacks[rand(0, unit.combat.attacks.length - 1)];
     const prop = plan.kind === 'prop';
-    const px = prop ? plan.tx : (plan.a[0] + plan.b[0]) / 2;
-    const pz = prop ? plan.tz : (plan.a[1] + plan.b[1]) / 2;
-    const label = prop
-      ? (world.tileDefAt(plan.tx, plan.tz)?.label || 'furniture').toLowerCase()
-      : 'partition';
-    unit.lunge(px, pz);
-    faceTarget(unit, px, pz);
+    const aimX = prop ? plan.tx : (plan.a[0] + plan.b[0]) / 2;
+    const aimZ = prop ? plan.tz : (plan.a[1] + plan.b[1]) / 2;
+    unit.lunge(aimX, aimZ);
+    faceTarget(unit, aimX, aimZ);
     const dmg = rand(line.min, line.max);
-    const left = prop
-      ? world.damageProp(plan.tx, plan.tz, dmg)
-      : world.damageEdge(plan.a[0], plan.a[1], plan.b[0], plan.b[1], dmg);
-    fx.damageText(px, pz, `-${dmg}`, '#ffd76b', { big: left === 0 });
-    fx.impact(px, pz, 'slam', { y: 0.4 });
-    if (left === 0) {
-      fx.shake(0.09, 0.24);
+    // The break is demolition.breakDown - the same one the player's verb runs.
+    // What is left here is what an AI break actually differs by: a random
+    // attack line off its own kit, and third-person narration.
+    const { label, left, gone } = breakDown(plan, dmg);
+    if (gone) {
       log(prop
         ? `${unit.def.name} takes the ${label} apart. One less thing between you.`
         : `${unit.def.name} batters the partition down. Open plan, the hard way.`);
@@ -2510,11 +2509,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       shootable: (u, t) => {
         const rls = rangedLines(u);
         if (!rls.length) return null;
-        const b = posOf(u);
-        const tp2 = posOf(t);
-        const d = Math.hypot(b.x - tp2.x, b.z - tp2.z);
-        const line = rls.find((a) => d <= a.range
-          && world.hasLos(u.x, u.z, t.actor.x, t.actor.z));
+        // `bodyDist`/`bodyLos`, the same two the PLAYER's ranged gate asks -
+        // this hand-rolled the distance and then asked line of sight of ROUNDED
+        // TILES, which is the one that mattered: since DEGRID a body rests
+        // wherever its walk left it, so the AI could refuse a shot the player
+        // would be allowed from the same spot, or take one the shot resolver
+        // then re-measured and blocked.
+        const gap = bodyDist(u, t);
+        const line = rls.find((a) => gap <= a.range && bodyLos(u, t));
         if (!line) return null;
         const so = shotOutcome(u, t.member);
         return (so.target && (!so.redirected || so.target.sheet)) ? { line, so } : null;

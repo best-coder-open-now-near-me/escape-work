@@ -17,6 +17,8 @@
 // while sneaking judges surprise by SIGHT (SNEAK M4/D6), so who saw the
 // initiator is captured BEFORE the sneak is cleared - the order matters, and it
 // is one line apart in the same function.
+import { engagedAround } from './combat-geometry.js';
+
 export function createCombatEntry(d) {
   function adjacentEnemyToParty() {
     for (const m of d.party?.members || []) {
@@ -214,12 +216,7 @@ export function createCombatEntry(d) {
     const hit = adjacentEnemyToParty();
     if (!hit) return;
     const { en, member } = hit;
-    const engaged = d.enemies.filter((e) =>
-      e.alive && Math.max(Math.abs(e.x - member.actor.x), Math.abs(e.z - member.actor.z)) <= d.ENGAGE_RADIUS
-      // ...and who can actually take part. Somebody inside the radius but
-      // sealed off joins a fight they can never act in, and victory needs
-      // every engaged coworker down - so the fight would never end.
-      && d.canTakePart(member.actor, e));
+    const engaged = engagedAround(d.enemies, member.actor, d.ENGAGE_RADIUS, d.canTakePart);
     beginCombat({ engaged, primary: en });
   }
 

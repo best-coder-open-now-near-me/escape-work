@@ -174,36 +174,55 @@ export function createDemolition(d) {
   // facade leans the mesh - the pool is hidden, the object wears it) or
   // watch the world facade delete the thing. The crouch behind it needs no
   // hook: refresh()'s revalidation finds the shield missing.
-  function performBreak(id, plan) {
-    const a = ACTIONS[id];
-    if (d.active.ap < a.ap) { d.log('Not enough AP.'); return; }
-    if (a.ammoCost && d.active.sheet.paper < d.ammoCostOf(id)) { d.log('Out of paper.'); return; }
+  // The break itself, with no opinion about who did it: where the blow lands,
+  // what the thing is called, how much of it is left, and the hit you see.
+  //
+  // `performBreak` and `aiBreak` were two copies of this, identical down to the
+  // label expression and the `big: left === 0` flag - and they had already
+  // drifted in the way copies do: one of them went through the world facade for
+  // the tile def and the other did not. What legitimately differs is only what
+  // brackets it: the player's half bills AP, paper and a use, throws a
+  // projectile when the verb has range, and checks victory; the AI's half picks
+  // a random attack line and narrates in the third person. Neither of those is
+  // the break.
+  function breakDown(plan, dmg) {
     const prop = plan.kind === 'prop';
     const px = prop ? plan.tx : (plan.a[0] + plan.b[0]) / 2;
     const pz = prop ? plan.tz : (plan.a[1] + plan.b[1]) / 2;
     const label = prop
       ? (d.world.tileDefAt(plan.tx, plan.tz)?.label || 'furniture').toLowerCase()
       : 'partition';
+    const left = prop
+      ? d.world.damageProp(plan.tx, plan.tz, dmg)
+      : d.world.damageEdge(plan.a[0], plan.a[1], plan.b[0], plan.b[1], dmg);
+    d.fx.damageText(px, pz, `-${dmg}`, '#ffd76b', { big: left === 0 });
+    d.fx.impact(px, pz, 'slam', { y: 0.4 });
+    if (left === 0) d.fx.shake(0.09, 0.24);
+    return { px, pz, label, left, gone: left === 0 };
+  }
+
+  function performBreak(id, plan) {
+    const a = ACTIONS[id];
+    if (d.active.ap < a.ap) { d.log('Not enough AP.'); return; }
+    if (a.ammoCost && d.active.sheet.paper < d.ammoCostOf(id)) { d.log('Out of paper.'); return; }
+    const prop = plan.kind === 'prop';
+    const aimX = prop ? plan.tx : (plan.a[0] + plan.b[0]) / 2;
+    const aimZ = prop ? plan.tz : (plan.a[1] + plan.b[1]) / 2;
     if (a.ammoCost) d.active.sheet.paper -= d.ammoCostOf(id);
     d.active.ap = roundAp(d.active.ap - a.ap);
     if (a.uses) d.active.usesLeft[id] -= 1;
     if (rangeOf(id)) {
       // The prop's break point is real geometry (a tile centre or an edge
       // midpoint); only the ORIGIN moves to the body.
-      d.fx.projectile(posOf(d.active), { x: px, z: pz },
+      d.fx.projectile(posOf(d.active), { x: aimX, z: aimZ },
         a.ammoCost ? 'ball' : 'shot');
     } else {
-      d.active.actor.lunge(px, pz);
+      d.active.actor.lunge(aimX, aimZ);
     }
-    d.faceTarget(d.active, px, pz);
+    d.faceTarget(d.active, aimX, aimZ);
     const dmg = d.rand(a.min, a.max) + damageBonus(d.active.sheet);
-    const left = prop
-      ? d.world.damageProp(plan.tx, plan.tz, dmg)
-      : d.world.damageEdge(plan.a[0], plan.a[1], plan.b[0], plan.b[1], dmg);
-    d.fx.damageText(px, pz, `-${dmg}`, '#ffd76b', { big: left === 0 });
-    d.fx.impact(px, pz, 'slam', { y: 0.4 });
-    if (left === 0) {
-      d.fx.shake(0.09, 0.24);
+    const { label, left, gone } = breakDown(plan, dmg);
+    if (gone) {
       d.log(prop
         ? `The ${label} comes apart. The office is short one piece of cover.`
         : 'The partition comes apart. Open plan, the hard way.');
@@ -220,6 +239,7 @@ export function createDemolition(d) {
   // Whoever is standing on (x, z) - member, summon or coworker. The take-cover
 
   return {
+    breakDown,
     topple,
     landStun,
     dropOnto,

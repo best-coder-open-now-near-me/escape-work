@@ -63,14 +63,11 @@ export function createWalking(d) {
       act();
       return;
     }
-    let best = null;
-    for (const [dx, dz] of d.DIRS8) {
-      const ax = x + dx;
-      const az = z + dz;
-      if (!d.isWalkable(ax, az)) continue;
-      const p = d.findPath(d.isWalkable, d.player.x, d.player.z, ax, az, d.hazardCost, d.grid.stepOpen);
-      if (p && (!best || p.length < best.length)) best = p;
-    }
+    // The same search `bestApproachPath` does - it IS that search, and used to
+    // be a line-for-line copy of it sitting eighty lines away. Both moved into
+    // this file together, which is what made the duplication impossible to
+    // keep: a change to what counts as a reachable neighbour has one home now.
+    const best = bestApproachPath(x, z);
     if (!best || best.length < 2) return;
     d.setPendingAction({ x, z, run: act });
     const [gx, gz] = best[best.length - 1];

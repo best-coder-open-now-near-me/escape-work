@@ -5,6 +5,7 @@
 import { BUTTON_CHROME, esc,
 } from './chrome.js';
 import { TALENTS, STARTING_TALENT_BY_CLASS } from '../data/talents.js';
+import { pendingPoints } from '../stats.js';
 
 // --- end-of-game overlays ----------------------------------------------------
 function overlay(id, inner) {
@@ -84,7 +85,12 @@ export function showLevelUpScreen(sheet, { onSpend, onLearn, nodesFor, onDone } 
     const ap = sheet.attrPoints || 0;
     const cp = sheet.classPoints || 0;
     const nodes = nodesFor ? nodesFor() : [];
-    const pending = ap + cp;
+    // stats.js owns "how many points are banked" (pendingPoints). This screen
+    // re-derived it as `ap + cp`, which made it the FIFTH place that sum was
+    // written - and the one place where getting it wrong is visible while the
+    // player is spending. It still reads `ap` and `cp` separately just above,
+    // because the two rows are labelled separately; only the total is shared.
+    const pending = pendingPoints(sheet);
     host.innerHTML = `
       <div style="background:#232334; border:1px solid #3a3a52; border-radius:12px;
         padding:22px 26px; min-width:380px; max-width:460px; max-height:86vh; overflow:auto;

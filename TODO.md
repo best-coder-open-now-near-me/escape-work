@@ -418,19 +418,19 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q077** `/home/user/escape-work/ARCHITECTURE.md:444` [doc-drift] ARCHITECTURE.md still documents the pre-branch enemy targeting rule ("nearest living member, ties to the bloodied one")<br>      ↳ DONE — and worth recording WHY it survived so long: the sentence is exactly `pickTarget` at `focus: 0`, so it was true of the shipped game and merely no longer the rule. The entry now names the engageable tier and the four blended terms.
 - [ ] **Q078** `/home/user/escape-work/src/main.js:141` [doc-drift] The `?seed=` comment added by AI M1 asserts an initiative-rng gap the code does not have, and credits the seed with slips it does not cover
 - [x] **Q079** `src/data/enemies.js:7` [doc-drift] `aggression` is documented as fight-initiation behaviour but is only a dot colour; the documented `'green'` value is used by nobody<br>      ↳ DONE — both halves confirmed against the code: `aggression` is read at exactly one site (`hover.js` AGGRO) and by nothing else, and no entry in the file carries `'green'`. The header says DISPLAY SIGNAL now, names `checkCombatTrigger` as what actually starts fights, and says out loud that the dot table falls back to red — so adding 'green' back is a hover.js change, not a data one.
-- [ ] **Q080** `src/combat.js:2699` [duplication] `aiShoveMember` re-states the shove's slam damage as a bare literal `2`, 617 lines from the `slamDmg = 2` default it claims to match
+- [x] **Q080** `src/combat.js:2699` [duplication] `aiShoveMember` re-states the shove's slam damage as a bare literal `2`, 617 lines from the `slamDmg = 2` default it claims to match<br>      ↳ **DONE — already fixed, verified not assumed.** `aiShoveMember` no longer exists: it was folded into `displaceBody` in an earlier pass, and the comment there records why (the copy had already lost the stun and the prop topple). `slamDmg = 2` is the sole owner; searched for a second literal and there is none.
 - [x] **Q081** `src/combat.js:2645` [duplication] aiPullMember drops the hazard-landing damage performPull applies, so an AI pull into live water or fire costs the member nothing<br>      ↳ DONE — billed through memberSurfDamage
-- [ ] **Q082** `src/combat.js:4696` [duplication] The AI's shoot gate hand-rolls range and asks line-of-sight of rounded tiles, bypassing combat.js's own bodyDist/bodyLos and combat-geometry.verbReaches
-- [ ] **Q083** `src/combat.js:505` [duplication] "What counts as a cover cell" is written four times across three modules
-- [ ] **Q084** `src/combat.js:2296` [duplication] "Put a shoulder into the partition" is resolved in three places, one of which does not go through the world facade
-- [ ] **Q085** `src/combat.js:2736` [duplication] performBreak and aiBreak are two copies of the break-down resolver, identical down to the label expression
+- [x] **Q082** `src/combat.js:4696` [duplication] The AI's shoot gate hand-rolls range and asks line-of-sight of rounded tiles, bypassing combat.js's own bodyDist/bodyLos and combat-geometry.verbReaches<br>      ↳ **DONE — and it was a behaviour fix, not a tidy-up.** The gate hand-rolled the distance and then asked line of sight of ROUNDED TILES. Since DEGRID a body rests wherever its walk left it, so the AI could refuse a shot the player is allowed from the same spot, or take one the resolver then re-measured and blocked. It asks `bodyDist`/`bodyLos` now - the same two the player's ranged gate asks. ai 3/3 in file context, including the Executive.
+- [x] **Q083** `src/combat.js:505` [duplication] "What counts as a cover cell" is written four times across three modules<br>      ↳ **DONE — `data/tiles.shieldsCell`, next to `blocksSight`.** Five copies, not four: the crouch predicate, the shot resolver, the AI's, and the out-of-combat crouch. One threshold decides both halves (a prop a shot passes over is one you can crouch behind), so the rule lives with the defs. **A fifth-and-a-half was left alone deliberately:** `level-preview.js` counts any solid, so the editor shows `#` walls as cover where the game does not. Switching it broke their test, which encodes walls-count-as-cover - that is a design question, not a copy to collapse. See the question below.
+- [x] **Q084** `src/combat.js:2296` [duplication] "Put a shoulder into the partition" is resolved in three places, one of which does not go through the world facade<br>      ↳ **DONE — `world-edits.js`.** The duplicated thing was the PAIRING: a tile's type lives in the grid and its look in the scene, so changing one without the other leaves a partition you can walk through but still see. Written out three times. The out-of-combat copy is the one the finding meant by "does not go through the world facade" - out there is no facade, so the pairing moved somewhere both sides can reach and combat's facade now delegates to it.
+- [x] **Q085** `src/combat.js:2736` [duplication] performBreak and aiBreak are two copies of the break-down resolver, identical down to the label expression<br>      ↳ **DONE — one `breakDown`, two callers.** They had already drifted: one went through the world facade for the tile def and the other did not. What legitimately differs is only the bracketing - the player's half bills AP, paper and a use, throws a projectile when the verb has range and checks victory; the AI's picks a random attack line and narrates in the third person. Neither of those is the break.
 - [x] **Q086** `src/hover.js:242` [duplication] hover.js and combat.js each carry their own copy of the ring/face drawing primitives, the affordance palette and the cover-aim easing<br>      ↳ DONE — ground-marks.js, shared with hover.js
-- [ ] **Q087** `src/main.js:1140` [duplication] `approachAndDo` re-implements `bestApproachPath` line for line
-- [ ] **Q088** `src/main.js:2115` [duplication] The "who joins this fight" filter is written out three times
-- [ ] **Q089** `src/main.js:2511` [duplication] main.js reimplements combat-plans.topplePlan line for line as oocTopplePlanAt
-- [ ] **Q090** `src/main.js:3758` [duplication] main.js's memberSpeed re-derives walk speed instead of using step-rules.speedUnderStatus, and adds a surface term the other two callers do not have
-- [ ] **Q091** `src/main.js:2616` [duplication] The out-of-combat crouch is a full parallel implementation of combat's, refusal strings included
-- [ ] **Q092** `src/ui/screens.js:87` [duplication] The level-up screen re-derives the banked-points sum that `pendingPoints` owns — a fifth surface, on the screen where points are spent
+- [x] **Q087** `src/main.js:1140` [duplication] `approachAndDo` re-implements `bestApproachPath` line for line<br>      ↳ **DONE.** `approachAndDo` called `bestApproachPath` instead of restating its loop. Both landed in `walking.js` in the same pass, which is what made the copy impossible to keep.
+- [x] **Q088** `src/main.js:2115` [duplication] The "who joins this fight" filter is written out three times<br>      ↳ **DONE — `combat-geometry.engagedAround`.** Four copies, not three (the sneak sweep is the fourth). It also absorbs the `if (!engaged.includes(primary)) engaged.push(primary)` line that three of the four had written out, because that line only exists BECAUSE of the radius filter it follows.
+- [x] **Q089** `src/main.js:2511` [duplication] main.js reimplements combat-plans.topplePlan line for line as oocTopplePlanAt<br>      ↳ **DONE.** `oocTopplePlanAt` was `combat-plans.topplePlan` rewritten against `grid` instead of a facade. One function now: no AP and no turn out here, but a cabinet falls the way a cabinet falls.
+- [x] **Q090** `src/main.js:3758` [duplication] main.js's memberSpeed re-derives walk speed instead of using step-rules.speedUnderStatus, and adds a surface term the other two callers do not have<br>      ↳ **DONE, and half of it was not a bug.** The `speedMult` re-derivation was a fourth copy of a one-line rule and now calls `step-rules.speedUnderStatus`; Quiet Shoes needed its own ANSWER (`{}` while sneaking), not its own arithmetic. **The surface term stays, deliberately:** out of combat a sticky floor is paid in wall-clock, in a fight it is paid in AP through `surfaceStepCost` - slowing the animation as well would charge for it twice. Documented in place so the next reader does not "fix" it.
+- [ ] **Q091** `src/main.js:2616` [duplication] The out-of-combat crouch is a full parallel implementation of combat's, refusal strings included<br>      ↳ **PARTLY DONE — the refusal ladder is shared, the rest is not.** Both sides call `tactics.crouchProblem` now, so the two refusal strings and their ORDER have one home: a spot cannot refuse "nothing to hide behind" on the map and quietly become a legal crouch the moment initiative rolls. What legitimately differs comes in as two answers (`roomFree`, `faces`) rather than two implementations. **Still parallel:** the cover predicate either side (`oocCoverCell` vs `coverCellFor` - same def rule since Q083, different body test) and the perform half. Left open rather than closed, because the remainder is a real design question about whether the map should own a crouch at all.
+- [x] **Q092** `src/ui/screens.js:87` [duplication] The level-up screen re-derives the banked-points sum that `pendingPoints` owns — a fifth surface, on the screen where points are spent<br>      ↳ **DONE.** The level-up screen called `pendingPoints` instead of re-deriving `ap + cp` - the fifth surface for that sum, and the one place where getting it wrong is visible while the player is spending. It still reads `ap` and `cp` separately, because the two rows are labelled separately; only the total is shared.
 - [ ] **Q093** `src/god.js:109` [god-method] `god.js buildPanel` is a 595-line god closure with 23 inner functions and six shared mutable variables, and the e2e suite depends on its verbs
 - [x] **Q094** `/home/user/escape-work/src/combat.js:2184` [inconsistency] AI_PLAN A4's ratified "a RANGED unit may shove to disengage" carve-out is never wired: the only production caller omits `disengage`<br>      ↳ DONE — same finding as Q047. The doc side checks out verbatim: AI_PLAN A4 carries `[ratified]` with provenance ("Q3 answered A", designer 2026-08-01) and doctrine #11 leans on the carve-out by name. The state this closes is the worst of the three available: ratified, documented in two places INCLUDING the ladder's own comment, and absent from the game.
 - [ ] **Q095** `src/combat-ai.js:75` [inconsistency] HR's triage heal has no line-of-sight test and measures tiles, where the player's identical verb requires a clear line and body distance
@@ -772,6 +772,30 @@ resolves the acting actor's own tile first.
   `displaceBody` behind a `victimView` adapter.
 
 ---
+## Questions for the designer
+
+- **Does the editor's cover preview mean the same thing the game does?** They
+  currently disagree, and both readings are defensible.
+
+  The game's rule (TACTICS_PLAN M6a) is one threshold for two questions: a solid
+  short enough to shoot OVER is a solid you can crouch behind, and a `#` wall is
+  neither - a shot cannot pass it at all, so "cover" against it is moot. The
+  editor's `coverMap` counts any solid, walls included, and `level-preview.test`
+  pins that.
+
+  So a room whose only shelter is its outer walls previews as sheltered and
+  plays as open ground.
+
+  - **A — the preview matches the game** (one rule, `shieldsCell`): an author
+    sees the cover the fight will actually grant. Costs a red test to update,
+    and rooms that look bare in the preview really are bare.
+  - **B — leave it** (the preview means "how enclosed is this tile"): a wall IS
+    shelter in the ordinary sense, and the preview is about placement, not about
+    the shot resolver.
+  - I would pick **A**, because the preview's stated purpose is "derivable from
+    the same rules the game uses" - but B is a coherent thing to mean and it is
+    your call, so nothing was changed.
+
 ## Settled decisions
 
 Answered directly by the project owner — recorded so they are not relitigated.

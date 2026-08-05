@@ -30,8 +30,8 @@ import {
 import { applyStatus, removeStatus, statusFx, hasStatus, tickStep, tickTurn, statusLeft, statusList } from './statuses.js';
 import { createDraft, createCharacter, draftModel, draftLook } from './creation.js';
 import { CUSTOM_RIGS } from './data/looks.js';
-import { aimsAtAlly, coneFrom, conePolyline, isToppleable, toppleLanding } from './powers.js';
-import { PARTITION_TOPPLE, blocksSight } from './data/tiles.js';
+import { aimsAtAlly, coneFrom, conePolyline, isToppleable } from './powers.js';
+import { PARTITION_TOPPLE, blocksSight, shieldsCell } from './data/tiles.js';
 import { shieldedFaces } from './tactics.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
@@ -46,6 +46,7 @@ import { createCombatEntry } from './combat-entry.js';
 import { createMouse } from './mouse.js';
 import { createKeyboard } from './keyboard.js';
 import { createExamine } from './examine.js';
+import { createWorldEdits } from './world-edits.js';
 import { createWalking } from './walking.js';
 import { createSummonLayer } from './summon-layer.js';
 import { createProgressionUi } from './progression-ui.js';
@@ -67,7 +68,7 @@ import { createLooting } from './looting.js';
 import { createShopping } from './shopping.js';
 import {
   surfaceEffect, rawSurfaceDamage, effectiveSurfaceDamage, slipChance, slips,
-  hasGum, surfacePathCost, impactKindFor,
+  hasGum, surfacePathCost, impactKindFor, speedUnderStatus,
 } from './step-rules.js';
 import { createDoors, atDoor, COMBAT_DOOR_AP, doorMidpoint } from './doors.js';
 import { createDialogue, shopKeyForNpc, sayRecruited } from './dialogue.js';
@@ -78,7 +79,7 @@ import {
 } from './hotbar-model.js';
 import { startCombat } from './combat.js';
 import { verbSides } from './combat-targeting.js';
-import { cheb as chebOf, canReach as canReachAt } from './combat-geometry.js';
+import { cheb as chebOf, canReach as canReachAt, engagedAround } from './combat-geometry.js';
 import { startEditor } from './editor.js';
 import { NPCS } from './data/npcs.js';
 import { installGodMode } from './god.js';
@@ -334,6 +335,9 @@ function startGame(level) {
   // the party cap - they live only for the combat and are despawned when it
   // ends. They block enemies (like the party) but are pass-through for the party.
   const summons = [];
+  // Grid+mesh edits, paired once (world-edits.js) - combat's facade builds its
+  // own from the same factory, so the pairing has one definition either side.
+  const worldEdits = createWorldEdits(grid, scene);
   // Non-hostile coworkers you talk to (data/npcs.js) - separate from `enemies`
   // so combat never engages them and they take no turns.
   const npcs = grid.npcSpawns.map((s) => new NpcActor(s.x, s.z, s.type, NPCS[s.type]));
@@ -746,6 +750,7 @@ function startGame(level) {
     ACTIONS,
     ENGAGE_RADIUS,
     PARTITION_TOPPLE,
+    worldEdits,
     // Three consts declared BELOW this wiring, so they go in behind getters
     // and wrappers - by-reference would read them in their dead zone.
     get vfx() { return vfx; },
@@ -786,7 +791,6 @@ function startGame(level) {
     isToppleable: (...a) => isToppleable(...a),
     rangeOf: (...a) => rangeOf(...a),
     statusList: (...a) => statusList(...a),
-    toppleLanding: (...a) => toppleLanding(...a),
     walkToExact: (...a) => walkToExact(...a),
     quiet: (...a) => quiet(...a),
     arrivalLine: (...a) => arrivalLine(...a),
@@ -850,6 +854,7 @@ function startGame(level) {
     clearOocCrouch: (...a) => clearOocCrouch(...a),
     effectiveSurfDamage: (...a) => effectiveSurfDamage(...a),
     endSneak: (...a) => endSneak(...a),
+    speedUnderStatus,
     hazardCostFor: (...a) => hazardCostFor(...a),
     inAnyCone: (...a) => inAnyCone(...a),
     isWalkable: (...a) => isWalkable(...a),
@@ -1795,7 +1800,7 @@ function startGame(level) {
     || null;
   const oocCoverCell = (x, z) => {
     const d = grid.defAt(x, z);
-    if (d && (!!d.cover || (!!d.solid && !blocksSight(d)))) return true;
+    if (shieldsCell(d)) return true;
     return !!(enemyAt(x, z) || npcAt(x, z) || partyAt(x, z) || summonAt(x, z));
   };
   // Which faces of a tile would shield a crouch there. One helper, read by the
@@ -2845,10 +2850,7 @@ function startGame(level) {
         || live.find((e) => canTakePart(player, e))
         || live[0];
       if (!primary) return false;
-      const engaged = live.filter((e) =>
-        Math.max(Math.abs(e.x - player.x), Math.abs(e.z - player.z)) <= ENGAGE_RADIUS
-        && canTakePart(player, e));
-      if (!engaged.includes(primary)) engaged.push(primary);
+      const engaged = engagedAround(live, player, ENGAGE_RADIUS, canTakePart, primary);
       beginCombat({ engaged, primary });
       return true;
     },

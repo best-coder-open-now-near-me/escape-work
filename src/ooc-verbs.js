@@ -10,25 +10,32 @@
 // half lives in the click handlers. Naming the writes is the point; a setter
 // call is greppable in a way that `armedOoc = id` from anywhere in four
 // thousand lines is not.
+import { topplePlan } from './combat-plans.js';
+import { engagedAround } from './combat-geometry.js';
+import { crouchProblem } from './tactics.js';
+
 export function createOocVerbs(d) {
+  // The map half of tactics.crouchProblem - same ladder, same words, the other
+  // side of a fight starting.
   function oocCoverProblem(x, z) {
-    const here = d.player.x === x && d.player.z === z;
-    if (!here && (!d.isWalkable(x, z) || d.enemyAt(x, z) || d.npcAt(x, z) || d.partyAt(x, z))) {
-      return 'No room to tuck in there.';
-    }
-    if (!d.oocCoverFaces(x, z).length) return 'Nothing there to hide behind.';
-    return null;
+    return crouchProblem({
+      here: d.player.x === x && d.player.z === z,
+      roomFree: d.isWalkable(x, z)
+        && !d.enemyAt(x, z) && !d.npcAt(x, z) && !d.partyAt(x, z),
+      faces: d.oocCoverFaces(x, z).length,
+    });
   }
 
-  function oocTopplePlanAt(px, pz) {
-    const def = d.grid.defAt(px, pz);
-    if (!d.isToppleable(def)) return null;
-    const landing = d.toppleLanding(d.player.x, d.player.z, px, pz);
-    if (!landing) return null;
-    const [lx, lz] = landing;
-    if (!d.grid.terrainOpen(lx, lz) || !d.grid.stepOpen(px, pz, lx, lz)) return null;
-    return { def, x: px, z: pz, lx, lz };
-  }
+  // combat-plans owns this question - "would that prop go over, and where would
+  // it land" - and this was a line-for-line copy of it with the world queries
+  // spelled out against `grid` instead of a facade. The rule is the same rule
+  // in or out of a fight, so it is one function now: no AP and no turn out
+  // here, but a cabinet falls the way a cabinet falls.
+  const oocTopplePlanAt = (px, pz) => topplePlan(d.player.x, d.player.z, px, pz, {
+    tileDefAt: (x, z) => d.grid.defAt(x, z),
+    terrainOpen: (x, z) => d.grid.terrainOpen(x, z),
+    stepOpen: (x, z, tx, tz) => d.grid.stepOpen(x, z, tx, tz),
+  });
 
   function oocCoverNames(x, z) {
     const seen = [];
@@ -162,10 +169,7 @@ export function createOocVerbs(d) {
       d.ui.say('No way to reach them from here.');
       return;
     }
-    const engaged = d.enemies.filter((e) =>
-      e.alive && Math.max(Math.abs(e.x - d.player.x), Math.abs(e.z - d.player.z)) <= d.ENGAGE_RADIUS
-      && d.canTakePart(d.player, e)); // same rule as checkCombatTrigger - see there
-    if (!engaged.includes(en)) engaged.push(en);
+    const engaged = engagedAround(d.enemies, d.player, d.ENGAGE_RADIUS, d.canTakePart, en);
     // The aimed point rides into the fight: the opener must fire the wedge
     // the player SAW, not one re-aimed at the target's tile centre.
     d.beginCombat({ engaged, primary: en, opening: { actionId, target: en, point } });
@@ -263,11 +267,12 @@ export function createOocVerbs(d) {
           d.ui.say('Somebody is standing there. Not like this.');
           return;
         }
-        const e = d.grid.removeEdgeBetween(d.player.x, d.player.z, tile.x, tile.z);
-        if (!e) return;
-        d.scene.removeEdgeWall?.(e.o, e.k);
-        d.grid.setType(tile.x, tile.z, d.PARTITION_TOPPLE.becomes);
-        d.scene.refreshTile?.(tile.x, tile.z);
+        // The same grid+mesh pairing combat's facade uses (world-edits.js).
+        // This was the copy that did it by hand, and the one the finding meant
+        // by "does not go through the world facade" - out here there is no
+        // facade to go through, so the pairing moved somewhere both can reach.
+        if (!d.worldEdits.toppleEdge(d.player.x, d.player.z, tile.x, tile.z)) return;
+        d.worldEdits.setType(tile.x, tile.z, d.PARTITION_TOPPLE.becomes);
         d.vfx.impact(tile.x, tile.z, 'slam', { y: 0.3 });
         d.vfx.shake(0.08, 0.2);
         d.ui.say('You put a shoulder into the partition. It goes over flat.');

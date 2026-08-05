@@ -23,6 +23,7 @@
 // `def` now. That collision is a documented trap in tools/check-extractions.mjs
 // and it was sitting in the code before the cut began.
 import { shieldingFace } from './tactics.js';
+import { shieldsCell } from './data/tiles.js';
 
 export function createCrouch(d) {
   // Is somebody holding a `guard` stance on this exact tile? Read by the cover
@@ -88,7 +89,7 @@ export function createCrouch(d) {
   // `exclude` keeps a croucher from shielding themselves.
   const coverCellFor = (...exclude) => (cx, cz) => {
     const def = d.world.tileDefAt(cx, cz);
-    if (def && (!!def.cover || (!!def.solid && !d.blocksSight(def)))) return true;
+    if (shieldsCell(def)) return true;
     const u = d.unitStandingAt(cx, cz);
     return !!u && !exclude.includes(u) && d.standing(u);
   };

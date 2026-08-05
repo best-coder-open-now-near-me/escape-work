@@ -20,7 +20,7 @@ import { toHitTerms, positionMods, inReach, dist, shieldedFaces, shieldingFace }
 import { accuracy, dodge, hitChance, rollHit, moveCostOf, MOVE } from './stats.js';
 import { statusFx, hasStatus } from './statuses.js';
 import { SURFACES } from './data/surfaces.js';
-import { blocksSight } from './data/tiles.js';
+import { blocksSight, shieldsCell } from './data/tiles.js';
 import { impactKindFor } from './step-rules.js';
 import { canReach as canReachAt, reachOfUnit, withinReach } from './combat-geometry.js';
 
@@ -150,7 +150,7 @@ export function createHitResolution(d) {
       // grant cover for it.
       coverCell: (x, z) => {
         const def = d.world.tileDefAt(x, z);
-        return !!def && (!!def.cover || (!!def.solid && !blocksSight(def)))
+        return shieldsCell(def)
           || d.guardStandingAt(x, z, defender);
       },
       allies,

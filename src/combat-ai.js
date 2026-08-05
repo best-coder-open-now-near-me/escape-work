@@ -15,7 +15,7 @@ import { cheb, posOf, reachOfUnit, AROUND, ORTHO } from './combat-geometry.js';
 import {
   inReach, dist, shieldedFaces, facesShieldFrom, isFlanked, isBackstab, provokedBy,
 } from './tactics.js';
-import { blocksSight } from './data/tiles.js';
+import { shieldsCell } from './data/tiles.js';
 
 // The AI's tunables, one block (AI_PLAN A7): every magnitude a difficulty
 // pass - or someday a selector - would turn lives here, beside the rules
@@ -373,7 +373,7 @@ export function aiCrouchCovered(bx, bz, tx, tz, { tileDefAt, stepOpen, bodyAt = 
       const d = tileDefAt(x, z);
       // Low solids and fallen furniture only: behind a TALL solid nothing can
       // shoot you anyway, so the beat would read as the AI hiding from air.
-      if (d && (d.cover || (d.solid && !blocksSight(d)))) return true;
+      if (shieldsCell(d)) return true;
       return !!(bodyAt && bodyAt(x, z));
     },
   });

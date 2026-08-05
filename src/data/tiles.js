@@ -98,6 +98,21 @@ export const SIGHT_BLOCK_HEIGHT = 0.75;
 export const blocksSight = (def) =>
   !!def?.solid && (!!def.tall || (def.height ?? 1) >= SIGHT_BLOCK_HEIGHT);
 
+// Does the thing on this cell SHIELD it - the M6a height rule, stated once.
+//
+// One threshold decides both halves, which is the whole point: a prop a shot
+// passes over is a prop you can crouch behind, and a prop tall enough to stop
+// the shot is tall enough that hiding behind it is moot. So a cell shields when
+// it is explicitly `cover`, or when it is solid and SHORT enough to shoot over
+// - `blocksSight` and this are two readings of the same line, and a prop can
+// never both block the shot and grant cover for it.
+//
+// This was written out five times - the crouch's own predicate, the shot
+// resolver's, the AI's, the out-of-combat crouch's and the editor preview's -
+// each a hand-copy of `def.cover || (def.solid && !blocksSight(def))`. It is a
+// fact about a tile DEF, so it lives with the defs.
+export const shieldsCell = (def) => !!def && (!!def.cover || (!!def.solid && !blocksSight(def)));
+
 // The order the editor groups tile brushes in. It lives HERE, with the tiles,
 // because it is a fact about the CONTENT: adding a category to a tile def and
 // having the editor lay it out should be one edit, not two.
