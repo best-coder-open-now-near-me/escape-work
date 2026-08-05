@@ -185,6 +185,11 @@ test('the inspector holds diagnostics and canvas edges resize directly', async (
 
   await expect(page.locator('#editor-inspector #editor-analysis')).toHaveCount(1);
   await expect(page.locator('#editor-shell > #editor-analysis')).toHaveCount(0);
+  await expect(page.locator('#editor-orientation')).toHaveCount(1);
+  await expect(page.locator('#editor-inspector #editor-orientation')).toHaveCount(0);
+  await expect.poll(() => page.locator('#editor-orientation-axes').evaluate(
+    (element) => element.style.getPropertyValue('--editor-orientation-yaw'),
+  )).toBe('45deg');
   await expect(page.locator('#ed-resize-x-left-add')).toHaveAttribute('aria-label', 'Add one column at the left edge');
   await expect(page.locator('#ed-resize-y-bottom-add')).toHaveAttribute('aria-label', 'Add one row at the bottom edge');
 

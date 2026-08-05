@@ -363,6 +363,7 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     // The point the rig is looking at (pre-shake), for tests that assert on
     // where a pan or a recenter actually sent the view.
     get focus() { return { x: baseX, z: baseZ }; },
+    get yaw() { return CAM.yaw; },
     setView,
     setTactical,
     toggleTactical: () => setTactical(!tactical),

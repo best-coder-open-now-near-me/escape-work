@@ -204,9 +204,11 @@ export function startEditor(app, levelData, stashKey) {
   // pinned to wherever boot put it, and any pan would have been inert.
   const focus = { x: 0, z: 0 };
   const refocus = () => { focus.x = (width - 1) / 2; focus.z = (height - 1) / 2; };
+  let updateViewportOrientation = () => {};
   app.on('update', (dt) => {
     renderer.animate(dt);
     controls.follow(focus, dt);
+    updateViewportOrientation();
   });
   // Actor spawn markers are editor-only affordances (the game replaces them
   // with character models).
@@ -1577,6 +1579,38 @@ export function startEditor(app, levelData, stashKey) {
   analysisHeading.textContent = 'Analysis';
   const problems = document.createElement('div');
   problems.id = 'editor-problems';
+  const orientation = document.createElement('div');
+  orientation.id = 'editor-orientation';
+  orientation.setAttribute('role', 'img');
+  orientation.setAttribute('aria-label', 'Viewport orientation: X and Y axes');
+  const orientationAxes = document.createElement('div');
+  orientationAxes.id = 'editor-orientation-axes';
+  orientationAxes.setAttribute('aria-hidden', 'true');
+  const orientationAxis = (axis, label) => {
+    const line = document.createElement('div');
+    line.className = 'editor-orientation-axis';
+    line.dataset.axis = axis;
+    const name = document.createElement('span');
+    name.textContent = label;
+    line.appendChild(name);
+    return line;
+  };
+  const orientationOrigin = document.createElement('span');
+  orientationOrigin.className = 'editor-orientation-origin';
+  orientationAxes.append(
+    orientationAxis('x', '+X'),
+    orientationAxis('y', '+Y'),
+    orientationOrigin,
+  );
+  orientation.appendChild(orientationAxes);
+  let viewportYaw = null;
+  updateViewportOrientation = () => {
+    const yaw = ((controls.yaw % 360) + 360) % 360;
+    if (yaw === viewportYaw) return;
+    viewportYaw = yaw;
+    orientationAxes.style.setProperty('--editor-orientation-yaw', `${yaw}deg`);
+  };
+  updateViewportOrientation();
 
   // Palette construction remains registry-driven; the shell simply gives it a
   // dedicated scroll region rather than making it compete with commands.
@@ -2460,7 +2494,7 @@ export function startEditor(app, levelData, stashKey) {
   inspectorBody.append(selectionInfo, levelRow);
   analysis.append(analysisHeading, viewRow, problems);
   inspector.append(inspectorHeading, inspectorBody, analysis);
-  bar.append(topbar, toolPanel, inspector);
+  bar.append(topbar, toolPanel, inspector, orientation);
   document.body.appendChild(bar);
   applyCollapse();
 

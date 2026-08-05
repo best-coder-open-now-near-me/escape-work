@@ -31,6 +31,38 @@ export function installEditorStyles() {
     #editor-identity span { opacity: .62; font-size: 11px; margin-top: 1px; }
     #editor-commands { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
     #editor-tools, #editor-inspector { pointer-events: auto; }
+    #editor-orientation {
+      grid-column: 2; grid-row: 2; align-self: end; justify-self: end;
+      display: grid; place-items: center; width: 76px; height: 76px; margin: 0 14px 14px 0;
+      pointer-events: none; border: 1px solid rgba(83, 83, 112, .9); border-radius: 8px;
+      background: rgba(17, 17, 31, .74); box-shadow: 0 7px 20px rgba(0, 0, 0, .34);
+    }
+    #editor-orientation-axes {
+      position: relative; width: 58px; height: 58px;
+      transform: rotate(var(--editor-orientation-yaw, 0deg));
+      transform-origin: center;
+    }
+    .editor-orientation-axis {
+      position: absolute; top: 50%; left: 50%; width: 23px; height: 2px;
+      transform-origin: 0 50%; color: #85dff6;
+    }
+    .editor-orientation-axis[data-axis="x"] { transform: translateY(-50%); }
+    .editor-orientation-axis[data-axis="y"] { transform: translateY(-50%) rotate(90deg); color: #f0cd7d; }
+    .editor-orientation-axis::before { content: ''; position: absolute; inset: 0; background: currentColor; }
+    .editor-orientation-axis::after {
+      content: ''; position: absolute; top: 50%; right: -1px; width: 6px; height: 6px;
+      border-top: 2px solid currentColor; border-right: 2px solid currentColor;
+      transform: translateY(-50%) rotate(45deg);
+    }
+    .editor-orientation-axis span {
+      position: absolute; top: 50%; right: -18px; transform: translateY(-50%);
+      color: currentColor; font-size: 10px; font-weight: 700; letter-spacing: 0;
+    }
+    .editor-orientation-origin {
+      position: absolute; top: 50%; left: 50%; width: 7px; height: 7px;
+      transform: translate(-50%, -50%); border: 2px solid #e8e8ef; border-radius: 50%;
+      background: #17171f;
+    }
     #editor-tools {
       grid-column: 1; grid-row: 2; display: flex; flex-direction: column;
       min-height: 0; overflow: hidden; border-radius: 8px;
@@ -121,6 +153,7 @@ export function installEditorStyles() {
       #editor-tools { left: 8px; transform: translateX(calc(-100% - 16px)); }
       #editor-inspector { right: 8px; transform: translateX(calc(100% + 16px)); }
       #editor-shell[data-tools-open="true"] #editor-tools, #editor-shell[data-inspector-open="true"] #editor-inspector { transform: translateX(0); }
+      #editor-orientation { grid-column: 1; grid-row: 2; width: 68px; height: 68px; margin: 0 12px 12px 0; }
       #editor-analysis { max-height: 165px; }
       #editor-shell .editor-panel-toggle { display: inline-flex; }
     }
