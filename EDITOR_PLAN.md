@@ -21,8 +21,9 @@ M0 and M4 and re-tags nothing here.
 Asked in-session on 2026-08-01. **Q1 is closed**: the designer proposed the
 layer-stack model, directed a feasibility spike ahead of milestone work, and
 approved the built result ("this looks great!", 2026-08-01) — see the spike
-section. **Q2 is closed** (2026-08-02, answer A — see below). Q3 remains open
-and the plan proceeds on its recommended default, tagged `[proposed]`.
+section. **Q2 is closed** (2026-08-02, answer A — see below). **Q3 is
+closed** (decision 9). Q4 remains open and is deliberately not decided by the
+connection-point interaction.
 
 **Q1 — What does "multifloor in a single level" mean mechanically?** The
 stated scene is "a lobby with a lot of height, multifloor in what is really a
@@ -82,6 +83,24 @@ NPC/companion/tiered-enemy brushes, save-directly-to-`levels/`. Recommended:
 all four (they're each small-to-medium and M0 is independent of the layer
 work), cutting stamps first if the round needs to shrink.
 
+**Q4 — How do multiple stairwells pair?** A level with one connection between
+each adjacent pair of storeys needs no pairing data. The moment there are two,
+the generator needs to know whether lower point A connects to upper point C or
+D. This does not change the settled drop-point interaction, but it changes the
+format and the validation model.
+
+- **A. One connection per adjacent storey pair (recommended).** Ground has an
+  up point; the top storey has a point from below; an intermediate storey has
+  both. No pairing UI or metadata. *Consequence:* simple, visible v1; a level
+  cannot have two distinct stairwells between the same two storeys yet.
+- **B. Named connection pairs.** Points carry the same connection name/id to
+  opt into a pair. *Consequence:* multiple stairwells work immediately, but
+  the supposedly setting-free workflow gains an identity control and orphan
+  pair validation.
+- **C. Pair by placement order.** The first lower point joins the first upper
+  point, and so on. *Consequence:* no visible metadata, but a reorder can
+  silently change a building's routes. Not recommended.
+
 ## Decisions
 
 | # | Decision | Status | Source / notes |
@@ -91,7 +110,7 @@ work), cutting stamps first if the round needs to shrink.
 | 3 | Verticality is required: tall single-level spaces with multifloor play | `[stated]` | designer, 2026-08-01: "a lobby with a lot of height, multifloor in what is really a single 'floor' level" |
 | 4 | Verticality model: stacked full-storey layers, each authored as an ordinary flat map, with one height setting per layer | `[ratified]` | designer-proposed 2026-08-01 ("full floors with one layer/height setting"), embodied by the spike, approved on sight ("this looks great!", 2026-08-01) |
 | 5 | Format: optional `"layers"` array, one entry per floor, bottom-up; a level without it is a single ground layer | `[ratified]` | shipped in the spike (merged 2026-08-01) and now written as well as read by the editor (M4). Documented in `levels/README.md`. `height` on layer *i* is the rise ABOVE storey *i*, not its own ceiling |
-| 6 | Storey connections are authored as drop points on their participating storeys. The generator carves and renders the staircase/portal from those points as needed; there is no global staircase setting or stored stair geometry. Invalid openings still fail loudly rather than being carved silently. | `[ratified]` | Designer, 2026-08-05: "more a drop point for each storey as connection points to carve from. then we can generate them as needed." This supersedes the earlier lower-storey marker-run wording. |
+| 6 | Storey connections are authored as start/end drop points on their participating storeys. The generator carves and renders the staircase/portal from those points as needed; there is no global staircase setting or stored stair geometry. A missing expected point generates a fallback staircase but is persistently warned and highlighted red; an invalid explicit opening still fails loudly rather than being carved silently. | `[ratified]` | Designer, 2026-08-05: "more a drop point for each storey as connection points to carve from. then we can generate them as needed," followed by "when no start or end point is set on a storey, generate the staircase anyways, but throw up a warning over it or a red highlight maybe?" This supersedes the earlier lower-storey marker-run wording. |
 | 7 | Movement: within a layer as today; between layers only via stair portals; no hop/fall/jump in v1 | `[proposed]` | cheap reversible default; shoving someone off the balcony is a tempting later verb, not v1 |
 | 8 | Cross-layer combat is LOS + reach only; no high/low-ground stat modifier | `[ratified]` | Q2, closed 2026-08-02: designer approved option A verbatim ("i approve your recommendation"). Keeps the `[stated]` "tactics stay as shipped" record intact (TODO.md) |
 | 9 | Editor QoL for v1: undo/redo, region stamps, actor brushes, save-to-disk | `[ratified]` | Q3 answered by IQ1 ("painter", 2026-08-02). All four shipped, plus fill/line/rect/eyedropper, a live playability lint, a metadata strip and per-placement rotation |
@@ -125,20 +144,25 @@ actors carry a `layer` index, within-layer queries go to that layer's grid,
 and only the genuinely cross-layer questions (sight, targeting, stair
 traversal) know more than one floor exists.
 
-**Storey connections.** The author drops a connection point on every storey
-that participates in a vertical route. Generation does the rest: carve the
-required openings, choose and render the staircase geometry, and emit the
-portal edges pathfinding uses. It must refuse an occupied or otherwise
-invalid opening at validation time -- never silently delete authored space.
-The points are the durable authoring data; generated stair geometry is not.
+**Storey connections.** The author drops a start and/or end connection point
+on every storey that participates in a vertical route. Generation does the
+rest: carve the required openings, choose and render the staircase geometry,
+and emit the portal edges pathfinding uses. The points are the durable
+authoring data; generated stair geometry is not.
+
+A missing expected point is not a blocker: the generator chooses a
+deterministic fallback and builds the connection anyway. The editor keeps a
+persistent warning in the Inspector, marks the affected storey red, and draws
+the fallback point as a red spatial highlight until the author provides the
+missing endpoint. An explicitly placed point whose opening is occupied or
+otherwise impossible still fails validation -- generation must not silently
+delete authored content to honour it.
 
 The exact rule for pairing several connection points is intentionally still
-open. The settled v1 shape is one or more visible points placed on the
+open -- see Q4. The settled v1 shape is visible start/end points on the
 participating storeys, not a level-wide staircase setting and not manually
-painted stair runs. Once the intended multi-stairwell workflow is chosen, the
-format can give paired points a shared connection identity without changing
-the editor's basic interaction. Dijkstra needs no new theory: per-storey
-graphs joined by generated portal edges, and AI routes through them for free.
+painted stair runs. Dijkstra needs no new theory: per-storey graphs joined by
+generated portal edges, and AI routes through them for free.
 
 **Combat and LOS.** Within a layer, every shipped rule applies verbatim.
 Across layers, one new primitive carries the load: a 3D sightline sampled
