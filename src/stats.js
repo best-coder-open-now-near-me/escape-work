@@ -806,8 +806,8 @@ export const spendablePoints = (sheet) => (sheet?.attrPoints || 0)
   + (classTrack(sheet || {}).some((n) => nodeAvailable(sheet, n)) ? (sheet?.classPoints || 0) : 0);
 
 // How much this character can carry. The cap follows effective Grit: five
-// guaranteed slots plus one per point. A five-Grit sheet retains the former
-// ten-item baseline, while gear that grants Grit carries its capacity with it.
+// guaranteed slots plus five per point. A five-Grit sheet carries 30 items,
+// while gear that grants Grit carries its capacity with it.
 //
 // This is deliberately an admission gate, never a reconciliation pass. If a
 // cap falls below what is already in the bag, nothing drops; the existing guard
@@ -815,7 +815,7 @@ export const spendablePoints = (sheet) => (sheet?.attrPoints || 0)
 export function inventoryCapOf(sheet) {
   if (!sheet) return 0;
   const grit = (sheet.attr?.grit || 0) + (equippedStats(sheet).attrBonus.grit || 0);
-  return Math.max(0, 5 + grit);
+  return Math.max(0, 5 + 5 * grit);
 }
 
 // Spend one banked attribute point raising `attr` by 1, then re-derive. Returns

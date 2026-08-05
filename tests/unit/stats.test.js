@@ -614,19 +614,19 @@ test('unequipItem returns gear to the bag, and refuses when the bag is full', ()
 
 test('inventory capacity follows Grit and leaves an over-cap bag intact', () => {
   const s = createSheet('office-drone');
-  assert.equal(inventoryCapOf(s), 10); // 5 guaranteed slots + the Drone's 5 Grit
+  assert.equal(inventoryCapOf(s), 30); // 5 guaranteed slots + five per Drone Grit
   s.attr.grit = 6;
-  assert.equal(inventoryCapOf(s), 11);
+  assert.equal(inventoryCapOf(s), 35);
 
-  s.inventory = new Array(10).fill('paper-wad');
+  s.inventory = new Array(34).fill('paper-wad');
   s.equipped.weapon = 'red-stapler';
   assert.equal(unequipItem(s, 'weapon', inventoryCapOf(s)), true);
-  assert.equal(s.inventory.length, 11);
+  assert.equal(s.inventory.length, 35);
 
   // Model a later cap loss: no automatic drop, but no further stowing either.
   s.attr.grit = 4;
-  assert.equal(inventoryCapOf(s), 9);
-  assert.equal(s.inventory.length, 11);
+  assert.equal(inventoryCapOf(s), 25);
+  assert.equal(s.inventory.length, 35);
   s.equipped.weapon = 'stapler';
   assert.equal(unequipItem(s, 'weapon', inventoryCapOf(s)), false);
   assert.equal(s.equipped.weapon, 'stapler');
