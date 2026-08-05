@@ -26,7 +26,7 @@ import { STATUSES } from './data/statuses.js';
 import { MISS_COLOR } from './hit-resolution.js';
 import { truncateByBudget } from './pathfinding.js';
 import { aimsAtAlly, buffOutcome, buffProblem, controlIsRanged, controlOutcome, controlProblem, dashDistanceOf, isControl, isMobility, mobilityProblem, zoneProblem } from './powers.js';
-import { damageBonus, roundAp } from './stats.js';
+import { damageBonus, roundAp, soakHit } from './stats.js';
 import { applyStatus, blockedBy, clearStatuses, statusList } from './statuses.js';
 import { dist, inReach } from './tactics.js';
 
@@ -203,7 +203,10 @@ export function createVerbs(d) {
     // also let a lethal slam swallow the status silently.
     if (plan.applies) {
       const blocked = blockedBy(en, plan.applies);
-      if (applyStatus(en, plan.applies, {}, 0)) {
+      // Their Composure resist, same as a member's against an enemy apply
+      // (combat.js) - this used to hardcode 0, one of the sites that quietly
+      // asserted coworkers had no Composure.
+      if (applyStatus(en, plan.applies, {}, en.combat.statusResist)) {
         d.statusFxAt(en, plan.applies);
         line += ` ${d.appliesLine(a, en.def.name)}`;
         // `charmed` is the one status that changes which SIDE somebody is on
@@ -389,7 +392,7 @@ export function createVerbs(d) {
       // identical between the two.
       if (isControl(a)) {
         const blocked = blockedBy(en, a.applies);
-        if (a.applies && applyStatus(en, a.applies, {}, 0)) {
+        if (a.applies && applyStatus(en, a.applies, {}, en.combat.statusResist)) {
           d.statusFxAt(en, a.applies);
           hits += 1;
         } else if (blocked) {
@@ -397,7 +400,7 @@ export function createVerbs(d) {
         }
         continue;
       }
-      const dmg = d.ambushDmg(d.rand(a.min, a.max) + damageBonus(d.active.sheet));
+      const dmg = soakHit(d.ambushDmg(d.rand(a.min, a.max) + damageBonus(d.active.sheet)), en.combat.deflect);
       const died = en.takeDamage(dmg);
       d.hitFx(en, 'paper', d.active);
       if (died) d.deathFx(en);

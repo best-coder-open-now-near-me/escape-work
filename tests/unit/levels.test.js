@@ -68,15 +68,23 @@ test('every registry cross-reference resolves', () => {
   // restatement is what let the mail room companion keep the old rig and the old
   // kit after the Mail Room class moved on - a silent copy that drifts. An
   // override is for DEPARTING from the class; matching it means delete the line.
-  // `maxHp` is exempt: enemies spell it `hp` and fromClass drops the inherited
-  // one, so an enemy's own value can legitimately equal the class's.
-  // `name` is NOT exempt any more: it is inherited like everything else, so a
+  // `maxHp` is NOT exempt any more, and neither is the `hp` spelling: an enemy
+  // now inherits health like it inherits everything else (data/enemies.js), so
+  // a departure is an override under the class's own key and gets compared like
+  // any other. The exemption is why the Guard could sit at 20 against
+  // Security's 26 with nothing to say so.
+  // `name` is NOT exempt either: it is inherited like everything else, so a
   // kit that restates the class's own label is the same silent copy as any
   // other - and the two companions that used to carry invented names are
   // exactly where that copy was hiding.
+  //
+  // What IS exempt is what only one SIDE of a fight has: a map char, an XP
+  // bounty, a body's loot, the AI's damage rolls and how it reads on the focus
+  // banner. Those aren't a second implementation of a shared stat - a party
+  // member has no `xp` reward because nobody kills him for it.
   const IDENTITY = new Set([
     'classId', 'char', 'examine', 'dialogue', 'recruitedDialogue',
-    'level', 'hp', 'xp', 'loot', 'attacks', 'attackAp', 'aggression', 'summon',
+    'level', 'xp', 'loot', 'attacks', 'attackAp', 'aggression', 'summon',
   ]);
   // The check's granularity follows the MERGE's: a field merged per key (attr)
   // is checked per key, or three verbatim attributes hide behind one that
@@ -98,6 +106,20 @@ test('every registry cross-reference resolves', () => {
         assert.notDeepEqual(val, base[key],
           `${regName}.${id}.${key} just repeats ${kit.classId}.${key} - delete it and inherit`);
       }
+    }
+  }
+
+  // One stat, one spelling. The check above can only compare keys the class
+  // ALSO has, so a kit writing `hp` where the class writes `maxHp` slips past
+  // it untouched however far the two values diverge - which is precisely how
+  // the Guard's 20 lived next to Security's 26 for as long as it did. A second
+  // name for a shared stat is a parallel implementation with extra steps.
+  for (const [regName, kits] of ARCHETYPE_KITS) {
+    for (const [id, kit] of Object.entries(kits)) {
+      if (!kit.classId) continue;
+      assert.equal(kit.hp, undefined,
+        `${regName}.${id} spells max HP \`hp\` while ${kit.classId} spells it \`maxHp\` - `
+        + 'inherit the class\'s health, or depart from it under its own key so the check above sees it');
     }
   }
 

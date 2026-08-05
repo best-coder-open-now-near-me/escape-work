@@ -557,10 +557,14 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   one while still calling himself mail room. An override means DEPARTING from the class;
   a lint fails the build if one merely repeats what the class already says.
   Registries export their raw kit tables (`COMPANION_KITS`, `ENEMY_KITS`) for
-  it. Enemies drop the inherited `maxHp` - they spell it `hp`, and `unitCombat`
-  prefers `maxHp`, so keeping it would silently outrank their own. Characters
-  with no class twin (The Manager, the Executive) stay written out; don't invent
-  a class just to inherit from one.
+  it. A class-backed enemy inherits `maxHp` like everything else - the old
+  `hp`-vs-`maxHp` double spelling (and the `drop: ['maxHp']` machinery it
+  needed) is gone, because a mandatory override is invisible to the lint and
+  the Guard sat at 20 against Security's 26 with nothing to say so. The one
+  character with no class twin (the Executive) stays written out - The Manager
+  looked like a second one until `middle-manager` turned out to have been in
+  the registry all along, the same way `human-resources` had; don't invent a
+  class just to inherit from one, and check before declaring there's no twin.
 - **New enemy**: entry in `data/enemies.js` + character in a level's `actors`
   legend + a .glb in `assets/characters/`. If it's a playable job, give it a
   `classId` instead of restating the class.
@@ -595,10 +599,17 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   `maxHp`/`maxAp` are recomputed from `attr` + an innate `base` floor by
   `recomputeDerived(sheet)`; **never assign `sheet.maxHp`/`sheet.maxAp` directly**
   (they'd drift on the next recompute). Any code that changes an attribute calls
-  `recomputeDerived`. AI-driven units (enemies, and enemy-side summons) are NOT
-  sheets — they read stats through `unitCombat(def)` and scale on the enemy
-  curve, not attributes. (A PLAYER-side summon is the exception: it's a
-  controllable temporary member with a real sheet — see **Summons** below.)
+  `recomputeDerived`. AI-driven units (enemies, and enemy-side summons) are not
+  sheets, but attributes are their source too: `unitCombat(def)` derives
+  accuracy (Savvy), dodge (Hustle), damage bonus (Savvy), deflect and status
+  resist (Composure), grit saves and initiative speed (Hustle) from `def.attr`
+  through the SAME functions a sheet uses — everything is the same in enemies
+  as allies; no stat gets a side-local substitute (designer, 2026-08-05). The
+  storage differs, never the rules: a def's flat `accuracy`/`dodge`/`soak` are
+  its gear-equivalent innate lines, stacked on top of the derivation the way a
+  sheet stacks equipment. Only max HP/AP stay authored per def (enemies level
+  on the placement curve, `scaleEnemy`, not by spending points). (A PLAYER-side
+  summon is an actual member: it carries a real sheet — see **Summons** below.)
 - **Talents**: per-class in `data/classes.js` (shown on the resume cards).
   Effects the code understands: paperDamageBonus, paperAmmoDiscount,
   paperCutImmune, shockImmune, slipImmune, surfaceDamageResist, hasLighter,

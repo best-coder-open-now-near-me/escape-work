@@ -25,7 +25,7 @@ import { throwablesFor as throwableIdsFor, UNIVERSAL_ACTIONS,
 } from './hotbar-model.js';
 import { truncateByBudget, routeToFiringPosition, trimToFirst } from './pathfinding.js';
 import { pronounsOf, capitalize, verb } from './creation.js';
-import { createSheetFrom, damageBonus, applyDamage, deflect, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, gritSaveChance, roundAp, fmtAp, MOVE, REACH } from './stats.js';
+import { createSheetFrom, damageBonus, applyDamage, deflect, soakHit, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, gritSaveChance, roundAp, fmtAp, MOVE, REACH } from './stats.js';
 import {
   applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy,
   statusSeverity, tickStep,
@@ -621,7 +621,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const memberSlot = (m) => ({ member: m, team: 'player', initMod: effectiveAttr(m.sheet).hustle ?? 0 });
   // AI-driven units are always enemy-side; player-side summons are members
   // (memberSlot), never units.
-  const unitSlot = (u) => ({ unit: u, team: 'enemy', initMod: u.combat.ap || 0 });
+  // The same modifier as a member's, from the same attribute (initiative.js) -
+  // AP used to stand in for it on this side only.
+  const unitSlot = (u) => ({ unit: u, team: 'enemy', initMod: u.combat.hustle || 0 });
   const slotActor = (s) => (s.member ? s.member.actor : s.unit);
   const slotAlive = (s) => (s.member ? s.member.sheet.hp > 0 && !!s.member.actor : !!s.unit.alive);
   const slotName = (s) => (s.member ? s.member.sheet.name : s.unit.def.name);
@@ -1370,7 +1372,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // where the victim most needs to be told why the second slam didn't daze.
       if (!died) {
         const blocked = blockedBy(v.statusTarget, 'stunned');
-        if (applyStatus(v.statusTarget, 'stunned')) {
+        if (applyStatus(v.statusTarget, 'stunned', {}, v.resist)) {
           statusFxAt(v.member ? v.body : v.ref, 'stunned');
           msg += ` They crumple - ${STATUSES.stunned.name}, they lose their next turn.`;
         } else if (blocked) msg += ` ${immunityLine(blocked, v.name)}`;
@@ -1735,15 +1737,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       fx.damageText(lx, lz, `-${dmg}`, '#ffd76b', { big: died });
       msg += ` They come down hard. -${dmg}.`;
       if (!died) {
-        const blocked = blockedBy(en, 'stunned');
-        if (applyStatus(en, 'stunned')) {
-          statusFxAt(en, 'stunned');
-          // Name the status the HUD chip names, and say what it costs them.
-          // "Dazed." named nothing on the sheet and sounded like a to-hit
-          // penalty; the status is a SKIPPED TURN (designer, 2026-07-31: "what
-          // does it do?"), and a lost turn is worth reading as one.
-          msg += ` ${STATUSES.stunned.name} - they lose their next turn.`;
-        } else if (blocked) msg += ` ${immunityLine(blocked, en.def.name)}`;
+        // Through landStun, the one crash-landing stun for either shape of
+        // victim - resist and immunity narration included. This site predated
+        // it and kept a hand-rolled copy that skipped the coworker's resist.
+        // The line names the status the HUD chip names, and says what it
+        // costs them: the status is a SKIPPED TURN (designer, 2026-07-31:
+        // "what does it do?"), and a lost turn is worth reading as one.
+        msg += landStun(en, ` ${STATUSES.stunned.name} - they lose their next turn.`);
         if (applyStatus(en, 'pinned')) statusFxAt(en, 'pinned');
       } else {
         callbacks.onEnemyKilled(en);
@@ -2139,7 +2139,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // out of aiAttack so an opportunity attack lands by exactly the same rules
   // as a turn attack rather than reimplementing them (TACTICS_PLAN M2).
   function unitStrikesMember(unit, m, atk) {
-    let dmg = rand(atk.min, atk.max);
+    // The same Savvy-derived bonus a member's swing adds (stats.damageBonus) -
+    // a unit's attack lines are its weapon, the bonus is its hands.
+    let dmg = rand(atk.min, atk.max) + (unit.combat.dmgBonus || 0);
     // The attack roll. A miss skips damage, the deflect interaction, the
     // flinch, and any applied status; the enemy's AP was already committed
     // by the caller.
@@ -2155,8 +2157,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     let line = atk.log;
     // Composure soaks a flat slice off the hit (one point always lands),
     // before the Deflect Blame stance (incomingMult) halves whatever is left.
-    const soak = deflect(m.sheet);
-    if (soak > 0) dmg = Math.max(1, dmg - soak);
+    dmg = soakHit(dmg, deflect(m.sheet));
     const inMult = statusFx(m.sheet).incomingMult ?? 1;
     if (inMult < 1) {
       dmg = Math.max(1, Math.ceil(dmg * inMult));
@@ -2398,7 +2399,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         refresh();
         return;
       }
-      const dmg = rand(a.min, a.max) + damageBonus(attacker.sheet);
+      // Roll, bonus, soak: the mirror of unitStrikesMember with the roles
+      // reversed - the defender's Composure shaves this hit like a member's
+      // shaves theirs.
+      const dmg = soakHit(rand(a.min, a.max) + damageBonus(attacker.sheet), defender.combat.deflect);
       const died = defender.takeDamage(dmg);
       hitFx(defender, 'melee', attacker);
       if (died) deathFx(defender);

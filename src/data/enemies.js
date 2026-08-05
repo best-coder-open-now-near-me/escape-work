@@ -112,7 +112,15 @@ const KITS = {
     ap: 5,
     attackAp: 3,
     xp: 10,
-    accuracy: 0.05, // sharper aim than the base coworkers (HIT_PLAN)
+    // The one bespoke enemy left, and bespoke does not mean statless: every
+    // combatant derives accuracy, dodge, damage, deflect and saves from the
+    // same four attributes (stats.unitCombat), so his are authored here where
+    // a class twin would have carried them. Written to read as the man: hard
+    // to fluster (the deflect and the resist are his), sharp (the Savvy is
+    // where "sharper aim than the base coworkers" now comes from - it also
+    // buys his swings the same damage bonus a member's Savvy buys), soft hands
+    // (grit), and he has never hurried in his life.
+    attr: { grit: 4, hustle: 2, savvy: 6, composure: 8 },
     aggression: 'red', // descended from the floors above; negotiation is beneath him
     focus: 0.9, // picks the kill and works it - restructuring is a discipline
     examine: 'An Executive, down from the floors above. The air pressure changes around him.',
@@ -154,7 +162,6 @@ const KITS = {
     // Security Guard from the player's guard.
     look: { build: { legs: 1.82, torso: 1.24 } },
     level: 1,
-    hp: 12,
     attackAp: 3,
     xp: 6,
     aggression: 'yellow', // wants a "culture-fit conversation" before the knives
@@ -221,9 +228,10 @@ const KITS = {
     // guard, who stands taller and less padded on the same rig.
     look: { build: { torso: 1.34 } },
     level: 2,
-    hp: 20,
     attackAp: 3,
     xp: 11,
+    // ON TOP of the dodge his Hustle already derives (stats.unitCombat) - the
+    // def has no shoes to put it in, so a trained foot is stated outright.
     dodge: 0.05, // trained to stay on his feet (HIT_PLAN)
     // The maglite is already in his attack lines, and a long one is genuinely a
     // reach weapon (TACTICS_PLAN revision M5). 2.1 clears a full orthogonal tile
@@ -262,18 +270,22 @@ const KITS = {
 export const ENEMY_TYPES = Object.fromEntries(
   Object.entries(KITS).map(([id, kit]) => [
     id,
-    // `maxHp` is dropped ONLY when this enemy states its own `hp`: the two
-    // registries spell max HP differently and unitCombat prefers `maxHp`, so an
-    // inherited one would silently outrank the enemy's own value.
+    // No `drop` any more, and no special case for health. A class-backed enemy
+    // inherits `maxHp` like it inherits everything else, and departs from it -
+    // if it ever should - by overriding `maxHp` under the class's own spelling,
+    // where the redundant-override lint can see it like any other field.
     //
-    // It used to be dropped unconditionally, which quietly made the `hp`
-    // override MANDATORY - a class-backed enemy that deleted its hp line, the
-    // one thing the "an override is for DEPARTING" rule asks you to do, came
-    // out the far side carrying neither field and no health at all. Nothing
-    // caught it because both entries that existed happened to override.
-    // Inheriting a class's health is the DEFAULT now, and stating `hp` is the
-    // departure it was always supposed to be.
-    kit.classId ? fromClass(kit, { drop: kit.hp != null ? ['maxHp'] : [] }) : kit,
+    // The old `drop: ['maxHp']` existed because these entries spelled health
+    // `hp` while the class spelled it `maxHp`, and unitCombat prefers `maxHp`,
+    // so the class's would have outranked the enemy's. That is a second name
+    // for one stat, and it did the damage a second name always does: dropping
+    // the inherited field made an `hp` line MANDATORY (delete it and the enemy
+    // had no health at all), and because the override was mandatory it was
+    // invisible - the Guard sat at 20 against Security's 26 and HR at 12
+    // against Human Resources' 20, and the lint that exists to catch a silent
+    // copy exempts `hp`, so nothing ever said so. One spelling, one value,
+    // checked like everything else.
+    kit.classId ? fromClass(kit) : kit,
   ]),
 );
 export { KITS as ENEMY_KITS };

@@ -6,18 +6,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { unitCombat } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
-import { ENEMY_TYPES } from '../../src/data/enemies.js';
+import { ENEMY_TYPES, ENEMY_KITS } from '../../src/data/enemies.js';
 import { ACTIONS, arrivalLine, summonSpec } from '../../src/data/actions.js';
 
 // Resolve a summon descriptor's archetype id the way world.spawnSummon does.
 const archetypeOf = (id) => CLASSES[id] || ENEMY_TYPES[id];
 
-test('unitCombat normalizes an ENEMY_TYPES def (max HP spelled `hp`)', () => {
-  const c = unitCombat(ENEMY_TYPES.hr);
-  assert.equal(c.maxHp, ENEMY_TYPES.hr.hp); // enemies spell it `hp`
-  assert.equal(c.attackAp, ENEMY_TYPES.hr.attackAp);
+test('unitCombat normalizes a bespoke ENEMY_TYPES def (max HP spelled `hp`)', () => {
+  const c = unitCombat(ENEMY_TYPES.executive); // no class twin; his own stat block
+  assert.equal(c.maxHp, ENEMY_TYPES.executive.hp); // bespoke enemies spell it `hp`
+  assert.equal(c.attackAp, ENEMY_TYPES.executive.attackAp);
   assert.ok(Array.isArray(c.attacks) && c.attacks.length > 0);
-  assert.equal(c.xp, ENEMY_TYPES.hr.xp);
+  assert.equal(c.xp, ENEMY_TYPES.executive.xp);
 });
 
 test('unitCombat normalizes a class archetype (max HP spelled `maxHp`)', () => {
@@ -41,19 +41,17 @@ test('every enemy resolves a max HP, inherited or stated', () => {
   }
 });
 
-test('a class-backed enemy with no `hp` line inherits the class health', () => {
-  const m = ENEMY_TYPES.manager;
-  assert.equal(m.classId, 'middle-manager');
-  assert.equal(m.hp, undefined, 'states no health of its own');
-  assert.equal(unitCombat(m).maxHp, CLASSES['middle-manager'].maxHp);
-});
-
-test('a class-backed enemy that DOES state `hp` still outranks the class', () => {
-  // The reason the drop exists at all: the two registries spell max HP
-  // differently and unitCombat prefers `maxHp`, so an inherited one would win.
-  const g = ENEMY_TYPES['security-guard'];
-  assert.ok(g.hp != null && g.hp !== CLASSES.security.maxHp, 'a real departure');
-  assert.equal(unitCombat(g).maxHp, g.hp);
+test('a class-backed enemy inherits the class health, no second spelling', () => {
+  // "Everything should be the same in enemies as allies" (designer,
+  // 2026-08-05): a class-backed enemy carries no `hp` of its own - health is
+  // the class's `maxHp`, inherited like every other field, and a departure
+  // would be a `maxHp` override the redundant-override lint can see.
+  for (const [id, def] of Object.entries(ENEMY_TYPES)) {
+    if (!def.classId) continue;
+    assert.equal(ENEMY_KITS[id].hp, undefined, `${id} states no health of its own`);
+    assert.equal(unitCombat(def).maxHp, CLASSES[def.classId].maxHp,
+      `${id} fights at ${def.classId}'s health`);
+  }
 });
 
 test('unitCombat defaults xp/loot for a player class with no AI fields', () => {

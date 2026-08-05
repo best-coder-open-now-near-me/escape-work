@@ -6,11 +6,13 @@
 // There is no side-phase; a member's turn and an enemy's turn interleave by
 // roll.
 //
-// The modifier is a unit's SPEED: for a party member it is their `hustle`
-// attribute (the point-investable stat that also drives AP - invest in hustle
-// and you act earlier AND do more per turn, coherently); for an enemy it is
-// their `ap` budget (enemies have no attributes, and AP is their quickness).
-// combat.js reads the right source and passes it in as `initMod`. The d20
+// The modifier is a unit's SPEED, and speed is `hustle` for EVERY combatant -
+// the point-investable stat that also drives AP (invest in hustle and you act
+// earlier AND do more per turn, coherently). Enemies used to roll their `ap`
+// budget instead, under a comment here claiming they had no attributes; they
+// had them all along (data/enemies.js `attr`), and no stat gets a side-local
+// substitute. combat.js reads the right storage and passes it in as `initMod`.
+// The d20
 // dominates the small (~3..8) modifier, so order is mostly luck with a
 // deliberate speed lean - the d20 + modifier shape it echoes. A missing
 // modifier is treated as +0.

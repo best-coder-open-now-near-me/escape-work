@@ -16,7 +16,7 @@
 import { posOf } from './combat-geometry.js';
 import { ACTIONS } from './data/actions.js';
 import { MISS_COLOR } from './hit-resolution.js';
-import { applyDamage, damageBonus, equippedAction, rangeOf, roundAp, weaponProc } from './stats.js';
+import { applyDamage, damageBonus, equippedAction, rangeOf, roundAp, soakHit, statusResist, weaponProc } from './stats.js';
 import { applyStatus, blockedBy, clearStatuses, hasStatus, statusFx, statusList } from './statuses.js';
 
 export function createPlayerStrike(d) {
@@ -102,6 +102,9 @@ export function createPlayerStrike(d) {
       dmg = d.rand(a.min, a.max) + damageBonus(d.active.sheet); // carried staplers count
       if (a.ammoCost) dmg += d.talentFxOf(d.active).paperDamageBonus || 0;
       dmg = d.ambushDmg(dmg);
+      // Their Composure shaves the hit exactly as a member's shaves an enemy's
+      // (combat.js unitStrikesMember) - same soak, other direction.
+      dmg = soakHit(dmg, en.combat.deflect);
       died = en.takeDamage(dmg);
       // Anything that arrived from over there lands as a projectile hit, not a
       // punch: light debris thrown away from the shooter.
@@ -117,14 +120,17 @@ export function createPlayerStrike(d) {
       d.syncUnitSpeed(en); // the gum goes with it, and so does the limp
       if (woke) line += ' Their surprise is power-cycled away.';
     }
-    // A status the action carries lands on a live target (enemies have no
-    // Composure, so no resist). This is the player-action `applies` vector.
+    // A status the action carries lands on a live target, against the same
+    // Composure resist a member gets (combat.js reads statusResist for the
+    // mirror-image apply). A comment here used to claim "enemies have no
+    // Composure, so no resist" - they had it the whole time, sitting unread in
+    // `attr`. This is the player-action `applies` vector.
     // A window read BEFORE the apply, so a stun Detain can't land is narrated
     // rather than swallowed - checking after would see the window this very
     // application just granted.
     if (a.applies && !died) {
       const blocked = blockedBy(en, a.applies);
-      if (applyStatus(en, a.applies)) {
+      if (applyStatus(en, a.applies, {}, en.combat.statusResist)) {
         d.statusFxAt(en, a.applies);
         line += ` ${d.appliesLine(a, en.def.name)}`;
       } else if (blocked) line += ` ${d.immunityLine(blocked, en.def.name)}`;
@@ -133,7 +139,7 @@ export function createPlayerStrike(d) {
     // weapon's own swing (swing the gum stapler, fling gum).
     const proc = weaponProc(d.active.sheet);
     if (proc && !died && id === equippedAction(d.active.sheet)
-      && d.resolveProc(proc.chance) && applyStatus(en, proc.applies)) {
+      && d.resolveProc(proc.chance) && applyStatus(en, proc.applies, {}, en.combat.statusResist)) {
       d.statusFxAt(en, proc.applies);
       line += ` ${d.appliesLine(proc, en.def.name)}`;
     }
@@ -171,6 +177,7 @@ export function createPlayerStrike(d) {
         // walking onto the tile does. The enemy model consults none.
         hazardAt: (x, z) => d.world.memberSurfDamage(v.sheet, x, z),
         statusTarget: v.sheet,
+        resist: statusResist(v.sheet),
         onDeath: () => d.notifyMemberDown(),
         dmgColor: undefined,
       };
@@ -182,6 +189,7 @@ export function createPlayerStrike(d) {
       hurt: (dmg) => v.takeDamage(dmg),
       hazardAt: (x, z) => d.world.enemySurfDamage(x, z),
       statusTarget: v,
+      resist: v.combat.statusResist,
       onDeath: () => { d.deathFx(v); d.callbacks.onEnemyKilled(v); },
       dmgColor: '#ffd76b',
     };

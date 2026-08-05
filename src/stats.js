@@ -64,8 +64,18 @@ export function xpNextForLevel(level) {
 // A DOS2-style percentage hit model: hitChance = BASE + accuracy(attacker) -
 // dodge(defender) + mods, clamped. Accuracy derives from Savvy, dodge from
 // Hustle - the same "attributes are the source, numbers are derived" shape the
-// rest of the sheet uses. Enemies aren't sheets, so their innate accuracy/dodge
-// ride through unitCombat(def).
+// rest of the sheet uses, and it is the shape for EVERY combatant. A member and
+// a coworker are the same kind of thing standing on opposite sides of a fight;
+// neither side gets a private hit model.
+//
+// This used to be two models. A sheet derived accuracy from Savvy and dodge
+// from Hustle; an AI unit read a flat authored number and defaulted to ZERO, so
+// the Security Guard's Savvy 5 bought him nothing and every coworker in the game
+// swung at exactly HIT.BASE. `accFromSavvy`/`dodgeFromHustle` below are that one
+// formula, factored out so both storage shapes reach it: a sheet passes its
+// effective attributes and adds gear, a def passes `attr` and adds whatever the
+// entry states innately. The innate fields are the coworker's equivalent of a
+// worn item - a bonus ON TOP of the derivation, never a replacement for it.
 //
 // The model is LIVE (milestone 2): a base 85% hit, nudged ±5% per accuracy/
 // dodge step, clamped to [35%, 95%] so a 1-in-20 whiff always remains and a
@@ -401,11 +411,32 @@ export function unitCombat(def) {
     attacks: def.attacks || [],
     xp: def.xp ?? 0,
     loot: def.loot || [],
-    // Innate hit-chance stats for AI units (fractions, default 0). Enemies
-    // aren't sheets, so this is the seam their accuracy/dodge ride through -
-    // the same passthrough every other unit stat uses (HIT_PLAN.md).
-    accuracy: def.accuracy || 0,
-    dodge: def.dodge || 0,
+    // Hit-chance stats, DERIVED from attributes by the same two functions a
+    // sheet uses, plus whatever the entry states innately. A def has no gear
+    // slots, so its flat `accuracy`/`dodge` are its equivalent of worn items -
+    // the Executive's sharper aim, the Guard's trained footing - and they add
+    // to the derivation rather than standing in for it.
+    //
+    // They used to BE it: this read `def.accuracy || 0` and nothing else, so an
+    // AI unit's Savvy and Hustle were inert and every coworker without an
+    // innate line attacked and defended at exactly HIT.BASE. That is the same
+    // bug REVIEW.md found in `grit` one line down, in the same seam, for the
+    // same reason - the attributes were sitting right there on the def and the
+    // read asked for a top-level field instead (HIT_PLAN.md).
+    accuracy: accFromSavvy(def.attr?.savvy) + (def.accuracy || 0),
+    dodge: dodgeFromHustle(def.attr?.hustle) + (def.dodge || 0),
+    // The other three attribute-derived combat stats, by the same rule and for
+    // the same reason. Members had all three and AI units had none: a
+    // coworker's swings rolled bare dice while a member's added Savvy, a
+    // member shaved every hit by Composure while a coworker soaked nothing,
+    // and applyStatus took a resist that every unit call site hardcoded to 0 -
+    // demolition.js even documented "members carry a resist; coworkers do not"
+    // as if it were a rule. It never was ("everything should be the same in
+    // enemies as allies" - designer, 2026-08-05). `soak`/`bonusDmg`, where a
+    // def states them, are the gear-equivalent innate lines, on top.
+    dmgBonus: dmgFromSavvy(def.attr?.savvy) + (def.bonusDmg || 0),
+    deflect: deflectFromComposure(def.attr?.composure) + (def.soak || 0),
+    statusResist: deflectFromComposure(def.attr?.composure),
     // Melee reach. An AI unit wears no weapon, so its reach is stated on the
     // def outright rather than derived from equipment - a coworker with a long
     // handled thing sets `reach` and everyone else inherits the floor.
@@ -417,6 +448,12 @@ export function unitCombat(def) {
     // ever defined, so every enemy in the game saved at the `?? 2` fallback and
     // the Guard's Grit 7 was silently discarded (REVIEW.md 2026-08-02 sec 1.5).
     grit: def.grit ?? def.attr?.grit ?? 2,
+    // Hustle, for initiative: everybody rolls d20 + Hustle (initiative.js).
+    // Enemies used to roll d20 + AP under a comment claiming they had no
+    // attributes - which handed the action BUDGET a second job as quickness,
+    // the exact double-counting the member model does through one stat on
+    // purpose (invest in Hustle: act earlier AND do more, coherently).
+    hustle: def.attr?.hustle ?? 0,
   };
 }
 
@@ -577,8 +614,8 @@ export function effectiveAttr(sheet) {
 // every current class - damage now grows by spending points into Savvy). The
 // old "best carried stapler counts" rule is gone: a weapon only counts in hand.
 export function damageBonus(sheet) {
-  const savvy = Math.floor((effectiveAttr(sheet).savvy || 0) / PROGRESSION.DMG_PER_SAVVY);
-  return (sheet.bonusDmg || 0) + savvy + equippedStats(sheet).dmg;
+  return (sheet.bonusDmg || 0) + dmgFromSavvy(effectiveAttr(sheet).savvy)
+    + equippedStats(sheet).dmg;
 }
 
 // A sheet's melee reach in tile-units: the floor every character has, plus
@@ -638,29 +675,58 @@ export function ammoCostOf(sheet, actionId) {
 // incoming hit (one point of damage always lands, so it never fully negates).
 // Outfit/trinket `soak` stacks on top.
 export function deflect(sheet) {
-  return Math.floor((effectiveAttr(sheet).composure || 0) / PROGRESSION.COMP_PER_DEFLECT)
-    + equippedStats(sheet).soak;
+  return deflectFromComposure(effectiveAttr(sheet).composure) + equippedStats(sheet).soak;
 }
 
 // Composure also shakes off applied statuses faster - it shortens the sticky
 // ones (a combat gum flick) by this many turns. Poise on a different axis.
 export function statusResist(sheet) {
-  return Math.floor((effectiveAttr(sheet).composure || 0) / PROGRESSION.COMP_PER_DEFLECT);
+  return deflectFromComposure(effectiveAttr(sheet).composure);
+}
+
+// The two derivations, as pure functions of one attribute. Every combatant in
+// the game reaches its accuracy and its dodge through these - the sheet
+// wrappers below, and `unitCombat` for an AI-driven unit. Kept separate from
+// those wrappers for exactly one reason: the two sides store their attributes
+// differently (a sheet has `attr` plus gear and talents, a def has `attr`), and
+// that storage difference is the ONLY thing either wrapper is allowed to be
+// about. The moment a formula lives in the wrapper, the two sides drift.
+export function accFromSavvy(savvy) {
+  return Math.floor((savvy || 0) / HIT.ACC_PER_SAVVY) * HIT.STEP;
+}
+export function dodgeFromHustle(hustle) {
+  return Math.floor((hustle || 0) / HIT.DODGE_PER_HUSTLE) * HIT.STEP;
+}
+export function dmgFromSavvy(savvy) {
+  return Math.floor((savvy || 0) / PROGRESSION.DMG_PER_SAVVY);
+}
+// One derivation for BOTH of Composure's defensive jobs - the flat damage
+// shave (`deflect`) and the status shortening (`statusResist`) ride the same
+// step, which is why there aren't two functions here.
+export function deflectFromComposure(composure) {
+  return Math.floor((composure || 0) / PROGRESSION.COMP_PER_DEFLECT);
+}
+
+// Soak applied to one landed hit: a shaved hit always leaves one point, so
+// deflect never fully negates. THE damage-mitigation arithmetic for every
+// combatant - the member sink (combat.js unitStrikesMember) and the
+// member-swings-at-a-coworker sites all call this rather than each keeping a
+// private max().
+export function soakHit(dmg, soak) {
+  return soak > 0 ? Math.max(1, dmg - soak) : dmg;
 }
 
 // A sheet's accuracy: how much its Savvy (+ gear acc) adds to the hit chance,
 // as a fraction (0.05 per step). Layered onto the attacker side of hitChance.
 export function accuracy(sheet) {
-  return Math.floor((effectiveAttr(sheet).savvy || 0) / HIT.ACC_PER_SAVVY) * HIT.STEP
-    + equippedStats(sheet).acc;
+  return accFromSavvy(effectiveAttr(sheet).savvy) + equippedStats(sheet).acc;
 }
 
 // A sheet's dodge: how much its Hustle (+ gear dodge) subtracts from an
 // attacker's hit chance, as a fraction. Hustle already buys AP and initiative;
 // this is its defensive second job (HIT_PLAN #2).
 export function dodge(sheet) {
-  return Math.floor((effectiveAttr(sheet).hustle || 0) / HIT.DODGE_PER_HUSTLE) * HIT.STEP
-    + equippedStats(sheet).dodge;
+  return dodgeFromHustle(effectiveAttr(sheet).hustle) + equippedStats(sheet).dodge;
 }
 
 // The chance an attack lands: base + attacker accuracy - defender dodge + any

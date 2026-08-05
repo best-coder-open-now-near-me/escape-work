@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { COMPANIONS } from '../../src/data/companions.js';
 import {
-  createSheet, grantTalent, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, spendablePoints, pendingPoints, scaleEnemy, statusResist, accuracy, dodge, hitChance, rollHit, unitCombat, equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, gritSaveChance, SAVE,
+  createSheet, grantTalent, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, spendablePoints, pendingPoints, scaleEnemy, statusResist, accuracy, dodge, accFromSavvy, dodgeFromHustle, dmgFromSavvy, deflectFromComposure, soakHit, hitChance, rollHit, unitCombat, equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, gritSaveChance, SAVE,
 } from '../../src/stats.js';
 import * as stats from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
@@ -390,13 +390,59 @@ test('scaleEnemy grows AP once the gap reaches AP_PER levels', () => {
   assert.equal(m.ap, 5); // base def untouched
 });
 
-test('innate accuracy/dodge survive unitCombat', () => {
-  // Two enemies, because the two dials are authored on different people: the
-  // Executive aims better, the Security Guard is harder to pin down.
-  assert.ok(unitCombat(ENEMY_TYPES.executive).accuracy > 0, 'the Executive is accurate');
-  assert.ok(unitCombat(ENEMY_TYPES['security-guard']).dodge > 0, 'the guard is evasive');
-  assert.equal(unitCombat(ENEMY_TYPES.manager).accuracy, 0); // the base tier stays plain
-  assert.equal(unitCombat(ENEMY_TYPES.manager).dodge, 0);
+test('an AI unit derives accuracy/dodge from its attributes, like a sheet', () => {
+  // One hit model, both sides (HIT_PLAN): Savvy buys accuracy and Hustle buys
+  // dodge through the same two functions a member's sheet uses. Before this,
+  // unitCombat read only the flat innate fields, so a coworker's attributes
+  // were inert and anyone without an authored line fought at exactly HIT.BASE.
+  const mm = CLASSES['middle-manager'].attr; // the Manager inherits this spread
+  const m = unitCombat(ENEMY_TYPES.manager);
+  assert.equal(m.accuracy, accFromSavvy(mm.savvy));
+  assert.equal(m.dodge, dodgeFromHustle(mm.hustle));
+});
+
+test('innate accuracy/dodge stack ON TOP of the derivation', () => {
+  // A flat field is a def's gear slot - the Guard's trained footing - so it
+  // adds to what the attributes derive, never replaces it.
+  const g = ENEMY_TYPES['security-guard']; // Security's Hustle 4 derives 0.05, plus the innate 0.05
+  assert.equal(unitCombat(g).dodge, dodgeFromHustle(g.attr.hustle) + g.dodge);
+  assert.ok(unitCombat(g).dodge > g.dodge, 'the attributes contribute');
+});
+
+test('a bespoke enemy carries an authored attr block, and it is the source', () => {
+  // The Executive has no class twin, which does not exempt him from the rule
+  // that attributes are where combat stats come from: his aim is his Savvy
+  // now, not the innate line the entry used to carry instead of attributes.
+  const x = ENEMY_TYPES.executive;
+  assert.ok(x.attr, 'the Executive has attributes');
+  const c = unitCombat(x);
+  assert.equal(c.accuracy, accFromSavvy(x.attr.savvy));
+  assert.equal(c.grit, x.attr.grit, 'saves stop falling back to the default');
+});
+
+test('unitCombat derives damage bonus, deflect and status resist for both sides', () => {
+  // The other three attribute-derived stats members always had. Same
+  // functions, same numbers: a coworker's Savvy buys swings the member bonus,
+  // their Composure shaves hits and shortens statuses like a member's does.
+  const m = unitCombat(ENEMY_TYPES.manager); // middle-manager: savvy 4, composure 7
+  const a = CLASSES['middle-manager'].attr;
+  assert.equal(m.dmgBonus, dmgFromSavvy(a.savvy));
+  assert.equal(m.deflect, deflectFromComposure(a.composure));
+  assert.equal(m.statusResist, deflectFromComposure(a.composure));
+  // And initiative speed: d20 + Hustle for everybody (initiative.js) - AP
+  // stood in for it on the enemy side only.
+  assert.equal(m.hustle, a.hustle);
+  // The employee's explicit zero spread derives zeros - flimsy on purpose.
+  const e = unitCombat(CLASSES.employee);
+  assert.equal(e.dmgBonus, 0);
+  assert.equal(e.deflect, 0);
+  assert.equal(e.statusResist, 0);
+});
+
+test('soakHit is the one mitigation rule: shaves, never negates', () => {
+  assert.equal(soakHit(5, 2), 3);
+  assert.equal(soakHit(2, 7), 1, 'one point always lands');
+  assert.equal(soakHit(4, 0), 4, 'no soak, untouched');
 });
 
 test('scaleEnemy nudges accuracy up on deep floors, capped', () => {
@@ -411,12 +457,14 @@ test('scaleEnemy nudges accuracy up on deep floors, capped', () => {
 });
 
 test('scaleEnemy adds the depth nudge on top of innate accuracy', () => {
-  const x = ENEMY_TYPES.executive; // native 2, innate accuracy 0.05
-  const scaled = scaleEnemy(x, x.level + ENEMY_SCALING.ACC_PER); // +1 step
-  assert.ok(Math.abs(scaled.accuracy - (x.accuracy + HIT.STEP)) < 1e-9);
-  // Dodge is identity, unscaled - checked on the one who has any.
-  const g = ENEMY_TYPES['security-guard'];
-  assert.ok(Math.abs(scaleEnemy(g, g.level + ENEMY_SCALING.ACC_PER).dodge - g.dodge) < 1e-9);
+  // The Guard carries the innate line now (the Executive's aim moved into his
+  // Savvy); depth stacks onto the flat field, and unitCombat adds the
+  // attribute derivation on top of whatever scaleEnemy wrote.
+  const g = ENEMY_TYPES['security-guard']; // innate dodge 0.05, no innate accuracy
+  const scaled = scaleEnemy(g, g.level + ENEMY_SCALING.ACC_PER); // +1 step
+  assert.ok(Math.abs(scaled.accuracy - HIT.STEP) < 1e-9);
+  // Dodge is identity, unscaled.
+  assert.ok(Math.abs(scaled.dodge - g.dodge) < 1e-9);
 });
 
 test('scaleEnemy scales the maxHp field for a class-backed AI unit', () => {

@@ -59,12 +59,16 @@ export function createDemolition(d) {
   // line (REVIEW.md 2026-08-02 section 1.9). `aiPullMember` copied the member
   // half verbatim, so the newest beat inherited the defect.
   //
-  // Members carry a resist; coworkers do not. That is the only real difference,
-  // and it is the reason the two were written apart in the first place.
+  // This comment used to say "members carry a resist; coworkers do not" as if
+  // it were a rule. It was the bug: Composure is a stat both sides have, and
+  // the coworker's was sitting unread in `attr` while this branch handed the
+  // apply a zero ("everything should be the same in enemies as allies" -
+  // designer, 2026-08-05). The branch that remains is storage, not rules: a
+  // member's resist rides a sheet, a coworker's rides unitCombat.
   function landStun(victim, line) {
     const target = victim.sheet || victim;
     const name = victim.sheet ? victim.sheet.name : victim.def.name;
-    const resist = victim.sheet ? statusResist(victim.sheet) : 0;
+    const resist = victim.sheet ? statusResist(victim.sheet) : victim.combat.statusResist;
     const blocked = blockedBy(target, 'stunned');
     if (applyStatus(target, 'stunned', {}, resist)) {
       d.statusFxAt(victim, 'stunned');
