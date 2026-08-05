@@ -17,7 +17,7 @@ import { posOf } from './combat-geometry.js';
 import { ACTIONS } from './data/actions.js';
 import { MISS_COLOR } from './hit-resolution.js';
 import { applyDamage, damageBonus, equippedAction, rangeOf, roundAp, weaponProc } from './stats.js';
-import { applyStatus, blockedBy, clearStatuses, hasStatus, statusFx } from './statuses.js';
+import { applyStatus, blockedBy, clearStatuses, hasStatus, statusFx, statusList } from './statuses.js';
 
 export function createPlayerStrike(d) {
   // --- player actions ------------------------------------------------------------
@@ -36,6 +36,19 @@ export function createPlayerStrike(d) {
     // uses left this fight" forever.
     if (a.uses && d.active.usesLeft[id] <= 0) {
       d.log(`No ${a.label.toLowerCase()} left this fight.`);
+      d.disarm();
+      d.refresh();
+      return;
+    }
+    // A DICE-LESS PURGE with nothing to clear does nothing, so it costs
+    // nothing. The friendly twin of this verb has always refused for free
+    // (powers.emptyPayload, "Nothing to clear - they are running clean") while
+    // the same verb aimed at a coworker billed its AP and narrated a success -
+    // the player was told Reboot worked, watched nothing change, and was down
+    // two AP. Only the dice-less case: a verb that also swings has a swing to
+    // pay for whether or not the purge finds anything.
+    if (a.purge && !Number.isFinite(a.min) && !statusList(en).length) {
+      d.log('Nothing to clear - they are running clean.');
       d.disarm();
       d.refresh();
       return;

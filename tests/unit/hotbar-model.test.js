@@ -183,3 +183,28 @@ test('the airplane follows the talent, not the class', () => {
   grantTalent(guard, 'origami-specialist');
   assert.ok(throwablesFor(guard).includes('paper-airplane'));
 });
+
+test('an unknown action id is refused, not silently usable (Q214)', () => {
+  // It used to return null - the same answer a live attack gets - so a slot
+  // holding a stale id drew enabled and pressing it did nothing.
+  assert.ok(combatOnlyReason('no-such-action'));
+  assert.ok(combatOnlyReason(undefined));
+});
+
+test('each fight-only verb is refused for its OWN reason (Q214)', () => {
+  // One sentence used to cover six types, and it was wrong for most of them: a
+  // dash is not pointless out here because nobody is swinging, it is pointless
+  // because there is no AP to buy distance with and you can just walk.
+  const byType = (t) => Object.keys(ACTIONS).find((id) => ACTIONS[id].type === t);
+  const dash = byType('mobility');
+  if (dash) assert.match(combatOnlyReason(dash), /walk/i);
+  const stance = byType('stance');
+  if (stance) assert.doesNotMatch(combatOnlyReason(stance), /swinging at you/);
+  // Whatever the type, a refusal names the verb it is refusing.
+  for (const t of ['heal', 'defend', 'stance', 'mobility', 'pull', 'control', 'zone']) {
+    const id = byType(t);
+    if (!id) continue;
+    assert.match(combatOnlyReason(id), new RegExp(ACTIONS[id].label.split(' ')[0], 'i'),
+      `the ${t} refusal does not name the verb`);
+  }
+});

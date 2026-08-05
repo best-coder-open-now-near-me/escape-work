@@ -92,14 +92,35 @@ export function itemCountsFor(s) {
 // between fights is exactly when you want it gone. Take Cover works out here
 // too (designer, 2026-07-30): crouch before anyone has noticed you, and the
 // crouch rides into the fight.
+// Every reason is written for the verb it refuses, because a refusal that is
+// factually wrong is worse than a vague one: it teaches the player something
+// untrue about the game. One sentence used to cover six types - a dash was
+// refused as though it were an overwatch stance ("only means something once
+// someone is swinging at you"), which is not why a dash is pointless out here.
+// The real reason is that out of combat there is no AP economy to buy distance
+// with, and you can simply walk.
+const OUT_OF_COMBAT_REFUSAL = {
+  heal: (a) => `${a.label} is for a fight - out here, heal from your pockets.`,
+  defend: (a) => `${a.label} only means something once someone is swinging at you.`,
+  stance: (a) => `${a.label} watches for a turn that is not coming - start the fight first.`,
+  mobility: (a) => `No need for ${a.label.toLowerCase()} out here. Just walk.`,
+  pull: (a) => `${a.label} hauls somebody out of position, and nobody is holding one yet.`,
+  control: (a) => `${a.label} needs a fight to change the sides of.`,
+  zone: (a) => `${a.label} holds ground for a turn order that has not started.`,
+};
+
 export function combatOnlyReason(id) {
   const a = ACTIONS[id];
-  const t = a?.type;
-  if (!a || t === 'attack' || t === 'shove' || t === 'summon' || t === 'purge' || t === 'cover') {
+  // An unknown id is NOT usable. This returned null for one - the same answer
+  // it gives a live attack - so a slot holding a stale or misspelled id read as
+  // ready to press, and the bar drew it enabled.
+  if (!a) return 'That is not something you know how to do.';
+  const t = a.type;
+  if (t === 'attack' || t === 'shove' || t === 'summon' || t === 'purge' || t === 'cover') {
     return null;
   }
-  if (t === 'heal') return `${a.label} is for a fight - out here, heal from your pockets.`;
-  return `${a.label} only means something once someone is swinging at you.`;
+  const reason = OUT_OF_COMBAT_REFUSAL[t];
+  return reason ? reason(a) : `${a.label} is for a fight.`;
 }
 
 // The layout the BAR shows: what the character has, plus at least one empty

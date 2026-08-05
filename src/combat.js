@@ -1709,8 +1709,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Landing them in a hazard is the puller's gift to give - the same
     // surface rule the shove's glide applies.
     if (en.alive) {
+      // The same pair the shove's glide applies, in the same order: `applies`
+      // lands whether or not the tile bites, `bleed` rides the damage. This
+      // site billed the damage alone, so a body DROPPED into fire took the 4
+      // and never caught, while the identical body SHOVED into it did both.
+      const sfx = surfaceEffect(world.floorAt(lx, lz));
+      if (sfx?.applies && sfx.applies !== 'gum' && applyStatus(en, sfx.applies)) {
+        statusFxAt(en, sfx.applies);
+      }
       const sdmg = world.enemySurfDamage(lx, lz);
       if (sdmg > 0) {
+        if (sfx?.bleed) applyStatus(en, 'bleed', { duration: sfx.bleed });
         const died = en.takeDamage(sdmg);
         fx.impact(lx, lz, hazardKind(lx, lz), { y: 0.4 });
         if (died) deathFx(en);

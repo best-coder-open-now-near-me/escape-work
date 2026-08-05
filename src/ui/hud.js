@@ -72,12 +72,22 @@ function renderStatusEffects(sheet) {
 // every incidental refresh - using an item, taking a hit - would have to know
 // about portraits just to avoid blanking one.
 let lastPortrait = null;
+// How full an HP bar is: clamped to 0..1, and guarded against a maxHp of 0.
+//
+// The profile card did both of these and the party bar did neither, two hundred
+// lines apart. Overheal (a revive item that heals past max, a buff that raises
+// maxHp after the fact) drew a bar wider than its track; a sheet with maxHp 0 -
+// which is what a half-built or wiped sheet looks like for one frame - divided
+// by zero and drew `NaN%`, and the browser silently keeps the previous width, so
+// the bar freezes at whatever it last showed rather than looking broken.
+const hpFracOf = (s) => Math.max(0, Math.min(1, s?.maxHp ? s.hp / s.maxHp : 0));
+
 export function updateStatsHud(sheet, portraitUrl = undefined) {
   if (portraitUrl !== undefined) lastPortrait = portraitUrl || null;
   const el = document.getElementById('stats');
   if (!el || !sheet) return;
   const portrait = lastPortrait;
-  const hpFrac = Math.max(0, Math.min(1, sheet.maxHp ? sheet.hp / sheet.maxHp : 0));
+  const hpFrac = hpFracOf(sheet);
   const xpFrac = Math.max(0, Math.min(1, sheet.xpNext ? sheet.xp / sheet.xpNext : 0));
   // Green while healthy, amber under half, red when it is nearly over.
   const hpColor = hpFrac > 0.5 ? '#8adf76' : hpFrac > 0.25 ? '#ffd76b' : '#ff6b5e';
@@ -429,8 +439,8 @@ export function createPartyBar({ onSelect, onLevelUp, onFocus }) {
           <span style="opacity:.8">${down ? 'DOWN' : `${s.hp}/${s.maxHp}${ap}`}</span>
         </div>
         <div style="height:4px; margin-top:4px; background:#1a1a28; border-radius:2px;">
-          <div style="height:100%; width:${Math.max(0, Math.round((s.hp / s.maxHp) * 100))}%;
-            background:${down ? '#5a2a2a' : s.hp / s.maxHp > 0.4 ? '#6fc86f' : '#e0b23a'}; border-radius:2px;"></div>
+          <div style="height:100%; width:${Math.round(hpFracOf(s) * 100)}%;
+            background:${down ? '#5a2a2a' : hpFracOf(s) > 0.4 ? '#6fc86f' : '#e0b23a'}; border-radius:2px;"></div>
         </div>`;
       slot.onclick = () => onSelect(i);
       if (onFocus) {

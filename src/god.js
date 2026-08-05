@@ -101,7 +101,16 @@ export function installGodMode(api) {
       // Only re-write when the game has drifted the value off its pin - this
       // keeps a pinned setter (e.g. combat AP, which refreshes on write) from
       // firing every single frame.
-      try { if (o[pin.key] !== pin.value) o[pin.key] = pin.value; } catch { /* stale target */ }
+      // Through the SETTER when the field has one, exactly as the edit box
+      // does. The hold used to write raw, so a field whose setter enforces an
+      // invariant - the purse is clamped to a whole number at or above zero -
+      // had that invariant honoured when you typed the value and bypassed sixty
+      // times a second afterwards. Pinning was the one way to keep a value the
+      // setter exists to refuse.
+      try {
+        if (o[pin.key] === pin.value) continue;
+        if (pin.set) pin.set(pin.value); else o[pin.key] = pin.value;
+      } catch { /* stale target */ }
     }
   });
 }
@@ -285,7 +294,17 @@ function buildPanel(api, requestToggle) {
     }, { textContent: '📌', title: 'Hold this value every frame' });
     b.onclick = () => {
       if (panel.pins.has(id)) panel.pins.delete(id);
-      else panel.pins.set(id, { label: `${target.title} · ${key}`, getObj: target.getObj, key, value: read() });
+      // The pin carries the field's SETTER, if it has one - the per-frame hold
+      // below writes through it for the same reason the edit box does.
+      else {
+        panel.pins.set(id, {
+          label: `${target.title} · ${key}`,
+          getObj: target.getObj,
+          set: target.setters?.[key] || null,
+          key,
+          value: read(),
+        });
+      }
       render();
     };
     return b;
