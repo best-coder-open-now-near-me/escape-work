@@ -15,8 +15,9 @@ import test from 'node:test';
 import assert from 'node:assert';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const SRC = new URL('../../src/', import.meta.url).pathname;
+const SRC = fileURLToPath(new URL('../../src/', import.meta.url));
 
 // main.js is the ENTRY POINT: it boots the engine, builds the scene and wires
 // the DOM at import, which is its job. Nothing imports it, so nothing is
@@ -38,7 +39,7 @@ test('every module imports under bare node', async () => {
   const broken = [];
   for (const m of all) {
     try {
-      await import(join(SRC, m));
+      await import(pathToFileURL(join(SRC, m)).href);
     } catch (e) {
       broken.push(`${m} — ${String(e.message).split('\n')[0]}`);
     }

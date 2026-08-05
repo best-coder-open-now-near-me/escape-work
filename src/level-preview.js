@@ -17,6 +17,7 @@ import { SURFACES } from './data/surfaces.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { scaleEnemy } from './stats.js';
 import { ITEMS, LOOT_TABLES } from './data/items.js';
+import { shieldsCell } from './data/tiles.js';
 import { shieldedFaces } from './tactics.js';
 import { segmentClear } from './pathfinding.js';
 import { SURPRISE_RADIUS } from './combat-geometry.js';
@@ -57,14 +58,15 @@ export function orphans(g) {
 }
 
 /**
- * Which cells offer cover, and how much of it. `shieldedFaces` is the game's
- * own answer - the count of orthogonal faces with a wall, partition, closed
- * door or solid prop against them. 0 is open ground; 4 is a cupboard.
+ * Which walkable cells can be used as actual combat cover, and how much of it.
+ * `shieldedFaces` is the game's own answer - the count of orthogonal faces
+ * with a partition, closed door or shoot-over prop against them. 0 is open
+ * ground; a tall cell wall is not cover because it already blocks the shot.
  */
 export function coverMap(g) {
   const coverCell = (x, z) => {
     const def = g.defAt(x, z);
-    return !!def && !!def.solid;
+    return shieldsCell(def);
   };
   const out = new Map();
   for (let z = 0; z < g.height; z++) {

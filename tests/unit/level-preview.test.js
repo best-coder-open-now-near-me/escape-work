@@ -46,23 +46,41 @@ test('a door makes the far room reachable and unorphans it', () => {
   assert.equal(orphans(open).size, 0, 'a door in it is a route');
 });
 
-test('cover counts shielded faces, so a corner beats open ground', () => {
+test('cover counts actual combat shielded faces, not tall cell walls', () => {
   const lv = g({
     ...BASE,
+    tiles: { ...BASE.tiles, D: 'desk' },
     map: [
       '#####',
-      '#.@.#',
+      '#.@D#',
       '#...#',
       '#..>#',
       '#####',
     ],
+    walls: ['V 2 2'],
   });
   const cover = coverMap(lv);
-  // The cell against the top wall has one shielded face; the middle has none.
-  assert.equal(cover.get('2,1'), 1);
+  // The partition and the desk are cover; the tall `#` walls are not.
+  assert.equal(cover.get('1,1'), undefined, 'tall walls are enclosure, not combat cover');
+  assert.equal(cover.get('1,2'), 1, 'a partition shields one face');
+  assert.equal(cover.get('2,1'), 1, 'the desk shields from the side');
+  assert.equal(cover.get('3,2'), 1, 'the desk shields from below');
+  assert.equal(cover.get('1,3'), undefined, 'the bottom wall does not count as cover');
+});
+
+test('cover still adds up across multiple real shielded faces', () => {
+  const lv = g({
+    ...BASE,
+    map: [
+      '.....',
+      '.@..>',
+      '.....',
+    ],
+    walls: ['H 1 1 2', 'V 1 1 2'],
+  });
+  const cover = coverMap(lv);
+  assert.equal(cover.get('1,1'), 2, 'a real partition corner has two shielded faces');
   assert.equal(cover.get('2,2'), undefined, 'open ground offers nothing');
-  // A corner is shielded on two sides.
-  assert.equal(cover.get('1,1'), 2);
 });
 
 test('enemies that can see each other are one fight', () => {

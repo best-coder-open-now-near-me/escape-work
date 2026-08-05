@@ -1175,7 +1175,7 @@ export function startEditor(app, levelData, stashKey) {
   // predicates the game uses), recomputed on the same debounce as the lint.
   const OVERLAYS = [
     { id: 'reach', label: 'reach', title: 'Rooms nobody can walk into, in red. Everything the player can reach is left clear.' },
-    { id: 'cover', label: 'cover', title: 'How many faces of a tile are shielded. Brighter = better cover to fight from.' },
+    { id: 'cover', label: 'cover spots', title: 'Terrain spots Take Cover can use. Brighter = more shielded faces.' },
     { id: 'engage', label: 'fights', title: 'Which coworkers join ONE fight, by sightline. A group of six is a very different floor from three pairs.' },
     { id: 'surprise', label: 'surprise', title: 'Open a fight from inside this band and that coworker loses its first turn.' },
     { id: 'notice', label: 'notice', title: 'Where a coworker could see you from, at the stealth cone\'s range. Facing is not authored yet, so this is the radius, not the cone.' },

@@ -38,15 +38,12 @@ off and fires rather than trading punches in the scrum. Doctrine #11 working
 as written. Left as shipped. If it ever reads as slippery rather than smart
 that is a re-open of A4, not a bug, and the one-line gate is easy to remove.
 
-**3. Should the editor's cover preview mean fight cover or enclosure? - OPEN.**
+**3. Should the editor's cover preview mean fight cover or enclosure? - ANSWERED: option A.**
 
-`[proposed]` - the preview currently counts every solid, including walls, while
-the combat rule only counts a solid that can shield a body. **A (recommended):**
-derive the preview from `shieldsCell`, so authors see the cover a fight will
-actually grant. **B:** keep the current enclosure reading, where outer walls
-also count as shelter. A aligns the editor with play; B preserves a broader,
-non-combat preview. No implementation should choose between them until the
-designer answers.
+`[ratified]` - designer, 2026-08-05: "i see your point and agree with you,
+lets do that". The preview derives from `shieldsCell`, so authors see the
+cover a fight will actually grant. The old enclosure reading, where outer
+walls also counted as shelter, is rejected for this overlay.
 
 **4. Should handing an item to a party member obey their capacity? - OPEN.**
 
@@ -493,7 +490,7 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q080** `src/combat.js:2699` [duplication] `aiShoveMember` re-states the shove's slam damage as a bare literal `2`, 617 lines from the `slamDmg = 2` default it claims to match<br>      ↳ **DONE — already fixed, verified not assumed.** `aiShoveMember` no longer exists: it was folded into `displaceBody` in an earlier pass, and the comment there records why (the copy had already lost the stun and the prop topple). `slamDmg = 2` is the sole owner; searched for a second literal and there is none.
 - [x] **Q081** `src/combat.js:2645` [duplication] aiPullMember drops the hazard-landing damage performPull applies, so an AI pull into live water or fire costs the member nothing<br>      ↳ DONE — billed through memberSurfDamage
 - [x] **Q082** `src/combat.js:4696` [duplication] The AI's shoot gate hand-rolls range and asks line-of-sight of rounded tiles, bypassing combat.js's own bodyDist/bodyLos and combat-geometry.verbReaches<br>      ↳ **DONE — and it was a behaviour fix, not a tidy-up.** The gate hand-rolled the distance and then asked line of sight of ROUNDED TILES. Since DEGRID a body rests wherever its walk left it, so the AI could refuse a shot the player is allowed from the same spot, or take one the resolver then re-measured and blocked. It asks `bodyDist`/`bodyLos` now - the same two the player's ranged gate asks. ai 3/3 in file context, including the Executive.
-- [x] **Q083** `src/combat.js:505` [duplication] "What counts as a cover cell" is written four times across three modules<br>      ↳ **DONE — `data/tiles.shieldsCell`, next to `blocksSight`.** Five copies, not four: the crouch predicate, the shot resolver, the AI's, and the out-of-combat crouch. One threshold decides both halves (a prop a shot passes over is one you can crouch behind), so the rule lives with the defs. **A fifth-and-a-half was left alone deliberately:** `level-preview.js` counts any solid, so the editor shows `#` walls as cover where the game does not. Switching it broke their test, which encodes walls-count-as-cover - that is a design question, not a copy to collapse. See the question below.
+- [x] **Q083** `src/combat.js:505` [duplication] "What counts as a cover cell" is written four times across three modules<br>      ↳ **DONE — `data/tiles.shieldsCell`, next to `blocksSight`.** Five copies, not four: the crouch predicate, the shot resolver, the AI's, the out-of-combat crouch and the editor's cover-spots preview. One threshold decides both halves (a prop a shot passes over is one you can crouch behind), so the rule lives with the defs. The editor copy was deliberately left open until the designer chose whether it meant fight cover or enclosure; answered 2026-08-05 as fight cover, so `level-preview.coverMap` now derives from `shieldsCell`.
 - [x] **Q084** `src/combat.js:2296` [duplication] "Put a shoulder into the partition" is resolved in three places, one of which does not go through the world facade<br>      ↳ **DONE — `world-edits.js`.** The duplicated thing was the PAIRING: a tile's type lives in the grid and its look in the scene, so changing one without the other leaves a partition you can walk through but still see. Written out three times. The out-of-combat copy is the one the finding meant by "does not go through the world facade" - out there is no facade, so the pairing moved somewhere both sides can reach and combat's facade now delegates to it.
 - [x] **Q085** `src/combat.js:2736` [duplication] performBreak and aiBreak are two copies of the break-down resolver, identical down to the label expression<br>      ↳ **DONE — one `breakDown`, two callers.** They had already drifted: one went through the world facade for the tile def and the other did not. What legitimately differs is only the bracketing - the player's half bills AP, paper and a use, throws a projectile when the verb has range and checks victory; the AI's picks a random attack line and narrates in the third person. Neither of those is the break.
 - [x] **Q086** `src/hover.js:242` [duplication] hover.js and combat.js each carry their own copy of the ring/face drawing primitives, the affordance palette and the cover-aim easing<br>      ↳ DONE — ground-marks.js, shared with hover.js
@@ -846,27 +843,22 @@ resolves the acting actor's own tile first.
 ---
 ## Editor preview context
 
-The open question above exists because the editor's cover preview and combat
-currently disagree, and both readings are defensible.
+Settled 2026-08-05: the editor preview matches the game.
 
   The game's rule (TACTICS_PLAN M6a) is one threshold for two questions: a solid
   short enough to shoot OVER is a solid you can crouch behind, and a `#` wall is
   neither - a shot cannot pass it at all, so "cover" against it is moot. The
-  editor's `coverMap` counts any solid, walls included, and `level-preview.test`
-  pins that.
+  editor's `coverMap` now derives from that same `shieldsCell` rule.
 
-  So a room whose only shelter is its outer walls previews as sheltered and
-  plays as open ground.
+  So a room whose only shelter is its outer walls previews as open ground,
+  matching how it plays.
 
   - **A — the preview matches the game** (one rule, `shieldsCell`): an author
-    sees the cover the fight will actually grant. Costs a red test to update,
-    and rooms that look bare in the preview really are bare.
-  - **B — leave it** (the preview means "how enclosed is this tile"): a wall IS
-    shelter in the ordinary sense, and the preview is about placement, not about
-    the shot resolver.
-  - I would pick **A**, because the preview's stated purpose is "derivable from
-    the same rules the game uses" - but B is a coherent thing to mean and it is
-    your call, so nothing was changed.
+    sees the cover the fight will actually grant. Ratified 2026-08-05 and
+    implemented.
+  - **B — leave it** (the preview means "how enclosed is this tile"): rejected
+    for this overlay. Enclosure can become its own preview if it proves useful,
+    but `cover spots` means Take Cover cover.
 
 ## Settled decisions
 
