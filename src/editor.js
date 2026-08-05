@@ -26,6 +26,11 @@ import { parseFloors } from './floors.js';
 import * as preview from './level-preview.js';
 import { installEditorStyles } from './editor-styles.js';
 import { toast, BUTTON_CHROME } from './ui.js';
+import {
+  cloneEditorStorey, storeySize,
+  shiftEditorStorey, resizeEditorStorey, paintDocumentCell,
+  setDocumentEdge, stampDocumentEdges,
+} from './editor-document.js';
 
 const pc = globalThis.window?.pc;
 
@@ -91,12 +96,8 @@ export function startEditor(app, levelData, stashKey) {
   let storeys = [];   // parked { rows, hWalls, vWalls, hDoors, vDoors, propRot, height }
   let active = 0;
   const STOREY_DEFAULT_H = 2.1; // matches floors.js STOREY_H
-  const cloneStorey = (st) => ({
-    rows: st.rows.map((r) => r.slice()),
-    hWalls: new Set(st.hWalls), vWalls: new Set(st.vWalls),
-    hDoors: new Set(st.hDoors), vDoors: new Set(st.vDoors),
-    propRot: new Map(st.propRot),
-    height: st.height ?? STOREY_DEFAULT_H,
+  const cloneStorey = (st) => cloneEditorStorey({
+    ...st, height: st.height ?? STOREY_DEFAULT_H,
   });
   const captureStorey = () => ({
     rows: rows.map((r) => r.slice()),
@@ -106,12 +107,12 @@ export function startEditor(app, levelData, stashKey) {
     height: storeys[active]?.height ?? STOREY_DEFAULT_H,
   });
   function adoptStorey(st) {
-    rows = st.rows.map((r) => r.slice());
-    hWalls = new Set(st.hWalls); vWalls = new Set(st.vWalls);
-    hDoors = new Set(st.hDoors); vDoors = new Set(st.vDoors);
-    propRot = new Map(st.propRot);
-    height = rows.length;
-    width = rows.length ? Math.max(...rows.map((r) => r.length)) : 0;
+    const next = cloneStorey(st);
+    rows = next.rows;
+    hWalls = next.hWalls; vWalls = next.vWalls;
+    hDoors = next.hDoors; vDoors = next.vDoors;
+    propRot = next.propRot;
+    ({ width, height } = storeySize(next));
   }
   // Edge walls (partitions between tiles) - same Sets grid.js parses.
   let hWalls = new Set();
@@ -119,6 +120,10 @@ export function startEditor(app, levelData, stashKey) {
   // Doors, also on edges (a door replaces a wall on the same edge).
   let hDoors = new Set();
   let vDoors = new Set();
+  const activeDocumentStorey = () => ({
+    rows, hWalls, vWalls, hDoors, vDoors, propRot,
+    height: storeys[active]?.height ?? STOREY_DEFAULT_H,
+  });
 
   // --- map characters are PER LEVEL, not per registry --------------------------
   // A level's map is one character per cell, and its `tiles` legend says what
@@ -353,19 +358,17 @@ export function startEditor(app, levelData, stashKey) {
     const wallSet = edge.o === 'h' ? hWalls : vWalls;
     const doorSet = edge.o === 'h' ? hDoors : vDoors;
     const k = edge.x + ',' + edge.z;
+    const kind = add ? (brush === 'door' ? 'door' : 'wall') : null;
     if (add) {
       const target = brush === 'door' ? doorSet : wallSet;
       const other = brush === 'door' ? wallSet : doorSet;
       if (target.has(k) && !other.has(k)) return;
       commitStroke();
-      other.delete(k);
-      target.add(k);
     } else {
       if (!wallSet.has(k) && !doorSet.has(k)) return;
       commitStroke();
-      wallSet.delete(k);
-      doorSet.delete(k);
     }
+    setDocumentEdge(activeDocumentStorey(), edge.o, edge.x, edge.z, kind);
     const ek = edge.o + ':' + k;
     edgeEntities.get(ek)?.destroy();
     edgeEntities.delete(ek);
@@ -877,14 +880,11 @@ export function startEditor(app, levelData, stashKey) {
     if (x < 0 || x >= width || z < 0 || z >= height) return;
     if (rows[z][x] === ch) return;
     commitStroke();
-    // exactly one player spawn: painting a new one clears the old
-    if (ch === PLAYER_CHAR) {
-      for (let zz = 0; zz < height; zz++) {
-        const xx = rows[zz].indexOf(PLAYER_CHAR);
-        if (xx !== -1) { rows[zz][xx] = charOfType('floor'); renderCell(xx, zz); }
-      }
-    }
-    rows[z][x] = ch;
+    const { clearedPlayer } = paintDocumentCell(activeDocumentStorey(), x, z, ch, {
+      playerChar: PLAYER_CHAR,
+      blank: charOfType('floor'),
+    });
+    for (const cell of clearedPlayer) renderCell(cell.x, cell.z);
     if (batch) {
       // Defer both global passes and every redraw to the end of the batch.
       // Neighbours go in too, for the same pool-shaping reason as below.
@@ -916,83 +916,42 @@ export function startEditor(app, levelData, stashKey) {
   // right and bottom edges, so adding a corridor to the north meant repainting
   // the whole floor one row down. Shifting rows is easy; the edge runs are the
   // real work, since every wall and door key is an absolute coordinate.
-  // A loaded level may be larger than the editor's authoring ceiling. A resize
-  // on one axis must never clamp the untouched axis and delete imported work;
-  // oversized axes may shrink, but they cannot grow until back under the cap.
-  const resizedDimension = (current, delta) => {
-    if (!delta) return current;
-    if (delta < 0) return Math.max(MIN_SIZE, current + delta);
-    return current >= MAX_SIZE ? current : Math.min(MAX_SIZE, current + delta);
+  const isPlacedActor = (char) => Boolean(
+    char === PLAYER_CHAR || actorIdByChar[char] || tierCharIds[char],
+  );
+  const warnLostActors = (count) => {
+    if (count) toast(`Trimmed ${count} placed actor${count === 1 ? '' : 's'}. Ctrl+Z puts them back.`);
   };
   function shift(dx, dz) {
     if (!dx && !dz) return;
-    const nw = resizedDimension(width, dx);
-    const nh = resizedDimension(height, dz);
-    if (nw === width && nh === height) return;
+    const change = shiftEditorStorey(activeDocumentStorey(), dx, dz, {
+      blank: charOfType('floor'), minSize: MIN_SIZE, maxSize: MAX_SIZE,
+      isActor: isPlacedActor,
+    });
+    if (!change) return;
     pushHistory();
-    const blank = charOfType('floor');
-    if (dz > 0) for (let i = 0; i < dz; i++) rows.unshift(new Array(width).fill(blank));
-    else for (let i = 0; i < -dz; i++) rows.shift();
-    if (dx > 0) for (const row of rows) for (let i = 0; i < dx; i++) row.unshift(blank);
-    else for (const row of rows) for (let i = 0; i < -dx; i++) row.shift();
-    width = nw;
-    height = nh;
-    const move = (set, o) => new Set([...set].map((k) => {
-      const [x, z] = k.split(',').map(Number);
-      return (x + dx) + ',' + (z + dz);
-    }).filter((k) => {
-      const [x, z] = k.split(',').map(Number);
-      return edgeInRange(o, x, z);
-    }));
-    hWalls = move(hWalls, 'h');
-    vWalls = move(vWalls, 'v');
-    hDoors = move(hDoors, 'h');
-    vDoors = move(vDoors, 'v');
+    adoptStorey(change.storey);
+    warnLostActors(change.lostActors);
     renderAll();
     markDirty();
   }
 
   function resize(dw, dh) {
-    const nw = resizedDimension(width, dw);
-    const nh = resizedDimension(height, dh);
-    if (nw === width && nh === height) return;
+    const oldWidth = width;
+    const oldHeight = height;
+    const change = resizeEditorStorey(activeDocumentStorey(), dw, dh, {
+      blank: charOfType('floor'), minSize: MIN_SIZE, maxSize: MAX_SIZE,
+      isActor: isPlacedActor,
+    });
+    if (!change) return;
     pushHistory();
-    const ow = Math.min(nw, width);
-    const oh = Math.min(nh, height);
+    const ow = Math.min(change.width, oldWidth);
+    const oh = Math.min(change.height, oldHeight);
     // Conduction and carpet are global passes, so a NEW cell can recolour an
     // old one; only a pure shrink leaves the interior provably untouched.
-    const grew = nw > width || nh > height;
-    // Shrinking silently deleted whatever was in the trimmed rows/columns,
-    // including the player spawn. Say what is about to go; undo can take it
-    // back now, but only if you know to reach for it.
-    if (nw < width || nh < height) {
-      let lostActors = 0;
-      for (let z = 0; z < height; z++) {
-        for (let x = 0; x < width; x++) {
-          if (x < nw && z < nh) continue;
-          const c = rows[z][x];
-          if (c === PLAYER_CHAR || actorIdByChar[c] || tierCharIds[c]) lostActors++;
-        }
-      }
-      if (lostActors) toast(`Trimmed ${lostActors} placed actor${lostActors === 1 ? '' : 's'}. Ctrl+Z puts them back.`);
-    }
-    while (rows.length < nh) rows.push(new Array(width).fill(charOfType('floor')));
-    while (rows.length > nh) rows.pop();
-    for (const row of rows) {
-      while (row.length < nw) row.push(charOfType('floor'));
-      while (row.length > nw) row.pop();
-    }
-    width = nw;
-    height = nh;
-    // drop edge walls/doors that fell off the map
-    const inRange = (o) => (k) => {
-      const [x, z] = k.split(',').map(Number);
-      return edgeInRange(o, x, z);
-    };
-    hWalls = new Set([...hWalls].filter(inRange('h')));
-    vWalls = new Set([...vWalls].filter(inRange('v')));
-    hDoors = new Set([...hDoors].filter(inRange('h')));
-    vDoors = new Set([...vDoors].filter(inRange('v')));
+    const grew = change.width > oldWidth || change.height > oldHeight;
+    adoptStorey(change.storey);
+    warnLostActors(change.lostActors);
     // Incremental. `renderAll` destroys and re-creates EVERY entity on the map
     // and re-instantiates each .glb prop - and growing to the 40x40 ceiling is
     // ~30 clicks, each a full teardown of a map that is getting larger every
@@ -1243,17 +1202,7 @@ export function startEditor(app, levelData, stashKey) {
       const z = at.z + dz;
       if (x < width && z < height) propRot.set(x + ',' + z, rotY);
     }
-    const put = (pairs, set, o) => {
-      for (const [dx, dz] of pairs) {
-        const x = at.x + dx;
-        const z = at.z + dz;
-        if (edgeInRange(o, x, z)) set.add(x + ',' + z);
-      }
-    };
-    put(clipboard.hWalls, hWalls, 'h');
-    put(clipboard.vWalls, vWalls, 'v');
-    put(clipboard.hDoors, hDoors, 'h');
-    put(clipboard.vDoors, vDoors, 'v');
+    stampDocumentEdges(activeDocumentStorey(), clipboard, at, width, height);
     renderAllEdges();
     for (let dz = 0; dz < clipboard.h; dz++) {
       for (let dx = 0; dx < clipboard.w; dx++) {
@@ -1403,6 +1352,9 @@ export function startEditor(app, levelData, stashKey) {
   const controls = createControls({
     app,
     canvas: document.getElementById('app'),
+    // The editor owns Alt+Shift+drag for region capture. The game keeps the
+    // same chord as a trackpad-friendly orbit fallback.
+    altShiftOrbit: false,
     // A layered level has no top-level `map` - the storeys own it - and
     // `refocus()` recomputes this from the real extent as soon as renderAll
     // runs, so the initial value only has to be harmless.

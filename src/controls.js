@@ -21,7 +21,7 @@ const pc = globalThis.window?.pc;
 // gesture vocabulary. The editor needs all three for shift-rectangles,
 // alt-eyedropper and right-drag erase; the game passes none of them and is
 // unaffected.
-export function createControls({ app, canvas, focus, onLeftClickTile, onRightClickTile, onAnyLeftPress, onLeftDragTile, onLeftRelease, onRightDragTile, onHover, onHoverLeave, onTacticalChange = null, aim = null }) {
+export function createControls({ app, canvas, focus, onLeftClickTile, onRightClickTile, onAnyLeftPress, onLeftDragTile, onLeftRelease, onRightDragTile, onHover, onHoverLeave, onTacticalChange = null, aim = null, altShiftOrbit = true }) {
   // Rig: camYaw (spins around the focus) -> camPitch (tilts) -> camera (sits
   // back at a fixed distance, looking at the focus).
   const camYaw = new pc.Entity('camYaw');
@@ -117,12 +117,10 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   const aimed = (sx, sy) => (aim ? aim(sx, sy) : [sx, sy]);
   app.mouse.on(pc.EVENT_MOUSEDOWN, (e) => {
     if (!onCanvas(e)) return;
-    if (e.button === pc.MOUSEBUTTON_MIDDLE || (e.button === pc.MOUSEBUTTON_LEFT && mods.alt && mods.shift)) {
-      // Alt+Shift+left is the second orbit binding. Orbit was middle-drag only,
-      // which a trackpad without a middle button cannot produce at all - the
-      // camera was simply unusable there. Alt alone and Alt+Shift alone are
-      // both taken by the editor's eyedropper and capture, so the chord is the
-      // pair plus the button.
+    if (e.button === pc.MOUSEBUTTON_MIDDLE || (altShiftOrbit && e.button === pc.MOUSEBUTTON_LEFT && mods.alt && mods.shift)) {
+      // Alt+Shift+left is the optional second orbit binding. A trackpad without
+      // a middle button needs it in the game; the editor disables it because
+      // that host owns the same chord for region capture.
       orbiting = true;
     } else if (e.button === pc.MOUSEBUTTON_LEFT) {
       leftHeld = true;

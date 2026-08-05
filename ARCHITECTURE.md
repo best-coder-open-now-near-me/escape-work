@@ -179,7 +179,8 @@ src/
                        the rest - combat.js hands it a decided picture
   god.js             God-mode tweak panel (` / F8): live-reflects the sheet,
                      enemies, combat + world; edit/pin values, pause, spawn
-  editor.js          In-browser level editor (paint/erase, export, playtest)
+  editor-document.js Pure storey transforms and editor document invariants
+  editor.js          In-browser level editor host (render, input, export, playtest)
   main.js            Entry point: routes game vs #editor, owns game flow
   index.html         Shell; loads engine + bundle
 build.mjs            esbuild bundle + static copies -> build/web/

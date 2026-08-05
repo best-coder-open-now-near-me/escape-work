@@ -260,6 +260,18 @@ test('resizing one axis preserves an oversized imported axis', async ({ page }) 
   await expect.poll(() => page.evaluate(() => window.__editor.size)).toEqual({ width: 41, height: 5 });
   await page.click('#ed-resize-y-top-add');
   await expect.poll(() => page.evaluate(() => window.__editor.size)).toEqual({ width: 41, height: 6 });
+
+  const topActor = {
+    name: 'Trim Warning',
+    tiles: { '.': 'floor', '>': 'exit' },
+    actors: { '@': 'player' },
+    map: ['@....', '.....', '.....', '.....', '....>'],
+  };
+  await page.click('#ed-export');
+  await page.locator('#export-json').fill(JSON.stringify(topActor));
+  await page.click('#export-load');
+  await page.click('#ed-resize-y-top-remove');
+  await expect(page.locator('#loot-toast')).toContainText('Trimmed 1 placed actor');
 });
 
 test('level names render as text rather than editor-origin markup', async ({ page }) => {
@@ -272,6 +284,28 @@ test('level names render as text rather than editor-origin markup', async ({ pag
   await expect(page.locator('#ed-status')).toContainText(payload);
   await expect(page.locator('#ed-status img')).toHaveCount(0);
   expect(await page.evaluate(() => window.__editorInjected)).toBeUndefined();
+});
+
+test('Alt+Shift drag reaches editor region capture instead of orbit', async ({ page }) => {
+  await page.goto('/#editor');
+  await page.waitForFunction(() => window.__editor, null, { timeout: 90_000 });
+  await waitForSmoothFrames(page);
+
+  const points = await page.evaluate(() => ({
+    from: window.__editor.project(10, 7),
+    to: window.__editor.project(11, 8),
+  }));
+  await page.keyboard.down('Alt');
+  await page.keyboard.down('Shift');
+  await page.mouse.move(points.from.x, points.from.y);
+  await page.mouse.down();
+  await page.mouse.move(points.to.x, points.to.y, { steps: 4 });
+  await page.mouse.up();
+  await page.keyboard.up('Shift');
+  await page.keyboard.up('Alt');
+
+  await expect(page.locator('#brush-stamp')).toHaveText('stamp 2×2');
+  await expect.poll(() => page.evaluate(() => window.__editor.brush)).toBe('stamp');
 });
 
 test('storage denial reports Playtest failure but cannot trap Exit', async ({ page }) => {

@@ -99,8 +99,8 @@ How to read it:
   those as leads. Of eight refutations in this pass, six were right about the
   code and wrong about the consequence.
 
-**241 entries** — 24 high / 119 medium / 98 low. **182 ticked, 59 open**
-(high **24/24 — the band is clear**, medium 93/119, low 65/98).
+**241 entries** — 24 high / 119 medium / 98 low. **186 ticked, 55 open**
+(high **24/24 — the band is clear**, medium 97/119, low 65/98).
 
 **Known `[bug]` findings are open again.** The editor overhaul regressed Q163
 and Q164 and exposed five more editor lifecycle/invariant findings below. The
@@ -275,22 +275,30 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
   ↳ DONE — the status rebuilds semantic nodes and assigns `textContent`; an E2E
   payload remains visible text and creates no element or script side effect.
 
-- [ ] **Q917** `src/controls.js:118`, `src/editor.js:1410` [bug] **(new 2026-08-05, review)**
+- [x] **Q917** `src/controls.js:118`, `src/editor.js:1410` [bug] **(new 2026-08-05, review)**
   Alt+Shift+left is consumed as orbit before the editor's documented region
   capture handler receives it, leaving capture/stamp unreachable through UI.
+  ↳ DONE — controls exposes the optional fallback; the editor disables it while
+  the game retains trackpad orbit. E2E captures a 2×2 region through the chord.
 
-- [ ] **Q918** `src/editor.js:874`, `src/editor.js:919` [bug] **(new 2026-08-05, review)**
+- [x] **Q918** `src/editor.js:874`, `src/editor.js:919` [bug] **(new 2026-08-05, review)**
   Coordinate-keyed prop rotations are neither remapped by top/left resize nor
   cleared consistently by repaint/trim, so rotations move to or resurrect on
   the wrong prop.
+  ↳ DONE — `editor-document.js` remaps on near-edge shifts and filters/clears on
+  far-edge shrink and repaint; unit tests pin each lifecycle.
 
-- [ ] **Q919** `src/editor.js:1238` [bug] **(new 2026-08-05, review)**
+- [x] **Q919** `src/editor.js:1238` [bug] **(new 2026-08-05, review)**
   Region stamping bypasses wall/door mutual exclusion and can export the same
   edge in both collections.
+  ↳ DONE — normal painting and stamping share `setDocumentEdge`; doors and
+  walls replace one another, including malformed clipboard overlap.
 
-- [ ] **Q920** `src/editor.js:919` [inconsistency] **(new 2026-08-05, review)**
+- [x] **Q920** `src/editor.js:919` [inconsistency] **(new 2026-08-05, review)**
   Top/left shrink can remove actors without the warning right/bottom shrink
   provides.
+  ↳ DONE — both transform directions return the same actor-loss count; E2E
+  removes the top row's player and observes the recovery toast.
 
 
 
@@ -475,7 +483,7 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q040** `src/combat.js:3536` [inconsistency] **(carried)** `verbKind` has only two consumers while five more hand-written `a.type` ladders are live — the exact drift TODO.md Phase 5 says to watch for<br>      ↳ DONE — attackOrConfront asks verbSides; three of five ladders now collapsed
 - [x] **Q041** `src/combat-plans.js:54` [soc] **(carried)** Pure plan modules take a parameter literally named `world` that is combat's host facade, so the contract is duck-typed and unit tests structurally cannot check it<br>      ↳ **THE PROVIDER SIDE IS REACHABLE NOW (2026-08-03).** `world-contract.test.js` pins what the pure rules NEED off the bag and says in its own header that it deliberately cannot check the other side - "main.js is the entry point and importable.test.js excludes it on purpose, so the provider side cannot be reached from node". The facade was a 199-line literal inside `beginCombat`; it is `combat-world.js` now, a plain function returning a plain object, so a test can build one and ask whether it still carries the keys the rules read. **The test itself is not written yet** - that is what is left of this finding.<br>      ↳ **DONE — `world-provider.test.js`.** The consumer half pinned what each rule NEEDS off the bag and said in its header that the provider side "cannot be reached from node". It can now: `combat-world.js` is a plain function returning a plain object. The new tests deliberately do NOT restate the key lists - two lists that must agree is the drift this finding is about - they drive the REAL facade through the REAL rules, so a key dropped from the provider fails the same way it would in a fight. Red-first checked: deleting `stepOpen` fails 3, `tileDefAt` or `approach` fails 2.
 - [ ] **Q042** `src/combat.js:97` [soc] **(carried)** `startCombat` remains a large closure with `armed` shared across targeting, input, rendering, and turn resolution; give that state an explicit owner.
-- [ ] **Q043** `src/editor.js:516` [soc] **(carried)** `editor.js startEditor` is a 641-line god closure, and it hardcodes the tile-category list in system code — adding a category means editing the editor<br>      ↳ **PARTLY DONE** — the tile-category ORDER is now content (`TILE_CATEGORIES` in data/tiles.js), lint both directions, and the live drift it was hiding is fixed: `snack-machine` declares `furniture`, which the editor's list never named, so its brush sorted silently to the end of the palette. **REOPENED 2026-08-05:** the current `startEditor` is roughly 2,749 lines and now owns document transforms, persistence, history, rendering, controls and DOM construction. Extract the document-state owner before another UI split.
+- [ ] **Q043** `src/editor.js:516` [soc] **(carried)** `editor.js startEditor` is a 641-line god closure, and it hardcodes the tile-category list in system code — adding a category means editing the editor<br>      ↳ **PARTLY DONE** — the tile-category ORDER is now content (`TILE_CATEGORIES` in data/tiles.js), lint both directions, and the live drift it was hiding is fixed: `snack-machine` declares `furniture`, which the editor's list never named, so its brush sorted silently to the end of the palette. **ADVANCED 2026-08-05:** `editor-document.js` now owns clone/size, cell paint, edge-kind, stamping and coordinate transforms with six unit tests. `startEditor` still owns persistence, history, rendering, controls and DOM construction, so the host remains open for later UI/state slices.
 - [x] **Q044** `src/tile-renderer.js:12` [test-gap] **(carried)** Four modules still read `const pc = window.pc` at module scope, the pattern already fixed in actors.js/models.js/shading.js<br>      ↳ DONE — all ten deferred; 67 of 68 modules now import under node, gated by a test
 - [x] **Q045** `src/actors.js:68` [bug] A character whose .glb fails to load teleports to the world origin, because the magenta fallback holder has no child and `GridActor` drives `visual === entity`<br>      ↳ DONE — and the fix belongs in `models.js`, not actors.js where the finding is filed: `placeModel`'s SUCCESS path establishes "the holder is the body, `children[0]` is the visual", and `placeFallback` was the one branch that broke the contract. Made the box a child. The symptom is worse than "renders at the origin": the logical tile follows the body, so its per-tile effects fire at (0,0), and a walk issued to it never arrives because `moving` never clears — in a fight, a turn waiting on that arrival hangs.
 
