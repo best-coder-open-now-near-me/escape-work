@@ -332,15 +332,30 @@ test('scaleEnemy returns the def unchanged at its native level', () => {
   assert.equal(scaleEnemy(m, m.level), m);
 });
 
+// The Executive, because this case is specifically about the `hp` SPELLING and
+// he is the last bespoke enemy left carrying it - the Manager used to be the
+// example here and became class-backed, which spells max HP `maxHp`. Both
+// spellings are covered: this test owns `hp`, the one below owns `maxHp`.
 test('scaleEnemy grows hp, xp, and damage with level, leaving the base def intact', () => {
-  const m = ENEMY_TYPES.manager; // level 1, hp 14, xp 8
-  const s = scaleEnemy(m, 3);
-  assert.equal(s.level, 3);
+  const m = ENEMY_TYPES.executive; // level 2, hp 18, xp 10
+  const s = scaleEnemy(m, 4);
+  assert.equal(s.level, 4);
   assert.ok(s.hp > m.hp, 'hp grows');
   assert.ok(s.xp > m.xp, 'xp grows');
   assert.ok(s.attacks[0].max >= m.attacks[0].max, 'damage grows');
-  assert.equal(m.hp, 14); // the registry entry is not mutated
-  assert.equal(s.maxHp, undefined); // enemies carry `hp`, not `maxHp`
+  assert.equal(m.hp, 18); // the registry entry is not mutated
+  assert.equal(s.maxHp, undefined); // a bespoke enemy carries `hp`, not `maxHp`
+});
+
+// The other spelling, on the same curve. A class-backed enemy inherits `maxHp`
+// and carries no `hp` at all, so a scaling rule that only knew one field name
+// would leave the Manager's health flat at every tier a floor asked for.
+test('scaleEnemy grows the max HP of a class-backed enemy too', () => {
+  const m = ENEMY_TYPES.manager; // classId middle-manager: maxHp, no hp
+  assert.equal(m.hp, undefined, 'a class-backed enemy spells it `maxHp`');
+  const s = scaleEnemy(m, 3);
+  assert.ok(s.maxHp > m.maxHp, 'max HP grows');
+  assert.equal(s.hp, undefined, 'and no second HP field is invented');
 });
 
 // The floor curve is gone (PROGRESSION_PLAN.md decisions 13-14, designer
@@ -362,7 +377,7 @@ test('a tiered placement reproduces the curve, not a second stat block', () => {
   const m = ENEMY_TYPES.manager; // native 1
   const at3 = scaleEnemy(m, 3);
   assert.equal(at3.level, 3);
-  assert.ok(at3.hp > m.hp, 'tougher than the base tier');
+  assert.ok(at3.maxHp > m.maxHp, 'tougher than the base tier');
   assert.ok(at3.xp > m.xp, 'and worth more');
   // Asking for the tier directly is now the ONLY way to ask for it.
   assert.deepEqual(at3, scaleEnemy(m, 3));

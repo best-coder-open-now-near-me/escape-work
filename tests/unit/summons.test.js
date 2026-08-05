@@ -28,6 +28,34 @@ test('unitCombat normalizes a class archetype (max HP spelled `maxHp`)', () => {
   assert.equal(typeof c.attackAp, 'number');
 });
 
+// Every enemy has health, whichever way it got one. The class-backed pair used
+// to reach this bar only because both happened to override `hp`: max HP was
+// dropped from the inherited class unconditionally, so deleting an `hp` line -
+// the exact thing "an override is for DEPARTING from the class" asks for - left
+// the enemy with neither field and unitCombat resolving `undefined`. The
+// Manager naming `middle-manager` was the first entry to actually try it.
+test('every enemy resolves a max HP, inherited or stated', () => {
+  for (const [id, def] of Object.entries(ENEMY_TYPES)) {
+    const c = unitCombat(def);
+    assert.ok(Number.isFinite(c.maxHp) && c.maxHp > 0, `${id} has a real max HP`);
+  }
+});
+
+test('a class-backed enemy with no `hp` line inherits the class health', () => {
+  const m = ENEMY_TYPES.manager;
+  assert.equal(m.classId, 'middle-manager');
+  assert.equal(m.hp, undefined, 'states no health of its own');
+  assert.equal(unitCombat(m).maxHp, CLASSES['middle-manager'].maxHp);
+});
+
+test('a class-backed enemy that DOES state `hp` still outranks the class', () => {
+  // The reason the drop exists at all: the two registries spell max HP
+  // differently and unitCombat prefers `maxHp`, so an inherited one would win.
+  const g = ENEMY_TYPES['security-guard'];
+  assert.ok(g.hp != null && g.hp !== CLASSES.security.maxHp, 'a real departure');
+  assert.equal(unitCombat(g).maxHp, g.hp);
+});
+
 test('unitCombat defaults xp/loot for a player class with no AI fields', () => {
   const c = unitCombat(CLASSES['office-drone']);
   assert.equal(c.xp, 0); // player classes never award XP as a kill

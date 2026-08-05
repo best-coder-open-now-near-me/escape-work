@@ -48,18 +48,38 @@ import { fromClass } from './classes.js';
 // The rule below is right; it had been asserted about five entries and checked
 // on none. Check it when you add one.
 //
-// The Manager and the Executive genuinely have no twin: no class is about
-// being either, and neither imitates one. Don't invent a class just to inherit
-// from it - and don't leave a twin unnamed just because writing it out is
-// quicker.
+// It was then asserted a second time, about The Manager, and was wrong again
+// for the same reason: `middle-manager` has been in the class registry the
+// whole time, and being a middle manager is exactly what The Manager is. He
+// names it now. The tell both times was a rig: a job with two .glb files
+// (`manager` and `midmanager`, `hr` and `hrrep`) is a job written down twice.
+//
+// The Executive is the last entry with no twin, and genuinely has none: no
+// class is about being one, and he imitates none. Don't invent a class just to
+// inherit from it - and don't leave a twin unnamed just because writing it out
+// is quicker.
 const KITS = {
   manager: {
+    // The same job as the playable Middle Manager class, so he IS one: the rig,
+    // the build baseline, the attributes and the kit come from it. What is left
+    // below is only what makes him the one you FIGHT.
+    classId: 'middle-manager',
     char: 'M',
+    // He keeps a name because he is a PERSON you meet, not the job in the
+    // abstract - the same deliberate line the Security Guard carries against
+    // the Security class.
     name: 'The Manager',
+    // Where the Guard and HR depart from their class by BUILD on a shared rig,
+    // he departs by wearing a different body outright - `manager.glb` is his,
+    // `midmanager.glb` is the player's. That makes the build override below
+    // load-bearing rather than decorative: `look` is replaced whole, never
+    // merged (classes.js MERGED_PER_KEY), and the class's 1.68 legs are a
+    // stretch tuned against the OTHER rig. These are the engine defaults
+    // (models.js PROPORTIONS) - what he has always been - written out so that
+    // inheriting somebody else's silhouette can't happen by omission.
     model: 'manager',
+    look: { build: { legs: 1.9, torso: 1.3 } },
     level: 1, // native tier; a floor deeper than this scales him up (stats.scaleEnemy)
-    hp: 14,
-    ap: 5,
     attackAp: 3, // AP one swing costs them in combat
     xp: 8,
     aggression: 'red', // straight to battle
@@ -242,9 +262,18 @@ const KITS = {
 export const ENEMY_TYPES = Object.fromEntries(
   Object.entries(KITS).map(([id, kit]) => [
     id,
-    // `maxHp`: enemies spell it `hp`, and unitCombat prefers `maxHp` - leaving
-    // the class's would silently outrank this enemy's own HP.
-    kit.classId ? fromClass(kit, { drop: ['maxHp'] }) : kit,
+    // `maxHp` is dropped ONLY when this enemy states its own `hp`: the two
+    // registries spell max HP differently and unitCombat prefers `maxHp`, so an
+    // inherited one would silently outrank the enemy's own value.
+    //
+    // It used to be dropped unconditionally, which quietly made the `hp`
+    // override MANDATORY - a class-backed enemy that deleted its hp line, the
+    // one thing the "an override is for DEPARTING" rule asks you to do, came
+    // out the far side carrying neither field and no health at all. Nothing
+    // caught it because both entries that existed happened to override.
+    // Inheriting a class's health is the DEFAULT now, and stating `hp` is the
+    // departure it was always supposed to be.
+    kit.classId ? fromClass(kit, { drop: kit.hp != null ? ['maxHp'] : [] }) : kit,
   ]),
 );
 export { KITS as ENEMY_KITS };
