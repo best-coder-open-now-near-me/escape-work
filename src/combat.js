@@ -1554,8 +1554,45 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     });
   }
 
-  function performTakeCover(tx, tz, point = null) {
+  // The spot a click MEANT, when the click landed on a body.
+  //
+  // "Any character as cover" is the verb's own rule, and its tooltip says so
+  // out loud - "aim at furniture, a tile against a partition, or a TEAMMATE".
+  // But a body's own tile is occupied, so passing it straight to the spot test
+  // refused every such click with "No room to tuck in there": the tooltip, the
+  // arm message and the click branch's own comment all promised something the
+  // verb always said no to.
+  //
+  // Aiming at a body means "get behind THEM", so the spot is the tile beside
+  // them that is nearest you and legal to crouch on - which is also what "you
+  // walk over and tuck in" describes.
+  function coverSpotFor(tx, tz) {
+    if (!coverSpotProblem(tx, tz)) return [tx, tz];
+    const occupant = unitStandingAt(tx, tz);
+    if (!occupant || occupant === active) return null;
+    const me = posOf(active);
+    let best = null;
+    let bestD = Infinity;
+    for (const [dx, dz] of AROUND) {
+      const sx = tx + dx;
+      const sz = tz + dz;
+      if (coverSpotProblem(sx, sz)) continue;
+      const gap = Math.hypot(sx - me.x, sz - me.z);
+      if (gap < bestD) { bestD = gap; best = [sx, sz]; }
+    }
+    return best;
+  }
+
+  function performTakeCover(rawX, rawZ, rawPoint = null) {
     const a = ACTIONS['take-cover'];
+    const spot = coverSpotFor(rawX, rawZ);
+    if (!spot) { log(coverSpotProblem(rawX, rawZ)); return; }
+    const [tx, tz] = spot;
+    // The clicked POINT belongs to the tile that was clicked. If the spot moved
+    // (the click was on a body and we tucked in beside them), that point is
+    // inside somebody else's tile - so the walk takes the spot's centre instead
+    // of finishing on top of the shield.
+    const point = (tx === rawX && tz === rawZ) ? rawPoint : null;
     const problem = coverSpotProblem(tx, tz);
     if (problem) { log(problem); return; }
     if (active.ap < a.ap) { log('Not enough AP.'); return; }
