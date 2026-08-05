@@ -235,17 +235,15 @@ quoting it: `grep -c '^- \[x\] \*\*Q' TODO.md`.*
   a centroid can easily be a tile nobody can stand on. Found while splitting
   lootEntries, not by a failure; the arm may well be right.
 <br>      ↳ **DONE — `paperLabel` at module scope, four tests.** The arm the entry called "the interesting one" is pinned: the chip floats at the patch CENTRE, the click walks to the nearest patch TILE, and those are deliberately different points. The test that matters is a horseshoe of paper whose centroid lands in the mouth on bare floor - a click that walked to the chip would harvest nothing - and it asserts its own fixture still has a centre OFF the patch, so it cannot quietly stop testing anything. Red-first: routing the walk to the centre fails 3 of the 4. The finding guessed "the arm may well be right", and it was; what was missing was anything that would notice if it stopped being.
-- [ ] **Q904** `src/stats.js` [design] **(new 2026-08-03, from the Q136 answer)**
-  **[ratified]** (designer, 2026-08-05: "both recommendations are fine").
+- [x] **Q904** `src/stats.js` [design] **(new 2026-08-03, from the Q136 answer)**
+  **DONE — [ratified]** (designer, 2026-08-05: "that proposal is fine as well").
   Capacity follows effective Grit, and a bag that later exceeds its cap remains
   intact while pickup and stow gates refuse additions until it drains. Equipped
   Grit counts too, so a capacity-granting item carries its own room. This is an
   admission rule, never an automatic drop rule.
 
-  **[proposed] Calibration awaiting a verdict:** 5 + Grit. It retains the
-  former ten-item baseline for the five-Grit Office Drone, and the current
-  classes span 8-13 slots. It is implemented so the full rule can be played,
-  but its number is not laundered into a ratified design decision.
+  The calibration is 5 + Grit. It retains the former ten-item baseline for the
+  five-Grit Office Drone, and the current classes span 8-13 slots.
 
 - [x] **Q905** `tests/e2e/cover.spec.js:21` [test-gap] **(new 2026-08-03, from the throwing.spec fix)**
   Two more copies of the unpinned `clickManager` - cover.spec.js:21 (four call
