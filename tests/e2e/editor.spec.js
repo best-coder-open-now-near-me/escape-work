@@ -207,3 +207,27 @@ test('the inspector holds diagnostics and canvas edges resize directly', async (
     { timeout: 30_000 },
   ).toEqual({ width: before.width + 1, height: before.height + 1 });
 });
+
+test('level metadata is labelled and Frame level fits the editor canvas', async ({ page }) => {
+  await page.goto('/#editor');
+  await page.waitForFunction(() => window.__editor, null, { timeout: 90_000 });
+  await waitForSmoothFrames(page);
+
+  await expect(page.locator('#editor-level-details .editor-inspector-section-heading')).toHaveText('Level');
+  await expect(page.getByLabel('Level name')).not.toHaveValue('');
+  await expect(page.getByLabel('Level order')).toHaveValue('1');
+  await expect(page.getByLabel('Exit destination')).toHaveValue('level2');
+  await expect(page.locator('#ed-storey-0')).toHaveText('Ground');
+  await expect(page.getByLabel('Height to next storey')).toBeHidden();
+
+  await page.click('#ed-frame-level');
+  await expect.poll(() => page.evaluate(() => {
+    const { view, cameraFocus, size } = window.__editor;
+    return {
+      topDown: view.tactical && view.pitch === 90,
+      fitsWideMaps: view.dist > 42,
+      centered: Math.abs(cameraFocus.x - (size.width - 1) / 2) < 0.1
+        && Math.abs(cameraFocus.z - (size.height - 1) / 2) < 0.1,
+    };
+  }), { timeout: 30_000 }).toEqual({ topDown: true, fitsWideMaps: true, centered: true });
+});

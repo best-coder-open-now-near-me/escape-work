@@ -337,6 +337,32 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     return !!tactical;
   }
 
+  // Frame a rectangular ground area inside the portion of the canvas the host
+  // leaves unobscured by its own UI. This deliberately raises the instance's
+  // zoom ceiling when needed: a 40x40 editor map cannot fit through the
+  // gameplay camera's normal 42-unit ceiling.
+  function frameGroundBounds({ width, height, viewportWidth, viewportHeight, padding = 1.12 } = {}) {
+    const mapWidth = Math.max(1, Number(width) || 1);
+    const mapHeight = Math.max(1, Number(height) || 1);
+    const canvasWidth = Math.max(1, canvas.clientWidth || 1);
+    const canvasHeight = Math.max(1, canvas.clientHeight || 1);
+    const visibleWidth = pc.math.clamp(Number(viewportWidth) || canvasWidth, 1, canvasWidth);
+    const visibleHeight = pc.math.clamp(Number(viewportHeight) || canvasHeight, 1, canvasHeight);
+    const verticalHalfFov = cameraEntity.camera.fov * pc.math.DEG_TO_RAD / 2;
+    const verticalTangent = Math.tan(verticalHalfFov);
+    const horizontalTangent = verticalTangent * (canvasWidth / canvasHeight);
+    const distance = Math.max(
+      mapWidth * canvasWidth / (2 * horizontalTangent * visibleWidth),
+      mapHeight * canvasHeight / (2 * verticalTangent * visibleHeight),
+    ) * padding;
+
+    setTactical(true);
+    CAM.maxDist = Math.max(CAM.maxDist, distance);
+    CAM.dist = Math.max(CAM.minDist, distance);
+    apply();
+    return CAM.dist;
+  }
+
   return {
     cameraEntity,
     screenToTile,
@@ -364,9 +390,11 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     // where a pan or a recenter actually sent the view.
     get focus() { return { x: baseX, z: baseZ }; },
     get yaw() { return CAM.yaw; },
+    get view() { return { dist: CAM.dist, pitch: CAM.pitch, yaw: CAM.yaw, tactical: !!tactical }; },
     setView,
     setTactical,
     toggleTactical: () => setTactical(!tactical),
+    frameGroundBounds,
     get tactical() { return !!tactical; },
   };
 }

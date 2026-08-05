@@ -1620,6 +1620,30 @@ export function startEditor(app, levelData, stashKey) {
   commands.id = 'editor-commands';
   const levelRow = document.createElement('div');
   levelRow.id = 'editor-level-row';
+  const inspectorSection = (id, title) => {
+    const section = document.createElement('section');
+    section.id = id;
+    section.className = 'editor-inspector-section';
+    const heading = document.createElement('div');
+    heading.className = 'editor-inspector-section-heading';
+    heading.textContent = title;
+    const body = document.createElement('div');
+    body.className = 'editor-inspector-section-body';
+    section.append(heading, body);
+    return { section, body };
+  };
+  const inspectorField = (labelText, control) => {
+    const field = document.createElement('label');
+    field.className = 'editor-inspector-field';
+    field.htmlFor = control.id;
+    const label = document.createElement('span');
+    label.textContent = labelText;
+    field.append(label, control);
+    return field;
+  };
+  const levelDetails = inspectorSection('editor-level-details', 'Level');
+  const storeyDetails = inspectorSection('editor-storey-details', 'Storeys');
+  levelRow.append(levelDetails.section, storeyDetails.section);
   const viewRow = document.createElement('div');
   viewRow.id = 'editor-view-row';
   const btn = (id, label, host = palette) => {
@@ -1637,6 +1661,31 @@ export function startEditor(app, levelData, stashKey) {
     const s = document.createElement('div');
     Object.assign(s.style, { width: '1px', alignSelf: 'stretch', background: '#3a3a52', margin: '0 2px' });
     host.appendChild(s);
+  };
+  const frameViewport = () => {
+    const canvasRect = document.getElementById('app').getBoundingClientRect();
+    const topbarRect = topbar.getBoundingClientRect();
+    let left = canvasRect.left + 10;
+    let right = canvasRect.right - 10;
+    const top = Math.max(canvasRect.top + 10, topbarRect.bottom + 10);
+    const bottom = canvasRect.bottom - 10;
+    if (window.matchMedia('(min-width: 981px)').matches) {
+      left = Math.max(left, toolPanel.getBoundingClientRect().right + 10);
+      right = Math.min(right, inspector.getBoundingClientRect().left - 10);
+    }
+    const middleX = canvasRect.left + canvasRect.width / 2;
+    const middleY = canvasRect.top + canvasRect.height / 2;
+    return {
+      width: Math.max(1, 2 * Math.min(middleX - left, right - middleX)),
+      height: Math.max(1, 2 * Math.min(middleY - top, bottom - middleY)),
+    };
+  };
+  const frameLevel = () => {
+    refocus();
+    controls.recenter();
+    const viewport = frameViewport();
+    controls.frameGroundBounds({ width, height, viewportWidth: viewport.width, viewportHeight: viewport.height });
+    toast('Framed the full level.');
   };
 
   // The tooltip used to report the map character and nothing else, while the
@@ -1976,7 +2025,7 @@ export function startEditor(app, levelData, stashKey) {
   const storeyBox = document.createElement('div');
   storeyBox.id = 'ed-storeys';
   Object.assign(storeyBox.style, { display: 'flex', gap: '4px', alignItems: 'center' });
-  levelRow.appendChild(storeyBox);
+  storeyDetails.body.appendChild(storeyBox);
 
   const heightField = document.createElement('input');
   heightField.id = 'ed-storey-height';
@@ -1993,6 +2042,8 @@ export function startEditor(app, levelData, stashKey) {
     const v = parseFloat(heightField.value);
     if (storeys[active] && Number.isFinite(v) && v > 0) { storeys[active].height = v; markDirty(); }
   };
+  const heightRow = inspectorField('Height to next storey', heightField);
+  storeyDetails.body.appendChild(heightRow);
 
   function switchStorey(i) {
     if (i === active || !storeys[i]) return;
@@ -2036,15 +2087,12 @@ export function startEditor(app, levelData, stashKey) {
   }
   function renderStoreyTabs() {
     storeyBox.innerHTML = '';
-    const label = document.createElement('span');
-    label.textContent = 'storey';
-    Object.assign(label.style, { opacity: '.55', fontSize: '10px', letterSpacing: '1px', textTransform: 'uppercase' });
-    storeyBox.appendChild(label);
     storeys.forEach((st, i) => {
       const b = document.createElement('button');
       b.id = 'ed-storey-' + i;
-      b.textContent = String(i);
-      b.title = i === 0 ? 'Ground storey' : `Storey ${i}`;
+      b.textContent = i === 0 ? 'Ground' : `Storey ${i}`;
+      b.title = i === 0 ? 'Switch to the ground storey' : `Switch to storey ${i}`;
+      b.setAttribute('aria-label', i === 0 ? 'Switch to the ground storey' : `Switch to storey ${i}`);
       b.setAttribute('aria-pressed', i === active ? 'true' : 'false');
       Object.assign(b.style, BUTTON_CHROME, {
         padding: '8px 11px', borderRadius: '7px', minHeight: '38px', cursor: 'pointer',
@@ -2057,6 +2105,7 @@ export function startEditor(app, levelData, stashKey) {
     add.id = 'ed-storey-add';
     add.textContent = '+';
     add.title = 'Add a storey above';
+    add.setAttribute('aria-label', 'Add a storey above');
     Object.assign(add.style, BUTTON_CHROME, { padding: '8px 10px', borderRadius: '7px', minHeight: '38px', cursor: 'pointer' });
     add.onclick = addStorey;
     storeyBox.appendChild(add);
@@ -2065,6 +2114,7 @@ export function startEditor(app, levelData, stashKey) {
       del.id = 'ed-storey-remove';
       del.textContent = '−';
       del.title = 'Delete the storey you are on';
+      del.setAttribute('aria-label', 'Delete the active storey');
       Object.assign(del.style, BUTTON_CHROME, {
         padding: '8px 10px', borderRadius: '7px', minHeight: '38px', cursor: 'pointer', borderColor: '#7a3a4a',
       });
@@ -2072,7 +2122,7 @@ export function startEditor(app, levelData, stashKey) {
       storeyBox.appendChild(del);
     }
     heightField.value = String(storeys[active]?.height ?? STOREY_DEFAULT_H);
-    heightField.style.display = storeys.length > 1 ? '' : 'none';
+    heightRow.hidden = storeys.length < 2 || active === storeys.length - 1;
     // A stair run needs somewhere to climb to. On a flat level the marker is an
     // invisible wall, so the brush is present-but-refused rather than hidden -
     // the author can see the capability exists and why it is unavailable.
@@ -2087,25 +2137,22 @@ export function startEditor(app, levelData, stashKey) {
         : 'Stairway — needs a storey above this one. Add one with + first.';
     }
   }
-  levelRow.appendChild(heightField);
 
   // --- level identity ---------------------------------------------------------
-  const field = (id, placeholder, width, title) => {
+  const field = (id, placeholder, title) => {
     const i = document.createElement('input');
     i.id = id;
     i.placeholder = placeholder;
     i.title = title;
-    i.setAttribute('aria-label', title);
     Object.assign(i.style, BUTTON_CHROME, {
-      padding: '8px 9px', borderRadius: '7px', width, cursor: 'text',
+      padding: '8px 9px', borderRadius: '7px', cursor: 'text',
     });
-    levelRow.appendChild(i);
     return i;
   };
-  const nameField = field('ed-name', 'floor name', '150px', 'The name shown when this floor loads');
+  const nameField = field('ed-name', 'Untitled level', 'The name shown when this level loads.');
   nameField.oninput = () => { levelName = nameField.value; markDirty(); setStatus(); };
-  const depthField = field('ed-depth', 'depth', '62px',
-    'The floor number. Enemies do NOT scale with it - place a tier explicitly to make one tougher.');
+  const depthField = field('ed-depth', '1',
+    'Campaign sequence only. Enemies do not scale with it; set an enemy tier explicitly.');
   depthField.type = 'number';
   depthField.min = '1';
   depthField.oninput = () => {
@@ -2115,14 +2162,18 @@ export function startEditor(app, levelData, stashKey) {
   };
   const nextField = document.createElement('select');
   nextField.id = 'ed-next';
-  nextField.title = 'The floor this one\'s exit leads to. Blank = the run ends here.';
-  nextField.setAttribute('aria-label', 'Next floor');
+  nextField.title = 'The level reached through this level\'s exit. Blank ends the run.';
+  nextField.setAttribute('aria-label', 'Exit destination');
   Object.assign(nextField.style, BUTTON_CHROME, { padding: '8px', borderRadius: '7px', cursor: 'pointer' });
-  nextField.innerHTML = '<option value="">next: (ends the run)</option>'
+  nextField.innerHTML = '<option value="">Ends the run</option>'
     + Object.entries(LEVELS).filter(([, l]) => !l.layers)
-      .map(([id, l]) => `<option value="${id}">next: ${l.name || id}</option>`).join('');
+      .map(([id, l]) => `<option value="${id}">${l.name || id}</option>`).join('');
   nextField.onchange = () => { levelNext = nextField.value || undefined; markDirty(); };
-  levelRow.appendChild(nextField);
+  levelDetails.body.append(
+    inspectorField('Level name', nameField),
+    inspectorField('Level order', depthField),
+    inspectorField('Exit destination', nextField),
+  );
   // Keep the fields honest when a load replaces the document under them.
   function syncMetaFields() {
     nameField.value = levelName || '';
@@ -2259,6 +2310,10 @@ export function startEditor(app, levelData, stashKey) {
   // iteration. It changes nothing about WHAT you playtest with - same fresh
   // level-1 solo character - it just stops asking you to make it every time.
   const PLAYTEST_CLASS_KEY = 'escape-work.playtest.class';
+  const frameLevelButton = btn('ed-frame-level', 'Frame level', commands);
+  frameLevelButton.title = 'Fit the entire level in the editor view (F).';
+  frameLevelButton.setAttribute('aria-keyshortcuts', 'F');
+  frameLevelButton.onclick = frameLevel;
   btn('ed-playtest', '▶ Playtest', commands).onclick = () => {
     // Refuse to launch something that cannot be finished. The lint already
     // knows; walking into a floor with no exit to discover it is a wasted trip.
@@ -2350,7 +2405,7 @@ export function startEditor(app, levelData, stashKey) {
   // --- keyboard ---------------------------------------------------------------
   // The editor registered no key handlers at all: no undo, no Escape, nothing.
   window.addEventListener('keydown', (e) => {
-    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.key.toLowerCase() === 'z') {
       e.preventDefault();
@@ -2371,7 +2426,8 @@ export function startEditor(app, levelData, stashKey) {
     // never offered it. Its own comment is the argument: overhead is where tile
     // boundaries stop being ambiguous.
     if (k === 't') { e.preventDefault(); controls.toggleTactical(); return; }
-    if (k === 'home' || k === 'f') { e.preventDefault(); refocus(); toast('Camera re-centred on the map.'); return; }
+    if (k === 'home') { e.preventDefault(); refocus(); controls.recenter(); toast('Camera re-centred on the map.'); return; }
+    if (k === 'f') { e.preventDefault(); frameLevel(); return; }
     // R rotates the prop under the cursor through the four orientations. This
     // is the whole of IQ4: `rotY` was a property of the tile TYPE, so every
     // desk in the game faced the same way and a rotated one meant a new
@@ -2708,6 +2764,8 @@ export function startEditor(app, levelData, stashKey) {
     get brush() { return brush; },
     get mode() { return editorMode; },
     get selection() { return selection && { ...selection }; },
+    get view() { return controls.view; },
+    get cameraFocus() { return controls.focus; },
     get walls() { return compressWallRuns(hWalls, vWalls); },
     get doors() { return compressWallRuns(hDoors, vDoors); },
     carpetAt: (x, z) => carpet.get(x + ',' + z) || null,

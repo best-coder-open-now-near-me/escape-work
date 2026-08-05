@@ -100,9 +100,15 @@ export function installEditorStyles() {
     .editor-inspector-facts dt { opacity: .58; }
     .editor-inspector-facts dd { margin: 0; overflow-wrap: anywhere; }
     .editor-inspector-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-    #editor-level-row { display: flex !important; flex-direction: column; align-items: stretch !important; gap: 7px !important; padding: 0; }
+    #editor-level-row { display: flex !important; flex-direction: column; align-items: stretch !important; gap: 10px !important; padding: 0; }
     #editor-level-row > * { max-width: 100%; }
-    #editor-storeys { flex-wrap: wrap; }
+    .editor-inspector-section { padding: 0 0 10px; border-bottom: 1px solid #3a3a52; }
+    .editor-inspector-section-body { display: grid; gap: 8px; padding-top: 8px; }
+    .editor-inspector-section-heading { display: flex; align-items: baseline; justify-content: space-between; font-size: 11px; font-weight: 700; }
+    .editor-inspector-field { display: grid; grid-template-columns: minmax(92px, .85fr) minmax(0, 1.45fr); align-items: center; gap: 8px; color: #c9c9d6; }
+    .editor-inspector-field > span { min-width: 0; }
+    .editor-inspector-field > input, .editor-inspector-field > select { min-width: 0; width: 100% !important; box-sizing: border-box; }
+    #ed-storeys { flex-wrap: wrap; }
     #editor-analysis {
       flex: 0 0 auto; max-height: 190px; overflow: hidden;
       border-top: 1px solid #3a3a52; background: rgba(27, 27, 42, .78);
@@ -115,8 +121,7 @@ export function installEditorStyles() {
     .editor-problem[data-level="warn"] { border-color: #76643a; color: #ffe7a3; }
     .editor-problem-dot { flex: 0 0 auto; font-weight: 700; }
     #editor-problems-empty { color: #8adf76; padding: 3px 0; }
-    #editor-resize { display: flex; flex-direction: column; gap: 7px; padding: 9px 0 2px; border-top: 1px solid #3a3a52; }
-    .editor-inspector-section-heading { display: flex; align-items: baseline; justify-content: space-between; font-size: 11px; font-weight: 700; }
+    #editor-resize { display: flex; flex-direction: column; gap: 7px; padding: 0 0 2px; }
     #ed-size { color: #8adf76; font-variant-numeric: tabular-nums; }
     .editor-resize-axis { display: grid; grid-template-columns: 36px 36px minmax(0, 1fr) 36px 36px; align-items: center; gap: 4px; }
     .editor-resize-axis-button { width: 36px; padding: 6px 0 !important; font-weight: 700; }
