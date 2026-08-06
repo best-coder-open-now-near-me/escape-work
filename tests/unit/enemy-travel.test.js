@@ -5,7 +5,8 @@ import { createEnemyTraveler } from '../../src/enemy-travel.js';
 function harness({ slip = false, stepDamage = 0, surfaceDamage = 0 } = {}) {
   const events = [];
   const travel = createEnemyTraveler({
-    createTravelExposureState: () => ({}),
+    travelExposureStateFor: () => ({}),
+    resetTravelExposure: () => {},
     advanceTravelExposure: () => [
       { kind: 'step', distance: 1, point: { x: 1, z: 0 } },
       { kind: 'surface', phase: 'repeat', distance: 1, point: { x: 1, z: 0 },

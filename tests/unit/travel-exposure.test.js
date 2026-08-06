@@ -5,6 +5,8 @@ import {
   advanceTravelExposure,
   createTravelExposureState,
   exposureDistanceFromComposure,
+  seedTravelExposureAtLanding,
+  travelExposureStateFor,
 } from '../../src/travel-exposure.js';
 
 const floorAt = (field) => (x, z) => ({ surfaceId: field.surfaceAt(x, z) });
@@ -51,4 +53,14 @@ test('distance state carries across frame-sized segments', () => {
   }, opts);
   assert.equal(first.filter((event) => event.kind === 'step').length, 0);
   assert.equal(second.filter((event) => event.kind === 'step').length, 1);
+});
+
+test('forced landing seeds contact without erasing distance already walked', () => {
+  const carrier = {};
+  const state = travelExposureStateFor(carrier);
+  state.stepDistance = 0.7;
+  seedTravelExposureAtLanding(carrier, { surfaceId: 'paper' });
+  assert.equal(state.stepDistance, 0.7);
+  assert.equal(state.floorKey, 'paper');
+  assert.equal(state.surfaceDistance, 0);
 });

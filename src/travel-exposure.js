@@ -20,6 +20,37 @@ export const createTravelExposureState = () => ({
   surfaceDistance: 0,
 });
 
+// One carrier keeps one distance history even when its controller changes
+// (wander -> combat AI -> charm). Keeping this store in the clock module also
+// lets a forced landing seed contact without resetting distance already walked.
+const carrierStates = new WeakMap();
+export function travelExposureStateFor(carrier) {
+  let state = carrierStates.get(carrier);
+  if (!state) {
+    state = createTravelExposureState();
+    carrierStates.set(carrier, state);
+  }
+  return state;
+}
+
+export const surfaceExposureKey = (floor = {}) => (floor.burning
+  ? 'fire'
+  : floor.electrified
+    ? 'electrified'
+    : floor.surfaceId || null);
+
+// A teleport/glide applies its entry effect separately. Seed that landed
+// contact so the first ordinary walking frame does not apply entry a second
+// time; preserve the step clock because forced movement travelled no steps.
+export function seedTravelExposureAtLanding(carrier, floor) {
+  const state = travelExposureStateFor(carrier);
+  state.floorKey = surfaceExposureKey(floor);
+  state.surfaceDistance = 0;
+  return state;
+}
+
+export const resetTravelExposure = (carrier) => carrierStates.delete(carrier);
+
 const pointAlong = (span, distance) => {
   const k = span.distance > 0 ? distance / span.distance : 0;
   return {
@@ -45,11 +76,7 @@ export function advanceTravelExposure(state, segment, {
 
   for (const span of spans) {
     const floor = floorAt(span.midpoint.x, span.midpoint.z) || {};
-    const floorKey = floor.burning
-      ? 'fire'
-      : floor.electrified
-        ? 'electrified'
-        : floor.surfaceId || null;
+    const floorKey = surfaceExposureKey(floor);
 
     // A physical transition is immediate. Adjacent fine cells carrying the
     // same effective floor remain one continuous exposure; a real bare gap

@@ -3,18 +3,8 @@
 // one rule so a coworker cannot acquire different feet when initiative opens.
 
 export function createEnemyTraveler(d) {
-  const states = new WeakMap();
-  const stateFor = (unit) => {
-    let state = states.get(unit);
-    if (!state) {
-      state = d.createTravelExposureState();
-      states.set(unit, state);
-    }
-    return state;
-  };
-
   const travelEnemy = (unit, segment) => {
-    const events = d.advanceTravelExposure(stateFor(unit), segment, {
+    const events = d.advanceTravelExposure(d.travelExposureStateFor(unit), segment, {
       traceSegment: d.traceSegment,
       floorAt: d.floorAt,
       interval: d.exposureInterval(unit),
@@ -35,7 +25,7 @@ export function createEnemyTraveler(d) {
           const died = unit.takeDamage(step.damage);
           d.onDamage?.(unit, step.damage, point, { kind: 'step', died });
           if (died) {
-            states.delete(unit);
+            d.resetTravelExposure(unit);
             return false;
           }
         }
@@ -59,7 +49,7 @@ export function createEnemyTraveler(d) {
           const died = unit.takeDamage(amount);
           d.onDamage?.(unit, amount, point, { kind: 'surface', floor, sfx, died });
           if (died) {
-            states.delete(unit);
+            d.resetTravelExposure(unit);
             return false;
           }
         }
@@ -86,6 +76,6 @@ export function createEnemyTraveler(d) {
     return true;
   };
 
-  travelEnemy.reset = (unit) => states.delete(unit);
+  travelEnemy.reset = (unit) => d.resetTravelExposure(unit);
   return travelEnemy;
 }

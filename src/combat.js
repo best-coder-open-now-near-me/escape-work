@@ -69,6 +69,7 @@ import {
   swingPointAt as swingPointFrom, hasSwingSpot as hasSwingSpotFor, zoneCellsFor,
 } from './combat-geometry.js';
 import { createGroundMarks } from './ground-marks.js';
+import { resolveSurfaceLanding } from './forced-landing.js';
 import { NEIGHBOR_DIRS } from './directions.js';
 import { mulberry32Uint } from './rng.js';
 import { isLivingMember } from './member-rules.js';
@@ -1267,7 +1268,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // longer exists: it dealt surface damage, logged into a panel already
     // removed from the DOM, and called onEnemyKilled - handing XP and a kill
     // line to a party that had just been wiped.
-    for (const e of engaged) e.onTile = null;
+    for (const e of engaged) {
+      e.onTile = null;
+      e.onTravel = null;
+    }
     // Stand everyone up and drop the chips: the crouch map dies with this
     // closure, and without this the pose and the 'covered' status would
     // outlive the fight that meant them (the status only ticks on the combat
@@ -1323,6 +1327,25 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     immunityLine: (...a) => immunityLine(...a),
     reportDamage: (...a) => reportDamage(...a),
   });
+
+  // One landing resolver for every non-walk relocation. A shove, pull and
+  // Courier Swap travel differently, but the pair of feet at the destination
+  // asks one question: what surface is under this exact rest point? The glide
+  // itself intentionally has no distance ticks or intermediate contacts.
+  function resolveForcedLanding(target, px, pz, { countForAi = false } = {}) {
+    const v = target?.hazardAt ? target : victimView(target);
+    return resolveSurfaceLanding(v, px, pz, {
+      floorAt: (...a) => world.floorAt(...a),
+      stickGum: (...a) => world.stickGum(...a),
+      applyStatus: (...a) => applyStatus(...a),
+      statusFxAt: (...a) => statusFxAt(...a),
+      syncUnitSpeed: (...a) => syncUnitSpeed(...a),
+      onDamage: (damage) => { if (countForAi) bout.dmgDealt += damage; },
+      impact: (x, z) => fx.impact(x, z, hazardKind(x, z), { y: 0.4 }),
+      damageText: (x, z, damage, color, died) =>
+        fx.damageText(x, z, `-${damage}`, color, { big: died }),
+    });
+  }
   // Put a body somewhere else, and resolve what it hits. ONE resolver for both
   // sides (Q4-A): `aiShoveMember` used to be a hand-written parallel of this,
   // its comment claiming parity, and it had already lost two of the three slam
@@ -1396,34 +1419,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const pd = Math.hypot(dx, dz) || 1;
     const [lpx, lpz] = world.clampPoint(tx + (dx / pd) * 0.22, tz + (dz / pd) * 0.22);
     v.body.pushTo(tx, tz, lpx, lpz);
-    // The riders that come WITH a hazard tile, not just its number. The facade's
-    // own memberSurfDamage comment states the rule this restores - "the same
-    // tile means the same thing however you got there" - and Q1-A made the
-    // DAMAGE honour it while leaving these behind: a body shoved into fire took
-    // the 4 and never caught, and one shoved onto a drift was cut without being
-    // left bleeding, while walking onto either tile did both.
-    //
-    // Same pure `surfaceEffect` off the same `floorAt` sheet the walk sites
-    // read, so there is no second opinion about what a tile does. `applies`
-    // lands whether or not the tile bites; `bleed` rides the damage, which is
-    // the order main.js's applySurfaceOn uses.
-    const dmg = v.hazardAt(tx, tz);
-    const sfx = surfaceEffect(world.floorAt(tx, tz));
-    if (sfx?.applies && sfx.applies !== 'gum' && applyStatus(v.statusTarget, sfx.applies)) {
-      statusFxAt(v.statusTarget, sfx.applies);
-    }
-    if (dmg > 0) {
-      if (sfx?.bleed) applyStatus(v.statusTarget, 'bleed', { duration: sfx.bleed });
-      const live = world.isElectrified && world.isElectrified(tx, tz);
-      const surf = world.surfaceIdAt(tx, tz);
-      const died = v.hurt(dmg);
-      fx.impact(tx, tz, hazardKind(tx, tz), { y: 0.4 });
-      bill(dmg, tx, tz, died);
-      if (died) v.onDeath();
+    const landing = resolveForcedLanding(v, lpx, lpz, { countForAi: !mine });
+    if (landing.damage > 0) {
       return {
         slammed: false,
-        died,
-        msg: `${says(`${verb} ${v.name}`)} into the ${live ? 'LIVE water' : surf || 'hazard'}! -${dmg}.`,
+        died: landing.died,
+        msg: `${says(`${verb} ${v.name}`)} into the ${landing.label}! -${landing.damage}.`,
       };
     }
     return { slammed: false, died: false, msg: `${says(`${verb} ${v.name}`)} back a step.` };
@@ -1748,27 +1749,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         callbacks.onEnemyKilled(en);
       }
     }
-    // Landing them in a hazard is the puller's gift to give - the same
-    // surface rule the shove's glide applies.
+    // Landing them in a hazard is the puller's gift to give, whether they
+    // saved against the hard fall or not. The shared resolver samples the
+    // exact pulled rest point and applies entry once.
     if (en.alive) {
-      // The same pair the shove's glide applies, in the same order: `applies`
-      // lands whether or not the tile bites, `bleed` rides the damage. This
-      // site billed the damage alone, so a body DROPPED into fire took the 4
-      // and never caught, while the identical body SHOVED into it did both.
-      const sfx = surfaceEffect(world.floorAt(lx, lz));
-      if (sfx?.applies && sfx.applies !== 'gum' && applyStatus(en, sfx.applies)) {
-        statusFxAt(en, sfx.applies);
-      }
-      const sdmg = world.enemySurfDamage(lx, lz);
-      if (sdmg > 0) {
-        if (sfx?.bleed) applyStatus(en, 'bleed', { duration: sfx.bleed });
-        const died = en.takeDamage(sdmg);
-        fx.impact(lx, lz, hazardKind(lx, lz), { y: 0.4 });
-        if (died) deathFx(en);
-        fx.damageText(lx, lz, `-${sdmg}`, '#ffd76b', { big: died });
-        msg += ` The landing is ${world.isElectrified && world.isElectrified(lx, lz) ? 'LIVE' : 'a hazard'}. -${sdmg}.`;
-        if (died) callbacks.onEnemyKilled(en);
-      }
+      const landing = resolveForcedLanding(en, hpx, hpz);
+      if (landing.damage > 0) msg += ` The landing is ${landing.label}. -${landing.damage}.`;
     }
     log(msg);
     disarm();
@@ -1820,18 +1806,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       }
       msg += landStun(m, ' They come down dazed.');
       if (applyStatus(m.sheet, 'pinned')) statusFxAt(m, 'pinned');
-      // The hazard the landing tile carries, billed through the member model
-      // (Q1-A) - `performPull` applies it and this copy dropped it, so an AI
-      // pull into live water or fire cost the member nothing.
-      const sdmg = world.memberSurfDamage(m.sheet, lx, lz);
-      if (sdmg > 0) {
-        bout.dmgDealt += sdmg;
-        const gone = applyDamage(m.sheet, sdmg);
-        fx.impact(lx, lz, hazardKind(lx, lz), { y: 0.4 });
-        fx.damageText(lx, lz, `-${sdmg}`, undefined, { big: gone });
-        msg += ` The landing is ${world.isElectrified && world.isElectrified(lx, lz) ? 'LIVE' : 'a hazard'}. -${sdmg}.`;
-        if (gone) { log(msg); notifyMemberDown(); refresh(); return; }
-      }
+    }
+    // Surface entry is independent of the Grit save. Previously this sat
+    // inside the failed-save arm, so the better the landing, the less real the
+    // fire underneath it became.
+    if (m.sheet.hp > 0) {
+      const landing = resolveForcedLanding(m, hpx, hpz, { countForAi: true });
+      if (landing.damage > 0) msg += ` The landing is ${landing.label}. -${landing.damage}.`;
+      if (landing.died) { log(msg); refresh(); return; }
     }
     log(msg);
     refresh();
@@ -1916,6 +1898,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     breakCrouch: (...a) => breakCrouch(...a),
     faceTarget: (...a) => faceTarget(...a),
     displaceBody: (...a) => displaceBody(...a),
+    resolveForcedLanding: (...a) => resolveForcedLanding(...a),
     performOn: (...a) => performOn(...a),
     joinCombat: (...a) => joinCombat(...a),
     charmUnit: (...a) => charmUnit(...a),

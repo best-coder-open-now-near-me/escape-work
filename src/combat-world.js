@@ -81,14 +81,15 @@ export function createCombatWorld(d) {
       const blocked = (x, z) => !!livingMemberAt(
         [...d.party.members, ...d.summons], x, z, walker,
       );
-      return d.smoothFromBody(p, actor,
-        (x, z) => !blocked(x, z) && d.effectiveSurfDamage(x, z, ms) <= 0);
+      return d.smoothFromBody(p, actor, (x, z) => !blocked(x, z), ms);
   },
     smoothEnemy: (en, p) => {
       const pos = en.entity?.getPosition();
       if (pos) p = [[pos.x, pos.z], ...p.slice(1)];
-      const base = (x, z) => d.enemyClearOfHazards(x, z) && !d.partyAt(x, z) && !d.summonAt(x, z);
-      return d.smoothPath(d.routeOpen(base, p), p, d.grid.edgeOpen);
+      const base = (x, z) => d.isWalkable(x, z) && !d.partyAt(x, z) && !d.summonAt(x, z);
+      return d.smoothPath(
+        d.routeOpen(base, p), p, d.grid.edgeOpen, d.enemyHazardSegmentCost,
+      );
   },
     clampPoint: d.clampPoint,
     approach: d.approachTo,

@@ -140,6 +140,13 @@ test('truncateByBudget charges double through expensive cells', () => {
   assert.ok(cost > 5 && cost < 7, `mixed-rate cost ~6.5ish, got ${cost}`);
 });
 
+test('truncateByBudget prices the continuous point rather than a rounded tile', () => {
+  const seen = [];
+  truncateByBudget([[0.1, 0], [0.3, 0]], 10, (x) => { seen.push(x); return 1; });
+  assert.ok(seen.some((x) => x > 0.1 && x < 0.3));
+  assert.ok(seen.every((x) => !Number.isInteger(x)), `sampled exact feet: ${seen}`);
+});
+
 test('smoothPath collapses a dog-leg with clear line of sight', () => {
   const w = walkableFrom([
     '...',
@@ -150,6 +157,27 @@ test('smoothPath collapses a dog-leg with clear line of sight', () => {
   assert.ok(s.length < 5, 'fewer waypoints than the raw path');
   assert.deepEqual(s[0], [0, 0]);
   assert.deepEqual(s[s.length - 1], [2, 2]);
+});
+
+test('smoothPath refuses a shortcut with more fine-surface penalty than its route', () => {
+  const w = walkableFrom(['...', '...', '...']);
+  const raw = [[0, 1], [0, 0], [1, 0], [2, 0], [2, 1]];
+  const penalty = (ax, az, bx, bz) => {
+    const len = Math.hypot(bx - ax, bz - az);
+    let cost = 0;
+    const n = Math.max(1, Math.ceil(len / 0.05));
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n;
+      const x = ax + (bx - ax) * t;
+      const z = az + (bz - az) * t;
+      if (Math.hypot(x - 1, z - 1) < 0.35) cost += len / n;
+    }
+    return cost;
+  };
+  const s = smoothPath(w, raw, null, penalty);
+  let cost = 0;
+  for (let i = 1; i < s.length; i++) cost += penalty(...s[i - 1], ...s[i]);
+  assert.ok(cost < 1e-8, `smoothed route stays out of the fine hazard: ${JSON.stringify(s)}`);
 });
 
 // --- smoothing from where the body ACTUALLY stands ---------------------------

@@ -76,23 +76,24 @@ export function createVerbs(d) {
   // a courier's trick, not a route.
   function performSwap(id, m) {
     const a = ACTIONS[id];
+    const me = d.active;
     const problem = mobilityProblem(a, {
-      dist: d.bodyDist(d.active, m),
-      los: d.bodyLos(d.active, m),
-      ap: d.active.ap,
-      usesLeft: a.uses ? d.active.usesLeft[id] ?? 0 : null,
+      dist: d.bodyDist(me, m),
+      los: d.bodyLos(me, m),
+      ap: me.ap,
+      usesLeft: a.uses ? me.usesLeft[id] ?? 0 : null,
       allyHp: m.sheet.hp,
     });
     if (problem) { d.setLastClickOutcome(`refused:${problem}`); d.log(problem); return; }
-    if (m === d.active) { d.log('You are already there.'); return; }
-    const mine = { x: d.active.actor.x, z: d.active.actor.z };
+    if (m === me) { d.log('You are already there.'); return; }
+    const mine = { x: me.actor.x, z: me.actor.z };
     const theirs = { x: m.actor.x, z: m.actor.z };
     // Trade PLACES, not tile centres: each body takes the other's actual
     // rest point, so the free-point stances both had survive the trick.
-    const myRest = posOf(d.active);
+    const myRest = posOf(me);
     const theirRest = posOf(m);
-    d.active.ap = roundAp(d.active.ap - a.ap);
-    if (a.uses) d.active.usesLeft[id] -= 1;
+    me.ap = roundAp(me.ap - a.ap);
+    if (a.uses) me.usesLeft[id] -= 1;
     // pushTo is the existing "move a body without it counting as a walk" call
     // (the shove's glide). Using it here means the swap cannot provoke and
     // cannot trigger a per-tile hazard hook mid-flight.
@@ -100,11 +101,19 @@ export function createVerbs(d) {
     // exactly the "pull the wounded out of cover" verb (TACTICS_PLAN M6);
     // refresh()'s revalidation would catch it, but breaking here logs it in
     // the same beat as the trade instead of a surprise line later.
-    d.breakCrouch(d.active);
+    d.breakCrouch(me);
     d.breakCrouch(m);
-    d.active.actor.pushTo(theirs.x, theirs.z, theirRest.x, theirRest.z);
+    me.actor.pushTo(theirs.x, theirs.z, theirRest.x, theirRest.z);
     m.actor.pushTo(mine.x, mine.z, myRest.x, myRest.z);
-    d.log(`${a.log} You and ${m.sheet.name} trade places.`);
+    const mineLanding = d.resolveForcedLanding(me, theirRest.x, theirRest.z);
+    const theirLanding = d.resolveForcedLanding(m, myRest.x, myRest.z);
+    const landings = [
+      mineLanding.damage > 0 ? `You land in ${mineLanding.label} (-${mineLanding.damage}).` : '',
+      theirLanding.damage > 0
+        ? `${m.sheet.name} lands in ${theirLanding.label} (-${theirLanding.damage}).`
+        : '',
+    ].filter(Boolean).join(' ');
+    d.log(`${a.log} You and ${m.sheet.name} trade places.${landings ? ` ${landings}` : ''}`);
     d.disarm();
     d.refresh();
   }

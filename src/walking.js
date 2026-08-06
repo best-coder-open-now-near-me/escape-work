@@ -19,13 +19,15 @@
 // reference - it is a queue two sides push and shift, and wrapping an array in
 // setters would say less than the array does.
 export function createWalking(d) {
-  function smoothFromBody(p, actor = d.player, extraClear = null) {
+  function smoothFromBody(p, actor = d.player, extraClear = null, costSheet = d.sheet) {
     const pos = actor.entity?.getPosition();
     if (pos) p = [[pos.x, pos.z], ...p.slice(1)];
     const base = extraClear
       ? (x, z) => d.isWalkable(x, z) && extraClear(x, z)
-      : d.clearOfHazards;
-    return d.smoothPath(d.routeOpen(base, p), p, d.grid.edgeOpen);
+      : d.isWalkable;
+    return d.smoothPath(
+      d.routeOpen(base, p), p, d.grid.edgeOpen, d.hazardSegmentCostFor(costSheet),
+    );
   }
   // Where the body may actually stand: the exact clicked point, pulled in
   // from walls/partitions so the model never clips them.
@@ -182,7 +184,8 @@ export function createWalking(d) {
       const path = leg.path.map((p) => [p[0], p[1]]);
       const pos = d.player.entity?.getPosition();
       if (pos) path[0] = [pos.x, pos.z];
-      const smoothed = d.smoothPath(walkableOn(leg.layer), path, g.edgeOpen);
+      const penalty = leg.layer === d.playerLayer ? d.hazardSegmentCostFor(d.sheet) : null;
+      const smoothed = d.smoothPath(walkableOn(leg.layer), path, g.edgeOpen, penalty);
       d.player.setPath(smoothed);
       d.setLastPath(smoothed);
     } else {

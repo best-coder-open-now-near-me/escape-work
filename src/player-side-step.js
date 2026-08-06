@@ -58,16 +58,6 @@ export function createPlayerSideStepper(d) {
 // the pre-clock traction answer survives that point (a wad that expires there
 // still protects that step), matching the old ordered tile pipeline.
 export function createPlayerSideTraveler(d) {
-  const states = new WeakMap();
-  const stateFor = (body) => {
-    let state = states.get(body);
-    if (!state) {
-      state = d.createTravelExposureState();
-      states.set(body, state);
-    }
-    return state;
-  };
-
   const travelPlayerSide = (body, segment, {
     onDown = () => {},
     say = () => {},
@@ -76,7 +66,7 @@ export function createPlayerSideTraveler(d) {
     const sheet = body.sheet;
     const actor = body.actor;
     const tell = (secondPerson, named) => say(bodyAwareLine(speaker, secondPerson, named));
-    const events = d.advanceTravelExposure(stateFor(body), segment, {
+    const events = d.advanceTravelExposure(d.travelExposureStateFor(body), segment, {
       traceSegment: d.traceSegment,
       floorAt: d.floorAt,
       interval: d.exposureInterval(body),
@@ -95,7 +85,7 @@ export function createPlayerSideTraveler(d) {
         if (event.kind !== 'step') continue;
         if (d.tickStepOn(sheet, actor, point.x, point.z, tell)) {
           onDown('Death by a thousand paper cuts. Well - several.');
-          states.delete(body);
+          d.resetTravelExposure(body);
           return false;
         }
       }
@@ -103,7 +93,7 @@ export function createPlayerSideTraveler(d) {
         if (event.kind !== 'surface') continue;
         if (d.applySurfaceOn(sheet, actor, point.x, point.z, tell)) {
           onDown('Done in by the office itself. Facilities sends their regards.');
-          states.delete(body);
+          d.resetTravelExposure(body);
           return false;
         }
       }
@@ -117,6 +107,6 @@ export function createPlayerSideTraveler(d) {
     return true;
   };
 
-  travelPlayerSide.reset = (body) => states.delete(body);
+  travelPlayerSide.reset = (body) => d.resetTravelExposure(body);
   return travelPlayerSide;
 }

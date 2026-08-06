@@ -44,8 +44,9 @@ import { createFloorEffects } from './floor-effects.js';
 import { createPlayerSideStepper, createPlayerSideTraveler } from './player-side-step.js';
 import {
   advanceTravelExposure,
-  createTravelExposureState,
   exposureDistanceFromComposure,
+  resetTravelExposure,
+  travelExposureStateFor,
 } from './travel-exposure.js';
 import { createEnemyTraveler } from './enemy-travel.js';
 import { showLevelMenu } from './desk.js';
@@ -526,12 +527,29 @@ function startGame(level) {
   // way; smoothing must never straighten a route through a damaging cell the
   // route avoided. The player and enemies get separate cost models - talents
   // discount only the player's.
-  const hazardCostFor = (ms) => (x, z) => surfacePathCost(floorAt(x, z), ms?.talent?.effects);
-  const hazardCost = (x, z) => hazardCostFor(sheet)(x, z); // the leader's cost model
+  // Exact surface penalty along a continuous segment. The router calls this
+  // for each centre-to-centre edge; the smoother calls the same integral when
+  // considering a shortcut or rounded bend.
+  const hazardSegmentCostFor = (ms) => (ax, az, bx, bz) =>
+    grid.surfaceField.traceSegment(ax, az, bx, bz)
+      .reduce((cost, span) => cost + span.distance * surfacePathCost(
+        floorAt(span.midpoint.x, span.midpoint.z), ms?.talent?.effects,
+      ), 0);
+  const hazardCostFor = (ms) => {
+    const segmentCost = hazardSegmentCostFor(ms);
+    return (x, z, fromX, fromZ) => (Number.isFinite(fromX) && Number.isFinite(fromZ)
+      ? segmentCost(fromX, fromZ, x, z)
+      : surfacePathCost(floorAt(x, z), ms?.talent?.effects));
+  };
+  const hazardCost = (...a) => hazardCostFor(sheet)(...a); // the leader's cost model
   // The enemy model is the same rule with NO talents - your shoes are not
   // their problem, and passing the leader's would have them fearing exactly
   // the tiles you are immune to.
-  const enemyHazardCost = (x, z) => surfacePathCost(floorAt(x, z));
+  const enemyHazardSegmentCost = hazardSegmentCostFor(null);
+  const enemyHazardCost = (x, z, fromX, fromZ) =>
+    (Number.isFinite(fromX) && Number.isFinite(fromZ)
+      ? enemyHazardSegmentCost(fromX, fromZ, x, z)
+      : surfacePathCost(floorAt(x, z)));
   const clearOfHazards = (x, z) => isWalkable(x, z) && !isHazard(x, z);
   const enemyClearOfHazards = (x, z) => isWalkable(x, z) && !enemyIsHazard(x, z);
 
@@ -1216,6 +1234,7 @@ function startGame(level) {
     isWalkable: (...a) => isWalkable(...a),
     clearOfHazards: (...a) => clearOfHazards(...a),
     hazardCost: (...a) => hazardCost(...a),
+    hazardSegmentCostFor: (...a) => hazardSegmentCostFor(...a),
     enemyAt: (...a) => enemyAt(...a),
     npcAt: (...a) => npcAt(...a),
     hasLos: (...a) => hasLos(...a),
@@ -1698,7 +1717,9 @@ function startGame(level) {
     smoothFromBody: (...a) => smoothFromBody(...a),
     freeTilesNear: (...a) => freeTilesNear(...a),
     hazardCostFor: (...a) => hazardCostFor(...a),
+    hazardSegmentCostFor: (...a) => hazardSegmentCostFor(...a),
     enemyHazardCost: (...a) => enemyHazardCost(...a),
+    enemyHazardSegmentCost: (...a) => enemyHazardSegmentCost(...a),
     enemyClearOfHazards: (...a) => enemyClearOfHazards(...a),
     rawSurfDamage: (...a) => rawSurfDamage(...a),
     effectiveSurfDamage: (...a) => effectiveSurfDamage(...a),
@@ -1930,7 +1951,8 @@ function startGame(level) {
 
   const travelPlayerSide = createPlayerSideTraveler({
     advanceTravelExposure,
-    createTravelExposureState,
+    travelExposureStateFor,
+    resetTravelExposure,
     traceSegment: grid.surfaceField.traceSegment,
     floorAt,
     exposureInterval: (body) => exposureDistanceFromComposure(
@@ -1945,7 +1967,8 @@ function startGame(level) {
   });
   const travelEnemy = createEnemyTraveler({
     advanceTravelExposure,
-    createTravelExposureState,
+    travelExposureStateFor,
+    resetTravelExposure,
     traceSegment: grid.surfaceField.traceSegment,
     floorAt,
     exposureInterval: (unit) => exposureDistanceFromComposure(unit.combat.composure),
@@ -2492,6 +2515,7 @@ function startGame(level) {
     isHazard: (...a) => isHazard(...a),
     enemyIsHazard: (...a) => enemyIsHazard(...a),
     enemyClearOfHazards: (...a) => enemyClearOfHazards(...a),
+    enemyHazardSegmentCost: (...a) => enemyHazardSegmentCost(...a),
     partyAt: (...a) => partyAt(...a),
     summonAt: (...a) => summonAt(...a),
     floorAt: (...a) => floorAt(...a),

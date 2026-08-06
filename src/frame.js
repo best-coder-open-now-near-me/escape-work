@@ -111,7 +111,9 @@ export function createFrame(d) {
         if (pos) p[0] = [pos.x, pos.z];
         // amble to a loose spot in the tile, not its dead centre
         p[p.length - 1] = d.clampPoint(tx + (Math.random() - 0.5) * 0.7, tz + (Math.random() - 0.5) * 0.7);
-        return d.smoothPath(d.routeOpen(open, p), p, d.grid.edgeOpen);
+        return d.smoothPath(
+          d.routeOpen(open, p), p, d.grid.edgeOpen, d.enemyHazardSegmentCost,
+        );
       },
     };
     let anyoneMoved = false;

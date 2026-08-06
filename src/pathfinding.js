@@ -45,7 +45,10 @@ export function findPath(isWalkable, sx, sz, tx, tz, extraCost = null, stepOpen 
       if (!isWalkable(nx, nz)) continue;
       if (dx !== 0 && dz !== 0 && !(isWalkable(x + dx, z) && isWalkable(x, z + dz))) continue;
       if (stepOpen && !stepOpen(x, z, nx, nz)) continue;
-      const nd = d + (dx !== 0 && dz !== 0 ? Math.SQRT2 : 1) + (extraCost ? extraCost(nx, nz) : 0);
+      // A cost callback may integrate the whole edge (nx,nz <- x,z). Legacy
+      // tile callbacks simply ignore the trailing coordinates.
+      const nd = d + (dx !== 0 && dz !== 0 ? Math.SQRT2 : 1)
+        + (extraCost ? extraCost(nx, nz, x, z) : 0);
       const k = key(nx, nz);
       if (nd < (dist.get(k) ?? Infinity)) {
         dist.set(k, nd);
@@ -281,7 +284,9 @@ export function truncateByBudget(path, budget, rate) {
     let t = 0;
     for (let s = 0; s < n; s++) {
       const mid = (t + step / 2) / len;
-      const r = rate(Math.round(ax + (bx - ax) * mid), Math.round(az + (bz - az) * mid));
+      // Rates are continuous world questions now. Integer-based callbacks
+      // remain compatible, while fine surfaces can price the actual feet.
+      const r = rate(ax + (bx - ax) * mid, az + (bz - az) * mid);
       const c = step * r;
       if (cost + c > budget + 1e-9) {
         const within = r > 0 ? Math.max(0, (budget - cost) / r) : step;
@@ -338,7 +343,11 @@ function standsClear(isWalkable, edgeOpen, px, pz) {
 // every candidate must also be a spot a body could legally stand
 // (standsClear). A few rounds propagate the slack along the path.
 const TIGHTEN_ROUNDS = 3;
-function tightenPath(isWalkable, path, edgeOpen) {
+const segmentPenaltyOf = (penalty, a, b) => penalty
+  ? penalty(a[0], a[1], b[0], b[1])
+  : 0;
+
+function tightenPath(isWalkable, path, edgeOpen, segmentPenalty = null) {
   if (path.length <= 2) return path;
   const out = path.map((p) => [p[0], p[1]]);
   for (let r = 0; r < TIGHTEN_ROUNDS; r++) {
@@ -357,7 +366,13 @@ function tightenPath(isWalkable, path, edgeOpen) {
         const t = (lo + hi) / 2;
         const px = b[0] + (mx - b[0]) * t;
         const pz = b[1] + (mz - b[1]) * t;
-        if (standsClear(isWalkable, edgeOpen, px, pz)
+        const p = [px, pz];
+        const oldPenalty = segmentPenaltyOf(segmentPenalty, a, b)
+          + segmentPenaltyOf(segmentPenalty, b, c);
+        const newPenalty = segmentPenaltyOf(segmentPenalty, a, p)
+          + segmentPenaltyOf(segmentPenalty, p, c);
+        if (newPenalty <= oldPenalty + 1e-8
+          && standsClear(isWalkable, edgeOpen, px, pz)
           && walkableCorridor(isWalkable, a[0], a[1], px, pz, edgeOpen)
           && walkableCorridor(isWalkable, px, pz, c[0], c[1], edgeOpen)) lo = t;
         else hi = t;
@@ -381,7 +396,7 @@ function tightenPath(isWalkable, path, edgeOpen) {
 // bend kept whenever the room genuinely is that tight.
 const BEND_RADIUS = 0.4;
 const BEND_STEPS = 3;
-function roundBends(isWalkable, path, edgeOpen) {
+function roundBends(isWalkable, path, edgeOpen, segmentPenalty = null) {
   if (path.length <= 2) return path;
   const out = [path[0]];
   for (let i = 1; i < path.length - 1; i++) {
@@ -418,6 +433,15 @@ function roundBends(isWalkable, path, edgeOpen) {
     for (let s = 1; ok && s < arc.length; s++) {
       ok = walkableCorridor(isWalkable, arc[s - 1][0], arc[s - 1][1], arc[s][0], arc[s][1], edgeOpen);
     }
+    if (ok && segmentPenalty) {
+      const sharpPenalty = segmentPenaltyOf(segmentPenalty, a, b)
+        + segmentPenaltyOf(segmentPenalty, b, p2);
+      let arcPenalty = segmentPenaltyOf(segmentPenalty, a, p1);
+      for (let s = 1; s < arc.length; s++) {
+        arcPenalty += segmentPenaltyOf(segmentPenalty, arc[s - 1], arc[s]);
+      }
+      ok = arcPenalty <= sharpPenalty + 1e-8;
+    }
     if (ok) { out.push(...arc); continue; }
     // Too tight to round - the sharp turn is the truth. But the sharp turn is
     // only the truth if a -> b is walkable, and the FIRST check above is
@@ -442,17 +466,33 @@ function roundBends(isWalkable, path, edgeOpen) {
 // corners they round (tightenPath) and curve through them (roundBends), so
 // movement flows at any angle, hugs walls at body radius, and never reads
 // as aiming at waypoints.
-export function smoothPath(isWalkable, path, edgeOpen = null) {
+export function smoothPath(isWalkable, path, edgeOpen = null, segmentPenalty = null) {
   if (!path || path.length <= 2) return path;
   const out = [path[0]];
   let i = 0;
   while (i < path.length - 1) {
     let j = path.length - 1;
-    while (j > i + 1 && !walkableCorridor(isWalkable, path[i][0], path[i][1], path[j][0], path[j][1], edgeOpen)) j--;
+    while (j > i + 1) {
+      const clear = walkableCorridor(
+        isWalkable, path[i][0], path[i][1], path[j][0], path[j][1], edgeOpen,
+      );
+      let routedPenalty = 0;
+      for (let k = i + 1; segmentPenalty && k <= j; k++) {
+        routedPenalty += segmentPenaltyOf(segmentPenalty, path[k - 1], path[k]);
+      }
+      const shortcutPenalty = segmentPenaltyOf(segmentPenalty, path[i], path[j]);
+      if (clear && shortcutPenalty <= routedPenalty + 1e-8) break;
+      j--;
+    }
     out.push(path[j]);
     i = j;
   }
-  return roundBends(isWalkable, tightenPath(isWalkable, out, edgeOpen), edgeOpen);
+  return roundBends(
+    isWalkable,
+    tightenPath(isWalkable, out, edgeOpen, segmentPenalty),
+    edgeOpen,
+    segmentPenalty,
+  );
 }
 
 // The cheapest route to a tile a RANGED attack could fire at (tx, tz) from, or

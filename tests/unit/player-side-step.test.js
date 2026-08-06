@@ -21,7 +21,8 @@ function harness({ tileEffect = null, tickDown = false, surfaceDown = false } = 
     },
   });
   const travel = createPlayerSideTraveler({
-    createTravelExposureState: () => ({}),
+    travelExposureStateFor: () => ({}),
+    resetTravelExposure: () => {},
     advanceTravelExposure: () => [
       { kind: 'step', distance: 1, point: { x: 4.25, z: 7 } },
       { kind: 'surface', phase: 'repeat', distance: 1, point: { x: 4.25, z: 7 } },
@@ -120,7 +121,8 @@ test('the real surface coordinator preserves the temporary ally voice', () => {
     syncHudFor: () => {},
   });
   const travel = createPlayerSideTraveler({
-    createTravelExposureState: () => ({}),
+    travelExposureStateFor: () => ({}),
+    resetTravelExposure: () => {},
     advanceTravelExposure: () => [
       { kind: 'surface', phase: 'entry', distance: 0, point: { x: 1, z: 1 } },
     ],

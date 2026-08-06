@@ -15,14 +15,16 @@
 import { createEnemyTraveler } from './enemy-travel.js';
 import {
   advanceTravelExposure,
-  createTravelExposureState,
   exposureDistanceFromComposure,
+  resetTravelExposure,
+  travelExposureStateFor,
 } from './travel-exposure.js';
 
 export function createAiAdvance(d) {
   const travelEnemy = createEnemyTraveler({
     advanceTravelExposure,
-    createTravelExposureState,
+    travelExposureStateFor,
+    resetTravelExposure,
     traceSegment: (...a) => d.world.traceSurfaceSegment(...a),
     floorAt: (...a) => d.world.floorAt(...a),
     exposureInterval: (unit) => exposureDistanceFromComposure(unit.combat.composure),
