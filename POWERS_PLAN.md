@@ -706,23 +706,25 @@ tip into *mandatory* — a support class you must recruit is a tax, not a choice
    JSON, and thereafter the level has a tile with no character. The lint
    assertion in M6 is the guard, and it should fail loudly on the *level*, not
    just on the registry.
-7. **Deferred: `buff` and `mobility` for the AI.** Enemies get control, zones
-   and stances; a healing, teleporting enemy is a much larger AI diff
-   (target selection for friendlies, retreat logic) and belongs with the
-   faction work `SUMMON_PLAN.md` gestures at.
+7. **Partly closed by `AI_PLAN.md` M6.** Enemy HR now has a rationed `support`
+   descriptor, friendly target selection, range/LOS gates, cooldowns, and a
+   backline positioning bias `[ratified]` (designer, 2026-08-01, Q4-A: "all of
+   the recommended answers are good"). Generic action-driven `buff` and
+   `mobility` remain deferred, as does repositioning specifically to make a
+   support cast; those are still the larger faction/AI diff this risk named.
 8. **Open: does `buff` need friendly-fire discipline?** A `zone` aimed badly
    already burns your own party — that is the Divinity contract and it is
    good. But a *cone* control that roots your own teammates may just read as a
    bug. Recommend: control cones check allegiance, zones do not. Revisit if
    the asymmetry reads as inconsistent.
 
-### Open after M9: the enemy HR Representative
+### Closed after M9: the enemy HR Representative
 
 She inherits `classId: 'human-resources'` and carries her own `summon`
-descriptor, which now reads `from: 'escalate'` - an HR enemy inheriting the
-Manager's action id. It works (the contract shares only `archetype`, and who
-shows up is still the honest shared fact) but it reads oddly, and there are
-three ways out:
+descriptor, which reads `from: 'escalate'` — an HR enemy pointing at the
+Manager's action id. It works (the contract shares only the summon archetype,
+and who shows up is still the honest shared fact) but reads oddly. M9 recorded
+three possible directions:
 
 - **Leave it.** Descriptors are per-side by design; hers is her own and only
   the archetype is shared. Cheapest, and the oddness is confined to one line.
@@ -730,10 +732,14 @@ three ways out:
   exactly. Cleanest conceptually. Costs: The Manager and The Executive
   deliberately have no class twin, so there is no enemy that IS a middle
   manager to give it to - one would have to be written.
-- **Make her a support enemy** - heals and buffs the other enemies, mirroring
+- **Make her a support enemy** — heals and buffs the other enemies, mirroring
   the player HR precisely, which is what "a class is the shared unit archetype"
-  actually implies. Blocked today by `POWERS_PLAN` risk 7, which defers `buff`
-  for the AI: a healing enemy needs friendly target selection and retreat
-  logic, and that is the faction work `SUMMON_PLAN.md` gestures at.
+  actually implies.
 
-Recommend the first until the AI can buff, then the third. `[proposed]`
+**Resolution `[ratified]`: add support without deleting the summon.** The
+designer accepted AI_PLAN Q4-A on 2026-08-01 ("all of the recommended answers
+are good"), and M6 shipped `ENEMY_TYPES.hr.support` plus
+`combat-ai.aiSupportPlan`. She heals the lowest-fraction ally under the
+threshold, self included, with two uses, a one-round cooldown, range/LOS gates,
+and backline bias. The odd `from: 'escalate'` descriptor remains a naming debt,
+not a blocker or missing capability.

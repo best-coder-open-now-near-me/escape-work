@@ -4,17 +4,17 @@ Make the enemies play the game we already built. The ask `[stated]` (task,
 2026-08-01): *"make a plan to upgrade our ai's difficulty"* — into a game the
 designer has already sized up: *"the game is laughably easy right now"*
 (designer, 2026-07-31, recorded in `POWERS_PLAN.md` M9). This document is the
-implementation plan: what the AI decides today, where its game is smaller than
-the player's, the milestone order for closing that gap, and the design
+implementation plan: the pre-plan AI baseline, where its game was smaller than
+the player's, the milestone order that closed that gap, and the design
 decisions with their tags. Milestones 1-6 shipped on 2026-08-01/02 - see
 **As landed** below for the deviations; milestone 7, the tuning pass, is open
 by design.
 
 The thesis, up front: **the AI's difficulty problem is decision quality, not
 numbers.** The numbers already have an owner — `stats.scaleEnemy` grows HP,
-damage, AP and accuracy by floor depth (`stats.js:323`), and every plan defers
-magnitudes to playtest. What no system owns is that the AI plays six beats
-(`combat-ai.js:149`) against a player holding the whole verb set: it never
+damage, AP and accuracy by floor depth, and every plan defers magnitudes to
+playtest. At the plan baseline the AI played six beats
+(`combat-ai.chooseBeat`, before M4-M6) against a player holding the whole verb set: it never
 shoots, never shoves a body, never breaks or topples a partition, never pulls,
 never heals, never picks a target for a reason beyond "nearest", and walks the
 shortest route through fire it could walk around. Every one of those verbs is
@@ -49,8 +49,8 @@ pull-over as a counter — is player-side future-proofing with zero live value
   stays a one-way game; milestone 5 drops out of the plan and difficulty
   leans entirely on melee smarts.
 
-**Q2 — Target selection: how mean?** Today: nearest engageable member,
-wounded as a tiebreak (`combat-ai.js:57`). My recommendation is **B**.
+**Q2 — Target selection: how mean?** At the plan baseline: nearest engageable
+member, wounded as a tiebreak (the former `combat-ai.pickTarget`). My recommendation is **B**.
 
 - **A: full focus fire** — always the finishable or frailest target, switch
   the moment a better kill appears. Deadliest and cheapest to build; reads as
@@ -79,8 +79,8 @@ My recommendation is **A**.
 - **C: keep them deferred.** Crouching stays strictly better for the player
   than for enemies; milestone 4 drops out.
 
-**Q4 — Should the enemy side get support behavior?** Enemy HR still summons
-(`data/enemies.js:134`), but the class she inherits from now owns the game's
+**Q4 — Should the enemy side get support behavior?** Enemy HR already summoned
+(`data/enemies.js`, `ENEMY_TYPES.hr.summon`), but the class she inherits from owned the game's
 only heal (`POWERS_PLAN.md` decisions 16–18) and her AI never uses it. There
 is a real tension to weigh: M9 cut healing from five classes *because it was
 a ritual* — an enemy heal-sponge could reintroduce that tedium from the other
@@ -105,7 +105,7 @@ difficulty setting today. My recommendation is **A**.
   agree — their modes are mostly stat-and-loadout packages over one shared
   brain; see the looked-up section.)
 - **B: a numbers-only selector now** — e.g. a difficulty offset feeding
-  `effectiveLevel` (`stats.js:366`), which the engine would take today.
+  `effectiveLevel` (`stats.effectiveLevel`), which the engine would take today.
   Cheap mechanically, but commits UI, save-format and triple-balance surface
   before the single game is even hard.
 - **C: behavior modes** (docile AI on easy, full ladder on hard). Most
@@ -116,11 +116,16 @@ difficulty setting today. My recommendation is **A**.
 This plan will be executed by someone who was not in the room. The rules
 of engagement, so the doc is enough:
 
-- **Read first:** `CLAUDE.md` (the process — tags are load-bearing),
-  `ARCHITECTURE.md` (the carve), `src/combat-ai.js` end to end (168
-  lines — it is the module this plan grows), the AI arm of `combat.js`
-  (`:4297-4381`), and `tests/unit/combat-ai.test.js` (the contract you
-  are extending).
+- **Read first:** `AGENTS.md` (the process — tags are load-bearing),
+  `ARCHITECTURE.md` (the carve), `src/combat-ai.js` end to end (the decision,
+  gather and dispatch owner), `src/combat-advance.js`, the `aiBeatPlans` and
+  AI branch of `startCombat.update` in `combat.js`, and
+  `tests/unit/combat-ai.test.js` (the contract you are extending).
+- **Milestone 7 starts from the shipped tree and the As-landed record.** The
+  earlier baseline tables and milestone scopes explain why the work exists;
+  they are not implementation instructions. Tune the current `AI` block and
+  twelve-arm `chooseBeat` contract, without recreating proposed functions that
+  the landed architecture deliberately did not need.
 - **The tags bind you.** The five headline questions are answered — A3,
   A4, A5, A6, A7 are `[ratified]` (designer, 2026-08-01) and are the
   design, not suggestions. So is A10's ladder position (designer,
@@ -136,8 +141,8 @@ of engagement, so the doc is enough:
   and symmetry (every beat at the player's price through the shared
   resolution paths — reuse `unitStrikesMember`/`dropOnto`/`pushTo`,
   never reimplement a roll).
-- **Do not touch:** the driver's guard order (`combat.js:4297`), the
-  degenerate self-path (`combat-ai.js:34`), the engageability tier in
+- **Do not touch:** the AI branch's guard order (`startCombat.update`), the
+  degenerate self-path (`combat-ai.standTilePath`), the engageability tier in
   targeting, `provokedBy`'s set-diff shape, or the one-unit-at-a-time
   driver (`[stated]`, `INITIATIVE_PLAN.md` #3). Where a milestone
   *deliberately* rewrites a test (the wounded tiebreak), it says so;
@@ -151,7 +156,7 @@ of engagement, so the doc is enough:
 
 Two levers are deliberately **not** this plan's:
 
-- **Numbers.** `scaleEnemy` owns the curve (`stats.js:323`); the seniority
+- **Numbers.** `scaleEnemy` owns the curve (`stats.scaleEnemy`); the seniority
   variants and per-placement levels are `CHARACTER_PLAN.md`'s open business
   (its decision #15); elite modifiers are `PROGRESSION_PLAN.md`'s stretch
   seam (its decision #12). This plan adds no stat inflation — if the smarter
@@ -166,43 +171,43 @@ What is in scope: **the decisions.** Target choice, stand-tile choice, verb
 choice, and the beats the AI has never had — using systems that already
 exist, at the prices the player already pays.
 
-## Where the AI is today
+## Where the AI was before this plan
 
-The audit, so the gap is on the record. The brain is
-`src/combat-ai.js` (168 lines, pure, fully unit-tested —
-`tests/unit/combat-ai.test.js` pins the ladder order, the targeting rule, the
-stand-tile routing and the crouch test); the doing is `combat.js`'s AI arm
-(`combat.js:4297-4381`).
+This is the historical audit that defined the gap, not a description of the
+current tree. The current brain remains `src/combat-ai.js` (pure and
+unit-tested); its world-heavy advance lives in `src/combat-advance.js`, and
+`combat.js` binds those rules to bodies, AP, FX and logs. See **As landed** for
+the shipped result.
 
 **What it has:**
 
 | Behavior | Where | Note |
 | --- | --- | --- |
-| Beat ladder: summon → topple → attack → advance → crouch → pass | `combat-ai.js:149` | The order IS the design; each beat outranks what it strictly beats |
-| Summoner reinforces before wading in (HR) | `combat.js:4324` | Cooldown-paced, capped (`data/enemies.js:134`) |
-| Topples furniture onto members | `combat-plans.js:54` | Same plan and price as the player's shove-topple — "both sides push for the same" |
-| Nearest engageable target, wounded tiebreak | `combat-ai.js:57` | Engageable outranks near (the M3 anti-stall fix) |
-| Random attack line from `def.attacks` | `data/enemies.js:3` | Statuses (gum, confused, blinded, stunned) land by luck, not intent |
-| Crouches when boxed in and actually shielded | `combat.js:2445` | Enemies take cover in v1 `[ratified]` (2026-07-30) |
-| Takes and suffers opportunity attacks | `combat.js:4159-4164` | Symmetric by construction (M1's shared assembler) |
+| Beat ladder: summon → topple → attack → advance → crouch → pass | `combat-ai.chooseBeat` (pre-M4) | The order IS the design; each beat outranks what it strictly beats |
+| Summoner reinforces before wading in (HR) | `combat-ai.aiBeatPlansFrom` + `combat.js` doer | Cooldown-paced, capped by `ENEMY_TYPES.hr.summon` |
+| Topples furniture onto members | `combat-plans.aiTopplePlan` | Same plan and price as the player's shove-topple — "both sides push for the same" |
+| Nearest engageable target, wounded tiebreak | `combat-ai.pickTarget` (pre-M2) | Engageable outranks near (the M3 anti-stall fix) |
+| Random attack line from `def.attacks` | `data/enemies.js` attack vocabulary (pre-M6) | Statuses (gum, confused, blinded, stunned) landed by luck, not intent |
+| Crouches when boxed in and actually shielded | `combat-ai.aiCrouchCovered` + combat doer | Enemies take cover in v1 `[ratified]` (designer, 2026-07-30, "go with your defaults"; `TACTICS_PLAN.md` M6) |
+| Takes and suffers opportunity attacks | `combat.js` shared strike/step resolution | Symmetric by construction (M1's shared assembler) |
 | Flank/backstab/cover apply to its swings | `TACTICS_PLAN.md` M1 | Passively — it benefits if it happens to stand right |
-| Pays surface taxes, slips, catches gum | `combat.js:4152-4206` | The floor treats both sides alike |
-| Scales by floor depth | `stats.js:323` | HP/damage/AP/accuracy curve, native tier respected |
+| Pays surface taxes, slips, catches gum | `combat-advance.js` `onTile` hook | The floor treats both sides alike |
+| Scales by floor depth | `stats.scaleEnemy` | HP/damage/AP/accuracy curve, native tier respected |
 
 **What it never does, though the system is shipped and priced:**
 
 | Missing | The system it ignores | Status in the record |
 | --- | --- | --- |
 | Shoot | The whole ranged stack: range, LOS, ammo, cover, crouch redirects | "no shipped enemy has a ranged attack" (`TACTICS_PLAN.md` M6) |
-| Shove a body | `displacePlan` (`combat-plans.js:177`), hazards, wall-slam, shove-as-disengage | Never an AI beat |
+| Shove a body | `combat-plans.displacePlan`, hazards, wall-slam, shove-as-disengage | Never an AI beat |
 | Topple a partition | `toppleEdge` / partition M8 machinery | "The AI does not yet topple partitions (furniture only) — a follow-up" (`TACTICS_PLAN.md` M6) |
-| Break cover down | `breakPlan` (`combat-plans.js:69`) — already shared with the AI in mind | Deferred `[proposed]` (M8) |
-| Pull Over | `pullPlan` (`combat-plans.js:122`) — likewise shared | Deferred `[proposed]` (M8) |
-| Heal or buff | The action system entirely — enemy defs carry inline `attacks`, not `actions` (`TODO.md:852`) | Enemy HR's class now owns triage (`POWERS_PLAN.md` 16–18) and her AI can't reach it |
+| Break cover down | `combat-plans.breakPlan` — already shared with the AI in mind | Deferred `[proposed]` (M8) |
+| Pull Over | `combat-plans.pullPlan` — likewise shared | Deferred `[proposed]` (M8) |
+| Heal or buff | The action system entirely — enemy defs carried inline `attacks`, not player `actions` | Enemy HR's class owned triage (`POWERS_PLAN.md` 16–18) and her AI could not reach it |
 | Choose targets for a reason | `positionMods`, HP, kill math — all queryable | Nearest + wounded tiebreak only |
 | Choose stand tiles for a reason | `isFlanked` / `isBackstab` / `provokedBy` / `surfaceStepCost` — all pure, all exported | `standTilePath` returns the shortest route, full stop |
-| Avoid hazards | `slipChanceAt`, `enemySurfDamage` | It logs the damage it walks through (`combat.js:4167`) |
-| Crouch proactively | Attacking does not break the crouch `[ratified]` — an entrenched shooter is legal | Crouch is a last resort today (`combat-ai.js:105`) |
+| Avoid hazards | `slipChanceAt`, `enemySurfDamage` | It logged the damage it walked through (`combat-advance.js` `onTile`) |
+| Crouch proactively | Attacking does not break the crouch `[ratified]` (designer, 2026-07-30, "go with your defaults"; `TACTICS_PLAN.md` M6) — an entrenched shooter is legal | Crouch was a last resort (`combat-ai.aiCrouchCovered`) |
 
 Also on the record and **out of this plan's scope**: hunting a hidden player
 needs last-known-position AI, deferred to sneak v2 `[stated]` (designer,
@@ -210,7 +215,7 @@ needs last-known-position AI, deferred to sneak v2 `[stated]` (designer,
 `[stated]` ("one at a time is fine for ai right now", designer, 2026-07-30,
 `INITIATIVE_PLAN.md` #3); charm already handles side-swapping without AI
 changes (the charmed unit is player-controlled, BG3's Dominate shape, not
-DOS2's AI-driven Charmed — `TODO.md:22`).
+DOS2's AI-driven Charmed — see the closed charm work in `TODO.md`).
 
 ## What the reference games actually do (looked up)
 
@@ -332,48 +337,34 @@ Four lessons, each reflected in a decision above:
 | A2 | **The ladder stays; scoring lives inside beats.** `chooseBeat` keeps its fixed, tested priority order; intelligence goes into *which target*, *which tile*, *which verb instance* — each a pure scored choice behind the beat | `[proposed]` | The alternative — a DOS2-style utility scorer ranking all actions — is the genre's endgame but trades away the one thing the ladder has proven: every beat is unit-testable and every fight is explainable. Revisit if the ladder's arm count stops being legible |
 | A3 | **Target scoring with a per-def `focus` knob** (Q2-B): score = engageability, then a weighted blend of proximity, kill-securability (fewest expected swings to down), and fragility; `focus` in the enemy def picks the blend | `[ratified]` | Q2 answered B (designer, 2026-08-01, "all of the recommended answers are good") |
 | A4 | **The AI gets all four cover-denial verbs at player prices** (Q3-A): shove-at-bodies (for a melee unit: slam/hazard landings only — never a free step-back), partition topple, break-down when sealed off, Pull Over on a crouched member. One carve-out: a RANGED unit may shove to disengage — the game's own doctrine that shove is the safe way to break contact (`TACTICS_PLAN.md` #9) applied from the other side | `[ratified]` | Q3 answered A (designer, 2026-08-01). Supersedes M8's deferral the way that deferral said it would be; decision #11 (`TACTICS_PLAN.md`) is the standing doctrine |
-| A5 | **One existing enemy gets a ranged loadout** (Q1-A), and the AI gets shoot / reposition-for-LOS / crouch-and-shoot beats | `[ratified]` | Q1 answered A (designer, 2026-08-01). WHICH enemy carries it stays `[proposed]` (the Executive, per the data section) — flavor is the designer's whenever they want it |
+| A5 | **One existing enemy gets a ranged loadout** (Q1-A), and the AI gets shoot / reposition-for-LOS / crouch-and-shoot beats | `[ratified]` | Q1 answered A (designer, 2026-08-01). The Executive selection was an implementation proposal, then ratified by the merged M5 implementation (`9a6adf1`) |
 | A6 | **Enemy HR heals, rationed; summoners keep distance** (Q4-A) | `[ratified]` | Q4 answered A (designer, 2026-08-01). The ration (uses-per-fight, like the player's triage) is what keeps this from being the heal-ritual M9 just killed |
 | A7 | **No difficulty selector in v1**; every new magnitude lives in one `AI` tunables block | `[ratified]` | Q5 answered A (designer, 2026-08-01). The block is what makes any later selector cheap — one multiplier, not a scavenger hunt |
 | A8 | **Per-enemy personality is data; the brain is systems.** New per-def vocabulary (`focus`, a ranged attack entry, support flags) is documented in `data/enemies.js` like `aggression` and `reach` already are; `combat-ai.js` owns every rule that reads it | `[proposed]` | The `ARCHITECTURE.md` rule applied to AI. `aggression` (green/yellow/red) is the precedent: disposition already lives on the def |
-| A9 | **The AI never cheats.** Same AP prices (the topple precedent: "both sides push for the same", `combat-ai.js:141`), same rolls (M1's shared assembler), same information (it reacts to what combat shows it) | `[proposed]` | Difficulty that comes from fairness reads as the enemy being good; difficulty from cheating reads as the game being unfair. Every reference lesson supports it |
+| A9 | **The AI never cheats.** Same AP prices (the topple precedent: "both sides push for the same", `combat-ai.chooseBeat`), same rolls (M1's shared assembler), same information (it reacts to what combat shows it) | `[proposed]` | Difficulty that comes from fairness reads as the enemy being good; difficulty from cheating reads as the game being unfair. Every reference lesson supports it |
 | A10 | **Sealed-off enemies break through instead of turtling** — when no route to any target exists, a unit with a breakable barrier on the way batters it (`breakPlan`), and a unit sealed by a CLOSED DOOR opens it at the player's own door price rather than farming crouches forever. `break` sits ABOVE `crouch`, so a boxed-in coworker digs its way out rather than hunkering down — **including when the barrier it batters is its own cover** | `[ratified]` | The ordering was put to the designer with its consequence spelled out (a boxed enemy demolishing the cabinets protecting it) and the alternative offered (crouch above break, preserving the shipped turtle beat untouched): *"yeah thats fine the way it is"* (designer, 2026-08-03). Also the honest fix for the class of fights the closed-door deadlock belonged to: an unreachable enemy is now a *delayed* enemy, not a stalemate. Doors have no break pool (they are not in the wall sets, by construction), so without the open arm, closing a door on an enemy mid-fight turns it into a piñata |
 
 ## Architecture: where it lands
 
-Same carve as everything since the extraction: **decisions in
-`combat-ai.js` (pure, unit-tested), plans in `combat-plans.js` (already
-there), doing in `combat.js`, vocabulary in `data/enemies.js`.**
+As landed, the carve is: **decisions, state assembly, support selection and
+beat dispatch in `combat-ai.js`; physical displacement/demolition plans in
+`combat-plans.js`; the world-heavy advance in `combat-advance.js`; doing and
+world adapters in `combat.js`; vocabulary in `data/enemies.js`.**
 
 ### Pure modules
 
-- **`src/combat-ai.js`** — grows three scored choices and the new ladder
-  arms:
-  - `scoreTarget(unit, candidates, world)` — replaces `pickTarget`'s
-    hand-rolled comparison with the A3 blend; `focus` weights passed in.
-    `pickTarget` stays as the name; the tie-break chain becomes a score.
-  - `scoreStandTile(unit, target, tiles, world)` — path cost, minus flank /
-    backstab position value at arrival (`positionMods` with roles reversed),
-    minus opportunity attacks the route would eat (`provokedBy` along it),
-    minus hazard and slip exposure (`surfaceStepCost`, `slipChanceAt`).
-    `standTilePath` keeps its contract (a route) but chooses by score, not
-    length alone.
-  - `chooseBeat` grows arms in the ladder order the state-machine section
-    below fixes: `support`, `pull`, `shove`, `entrench`, `shoot`, `break`
-    — and `advance` stays ONE arm whose *destination rule* is kit-shaped
-    (melee: a swing tile; ranged: a firing tile), so the ladder does not
-    fork per kit. Each arm's availability is a plan result passed in,
-    exactly as `summon`/`topple` already work — the ladder never computes
-    world state.
-  - One `AI` tunables block: scoring weights, shove-worthiness threshold,
-    heal-at-fraction, ranged keep-away distance. The A7 block.
-- **`src/combat-plans.js`** — mostly already done, which is the point:
-  `breakPlan`, `pullPlan`, `displacePlan`, `topplePlan` are shared today.
-  Adds `aiShovePlan` (which adjacent victim + direction yields a slam or a
-  hazard landing — the "strictly better than a swing" test the topple beat
-  already models) and `aiPullPlan` / `aiBreakPlan` wrappers that answer
-  "is one worth taking this turn" over the eight neighbours, the same
-  shape `aiTopplePlan` has.
+- **`src/combat-ai.js`** owns the shipped pure choices and state machine:
+  `pickTarget` scores engageability/proximity/kill/frailty; `scoreDestination`
+  scores candidate routes; `aiSupportPlan` chooses the ally to heal;
+  `aiBeatPlansFrom` gathers affordable leaf plans; `chooseBeat` fixes their
+  order; and `takeBeat` dispatches the selected doer. Shoot and entrench are
+  deliberately not standalone `combat-plans.js` functions: `aiBeatPlansFrom`
+  derives both from the same host-supplied `shootable` and crouch facts.
+- **`src/combat-plans.js`** owns geometry plans that are meaningful to both
+  player and AI: `breakPlan`, `pullPlan`, `displacePlan`, `topplePlan`, plus
+  `aiShovePlan`, `aiPullPlan`, `aiBreakPlan`, `aiTopplePlan` and
+  `aiEdgeTopplePlan`. These functions decide what a physical verb would do;
+  they do not own healing, shooting, AP, waits, logs or FX.
 - **`src/data/enemies.js`** — vocabulary only: `focus` (A3), a ranged
   attack entry (`range`, and `ammo`-less by default — a stapler fires
   free like the player's), `support` on HR (heal numbers + ration),
@@ -381,12 +372,13 @@ there), doing in `combat.js`, vocabulary in `data/enemies.js`.**
 
 ### Impure
 
-- **`src/combat.js`** — the doing arms for each new beat (spend, log, FX,
-  wait), the plan-gathering before `chooseBeat` (exactly as
-  `summonReady`/`aiTopplePlan` are gathered today, `combat.js:4324`), and
-  the AI's ranged swing running the same `shotOutcome` gauntlet the
-  player's does — redirects into human shields included, which is the
-  moment that shipped rule finally faces the player.
+- **`src/combat-advance.js`** owns the route-field choice and movement side
+  effects for the advance beat. It asks pure scoring rules for a destination,
+  then binds the route to opportunity attacks, surfaces, statuses and slips.
+- **`src/combat.js`** adapts live bodies/world queries into `aiBeatPlansFrom`,
+  supplies the doers consumed by `takeBeat`, and runs enemy ranged strikes
+  through the same `shotOutcome` gauntlet as the player — redirects into
+  human shields included.
 - **`src/ui.js` / log lines** — every new beat needs a legible log line and
   its existing FX. An AI that pulls you over your desk without a clear log
   line is a bug report, not a difficulty feature (the OA lesson,
@@ -407,7 +399,7 @@ invariants that keep it terminating.
 ### Driver states (per frame, `phase === 'ai'`)
 
 The per-frame guards run in this order, and the order is load-bearing
-(today's driver already has all of them — `combat.js:4297`):
+(`startCombat.update` owns them):
 
 | State | Guard | What happens |
 | --- | --- | --- |
@@ -426,7 +418,10 @@ stall backstop (below). Everything else loops through DECIDE.
 One ladder, fixed order; a beat a unit's kit can't take simply never
 gates on (a melee unit never has a firing solution, a def without
 `support` never has a heal). Any one unit's *live* ladder stays at eight
-or fewer arms.
+or fewer arms. The complete twelve-arm order (including `pass`) is
+`[ratified]` by the merged M4/M6 implementation (`fc4cb15`, `4694a21`) and
+the later tested extraction (`8e29253`); `combat-ai.chooseBeat` is its current
+executable owner.
 
 | # | Beat | Gates on | Spends | Why it sits here |
 | --- | --- | --- | --- | --- |
@@ -436,10 +431,10 @@ or fewer arms.
 | 4 | `topple` | furniture **or partition edge** with a victim under the fall | shove AP | Unchanged position, widened aim — damages, stuns, leaves cover |
 | 5 | `shove` | melee kit: landing is a slam or hazard; ranged kit: also the plain step-back when adjacent to a threat | shove AP | Below topple (topple is shove-plus), above attack only when the plan says strictly better |
 | 6 | `attack` | in reach, has a melee line | attack AP | Unchanged position; the line pick becomes context-aware (melee lines in reach, status value weighted) |
-| 7 | `entrench` | ranged kit, in range + LOS, not crouched, a shielding face HERE, AP for crouch AND a shot | cover AP | Crouch-then-shoot in one turn — attacking doesn't break the crouch `[ratified]`, so this is the Gears fight the cover game was built for. Must precede `shoot` or it never fires |
+| 7 | `entrench` | ranged kit, in range + LOS, not crouched, a shielding face HERE, AP for crouch AND a shot | cover AP | Crouch-then-shoot in one turn — attacking doesn't break the crouch `[ratified]` (designer, 2026-07-30, "go with your defaults"; `TACTICS_PLAN.md` M6), so this is the Gears fight the cover game was built for. Must precede `shoot` or it never fires |
 | 8 | `shoot` | ranged kit, in range + LOS, `shotOutcome` clear | attack AP | The "in range but not in reach" arm; in melee reach, `attack` (above) already won — no point-blank ambiguity |
 | 9 | `advance` | a destination exists and budget covers a step | move budget | ONE arm; the destination rule is the kit's: melee walks the scored swing tile, ranged walks the scored firing tile |
-| 10 | `break` | no route to ANY target; a breakable barrier (or closed door — the open arm) on the would-be route | attack AP / door AP | Only when sealed: barrier-battering as a substitute for the advance that cannot exist (A10). Deliberately ABOVE the crouch `[ratified]` — a sealed coworker digs out rather than turtling, even when the thing it batters is its own cover |
+| 10 | `break` | no route to ANY target; a breakable barrier (or closed door — the open arm) on the would-be route | attack AP / door AP | Only when sealed: barrier-battering as a substitute for the advance that cannot exist (A10). Deliberately ABOVE the crouch `[ratified]` (designer, 2026-08-03, "yeah thats fine the way it is") — a sealed coworker digs out rather than turtling, even when the thing it batters is its own cover |
 | 11 | `crouch` | as today (boxed in, actually shielded) | cover AP | The turtle stays the last resort for melee kits |
 | 12 | `pass` | — | — | Hand the turn on |
 
@@ -505,11 +500,12 @@ export const AI = {
   BACKSTAB_VALUE: 1.0,// arriving in the target's rear arc
   OA_COST: 2.0,       // per opportunity attack the route would eat
   HAZARD_COST: 1.5,   // per damaging surface tile entered
-  SLIP_COST: 1.0,     // per slippery tile entered (expected turn loss)
+  SLIP_COST: 1.0,     // per unit of slip chance crossed (expected turn loss)
   // --- ranged (milestone 5) ---
   KEEP_AWAY: 2.5,     // a shooter wants at least this distance from the nearest threat
   CROWD_COST: 0.75,   // per tile-unit the firing tile sits inside KEEP_AWAY
   SHIELD_VALUE: 1.0,  // a firing tile with a shieldable face toward the target (entrench potential)
+  RANGE_SLACK: 0.5,   // stand inside max range so continuous-body drift cannot break the shot
   // --- attack lines (milestones 5-6) ---
   STATUS_WEIGHT: 2,   // an `applies` line the target doesn't wear is this much likelier
   // --- support (milestone 6) ---
@@ -520,22 +516,26 @@ export const AI = {
 ### `data/enemies.js` vocabulary (documented in the header, like `aggression` and `reach`)
 
 - **`focus`** (0..1, default `AI.FOCUS_DEFAULT`) — targeting discipline.
-  First-draft values `[proposed]`: Manager 0.2 (harasses whoever is
+  Shipped values `[ratified]` by the merged M2 implementation (`0b3c87b`):
+  Manager 0.2 (harasses whoever is
   closest — pettiness, not strategy), Executive 0.9 (picks the kill and
   works it), Security Guard 0.5 (steady; `STICKINESS` does his character
   work), HR 0.4.
 - **A ranged attack entry** — an `attacks` element with `range` (and the
   usual min/max/log/missLog/applies). `range` present = ranged line: only
   fired out of reach, gated on LOS and a clear `shotOutcome`, bills
-  `attackAp` like any line. Q1's candidate `[proposed]`: the Executive,
+  `attackAp` like any line. The shipped Q1 choice is the Executive
+  `[ratified]` by the merged M5 implementation (`9a6adf1`),
   one entry, `range: 5` (the throw-range precedent), e.g. *"The Executive
   sets a hard deadline from across the room."* Flavor is the designer's
   call; the mechanics are not affected by whose entry it is.
 - **`support`** on a def — the summon-descriptor pattern exactly
-  (`data/enemies.js:134` is the template): numbers on the def, paced by
-  the same clocks. `[proposed]` for HR:
-  `support: { heal: [4, 7], uses: 2, ap: 2, range: 4, log: 'HR approves
-  emergency self-care.' }`. `uses` is the ration (M9's lesson written
+  (`ENEMY_TYPES.hr.summon` is the template): numbers on the def, paced by
+  the same clocks. Shipped for HR `[ratified]` by the merged M6 implementation
+  (`4694a21`):
+  `support: { heal: [4, 7], uses: 2, cooldownRounds: 1, ap: 2, range: 4,
+  log: 'HR approves emergency self-care. Attendance is mandatory.' }`.
+  `uses` is the ration (M9's lesson written
   into the enemy side); `range` is aim distance — v1 support does NOT
   walk to heal (the summoner already stands amid her temps; a healer
   that repositions to heal is a v2 behavior, noted in risks).
@@ -571,13 +571,15 @@ score = AI.W_NEAR * near
 
 `current` is the unit's target from its previous beat this fight (a
 transient on the unit, like `summonCd`). The old wounded-tiebreak behavior
-is the `frail` term at `focus = 0.5`; the old rule entirely is `focus = 0`.
+survives as the deterministic tie-break at `focus = 0`; the old rule entirely
+is therefore `focus = 0`, not the default 0.5.
 
 ### Destination (inside the `advance` beat; kit picks the candidate set)
 
 ```
-scoreDestination(unit, target, routes, q)
-  // q: { threats, allies, facingOf, surfDamageAt, slipChanceAt, shieldFaceAt, nearestThreatDist }
+scoreDestination(routes, q = {})
+  // q: { target, approach, allies, facing, threats, edgeOpen,
+  //      surfDamageAt, slipChanceAt, shieldFaceAt, nearestThreatDist }
 ```
 
 - **Melee candidates:** the ≤8 swing-tile routes `standTilePath` already
@@ -611,7 +613,7 @@ weight = 1 + (a.applies && !hasStatus(target, a.applies) ? AI.STATUS_WEIGHT - 1 
 pick   = weighted draw through `rng`   // resolution, so rng is correct here; seeded runs stay reproducible
 ```
 
-### The new plans (`combat-plans.js`, beside `aiTopplePlan`)
+### The shipped plan seams
 
 - `aiShovePlan(bx, bz, world, victimAt, { hazardAt, disengage })` — for
   each `AROUND` victim, push directly away from the shover
@@ -619,26 +621,27 @@ pick   = weighted draw through `rng`   // resolution, so rng is correct here; se
   plan is a SLAM (`blocked`) or the landing is a hazard
   (`hazardAt(tx, tz)`); with `disengage` (ranged kit, threat adjacent),
   also accept the plain step-back. Returns `{ victim, plan }` or null.
-- `aiPullPlan(unit, members, crouchOf, world)` — members within
+- `combat-plans.aiPullPlan(unit, candidates, crouchOf, world, opts)` — members within
   `REACH.PULL` holding a live crouch whose shielded face lies between
   the bodies; delegates to `pullPlan` with the puller excluded from the
-  cover faces (the `pullCrouchOf` precedent, `combat.js:2477`). First
+  cover faces (the `pullCrouchOf` adapter in `combat.js`). First
   qualifying member wins (they are rare).
-- `aiBreakPlan(unit, world, towardTarget)` — gated on "no member is
-  engageable at all". Adjacent breakable prop, partition edge
-  (`edgeHpBetween`), or closed door on the face toward the nearest
-  member (`dirOctant`). Returns what to batter or which door to open.
+- `combat-plans.aiBreakPlan(bx, bz, tx, tz, world)` — gathered only when no
+  member is engageable. It checks the adjacent face toward the target for a
+  breakable prop, partition edge (`edgeHpBetween`), or closed door. Returns
+  what to batter or which door to open.
   v1 is deliberately adjacent-only; cost-aware pathfinding THROUGH
   breakables (route cost += panel HP) is the v2 refinement, noted so
   nobody builds it by accident.
-- `entrenchPlan` — ranged kit: in range + LOS + not crouched +
-  `aiCrouchCovered` HERE + AP ≥ coverAp + attackAp.
-- `shootPlan` — dist ≤ range, LOS, `shotOutcome` clear (passed in as a
-  leaf fact — combat owns bodies), a ranged line affordable.
-- `supportPlan(unit, allies, spec)` — allies (self included, the triage
-  mirror) with `hp/maxHp < AI.HEAL_AT`, within `spec.range`, skipping
-  summons with ≤1 lifetime turn left; ration and cooldown live on the
-  unit like `summonCd`. Lowest HP fraction wins.
+- `combat-ai.aiSupportPlan(bx, bz, spec, allies, opts)` — allies (self
+  included, the triage mirror) with `hp/maxHp < AI.HEAL_AT`, within
+  `spec.range`, skipping summons with ≤1 lifetime turn left. Lowest HP
+  fraction wins; `aiBeatPlansFrom` owns the ration/cooldown/AP gates.
+- There is no `entrenchPlan` or `shootPlan`. `aiBeatPlansFrom` asks combat for
+  one `shootable` leaf fact, asks `aiCrouchCovered` once, and derives
+  `canShoot`/`canEntrench` from those shared answers plus AP and crouch state.
+  This is deliberate: bodies and `shotOutcome` are combat-owned, while the
+  relation between the two beats is a pure ladder rule.
 
 ## The doing arms, specified
 
@@ -662,8 +665,8 @@ spec. All prices are the player's own (A9).
 The layered levels (`floors.js`, the atrium spike; verticality is required
 `[stated]`, designer 2026-08-01, `EDITOR_PLAN.md` #3) intersect this plan,
 and the honest current state bounds the scope: **actors above the ground
-storey are not supported yet** — `parseLevel` throws a named error for
-them (`floors.js:31-38`), so every fight today happens on one storey and
+storey are not supported yet** — `floors.parseFloors` throws a named error for
+them, so every fight today happens on one storey and
 nothing in milestones 1–7 changes that. What this section owns is making
 sure the AI work doesn't make the vertical future HARDER, and naming what
 that future needs from it.
@@ -714,12 +717,10 @@ coordinate, those keys grow it too, in one place each.
 The traps, from reading the code paths each milestone lands on. Each is
 cheap to dodge on the way in and expensive to debug after.
 
-1. **`unitCombat` is a whitelist, and it eats new fields silently.** It
-   copies exactly `{name, model, maxHp, ap, attackAp, attacks, xp, loot,
-   accuracy, dodge, reach}` (`stats.js:374`). The RIGHT path for the new
-   behavior fields is the one `summon` and `aggression` already use:
-   read them off `unit.def` at plan-gathering time (`combat.js:4324`
-   reads `unit.def.summon`), which works for registry enemies and
+1. **`unitCombat` normalizes combat stats, not behavior vocabulary.** The
+   RIGHT path for `focus`, `support`, `summon` and similar behavior fields is
+   to read them off `unit.def` at plan-gathering time (`aiBeatPlansFrom`'s
+   combat adapter does this), which works for registry enemies and
    class-backed units alike because both end up with a full merged def.
    Route a field through `unit.combat` ONLY if it is a combat stat —
    and then it must be added to the whitelist with `??`, not `||`, or
@@ -728,17 +729,17 @@ cheap to dodge on the way in and expensive to debug after.
    (`range` on an attack entry) ride free — `attacks` passes through
    whole.
 2. **`pickTarget` runs EAGERLY during `startCombat`** — the surprise
-   sweep calls it before any turn exists (`combat.js:263`). Scoring must
+   sweep calls it before any turn exists. Scoring must
    not read turn state (`acting`, waits, budgets), and every accessor it
    touches must be a hoisted `function` declaration — `const` in a
    temporal dead zone already broke a fight mid-setup once
    (`TACTICS_PLAN.md` M3's landed note).
-3. **The `engageMemo` is keyed on tiles and cleared per turn**
-   (`combat.js:231`) — it may cache *engageability* only. HP,
+3. **The `engageMemo` is keyed on tiles and cleared per turn** — it may
+   cache *engageability* only. HP,
    crouch state and statuses change mid-turn; bake any of them into that
    memo and the AI aims at a fight that already moved on. Score fresh
    every DECIDE; memoize only the route existence the memo already owns.
-   And add no new per-frame Dijkstras: `scoreStandTile` annotates the
+   And add no new per-frame Dijkstras: `scoreDestination` annotates the
    ≤8 routes `standTilePath` already runs — the memo exists because that
    fan once pushed CI past its timeouts.
 4. **Combat's members are not main's members.** Combat wraps
@@ -749,19 +750,18 @@ cheap to dodge on the way in and expensive to debug after.
 5. **Side is live state, not registry.** Charm swaps a slot's side in
    place (`turns.replace`), and summons carry their own team. The
    pull/shove/topple victim tests must take the caller's side predicate
-   (the `victimAt` pattern `aiTopplePlan` already uses,
-   `combat-plans.js:54`) — an AI unit consulting the enemy registry will
+   (the `victimAt` pattern `combat-plans.aiTopplePlan` already uses) — an AI unit consulting the enemy registry will
    eventually pull its own charmed colleague over a desk.
-6. **Scoring is rng-free; resolution is rng-shared.** All dice go
-   through `rng` (the last direct `Math.random` was deliberately
-   evicted, `combat.js:4191`) so seeded bouts reproduce; and the scored
+6. **Scoring is rng-free; resolution is rng-shared.** All combat dice go
+   through the `rng` injected into `startCombat`, so seeded bouts reproduce;
+   and the scored
    *choices* use stable tie-breaks (candidate order), never a coin flip,
    or unit tests and bout numbers wobble across runs. New beats reuse
    `dropOnto` / `unitStrikesMember` for resolution rather than
    reimplementing — that is also what keeps `forceHit` working in specs,
    and it is the OA lesson ("lands by identical rules") applied forward.
-7. **The self-path is sacred.** `standTilePath`'s degenerate self-path
-   (`combat-ai.js:34`) is the fix for the shipped
+7. **The self-path is sacred.** `combat-ai.standTilePath`'s degenerate
+   self-path is the fix for the shipped
    oscillate-forever pacing bug. Destination scoring must never send a
    unit that can already swing somewhere "better": the ladder guarantees
    it (in reach → `attack` outranks `advance`), but only while scoring
@@ -931,12 +931,13 @@ and the codebase, nothing else.
      cover-heavy layouts.
 5. **The ranged enemy (A5, Q1).**
    - *Scope:* the ranged attack entry on the chosen def, the
-     context-aware line picker (HERE, not 6 — footgun 9), `shootPlan` /
-     `entrenchPlan` and their arms, the ranged candidate set for
-     `advance`, the enemy-side `shotOutcome` reading with the symmetric
-     redirect refusal (footgun 10).
-   - *Files:* `data/enemies.js`, `combat-plans.js`, `combat-ai.js`,
-     `combat.js` (the ranged strike twin of `unitStrikesMember`).
+     context-aware line picker (HERE, not 6 — footgun 9), the shared
+     shootable/crouch facts that gate the `shoot` and `entrench` arms, the
+     ranged candidate set for `advance`, and the enemy-side `shotOutcome`
+     reading with the symmetric redirect refusal (footgun 10).
+   - *Files as landed:* `data/enemies.js`, `combat-ai.js`,
+     `combat-advance.js`, and `combat.js` (the ranged strike twin of
+     `unitStrikesMember`).
    - *Pre-req:* fix the ranged walk-in bug (`TODO.md` Phase 1) first or
      with this — the AI reuses the corrected question ("any tile within
      range with LOS"), not the melee-shaped one.
@@ -946,14 +947,15 @@ and the codebase, nothing else.
      affording both"; "the firing-tile score prefers a shielded face and
      respects KEEP_AWAY".
    - *e2e:* the entrenched-shooter bout — the armed enemy crouches
-     behind a desk and shoots over it two rounds running (crouch
-     survives attacking, `[ratified]`); the player pulls him over it —
+     behind a desk and shoots over it two rounds running (crouch survives
+     attacking, `[ratified]`, designer 2026-07-30, "go with your defaults";
+     `TACTICS_PLAN.md` M6); the player pulls him over it —
      the counter the system promised.
    - *Acceptance:* the player-side crouch is observably worth taking
      (bout with a crouched vs standing passive party shows the damage
      gap).
 6. **Support AI (A6, Q4).**
-   - *Scope:* `supportPlan` + the arm, HR's `support` descriptor, the
+   - *Scope:* `combat-ai.aiSupportPlan` + the arm, HR's `support` descriptor, the
      status weight on the line picker, summoner spacing (her destination
      score gains a stand-behind-the-temps term — reuse `KEEP_AWAY` with
      her summons as the screen).
@@ -1115,7 +1117,7 @@ Deviations and honest notes, recorded here per the house pattern:
 
 - **Unit (`tests/unit/combat-ai.test.js`)** — the pattern is set: every
   scored choice and every new ladder arm gets the same treatment the
-  current six beats have. The ladder-order tests extend; the targeting
+  original six beats had. The ladder-order tests extend; the targeting
   tests are rewritten to the new rule (deliberate, noted in milestone 2).
 - **Unit (`tests/unit/combat-plans.test.js`)** — `aiShovePlan`'s
   "strictly better" gate (a shove that just moves someone is refused; a
@@ -1126,7 +1128,7 @@ Deviations and honest notes, recorded here per the house pattern:
   gets pulled, a sealed enemy breaks through, the shooter crouches and
   keeps shooting, HR heals and the log says so.
 - **Regression invariant** — the anti-stall suite is sacred: the pacing
-  bug (`combat-ai.js:23-33`) and the boxed-in corridor case have tests
+  bug (`combat-ai.standTilePath`) and the boxed-in corridor case have tests
   because they each once broke the game; no scoring change may trade a
   worse decision for a stall. The termination invariant gets its own
   unit test: for any beat state, a DECIDE step spends, refuses, or ends
