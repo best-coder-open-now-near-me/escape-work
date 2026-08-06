@@ -2,9 +2,10 @@ import { layoutActionDock } from './chrome.js';
 
 // The passive readouts: things the game SAYS, with nothing to click. The
 // narrator box, the focus banner naming whatever the cursor is over, and the
-// loot toast. Their CONTENT is pointer-events:none so narration never swallows
-// a world click. The narrator's small Advanced disclosure is the sole opt-in
-// control island; it stops its own events before they reach the game.
+// loot toast. Their CONTENT is normally pointer-events:none so narration never
+// swallows a world click. The narrator's scrollable history and its small
+// Advanced disclosure are the two opt-in control islands; each stops its own
+// events before they reach the game.
 // `type` is the line's METADATA, not its look: every entry carries one
 // ('narration' unless the caller says otherwise - combat's initiative rolls
 // say 'initiative'), so a later filter can drop a whole category of line
@@ -30,6 +31,8 @@ export function say(text, type = 'narration') {
 // diagnostics make combat intentionally chattier, so the retained history is
 // larger than the visible viewport and scrolls inside it.
 const NARRATION_KEEP = 64;
+const NARRATION_Z = 27;
+const NARRATION_FOREGROUND_Z = 42; // above the end-screen overlay (40)
 const NARRATION_FILTERS = [
   ['narration', 'Narration'],
   ['combat', 'Combat'],
@@ -41,6 +44,17 @@ let narratorListEl = null;
 let narrationOk = false;
 const narrationLines = [];
 const narrationFilterState = Object.fromEntries(NARRATION_FILTERS.map(([type]) => [type, true]));
+
+// The game's click handlers sit above the UI modules and must never interpret
+// dragging the scrollbar, selecting a line, or opening Advanced as a world
+// order. Do not preventDefault: wheel/touch defaults are what make the history
+// itself scroll.
+function ownNarratorPointer(el, { wheel = false } = {}) {
+  for (const event of ['pointerdown', 'mousedown', 'mouseup', 'click', 'contextmenu']) {
+    el.addEventListener(event, (e) => e.stopPropagation());
+  }
+  if (wheel) el.addEventListener('wheel', (e) => e.stopPropagation());
+}
 
 function renderNarrator(animateNewest = false) {
   if (!narratorListEl) return;
@@ -69,7 +83,7 @@ function ensureNarrator() {
   narratorEl.id = 'narration-box';
   Object.assign(narratorEl.style, {
     position: 'fixed', right: '14px', bottom: '20px',
-    zIndex: '27', width: 'min(390px, 48vw)', maxHeight: '38vh', boxSizing: 'border-box',
+    zIndex: String(NARRATION_Z), width: 'min(390px, 48vw)', maxHeight: '38vh', boxSizing: 'border-box',
     pointerEvents: 'none', textAlign: 'left', overflow: 'hidden',
     display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: '7px',
     background: 'rgba(18,18,30,.9)', border: '1px solid #3a3a52', borderRadius: '12px',
@@ -82,10 +96,12 @@ function ensureNarrator() {
   narratorListEl = document.createElement('div');
   narratorListEl.id = 'narration-lines';
   Object.assign(narratorListEl.style, {
-    minHeight: '0', overflowY: 'auto', overscrollBehavior: 'contain',
-    display: 'flex', flexDirection: 'column', gap: '4px', pointerEvents: 'none',
-    scrollbarWidth: 'thin',
+    minHeight: '0', flex: '1 1 auto', overflowY: 'auto', overscrollBehavior: 'contain',
+    display: 'flex', flexDirection: 'column', gap: '4px', pointerEvents: 'auto',
+    touchAction: 'pan-y', paddingRight: '5px',
+    scrollbarWidth: 'thin', scrollbarColor: '#68657d #202032', scrollbarGutter: 'stable',
   });
+  ownNarratorPointer(narratorListEl, { wheel: true });
 
   const advanced = document.createElement('details');
   advanced.id = 'narration-advanced';
@@ -95,9 +111,7 @@ function ensureNarrator() {
   });
   // The app's world handlers live above this DOM island. A filter click is a
   // UI choice, never a click-through order to walk or attack.
-  for (const event of ['pointerdown', 'mousedown', 'mouseup', 'click', 'contextmenu']) {
-    advanced.addEventListener(event, (e) => e.stopPropagation());
-  }
+  ownNarratorPointer(advanced);
   const summary = document.createElement('summary');
   summary.textContent = 'Advanced';
   Object.assign(summary.style, { cursor: 'pointer', userSelect: 'none', textAlign: 'right' });
@@ -164,6 +178,14 @@ function narrate(text, type = 'narration') {
   const el = ensureNarrator();
   renderNarrator(narrationFilterState[type] !== false);
   el.style.opacity = narrationOk ? '1' : '0';
+}
+
+// End screens normally own the whole viewport. Defeat is the exception: the
+// player needs the retained combat record to diagnose the wipe, so screens.js
+// promotes the narrator above that one overlay without making it cover the
+// level-up, character-creation, or victory screens during ordinary play.
+export function setNarrationForeground(foreground) {
+  ensureNarrator().style.zIndex = String(foreground ? NARRATION_FOREGROUND_Z : NARRATION_Z);
 }
 
 // The narration box's current lines, newest last - for the e2e suite.

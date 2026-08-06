@@ -133,13 +133,12 @@ export function createFrame(d) {
       );
     }
     for (const npc of d.npcs) npc.update(dt); // idle in place, ease their facing
-    // The bottom narrator box gets general narration only when nothing else
-    // owns the bottom of the screen: not mid-fight (combat has its own log),
-    // not mid-conversation (the dialogue panel is up), not pre-class-pick.
-    // The narration box stays up in combat and in conversation now: examine
-    // text and incidental narration used to vanish entirely during both, which
-    // is what made every examine description look broken.
-    d.ui.setNarrationGate(!!d.sheet && !d.gameOver);
+    // The bottom narrator box keeps the run's history through exploration,
+    // combat, conversation, AND after a wipe:
+    // the last exchanges are the evidence for why the run ended. The defeat
+    // screen raises it over its overlay (ui/screens.js); this gate keeps the
+    // retained history alive once gameOver freezes everything else.
+    d.ui.setNarrationGate(!!d.sheet);
     // Persistent hotbar: visible only when it can act; ammo counts refresh
     // when they change (the gate keeps DOM writes off the hot path). Armed
     // out-of-combat target rings redraw each frame, like combat's own.

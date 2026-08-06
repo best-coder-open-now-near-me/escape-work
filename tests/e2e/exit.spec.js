@@ -12,7 +12,9 @@
 import { test, expect } from '@playwright/test';
 import level1 from '../../levels/level1.json' with { type: 'json' };
 import { TILE_TYPES } from '../../src/data/tiles.js';
-import { bootStash, bootAndPick, waitStill, enterCombat } from './helpers.js';
+import {
+  bootStash, bootAndPick, waitStill, enterCombat, endTurnUntilPlayer,
+} from './helpers.js';
 
 const PROGRESS_KEY = 'escape-work.progress';
 
@@ -202,7 +204,18 @@ test('a party WIPE is the only way to lose the run', async ({ page }) => {
   await enterCombat(page);
   expect(await page.evaluate(() => window.__combat.party.length)).toBe(1);
 
-  await page.evaluate(() => { window.__combat.forceHit = true; });
+  // Build a real diagnostic history first. The Manager's forced hits write the
+  // combat outcome plus hit/damage formulas, enough to overflow the retained
+  // narrator viewport without test-only DOM filler.
+  await page.evaluate(() => {
+    window.__combat.forceHit = true;
+    window.__god.player.hp = 999;
+    window.__god.timeScale = 4;
+    window.__combat.refresh();
+  });
+  for (let i = 0; i < 8; i++) await endTurnUntilPlayer(page);
+  expect(await page.evaluate(() => window.__game.narration.length)).toBeGreaterThan(16);
+
   await page.evaluate(() => { window.__god.player.hp = 1; window.__combat.refresh(); });
 
   // End turns until the Manager lands the blow that finishes the roster.
@@ -215,4 +228,36 @@ test('a party WIPE is the only way to lose the run', async ({ page }) => {
 
   await expect(page.locator('#lose-screen')).toBeVisible();
   expect(await page.locator('#lose-screen').textContent()).toMatch(/STUCK AT WORK/);
+
+  // Death leaves the transcript above the overlay, with a genuinely
+  // overflowing, interactive scroll surface rather than a clipped cosmetic
+  // box. Wheel upward to prove old lines can actually be reached.
+  const narration = page.locator('#narration-box');
+  const lines = page.locator('#narration-lines');
+  await expect(narration).toBeVisible();
+  const metrics = await page.evaluate(() => {
+    const box = document.getElementById('narration-box');
+    const list = document.getElementById('narration-lines');
+    const lose = document.getElementById('lose-screen');
+    return {
+      opacity: getComputedStyle(box).opacity,
+      boxZ: Number(getComputedStyle(box).zIndex),
+      loseZ: Number(getComputedStyle(lose).zIndex),
+      overflowY: getComputedStyle(list).overflowY,
+      pointerEvents: getComputedStyle(list).pointerEvents,
+      clientHeight: list.clientHeight,
+      scrollHeight: list.scrollHeight,
+      scrollTop: list.scrollTop,
+    };
+  });
+  expect(metrics.opacity).toBe('1');
+  expect(metrics.boxZ).toBeGreaterThan(metrics.loseZ);
+  expect(metrics.overflowY).toBe('auto');
+  expect(metrics.pointerEvents).toBe('auto');
+  expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+  expect(metrics.scrollTop).toBeGreaterThan(0); // new lines leave it at the bottom
+
+  await lines.hover();
+  await page.mouse.wheel(0, -1200);
+  await expect.poll(() => lines.evaluate((el) => el.scrollTop)).toBeLessThan(metrics.scrollTop);
 });

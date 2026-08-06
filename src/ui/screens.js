@@ -4,6 +4,7 @@
 // its button below rather than each inventing one.
 import { BUTTON_CHROME, esc,
 } from './chrome.js';
+import { setNarrationForeground } from './readouts.js';
 import { TALENTS, STARTING_TALENT_BY_CLASS } from '../data/talents.js';
 import { ATTRIBUTES } from '../data/attributes.js';
 import { pendingPoints } from '../stats.js';
@@ -56,6 +57,10 @@ export function showFloorClear({ nextName }, onNext) {
 }
 
 export function showLoseScreen(message) {
+  // A wipe is precisely when the combat transcript matters most. Keep the
+  // restart overlay, but let the narrator sit above it so its scrollbar and
+  // Advanced filters remain usable while the world is frozen behind both.
+  setNarrationForeground(true);
   const div = overlay('lose-screen', `
     <div style="font-size:22px; font-weight:800; letter-spacing:2px; margin-bottom:8px;">STUCK AT WORK</div>
     <div style="opacity:.85; margin-bottom:16px;">${message}</div>
