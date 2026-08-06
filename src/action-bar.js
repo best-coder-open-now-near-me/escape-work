@@ -122,21 +122,21 @@ export function createActionBar(d) {
       d.setArmed(id); // arm it; clicking a ringed target (or a spot) fires it
       d.hidePreview(); // aiming now - the movement trail yields to targets
       d.log(a.type === 'summon'
-        ? `${a.label} d.armed. Click where they should report.`
+        ? `${a.label} armed. Click where they should report.`
         : a.type === 'cover'
-          ? `${a.label} d.armed. Click something solid - or somebody brave.`
+          ? `${a.label} armed. Click something solid - or somebody brave.`
           : isPull(a)
-          ? `${a.label} d.armed. Click a coworker dug in behind cover.`
+          ? `${a.label} armed. Click a coworker dug in behind cover.`
           : isZone(a)
-          ? `${a.label} d.armed. Click where it should land.`
+          ? `${a.label} armed. Click where it should land.`
           : isMobility(a) && !aimsAtAlly(a)
-            ? `${a.label} d.armed. Click where you want to be.`
+            ? `${a.label} armed. Click where you want to be.`
             : aimsAtAlly(a)
           // Naming the SIDE matters on the one verb that points the other way:
           // armed the same way an attack is, aimed at the opposite half of the
           // board, and nothing else on the bar behaves like that yet.
-          ? `${a.label} d.armed. Click a teammate - or yourself.`
-          : `${a.label} d.armed. Click a target.`);
+          ? `${a.label} armed. Click a teammate - or yourself.`
+          : `${a.label} armed. Click a target.`);
       d.refresh();
     } else if (d.INSTANT_CONFIRM.has(a.type)) {
       // Instant self-actions (Deflect, a heal) used to fire the moment you

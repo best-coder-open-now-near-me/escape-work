@@ -37,6 +37,7 @@ import {
 } from './powers.js';
 import { createAimPaint } from './aim-paint.js';
 import { createAimView } from './combat-aim.js';
+import { createCombatIntent } from './combat-intent.js';
 import { createAiAdvance } from './combat-advance.js';
 import { STATUSES } from './data/statuses.js';
 import { blocksSight, PARTITION_TOPPLE } from './data/tiles.js';
@@ -480,10 +481,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // CURRENT turn: 'player' (a party member you control) | 'ai' (an enemy or a
   // player-team summon the AI drives) | 'done'.
   let phase = 'player';
-  // Nothing is pre-aimed: arm an attack/shove, THEN pick a target. While
-  // armed, hover switches from the movement trail to target rings.
-  let armed = null;
-  let pendingConfirm = null; // an instant self-action awaiting its second click
   let pendingMelee = null; // { en, action } to strike when the walk-up completes
   let pendingCrouch = null; // { tx, tz, spot } to tuck in when the walk-up completes
   let acting = null; // the AI unit's working turn state: { unit, ap, wait }
@@ -527,34 +524,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     unitStandingAt: (...a) => unitStandingAt(...a),
     log: (...a) => log(...a),
   });
-  // Back out of whatever is armed or awaiting confirmation. RIGHT-CLICK does
-  // this from anywhere; a left click never cancels (it reports an invalid
-  // target instead), so aiming can't be lost by a near-miss.
-  function cancelArmed(quiet = false) {
-    const was = armed || pendingConfirm;
-    disarm();
-    if (was && !quiet) log(`You lower the ${ACTIONS[was].label.toLowerCase()}.`);
-    return !!was;
-  }
-
-  // Stand the armed verb down - the STATE half of cancelArmed, with no
-  // narration, for the twenty-odd sites that reach here because a verb
-  // RESOLVED rather than because the player backed out.
-  //
-  // It exists because those sites each wrote the teardown by hand and drifted:
-  // all of them cleared `armed`, only four cleared `aim.aimPoint`, only three
-  // cleared `pendingConfirm`. The three are one state - what the next click
-  // will do - and they have to fall together or a resolved cone leaves its aim
-  // point behind for the next verb to read. Both of the strays are
-  // behaviour-neutral to fold in here, which is why this is a carve and not a
-  // fix: every `aim.aimPoint` read is already gated on `armed` (drawTargets:1475,
-  // 1494, 1510), and `pendingConfirm` is nulled before anything arms
-  // (`:3742`), so it is provably null wherever `armed` was set.
-  function disarm() {
-    armed = null;
-    pendingConfirm = null;
-    aim.clearAim();
-  }
+  // One explicit owner for what the next click will do. The callbacks are
+  // intentionally deferred: the aim view is constructed below, but no intent
+  // can be cleared until the fight has finished constructing it.
+  const intent = createCombatIntent({
+    actions: ACTIONS,
+    clearAim: () => aim.clearAim(),
+    log: (...a) => log(...a),
+  });
+  const disarm = (...a) => intent.disarm(...a);
+  const cancelArmed = (...a) => intent.cancel(...a);
 
   // The AI's advance (combat-advance.js) - the largest arm of the turn, and
   // the last one still living in this closure. It reads exactly one piece of
@@ -784,7 +763,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     REACH,
     view: {
       get phase() { return phase; },
-      get armed() { return armed; },
+      get armed() { return intent.armed; },
       get active() { return active; },
     },
     // Every rule is wrapped rather than passed by reference, and that is not
@@ -1054,7 +1033,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
                 : `Not enough AP - ${a.label} costs ${a.ap}.`,
       // An armed action stays pressable even when it has gone unaffordable -
       // that press is the only way to lower it again (see pressAction).
-      live: id === armed ? 'armed' : id === pendingConfirm ? 'confirm' : null,
+      live: id === intent.armed ? 'armed' : id === intent.pendingConfirm ? 'confirm' : null,
       tip: actionTip(id, a),
     };
   }
@@ -1879,7 +1858,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     members,
     callbacks,
     get active() { return active; },
-    get armed() { return armed; },
+    get armed() { return intent.armed; },
     get phase() { return phase; },
     rand: (...a) => rand(...a),
     log: (...a) => log(...a),
@@ -1916,7 +1895,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // that basic swing. Every preview reads this - the target rings, the to-hit
   // tag, and (through main.js) the cursor - so the affordances always describe
   // the swing that would actually land rather than only the armed case.
-  const previewAction = () => (phase === 'player' && active?.sheet ? (armed || defaultAttack()) : null);
+  const previewAction = () => (phase === 'player' && active?.sheet ? (intent.armed || defaultAttack()) : null);
 
   // What a click in a fight means (click-verbs.js): the verb arms, the
   // enemy-click dispatcher, the routes a click may walk first, and the
@@ -1931,9 +1910,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     members,
     callbacks,
     get active() { return active; },
-    get armed() { return armed; },
+    get armed() { return intent.armed; },
     get phase() { return phase; },
-    get pendingConfirm() { return pendingConfirm; },
+    get pendingConfirm() { return intent.pendingConfirm; },
     get pendingMelee() { return pendingMelee; },
     get pendingCrouch() { return pendingCrouch; },
     get lastClickOutcome() { return lastClickOutcome; },
@@ -1983,8 +1962,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     fireCone: (...a) => fireCone(...a),
     crouchLabel: (...a) => crouchLabel(...a),
     nameOf: (...a) => nameOf(...a),
-    setArmed: (v) => { armed = v; },
-    setPendingConfirm: (v) => { pendingConfirm = v; },
+    setArmed: (v) => intent.arm(v),
+    setPendingConfirm: (v) => intent.confirm(v),
     setPendingMelee: (v) => { pendingMelee = v; },
     setPendingCrouch: (v) => { pendingCrouch = v; },
     setLastClickOutcome: (v) => { lastClickOutcome = v; },
@@ -1999,9 +1978,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     watching,
     INSTANT_CONFIRM,
     get active() { return active; },
-    get armed() { return armed; },
+    get armed() { return intent.armed; },
     get phase() { return phase; },
-    get pendingConfirm() { return pendingConfirm; },
+    get pendingConfirm() { return intent.pendingConfirm; },
     log: (...a) => log(...a),
     refresh: (...a) => refresh(...a),
     disarm: (...a) => disarm(...a),
@@ -2016,8 +1995,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     ammoCostOf: (...a) => ammoCostOf(...a),
     liveSummonsOf: (...a) => liveSummonsOf(...a),
     resolveSummon: (...a) => resolveSummon(...a),
-    setArmed: (v) => { armed = v; },
-    setPendingConfirm: (v) => { pendingConfirm = v; },
+    setArmed: (v) => intent.arm(v),
+    setPendingConfirm: (v) => intent.confirm(v),
   });
   // Whose turn it is, and what opening one costs (turn-flow.js). Reached from a
   // turn, never from the startCombat sweep, so it is wired in place.
@@ -2791,10 +2770,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // character without the talent.
     get freeAp() { return active.freeAp || 0; },
     set ap(v) { active.ap = Math.max(0, roundAp(Number(v) || 0)); refresh(); },
-    get armed() { return armed; },
+    get armed() { return intent.armed; },
     // The instant awaiting its confirm click, or null - the other half of
     // "which slot is lit", which is what the one-live-slot rule asserts on.
-    get pendingConfirm() { return pendingConfirm; },
+    get pendingConfirm() { return intent.pendingConfirm; },
     // The hovered door's midpoint, or null - the threshold ring's own gate,
     // so a spec can assert the ring exists only while the cursor is on it.
     get hoverDoor() { return aim.hoverDoor; },
@@ -2920,7 +2899,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     logInitiative(); // after lead - the ambusher's raised roll is the real order
     beginTurn();
     if (phase === 'player') {
-      armed = opening.actionId;
+      intent.arm(opening.actionId);
       refresh();
       // A cone opener fires the wedge the player AIMED outside the fight -
       // the click point rides in through `opening` - rather than one
@@ -2953,7 +2932,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Is the armed action aimed at friends? main.js asks before it decides
     // which side of the board a click belongs to - it must not consult
     // ACTIONS itself, or there would be two answers to one question.
-    get armedIsFriendly() { return aimsAtAlly(ACTIONS[armed]); },
+    get armedIsFriendly() { return aimsAtAlly(ACTIONS[intent.armed]); },
     // --- the shared action bar -------------------------------------------------
     // main.js renders one bar for the whole game and asks these three things of
     // a fight: what does pressing a slot do, can it be pressed, and what has the
@@ -2980,7 +2959,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     },
     // Which slot is awaiting its second, committing press (an instant
     // self-action). The bar rings it differently from an armed one.
-    get pendingConfirm() { return pendingConfirm; },
+    get pendingConfirm() { return intent.pendingConfirm; },
     notifyMemberDown,
     // --- steering the shared turn ----------------------------------------------
     // The party bar, Tab, body clicks and the debug switchTo all route here IN
