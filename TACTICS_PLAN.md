@@ -14,6 +14,15 @@ later Take Cover milestones are live. This file is the historical
 design/ratification record; current behavior lives in the source and
 `ARCHITECTURE.md`.
 
+**Rule revision (2026-08-06): opportunity attacks are a talent.** `[stated]`
+(designer: "we need to make opportunity attacks a talent"). A combatant now
+projects a melee reaction threat only when their talent effects include
+`opportunityAttack`; the registry talent that owns it is **Exit Interview**.
+This supersedes the plan's original assumption that every unit with a basic
+melee swing threatens. The rest of the mechanism is unchanged: both sides use
+the same gate, forced movement remains safe, awareness and the shared reaction
+budget still apply, and overwatch remains a separate use of that budget.
+
 ## Questions for the designer (M6 Take Cover)
 
 All five answered. Q1 (height-threshold LOS) and Q3 (any character as a
@@ -368,7 +377,9 @@ behaviour rather than mechanism.
   usually mid-interpolation.
 - **Everyone has a basic melee swing.** Since `EQUIPMENT_PLAN` M3,
   `equippedAction(sheet)` always returns an action id (the weapon's, or
-  `punch`). Every member can therefore *threaten* a tile without new content.
+  `punch`). This originally implied every member could threaten a tile; the
+  2026-08-06 rule revision above supersedes that implication with the Exit
+  Interview talent gate.
 
 ## What we're building
 
@@ -455,9 +466,10 @@ never take opportunity attacks. Reuses `STATUS_PLAN`'s registry, and gives
 surprise a third job (it already grants the attacker accuracy and burns the
 victim's turn).
 
-**#11 — Everything is symmetric.** Enemies flank, take cover, backstab, and
-punish disengages. That is the entire point: it is what gives melee enemies
-teeth.
+**#11 — Everything is symmetric.** Enemies flank, take cover, and backstab.
+Opportunity attacks are symmetric too, but after the 2026-08-06 revision both
+sides must own Exit Interview before they punish a disengage. Symmetry means
+one rule for both sides, not universal ownership.
 
 **#12 — Positional bonuses are capped in aggregate.** Surprise + flank +
 backstab must not become a guaranteed hit. One `POSITION_CAP` bounds the sum

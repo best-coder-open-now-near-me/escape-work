@@ -432,7 +432,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   //          stepOpen(x,z,nx,nz), surfaceIdAt(x,z), enemySurfDamage(x,z) }
   // fx:    { projectile(from,to,kind), damageText(x,z,text,color) } - cosmetic
   // callbacks: { say, updateHud, onRound, onEnemyKilled(en), onWin, onLose }
-  const talentFxOf = (m) => m.sheet.talent?.effects || {};
+  // Members carry talents on their sheet; an enemy archetype may carry the
+  // same data shape on its def. Keeping that distinction here lets every
+  // combat rule ask about talent effects without quietly becoming party-only.
+  const talentFxOf = (u) => (u?.sheet
+    ? u.sheet.talent?.effects
+    : u?.def?.talent?.effects) || {};
   // --- the movement allowance (MOVEMENT_PLAN M2, "the Pawn") -----------------
   // A talent may grant AP that ONLY movement can spend. It is drawn from first,
   // so a reposition stops competing with a swing; once it is dry a long walk
@@ -2302,9 +2307,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const p = posOf(u);
     moveStart.set(u, { x: b.x, z: b.z, px: p.x, pz: p.z });
   };
-  // Everyone on the far side of `mover` able to punish it right now. Each
-  // carries its OWN reach: threat is whatever ground that unit could swing at,
-  // so a long weapon zones further than a pair of fists.
+  // Everyone on the far side of `mover` able to punish it right now. Exit
+  // Interview owns the ability to project this reaction threat; simply
+  // carrying a melee swing is no longer enough. Each owner carries its OWN
+  // reach, so a long weapon zones further than a pair of fists.
   // Who threatens this mover - the OTHER side, live. `engaged` is not that
   // list: a charmed coworker stays in it on purpose (charming the last hostile
   // must not win the fight) while fighting for the player, so reading it raw
@@ -2313,7 +2319,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // at the two sites inside `aiAdvance`/`aiSupportPlan` and missed this one.
   // Side is live state, never registry (AI_PLAN footgun 5).
   const threatsAgainst = (mover) => (mover.sheet ? aiAllies() : members)
-    .filter((u) => canReact(u))
+    .filter((u) => canReact(u) && talentFxOf(u).opportunityAttack)
     .map((u) => {
       const p = posOf(u);
       return { x: p.x, z: p.z, reach: reachOfUnit(u), ref: u };
@@ -2332,9 +2338,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // a threatened tile costs you - which is what makes it worth a class
     // point. Read the same way every other talent effect is, so an enemy
     // archetype can carry it too.
-    const flier = mover.sheet
-      ? mover.sheet.talent?.effects?.noProvoke
-      : mover.def?.talent?.effects?.noProvoke;
+    const flier = talentFxOf(mover).noProvoke;
     // A step off the crouch tile ends the crouch, whoever took it - the same
     // lazy validity every consult runs, invoked here so the chip drops the
     // moment the AI (or a walking member) leaves cover rather than at the
@@ -2351,13 +2355,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const to = posOf(mover);
     moveStart.set(mover, { x, z, px: to.x, pz: to.z }); // the next leg starts here
     if (!standing(mover)) return;
-    if (flier) {
-      // Say so once per escape, or "nothing happened" reads as a missing rule.
-      if (provokedBy(threatsAgainst(mover), from.px, from.pz, to.x, to.z, world.stepOpen).length) {
-        log(`${mover.sheet ? mover.sheet.name : mover.def.name} walks off untouched. Frequent flier.`);
-      }
-      return;
-    }
     // OVERWATCH fires first (POWERS_PLAN M5), and it is a different question
     // from the one below: an opportunity attack punishes LEAVING somebody's
     // reach, overwatch punishes ENTERING the ground a watcher is covering. A
@@ -2394,6 +2391,15 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       removeStatus(statusesOf(watcher), 'watching');
       opportunityStrike(watcher, mover, 'overwatch');
       if (!standing(mover)) return; // dropped in the doorway - nothing left to punish
+    }
+    if (flier) {
+      // Say so once per escape, or "nothing happened" reads as a missing rule.
+      // This sits AFTER overwatch deliberately: Frequent Flier prevents
+      // opportunity attacks, not a held ranged stance firing across its line.
+      if (provokedBy(threatsAgainst(mover), from.px, from.pz, to.x, to.z, world.stepOpen).length) {
+        log(`${mover.sheet ? mover.sheet.name : mover.def.name} walks off untouched. Frequent flier.`);
+      }
+      return;
     }
     for (const t of provokedBy(threatsAgainst(mover), from.px, from.pz, to.x, to.z, world.stepOpen)) {
       if (!canReact(t.ref)) continue; // an earlier swing this step spent it

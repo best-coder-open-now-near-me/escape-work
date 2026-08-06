@@ -136,10 +136,10 @@ export function inReach(ax, az, bx, bz, r, edgeOpen = null) {
   return reachOpen(ax, az, bx, bz, edgeOpen);
 }
 
-// A unit threatens wherever it could swing: the same reach test an actual
-// attack uses. Everyone can threaten - since EQUIPMENT_PLAN M3 every combatant
-// has a basic melee swing (its weapon's, or a punch) - so this needs no
-// per-unit capability check, only a reach.
+// A qualifying unit threatens wherever it could swing: the same reach test an
+// actual attack uses. This helper owns only that geometry. Combat filters the
+// candidate list through the Exit Interview talent first, so capability does
+// not get duplicated into a pure function that has no character data.
 //
 // Threat used to be the eight surrounding TILES. Reading it off `inReach`
 // instead is what makes an opportunity attack agree with the swing it becomes:

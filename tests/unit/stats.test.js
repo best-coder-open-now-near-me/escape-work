@@ -60,6 +60,13 @@ test('talent effects merge - numbers accumulate, flags replace', () => {
   assert.deepEqual(s.talents, ['origami-specialist', 'always-moving']);
 });
 
+test('Exit Interview owns the opportunity-attack capability', () => {
+  const s = createSheet('office-drone');
+  assert.equal(s.talent.effects.opportunityAttack, undefined);
+  assert.equal(grantTalent(s, 'exit-interview'), true);
+  assert.equal(s.talent.effects.opportunityAttack, true);
+});
+
 test('gainXp promotes once, fully heals, and grows the next bar', () => {
   const s = createSheet('office-drone');
   s.hp = 1;

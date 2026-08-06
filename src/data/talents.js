@@ -108,6 +108,14 @@ export const TALENTS = {
     // Never triggers an opportunity attack.
     effects: { noProvoke: true },
   },
+  'exit-interview': {
+    name: 'Exit Interview',
+    blurb: 'Nobody walks away without one. Enemies leaving your reach provoke a free swing.',
+    // Owns the ability to make opportunity attacks. Without this talent a
+    // basic melee swing still works normally, but it projects no reaction
+    // threat during somebody else's movement.
+    effects: { opportunityAttack: true },
+  },
   'always-moving': {
     name: 'Always Moving',
     blurb: 'You are already on your way somewhere. The first step is always free.',
@@ -162,6 +170,7 @@ export const TALENT_EFFECT_KEYS = [
   'slipImmune',         // main.js: the slip roll on wet floors
   'shockImmune',        // main.js: electrified water
   'hasLighter',         // main.js: igniting a flammable surface
+  'opportunityAttack',  // combat.js: projects a reaction threat during movement
   'noProvoke',          // combat.js: opportunity attacks
   'freeMoveAp',         // combat.js: the movement-only AP pool
   'surfaceDamageResist',// main.js: flat reduction on surface damage per step

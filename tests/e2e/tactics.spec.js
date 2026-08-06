@@ -30,24 +30,8 @@ const reachOf = (page) => page.evaluate(() => {
   return Math.max(Math.abs(p.x - m.x), Math.abs(p.z - m.z));
 });
 
-test('walking out of an enemy reach provokes a free swing', async ({ page }) => {
-  test.setTimeout(300_000);
-  await bootStash(page, DISENGAGE_ARENA, 'office-drone');
-  await enterCombat(page);
-  // Pin the roll so the reaction lands, and top the player up so the only
-  // damage that can possibly appear is the opportunity attack.
-  await page.evaluate(() => {
-    window.__combat.forceHit = true;
-    const s = window.__god.player;
-    s.hp = s.maxHp;
-  });
-  expect(await reachOf(page)).toBeLessThanOrEqual(1); // it threatens our tile
-
-  const hp0 = await page.evaluate(() => window.__god.player.hp);
+async function breakContact(page) {
   const from = await page.evaluate(() => window.__game.playerTile);
-  // Break contact for the far corner. Still our turn - the Manager has not
-  // been handed a turn to attack in, so any damage is the reaction.
-  //
   // Confirm we actually LEFT before waiting on the reaction. clickWorld only
   // promises the point was on screen - not that the click reached the world
   // and started a walk - so when this failed on CI it failed as "hp never
@@ -64,9 +48,57 @@ test('walking out of an enemy reach provokes a free swing', async ({ page }) => 
     } catch { /* the click never became a walk - aim again */ }
   }
   expect(moved, 'never broke contact, so nothing could have provoked').toBe(true);
+  await expect.poll(() => reachOf(page), { timeout: 30_000 }).toBeGreaterThan(1);
+}
+
+test('walking out of reach does not provoke without Exit Interview', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, DISENGAGE_ARENA, 'office-drone');
+  await enterCombat(page);
+  await page.evaluate(() => {
+    window.__combat.forceHit = true;
+    const s = window.__god.player;
+    s.hp = s.maxHp;
+  });
+  expect(await reachOf(page)).toBeLessThanOrEqual(1);
+  expect(await page.evaluate(() => !!window.__god.enemies.find((e) => e.alive)
+    ?.def.talent?.effects?.opportunityAttack)).toBe(false);
+
+  const hp0 = await page.evaluate(() => window.__god.player.hp);
+  const roll0 = await page.evaluate(() => JSON.stringify(window.__combat.lastRoll ?? null));
+  await breakContact(page);
+  expect(await page.evaluate(() => window.__god.player.hp)).toBe(hp0);
+  expect(await page.evaluate(() => JSON.stringify(window.__combat.lastRoll ?? null))).toBe(roll0);
+});
+
+test('an enemy with Exit Interview takes a free swing when you break away', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, DISENGAGE_ARENA, 'office-drone');
+  await enterCombat(page);
+  // Grant the registry talent, then give its data to the opposing combatant.
+  // Enemy defs use the same talent-effects shape as party sheets, which is
+  // what keeps the rule symmetric without welding it to an enemy type.
+  await page.evaluate(() => {
+    window.__combat.forceHit = true;
+    const s = window.__god.player;
+    s.hp = s.maxHp;
+    window.__god.grantTalent(s, 'exit-interview');
+    const foe = window.__god.enemies.find((e) => e.alive);
+    foe.def = {
+      ...foe.def,
+      talent: {
+        name: 'Exit Interview',
+        effects: { opportunityAttack: s.talent.effects.opportunityAttack },
+      },
+    };
+  });
+  expect(await reachOf(page)).toBeLessThanOrEqual(1);
+  expect(await page.evaluate(() => window.__god.player.talent.effects.opportunityAttack)).toBe(true);
+
+  const hp0 = await page.evaluate(() => window.__god.player.hp);
+  await breakContact(page);
   await expect.poll(() => page.evaluate(() => window.__god.player.hp),
     { timeout: 30_000 }).toBeLessThan(hp0);
-  expect(await reachOf(page)).toBeGreaterThan(1); // we did get out
 });
 
 test('circling inside its reach provokes nothing', async ({ page }) => {

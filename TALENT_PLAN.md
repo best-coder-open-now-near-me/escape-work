@@ -21,7 +21,7 @@ deliberate exception, stated up front in decision 8.
 class track survives, minus its talent nodes; see M2.
 
 > **Status: M1 shipped.** Departures from the plan below:
-> - **Nine entries, not ten.** Sharp Folds was cut on arrival - the
+> - **Nine entries shipped in M1, not ten.** Sharp Folds was cut on arrival - the
 >   effect-duplication lint caught it granting `paperDamageBonus` alongside
 >   Origami Specialist, and as a standalone pick it is that talent with a
 >   smaller number. The "merge the thin ones upward" note under decision 11
@@ -36,6 +36,12 @@ class track survives, minus its talent nodes; see M2.
 >   sidestepped by a `startTalent` field. It is marked for deletion by M2.
 > - **`grantTalent(sheet, id)`** is the new seam in `stats.js`; `applyEffect`
 >   itself needed no change, as predicted.
+> - **Exit Interview became the tenth entry on 2026-08-06.** Opportunity
+>   attacks are no longer universal; the new `opportunityAttack` effect is their sole
+>   capability gate. `[stated]` (designer: "we need to make opportunity
+>   attacks a talent"). It is deliberately not added to the temporary
+>   class-seed table: M2's picker is the ownership mechanism, and silently
+>   associating it with a class would recreate the coupling this plan removes.
 
 ## Where we are today
 
