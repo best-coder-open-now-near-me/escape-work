@@ -24,24 +24,6 @@ export function createDoors({
   isInCombat, isGameOver, getCombat, getPlayer,
   isWalkable, approachAndDo, onWorldChanged,
 }) {
-  // Only a key the grid actually has is a door. Kept separate from the pure
-  // `doorKeyNear` so the arithmetic stays testable without a grid.
-  //
-  // An OPEN door is not claimed from the ground at all. An open doorway is a
-  // gap you walk through - it is the tile you most want to click ON - and
-  // letting the floor there resolve to the door meant a step through a
-  // doorway pulled it shut instead (designer, 2026-07-31). Closing it is
-  // still one click: the swung-open panel is a registered pick target, so
-  // aiming at the door itself works, as do the right-click menu and the Alt
-  // overlay. Every ground-point surface reads this - the cursor, the focus
-  // banner, the click - so they cannot disagree about what the floor means.
-  const doorNearPoint = (point) => {
-    const key = doorKeyNear(point);
-    if (!key) return null;
-    const door = grid.doors.get(key);
-    return door && !door.open ? key : null;
-  };
-
   // The door a click or a hover means IN COMBAT, or null. One predicate, read
   // by both the cursor and the click, so the pointer can never promise a swing
   // of the handle that the click then declines.
@@ -52,17 +34,10 @@ export function createDoors({
   // the cursor stayed a plain arrow over the one piece of terrain you can
   // change.
   //
-  // Hitting the door MESH always counts - you aimed at the door, there is
-  // nothing else you could have meant. A ground point merely NEAR a door edge
-  // only counts when you are already standing beside it, because
-  // `doorNearPoint` claims a band either side of the edge and movement is
-  // the expensive thing in a fight: a click on the floor by a doorway has to
-  // stay a step, not become a refusal - or, worse, a 2 AP door swing.
-  const combatDoorAt = (hit, point) => {
-    if (hit?.kind === 'door') return hit.ref;
-    const key = point ? doorNearPoint(point) : null;
-    return key && atDoor(key, getCombat()?.actingActor) ? key : null;
-  };
+  // Only the visible door mesh counts. The floor beside a door is floor: no
+  // threshold band, proxy, or other invisible click target (designer,
+  // 2026-08-05).
+  const combatDoorAt = (hit) => hit?.kind === 'door' ? hit.ref : null;
 
   // The terrain edit alone: no gating, no price, no narration. Combat owns
   // the AP on its own side of the board - the player's active member pays
@@ -152,7 +127,7 @@ export function createDoors({
   }
 
   return {
-    doorNearPoint, combatDoorAt, toggleDoor, setDoorOpen, approachDoor,
+    combatDoorAt, toggleDoor, setDoorOpen, approachDoor,
     overlayEntries, doorsBeside, atDoor,
   };
 }

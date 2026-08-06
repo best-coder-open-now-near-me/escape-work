@@ -745,8 +745,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // module knowing why.
   const aimPaint = createAimPaint(app);
   // The aim VIEW (combat-aim.js): the wash, the walk preview, the ring drawers
-  // and the six variables only they touch (`preview`, `previewDt`, `coverEase`,
-  // `hoverDoor`, `paintEpoch`, `aim.aimPoint`). Declared here, private there - the
+  // and the five variables only they touch (`preview`, `previewDt`, `coverEase`,
+  // `paintEpoch`, `aim.aimPoint`). Declared here, private there - the
   // point of the slice is that five thousand lines can no longer assign to
   // them, only ask through the named methods at the bottom of that file.
   // `view` hands over the turn, which IS still combat's: getters rather than

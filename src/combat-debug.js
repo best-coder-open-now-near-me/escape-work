@@ -56,7 +56,6 @@ export function createCombatDebug(d) {
     get freeAp() { return d.active.freeAp || 0; },
     get armed() { return d.intent.armed; },
     get pendingConfirm() { return d.intent.pendingConfirm; },
-    get hoverDoor() { return d.aim.hoverDoor; },
     get aimPoint() {
       const p = d.aim.aimPoint;
       return p ? { x: p.x, z: p.z } : null;

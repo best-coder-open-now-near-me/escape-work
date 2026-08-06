@@ -529,8 +529,9 @@ let decalTex = null;
 function decalTextures(app) {
   if (decalTex) return decalTex;
   const TAU = Math.PI * 2;
-  // A shoe sole: the ball of the foot and a heel, toe toward -v (which the
-  // plane maps to +Z, the direction the walker is facing).
+  // A shoe sole: the ball of the foot and a heel, toe toward canvas -v. A
+  // PlayCanvas plane maps that end to local -Z, so the decal rotation below
+  // turns it 180 degrees relative to the actor's +Z forward axis.
   const foot = makeTexture(app, 64, (ctx, s) => {
     ctx.fillStyle = '#fff';
     ctx.beginPath();
@@ -644,6 +645,11 @@ const FOOT_COLORS = {
   coffee: [0.22, 0.14, 0.09],
 };
 
+// Generated foot texture points toward local -Z; actors define yaw zero as
+// +Z (actors.js faceToward). Keep that coordinate-system conversion named and
+// testable so a future texture cleanup cannot silently reverse every trail.
+export const footprintDecalYaw = (actorYaw) => actorYaw + 180;
+
 // One tile entered. `bleeding` means the walker is dripping (a bleed status, or
 // simply badly hurt); `surface` is what they just stepped IN, which both stains
 // the shoe for the next few tiles and decides how vivid this print is.
@@ -684,7 +690,9 @@ export function footstep(app, actor, x, z, { bleeding = false, surface = null, o
       tex: decalTextures(app).foot,
       color: FOOT_COLORS[kind],
       size: 0.38,
-      yaw: yaw + rnd(-7, 7),
+      // The generated texture's toe is local -Z while GridActor yaw zero faces
+      // +Z. Without this half-turn, every trail pointed back at its walker.
+      yaw: footprintDecalYaw(yaw) + rnd(-7, 7),
       life: kind === 'blood' ? 34 : 14,
       alpha: back ? alpha * 0.85 : alpha,
     });

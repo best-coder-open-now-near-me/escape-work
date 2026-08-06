@@ -73,7 +73,7 @@ const bodyRings = () => (_bodyRings ??= {
 //   summonDrop()                        for an armed summon: the hovered spot,
 //                                       the tiles its arrivals would fill, and
 //                                       why they couldn't (null if not armed)
-//   doorNear(point) / doorOpen(key)     the door under a ground point
+//   doorOpen(key)                       the state of a picked door
 //   tileDef(x, z) / shopSoldOut(x, z)   what a prop tile is and whether it's out
 //   corpseAt / looseAt / itemName       flat things the pick ray skims over
 //
@@ -137,7 +137,11 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
   let ctrlHeld = false;
   let altHeld = false;
   const glowHeld = () => ctrlHeld || altHeld;
-  const glowLit = () => glowHeld() || queries.inCombat();
+  // Doors are direct-use controls, so their highlight follows plain hover in
+  // and out of combat. Characters and props keep the established inspect-key
+  // gate outside combat; lighting all scenery all the time would turn the cue
+  // into ambient decoration again.
+  const glowLit = () => glowHeld() || queries.inCombat() || hoverTarget?.hit.kind === 'door';
 
   function applyGlow() {
     if (glowLit() && hoverTarget) setHoverHighlight(hoverTarget.entity, hoverTarget.rgb);
@@ -199,11 +203,6 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
         const extra = loose.length > 1 ? ` +${loose.length - 1}` : '';
         return { name: queries.itemName(loose[0].id) + extra, sub: 'Pick up', color: rgbCss(HL.loot) };
       }
-      const doorKey = queries.doorNear(point);
-      if (doorKey) {
-        const open = queries.doorOpen(doorKey);
-        return { name: open ? 'Door · open' : 'Door · closed', sub: open ? 'Close' : 'Open', color: rgbCss(HL.interact) };
-      }
       if (queries.tileDef(tx, tz).loot) return { name: queries.tileDef(tx, tz).label, sub: 'Rummage', color: rgbCss(HL.loot) };
     }
     return null;
@@ -231,7 +230,6 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
     if (point) {
       const tx = Math.round(point.x);
       const tz = Math.round(point.z);
-      if (queries.doorNear(point)) return 'pointer';
       if (queries.corpseAt(tx, tz) || queries.looseAt(tx, tz).length || queries.tileDef(tx, tz).loot) return 'pointer';
     }
     return 'default';
@@ -259,10 +257,10 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
       ui.setFocusBanner(focusInfoFor(hit, point));
       return hit;
     },
-    // The in-combat pass shows CHARACTERS only - combat.js owns the cursor
-    // there (it keys off whether a click would actually swing), so this is the
-    // glow and the banner alone. Pass null to show nothing.
-    showCharacter(hit, point) {
+    // The in-combat pass shows the body or door the click resolver accepted.
+    // Combat owns the cursor (it keys off whether the click can act), so this
+    // is the glow and banner alone. Pass null to show nothing.
+    showCombatTarget(hit, point) {
       hoverKind = hit ? hit.kind : null;
       track(hit);
       ui.setFocusBanner(hit ? focusInfoFor(hit, point) : null);

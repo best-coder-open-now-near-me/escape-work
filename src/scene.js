@@ -173,7 +173,9 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
     const [orient, coords] = [key[0], key.slice(2)];
     const [x, z] = coords.split(',').map(Number);
     const { holder, panel } = r.renderDoor(x, z, orient, grid.doors.get(key).open);
-    picking?.register(holder, 'door', key);
+    // Doors use their visible, rotated mesh bounds rather than a padded or
+    // world-aligned proxy: a click must be directly on the panel or hardware.
+    picking?.register(holder, 'door', key, { precise: true });
     const wallEntry = {
       entity: panel,
       x: orient === 'v' ? x - 0.5 : x,

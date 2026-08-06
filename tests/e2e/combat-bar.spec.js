@@ -219,33 +219,28 @@ test('a door can be worked mid-fight, from the tile beside it, for AP', async ({
 
   expect(await page.evaluate(() => window.__game.doorOpen('h:2,2')), 'the door starts shut').toBe(false);
 
-  // The threshold ring is a HOVER affordance now (designer, 2026-07-31): its
-  // gate (__combat.hoverDoor, fed by the same combatDoorAt the pointer cursor
-  // reads) holds the door only while the cursor is on it. It used to ring for
-  // as long as you stood beside the door, whatever the cursor was doing -
-  // a marker that never leaves the doorway reads as state, not affordance.
-  const pEdge = await page.evaluate(() => window.__game.project(2, 1.6));
-  await page.mouse.move(pEdge.x, pEdge.y);
-  await expect.poll(() => page.evaluate(() => window.__combat.hoverDoor)).not.toBe(null);
+  // The visible door itself is the hover affordance: cyan mesh glow and a
+  // pointer, with no green state ring left sitting under the doorway.
+  const pClosedPanel = await page.evaluate(() => window.__game.project3(2, 0.45, 1.5));
+  await page.mouse.move(pClosedPanel.x, pClosedPanel.y);
+  await expect.poll(() => page.evaluate(() => window.__game.hoverKind)).toBe('door');
+  await expect.poll(() => page.evaluate(() => window.__game.hoverGlow)).toBe(true);
   const pFloor = await page.evaluate(() => window.__game.project(1, 2));
   await page.mouse.move(pFloor.x, pFloor.y);
-  await expect.poll(() => page.evaluate(() => window.__combat.hoverDoor)).toBe(null);
+  await expect.poll(() => page.evaluate(() => window.__game.hoverGlow)).toBe(false);
 
   const apBefore = await page.evaluate(() => window.__combat.party[0].ap);
 
   expect(await page.evaluate(() => window.__game.playerTile),
     'standing at the handle').toEqual({ x: 2, z: 1 });
 
-  // Right-click the door: in a fight this menu used to offer Examine and
+  // Right-click the visible door: in a fight this menu used to offer Examine and
   // nothing else, so the game's only line-of-sight blocker was untouchable
   // during the half of the game that is about line of sight.
   //
-  // Aim at the EDGE (z 1.6), not a tile centre. A door is an edge, and
-  // `doorNearPoint` refuses any point that is not near one - a tile centre is
-  // the furthest a point can BE from every edge, so clicking (2,2) resolved to
-  // no door at all and the menu correctly offered only Examine.
-  const p = await page.evaluate(() => window.__game.project(2, 1.6));
-  await page.mouse.click(p.x, p.y, { button: 'right' });
+  // Use the same visible panel point as hover. Threshold/floor space is not a
+  // door target, even when the actor is standing beside it.
+  await page.mouse.click(pClosedPanel.x, pClosedPanel.y, { button: 'right' });
   await expect(page.locator('#context-menu')).toContainText('Open the door');
   await page.click('#context-menu >> text=Open the door');
 
@@ -274,6 +269,7 @@ test('a door can be worked mid-fight, from the tile beside it, for AP', async ({
   await page.mouse.move(panel.x, panel.y);
   await expect.poll(() => page.evaluate(() => document.getElementById('app').style.cursor),
     { timeout: 10_000 }).toBe('pointer');
+  await expect.poll(() => page.evaluate(() => window.__game.hoverGlow)).toBe(true);
 
   await page.mouse.click(panel.x, panel.y);
   await expect.poll(() => page.evaluate(() => window.__game.doorOpen('h:2,2'))).toBe(false);

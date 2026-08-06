@@ -21,6 +21,9 @@ test('hovering the door mesh highlights it and shows the interact cursor', async
   expect(await hover3(page, 8, 0.4, 4.5)).toBe(true);
   await expect.poll(() => page.evaluate(() => window.__game.hoverKind), { timeout: 15_000 }).toBe('door');
   expect(await page.evaluate(() => window.__game.cursor)).toBe('pointer');
+  // Doors are direct-use controls, so their cyan mesh glow does not require
+  // the inspect modifier that character highlighting does out of combat.
+  expect(await page.evaluate(() => window.__game.hoverGlow)).toBe(true);
 });
 
 test('clicking the raised door mesh opens it (parallax fix)', async ({ page }) => {

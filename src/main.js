@@ -75,7 +75,7 @@ import {
   surfaceEffect, rawSurfaceDamage, effectiveSurfaceDamage, slipChance, slips,
   hasGum, surfacePathCost, impactKindFor, speedUnderStatus,
 } from './step-rules.js';
-import { createDoors, atDoor, COMBAT_DOOR_AP, doorMidpoint } from './doors.js';
+import { createDoors, atDoor, COMBAT_DOOR_AP } from './doors.js';
 import { createDialogue, shopKeyForNpc, sayRecruited } from './dialogue.js';
 import { summonRange, summonRoom, dropCount, summonSpotProblem } from './summon-rules.js';
 import { outOfCombatActionState } from './hotbar-model.js';
@@ -1257,7 +1257,7 @@ function startGame(level) {
       approachEpoch += 1; // ...and so may yours: the armed target rings recheck
     },
   });
-  const { doorNearPoint, combatDoorAt, toggleDoor, approachDoor } = doors;
+  const { combatDoorAt, toggleDoor, approachDoor } = doors;
 
   // --- targeting, hover highlight, cursor --------------------------------------
   const cheb = (a, b) => chebOf(a.x, a.z, b.x, b.z);
@@ -1382,7 +1382,6 @@ function startGame(level) {
     SURFACES,
     FIRE,
     ELECTRIFIED,
-    doorNearPoint: (...a) => doorNearPoint(...a),
   });
 
   const canvasEl = document.getElementById('app');
@@ -2025,7 +2024,6 @@ function startGame(level) {
       ACTIONS,
       COMBAT_DOOR_AP,
       atDoor,
-      doorMidpoint,
       coneFrom,
       cheb: (...a) => cheb(...a),
       enemyAt: (...a) => enemyAt(...a),
@@ -2039,7 +2037,6 @@ function startGame(level) {
       approachAndDo: (...a) => approachAndDo(...a),
       approachDoor: (...a) => approachDoor(...a),
       combatDoorAt: (...a) => combatDoorAt(...a),
-      doorNearPoint: (...a) => doorNearPoint(...a),
       toggleDoor: (...a) => toggleDoor(...a),
       dispatchHit: (...a) => dispatchHit(...a),
       attackOrConfront: (...a) => attackOrConfront(...a),
@@ -2174,7 +2171,6 @@ function startGame(level) {
         return { x: run.oocCrouch.at.x, z: run.oocCrouch.at.z, faces: oocCoverFaces(run.oocCrouch.at.x, run.oocCrouch.at.z) };
       },
       inCombat: () => run.inCombat && !!run.combat,
-      doorNear: doorNearPoint,
       doorOpen: (key) => grid.doors.get(key)?.open,
       tileDef: (x, z) => grid.defAt(x, z),
       shopSoldOut: (x, z) => shopping.soldOut(shopKey(x, z)),

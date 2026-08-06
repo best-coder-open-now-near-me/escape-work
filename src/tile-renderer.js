@@ -429,12 +429,15 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
     const holder = new pc.Entity(); // sits at the hinge end of the edge
     const panel = new pc.Entity();
     panel.addComponent('render', { type: 'box', material: doorMat });
-    panel.setLocalScale(0.92, DOOR_HEIGHT, 0.09);
+    // The depth is visible interaction surface, not a hidden pick proxy. A
+    // paper-thin open edge was difficult to acquire from the default camera;
+    // this slightly sturdier office door gives the cursor real geometry to hit.
+    panel.setLocalScale(0.92, DOOR_HEIGHT, 0.14);
     panel.setLocalPosition(0.48, DOOR_HEIGHT / 2, 0);
     holder.addChild(panel);
     const knob = new pc.Entity();
     knob.addComponent('render', { type: 'sphere', material: knobMat });
-    knob.setLocalScale(0.07, 0.07, 0.07);
+    knob.setLocalScale(0.09, 0.09, 0.09);
     knob.setLocalPosition(0.82, DOOR_HEIGHT * 0.55, 0.06);
     holder.addChild(knob);
     // Hinge at the west/north end of the edge; open swings into the room.

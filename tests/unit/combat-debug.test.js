@@ -36,7 +36,7 @@ function fixture() {
     watching: new Map([[active, 'watch']]),
     crouched: new Map(),
     intent: { armed: 'attack', pendingConfirm: null },
-    aim: { hoverDoor: null, hoverHitChance: 0.65, preview: { reach: [] } },
+    aim: { hoverHitChance: 0.65, preview: { reach: [] } },
     aimPaint: { debug: { key: 'attack:1,2', count: 4 } },
     hits: {
       forceHit: null,

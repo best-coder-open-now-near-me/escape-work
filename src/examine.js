@@ -52,7 +52,7 @@ export function createExamine(d) {
     if (hit?.kind === 'npc') return hit.ref.def.examine || 'A coworker. Non-hostile, for now.';
     if (hit?.kind === 'party') return hit.ref.def?.examine || 'One of yours. Holding up, mostly.';
     if (hit?.kind === 'enemy') return hit.ref.def.examine || 'A coworker, in the way.';
-    const doorKey = hit?.kind === 'door' ? hit.ref : (point ? d.doorNearPoint(point) : null);
+    const doorKey = hit?.kind === 'door' ? hit.ref : null;
     if (doorKey) return doorExamine(d.grid.doors.get(doorKey)?.open);
     return tile ? examineTile(tile.x, tile.z) : null;
   }

@@ -162,15 +162,13 @@ export function createMouse(d) {
       const hit = d.picking.pick(d.controls.cameraEntity, sx, sy);
       if (hit && d.dispatchHit(hit)) return;
       if (!tile) return;
-      // Ground fallback - also catches flat targets the pick ray skims over: a
-      // door edge clicked on the floor, corpses, dropped items.
+      // Ground fallback catches genuinely flat targets the pick ray skims over:
+      // corpses and dropped items. Doors resolve only from their visible mesh.
       const en = d.enemyAt(tile.x, tile.z);
       const npc = d.npcAt(tile.x, tile.z);
       const corpse = d.loot.corpseAt(tile.x, tile.z);
-      const doorKey = d.doorNearPoint(point);
       if (en) d.attackOrConfront(en);
       else if (npc) d.approachAndDo(npc.x, npc.z, () => d.dialogue.open(npc));
-      else if (doorKey) d.approachDoor(doorKey);
       else if (d.grid.defAt(tile.x, tile.z).loot) {
         d.approachAndDo(tile.x, tile.z, () => d.loot.lootContainer(tile.x, tile.z));
       } else if (corpse) {
@@ -201,17 +199,15 @@ export function createMouse(d) {
         // a crosshair mid-walk and on AI turns, promising a swing while the
         // to-hit readout and the click itself refused.
         const picked = !onOwnTile && hit?.kind === 'enemy' && hit.ref.alive ? hit.ref : null;
-        // The hovered door, resolved ONCE with the click's own predicate
-        // (combatDoorAt) and handed to combat alongside the hover - the
-        // pointer cursor and the threshold ring read this same answer, so
-        // the two affordances light together and die together.
+        // The hovered door, resolved ONCE with the click's own predicate.
+        // The pointer and mesh highlight read this same answer; there is no
+        // persistent ground marker under the doorway.
         const doorKey = d.combatDoorAt(hit, point);
         // handleHover still runs with the real point - a cone, a zone and a
         // summon drop all aim off it, and the shuffle's own move preview is
         // priced there too. It is `hoverFoe` that stands down, which takes
         // the crosshair, the glow, the ring and the readout together.
-        const foe = d.combat.handleHover(point, sx, sy, picked,
-          doorKey ? d.doorMidpoint(doorKey) : null, onOwnTile);
+        const foe = d.combat.handleHover(point, sx, sy, picked, onOwnTile);
         // A coworker wins the cursor; failing that, a door you could work says
         // so with the same pointer it uses out of combat. The click reads the
         // very same predicate, so the two cannot disagree.
@@ -230,7 +226,8 @@ export function createMouse(d) {
         const charHit = foe && !picked ? { kind: 'enemy', ref: foe, entity: foe.entity } : hit;
         const character = charHit && (charHit.kind === 'party' || charHit.kind === 'npc'
           || (charHit.kind === 'enemy' && charHit.ref.alive));
-        d.hover.showCharacter(character ? charHit : null, point);
+        const doorHit = doorKey && hit?.kind === 'door' ? hit : null;
+        d.hover.showCombatTarget(character ? charHit : doorHit, point);
         return;
       }
       if (!d.sheet || d.gameOver || d.modalOpen()) { d.hover.clear(); d.setOocAim(null); return; }
@@ -273,7 +270,7 @@ export function createMouse(d) {
         // wears its price on the label - which is the same rule that keeps
         // everything else out of this menu and on the bar, honoured rather
         // than broken. Doors have no bar slot: they are terrain, not kit.
-        const dk = chit?.kind === 'door' ? chit.ref : (point ? d.doorNearPoint(point) : null);
+        const dk = chit?.kind === 'door' ? chit.ref : null;
         if (dk && d.atDoor(dk, d.combat?.actingActor)) {
           const isOpen = d.grid.doors.get(dk)?.open;
           items.push({
@@ -338,7 +335,7 @@ export function createMouse(d) {
         }
       }
       if (!tile) return;
-      const doorKey = (hit && hit.kind === 'door') ? hit.ref : d.doorNearPoint(point);
+      const doorKey = (hit && hit.kind === 'door') ? hit.ref : null;
       if (doorKey) {
         const open = d.grid.doors.get(doorKey).open;
         d.ui.showMenu(sx, sy, [

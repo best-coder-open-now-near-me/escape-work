@@ -6,8 +6,8 @@ import { createBodyTargets } from './combat-body-targets.js';
 //
 // This is a slice off `startCombat`, which is a 5,500-line closure holding 108
 // functions and 21 shared mutable variables (Q037/Q042). The slice is chosen
-// rather than convenient: six of those variables - `preview`, `previewDt`,
-// `coverEase`, `hoverDoor`, `paintEpoch` and, apart from a disarm, `aimPoint` -
+// rather than convenient: five of those variables - `preview`, `previewDt`,
+// `coverEase`, `paintEpoch` and, apart from a disarm, `aimPoint` -
 // were written by NOTHING outside this cluster. They were shared only in the
 // sense of living in the same scope as everything else. Here they are private,
 // and combat.js reaches them through five named methods instead of by writing
@@ -32,7 +32,6 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
   let preview = null; // { reach: [[x,z],...], tail: [[x,z],...] | null }
   let previewDt = 0;
   let aimPoint = null; // hover point while a cone, zone or summon is armed
-  let hoverDoor = null; // midpoint of the door under the cursor, or null
   let coverEase = null; // the cover ring's eased position, not its target
   // The enemy the cursor is on as of the last hover event - the body pick when
   // main.js has one, else the ground-point fallback (enemyAtPoint). This is the
@@ -50,7 +49,6 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
   // the bottom re-exports them so combat.js writes through the same doors.
   const setPreview = (p) => { preview = p; };
   const setAimPoint = (p) => { aimPoint = p; };
-  const setHoverDoor = (mid) => { hoverDoor = mid; };
   // Dropping the aim drops the eased marker with it, or the next crouch preview
   // starts from wherever the last one happened to stop.
   const clearAim = () => { aimPoint = null; coverEase = null; };
@@ -146,15 +144,6 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
   function drawHeldCrouch() {
     const s = ask.crouchStateOf(view.active);
     if (s) drawFaces(s.at.x, s.at.z, s.faces, COVER);
-  }
-
-  function drawHoveredDoor() {
-    if (!hoverDoor) return;
-    const active = view.active;
-    for (const mid of world.doorsBeside?.(active.actor.x, active.actor.z) || []) {
-      if (Math.abs(mid.x - hoverDoor.x) > 0.01 || Math.abs(mid.z - hoverDoor.z) > 0.01) continue;
-      drawRing(mid.x, mid.z, 0.3, active.ap >= mid.ap ? OK : FAR);
-    }
   }
 
   function drawZoneRings(a, id) {
@@ -414,10 +403,7 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
     costTag.style.display = 'block';
   }
 
-  function handleHover(point, sx, sy, picked = null, doorMid = null, onOwnTile = false) {
-    // Tracked before any gate, like hoverFoe: a hover that leaves the canvas
-    // (main.js calls in with nulls) must clear the door ring the same frame.
-    setHoverDoor(doorMid);
+  function handleHover(point, sx, sy, picked = null, onOwnTile = false) {
     // While aiming, target rings replace the movement trail entirely. Cone
     // attacks and summon placement additionally track the cursor - the wedge
     // (or the drop zone) follows it.
@@ -504,7 +490,6 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
     drawAimWash();
     if (view.phase !== 'player') return;
     drawHeldCrouch();
-    drawHoveredDoor();
     // Not gated on `armed`: with nothing armed a click still swings (the basic
     // attack), and a swing you can't see coming is worse than no swing at all -
     // the rings are how you know which coworker a click would hit and whether
@@ -561,8 +546,6 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
     setPreview,
     get aimPoint() { return aimPoint; },
     setAimPoint,
-    setHoverDoor,
-    get hoverDoor() { return hoverDoor; },
     // Combat clears the readout when a turn or a verb ends.
     setHoverFoe(en) { hoverFoe = en; },
     // A repaint the wash cannot predict: sight changed under it.
