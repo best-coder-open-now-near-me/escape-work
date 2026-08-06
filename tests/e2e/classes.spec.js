@@ -139,6 +139,19 @@ const QUIET_PAPER_ARENA = {
   ],
 };
 
+const TPS_CROSSING_ARENA = {
+  name: 'TPS Crossing Lab',
+  tiles: { '#': 'wall', 'm': 'meeting-floor' },
+  actors: { '@': 'player', 'H': 'hr' },
+  map: [
+    '###############',
+    '#mmmmmmmmmmmmm#',
+    '#@mmmmmmmmmmHm#',
+    '#mmmmmmmmmmmmm#',
+    '###############',
+  ],
+};
+
 test('Office Drone: TPS Form Storm uses the same fine-cell aim outside combat', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, QUIET_PAPER_ARENA, 'office-drone', { seed: 4 });
@@ -182,6 +195,47 @@ test('Office Drone: TPS Form Storm keeps its zone aim and lands above coloured c
     }
     return paper;
   }), { timeout: 10_000 }).toBeGreaterThan(0);
+});
+
+test('Office Drone: TPS Form Storm damages HR crossing its right edge', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, TPS_CROSSING_ARENA, 'office-drone', { seed: 4 });
+  await page.evaluate(() => window.__game.debugStillEnemies());
+  await page.click('#hotbar-act-paper-storm');
+
+  const p = await stableProject(page, 6, 2);
+  await page.mouse.move(p.x, p.y);
+  await expect.poll(() => page.evaluate(() => window.__game.aimPaint.count),
+    { timeout: 10_000 }).toBeGreaterThan(0);
+  // Pick the easternmost painted fine cell. Its neighbour to the right is
+  // guaranteed bare, giving HR the direction that used to report the shared
+  // boundary as the cell it was LEAVING and silently skip the entry damage.
+  const edge = await page.evaluate(() => window.__game.aimPaint.cells.reduce(
+    (best, [x, z]) => (!best || x > best.x ? { x, z } : best), null));
+
+  await page.mouse.click(p.x, p.y);
+  await expect.poll(() => page.evaluate(
+    ({ x, z }) => window.__game.surfaceAt(x, z), edge,
+  ), { timeout: 10_000 }).toBe('paper');
+  expect(await page.evaluate(
+    ({ x, z }) => window.__game.surfaceAt(x + 0.51, z), edge,
+  )).toBe(null);
+
+  const hpBefore = await page.evaluate(({ x, z }) => {
+    const hr = window.__god.enemies.find((enemy) => enemy.alive);
+    const fromX = x + 0.51;
+    hr.clearPath();
+    const y = hr.entity.getPosition().y;
+    hr.entity.setPosition(fromX, y, z);
+    hr.x = Math.round(fromX);
+    hr.z = Math.round(z);
+    hr.wanderTimer = Infinity;
+    hr.setPath([[fromX, z], [x, z]]);
+    return hr.hp;
+  }, edge);
+
+  await expect.poll(() => page.evaluate(() => window.__game.enemies[0].hp),
+    { timeout: 10_000 }).toBeLessThan(hpBefore);
 });
 
 // Just you and one Manager, two tiles apart in an open room - the same shape

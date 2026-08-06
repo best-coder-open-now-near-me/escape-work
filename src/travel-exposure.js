@@ -85,8 +85,15 @@ export function advanceTravelExposure(state, segment, {
       state.floorKey = floorKey;
       state.surfaceDistance = 0;
       if (floorKey) {
+        // `span.from` is the exact fine-cell boundary. With half-open cells it
+        // belongs to one side only, so entering from the opposite direction
+        // and re-reading consequences at that coordinate saw the BARE cell
+        // being left. Nudge the consequence point an imperceptible distance
+        // into the span whose midpoint supplied `floor`; entry remains
+        // immediate, but both travel directions now resolve the entered cell.
+        const entryPoint = pointAlong(span, Math.min(span.distance, 1e-6));
         events.push({ kind: 'surface', phase: 'entry', distance: travelled,
-          point: { ...span.from }, floor });
+          point: entryPoint, floor });
       }
     }
 

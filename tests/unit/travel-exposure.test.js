@@ -25,6 +25,20 @@ test('surface entry is immediate, repeats use distance, and a bare gap resets co
   assert.ok(surface[1].point.x > 0.49);
 });
 
+test('surface entry points land inside the entered cell in either direction', () => {
+  const field = createSurfaceField({ width: 3, height: 1 });
+  field.setCell(1, 1, 'paper'); // x 0..0.5 at this row
+  const events = advanceTravelExposure(createTravelExposureState(), {
+    // Enter from the right. The exact x=0.5 boundary belongs to the bare cell
+    // on that side, which used to make a coordinate re-read miss this entry.
+    from: { x: 0.8, z: 0.25 }, to: { x: -0.2, z: 0.25 },
+  }, { traceSegment: field.traceSegment, floorAt: floorAt(field), interval: 99 });
+  const entry = events.find((event) => event.kind === 'surface');
+  assert.ok(entry, 'crossing into paper emits an entry');
+  assert.equal(field.surfaceAt(entry.point.x, entry.point.z), 'paper',
+    'the consequence point is just inside the entered surface, not on its bare boundary');
+});
+
 test('continuous surface cells do not retrigger entry at their seam', () => {
   const field = createSurfaceField({ width: 2, height: 1 });
   field.fillTile(0, 0, 'paper');
