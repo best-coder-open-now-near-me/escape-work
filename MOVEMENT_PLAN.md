@@ -3,9 +3,13 @@
 Make repositioning affordable without giving up the single-pool AP economy.
 Today movement and actions compete for one budget at 1 AP per tile, which
 means the positional layer `TACTICS_PLAN.md` just landed — flanking, cover,
-backstab — costs a swing to use. This document is the implementation plan:
-the design decisions, the module-by-module changes, and the milestone order.
-No code yet.
+backstab — costs a swing to use. This document records the implementation
+plan: the design decisions, the module-by-module changes, and the milestone
+order.
+
+**Implementation status (2026-08-05): shipped.** All five milestones are in
+the game. This file is the historical design/ratification record; current
+module ownership and constants live in `ARCHITECTURE.md` and the source.
 
 It follows the shape of the other plans, and honors the one rule from
 `ARCHITECTURE.md`: **content is data, code is systems.** The movement rate is

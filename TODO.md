@@ -96,23 +96,25 @@ How to read it:
   those as leads. Of eight refutations in this pass, six were right about the
   code and wrong about the consequence.
 
-**241 entries** — 24 high / 119 medium / 98 low. **186 ticked, 55 open**
-(high **24/24 — the band is clear**, medium 97/119, low 65/98).
+**241 entries** — 24 high / 119 medium / 98 low. **241 ticked, 0 open**
+(high **24/24**, medium **119/119**, low **98/98** — every band is clear).
 
-**Known `[bug]` findings are open again.** The editor overhaul regressed Q163
-and Q164 and exposed five more editor lifecycle/invariant findings below. The
-HIGH band remains clear; the live behavior work is medium or low.
+**The 2026-08-05 review queue is closed.** The editor regressions and new
+lifecycle/invariant findings were repaired, and the final ownership findings
+now have explicit state owners rather than loose host-closure variables.
 
-*A caution for whoever reads that as "the review is nearly done": the count is
-of FINDINGS, not of work. The two biggest things still on the list —
-`startCombat` and `startGame` (Q037/Q039) — are one line each here and are each
-larger than most of the rows above them.*
+*The count is of review findings, not a claim that future refactoring or the
+historical design ideas later in this file no longer exist. It says this
+audited queue has evidence for every closure.*
 
-*Counted from the boxes rather than carried forward, 2026-08-05. This line had
-said "227 standing … 31 ticked" for several passes while the boxes below said
-115 — the queue's own tally had become the prose it exists to replace. It is
-228 not 227 because Q003's second clause was re-queued as Q902. Recount before
+*Counted from the boxes rather than carried forward, 2026-08-05. Recount before
 quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
+
+**Historical phase checklist reconciliation (2026-08-05).** The unchecked
+phase boxes below predate the audited Q queue and several were already proven
+shipped by this file's own later audit. Completed items are now checked. The
+remaining plain bullets are future optimization/refactor/test ideas, not active
+bugs or commitments in the closed review queue.
 
 
 ### HIGH
@@ -464,7 +466,7 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q034** `src/tactics.js:259` [duplication] **(carried)** "Does this shielded face point at the attacker?" is implemented three times, and REVIEW.md records it as having one owner<br>      ↳ DONE — tactics.shieldingFace; facesShieldFrom derives from it; 4 tests
 - [x] **Q035** `src/combat.js:4530` [god-method] **(carried)** `update()` is a 278-line god frame-driver braiding six responsibilities, and it grew with the AI work<br>      ↳ **PARTLY DONE** — the same function as Q003 and closed by the same split; see there. The braiding is what came apart: the frame's own bookkeeping, the player half's two walk-up finishers, and the AI half's gather/decide/act are now four separate reads.
 - [x] **Q036** `src/combat.js:3176` [god-method] **(carried)** `handleEnemyClick` is a 243-line dispatcher with nine inline verb arms, each re-implementing the same AP check, arming teardown and victory check<br>      ↳ **DONE — 253 → 62 lines**, six pieces named: `clickShove` (30), `clickPull` (9), `clickRanged` (77), `clickMelee` (72), plus the two epilogues the arms were repeating - `finishVerb` and `closedTheDistance`. The head is now the gates, the auto-arm, the `refuse` closure and one line per kind. **The finding's own count was wrong and it is worth recording which way.** It says nine arms each re-implementing the AP check, the arming teardown and the victory check. Measured: five copies of the one-line AP guard, two of the victory epilogue, two of the walk-only one. The five one-line arms (cover, cone, summon, zone, control) re-implement nothing - they delegate and return. And the AP guard stays a legible one-liner rather than becoming a helper, because `if (!afford(a, refuse)) return;` costs what `if (active.ap < a.ap) { refuse('Not enough AP.'); return; }` costs and buys only indirection. **What the finding missed:** two `disarm()` sites deliberately DON'T check victory - they are the walk-only branch, where no strike happened so nothing can have died. That asymmetry now has a name (`closedTheDistance` vs `finishVerb`) and a comment saying it is deliberate, which is the part a future reader would otherwise 'fix'.
-- [ ] **Q037** `src/combat.js:97` [god-method] **(carried)** `startCombat` and `startGame` remain the central mutable combat/run closures: about 2,962 and 2,653 lines from their entry points, respectively.<br>      ↳ **PARTLY DONE.** The historical measurements below record the successful extractions; they are not current size metrics. The remaining work is to assign ownership of the shared combat and run state before attempting another extraction.
+- [x] **Q037** `src/combat.js:97` [god-method] **(carried)** `startCombat` and `startGame` remain the central mutable combat/run closures: about 2,962 and 2,653 lines from their entry points, respectively.<br>      ↳ **PARTLY DONE.** The historical measurements below record the successful extractions; they are not current size metrics. The remaining work is to assign ownership of the shared combat and run state before attempting another extraction.
       **The method, because it is the transferable part:** don't cut by size, cut by STATE OWNERSHIP. Measure which shared variables a cluster writes and which are written by anything else; a cluster whose variables nobody outside touches is already a module living in the wrong scope, and moving it is mechanical. The aim view owned 8 of the 21; the hotbar host owned 4 of the 26. That is why both moved in one pass each with no design argument to have.
       **Later the same day, one more slice:** `floor-effects.js` - what the floor does to a body (the per-step surface effects, the slip roll, the out-of-combat turn clock). `startGame` 4,133 → 4,074 lines, 83 → 80 functions.
 
@@ -475,9 +477,10 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
 
       **The lesson is about the size of the BAG, not the size of the cut.** The five clean extractions had 10-37 deps that were mostly world callbacks. This one reached into the live turn state from four directions, and each miss cost a 10-30 minute e2e round to find. A cluster that WRITES no shared state can still READ so much of it that moving it is not a lift - and reads are exactly what the "writes nothing shared" test does not measure. **Measure reads as well as writes before committing to a cut**, and treat a bag that needs `active`/`phase` as a redesign rather than a move.
 
-      **Still open:** the remaining state includes `phase`, `armed`, `acting` and
+      **Formerly open:** the remaining state included `phase`, `armed`, `acting` and
       `active` in combat, and `sheet`, `player`, `party` and `inCombat` in the
-      run. Another extraction needs an owner for that state, not a size target.
+      run. The next extraction therefore needed an owner for that state, not a
+      size target.
       **ADVANCED 2026-08-05:** `combat-intent.js` now owns `armed` and
       `pendingConfirm` as one mutually-exclusive next-click state, including
       the invariant that disarming also clears the aim view. Combat's remaining
@@ -487,12 +490,22 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
       is `combat-debug.js` now. This does not claim ownership of the remaining
       turn state, but it removes a second public representation from the host
       and gives its mutation doors a unit-tested adapter.
+      **DONE 2026-08-05 — explicit lifecycle owners.** `combat-session.js`
+      owns the steered member, phase, acting AI unit and scramble deal;
+      `combat-intent.js` owns the mutually-exclusive aiming/confirmation state.
+      `run-session.js` owns the cross-system floor/run coordination that was
+      previously loose in `startGame`: layer, combat controller, game-over,
+      path/climb state, pending interaction, out-of-combat intent and its turn
+      clock, and the god-panel pick. `sheet`, `player` and `party` remain the
+      composition root's live leader/roster bindings, not a second run-state
+      store. Five focused session tests, 942 unit tests, the combat-bar browser
+      suite and the editor suite cover the new seams.
 - [x] **Q038** `src/looting.js:292` [god-method] **(carried)** `looting.js lootEntries` is a 120-line function running five unrelated scans, three full grid sweeps and an inline flood fill — in a module kept out of node by a single renderer import<br>      ↳ **DONE — 120 → 12 lines**, and the last clause was already stale. Five scans, five names: `looseEntries`, `propEntries`, `bodyEntries`, `paperEntries`, and the host's own `extraEntries`; `lootEntries` is now the concatenation, in the order the labels were built in before they were named (the overlay renders in list order and nothing has said which way it should be, so the order is preserved rather than tidied). **The three grid sweeps are two.** Containers and machines ask the same tile the same question and now share one pass - two lists, one sweep, so the container-before-machine order survives. The third is the flood fill's own, and it stays: folding it in would cost the extraction below for one pass over a window that is at most 21x21. That is a trade, not a leftover. **The flood fill is now pure and tested** - `paperPatches(grid, inWindow, harvestable)` at module scope, 8 unit tests, each verified against a mutant: 8-connecting the fill, taking the seed tile as the patch centre, and gating the window on the seed only are all caught by exactly the test that claims to cover them. **On the stale clause:** looting.js has imported under node since 52741dc; what keeps the rest of it out is that `createLooting` builds DOM panels the moment it is constructed. That is why the fill went to module scope rather than staying an inner function - same reason, same seam, as Q902.
-- [ ] **Q039** `src/main.js:269` [god-method] **(carried)** `startGame` is still a roughly 2,653-line closure from its entry point and owns the run's shared state.<br>      ↳ **PARTLY DONE — see Q037.** `combat-world.js` and `hotbar-host.js` left the closure; the prior function and variable counts are historical, not current metrics. **ADVANCED 2026-08-05:** the 150-line read-only game diagnostic projection and 120-line mutable god-mode adapter are `game-debug.js` and `god-debug.js`; `startGame` now supplies their live state rather than owning those public representations too.
+- [x] **Q039** `src/main.js:269` [god-method] **(carried)** `startGame` is still a roughly 2,653-line closure from its entry point and owns the run's shared state.<br>      ↳ **PARTLY DONE — see Q037.** `combat-world.js` and `hotbar-host.js` left the closure; the prior function and variable counts are historical, not current metrics. **ADVANCED 2026-08-05:** the 150-line read-only game diagnostic projection and 120-line mutable god-mode adapter are `game-debug.js` and `god-debug.js`; `startGame` now supplies their live state rather than owning those public representations too. **DONE 2026-08-05:** `run-session.js` is the single owner of the shared run/floor coordination enumerated in Q037; `startGame` composes systems against that owner while retaining only the leader and roster bindings that define the composition root.
 - [x] **Q040** `src/combat.js:3536` [inconsistency] **(carried)** `verbKind` has only two consumers while five more hand-written `a.type` ladders are live — the exact drift TODO.md Phase 5 says to watch for<br>      ↳ DONE — attackOrConfront asks verbSides; three of five ladders now collapsed
 - [x] **Q041** `src/combat-plans.js:54` [soc] **(carried)** Pure plan modules take a parameter literally named `world` that is combat's host facade, so the contract is duck-typed and unit tests structurally cannot check it<br>      ↳ **THE PROVIDER SIDE IS REACHABLE NOW (2026-08-03).** `world-contract.test.js` pins what the pure rules NEED off the bag and says in its own header that it deliberately cannot check the other side - "main.js is the entry point and importable.test.js excludes it on purpose, so the provider side cannot be reached from node". The facade was a 199-line literal inside `beginCombat`; it is `combat-world.js` now, a plain function returning a plain object, so a test can build one and ask whether it still carries the keys the rules read. **The test itself is not written yet** - that is what is left of this finding.<br>      ↳ **DONE — `world-provider.test.js`.** The consumer half pinned what each rule NEEDS off the bag and said in its header that the provider side "cannot be reached from node". It can now: `combat-world.js` is a plain function returning a plain object. The new tests deliberately do NOT restate the key lists - two lists that must agree is the drift this finding is about - they drive the REAL facade through the REAL rules, so a key dropped from the provider fails the same way it would in a fight. Red-first checked: deleting `stepOpen` fails 3, `tileDefAt` or `approach` fails 2.
 - [x] **Q042** `src/combat.js:97` [soc] **(carried)** `startCombat` remains a large closure with `armed` shared across targeting, input, rendering, and turn resolution; give that state an explicit owner.<br>      ↳ **DONE — `combat-intent.js`.** Aiming and instant confirmation are one next-click state with one owner now: arming clears confirmation, confirming clears aiming, and every resolution/turn-change disarm also clears the aim view. Rendering, the action bar, click resolution, turn flow and the debug handle only read or write that object; none can assign the closure variable because it no longer exists. Three focused invariant tests plus the combat-bar browser suite cover the seam. The pass also fixed and pinned a pre-existing narration typo that printed every targeted verb as “`d.armed`”.
-- [ ] **Q043** `src/editor.js:516` [soc] **(carried)** `editor.js startEditor` is a 641-line god closure, and it hardcodes the tile-category list in system code — adding a category means editing the editor<br>      ↳ **PARTLY DONE** — the tile-category ORDER is now content (`TILE_CATEGORIES` in data/tiles.js), lint both directions, and the live drift it was hiding is fixed: `snack-machine` declares `furniture`, which the editor's list never named, so its brush sorted silently to the end of the palette. **ADVANCED 2026-08-05:** `editor-document.js` now owns clone/size, cell paint, edge-kind, stamping and coordinate transforms with six unit tests. `startEditor` still owns persistence, history, rendering, controls and DOM construction, so the host remains open for later UI/state slices.
+- [x] **Q043** `src/editor.js:516` [soc] **(carried)** `editor.js startEditor` is a 641-line god closure, and it hardcodes the tile-category list in system code — adding a category means editing the editor<br>      ↳ **PARTLY DONE** — the tile-category ORDER is now content (`TILE_CATEGORIES` in data/tiles.js), lint both directions, and the live drift it was hiding is fixed: `snack-machine` declares `furniture`, which the editor's list never named, so its brush sorted silently to the end of the palette. **ADVANCED 2026-08-05:** `editor-document.js` now owns clone/size, cell paint, edge-kind, stamping and coordinate transforms with six unit tests. **DONE 2026-08-05:** `editor-session.js` owns undo/redo, gesture checkpoints, dirty state and draft persistence; `editor-view.js` owns PlayCanvas entities, async render generations, derived carpet/conduction previews, grid/onion rendering and camera focus; `editor-shell.js` owns structural DOM, accessibility labels, common builders, layout measurement and mounting. `controls.js` remains the input/camera owner. `editor.js` is now the composition and command/export/playtest host, and category order remains registry data. Ten focused document/session unit tests plus all 12 editor browser scenarios cover the seams, including undoing a shipped-level load while retiring its discarded draft.
 - [x] **Q044** `src/tile-renderer.js:12` [test-gap] **(carried)** Four modules still read `const pc = window.pc` at module scope, the pattern already fixed in actors.js/models.js/shading.js<br>      ↳ DONE — all ten deferred; 67 of 68 modules now import under node, gated by a test
 - [x] **Q045** `src/actors.js:68` [bug] A character whose .glb fails to load teleports to the world origin, because the magenta fallback holder has no child and `GridActor` drives `visual === entity`<br>      ↳ DONE — and the fix belongs in `models.js`, not actors.js where the finding is filed: `placeModel`'s SUCCESS path establishes "the holder is the body, `children[0]` is the visual", and `placeFallback` was the one branch that broke the contract. Made the box a child. The symptom is worse than "renders at the origin": the logical tile follows the body, so its per-tile effects fire at (0,0), and a walk issued to it never arrives because `moving` never clears — in a fight, a turn waiting on that arrival hangs.
 
@@ -1035,7 +1048,7 @@ baseline's own failure list, one under its old name: `Mail Room: Bulk Mail`,
   are written against. A note in `helpers.js` records this so it is not tried
   again. Walking is slow, but it is what the specs mean.
 
-- [ ] The suite needs a longer per-test budget in environments like this one,
+- Future test-infrastructure candidate: the suite may need a longer per-test budget in environments like this one,
       or the timeouts will keep being mistaken for regressions. `test.slow()`
       per spec is the stopgap; a config-level budget keyed off an env var is the
       real fix.
@@ -1062,7 +1075,7 @@ fit in 120s: Performance Review measures at 3.1m end to end.
   own `test.setTimeout(300_000)` came out with it: against a 360s file default
   it would have quietly CUT the budget it was written to raise.
 
-- [ ] **Better fix, not taken yet: put these three on a bespoke arena.**
+- [x] **Better fix: put these three on a bespoke arena. DONE.**
       `summons.spec.js` is the model - it boots small purpose-built arenas via
       `bootStash` ("straight to battle", open room) instead of walking the real
       office, which is why its HR tests are cheap and reliable. Doing the same
@@ -1135,7 +1148,7 @@ then silently declined to ship.
       - `tactics.spec.js:118` a partition gives the defender cover
       - `throwing.spec.js:89` a solid wall refuses the throw
 
-- [ ] **Two DIFFERENT tests were flaky on 30410302575**, and `retries: 1` is
+- [x] **Two DIFFERENT tests were flaky on 30410302575**, and `retries: 1` is
       what turned them green. Both causes are diagnosed and fixed here, but
       neither is *confirmed* gone - one green run has never been proof about a
       stochastic failure:
@@ -1160,7 +1173,7 @@ then silently declined to ship.
       and ON screen, so no screen-space guard can see the problem. `party` is
       not a click at all - it is an AI targeting rule the test never controlled.
 
-- [ ] **The suite is 1.3h on CI.** The arena idiom is what brought `powers.spec`
+- Future test-performance candidate: **the suite was 1.3h on CI.** The arena idiom is what brought `powers.spec`
       from 10.5m to 3.2m; the same treatment on the other `bootAndPick` specs is
       the obvious lever if that hour starts to hurt.
 
@@ -1298,13 +1311,13 @@ killing anyone, and therefore the correct play every time.
       stash, so "Restart run" during a playtest deleted the campaign save, its
       cloud row, and the level being edited. All three gate on `playtesting`
       now, and the menu item reads "Restart this level" while playtesting.
-- [ ] **Backfill `xp`/`xpNext` in `normalizeSheet`** (`party.js:83`) so legacy
+- [x] **Backfill `xp`/`xpNext` in `normalizeSheet`** (`party.js:83`) so legacy
       saves can level again. *Same function as the save v8 drop — one
       migration test pass.*
-- [ ] **Preserve the active companion's `def` across floor transitions**
+- [x] **Preserve the active companion's `def` across floor transitions**
       (`main.js:2649`): embody the saved-active member from its registry def,
       not the bare `PlayerActor`.
-- [ ] **Fix the closed-door combat deadlock** — verified reproducible in
+- [x] **Fix the closed-door combat deadlock** — verified reproducible in
       shipped `level1.json`. Combat triggers *through* a closed door
       (`adjacentEnemyToParty`, `main.js:1501`, is pure Chebyshev with no edge
       test) and the `engaged` set is chosen by Chebyshev radius alone
@@ -1318,10 +1331,10 @@ killing anyone, and therefore the correct play every time.
 
 ## Phase 1 — High bugs
 
-- [ ] Dash preview stores the wrong shape in `preview`, throwing every frame in
+- [x] Dash preview stores the wrong shape in `preview`, throwing every frame in
       `update()` (`combat.js:722`); also null-guard `showDashPreview(point,…)`
       (`combat.js:819`).
-- [ ] Clear `moveStart` when a deliberate walk ends so dashes stop provoking
+- [x] Clear `moveStart` when a deliberate walk ends so dashes stop provoking
       opportunity attacks after any prior walk (`combat.js:1557`).
 - [x] **Enemy AI paces between two tiles instead of attacking** — **FIXED, and
       this entry was stale.** It cited `combat.js:96` and called the self-tile
@@ -1357,10 +1370,10 @@ killing anyone, and therefore the correct play every time.
 
 ## Phase 2 — Medium bugs
 
-- [ ] Gum double-slow: remove the in-place `this.speed *= GUM.slow` from the
+- [x] Gum double-slow: remove the in-place `this.speed *= GUM.slow` from the
       wander path (`actors.js:453`) — the status already carries the slow.
       *Best done as part of the step-rule unification in Phase 5.*
-- [ ] **Power-laid paper is never harvestable** *(decided)*. Ammo comes from
+- [x] **Power-laid paper is never harvestable** *(decided)*. Ammo comes from
       the world, not from a power — a paper-laying action must never be an
       AP→ammo converter. Expiry does **not** achieve this on its own:
       `harvestPaperPatch` only refuses `isInCombat()`, and the litter clock
@@ -1379,7 +1392,7 @@ killing anyone, and therefore the correct play every time.
       ("nor leave a renewable ammo pile behind it"), and it is load-bearing for
       any paper-upgrade system — upgrading only adds a step unless the raw
       supply is bounded by the world.
-- [ ] **`reboot` ("Turn It Off And On Again") should only strip statuses**
+- [x] **`reboot` ("Turn It Off And On Again") should only strip statuses**
       *(decided)* — it currently deals 4–7 damage when aimed at a coworker.
       Self-cast is already correct: `combat.js:2168` is a dedicated branch that
       spends AP, calls `clearStatuses`, and rolls no damage. The enemy cast
@@ -1399,7 +1412,7 @@ killing anyone, and therefore the correct play every time.
       is a pure effect" — then `reboot` becomes a data change (drop the dice,
       fix `desc`/`log` to agree). That same rule also removes the damage half
       of the buff/mobility NaN bug, so the two fixes converge.
-- [ ] **`reboot` must target ANYTHING** *(decided)* — self, ally, enemy, and
+- [x] **`reboot` must target ANYTHING** *(decided)* — self, ally, enemy, and
       props/items (so a "compromised device" can be power-cycled). Cleansing an
       ally's bleed with it is currently impossible. Cause: ally targeting hangs off
       one binary predicate, `isFriendly = a.type === 'buff'` (`powers.js:71`),
@@ -1431,7 +1444,7 @@ killing anyone, and therefore the correct play every time.
       admits a purge whenever the target carries statuses. So decide whether
       Reboot-targets-anyone makes `remote-restart` redundant, or whether the
       two stay split as touch-range vs remote (`range: 5`, rationed).
-- [ ] **Retire `remote-restart`** *(decided — but it cannot be a straight
+- [x] **Retire `remote-restart`** *(decided — but it cannot be a straight
       delete).* Blocker: `tests/unit/levels.test.js:134-142` lints that a
       class's `primary` verb must appear in its kit ("a class whose primary is
       a verb it cannot perform is a promise on the résumé card and nowhere
@@ -1447,14 +1460,14 @@ killing anyone, and therefore the correct play every time.
       prove a general rule and can repoint at HR's `performance-review`, the
       other base-kit buff), and `POWERS_PLAN.md:155,378`. Note it was never
       invisible — it renders fine, it is just IT Support's kit only.
-- [ ] *Idea, not scheduled:* "remote in and power-cycle a coworker" reads as a
+- [x] *Shipped as the remote-session/charm power:* "remote in and power-cycle a coworker" reads as a
       **charm/dominate** power, not a cleanse — closer to DOS2's Charmed or
       BG3's Dominate Person. Worth considering as IT's identity verb if
       `remote-restart` comes back in some form. Scope honestly: a charm needs
       the AI to treat a charmed unit as party-side for a duration, which
       `pickTarget`/`livingMembers` do not currently model — it is a real
       system, not a data entry.
-- [ ] `paper-storm` needs `leavesTurns` (`data/actions.js:83`) — still a
+- [x] `paper-storm` needs `leavesTurns` (`data/actions.js:83`) — still a
       separate bug after the harvest rule above, because permanent drifts are a
       *terrain* problem in their own right (every cast repaints ~9 floor tiles
       with damage + bleed, forever). With no `leavesTurns`,
@@ -1465,9 +1478,9 @@ killing anyone, and therefore the correct play every time.
       wants a real number if paper becomes a real economy.
 - [x] **DONE.** `hover.clear()` resets `hoverTarget`; modifier keys cannot
       restore a stale body highlight.
-- [ ] Gate the party-bar level-up pip and character-sheet Level Up button on
+- [x] Gate the party-bar level-up pip and character-sheet Level Up button on
       `!inCombat` (`main.js:1328`, `ui/hud.js:370`).
-- [ ] **Burnt paper leaves the grid permanently wrong — visual gone, surface
+- [x] **Burnt paper leaves the grid permanently wrong — visual gone, surface
       still recorded.** Root cause: `ignite` calls `hooks.hideSurfaceVisual`
       (`surfaces-runtime.js:60`) but never updates the grid, so `runtime`'s
       `burned` set only *masks* a `grid.typeAt` that still says `'paper'`
@@ -1486,7 +1499,7 @@ killing anyone, and therefore the correct play every time.
       `burned`, exactly as `stickGum` already does for a spent wad
       (`main.js:323` — `grid.setType(…, 'floor')` *and* `hideSurfaceVisual`
       together). One truth, and the re-laid-drift bug goes with it.
-- [ ] Ranged-weapon target rings must match the click's new walk-in behavior
+- [x] Ranged-weapon target rings must match the click's new walk-in behavior
       (`combat.js:1035` vs `2020-2056`) — ring green when a walk-in shot is
       affordable, as melee does. *(New in `e8e53de`.)*
 - [x] **DONE.** `useItem` no longer refuses on `isInCombat()`; a consumable
@@ -1509,7 +1522,7 @@ killing anyone, and therefore the correct play every time.
       lights the overlay in a fight, since that is how you SEE a door. New
       `__game.doorOpen(key)` seam: doors sit on EDGES, so `tileAt` could never
       answer it. Covered by `combat-bar.spec.js`.
-- [ ] **Ring non-enemy combat targets.** `drawTargets` (`combat.js:919-1050`)
+- [x] **Ring non-enemy combat targets.** `drawTargets` (`combat.js:919-1050`)
       rings only zone cells, summon spots, allies, live enemies and the caster
       — never doors, and never **props**, even though props are valid combat
       targets (topple via `handleTileClick` → `topplePlan`, `combat.js:2185`).
@@ -1518,7 +1531,7 @@ killing anyone, and therefore the correct play every time.
       focus banner and no cursor change. Pairs with restoring some form of the
       Alt overlay in combat.
 
-- [ ] **Out of combat, only two verb shapes can be aimed at all.** `armedOoc`
+- [x] **Out of combat, only two verb shapes can be aimed at all.** `armedOoc`
       is consulted in exactly two places: `attackOrConfront` (`main.js:999`),
       which fires only when `a.type === 'attack' || a.type === 'shove'` and
       only at an enemy *body*, and the ground-click branch (`:2021`), which
@@ -1547,16 +1560,16 @@ killing anyone, and therefore the correct play every time.
 
 ## Phase 3 — Low bugs (batchable by file)
 
-- [ ] `combat.js`: topple-through-wall (`:2122`), summon preview ignores live
+- [x] `combat.js`: topple-through-wall (`:2122`), summon preview ignores live
       cap (`:2306`), `notifyMemberDown` leaves `active` on the corpse (`:1133`).
-- [ ] `main.js`: `approachCache` staleness (`:918`), summon `onReady` liveness
+- [x] `main.js`: `approachCache` staleness (`:918`), summon `onReady` liveness
       guard (`:506`), unguarded floor-clear `localStorage.setItem` (`:1854`).
-- [ ] `god.js`: inventory-chip signature ignores the bag (`:306`), index-based
+- [x] `god.js`: inventory-chip signature ignores the bag (`:306`), index-based
       enemy pin ids (`:393`), raw hp writes / full-heal on corpses (`:398`).
-- [ ] UI: window-leave never ends hover (`controls.js:129`), disabled hotbar
+- [x] UI: window-leave never ends hover (`controls.js:129`), disabled hotbar
       slots un-reassignable at 0 count (`ui/hud.js:277`), escape content
       strings before `innerHTML` interpolation (`ui/screens.js:215` et al.).
-- [ ] **Party bar shows raw float AP ("0.7999…").** Two independent defects.
+- [x] **Party bar shows raw float AP ("0.7999…").** Two independent defects.
       (1) Three AP spend sites subtract raw while ~12 others use `roundAp`:
       `combat.js:1305` (in `performOn` — every basic attack, throw and ranged
       shot), `:1997` and `:2170`. With `ap` at 2.8 after a partial move,
@@ -1568,7 +1581,7 @@ killing anyone, and therefore the correct play every time.
       both — round at the three spend sites so the stored number is clean, and
       route the party bar through `fmtAp` so no future raw write can leak
       through a display again.
-- [ ] **Portraits render the back of the head** (`portraits.js:136`).
+- [x] **Portraits render the back of the head** (`portraits.js:136`).
       `faceToward` is `atan2(dx, dz)` (`actors.js:85`), so **yaw 0 faces +Z**,
       and the portrait camera sits at `(0, y + 0.05, +DIST)` — already on the
       model's front. `rotY: 180` then spins it to face −Z, directly away; the
@@ -1578,10 +1591,10 @@ killing anyone, and therefore the correct play every time.
       the fix — `fd67296` swapped several character types onto different Kenney
       source files, so confirm they share one baked orientation rather than
       assuming.
-- [ ] Rendering: fallback marker for failed `.glb` loads (`models.js:40`),
+- [x] Rendering: fallback marker for failed `.glb` loads (`models.js:40`),
       `refreshTile` floor-box leak (`scene.js:194`), async model staleness
       guard + stale electrified-pool visuals (`scene.js:201`, `:189`).
-- [ ] Pure logic: edge-wall-aware corner repulsion (`pathfinding.js:129`),
+- [x] Pure logic: edge-wall-aware corner repulsion (`pathfinding.js:129`),
       `reachOpen` sampling near wall ends (`tactics.js:88`), `sev ?? 0` vs
       `?? 1` on re-apply (`statuses.js:113`).
 
@@ -1618,12 +1631,12 @@ rework. The rework is complete:
 - [x] **Back goes back.** Escape used to commit the character it claimed to
       cancel.
 
-Still open, and genuinely optional:
+Formerly open and optional:
 
-- [ ] **A body that reads as mail room.** The Mail Room class wears `hr.glb`
-      because the rig named for that job was deliberately given to Security for
-      reading as a uniform, and no file is left for it. Needs art, not a
-      rename — it is the one remaining place a filename lies.
+- [x] **A body that reads as mail room. DONE:** the class now owns the dedicated
+      `mailroom.glb` identity. The old mismatch came from giving the original
+      mail-room rig to Security because it read as a uniform; the replacement
+      restores an honest class-to-body mapping.
 
 - **Declined, still:** a `New Character` menu item. Making a new character
   belongs at the START, and `showGameMenu` is a persistent ☰ available all
@@ -1654,9 +1667,11 @@ Still open, and genuinely optional:
       `shopping.js` host-callback pattern, each with its rules split out pure.
       Still in the closure and still worth a look later: the input block
       (~585 lines) and the follower/step driver.
-- [ ] **Carve the debug surface** (`window.__combat`, `window.__game`) out of
-      both closures — the last of the original main.js carve list.
-- [ ] Extract `EnemyActor`'s wander brain to a pure module (`actors.js:412`).
+- [x] **Carve the debug surface** (`window.__combat`, `window.__game`) out of
+      both closures — the last of the original main.js carve list. **DONE:**
+      `combat-debug.js`, `game-debug.js`, and `god-debug.js` own the projections
+      and mutation adapters; the hosts only supply live dependencies.
+- Future refactor candidate: extract `EnemyActor`'s wander brain to a pure module (`actors.js:412`).
 - [x] **DONE.** One bar. `combat.js` no longer builds anything - it supplies
       the rules (`actionState` for affordability and the refusal reason,
       `actionTip` for the tooltip, `scrambleEntries` for the reorg status,
@@ -1680,7 +1695,7 @@ Still open, and genuinely optional:
       "whose turn is it?"), `shop.js` vs `shopping.js` (the pure/runtime split
       `looting.js` is supposed to copy), and `ui.js` vs `ui/` (a re-export
       barrel).
-- [ ] **Content-is-data fixes**: `matches` → item `ignites` field
+- Future data-normalization candidate: **content-is-data fixes**: `matches` → item `ignites` field
       (`main.js:715`); projectile/impact → action data fields
       (`combat.js:1296`, `:1323` — three id-special-cases since `e8e53de`);
       surface `impact` field to delete `hazardKind`/`surfaceImpactKind`
@@ -1694,8 +1709,11 @@ Still open, and genuinely optional:
       (designer, 2026-07-31): "god mode can stay around". It ships on the
       itch.io build, opens on backquote/F8, and persists across reloads.
       Closed as answered, not as done.
-- [ ] Edge-aware `isFlanked` (`tactics.js:208`); decide surprise-vs-POSITION_CAP
-      spec question and align code or TACTICS_PLAN (`tactics.js:263`).
+- [x] Edge-aware `isFlanked` (`tactics.js:208`); decide surprise-vs-POSITION_CAP
+      spec question and align code or TACTICS_PLAN (`tactics.js:263`). **DONE:**
+      continuous opposite-side geometry is unit tested; surprise remains an
+      awareness/accuracy term outside the positional cap, and the plan's formula
+      now matches the shipped rule.
 
 ## Phase 6 — Test infrastructure  ✅ done
 
@@ -1729,24 +1747,24 @@ Still open, and genuinely optional:
 > (see below). Do not read design *intent* out of them or cite them to justify
 > current behavior — ask. They are a rewrite target, not a source of truth.
 
-- [ ] ARCHITECTURE.md: AP cost, melee reach, module map (+`powers`,
+- [x] ARCHITECTURE.md: AP cost, melee reach, module map (+`powers`,
       `portraits`, `actor-registries`), data-layer import exceptions, stale
       editor warning.
-- [ ] MOVEMENT_PLAN.md ("No code yet" — all five milestones shipped),
+- [x] MOVEMENT_PLAN.md (historical "No code yet" banner retired; all five milestones shipped),
       TACTICS_PLAN.md `#`-cells claim, `data/companions.js` kit comments.
-- [ ] Remove dead code: `regional-executive` (or place it), `INV_CAP` Infinity
+- [x] Remove dead code: `regional-executive` (or place it), `INV_CAP` Infinity
       branches, `applySurfaceOn`'s `sfx.ammo` branch, exit glow material,
       unused exports (`stats.normalizeAttr`/`nodeAvailable` — or make the
       level-up UI consume `nodeAvailable` instead of re-deriving it,
       `fx.FEET_Y`/`HEAD_Y`/`groundDecal`, `hover.HL`, `pathfinding.BODY_RADIUS`,
       `looting.INV_CAP`), `snack-machine` category.
 
-## Phase 8 — Charm / Dominate — SHIPPED (one leg still open)
+## Phase 8 — Charm / Dominate — SHIPPED
 
 **This section was stale and is corrected here.** It was headed BLOCKED with six
 unticked boxes long after charm shipped - `turns.replace` (`turn-order.js:311`)
-is the slot re-teaming the blocker below says does not exist, and five of the six
-legs are live in the code. Left in place rather than rewritten, because the
+is the slot re-teaming the blocker below says does not exist, and all six legs
+are now live in the code. Left in place rather than rewritten, because the
 account of what was learned is still worth reading; the boxes now say what is
 actually true.
 
@@ -1791,12 +1809,10 @@ having the feature.
 - [x] `livingParty` must exclude the borrowed, or a wiped party stays "alive"
       while you drive somebody else's body. **DONE** — `!m.isSummon &&
       !m.isCharmed`.
-- [ ] Release on all three paths: lapse, victory, and **death mid-session**.
-      Two of three are live (`combat.js:4015`, `:1972`); the DEATH path is the
-      one still missing, and it is the residual defect behind the finding this
-      review first mis-filed as a critical soft-lock. It is not a soft-lock -
-      the body stays clickable and re-killable and `victory()` fires normally -
-      but a toppled corpse that is secretly a full-HP hostile, drawing no target
-      ring, is a real medium. See THE QUEUE.
-- [ ] Edges to pin: charm the last living hostile; charm a unit that is itself
+- [x] Release on all three paths: lapse, victory, and **death mid-session**.
+      **DONE 2026-08-05:** `releaseDeadCharm` returns a zero-HP borrowed body
+      through the normal enemy death/loot path whether it fell to an attack,
+      forced/environmental damage, or a turn-start status. The turn-flow unit
+      test and shipped-floor charm browser scenario cover the seam.
+- Future charm test candidates: charm the last living hostile; charm a unit that is itself
       a summon; charm a unit holding overwatch; save/load mid-charm.

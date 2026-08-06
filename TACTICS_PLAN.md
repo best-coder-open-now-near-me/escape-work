@@ -5,9 +5,14 @@ attacker accuracy vs defender dodge — and the eight tiles around a combatant
 are worth exactly as much as the eight tiles across the room. Leaving melee is
 free, so kiting is strictly dominant and melee enemies are toothless.
 Partitions block bodies but grant no combat advantage. Facing is decoration.
-This document is the implementation plan for four positional systems —
+This document records the implementation plan for four positional systems —
 opportunity attacks, cover, flanking, backstab — the design decisions, the
-module-by-module changes, and the milestone order. No code yet.
+module-by-module changes, and the milestone order.
+
+**Implementation status (2026-08-05): shipped.** The positional systems and
+later Take Cover milestones are live. This file is the historical
+design/ratification record; current behavior lives in the source and
+`ARCHITECTURE.md`.
 
 ## Questions for the designer (M6 Take Cover)
 
@@ -489,8 +494,9 @@ opportunity attack reuses the attacker's existing basic swing
 ## The math
 
 ```
-mods = − cover(attacker, defender)        // ranged only, defender-favouring
-     + min(POSITION_CAP, flank + backstab + surprise)
+mods = surprise                           // awareness bonus, outside position cap
+     − cover(attacker, defender)          // ranged only, defender-favouring
+     + min(POSITION_CAP, flank + backstab)
 chance = clamp(BASE + accuracy(attacker) − dodge(defender) + mods)
 ```
 

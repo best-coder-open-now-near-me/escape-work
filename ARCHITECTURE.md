@@ -104,6 +104,12 @@ src/
                      turns, movement, ranged/melee, AI-driven units - costs
                      from data. Owns the BODIES, the AP ledger, the FX and
                      the frame clock; the rules below are what it asks
+  combat-session.js  Mutable encounter lifecycle: steered member, player/AI/
+                     done phase, acting AI unit and scramble deal
+  combat-intent.js   Mutually-exclusive next-click intent: aimed action or
+                     instant confirmation; disarm also clears the aim view
+  combat-formulas.js Pure diagnostic projections for the actual hit, damage
+                     and proc inputs used by the combat resolvers
   combat-geometry.js Reach, the two range vocabularies (what a verb's WASH
                      covers vs what its CLICK acts from), the walk-up's
                      stand point, a zone's covered tiles     (pure logic)
@@ -156,14 +162,16 @@ src/
   hotbar-model.js    The bar's VIEW-MODEL: what belongs on it, in what
                      order, in which slot, and what each slot says about
                      itself. ui/hud.js renders it             (pure logic)
+  action-tooltip.js  One power description/number formatter shared by the
+                     unlock list and both hotbar modes         (pure logic)
   shopping.js        The merchant runtime: per-instance stock, the shop panel,
                      the buy/sell verbs (ECONOMY_PLAN.md)
   ui.js              All DOM. The FRONT DOOR only - it re-exports ui/,
                      so every caller keeps `import * as ui from './ui.js'`
   ui/                grouped by what a thing IS on screen:
     chrome.js          shared palette + the bottom-left HUD rail
-    readouts.js        narrator box, focus banner, loot toast (nothing
-                       to click)
+    readouts.js        retained, typed narrator/combat/formula/initiative log;
+                       collapsed Advanced filters; focus banner + loot toast
     hud.js             profile card + status chips, tactical button,
                        the paged action hotbar, party bar, level-up pip
     menus.js           context menu, Alt loot labels (at the cursor)
@@ -180,8 +188,12 @@ src/
   god.js             God-mode tweak panel (` / F8): live-reflects the sheet,
                      enemies, combat + world; edit/pin values, pause, spawn
   editor-document.js Pure storey transforms and editor document invariants
-  editor.js          In-browser level editor host (render, input, export, playtest)
-  main.js            Entry point: routes game vs #editor, owns game flow
+  editor-session.js  Undo/redo, stroke checkpoints, dirty state + draft policy
+  editor-view.js     Editor PlayCanvas entities, render caches + derived previews
+  editor-shell.js    Editor structural DOM, accessibility + layout measurement
+  editor.js          Editor composition, commands, export + playtest handoff
+  run-session.js     Mutable cross-system run/floor coordination state
+  main.js            Entry point: routes game vs #editor, composes game flow
   index.html         Shell; loads engine + bundle
 build.mjs            esbuild bundle + static copies -> build/web/
 tests/unit/          node --test suite for the pure modules + level linting
@@ -196,8 +208,11 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - `grid`, `pathfinding`, `stats`, `party`, `surfaces-runtime`, `initiative`,
   `turn-order`, `statuses`, `tactics`, `occlusion`, `shop`, `powers`,
   `combat-geometry`, `combat-plans`, `combat-ai`, `combat-targeting`,
-  `step-rules`, `summon-rules`, `hotbar-model`, `door-edges` are pure JS (no
-  PlayCanvas, no DOM) - unit tested in isolation (tests/unit).
+  `step-rules`, `summon-rules`, `hotbar-model`, `action-tooltip`,
+  `combat-formulas`, `door-edges`,
+  `combat-session`, `combat-intent`, `run-session`, `editor-document` and
+  `editor-session` are pure JS (no PlayCanvas, no DOM) - unit tested in
+  isolation (tests/unit).
 - **A rules module that needs the world takes a HOST, not the world.**
   `turn-order.js` is the pattern: it owns the turn walk and asks an injected
   host the questions only combat can answer (is this slot still standing, is
@@ -207,9 +222,10 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   a body or the DOM stays in `combat.js`. Reach for this shape when logic worth
   testing is trapped inside something that has to touch the engine.
 - `scene`, `shading`, `tile-renderer`, `models`, `controls`, `picking`,
-  `actors` touch PlayCanvas; `ui` touches the DOM; `fx`, `combat`, `hover` and
-  `looting` touch both (combat draws its own previews/rings; hover writes the
-  canvas cursor and draws rings; looting spawns dropped-item entities).
+  `actors` and `editor-view` touch PlayCanvas; `ui` and `editor-shell` touch
+  the DOM; `fx`, `combat`, `hover`, `looting` and the editor host touch both
+  (combat draws its own previews/rings; hover writes the canvas cursor and
+  draws rings; looting spawns dropped-item entities).
   `combat.js` no longer BUILDS a panel - the readout is `ui/combat.js` and the
   bar is main.js's hotbar - so what it still owns of the DOM is the movement
   cost tag and nothing else.
@@ -239,8 +255,11 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   summon spot rules (two, one of them documented as a copy of the other), and
   the pull's plan-vs-refusal (two hand-parallel walks down five legs). When you
   find yourself writing "the same questions X asks, less Y", that is the seam.
-- Only `main.js` sees everything. It owns game state (`inCombat`, `gameOver`)
-  and game flow (what a click means, when combat starts, tile effects).
+- Only `main.js` sees everything and composes game flow (what a click means,
+  when combat starts, tile effects). `run-session.js` owns cross-system mutable
+  run coordination: combat/game-over, active layer, climb/path state,
+  out-of-combat intent and pending interactions. The `sheet`/`player` leader
+  bindings and `party` roster stay in `main.js` because they connect the owners.
 - Enemy AI decisions (pathing costs, wander avoidance) use a talent-free
   hazard model - the player's talents discount only the player's own costs,
   never what enemies fear.
@@ -266,20 +285,25 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - **Doors live on edges too** ("doors" runs in the level JSON; a door
   replaces any wall on its edge). Closed doors block movement AND sight
   (they go floor to frame); conduction ignores them - water finds the gap
-  underneath, so pools stay static. Click a door (or its Alt label) to walk
-  up and toggle it; state lives in `grid.doors`, visuals re-render via
-  `scene.refreshDoor`. Enemies don't open doors. The editor has a door
-  brush next to the partition brush.
+  underneath, so pools stay static. Click the visible door panel or knob to
+  walk up and toggle it; there is deliberately no ground/threshold "ghost"
+  click area (`[stated]`, designer task text 2026-08-05: "directly on door
+  only"). Picking tests the mesh-local bounds of each rendered instance,
+  and cyan hover highlighting shows exactly when the door itself is targeted.
+  State lives in `grid.doors`; visuals re-render via `scene.refreshDoor`.
+  Enemies don't open doors. The editor has a door brush next to the partition
+  brush.
 - **Left-click is contextual (Divinity-style): the target picks the verb.**
   `picking.js` ray-tests the cursor against registered interactable holders
   (doors, living enemies, NPCs, rummageable props) and returns the nearest
   hit; `main.js`'s `dispatchHit` maps its `kind` to a verb - attack a
   coworker, talk to an NPC, open a door, rummage a prop - falling back to the
-  ground tile (`doorNearPoint`, corpses, dropped items, then walk-here) when
-  the ray misses. This is what makes a click on a TALL mesh land on the object
-  and not the floor a tile behind it (the old ground-plane-only projection
-  silently missed raised doors); it also drives the hover cursor and the
-  BG3-style coloured outline (`shading.addHighlight`/`setHighlight`, one shell
+  ground tile (corpses, dropped items, then walk-here) when the ray misses.
+  Door interaction is the direct per-instance geometry test described above,
+  never a nearby-ground fallback. This makes a click on a TALL mesh land on
+  the object and not the floor a tile behind it (the old ground-plane-only
+  projection silently missed raised doors); it also drives the hover cursor
+  and the BG3-style coloured outline (`shading.addHighlight`/`setHighlight`, one shell
   per interactable, coloured by kind). Register a holder as it's created;
   destroyed holders auto-unregister.
 - **The camera** (`controls.js`): an orbit rig - yaw/pitch drag, wheel zoom -
@@ -451,8 +475,9 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   bindings; everything a member does with their feet (surfaces, slips, gum,
   ammo pickup) runs against THAT member's own sheet via `onMemberStep`. The
   exit and walk-up interactions stay leader-only. Combat fields every member
-  with per-member AP/deflect/uses (`combat.js` `members`, `active`); who the
-  enemies target is `combat-ai.pickTarget`, a scored choice, not a nearest-first
+  with per-member AP/deflect/uses; `combat-session.js` owns which member is
+  currently steered. Who the enemies target is `combat-ai.pickTarget`, a
+  scored choice, not a nearest-first
   rule (AI_PLAN M2) - an ENGAGEABLE member outranks any unreachable one
   whatever the score, and within that tier nearness, kill-securability,
   fragility and stickiness to last turn's target are blended by the def's own
