@@ -88,3 +88,52 @@ test('the aim view constructs the extracted body pass', () => {
 
   assert.equal(typeof aim.drawTargets, 'function');
 });
+
+test('the aim view preserves a cone cursor point until its boundary draws', () => {
+  const lines = [];
+  class Vec3 {
+    constructor(x, y, z) { Object.assign(this, { x, y, z }); }
+  }
+  const action = { type: 'attack', ap: 2, cone: { range: 4, halfAngle: 35 } };
+  const view = {
+    phase: 'player',
+    armed: 'mail-cone',
+    active: {
+      ap: 4,
+      sheet: { paper: 0 },
+      actor: { x: 1, z: 1, moving: false, entity: { getPosition: () => ({ x: 1, z: 1 }) } },
+    },
+  };
+  let washHidden = 0;
+  const aim = createAimView({
+    app: { drawLine: (...args) => lines.push(args) },
+    pc: { Vec3 },
+    marks: {
+      OK: 'ok', FAR: 'far', COVER: 'cover', REACH: 'reach',
+      ring: () => {}, faces: () => {},
+    },
+    aimPaint: { hide: () => { washHidden += 1; } },
+    actions: { 'mail-cone': action },
+    world: { liveEnemies: () => [], doorsBeside: () => [] },
+    costTag: { style: {} },
+    REACH: {},
+    view,
+    ask: {
+      TARGET_R: 0.4,
+      crouchStateOf: () => null,
+      previewAction: () => 'mail-cone',
+      rangeOf: () => 0,
+      verbSides: () => ({ kind: 'cone', allies: false, enemies: true }),
+      coneTest: () => (() => true),
+      conePolyline: () => [[1, 1], [2, 2], [3, 2]],
+      bodyLos: () => true,
+    },
+  });
+
+  aim.setAimPoint({ x: 3, z: 2 });
+  aim.drawTargets();
+
+  assert.deepEqual(aim.aimPoint, { x: 3, z: 2 }, 'draw pass must not erase the cursor it consumes');
+  assert.equal(lines.length, 2, 'the cone boundary drew from that cursor point');
+  assert.equal(washHidden, 1, 'a cone hides the unrelated circular range wash');
+});

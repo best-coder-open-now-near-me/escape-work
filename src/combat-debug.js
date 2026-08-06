@@ -57,6 +57,10 @@ export function createCombatDebug(d) {
     get armed() { return d.intent.armed; },
     get pendingConfirm() { return d.intent.pendingConfirm; },
     get hoverDoor() { return d.aim.hoverDoor; },
+    get aimPoint() {
+      const p = d.aim.aimPoint;
+      return p ? { x: p.x, z: p.z } : null;
+    },
     get aimPaint() { return d.aimPaint.debug; },
     get enemies() {
       return d.engaged.map((e) => ({

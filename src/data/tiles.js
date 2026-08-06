@@ -880,3 +880,9 @@ export const PARTITION_TOPPLE = { damage: [1, 3], becomes: 'partition-fallen' };
 // designer 2026-07-30): the topple keeps the board in play, the break-down
 // does not.
 export const PARTITION_HP = 8;
+
+// Floor finishes that can accept a temporary surface. A coloured carpet is
+// still floor: Bulk Mail and TPS Form Storm should land ON it, not silently
+// skip the room because its floor happens to use a palette variant. The
+// caller keeps the original type so the temporary litter can restore it.
+export const acceptsSurface = (type) => type === 'floor' || !!TILE_TYPES[type]?.carpet;

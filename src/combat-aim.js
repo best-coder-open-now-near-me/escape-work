@@ -54,6 +54,7 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
   // Dropping the aim drops the eased marker with it, or the next crouch preview
   // starts from wherever the last one happened to stop.
   const clearAim = () => { aimPoint = null; coverEase = null; };
+  const clearCoverEase = () => { coverEase = null; };
   const bodyTargets = createBodyTargets({
     app,
     pc,
@@ -79,7 +80,11 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
     // rings and every walk-up read it, so the three cannot disagree.
     const armed = view.armed;
     const active = view.active;
+    // A cone owns a WEDGE, not a circular landing range. Painting the generic
+    // range wash under it was the whole in-combat/OOC mismatch: the real cone
+    // outline disappeared into what looked like TPS Form Storm's zone.
     const spec = view.phase === 'player' && armed && !active.actor.moving
+      && !actions[armed].cone
       ? ask.reachSpec(armed)
       : null;
     if (!spec) { aimPaint.hide(); return; }
@@ -507,10 +512,12 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
     // is always what would happen.
     const id = ask.previewAction();
     const a = id ? actions[id] : null;
-    // A stale ease position would make the next arm GLIDE in from wherever
-    // cover was last aimed - drop it the moment cover is not the live verb
-    // (including when no verb previews at all).
-    if (a?.type !== 'cover') clearAim();
+    // A stale ease position would make the next cover arm GLIDE in from
+    // wherever the last one stopped. Clear ONLY that easing state here. This
+    // used to call clearAim(), erasing the live cone/zone cursor point one line
+    // before their drawers read it; combat therefore showed a circular wash
+    // but never the wedge or exact zone footprint that OOC aiming did.
+    if (a?.type !== 'cover') clearCoverEase();
     if (!id) return;
     // ONE classifier for the whole pass (combat-targeting.verbSides). This
     // ladder used to be hand-written here in a different order from

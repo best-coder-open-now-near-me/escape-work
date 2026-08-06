@@ -703,13 +703,15 @@ function ensureFxMats() {
   if (fxMats) return fxMats;
   fxMats = {
     paper: makeMaterial([0.97, 0.96, 0.9], { gloss: 0.3 }),
+    paperFold: makeMaterial([0.82, 0.84, 0.86], { gloss: 0.2 }),
     trail: makeMaterial([1, 1, 1], { opacity: 0.4 }),
   };
   return fxMats;
 }
 
-// A thrown paper ball ('ball') or airplane ('plane') arcing from one tile to
-// another, shedding a fading trail. Fire and forget. It leaves the thrower's
+// A thrown paper ball ('ball'), airplane ('plane'), or flat envelope
+// ('envelope') arcing from one tile to another, shedding a fading trail. Fire
+// and forget. It leaves the thrower's
 // hand in a puff of loose sheets and shreds itself on arrival - the arc used
 // to simply blink out of existence at the target.
 //
@@ -721,6 +723,7 @@ function ensureFxMats() {
 export function throwProjectile(app, from, to, kind = 'ball') {
   const m = ensureFxMats();
   const shot = kind === 'shot';
+  const sheetFlight = kind === 'plane' || kind === 'envelope';
   const holder = new pc.Entity('projectile');
   if (kind === 'plane') {
     const spine = new pc.Entity();
@@ -735,6 +738,19 @@ export function throwProjectile(app, from, to, kind = 'ball') {
       wing.setLocalEulerAngles(0, 0, side * 24);
       holder.addChild(wing);
     }
+  } else if (kind === 'envelope') {
+    const body = new pc.Entity();
+    body.addComponent('render', { type: 'box', material: m.paper });
+    body.setLocalScale(0.25, 0.018, 0.34);
+    holder.addChild(body);
+    // A small contrasting flap makes the silhouette read as an envelope at
+    // the game's camera distance, not a white ball or anonymous projectile.
+    const flap = new pc.Entity();
+    flap.addComponent('render', { type: 'box', material: m.paperFold });
+    flap.setLocalScale(0.19, 0.012, 0.13);
+    flap.setLocalPosition(0, 0.017, -0.055);
+    flap.setLocalEulerAngles(0, 45, 0);
+    holder.addChild(flap);
   } else {
     const wad = new pc.Entity();
     wad.addComponent('render', { type: 'sphere', material: m.paper });
@@ -770,7 +786,7 @@ export function throwProjectile(app, from, to, kind = 'ball') {
       const k = Math.min(1, t / dur);
       const y = Y + Math.sin(Math.PI * k) * arc;
       holder.setPosition(from.x + dx * k, y, from.z + dz * k);
-      if (kind === 'plane') {
+      if (sheetFlight) {
         const vy = (Math.PI / dur) * Math.cos(Math.PI * k) * arc;
         const pitch = Math.atan2(vy, dist / dur) * pc.math.RAD_TO_DEG;
         holder.setEulerAngles(-pitch, yaw, 0);
@@ -781,11 +797,13 @@ export function throwProjectile(app, from, to, kind = 'ball') {
       while (acc > 0.024) {
         acc -= 0.024;
         const p = new pc.Entity();
-        p.addComponent('render', { type: 'sphere', material: m.trail });
-        p.setLocalScale(0.09, 0.09, 0.09);
+        p.addComponent('render', { type: sheetFlight ? 'box' : 'sphere', material: m.trail });
+        const base = sheetFlight ? [0.075, 0.012, 0.055] : [0.09, 0.09, 0.09];
+        p.setLocalScale(base[0], base[1], base[2]);
+        if (sheetFlight) p.setEulerAngles(0, yaw + parts.length * 29, parts.length % 2 ? 18 : -18);
         p.setPosition(holder.getPosition());
         app.root.addChild(p);
-        parts.push({ e: p, life: 0.32 });
+        parts.push({ e: p, life: 0.32, base });
       }
       if (k >= 1) {
         flying = false;
@@ -807,12 +825,31 @@ export function throwProjectile(app, from, to, kind = 'ball') {
         parts.splice(i, 1);
         continue;
       }
-      const s = 0.09 * (p.life / 0.32);
-      p.e.setLocalScale(s, s, s);
+      const fade = p.life / 0.32;
+      p.e.setLocalScale(p.base[0] * fade, p.base[1] * fade, p.base[2] * fade);
     }
     if (!flying && !parts.length) app.off('update', tick);
   };
   app.on('update', tick);
+}
+
+// Bulk Mail is a FAN, even when nobody happens to be standing in it. Five
+// envelopes fly along the same angular limits the rules carpet, so the effect
+// communicates the wedge instead of looking like one Paper Ball aimed at one
+// target. Resolution remains instant and entirely separate from these visuals.
+export function throwPaperFan(app, from, angle, cone, count = 5) {
+  const half = (cone.halfAngle * Math.PI) / 180;
+  for (let i = 0; i < count; i++) {
+    const t = count === 1 ? 0.5 : i / (count - 1);
+    const a = angle - half + t * half * 2;
+    // Alternate the reach slightly so the leading edge reads as scattered
+    // mail rather than five synchronized missiles.
+    const reach = cone.range * (0.78 + (i % 3) * 0.09);
+    throwProjectile(app, from, {
+      x: from.x + Math.cos(a) * reach,
+      z: from.z + Math.sin(a) * reach,
+    }, 'envelope');
+  }
 }
 
 // ---------------------------------------------------------------------------

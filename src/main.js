@@ -32,7 +32,7 @@ import { applyStatus, removeStatus, statusFx, hasStatus, tickStep, tickTurn, sta
 import { createDraft, createCharacter, draftModel, draftLook } from './creation.js';
 import { CUSTOM_RIGS } from './data/looks.js';
 import { aimsAtAlly, coneFrom, conePolyline, isToppleable } from './powers.js';
-import { PARTITION_TOPPLE, blocksSight } from './data/tiles.js';
+import { PARTITION_TOPPLE, acceptsSurface, blocksSight } from './data/tiles.js';
 import { cheb as chebOf } from './tactics.js';
 import { crouchFacesAt, leaveCrouch } from './crouch-rules.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
@@ -62,7 +62,7 @@ import { loadRemoteStore, SAVE_KEY_STORAGE } from './remote-store.js';
 import { placeModel, applyCharacterProportions, cloneMaterials, tintMaterials } from './models.js';
 import { createPortraits } from './portraits.js';
 import {
-  throwProjectile, spawnDamageText, worldToScreenCss, impact as impactFx, statusBurst,
+  throwPaperFan, throwProjectile, spawnDamageText, worldToScreenCss, impact as impactFx, statusBurst,
   createAuraLayer, footstep, bloodSplat, CHEST_Y,
 } from './fx.js';
 import { createControls } from './controls.js';
@@ -288,12 +288,11 @@ function startGame(level) {
       // grid, visual, and the harvested-here mark - exactly as stickGum retires
       // a wad that is now on somebody's shoe. Doing only the visual left the
       // grid still holding a drift on a tile that plainly had none: no surface
-      // could ever be laid there again (canTakeSurface wants 'floor'), it could
+      // could ever be laid there again (canTakeSurface refuses an existing
+      // surface), it could
       // never burn again, and refreshTile would redraw paper over ash.
       spendFuel: (x, z) => {
-        grid.setType(x, z, 'floor');
-        scene.hideSurfaceVisual(x, z);
-        loot?.forgetPaper?.(x, z); // a fresh drift here later is gatherable
+        restoreTempSurfaceAt(x, z);
       },
       addSmoke: scene.addSmoke,
       removeSmoke: scene.removeSmoke,
@@ -571,7 +570,15 @@ function startGame(level) {
   // the floor (nor leave a renewable ammo pile behind it). Tracked here rather
   // than in surfaces-runtime because reverting needs the grid AND the visual,
   // both of which live on this side.
-  const tempSurfaces = new Map(); // "x,z" -> { left, type }
+  const tempSurfaces = new Map(); // "x,z" -> { left, type, under }
+  function restoreTempSurfaceAt(x, z) {
+    const key = x + ',' + z;
+    const under = tempSurfaces.get(key)?.under || 'floor';
+    tempSurfaces.delete(key);
+    grid.setType(x, z, under);
+    scene.hideSurfaceVisual(x, z);
+    loot?.forgetPaper?.(x, z); // a fresh world drift here later is gatherable
+  }
   function ageTempSurfaces() {
     for (const [key, t] of [...tempSurfaces]) {
       const [x, z] = key.split(',').map(Number);
@@ -579,21 +586,19 @@ function startGame(level) {
       // longer ours to clean up.
       if (grid.typeAt(x, z) !== t.type) { tempSurfaces.delete(key); continue; }
       if (t.left > 1) { t.left -= 1; continue; }
-      tempSurfaces.delete(key);
-      grid.setType(x, z, 'floor');
-      scene.hideSurfaceVisual(x, z);
-      loot.forgetPaper?.(x, z); // a fresh drift here later is gatherable again
+      restoreTempSurfaceAt(x, z);
     }
   }
-  // Drop a power's surface on bare floor: grid, visual and the litter clock in
-  // one write. Combat's world callback and the out-of-combat cone both land
-  // here, so a drift laid with no fight on ages and reverts exactly like one
-  // laid mid-round - two copies of this rule is how the two would drift.
+  // Drop a power's surface on open office carpet: grid, visual and the litter
+  // clock in one write. Coloured carpet is still floor, and its original type
+  // rides with the temporary surface so expiry/fire restores the same carpet
+  // instead of repainting it grey.
   function leaveSurfaceAt(x, z, tileType, turns = 0) {
-    if (grid.typeAt(x, z) !== 'floor') return false;
+    const under = grid.typeAt(x, z);
+    if (!acceptsSurface(under)) return false;
     grid.setType(x, z, tileType);
     scene.addSurfaceVisual(x, z, tileType);
-    if (turns > 0) tempSurfaces.set(x + ',' + z, { left: turns, type: tileType });
+    if (turns > 0) tempSurfaces.set(x + ',' + z, { left: turns, type: tileType, under });
     // Ammo comes from the WORLD, never from a power. A paper-laying verb
     // that could be harvested afterwards is an AP-to-ammo converter, and
     // expiry alone does not prevent it: harvesting is refused in combat
@@ -1743,6 +1748,7 @@ function startGame(level) {
   // summon post makes. `test` is the wedge from coneFrom, aimed at (tx, tz).
   function fireOocCone(a, test, tx, tz) {
     player.lunge(tx, tz); // the fan of envelopes, aimed where you pointed
+    if (a.leaves === 'paper') vfx.paperFan(test.origin, test.angle, a.cone);
     const playerSide = [...(party?.members || []), ...summons];
     if (a.leaves) {
       const R = Math.ceil(a.cone.range) + 1;
@@ -2272,6 +2278,7 @@ function startGame(level) {
   const auras = createAuraLayer(app);
   const vfx = {
     projectile: (from, to, kind) => throwProjectile(app, from, to, kind),
+    paperFan: (from, angle, cone) => throwPaperFan(app, from, angle, cone),
     damageText: (x, z, text, color, opts) =>
       spawnDamageText(app, controls.cameraEntity, x, 0.2, z, text, color, opts),
     // A burst at chest height on a body, or at ground level for a floor event.

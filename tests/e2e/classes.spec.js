@@ -3,7 +3,7 @@
 // Detain - which is now a ROOT that deals no damage (POWERS_PLAN M2), not the
 // "attack that also stuns" it used to be.
 import { test, expect } from '@playwright/test';
-import { bootAndPick, bootStash, clickWorld, enterCombat, waitStill, stableProject, onScreen, clickAction } from './helpers.js';
+import { bootAndPick, bootStash, clickWorld, enterCombat, waitForPlayerTurn, waitStill, stableProject, onScreen, clickAction } from './helpers.js';
 
 test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ page }) => {
   test.setTimeout(300_000);
@@ -93,7 +93,12 @@ test('Mail Room: Bulk Mail cones damage and leave paper drifts', async ({ page }
   await page.evaluate(() => { window.__combat.forceHit = true; });
   await clickAction(page, 'mail-cone');
   // The condition the sleep here was guessing at, asked directly.
-  await stableProject(page, foe.x, foe.z).catch(() => {});
+  const aim = await stableProject(page, foe.x, foe.z).catch(() => null);
+  if (aim) await page.mouse.move(aim.x, aim.y);
+  await expect.poll(() => page.evaluate(() => window.__combat.aimPoint),
+    { timeout: 10_000 }).not.toBe(null);
+  expect(await page.evaluate(() => window.__combat.aimPaint.count),
+    'a cone should draw its wedge, not the circular zone/range wash').toBe(0);
   expect(await clickWorld(page, foe.x, foe.z)).toBe(true);
   await expect.poll(() => page.evaluate(
     ([x, z, hp]) => {
@@ -106,6 +111,43 @@ test('Mail Room: Bulk Mail cones damage and leave paper drifts', async ({ page }
 
   // The wedge's bare floor is carpeted with fresh paper.
   expect(await paperNear()).toBeGreaterThan(paperBefore);
+});
+
+const COLOURED_CARPET_ARENA = {
+  name: 'Paperwork Lab',
+  tiles: { '#': 'wall', 'm': 'meeting-floor' },
+  actors: { '@': 'player', 'M': 'manager' },
+  map: [
+    '#########',
+    '#mmmmmmm#',
+    '#m@mmmMm#',
+    '#mmmmmmm#',
+    '#########',
+  ],
+};
+
+test('Office Drone: TPS Form Storm keeps its zone aim and lands above coloured carpet', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, COLOURED_CARPET_ARENA, 'office-drone', { seed: 4 });
+  expect(await page.evaluate(() => window.__god.fight())).toBe(true);
+  await waitForPlayerTurn(page);
+  await clickAction(page, 'paper-storm');
+
+  const p = await stableProject(page, 4, 2);
+  await page.mouse.move(p.x, p.y);
+  await expect.poll(() => page.evaluate(() => window.__combat.aimPoint),
+    { timeout: 10_000 }).not.toBe(null);
+  expect(await page.evaluate(() => window.__combat.aimPaint.count),
+    'a ground zone keeps the circular placement wash').toBeGreaterThan(0);
+
+  expect(await clickWorld(page, 4, 2)).toBe(true);
+  await expect.poll(() => page.evaluate(() => {
+    let paper = 0;
+    for (let z = 1; z <= 3; z++) {
+      for (let x = 3; x <= 5; x++) if (window.__game.surfaceAt(x, z) === 'paper') paper += 1;
+    }
+    return paper;
+  }), { timeout: 10_000 }).toBeGreaterThan(0);
 });
 
 // Just you and one Manager, two tiles apart in an open room - the same shape

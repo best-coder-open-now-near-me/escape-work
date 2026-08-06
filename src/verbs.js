@@ -370,6 +370,7 @@ export function createVerbs(d) {
     d.active.ap = roundAp(d.active.ap - a.ap);
     d.active.actor.lunge(tx, tz);
     d.faceTarget(d.active, tx, tz); // the cone points where you aimed it
+    if (a.leaves === 'paper') d.fx.paperFan?.(test.origin, test.angle, a.cone);
     let hits = 0;
     for (const en of d.world.liveEnemies()) {
       // Same body-radius test the ring previewed - what you saw is what lands.
@@ -377,7 +378,6 @@ export function createVerbs(d) {
       if (!test(bp.x, bp.z, TARGET_R)) continue;
       if (!d.bodyLos(d.active, en)) continue;
       d.joinCombat(en); // a bystander caught in the mail joins the fight
-      d.fx.projectile(posOf(d.active), { x: bp.x, z: bp.z }, 'plane');
       // Roll per target. A dodged envelope flies but doesn't land; the wedge's
       // `leaves` surface still carpets below (HIT_PLAN #4). A surprised target
       // is easier to catch.

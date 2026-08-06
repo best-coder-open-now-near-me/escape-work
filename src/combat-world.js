@@ -20,6 +20,7 @@
 // character.
 import { createWorldEdits } from './world-edits.js';
 import { livingMemberAt } from './member-rules.js';
+import { acceptsSurface } from './data/tiles.js';
 
 export function createCombatWorld(d) {
   const edits = createWorldEdits(d.grid, d.scene);
@@ -121,8 +122,9 @@ export function createCombatWorld(d) {
     memberSurfDamage: (s, x, z) => d.effectiveSurfDamage(x, z, s),
     slipChanceAt: d.slipChanceAt,
     stickGum: d.stickGum,
-    // Cone attacks carpet plain floor with a surface tile (Bulk Mail ->
-    // paper). Only bare floor converts - carpets, surfaces, props stay.
+    // Cone attacks carpet open floor with a surface tile (Bulk Mail ->
+    // paper). Plain and coloured office carpet accept it; existing surfaces
+    // and props do not.
     // `turns` > 0 marks the surface as LITTER rather than terrain: it
     // clears itself after that many rounds (see ageTempSurfaces).
     // The read-only twin of leaveSurface's own first line. The zone verb's
@@ -130,7 +132,7 @@ export function createCombatWorld(d) {
     // TAKE a surface without painting one to find out - and asking a
     // different question than the commit asks is how a preview starts
     // lying (the rings promised tiles the click then skipped).
-    canTakeSurface: (x, z) => d.grid.typeAt(x, z) === 'floor',
+    canTakeSurface: (x, z) => acceptsSurface(d.grid.typeAt(x, z)),
     // Toppling (POWERS_PLAN M6) needs to read a prop's definition, test
     // whether the tile behind it is clear, and mutate both. setType is the
     // same call the exploding printer already makes, so the grid, the

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseLevel, parseWallRuns, compressWallRuns } from '../../src/grid.js';
-import { TILE_TYPES, blocksSight, SIGHT_BLOCK_HEIGHT, PARTITION_HP } from '../../src/data/tiles.js';
+import { TILE_TYPES, acceptsSurface, blocksSight, SIGHT_BLOCK_HEIGHT, PARTITION_HP } from '../../src/data/tiles.js';
 
 const level = (map, extra = {}) => ({
   name: 'test-floor',
@@ -64,6 +64,16 @@ test('blocksSight is a height rule, with tall as the structural override (M6a)',
   assert.equal(blocksSight(TILE_TYPES.paneling), true);         // structure, same family
   assert.equal(blocksSight(TILE_TYPES['cabinet-fallen']), false); // solid on its side, but LOW
   assert.equal(blocksSight(null), false);
+});
+
+test('temporary surfaces land on plain and coloured carpet, not props or hazards', () => {
+  assert.equal(acceptsSurface('floor'), true);
+  assert.equal(acceptsSurface('meeting-floor'), true);
+  assert.equal(acceptsSurface('break-floor'), true);
+  assert.equal(acceptsSurface('it-floor'), true);
+  assert.equal(acceptsSurface('desk'), false);
+  assert.equal(acceptsSurface('paper'), false);
+  assert.equal(acceptsSurface('water'), false);
 });
 
 test('the big plants conceal a crouch without blocking a shot (SNEAK)', () => {
