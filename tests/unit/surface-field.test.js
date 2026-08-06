@@ -60,3 +60,13 @@ test('invalid resolutions fail where they are configured', () => {
     /divide one movement tile exactly/,
   );
 });
+
+test('derived-state invalidation uses the same notification seam', () => {
+  const field = createSurfaceField({ width: 1, height: 1 });
+  const seen = [];
+  field.onChange((changeSet) => seen.push(changeSet));
+  field.invalidate('edge-opened');
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0].changes, []);
+  assert.equal(seen[0].reason, 'edge-opened');
+});

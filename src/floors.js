@@ -193,7 +193,7 @@ export function layeredGrid(floors, level, getActive) {
   // (REVIEW.md 2026-08-02 section 1.14). `floors.test.js` now derives the
   // expected set from a real grid and fails on any future omission.
   const METHODS = ['typeAt', 'defAt', 'terrainOpen', 'sightOpenCell', 'sightOpenCellLow',
-    'sightOpenLow', 'surfaceAt', 'isElectrified',
+    'sightOpenLow', 'surfaceAt', 'surfaceCellEdgeOpen', 'isElectrified',
     'setType', 'propHpAt', 'damageProp', 'edgeHpBetween', 'damageEdge', 'edgeOpen', 'stepOpen',
     'sightOpen', 'rotAt', 'wallEdgeBetween', 'removeEdgeBetween', 'doorBetween', 'setDoorOpen'];
   for (const m of METHODS) facade[m] = (...args) => g()[m](...args);

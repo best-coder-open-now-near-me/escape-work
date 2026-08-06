@@ -153,6 +153,7 @@ export function parseLevel(level) {
     for (const seed of surfaceSeeds) {
       surfaceField.fillTile(seed.x, seed.z, seed.surfaceId, {
         source: 'authored',
+        sourceKey: `authored:${seed.x},${seed.z}`,
         authoredType: seed.authoredType,
         sourceX: seed.x,
         sourceZ: seed.z,
@@ -233,7 +234,7 @@ export function parseLevel(level) {
     if (!e) return null;
     (e.o === 'h' ? hWalls : vWalls).delete(e.k);
     edgeDamage.delete(e.o + ':' + e.k); // the pool dies with the edge
-    electrified = computeElectrified();
+    surfaceField.invalidate('edge-opened');
     return e;
   };
 
@@ -378,7 +379,8 @@ export function parseLevel(level) {
         surfaceField.clearTile(x, z);
         if (def.surface) {
           surfaceField.fillTile(x, z, def.surface, {
-            source: 'runtime-type', authoredType: type, sourceX: x, sourceZ: z,
+            source: 'runtime-type', sourceKey: `runtime-type:${x},${z}`,
+            authoredType: type, sourceX: x, sourceZ: z,
           });
         }
       });
@@ -413,7 +415,7 @@ export function parseLevel(level) {
     rotAt,
     name: level.name || '', width, height,
     typeAt, defAt, terrainOpen, sightOpenCell, sightOpenCellLow, sightOpenLow,
-    surfaceField, surfaceAt, isElectrified, setType,
+    surfaceField, surfaceAt, surfaceCellEdgeOpen: surfaceEdgeOpen, isElectrified, setType,
     propHpAt, damageProp, edgeHpBetween, damageEdge,
     hWalls, vWalls, edgeOpen, stepOpen, sightOpen, wallEdgeBetween, removeEdgeBetween,
     doors, doorBetween, setDoorOpen,

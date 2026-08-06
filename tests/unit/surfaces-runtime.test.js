@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSurfaceRuntime } from '../../src/surfaces-runtime.js';
+import { parseLevel } from '../../src/grid.js';
 
 // A 1-row world described by two maps: surfaces and tile flags.
 function stubGrid({ surfaces = {}, defs = {}, closedEdges = [] } = {}) {
@@ -200,4 +201,39 @@ test('a FRESH drift on a burnt tile burns again', () => {
 
   grid.setType(0, 0, 'paper'); // somebody empties the recycling here
   assert.equal(rt.ignite(0, 0), true, 'the new drift catches like any other');
+});
+
+const finePaperGrid = (walls = []) => parseLevel({
+  name: 'fine-fire',
+  tiles: { p: 'paper' },
+  actors: {},
+  map: ['pp'],
+  walls,
+});
+
+const fineHooks = (grid) => ({
+  addFlame: () => null,
+  spendFuel: (x, z) => grid.surfaceField.clearAt(x, z),
+});
+
+test('fine fire consumes and spreads one physical surface cell at a time', () => {
+  const grid = finePaperGrid();
+  const rt = createSurfaceRuntime({ grid, hooks: fineHooks(grid), onExplosion: () => {} });
+  assert.equal(rt.ignite(-0.25, -0.25), true);
+  assert.equal(grid.surfaceAt(-0.25, -0.25), null, 'only the lit fuel cell is consumed');
+  assert.equal(grid.surfaceAt(0.25, -0.25), 'paper', 'paper beside it remains until spread');
+  rt.advanceTurn();
+  assert.equal(rt.isBurning(0.25, -0.25), true, 'the fine neighbour catches next');
+  assert.equal(rt.isBurning(0.75, -0.25), false, 'fire has not skipped a fine-cell beat');
+  rt.advanceTurn();
+  assert.equal(rt.isBurning(0.75, -0.25), true, 'then it crosses the movement-tile seam');
+});
+
+test('a partition dams fine-cell fire at the movement-tile seam', () => {
+  const grid = finePaperGrid(['V 1 0 1']);
+  const rt = createSurfaceRuntime({ grid, hooks: fineHooks(grid), onExplosion: () => {} });
+  rt.ignite(-0.25, -0.25);
+  for (let i = 0; i < 8; i++) rt.advanceTurn();
+  assert.equal(rt.isBurning(0.75, -0.25), false);
+  assert.equal(grid.surfaceAt(0.75, -0.25), 'paper', 'fuel beyond the partition remains');
 });

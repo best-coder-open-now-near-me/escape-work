@@ -291,9 +291,7 @@ function startGame(level) {
       // could ever be laid there again (canTakeSurface refuses an existing
       // surface), it could
       // never burn again, and refreshTile would redraw paper over ash.
-      spendFuel: (x, z) => {
-        restoreTempSurfaceAt(x, z);
-      },
+      spendFuel: (x, z) => spendSurfaceFuelAt(x, z),
       addSmoke: scene.addSmoke,
       removeSmoke: scene.removeSmoke,
     },
@@ -514,8 +512,7 @@ function startGame(level) {
   // grid and the scene.
   const stickGum = (x, z) => {
     if (!hasGum(floorAt(x, z))) return false;
-    grid.surfaceField.clearTile(x, z);
-    scene.hideSurfaceVisual(x, z);
+    grid.surfaceField.clearAt(x, z);
     return true;
   };
   // Dangerous/uncomfortable surfaces cost extra to path through, so
@@ -571,11 +568,26 @@ function startGame(level) {
   // than in surfaces-runtime because reverting needs the grid AND the visual,
   // both of which live on this side.
   const tempSurfaces = new Map(); // "x,z" -> { left, surfaceId }
+  const cellsInTile = (x, z) => grid.surfaceField.entries().filter((cell) =>
+    Math.floor(cell.ix / grid.surfaceField.cellsPerTile) === x
+    && Math.floor(cell.iz / grid.surfaceField.cellsPerTile) === z);
+  function spendSurfaceFuelAt(x, z) {
+    const tileX = Math.round(x);
+    const tileZ = Math.round(z);
+    grid.surfaceField.clearAt(x, z);
+    if (!cellsInTile(tileX, tileZ).some((cell) => cell.surfaceId === 'paper')) {
+      tempSurfaces.delete(tileX + ',' + tileZ);
+      loot?.forgetPaper?.(tileX, tileZ);
+    }
+  }
   function restoreTempSurfaceAt(x, z) {
     const key = x + ',' + z;
     tempSurfaces.delete(key);
-    grid.surfaceField.clearTile(x, z);
-    scene.hideSurfaceVisual(x, z);
+    grid.surfaceField.edit(() => {
+      for (const cell of cellsInTile(x, z)) {
+        if (cell.source === 'temporary') grid.surfaceField.clearCell(cell.ix, cell.iz);
+      }
+    });
     loot?.forgetPaper?.(x, z); // a fresh world drift here later is gatherable
   }
   function ageTempSurfaces() {
@@ -583,7 +595,11 @@ function startGame(level) {
       const [x, z] = key.split(',').map(Number);
       // Fire ate it, or something repainted the tile - either way it is no
       // longer ours to clean up.
-      if (grid.surfaceAt(x, z) !== t.surfaceId) { tempSurfaces.delete(key); continue; }
+      if (!cellsInTile(x, z).some((cell) =>
+        cell.surfaceId === t.surfaceId && cell.source === 'temporary')) {
+        tempSurfaces.delete(key);
+        continue;
+      }
       if (t.left > 1) { t.left -= 1; continue; }
       restoreTempSurfaceAt(x, z);
     }
@@ -595,9 +611,10 @@ function startGame(level) {
     const under = grid.typeAt(x, z);
     if (!acceptsSurface(under) || grid.surfaceAt(x, z)) return false;
     grid.surfaceField.fillTile(x, z, surfaceId, {
-      source: turns > 0 ? 'temporary' : 'runtime', sourceX: x, sourceZ: z,
+      source: turns > 0 ? 'temporary' : 'runtime',
+      sourceKey: `${turns > 0 ? 'temporary' : 'runtime'}:${x},${z}`,
+      sourceX: x, sourceZ: z,
     });
-    scene.addSurfaceVisual(x, z, surfaceId);
     if (turns > 0) tempSurfaces.set(x + ',' + z, { left: turns, surfaceId });
     // Ammo comes from the WORLD, never from a power. A paper-laying verb
     // that could be harvested afterwards is an AP-to-ammo converter, and

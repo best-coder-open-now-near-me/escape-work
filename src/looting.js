@@ -117,7 +117,10 @@ export function paperPatches({ width, height }, inWindow, harvestable) {
 export function createLooting({ app, grid, runtime, enemies, getActor, getSheet, isInCombat, isGameOver, approachAndDo, extraEntries = null, onGearChange = null, onBagChange = null, recipients = null, addCash = null, getCash = null, openShop = null, shopSoldOut = null, spendCombatAp = null }) {
   const containerLoot = new Map(); // "x,z" -> remaining item ids (rolled on first rummage)
   const looseItems = []; // { x, z, id, entity } - dropped/overflowed floor items
-  const harvestedPaper = new Set(); // "x,z" of paper drifts already gathered for ammo
+  // Source keys, not fine-cell keys: changing SurfaceField resolution must not
+  // mint more ammunition. One authored/runtime drop is one gatherable source
+  // even though several fine cells draw and govern it.
+  const harvestedPaper = new Set();
 
   const itemName = (id) => ITEMS[id]?.name || id;
 
@@ -139,13 +142,23 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
   }
   // A temporary drift that expires takes its harvested-here mark with it, so a
   // later drift on the same tile is gatherable again (main.js ageTempSurfaces).
-  const forgetPaper = (x, z) => harvestedPaper.delete(x + ',' + z);
+  const surfaceCellsInTile = (x, z) => grid.surfaceField.entries().filter((cell) =>
+    Math.floor(cell.ix / grid.surfaceField.cellsPerTile) === x
+    && Math.floor(cell.iz / grid.surfaceField.cellsPerTile) === z);
+  const paperSourceKey = (cell) => cell.sourceKey
+    || `${cell.source || 'surface'}:${cell.sourceX ?? Math.round(cell.x)},${cell.sourceZ ?? Math.round(cell.z)}`;
+  const forgetPaper = (x, z) => {
+    const suffix = `:${x},${z}`;
+    for (const key of [...harvestedPaper]) if (key.endsWith(suffix)) harvestedPaper.delete(key);
+  };
   const looseAt = (x, z) => looseItems.filter((li) => li.x === x && li.z === z);
   // Live, still-gatherable paper: a paper drift (not burning/burnt - runtime
   // reports 'fire'/null for those) that hasn't been picked clean yet. The
   // sheets stay and keep cutting after harvest; only the ammo is spent.
-  const paperHarvestable = (x, z) =>
-    runtime.surfaceAt(x, z) === 'paper' && !harvestedPaper.has(x + ',' + z);
+  const harvestablePaperAt = (x, z) => surfaceCellsInTile(x, z)
+    .filter((cell) => cell.surfaceId === 'paper')
+    .filter((cell) => !harvestedPaper.has(paperSourceKey(cell)));
+  const paperHarvestable = (x, z) => harvestablePaperAt(x, z).length > 0;
   const corpseAt = (x, z) =>
     enemies.find((e) => !e.alive && e.loot?.length && e.x === x && e.z === z) || null;
 
@@ -271,11 +284,12 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     const sheet = getSheet();
     if (!sheet || isInCombat() || isGameOver()) return;
     let sheets = 0;
+    const sources = new Set();
     for (const [x, z] of patch) {
-      if (!paperHarvestable(x, z)) continue;
-      harvestedPaper.add(x + ',' + z);
-      sheets += 1;
+      for (const cell of harvestablePaperAt(x, z)) sources.add(paperSourceKey(cell));
     }
+    for (const source of sources) harvestedPaper.add(source);
+    sheets = sources.size;
     if (!sheets) return;
     const before = sheet.paper;
     sheet.paper = Math.min(PAPER_CAP, sheet.paper + sheets);
@@ -531,7 +545,11 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     // paper call this as they paint, so a cone or a zone can never become a
     // renewable ammo pile: ammo comes from the world, not from spending AP.
     // The sheets themselves stay - they still burn, cut and fuel.
-    markPaperSpent: (x, z) => harvestedPaper.add(x + ',' + z),
+    markPaperSpent: (x, z) => {
+      for (const cell of surfaceCellsInTile(x, z)) {
+        if (cell.surfaceId === 'paper') harvestedPaper.add(paperSourceKey(cell));
+      }
+    },
     // Read-only views for the window.__game debug/test surface.
     debug: {
       looseItems: () => looseItems.map((li) => ({ x: li.x, z: li.z, id: li.id })),

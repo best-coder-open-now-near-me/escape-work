@@ -61,7 +61,7 @@ export function createApp(canvas) {
 export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 } = {}) {
   const r = createTileRenderer(app, { root, baseY });
   const walls = [];
-  const surfaceVisuals = new Map(); // "x,z" -> entity
+  const surfaceVisuals = new Map(); // fine-cell "ix,iz" -> entity
   const propVisuals = new Map();
   // Everything else `renderMarker` hands back. The two filers below only ever
   // kept `wall`, `surface` and `prop`, so the other two kinds were rendered
@@ -87,14 +87,6 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
       const type = grid.typeAt(x, z);
       if (type === null) continue;
       r.renderFloor(x, z, carpetAt.get(x + ',' + z) || type);
-      const surfaceId = grid.surfaceAt(x, z);
-      if (surfaceId) {
-        const surface = r.renderSurface(x, z, surfaceId, {
-          electrified: grid.isElectrified(x, z),
-          surfaceAt: grid.surfaceAt,
-        });
-        if (surface.kind === 'surface') surfaceVisuals.set(x + ',' + z, surface.entities[0]);
-      }
       if (type === 'floor') continue;
       if (type === 'exit') r.addExitBeacon(x, z); // motes rising off the stairwell
       // Rummageable / shoppable / ignitable / explosive props are left-clickable
@@ -140,6 +132,11 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
       } else trackExtra(x, z, res.entities);
     }
   }
+  // SurfaceField is already seeded when scene construction starts. Draw it
+  // after terrain/props so surface-only authored tiles (normalized to floor)
+  // do not need to masquerade as terrain to get a visual.
+  renderAllSurfaces();
+  grid.surfaceField.onChange(renderAllSurfaces);
   // Edge walls (partitions between tiles) join the same fade list, keyed by
   // their world-space centre - and by their grid key, so a toppled partition
   // (TACTICS_PLAN M6) can find its own mesh to retire.
@@ -219,23 +216,31 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
     }
   }
 
+  function renderAllSurfaces() {
+    for (const visual of surfaceVisuals.values()) visual.destroy();
+    surfaceVisuals.clear();
+    for (const cell of grid.surfaceField.entries()) {
+      const res = r.renderSurfaceCell(cell, grid.surfaceField, {
+        electrified: grid.isElectrified(cell.x, cell.z),
+      });
+      if (res.kind === 'surface') {
+        surfaceVisuals.set(grid.surfaceField.keyOf(cell.ix, cell.iz), res.entities[0]);
+      }
+    }
+  }
   function hideSurfaceVisual(x, z) {
-    const v = surfaceVisuals.get(x + ',' + z);
-    if (v) {
-      v.destroy();
-      surfaceVisuals.delete(x + ',' + z);
+    const cellsPerTile = grid.surfaceField.cellsPerTile;
+    for (const [key, visual] of [...surfaceVisuals]) {
+      const [ix, iz] = key.split(',').map(Number);
+      if (Math.floor(ix / cellsPerTile) !== x || Math.floor(iz / cellsPerTile) !== z) continue;
+      visual.destroy();
+      surfaceVisuals.delete(key);
     }
   }
   // Surfaces created at runtime (Bulk Mail leaving paper drifts). Registered
   // in surfaceVisuals so fire can consume them like any painted surface.
   function addSurfaceVisual(x, z, type) {
-    hideSurfaceVisual(x, z);
-    const surfaceId = TILE_TYPES[type]?.surface || type;
-    const res = r.renderSurface(x, z, surfaceId, {
-      electrified: grid.isElectrified(x, z),
-      surfaceAt: grid.surfaceAt,
-    });
-    if (res.kind === 'surface') surfaceVisuals.set(x + ',' + z, res.entities[0]);
+    renderAllSurfaces();
   }
   function removePropVisual(x, z) {
     const v = propVisuals.get(x + ',' + z);
@@ -290,14 +295,6 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
     const type = grid.typeAt(x, z);
     if (type === null) return;
     r.renderFloor(x, z, carpetAt.get(x + ',' + z) || type);
-    const surfaceId = grid.surfaceAt(x, z);
-    if (surfaceId) {
-      const surface = r.renderSurface(x, z, surfaceId, {
-        electrified: grid.isElectrified(x, z),
-        surfaceAt: grid.surfaceAt,
-      });
-      if (surface.kind === 'surface') surfaceVisuals.set(x + ',' + z, surface.entities[0]);
-    }
     if (type === 'floor') return;
     const def = TILE_TYPES[type];
     const interactive = !!def && (def.loot || def.shop || def.ignitable || def.explosive);

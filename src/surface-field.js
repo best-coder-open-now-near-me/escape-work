@@ -54,9 +54,9 @@ export function createSurfaceField({ width, height, quantum = SURFACE_QUANTUM })
     ? { x: -0.5 + (ix + 0.5) * quantum, z: -0.5 + (iz + 0.5) * quantum }
     : null;
 
-  const emit = (changes) => {
-    if (!changes.length) return;
-    const changeSet = Object.freeze({ changes: Object.freeze(changes) });
+  const emit = (changes, reason = null) => {
+    if (!changes.length && !reason) return;
+    const changeSet = Object.freeze({ changes: Object.freeze(changes), reason });
     for (const listener of listeners) listener(changeSet);
   };
   const record = (change) => {
@@ -157,6 +157,10 @@ export function createSurfaceField({ width, height, quantum = SURFACE_QUANTUM })
     listeners.add(listener);
     return () => listeners.delete(listener);
   };
+  // Derived surface presentation can change without a cell mutation (today:
+  // toppling a partition can join a water pool to a cable). It still travels
+  // through the one invalidation seam consumers already subscribe to.
+  const invalidate = (reason = 'derived') => emit([], reason);
 
   return {
     width,
@@ -182,6 +186,7 @@ export function createSurfaceField({ width, height, quantum = SURFACE_QUANTUM })
     edit,
     entries,
     onChange,
+    invalidate,
     get size() { return cells.size; },
   };
 }
