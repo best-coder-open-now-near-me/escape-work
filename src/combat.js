@@ -38,6 +38,7 @@ import { createAimPaint } from './aim-paint.js';
 import { createAimView } from './combat-aim.js';
 import { createCombatIntent } from './combat-intent.js';
 import { createCombatDebug } from './combat-debug.js';
+import { createCombatSession } from './combat-session.js';
 import { createAiAdvance } from './combat-advance.js';
 import { STATUSES } from './data/statuses.js';
 import { blocksSight, PARTITION_TOPPLE } from './data/tiles.js';
@@ -122,10 +123,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
   }
   let active = members[party.active];
-  // Which deal the confused action bar is on. Declared up here with the rest of
-  // the turn state because the turn engine's `turnStart` hook bumps it, and
-  // that closure is built long before the action bar itself (`scrambled`).
-  let scrambleTurn = 0;
+  // Shared encounter lifecycle: current driver, AI turn budget and the deal
+  // shown by a confused action bar. The systems below all see this one owner.
+  const session = createCombatSession();
   // Everyone you control: party members plus any summons you've conjured
   // (temporary members, appended by resolveSummon). `livingParty` is the real
   // roster only - a party WIPE (no real member standing) is the sole game-over;
@@ -480,13 +480,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // and `fmtAp` come from stats.js, which owns that rate.
 
   // Proper per-unit initiative (initiative.js): ONE interleaved order for the
-  // whole fight, not side-phases. `phase` now only says who's driving the
+  // whole fight, not side-phases. `session.phase` says who's driving the
   // CURRENT turn: 'player' (a party member you control) | 'ai' (an enemy or a
   // player-team summon the AI drives) | 'done'.
-  let phase = 'player';
   let pendingMelee = null; // { en, action } to strike when the walk-up completes
   let pendingCrouch = null; // { tx, tz, spot } to tuck in when the walk-up completes
-  let acting = null; // the AI unit's working turn state: { unit, ap, wait }
   // EVERY instant self-cast takes a confirm click - the stances (Deflect,
   // Return to Sender) and every heal (Coffee, Espresso, Energy Drink, Snack
   // Cart, the smoke break). They all used to commit the moment you touched the
@@ -642,7 +640,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       },
       turnStart: () => {
         engageMemo.clear(); // bounds how stale an answer can get
-        scrambleTurn += 1; // a confused character's bar re-deals each turn
+        session.beginScrambleTurn(); // a confused character's bar re-deals each turn
       },
       afterTick: (s) => {
         if (!s.member) syncUnitSpeed(s.unit); // gum wearing off gives the legs back
@@ -764,7 +762,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     costTag,
     REACH,
     view: {
-      get phase() { return phase; },
+      get phase() { return session.phase; },
       get armed() { return intent.armed; },
       get active() { return active; },
     },
@@ -995,7 +993,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // running, which is a reorg that keeps giving you back your two landmarks.
   function scrambled(ids) {
     const out = [...ids];
-    const next = mulberry32Uint(scrambleTurn);
+    const next = mulberry32Uint(session.scrambleTurn);
     for (let i = out.length - 1; i > 0; i--) {
       const j = next() % (i + 1);
       [out[i], out[j]] = [out[j], out[i]];
@@ -1009,7 +1007,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function actionState(id) {
     const a = ACTIONS[id];
     if (!a || !actionIdsOf(active).includes(id)) return null;
-    const affordable = phase === 'player' && active.ap >= a.ap
+    const affordable = session.phase === 'player' && active.ap >= a.ap
       && (!a.uses || active.usesLeft[id] > 0)
       && (!a.ammoCost || active.sheet.paper >= ammoCostOf(id))
       && !(a.footwork && statusFx(active.sheet).noFootwork); // no kicking with gum on the shoe
@@ -1026,7 +1024,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // bar already answered this (combatOnlyReason) - a fight should not be
       // the half of the game where the bar goes quiet.
       reason: affordable ? null
-        : phase !== 'player' ? 'Not your turn.'
+        : session.phase !== 'player' ? 'Not your turn.'
           : a.uses && active.usesLeft[id] <= 0 ? `${a.label} is spent for this fight.`
             : a.ammoCost && active.sheet.paper < ammoCostOf(id)
               ? `Needs ${ammoCostOf(id)} paper - you have ${active.sheet.paper}.`
@@ -1100,7 +1098,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (m.actor) m.actor.fx = { kind: 'death', t: 0 };
     }
     if (!livingParty().length) { defeat(); return; } // party wipe - the only loss
-    if (phase === 'player' && active.sheet.hp <= 0) {
+    if (session.phase === 'player' && active.sheet.hp <= 0) {
       log(`${active.sheet.name} goes down!`);
       // Hand the floor to somebody still standing BEFORE advancing. `active` is
       // what the HUD, the party card and the profile read, and `advanceTurn`
@@ -1163,13 +1161,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // multi-member party still needs the name, because the button alone
       // cannot say WHICH of your people is up; an AI turn still needs the
       // enemy's name, because nothing else on screen carries it.
-      turnLabel: phase === 'player'
+      turnLabel: session.phase === 'player'
         ? (solo ? '' : active.sheet.name)
-        : phase === 'ai' && acting ? `${acting.unit.def.name}'s turn` : '',
+        : session.phase === 'ai' && session.acting ? `${session.acting.unit.def.name}'s turn` : '',
       apText: apPips({
         ap: active.ap, maxAp: active.sheet.maxAp, text: fmtAp(active.ap), freeText: freeTag,
       }),
-      endEnabled: phase === 'player',
+      endEnabled: session.phase === 'player',
       // Under a shared turn the button names whose turn it ends - each member
       // retires their own (INITIATIVE_PLAN #2), so the label has to say which
       // one a press costs. Alone, it stays the plain verb it always was.
@@ -1238,7 +1236,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // outlive the fight that meant them (the status only ticks on the combat
     // turn clock, so out of a fight it would simply never expire).
     for (const u of [...crouched.keys()]) breakCrouch(u, true);
-    phase = 'done';
+    session.finish();
     app.off('update', update);
     aimPaint.destroy();
     // Only this REGION leaves - the dock and the slot row in it belong to the
@@ -1616,7 +1614,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // crouch. Symmetric by decision #11; ratified for v1 (designer, 2026-07-30).
   function tryAiCrouch(unit, target) {
     const coverAp = ACTIONS['take-cover'].ap;
-    if (crouched.has(unit) || acting.ap < coverAp || !target) return false;
+    if (crouched.has(unit) || session.acting.ap < coverAp || !target) return false;
     if (canReach(unit, target)) return false; // melee ignores cover - swing instead
     const b = bodyOf(unit);
     const t = bodyOf(target);
@@ -1626,7 +1624,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       bodyAt: (x, z) => { const u = unitStandingAt(x, z); return !!u && u !== unit && standing(u); },
     })) return false;
     if (!crouchHere(unit)) return false;
-    acting.ap = roundAp(acting.ap - coverAp);
+    session.acting.ap = roundAp(session.acting.ap - coverAp);
     refresh();
     return true;
   }
@@ -1850,7 +1848,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     callbacks,
     get active() { return active; },
     get armed() { return intent.armed; },
-    get phase() { return phase; },
+    get phase() { return session.phase; },
     rand: (...a) => rand(...a),
     log: (...a) => log(...a),
     refresh: (...a) => refresh(...a),
@@ -1886,7 +1884,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // that basic swing. Every preview reads this - the target rings, the to-hit
   // tag, and (through main.js) the cursor - so the affordances always describe
   // the swing that would actually land rather than only the armed case.
-  const previewAction = () => (phase === 'player' && active?.sheet ? (intent.armed || defaultAttack()) : null);
+  const previewAction = () => (session.phase === 'player' && active?.sheet ? (intent.armed || defaultAttack()) : null);
 
   // What a click in a fight means (click-verbs.js): the verb arms, the
   // enemy-click dispatcher, the routes a click may walk first, and the
@@ -1902,7 +1900,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     callbacks,
     get active() { return active; },
     get armed() { return intent.armed; },
-    get phase() { return phase; },
+    get phase() { return session.phase; },
     get pendingConfirm() { return intent.pendingConfirm; },
     get pendingMelee() { return pendingMelee; },
     get pendingCrouch() { return pendingCrouch; },
@@ -1970,7 +1968,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     INSTANT_CONFIRM,
     get active() { return active; },
     get armed() { return intent.armed; },
-    get phase() { return phase; },
+    get phase() { return session.phase; },
     get pendingConfirm() { return intent.pendingConfirm; },
     log: (...a) => log(...a),
     refresh: (...a) => refresh(...a),
@@ -2000,11 +1998,11 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     members,
     callbacks,
     applyDamage,
-    get phase() { return phase; },
+    get phase() { return session.phase; },
     get active() { return active; },
-    get acting() { return acting; },
-    setPhase: (v) => { phase = v; },
-    setActing: (v) => { acting = v; },
+    get acting() { return session.acting; },
+    setPhase: (v) => { session.phase = v; },
+    setActing: (v) => { session.acting = v; },
     freeMoveOf: (...a) => freeMoveOf(...a),
     releaseCharm: (...a) => releaseCharm(...a),
     advanceTurn: (...a) => advanceTurn(...a),
@@ -2176,7 +2174,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // acting enemy is mid-swing, so only the binding moves.
       if (m === active) {
         makeActive(livingParty()[0]);
-        if (phase === 'player') advanceTurn();
+        if (session.phase === 'player') advanceTurn();
         else refresh();
       }
     }
@@ -2256,7 +2254,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // front (TACTICS_PLAN #8) - so the mover takes the hit and keeps going,
   // unless it goes down.
   function notifyStep(ref, x, z) {
-    if (phase === 'done') return;
+    if (session.phase === 'done') return;
     const mover = combatantFor(ref);
     if (!mover) return;
     // Frequent Flier (MOVEMENT_PLAN M3): this character never provokes, from
@@ -2496,8 +2494,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // price, when a shot exists, when a crouch is worth taking) are in this
     // function any more.
     return gatherBeatPlans(unit, target, {
-      ap: acting.ap,
-      moveBudget: moveBudget(acting),
+      ap: session.acting.ap,
+      moveBudget: moveBudget(session.acting),
       summonSpec: (u) => summonSpec(u.def.summon),
       postableNow,
       supportSpec: (u) => u.def.support || null,
@@ -2586,7 +2584,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // eleven closure-bound verbs it calls, and `acting`, which is the turn
     // state the frame loop reads next tick.
     runBeat(beat, {
-      turn: acting,
+      turn: session.acting,
       plans,
       unit,
       target,
@@ -2605,8 +2603,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
         // The budget is read at CALL time, from the same `acting` the biller
         // writes back to - so the two halves of a move cannot disagree about
         // which turn they belong to.
-        advance: (u, t) => aiAdvance(u, moveBudget(acting), t),
-        billMove: (spent) => billMove(acting, spent),
+        advance: (u, t) => aiAdvance(u, moveBudget(session.acting), t),
+        billMove: (spent) => billMove(session.acting, spent),
         refresh,
         pass: advanceTurn,
       },
@@ -2636,13 +2634,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   //    one-line efficiency tidy that speeds every beat in the game up by a
   //    frame.
   function update(dt) {
-    if (phase === 'done') return;
+    if (session.phase === 'done') return;
     retireStaleMoveStarts();
     drawPreview(dt); // immediate-mode lines last one frame - redraw while shown
     drawTargets();
     // prune anyone killed externally (printer explosions during combat)
     if (!hostilesRemain()) { victory(); return; }
-    if (phase === 'player') {
+    if (session.phase === 'player') {
       finishWalkUpStrike();
       finishWalkUpCrouch();
       return;
@@ -2650,12 +2648,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // The AI drives the ONE unit whose initiative turn it is (acting, set by
     // beginTurn). It takes beats until out of AP, then advanceTurn hands the
     // order on.
-    if (phase !== 'ai' || !acting) return;
-    if (acting.wait > 0) {
-      acting.wait -= dt;
+    if (session.phase !== 'ai' || !session.acting) return;
+    if (session.acting.wait > 0) {
+      session.acting.wait -= dt;
       return;
     }
-    const { unit } = acting;
+    const { unit } = session.acting;
     if (!unit.alive) { advanceTurn(); return; }
     if (unit.moving) return; // let the current walk play out
     if (unit.slipped) {
@@ -2676,7 +2674,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // callees, and the tally counts DECISIONS, refusals included, so it belongs
     // after the choice and before the doing.
     const plans = aiBeatPlans(unit, target);
-    const refused = (acting.refused ??= new Set());
+    const refused = (session.acting.refused ??= new Set());
     const { beat } = chooseBeat(plans.beatState, refused);
     bout.beats[beat] = (bout.beats[beat] || 0) + 1;
     takeBeat(beat, unit, target, plans, refused);
@@ -2702,8 +2700,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // live fight; combat-debug.js owns how it is projected and which mutation
   // doors are allowed.
   window.__combat = createCombatDebug({
-    get phase() { return phase; },
-    get acting() { return acting; },
+    get phase() { return session.phase; },
+    get acting() { return session.acting; },
     get active() { return active; },
     get bout() { return bout; },
     get engaged() { return engaged; },
@@ -2748,7 +2746,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     turns.lead((s) => s.member === members[party.active]);
     logInitiative(); // after lead - the ambusher's raised roll is the real order
     beginTurn();
-    if (phase === 'player') {
+    if (session.phase === 'player') {
       intent.arm(opening.actionId);
       refresh();
       // A cone opener fires the wedge the player AIMED outside the fight -
@@ -2797,7 +2795,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Everything else in a turn is billed; a free full heal every round would
     // be the strongest move in the game.
     spendAp: (n) => {
-      if (phase !== 'player' || active.ap < n) return false;
+      if (session.phase !== 'player' || active.ap < n) return false;
       // Through roundAp like every other spend. Nothing visibly breaks without
       // it - both callers pass whole numbers and every AP reader already
       // defends itself - but this was the last raw `.ap` write in the file, and
@@ -2823,7 +2821,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // so out of a shared turn every route falls through to what it always did
     // (a bar click highlights nobody new, a body click stays a mis-walk).
     steerMember(ref) {
-      if (phase !== 'player' || !ref) return false;
+      if (session.phase !== 'player' || !ref) return false;
       const slot = turns.held.find((s) => s.member
         && (s.member === ref || s.member.sheet === ref.sheet || s.member.actor === ref));
       if (!slot || slot.member === active || turns.isDone(slot)) return false;
@@ -2833,7 +2831,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // right-click menu asks before offering the item; returns the name to put
     // on it, or null.
     canSteer(ref) {
-      if (phase !== 'player' || !ref) return null;
+      if (session.phase !== 'player' || !ref) return null;
       const slot = turns.held.find((s) => s.member
         && (s.member === ref || s.member.sheet === ref.sheet || s.member.actor === ref));
       if (!slot || slot.member === active || turns.isDone(slot) || slot.member.sheet.hp <= 0) return null;
@@ -2842,7 +2840,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Tab in combat: cycle the floor through the un-done members of the open
     // shared turn, the same loop the key walks through the roster out of one.
     cycleSteer() {
-      if (phase !== 'player') return false;
+      if (session.phase !== 'player') return false;
       const holders = turns.held.filter((s) => s.member && !turns.isDone(s) && s.member.sheet.hp > 0);
       if (holders.length < 2) return false;
       const i = holders.findIndex((s) => s.member === active);
@@ -2877,6 +2875,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return consumed;
     },
     abort: cleanup, // for deaths resolved outside combat (surfaces, explosions)
-    get active() { return phase !== 'done'; },
+    get active() { return session.active; },
   };
 }
