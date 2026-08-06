@@ -68,6 +68,8 @@ const bodyRings = () => (_bodyRings ??= {
 //                                       preview is the rule, so the rings and
 //                                       the crosshair ask the same question the
 //                                       click will
+//   armedHitOk(id, hit)                  the same verdict for an entity under
+//                                       the cursor, including friendly targets
 //   summonDrop()                        for an armed summon: the hovered spot,
 //                                       the tiles its arrivals would fill, and
 //                                       why they couldn't (null if not armed)
@@ -211,7 +213,10 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
   function cursorFor(hit, point) {
     const armed = queries.armed();
     if (armed) {
-      if (hit && hit.kind === 'enemy' && hit.ref.alive) {
+      if (hit && queries.armedHitOk) {
+        const ok = queries.armedHitOk(armed, hit);
+        if (ok !== null) return ok ? 'crosshair' : 'not-allowed';
+      } else if (hit && hit.kind === 'enemy' && hit.ref.alive) {
         return queries.armedTargetOk(armed, hit.ref) ? 'crosshair' : 'not-allowed';
       }
       return 'default';

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import {
   cheb, AROUND, ORTHO, reachOfUnit, posOf, withinReach, canReach,
   reachSpecOf, actRangeOf, verbReaches, swingPointAt, hasSwingSpot,
-  zoneCellsFor, edgeShieldedTile, TARGET_R, SURPRISE_RADIUS,
+  zoneCellsFor, edgeShieldedTile, playerSideAt, TARGET_R, SURPRISE_RADIUS,
 } from '../../src/combat-geometry.js';
 import { REACH, THROW_RANGE } from '../../src/stats.js';
 import { ACTIONS } from '../../src/data/actions.js';
@@ -59,6 +59,18 @@ test('posOf prefers the continuous body, and falls back to the tile', () => {
   // No body yet (a unit mid-spawn, or a test): the logical tile stands in.
   assert.deepEqual(posOf(at(3, 4)), { x: 3, z: 4 });
   assert.deepEqual(posOf({ actor: at(5, 6) }), { x: 5, z: 6 });
+});
+
+test('player-side occupancy treats party members and summons by the same record shape', () => {
+  const party = { sheet: { hp: 4 }, actor: { x: 2, z: 3 } };
+  const summon = { sheet: { hp: 1 }, actor: { x: 4, z: 3 } };
+  const down = { sheet: { hp: 0 }, actor: { x: 5, z: 3 } };
+  const records = [party, summon, down];
+
+  assert.equal(playerSideAt(records, 2, 3), true);
+  assert.equal(playerSideAt(records, 4, 3), true);
+  assert.equal(playerSideAt(records, 5, 3), false);
+  assert.equal(playerSideAt(records, 6, 3), false);
 });
 
 test('withinReach measures distance and ignores what stands between', () => {

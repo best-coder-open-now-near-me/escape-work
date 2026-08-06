@@ -80,7 +80,9 @@ import {
 } from './hotbar-model.js';
 import { startCombat } from './combat.js';
 import { verbSides } from './combat-targeting.js';
-import { cheb as chebOf, canReach as canReachAt, engagedAround } from './combat-geometry.js';
+import {
+  cheb as chebOf, canReach as canReachAt, engagedAround, playerSideAt,
+} from './combat-geometry.js';
 import { startEditor } from './editor.js';
 import { NPCS } from './data/npcs.js';
 import { installGodMode } from './god.js';
@@ -1752,13 +1754,15 @@ function startGame(level) {
   // summon post makes. `test` is the wedge from coneFrom, aimed at (tx, tz).
   function fireOocCone(a, test, tx, tz) {
     player.lunge(tx, tz); // the fan of envelopes, aimed where you pointed
+    const playerSide = [...(party?.members || []), ...summons];
     if (a.leaves) {
       const R = Math.ceil(a.cone.range) + 1;
       for (let z = Math.floor(player.z) - R; z <= Math.ceil(player.z) + R; z++) {
         for (let x = Math.floor(player.x) - R; x <= Math.ceil(player.x) + R; x++) {
           if (!test(x, z)) continue;
-          // No carpeting a tile a teammate is standing on - combat's own rule.
-          if (partyAt(x, z)) continue;
+          // No carpeting a tile anybody on your side is standing on. The same
+          // helper guards combat's live member list, which includes summons.
+          if (playerSideAt(playerSide, x, z)) continue;
           if (!hasLos(leadBody(), { x, z })) continue;
           leaveSurfaceAt(x, z, a.leaves, a.leavesTurns || 0);
         }
@@ -2090,6 +2094,18 @@ function startGame(level) {
       reach: () => reachOf(sheet),
       armed: () => armedOoc,
       armedTargetOk: oocTargetOk,
+      armedHitOk: (id, hit) => {
+        if (!hit || !ACTIONS[id]) return null;
+        const sides = verbSides(ACTIONS[id], rangeOf(id));
+        if (hit.kind === 'enemy') {
+          return sides.enemies && hit.ref.alive ? oocTargetOk(id, hit.ref) : null;
+        }
+        if (hit.kind === 'party') {
+          const m = memberOf(hit.ref);
+          return sides.allies && m ? m.sheet.hp > 0 : null;
+        }
+        return null;
+      },
       // Where an armed SUMMON would land right now: the hovered tile, the spots
       // its arrivals would fill, and why they couldn't. Null unless a summon is
       // armed with the cursor on the floor - the rings key off this one answer,

@@ -43,7 +43,7 @@ function renderStatusEffects(sheet) {
   for (const c of effectChips(sheet)) {
     const chip = document.createElement('div');
     chip.className = 'status-chip';
-    chip.textContent = `${c.icon} ${c.label}`;
+    chip.textContent = `${c.icon} ${c.label} ·${c.left}`;
     const accent = c.good ? '#6fc86f' : '#e0b23a';
     Object.assign(chip.style, {
       padding: '3px 9px', borderRadius: '6px', whiteSpace: 'nowrap', letterSpacing: '.3px',

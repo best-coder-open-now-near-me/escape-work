@@ -13,6 +13,11 @@ import { occludes } from './occlusion.js';
 // an import. Same treatment as actors.js/models.js/shading.js already carry.
 const pc = globalThis.window?.pc;
 
+// The fade transition must return each solid to the material it arrived with;
+// a custom solid is not necessarily a cubicle wall. Kept pure so the material
+// identity contract is testable without PlayCanvas.
+export const wallFadeMaterial = (wall, faded) => (faded ? wall.ghostMat : wall.solidMat);
+
 export function createApp(canvas) {
   const app = new pc.Application(canvas, {
     mouse: new pc.Mouse(canvas),
@@ -111,7 +116,15 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
       // `top` is the world Y of the wall's top face - the fade test needs it to
       // know whether the sightline clears this wall (see occlusion.js). A solid
       // tile's box is centred at def.height / 2 and def.height tall.
-      if (res.kind === 'wall') walls.push({ entity: res.entities[0], x, z, top: baseY + def.height, faded: false });
+      if (res.kind === 'wall') {
+        walls.push({
+          entity: res.entities[0], x, z, top: baseY + def.height, faded: false,
+          // Preserve this tile type's own opaque material across a fade. The
+          // generic wall material is only correct for the `wall` tile.
+          solidMat: res.entities[0].render.meshInstances[0].material,
+          ghostMat: r.wallGhost,
+        });
+      }
       else if (res.kind === 'surface') surfaceVisuals.set(x + ',' + z, res.entities[0]);
       else if (res.kind === 'prop') {
         propVisuals.set(x + ',' + z, res.entities[0]);
@@ -126,8 +139,10 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
   const addEdgeWall = (k, orient) => {
     const [x, z] = k.split(',').map(Number);
     const entry = orient === 'h'
-      ? { entity: r.renderEdgeWall(x, z, 'h'), x, z: z - 0.5, top: baseY + r.edgeWallTop, faded: false }
-      : { entity: r.renderEdgeWall(x, z, 'v'), x: x - 0.5, z, top: baseY + r.edgeWallTop, faded: false };
+      ? { entity: r.renderEdgeWall(x, z, 'h'), x, z: z - 0.5, top: baseY + r.edgeWallTop, faded: false,
+        solidMat: r.tileMats.wall, ghostMat: r.wallGhost }
+      : { entity: r.renderEdgeWall(x, z, 'v'), x: x - 0.5, z, top: baseY + r.edgeWallTop, faded: false,
+        solidMat: r.tileMats.wall, ghostMat: r.wallGhost };
     walls.push(entry);
     edgeWallVisuals.set(orient + ':' + k, entry);
   };
@@ -189,9 +204,7 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
       const shouldFade = occludes(w, cam, feet);
       if (shouldFade !== w.faded) {
         w.faded = shouldFade;
-        w.entity.render.meshInstances[0].material = shouldFade
-          ? (w.ghostMat || r.wallGhost)
-          : (w.solidMat || r.tileMats.wall);
+        w.entity.render.meshInstances[0].material = wallFadeMaterial(w, shouldFade);
       }
     }
   }

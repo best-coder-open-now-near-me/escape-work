@@ -1,52 +1,120 @@
-// Seeded combat resolution (TODO Phase 6). The point of closing combat's rng
-// seam: `rand` used to read Math.random at module scope, unreachable from the
-// injected rng, so DAMAGE was the one part of a resolution a seeded test could
-// not pin - and the roll -> damage -> status chain could only ever be checked a
-// piece at a time. These drive the same pure functions combat calls, in the same
-// order, off one seeded source.
+// Seeded attack resolution through the production hit and player-strike
+// modules. This deliberately does not reproduce either module's arithmetic:
+// one RNG drives the real roll, inclusive damage die, and status rider.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHitResolution } from '../../src/hit-resolution.js';
+import { createPlayerStrike } from '../../src/player-strike.js';
 import {
-  createSheet, damageBonus, accuracy, hitChance, rollHit, HIT,
+  ammoCostOf, createSheet, rollInt,
 } from '../../src/stats.js';
-import { applyStatus, hasStatus } from '../../src/statuses.js';
+import { hasStatus } from '../../src/statuses.js';
+import { posOf } from '../../src/combat-geometry.js';
 
-const seq = (values) => { let i = 0; return () => values[i++ % values.length]; };
+const seeded = (values) => {
+  let draws = 0;
+  const rng = () => values[draws++ % values.length];
+  rng.draws = () => draws;
+  return rng;
+};
 
-test('one seed reproduces a whole roll -> damage -> status resolution', () => {
-  const attacker = createSheet('office-drone');
-  const chance = hitChance(accuracy(attacker), 0); // acc vs dodge, clamped
-
-  const resolve = (rng) => {
-    const hit = rollHit(chance, rng);
-    if (!hit) return { hit, dmg: 0 };
-    // The same inclusive roll combat uses, off the same source.
-    const dmg = 3 + Math.floor(rng() * (5 - 3 + 1)) + damageBonus(attacker);
-    return { hit, dmg };
+function attackRig(values) {
+  const rng = seeded(values);
+  const sheet = createSheet('office-drone');
+  sheet.paper = 10;
+  const active = {
+    sheet,
+    actor: { x: 0, z: 0, lunge: () => {} },
+    ap: sheet.maxAp,
+    usesLeft: {},
   };
+  const target = {
+    x: 1, z: 0, hp: 20, maxHp: 20, statuses: {},
+    def: { name: 'Test Coworker' },
+    combat: { dodge: 0, deflect: 0, statusResist: 0 },
+    takeDamage(amount) {
+      this.hp = Math.max(0, this.hp - amount);
+      return this.hp <= 0;
+    },
+  };
+  const events = [];
+  const fx = {
+    projectile: () => events.push('projectile'),
+    impact: () => events.push('impact'),
+    status: () => events.push('status'),
+    damageText: () => events.push('damage-text'),
+    shake: () => events.push('shake'),
+  };
+  const world = {
+    stepOpen: () => true,
+    hasLos: () => true,
+    tileDefAt: () => null,
+    surfaceIdAt: () => null,
+    isBurning: () => false,
+    isElectrified: () => false,
+  };
+  const hit = createHitResolution({
+    world,
+    members: [active],
+    fx,
+    rng,
+    get active() { return active; },
+    facings: new Map(),
+    aiAllies: () => [],
+    standing: () => true,
+    posOf,
+    guardStandingAt: () => false,
+  });
+  const logs = [];
+  const strike = createPlayerStrike({
+    active,
+    fx,
+    rollAgainst: hit.rollAgainst,
+    rand: (lo, hi) => rollInt(rng, lo, hi),
+    resolveProc: hit.resolveProc,
+    hitFx: hit.hitFx,
+    statusFxAt: hit.statusFxAt,
+    deathFx: hit.deathFx,
+    ammoCostOf: (id) => ammoCostOf(sheet, id),
+    joinCombat: () => {},
+    faceTarget: () => {},
+    talentFxOf: () => ({}),
+    ambushDmg: (damage) => damage,
+    appliesLine: () => 'The rider lands.',
+    immunityLine: () => 'Immune.',
+    syncUnitSpeed: () => {},
+    callbacks: { onEnemyKilled: () => events.push('killed') },
+    log: (line) => logs.push(line),
+    disarm: () => events.push('disarm'),
+    refresh: () => events.push('refresh'),
+    hostilesRemain: () => true,
+    victory: () => events.push('victory'),
+  });
+  return { rng, sheet, active, target, events, logs, strike };
+}
 
-  // A roll of 0 always lands (0 < any chance), then a 0 takes the low end.
-  assert.deepEqual(resolve(seq([0, 0])), { hit: true, dmg: 3 + damageBonus(attacker) });
-  // ...and just under 1 takes the top of the spread.
-  assert.deepEqual(resolve(seq([0, 0.999])), { hit: true, dmg: 5 + damageBonus(attacker) });
-  // A roll at or above the chance misses, and a miss spends nothing else. The
-  // clamp guarantees a whiff stays reachable however buffed you are (CLAMP_HI),
-  // which is why this can be asserted at all rather than approximated.
-  assert.equal(chance <= HIT.CLAMP_HI, true);
-  assert.deepEqual(resolve(seq([HIT.CLAMP_HI, 0])), { hit: false, dmg: 0 });
+test('one seed drives the real hit, damage, and status-rider chain', () => {
+  const r = attackRig([0, 0.4]);
+  r.strike.performOn('paper-airplane', r.target);
 
-  // Same seed, same answer - twice, because that is the property being claimed.
-  assert.deepEqual(resolve(seq([0, 0.5])), resolve(seq([0, 0.5])));
+  assert.equal(r.rng.draws(), 2, 'one hit draw and one damage draw');
+  assert.equal(r.target.hp, 14);
+  assert.equal(hasStatus(r.target, 'blinded'), true);
+  assert.equal(r.sheet.paper, 9);
+  assert.equal(r.active.ap, r.sheet.maxAp - 2);
+  assert.deepEqual(r.events, ['projectile', 'impact', 'damage-text', 'status', 'disarm', 'refresh']);
+  assert.match(r.logs[0], /6 damage!.*rider lands/i);
 });
 
-test('a status rider lands on the same seed the damage did', () => {
-  // The third link in the chain: a resolution that hits, rolls damage, and
-  // then lands its rider - all decided by one reproducible sequence.
-  const target = { statuses: {} };
-  const rng = seq([0, 0.4, 0.2]);
-  assert.equal(rollHit(0.85, rng), true, 'the swing lands');
-  assert.ok(3 + Math.floor(rng() * 3) >= 3, 'the damage rolls');
-  assert.equal(rollHit(0.35, rng), true, 'and the proc resolves off the same source');
-  assert.equal(applyStatus(target, 'gum'), true);
-  assert.equal(hasStatus(target, 'gum'), true);
+test('a seeded miss spends the action but never draws damage or applies its rider', () => {
+  const r = attackRig([0.999, 0]);
+  r.strike.performOn('paper-airplane', r.target);
+
+  assert.equal(r.rng.draws(), 1, 'a miss must not consume the damage draw');
+  assert.equal(r.target.hp, 20);
+  assert.equal(hasStatus(r.target, 'blinded'), false);
+  assert.equal(r.sheet.paper, 9);
+  assert.equal(r.active.ap, r.sheet.maxAp - 2);
+  assert.deepEqual(r.events, ['projectile', 'impact', 'damage-text', 'disarm', 'refresh']);
+  assert.match(r.logs[0], /miss|augers/i);
 });

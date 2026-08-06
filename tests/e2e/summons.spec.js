@@ -42,10 +42,16 @@ test('HR summons employees that join the fight as enemies, capped', async ({ pag
     return employees(page);
   }, { timeout: 45_000 }).toBe(2);
 
-  // A further round doesn't stack a fresh batch on top - the live cap holds.
+  // A further full round doesn't stack a fresh batch on top - the live cap
+  // holds after HR has definitely received another initiative turn.
   if (await page.evaluate(() => !!window.__combat)) {
-    if (await page.evaluate(() => window.__combat?.phase === 'player')) await page.click('#combat-end-turn').catch(() => {});
-    await page.waitForTimeout(1500);
+    const round = await page.evaluate(() => window.__combat.bout.rounds);
+    await expect.poll(async () => {
+      if (await page.evaluate(() => window.__combat?.phase === 'player')) {
+        await page.click('#combat-end-turn').catch(() => {});
+      }
+      return page.evaluate(() => window.__combat?.bout.rounds ?? -1);
+    }, { timeout: 45_000 }).toBeGreaterThan(round);
     expect(await employees(page)).toBeLessThanOrEqual(2);
   }
 });

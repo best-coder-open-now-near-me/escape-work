@@ -750,6 +750,13 @@ export function rollHit(chance, rng = Math.random) {
   return rng() < chance;
 }
 
+// Inclusive integer roll shared by combat resolution and deterministic tests.
+// Keeping the conversion beside rollHit prevents a test from hand-copying a
+// private damage formula that can drift away from the live fight.
+export function rollInt(rng, lo, hi) {
+  return lo + Math.floor(rng() * (hi - lo + 1));
+}
+
 // Returns true when the character levelled up ("got promoted"). Level-ups fully
 // heal and BANK attribute points; the player spends them on the level-up screen
 // (companions included - nothing auto-allocates). Damage no longer rises

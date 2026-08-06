@@ -81,7 +81,7 @@ test('gum sticks, slows, shows on the HUD, grants traction, wears off', async ({
   await page.waitForTimeout(400);
   await waitStill(page);
   expect(await page.evaluate(() => window.__game.stats.gum)).toBeGreaterThan(0);
-  await expect(page.locator('#status-effects')).toContainText('Gum on shoe');
+  await expect(page.locator('#status-effects')).toContainText('Gum on shoe ·20');
   expect(await page.evaluate(() => window.__game.playerSpeed)).toBeCloseTo(2.4, 1); // 4 * 0.6
 
   // Gum is traction: repeated single-tile water dips, zero slip lines.

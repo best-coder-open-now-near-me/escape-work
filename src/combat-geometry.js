@@ -58,6 +58,14 @@ export function posOf(u) {
   return { x: a.x, z: a.z };
 }
 
+// Does a living record on the player side occupy this tile? Party members and
+// player summons share the same { sheet, actor } shape, so surface placement
+// should not need separate, drift-prone roster checks in and out of combat.
+export function playerSideAt(records, x, z) {
+  return records.some((m) => m.sheet.hp > 0
+    && m.actor && m.actor.x === x && m.actor.z === z);
+}
+
 // Is the defender within the attacker's reach DISTANCE? Ignores anything solid
 // in between on purpose: this is the melee/ranged split positionMods needs, and
 // whether a cubicle wall spoils a shot is a question about proximity, not about

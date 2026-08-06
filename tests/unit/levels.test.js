@@ -223,7 +223,7 @@ test('every registry cross-reference resolves', () => {
   }
   for (const it of Object.values(ITEMS)) if (it.attack) reachable.add(it.attack);
   for (const [id, a] of Object.entries(ACTIONS)) {
-    if (a.ammoCost) reachable.add(id); // throwables join the bar automatically
+    if (a.ammoCost && a.universal !== false) reachable.add(id); // universal throws join automatically
   }
   for (const id of Object.keys(ACTIONS)) {
     assert.ok(reachable.has(id), `action "${id}" is reachable by somebody`);
@@ -237,12 +237,29 @@ test('every registry cross-reference resolves', () => {
     assert.ok(TILE_TYPES[a.leaves], `action "${id}" leaves a real tile type ("${a.leaves}")`);
     assert.ok(TILE_TYPES[a.leaves].surface,
       `action "${id}" leaves "${a.leaves}", which must carry a surface to be worth painting`);
+    assert.ok(Number.isFinite(a.leavesTurns) && a.leavesTurns > 0,
+      `action "${id}" gives its temporary surface a positive leavesTurns lifetime`);
   }
   for (const [id, def] of Object.entries(ENEMY_TYPES)) {
     // summonSpec, because a descriptor may inherit its archetype from the
     // ACTION it is the AI-side twin of rather than restating it.
     const arch = summonSpec(def.summon)?.archetype;
     if (def.summon) assert.ok(CLASSES[arch] || ENEMY_TYPES[arch], `enemy "${id}" summons a real archetype`);
+    if (def.focus != null) {
+      assert.ok(Number.isFinite(def.focus) && def.focus >= 0 && def.focus <= 1,
+        `enemy "${id}" focus is a number from 0 to 1`);
+    }
+    if (def.support) {
+      const s = def.support;
+      assert.ok(Array.isArray(s.heal) && s.heal.length === 2
+        && s.heal.every(Number.isFinite) && s.heal[0] <= s.heal[1],
+      `enemy "${id}" support heal is a finite [min, max] pair`);
+      assert.ok(Number.isFinite(s.ap) && s.ap > 0, `enemy "${id}" support costs positive AP`);
+      assert.ok(Number.isFinite(s.range) && s.range > 0, `enemy "${id}" support has positive range`);
+      assert.ok(Number.isInteger(s.uses) && s.uses > 0, `enemy "${id}" support has positive integer uses`);
+      assert.ok(Number.isInteger(s.cooldownRounds) && s.cooldownRounds >= 0,
+        `enemy "${id}" support cooldown is a non-negative integer`);
+    }
   }
   // Tile loot tables exist, and every table entry names a real item.
   for (const [id, def] of Object.entries(TILE_TYPES)) {

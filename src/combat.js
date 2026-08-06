@@ -24,7 +24,7 @@ import { SURFACES } from './data/surfaces.js';
 import { throwablesFor as throwableIdsFor } from './hotbar-model.js';
 import { truncateByBudget, routeToFiringPosition, trimToFirst } from './pathfinding.js';
 import { pronounsOf, capitalize, verb } from './creation.js';
-import { createSheetFrom, damageBonus, applyDamage, deflect, soakHit, statusResist, hitChance, rollHit, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, gritSaveChance, roundAp, fmtAp, MOVE, REACH } from './stats.js';
+import { createSheetFrom, damageBonus, applyDamage, deflect, soakHit, statusResist, hitChance, rollHit, rollInt, accuracy, dodge, equippedAction, orderedActionIds, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf as ammoCost, effectiveAttr, gritSaveChance, roundAp, fmtAp, MOVE, REACH } from './stats.js';
 import {
   applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy,
   statusSeverity, tickStep,
@@ -68,13 +68,6 @@ import {
 import { createGroundMarks } from './ground-marks.js';
 
 const pc = globalThis.window?.pc;
-// Inclusive integer roll. Takes its randomness as an ARGUMENT rather than
-// reading Math.random, because a module-scope read is unreachable from the
-// injected `rng` - which meant damage was the one part of a resolution a seeded
-// test could not pin, and so the whole roll -> damage -> status chain could
-// only ever be tested a piece at a time.
-const randWith = (r, lo, hi) => lo + Math.floor(r() * (hi - lo + 1));
-
 // The narration when a landed hit applies a status: an explicit per-attack/
 // action line if given, else the status's own {name}-templated log, else a
 // bare fallback naming it.
@@ -133,7 +126,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // roster only - a party WIPE (no real member standing) is the sole game-over;
   // a summon falling never is, and a lone summon can't stave off defeat.
   // Every damage roll in this fight, bound to the injected rng.
-  const rand = (lo, hi) => randWith(rng, lo, hi);
+  const rand = (lo, hi) => rollInt(rng, lo, hi);
   const livingMembers = () => members.filter((m) => m.sheet.hp > 0 && m.actor);
   // Hoisted to the TOP of this closure on purpose. `canEngage` reads `canReach`
   // and `pickTarget` runs during the startCombat surprise sweep below - before

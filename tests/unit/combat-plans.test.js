@@ -217,6 +217,8 @@ test('the partition topple wants an edge, an open far tile, and a victim', () =>
   assert.deepEqual(hit, { edge: true, tx: 1, tz: 0 });
   // Empty carpet behind the panel: nothing to gain, no plan.
   assert.equal(aiEdgeTopplePlan(0, 0, w, () => false), null);
+  // A victim does not make an occupied/non-terrain landing legal.
+  assert.equal(aiEdgeTopplePlan(0, 0, { ...w, terrainOpen: () => false }, () => true), null);
 });
 
 test('aiPullPlan hauls the first crouched victim the pull rules accept', () => {

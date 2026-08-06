@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import {
   standTilePath, pickTarget, advanceRoute, aiCrouchCovered, chooseBeat,
   AI, standTileRoutes, scoreDestination, firingTileRoutes, beatStateFrom,
-  takeBeat, aiBeatPlansFrom,
+  takeBeat, aiBeatPlansFrom, aiSupportPlan, lineWeights,
 } from '../../src/combat-ai.js';
 import { REACH } from '../../src/stats.js';
 
@@ -140,6 +140,27 @@ test('a flanking arrival outranks a shorter route', () => {
   assert.equal(scoreDestination([shortest, flank], { target }), shortest);
 });
 
+test('path cost is the baseline even when the cheaper route is listed second', () => {
+  const expensive = [[0, 0], [0, 2], [3, 2]];
+  const cheap = [[0, 0], [2, 0]];
+  assert.equal(scoreDestination([expensive, cheap]), cheap);
+});
+
+test('backstab and slip risk each move an otherwise tied destination', () => {
+  const target = { x: 5, z: 5 };
+  const front = [[5, 7], [6, 5]];
+  const back = [[5, 7], [4, 5]];
+  assert.equal(scoreDestination([front, back], {
+    target, facing: { x: 1, z: 0 },
+  }), back);
+
+  const slippery = [[0, 0], [1, 0], [2, 0]];
+  const dry = [[0, 0], [1, 1], [2, 0]];
+  assert.equal(scoreDestination([slippery, dry], {
+    slipChanceAt: (x, z) => (x === 1 && z === 0 ? 1 : 0),
+  }), dry);
+});
+
 test('a route that eats an opportunity attack loses to an equal-cost detour', () => {
   const threats = [{ x: 0, z: 2, reach: 1.5 }];
   const through = [[0, 0], [0, 1], [3, 1]]; // enters the watcher's reach, then leaves
@@ -238,7 +259,12 @@ test('with no route, an adjacent unit shuffles inside its own tile', () => {
 });
 
 test('no route and not adjacent means there is nothing to spend on', () => {
-  assert.equal(advanceRoute(unit(0, 0), member(5, 5), null, moveWorld()), null);
+  let approached = 0;
+  const out = advanceRoute(unit(0, 0), member(5, 5), null, moveWorld({
+    approach: () => { approached += 1; return [4.4, 5]; },
+  }));
+  assert.equal(out, null);
+  assert.equal(approached, 0, 'a non-adjacent target never reaches the shuffle fallback');
 });
 
 test('the in-place shuffle is refused when it would not earn a swing', () => {
@@ -412,8 +438,7 @@ test('triage outranks reinforcement, and rations like everything else', () => {
   assert.equal(chooseBeat(rich({ ap: 1, support: { ap: 2, ready: true } })).beat, 'crouch');
 });
 
-test('the worst-off ally in range gets the heal; expiring temps do not', async () => {
-  const { aiSupportPlan, lineWeights } = await import('../../src/combat-ai.js');
+test('the worst-off ally in range gets the heal; expiring temps do not', () => {
   const spec = { heal: [4, 7], range: 4 };
   const hurt = { x: 1, z: 0, hp: 5, maxHp: 20, ref: 'hurt' };
   const worse = { x: 2, z: 0, hp: 2, maxHp: 20, ref: 'worse' };
@@ -435,8 +460,36 @@ test('the worst-off ally in range gets the heal; expiring temps do not', async (
   // The line weights: a status the target lacks doubles the line's chances;
   // one they already wear rolls flat.
   const pool = [{ min: 1, max: 2 }, { min: 1, max: 2, applies: 'blinded' }];
-  assert.deepEqual(lineWeights(pool, () => false), [1, AI.STATUS_WEIGHT]);
+  assert.deepEqual(lineWeights(pool, () => false), [1, 2]);
   assert.deepEqual(lineWeights(pool, (id) => id === 'blinded'), [1, 1]);
+});
+
+test('target selection prices kill-securability and fragility independently', () => {
+  const slow = member(2, 0, 8, 8);
+  const quick = member(0, 2, 8, 8);
+  assert.equal(pickTarget(0, 0, [slow, quick], () => true, {
+    focus: 1, expSwings: (m) => (m === quick ? 1 : 4),
+  }).member, quick);
+
+  const hale = member(2, 0, 5, 5);
+  const frail = member(0, 2, 5, 20);
+  assert.equal(pickTarget(0, 0, [hale, frail], () => true, {
+    focus: 1, expSwings: () => 2,
+  }).member, frail);
+});
+
+test('support refuses absent specs, invalid bodies, threshold ties, and blocked lines', () => {
+  const wounded = { x: 1, z: 0, hp: 1, maxHp: 10, ref: 'wounded' };
+  assert.equal(aiSupportPlan(0, 0, null, [wounded]), null);
+  assert.equal(aiSupportPlan(0, 0, { heal: [2, 3], range: 4 }, [
+    { ...wounded, maxHp: 0 },
+  ]), null);
+  assert.equal(aiSupportPlan(0, 0, { heal: [2, 3], range: 4 }, [
+    { ...wounded, hp: 5 },
+  ]), null);
+  assert.equal(aiSupportPlan(0, 0, { heal: [2, 3], range: 4 }, [wounded], {
+    canSupport: () => false,
+  }), null);
 });
 
 // --- the anti-stall contract (REVIEW.md 2026-08-02 sections 1.6 / 1.16) -------

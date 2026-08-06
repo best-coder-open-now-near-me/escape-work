@@ -19,7 +19,7 @@
 // shove glide already uses ("forced movement never provokes", TACTICS_PLAN #9)
 // - so granted movement joins forced movement rather than growing a second
 // exemption the threat code would have to learn about.
-import { TARGET_R, posOf, zoneCellsFor } from './combat-geometry.js';
+import { TARGET_R, playerSideAt, posOf, zoneCellsFor } from './combat-geometry.js';
 import { verb } from './creation.js';
 import { ACTIONS } from './data/actions.js';
 import { STATUSES } from './data/statuses.js';
@@ -413,8 +413,8 @@ export function createVerbs(d) {
       for (let z = Math.floor(test.origin.z) - R; z <= Math.ceil(test.origin.z) + R; z++) {
         for (let x = Math.floor(test.origin.x) - R; x <= Math.ceil(test.origin.x) + R; x++) {
           if (!test(x, z)) continue;
-          // No carpeting a tile a party member is standing on.
-          if (d.members.some((m) => m.sheet.hp > 0 && m.actor?.x === x && m.actor?.z === z)) continue;
+          // No carpeting a tile anybody on the player side is standing on.
+          if (playerSideAt(d.members, x, z)) continue;
           if (!d.losToTile(d.active, x, z)) continue;
           d.world.leaveSurface(x, z, a.leaves, a.leavesTurns || 0);
         }
