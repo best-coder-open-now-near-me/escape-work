@@ -3,7 +3,7 @@ import importlib.util
 import tempfile
 import unittest
 
-from unity_materials import read_materials
+from unity_materials import prefab_material_guids, read_material_libraries, read_materials
 
 
 CONVERTER_SPEC = importlib.util.spec_from_file_location(
@@ -58,6 +58,28 @@ class UnityMaterialsTests(unittest.TestCase):
             spec = read_materials(root)['flat']
             self.assertFalse(spec['uses_texture'])
             self.assertIsNone(spec['texture'])
+
+    def test_material_library_indexes_a_material_by_its_unity_guid(self):
+        with tempfile.TemporaryDirectory() as root:
+            material = os.path.join(root, 'shops.mat')
+            with open(material, 'w', encoding='utf8') as stream:
+                stream.write('    - _Color: {r: 1, g: 1, b: 1, a: 1}\n')
+            with open(material + '.meta', 'w', encoding='utf8') as stream:
+                stream.write('fileFormatVersion: 2\nguid: feed1234\n')
+
+            by_name, by_guid = read_material_libraries(root)
+            self.assertIs(by_name['shops'], by_guid['feed1234'])
+
+    def test_prefab_material_assignments_are_read_in_renderer_order(self):
+        with tempfile.TemporaryDirectory() as root:
+            prefab = os.path.join(root, 'desk.prefab')
+            with open(prefab, 'w', encoding='utf8') as stream:
+                stream.write(
+                    '  m_Materials:\n'
+                    '  - {fileID: 2100000, guid: abc123, type: 2}\n'
+                    '  - {fileID: 2100000, guid: def456, type: 2}\n'
+                )
+            self.assertEqual(prefab_material_guids(prefab), ['abc123', 'def456'])
 
     def test_manifest_selects_a_wave_and_preserves_authored_output_and_grounding(self):
         with tempfile.TemporaryDirectory() as root:

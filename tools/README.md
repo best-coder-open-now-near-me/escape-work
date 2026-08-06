@@ -60,6 +60,7 @@ a guess:
 | --- | --- | --- |
 | `<model>.fbx.meta` | `ModelImporter.meshes.globalScale`, Unity's Scale Factor | The raw FBX is in Maya units. This pack authors 4.0 for most props, but 5.0 for walls and 1.0–6.0 for others, so one hardcoded number cannot be right for the whole pack. With it, walls land at exactly 3.000 m. |
 | `<name>.mat` | The material: `_Color`, and whether `_MainTex` is bound | The FBX stores only a material *name*. Most of this pack's materials are flat colours with no texture at all - only `items` and `character` sample the shared atlas. Without the `.mat` library every prop converts to default grey. |
+| matching `.prefab` | MeshRenderer material GUID assignments | Newer Synty FBX files carry generic slot names such as `Shop_MAT`; Unity applies the real atlas material in the prefab. Without that indirection every converted prop is white. |
 
 Unity serialises `_Color` in linear space, which is what glTF's
 `baseColorFactor` wants, so those values pass straight through.
@@ -74,6 +75,10 @@ Unity serialises `_Color` in linear space, which is what glTF's
 - **Matches material names case-insensitively.** Meshes ask for `wood`; the
   library ships `Wood.mat`. An exact match silently drops 11 of this pack's
   material slots back to the FBX default.
+- **Follows prefab material GUIDs.** For packs whose FBX names no useful
+  material, the matching prefab selects the `.mat`, whose albedo GUID then
+  resolves to the texture beside its `.meta`. Unresolved slots and GUIDs are
+  printed and included in the report instead of silently exporting white.
 - **Reclaims material names.** Blender uniquifies a datablock whose name is
   taken, so rebuilding `items` while the FBX's own `items` is loaded yields
   `items.001` - and that suffix would ship in the `.glb`.

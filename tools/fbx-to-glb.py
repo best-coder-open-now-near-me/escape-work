@@ -24,11 +24,11 @@
 #   <model>.fbx.meta   ModelImporter.meshes.globalScale - the Scale Factor
 #                      Unity applies on import. The raw FBX is in Maya units;
 #                      without this every prop comes out 4x too small.
-#   <name>.mat         The material. Most of this pack's materials are flat
-#                      colours with no texture at all (_MainTex empty) - only
-#                      `items` and `character` sample the shared atlas. The
-#                      FBX stores just the material NAME, so without the .mat
-#                      library every prop converts to default grey.
+#   <name>.mat         The material. Older packs name it directly in the FBX;
+#                      newer Synty packs assign it by GUID in the matching
+#                      prefab. The .mat then names its albedo texture by GUID.
+#   <name>.prefab      MeshRenderer material GUIDs for FBX slots with generic
+#                      names such as Shop_MAT. Ignoring this exports white.
 #
 # Blender's FBX importer only sees the .fbx, so this script reads the sidecars
 # itself and rebuilds each material before exporting.
@@ -38,12 +38,20 @@ import re
 import json
 import argparse
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
 try:
     import bpy
 except ModuleNotFoundError:  # Pure manifest/material tests run without Blender.
     bpy = None
 
-from unity_materials import read_materials
+from unity_materials import (
+    prefab_for_model,
+    prefab_material_guids,
+    read_material_libraries,
+)
 
 # Mirrors SIGHT_BLOCK_HEIGHT in src/data/tiles.js. Duplicated rather than
 # imported because this script runs inside Blender's Python, which has no view
@@ -162,7 +170,8 @@ def manifest_jobs(path, selected_wave=None, src_override=None, out_override=None
 
 # --- conversion ---------------------------------------------------------------
 
-def convert(fbx_path, out_path, mats, atlas_path, cache, ground=True):
+def convert(fbx_path, out_path, mats, atlas_path, cache, ground=True,
+            assigned_materials=None):
     if bpy is None:
         raise RuntimeError('FBX conversion must run under Blender')
     import mathutils
@@ -182,14 +191,25 @@ def convert(fbx_path, out_path, mats, atlas_path, cache, ground=True):
     # NAME, and Blender's importer turns an unresolvable material into default
     # grey, so every slot is rebuilt here from the Unity definition. Names that
     # aren't in the library keep whatever the FBX gave them.
+    assigned_materials = assigned_materials or []
+    one_assigned = assigned_materials[0] if len(assigned_materials) == 1 else None
+    unresolved = set()
+    assigned_index = 0
     for obj in meshes:
         for slot in obj.material_slots:
             if not slot.material:
                 continue
             name = slot.material.name.split('.')[0]
-            spec = mats.get(name.lower())
+            spec = one_assigned
+            if spec is None and assigned_index < len(assigned_materials):
+                spec = assigned_materials[assigned_index]
+            if spec is None:
+                spec = mats.get(name.lower())
             if spec:
-                slot.material = build_material(name, spec, atlas_path, cache)
+                slot.material = build_material(spec.get('name', name), spec, atlas_path, cache)
+            else:
+                unresolved.add(name)
+            assigned_index += 1
 
     # Drop the model onto its own origin. Props in this pack are authored at
     # the height they sit at in the demo scene - desk clutter (laptop, mug,
@@ -260,6 +280,7 @@ def convert(fbx_path, out_path, mats, atlas_path, cache, ground=True):
         'floor': round(mn[2], 4),
         'tris': tris,
         'scale_factor': scale,
+        'unresolved_materials': sorted(unresolved),
     }
 
 
@@ -291,7 +312,7 @@ def main():
         out_root = os.path.abspath(args.out)
         jobs = None
 
-    mats = read_materials(src_root)
+    mats, mats_by_guid = read_material_libraries(src_root)
     atlas = find_atlas(src_root)
     print(f'[fbx-to-glb] {len(mats)} materials, atlas={atlas}')
 
@@ -324,9 +345,20 @@ def main():
         if not os.path.isfile(src):
             raise FileNotFoundError(f'Manifest source does not exist: {src}')
         cache.clear()  # materials are per-file; the .blend is reset each time
+        prefab = prefab_for_model(src_root, src)
+        material_guids = prefab_material_guids(prefab) if prefab else []
+        assigned_materials = []
+        missing_material_guids = []
+        for material_guid in material_guids:
+            spec = mats_by_guid.get(material_guid)
+            if spec:
+                assigned_materials.append(spec)
+            else:
+                missing_material_guids.append(material_guid)
         info = convert(
             src, out, mats, atlas, cache,
             ground=job['ground'] and not args.no_ground,
+            assigned_materials=assigned_materials,
         )
         if info is None:
             print(f'[fbx-to-glb] SKIP (no mesh) {os.path.basename(src)}')
@@ -338,11 +370,16 @@ def main():
         # bookcase was cover or a wall was discovered in play. The script
         # already measures the model; say what the measurement implies.
         info['blocks_sight'] = info['height'] >= SIGHT_BLOCK_HEIGHT
+        info['prefab'] = os.path.relpath(prefab, src_root) if prefab else None
+        info['missing_material_guids'] = missing_material_guids
         report[stem] = info
         sight = 'BLOCKS SIGHT' if info['blocks_sight'] else 'shoot over'
         print(f'[fbx-to-glb] OK {stem:40s} '
               f'W={info["width"]:.3f} D={info["depth"]:.3f} H={info["height"]:.3f} '
               f'tris={info["tris"]:6d}  -> {sight}')
+        if info['unresolved_materials'] or missing_material_guids:
+            print(f'[fbx-to-glb] WARN {stem}: unresolved slots='
+                  f'{info["unresolved_materials"]}, GUIDs={missing_material_guids}')
 
     if args.report:
         report_dir = os.path.dirname(os.path.abspath(args.report))
