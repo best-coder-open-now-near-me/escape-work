@@ -87,6 +87,14 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
       const type = grid.typeAt(x, z);
       if (type === null) continue;
       r.renderFloor(x, z, carpetAt.get(x + ',' + z) || type);
+      const surfaceId = grid.surfaceAt(x, z);
+      if (surfaceId) {
+        const surface = r.renderSurface(x, z, surfaceId, {
+          electrified: grid.isElectrified(x, z),
+          surfaceAt: grid.surfaceAt,
+        });
+        if (surface.kind === 'surface') surfaceVisuals.set(x + ',' + z, surface.entities[0]);
+      }
       if (type === 'floor') continue;
       if (type === 'exit') r.addExitBeacon(x, z); // motes rising off the stairwell
       // Rummageable / shoppable / ignitable / explosive props are left-clickable
@@ -100,7 +108,7 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
       const res = r.renderMarker(x, z, type, {
         electrified: grid.isElectrified(x, z),
         rotY: grid.rotAt?.(x, z) ?? null,
-        surfaceAt: (sx, sz) => TILE_TYPES[grid.typeAt(sx, sz)]?.surface || null,
+        surfaceAt: grid.surfaceAt,
         // A model prop's holder only exists once its .glb lands, so this is the
         // one moment it is offered. Track it exactly like a primitive prop's
         // visual: `removePropVisual` is otherwise a silent no-op for it, and
@@ -222,9 +230,10 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
   // in surfaceVisuals so fire can consume them like any painted surface.
   function addSurfaceVisual(x, z, type) {
     hideSurfaceVisual(x, z);
-    const res = r.renderMarker(x, z, type, {
+    const surfaceId = TILE_TYPES[type]?.surface || type;
+    const res = r.renderSurface(x, z, surfaceId, {
       electrified: grid.isElectrified(x, z),
-      surfaceAt: (sx, sz) => TILE_TYPES[grid.typeAt(sx, sz)]?.surface || null,
+      surfaceAt: grid.surfaceAt,
     });
     if (res.kind === 'surface') surfaceVisuals.set(x + ',' + z, res.entities[0]);
   }
@@ -281,13 +290,21 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
     const type = grid.typeAt(x, z);
     if (type === null) return;
     r.renderFloor(x, z, carpetAt.get(x + ',' + z) || type);
+    const surfaceId = grid.surfaceAt(x, z);
+    if (surfaceId) {
+      const surface = r.renderSurface(x, z, surfaceId, {
+        electrified: grid.isElectrified(x, z),
+        surfaceAt: grid.surfaceAt,
+      });
+      if (surface.kind === 'surface') surfaceVisuals.set(x + ',' + z, surface.entities[0]);
+    }
     if (type === 'floor') return;
     const def = TILE_TYPES[type];
     const interactive = !!def && (def.loot || def.shop || def.ignitable || def.explosive);
     const res = r.renderMarker(x, z, type, {
       electrified: grid.isElectrified(x, z),
       rotY: grid.rotAt?.(x, z) ?? null,
-      surfaceAt: (sx, sz) => TILE_TYPES[grid.typeAt(sx, sz)]?.surface || null,
+      surfaceAt: grid.surfaceAt,
       onAsync: (holder) => {
         propVisuals.set(x + ',' + z, holder);
         if (interactive && picking) picking.register(holder, 'prop', { x, z });

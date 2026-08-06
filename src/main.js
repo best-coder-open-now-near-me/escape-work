@@ -514,7 +514,7 @@ function startGame(level) {
   // grid and the scene.
   const stickGum = (x, z) => {
     if (!hasGum(floorAt(x, z))) return false;
-    grid.setType(x, z, 'floor');
+    grid.surfaceField.clearTile(x, z);
     scene.hideSurfaceVisual(x, z);
     return true;
   };
@@ -570,12 +570,11 @@ function startGame(level) {
   // the floor (nor leave a renewable ammo pile behind it). Tracked here rather
   // than in surfaces-runtime because reverting needs the grid AND the visual,
   // both of which live on this side.
-  const tempSurfaces = new Map(); // "x,z" -> { left, type, under }
+  const tempSurfaces = new Map(); // "x,z" -> { left, surfaceId }
   function restoreTempSurfaceAt(x, z) {
     const key = x + ',' + z;
-    const under = tempSurfaces.get(key)?.under || 'floor';
     tempSurfaces.delete(key);
-    grid.setType(x, z, under);
+    grid.surfaceField.clearTile(x, z);
     scene.hideSurfaceVisual(x, z);
     loot?.forgetPaper?.(x, z); // a fresh world drift here later is gatherable
   }
@@ -584,21 +583,22 @@ function startGame(level) {
       const [x, z] = key.split(',').map(Number);
       // Fire ate it, or something repainted the tile - either way it is no
       // longer ours to clean up.
-      if (grid.typeAt(x, z) !== t.type) { tempSurfaces.delete(key); continue; }
+      if (grid.surfaceAt(x, z) !== t.surfaceId) { tempSurfaces.delete(key); continue; }
       if (t.left > 1) { t.left -= 1; continue; }
       restoreTempSurfaceAt(x, z);
     }
   }
-  // Drop a power's surface on open office carpet: grid, visual and the litter
-  // clock in one write. Coloured carpet is still floor, and its original type
-  // rides with the temporary surface so expiry/fire restores the same carpet
-  // instead of repainting it grey.
-  function leaveSurfaceAt(x, z, tileType, turns = 0) {
+  // Drop a power's surface on open office carpet: field, visual and litter
+  // clock in one write. Terrain stays what it was, including coloured carpet;
+  // the surface is an overlay rather than a temporary terrain replacement.
+  function leaveSurfaceAt(x, z, surfaceId, turns = 0) {
     const under = grid.typeAt(x, z);
-    if (!acceptsSurface(under)) return false;
-    grid.setType(x, z, tileType);
-    scene.addSurfaceVisual(x, z, tileType);
-    if (turns > 0) tempSurfaces.set(x + ',' + z, { left: turns, type: tileType, under });
+    if (!acceptsSurface(under) || grid.surfaceAt(x, z)) return false;
+    grid.surfaceField.fillTile(x, z, surfaceId, {
+      source: turns > 0 ? 'temporary' : 'runtime', sourceX: x, sourceZ: z,
+    });
+    scene.addSurfaceVisual(x, z, surfaceId);
+    if (turns > 0) tempSurfaces.set(x + ',' + z, { left: turns, surfaceId });
     // Ammo comes from the WORLD, never from a power. A paper-laying verb
     // that could be harvested afterwards is an AP-to-ammo converter, and
     // expiry alone does not prevent it: harvesting is refused in combat
@@ -609,7 +609,7 @@ function startGame(level) {
     // the surface itself: the sheets still burn, still cut, still fuel a
     // fire. `forgetPaper` drops the mark when the tile reverts to bare
     // floor, so a WORLD drift laid there later is gatherable again.
-    if (tileType === 'paper') loot.markPaperSpent?.(x, z);
+    if (surfaceId === 'paper') loot.markPaperSpent?.(x, z);
     return true;
   }
   const portraits = createPortraits(app);

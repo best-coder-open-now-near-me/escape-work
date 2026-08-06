@@ -198,7 +198,7 @@ export function layeredGrid(floors, level, getActive) {
     'sightOpen', 'rotAt', 'wallEdgeBetween', 'removeEdgeBetween', 'doorBetween', 'setDoorOpen'];
   for (const m of METHODS) facade[m] = (...args) => g()[m](...args);
   // Sets and maps are read as properties, so they need live getters.
-  for (const p of ['hWalls', 'vWalls', 'doors']) {
+  for (const p of ['hWalls', 'vWalls', 'doors', 'surfaceField']) {
     Object.defineProperty(facade, p, { get: () => g()[p] });
   }
   return facade;

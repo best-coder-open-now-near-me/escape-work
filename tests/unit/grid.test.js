@@ -158,7 +158,21 @@ test('parseLevel throws on unknown tile types and applies aliases', () => {
   const g = parseLevel({
     name: 'old-save', tiles: { 'w': 'wet-floor' }, actors: {}, map: ['w'],
   });
-  assert.equal(g.typeAt(0, 0), 'water'); // TYPE_ALIASES upgrade old exports
+  assert.equal(g.typeAt(0, 0), 'floor', 'surface syntax normalizes to terrain');
+  assert.equal(g.surfaceAt(0, 0), 'water', 'TYPE_ALIASES still upgrades the authored surface');
+});
+
+test('authored surfaces seed the fine field without remaining terrain types', () => {
+  const g = parseLevel(level(['~p']));
+  assert.equal(g.typeAt(0, 0), 'floor');
+  assert.equal(g.typeAt(1, 0), 'floor');
+  assert.equal(g.surfaceAt(0, 0), 'water');
+  assert.equal(g.surfaceAt(1, 0), 'paper');
+  assert.equal(g.surfaceField.size, 8, 'two authored tiles seed fine cells');
+  assert.deepEqual(
+    new Set(g.surfaceField.entries().map((cell) => cell.source)),
+    new Set(['authored']),
+  );
 });
 
 test('edge walls block single edges; diagonals must clear the corner', () => {
@@ -217,6 +231,17 @@ test('setType recomputes conduction pools', () => {
   assert.equal(g.isElectrified(2, 0), true);
   g.setType(1, 0, 'floor');
   assert.equal(g.isElectrified(1, 0), false);
+  assert.equal(g.isElectrified(2, 0), false);
+});
+
+test('legacy surface setType writes only the field and clearing retires it', () => {
+  const g = parseLevel(level(['*.~']));
+  g.setType(1, 0, 'water');
+  assert.equal(g.typeAt(1, 0), 'floor', 'surface never becomes terrain truth');
+  assert.equal(g.surfaceAt(1, 0), 'water');
+  assert.equal(g.isElectrified(2, 0), true);
+  g.setType(1, 0, 'floor');
+  assert.equal(g.surfaceAt(1, 0), null);
   assert.equal(g.isElectrified(2, 0), false);
 });
 

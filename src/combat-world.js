@@ -132,7 +132,8 @@ export function createCombatWorld(d) {
     // TAKE a surface without painting one to find out - and asking a
     // different question than the commit asks is how a preview starts
     // lying (the rings promised tiles the click then skipped).
-    canTakeSurface: (x, z) => acceptsSurface(d.grid.typeAt(x, z)),
+    canTakeSurface: (x, z) => acceptsSurface(d.grid.typeAt(x, z))
+      && !d.runtime.surfaceAt(x, z),
     // Toppling (POWERS_PLAN M6) needs to read a prop's definition, test
     // whether the tile behind it is clear, and mutate both. setType is the
     // same call the exploding printer already makes, so the grid, the

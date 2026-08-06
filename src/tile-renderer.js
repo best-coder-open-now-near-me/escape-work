@@ -273,6 +273,21 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
     parent.addChild(holder);
     return holder;
   }
+
+  // Render a surface from its own registry id. Runtime terrain no longer uses
+  // a surface tile type as storage, so scene.js calls this directly from the
+  // authoritative SurfaceField. renderMarker keeps delegating here for the
+  // editor, whose palette/document format still authors surface tile types.
+  function renderSurface(x, z, surfaceId, { electrified = false, surfaceAt = null } = {}) {
+    const surf = SURFACES[surfaceId];
+    if (!surf?.style) return { kind: 'none', entities: [] };
+    let vis;
+    if (surf.style === 'cable') vis = addCable(x, z);
+    else if (surf.style === 'paper') vis = addPaper(x, z);
+    else if (surf.style === 'gum') vis = addGumWad(x, z);
+    else vis = addPool(x, z, surfaceId, electrified, surfaceAt);
+    return { kind: 'surface', entities: [vis] };
+  }
   function addTrash(x, z) {
     const holder = new pc.Entity();
     const can = new pc.Entity();
@@ -489,13 +504,7 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
       return { kind: 'prop', entities: builder ? [builder(x, z)] : [] };
     }
     if (def.surface) {
-      const surf = SURFACES[def.surface];
-      let vis;
-      if (surf.style === 'cable') vis = addCable(x, z);
-      else if (surf.style === 'paper') vis = addPaper(x, z);
-      else if (surf.style === 'gum') vis = addGumWad(x, z);
-      else vis = addPool(x, z, def.surface, electrified, surfaceAt);
-      return { kind: 'surface', entities: [vis] };
+      return renderSurface(x, z, def.surface, { electrified, surfaceAt });
     }
     if (def.solid) {
       // Full-size so adjacent walls merge into continuous surfaces.
@@ -662,7 +671,8 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
   }
 
   return {
-    renderFloor, renderMarker, renderEdgeWall, renderDoor, renderStair, addFlame, explosionFlash, animate,
+    renderFloor, renderMarker, renderSurface, renderEdgeWall, renderDoor, renderStair,
+    addFlame, explosionFlash, animate,
     addExitBeacon,
     addSmoke, removeSmoke,
     tileMats, wallGhost, doorMat, doorGhost, floorHeight: floorDef.height,
