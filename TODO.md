@@ -104,9 +104,9 @@ and Q164 and exposed five more editor lifecycle/invariant findings below. The
 HIGH band remains clear; the live behavior work is medium or low.
 
 *A caution for whoever reads that as "the review is nearly done": the count is
-of FINDINGS, not of work. The three biggest things on the list — `startCombat`
-and `startGame` (Q037/Q042/Q039) and the `drawTargets` body pass (Q901) — are
-one line each here and are each larger than most of the rows above them.*
+of FINDINGS, not of work. The two biggest things still on the list —
+`startCombat` and `startGame` (Q037/Q039) — are one line each here and are each
+larger than most of the rows above them.*
 
 *Counted from the boxes rather than carried forward, 2026-08-05. This line had
 said "227 standing … 31 ticked" for several passes while the boxes below said
@@ -155,7 +155,7 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
 - [x] **Q019** `src/main.js:2018` [bug] Sneaking survives the floor transition as a ghost status, and the next floor can never start a fight with you<br>      ↳ DONE — held-mode statuses stripped on serialize
 - [x] **Q020** `src/stats.js:806` [bug] Equip/unequip cycling a maxHp trinket ratchets HP back to full — a free, unlimited heal<br>      ↳ DONE — debitLostHp, floored at 1
 - [x] **Q021** `src/combat.js:2694` [duplication] aiShoveMember is a second shove resolver that has already dropped the wall-slam stun and the slam-into-a-prop topple<br>      ↳ DONE — merged into displaceBody behind victimView (Q4-A)
-- [x] **Q022** `src/combat.js:1384` [god-method] `combat.js drawTargets()` is a 321-line renderer holding thirteen verb-specific drawing rules, a third verb-dispatch ladder, and mutable animation state<br>      ↳ **PARTLY DONE — 321 → 195 lines.** Seven pieces named: drawAimWash (50), drawCoverRings (29), drawZoneRings (17), drawSummonRings (10), drawAllyRings (9), drawHoveredDoor (7), drawHeldCrouch (4). The third verb-dispatch ladder was already collapsed onto verbSides. **Still open, and deliberately:** the BODY pass - cone polyline, reach ring, shove/topple/partition/break rings, the per-enemy loop - which genuinely shares hoverFoe, coverEase and the enemy iteration and wants a real look rather than another mechanical cut. Re-queued as Q901.
+- [x] **Q022** `src/combat.js:1384` [god-method] `combat.js drawTargets()` is a 321-line renderer holding thirteen verb-specific drawing rules, a third verb-dispatch ladder, and mutable animation state<br>      ↳ **DONE in two ownership passes.** First, 321 → 195 lines: drawAimWash, drawCoverRings, drawZoneRings, drawSummonRings, drawAllyRings, drawHoveredDoor and drawHeldCrouch moved with the aim-view state they own, and the dispatch collapsed onto `verbSides`. The deliberately deferred body/enemy pass is now `combat-body-targets.js`; see Q901 for why it became safe to move without duplicating hover/easing state.
 - [x] **Q023** `src/ui/chrome.js:90` [test-gap] One module-scope `window.addEventListener` in ui/chrome.js locks 1,613 lines — the whole `ui/` layer plus the three host-callback modules the architecture holds up as exemplary — out of node unit testing<br>      ↳ DONE — bound on first use; 11 modules unlocked
 - [x] **Q024** `tests/e2e/helpers.js:92` [test-gap] No e2e arena or spec ever fights an Executive or a Security Guard - so the enemy ranged kit, M5's headline feature, has zero end-to-end coverage<br>      ↳ **DONE — and the finding was HALF STALE by the time it was reached, which is recorded rather than quietly fixed.** The Executive *is* fought: `ai.spec.js`'s Range Hall pins that he shoots from across the room instead of closing, so "the enemy ranged kit has zero end-to-end coverage" had stopped being true. What genuinely had nothing was the **Security Guard** — every `'security'` in the suite is the PLAYER's class, and the one arena named for him fights a Manager. New spec `tests/e2e/enemy-kit.spec.js`, 3 tests, all green:
       - **Escort Hall** — the guard strikes from two tiles off and never has to close. His reach (2.1) clears a full orthogonal tile; bare hands (1.5) do not. The second assertion is the one that makes it about reach rather than about a coworker walking up.
@@ -308,16 +308,10 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
 
 
 
-- [ ] **Q901** `src/combat-aim.js:485` [god-method] **(new 2026-08-02, the remainder of Q022)**<br>      ↳ **MOVED, not yet split.** The roughly 200-line body/enemy target pass now lives with the aim view. It still shares hover, easing, and enemy iteration state, so the remaining work is a state-ownership design rather than a mechanical extraction.
-  **Current location:** `src/combat-aim.js:485`; the combined body/enemy pass is
-  about 200 lines: the cone polyline, melee reach ring,
-  the shove/topple/partition/break rings and the per-enemy ring loop. Unlike the
-  ground arms these are NOT independent - they share `hoverFoe`, `coverEase` and
-  the enemy iteration, so splitting them means deciding what owns that state, not
-  just moving braces. Worth noting what the ground-arm extraction nearly cost: the
-  ally arm had no `return` and FELL THROUGH on purpose, which is what gives the
-  purge rings on both halves; a mechanical cut turns that into `return true`
-  silently. Expect at least one more of those in here.
+- [x] **Q901** `src/combat-aim.js:485` [god-method] **(new 2026-08-02, the remainder of Q022)**<br>      ↳ **DONE — `combat-body-targets.js`.** The ownership question is explicit now: `combat-aim.js` alone owns `hoverFoe`, `aimPoint` and `coverEase`; the body/object pass is stateless and receives read-only getters for the first two. Its enemy iteration is frame-local, including one lazy shot outcome per enemy, so no shared iterator or memo escaped with it. Cone, melee reach, shove/topple/partition/break affordances, enemy verdict rings and the purge self-ring moved together, preserving the ally-to-enemy fall-through a dual-sided purge requires. Three focused tests, all 918 unit tests and targeting 7/7 pass.
+  **Constraint preserved:** the ally arm deliberately falls through for a
+  dual-sided purge. The extracted pass remains the next statement after that
+  gate, rather than turning the ally helper into an unconditional return.
 - [x] **Q902** `src/combat.js` [test-gap] **(new 2026-08-03, the remainder of Q003/Q035)**
   **DONE 2026-08-03 — the seam exists, and both halves of the AI turn crossed it.**
   The finding was right that cutting further would not help: the loop needed a

@@ -1,3 +1,5 @@
+import { createBodyTargets } from './combat-body-targets.js';
+
 // The AIM VIEW: everything the ground says about a verb you are pointing but
 // have not committed - the wash, the target rings, the walk preview, the eased
 // cover marker - plus the small pile of state that only those drawers touch.
@@ -52,6 +54,17 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
   // Dropping the aim drops the eased marker with it, or the next crouch preview
   // starts from wherever the last one happened to stop.
   const clearAim = () => { aimPoint = null; coverEase = null; };
+  const bodyTargets = createBodyTargets({
+    app,
+    pc,
+    marks,
+    world,
+    REACH,
+    view,
+    ask,
+    get aimPoint() { return aimPoint; },
+    get hoverFoe() { return hoverFoe; },
+  });
 
   // The ground wash while a ranged verb is armed (TACTICS_PLAN M7): every tile
   // the aim can legally land on, line of sight included, painted translucent
@@ -526,158 +539,7 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
     // green ring is a promise.
     if (sides.allies && drawAllyRings(a, id, sides)) return;
     if (!sides.enemies) return;
-    if (a.cone) {
-      const test = aimPoint && ask.coneTest(a, aimPoint.x, aimPoint.z);
-      if (test) {
-        const y = 0.14;
-        const line = ask.conePolyline(a, test);
-        for (let i = 1; i < line.length; i++) {
-          app.drawLine(new pc.Vec3(line[i - 1][0], y, line[i - 1][1]),
-            new pc.Vec3(line[i][0], y, line[i][1]), OK);
-        }
-      }
-      for (const en of world.liveEnemies()) {
-        if (!en.entity) continue;
-        const pos = en.entity.getPosition();
-        // Test the BODY (where the ring is drawn), not the tile centre, so the
-        // ring and the rule agree about what the cone catches.
-        const hit = test && test(pos.x, pos.z, TARGET_R)
-          && ask.bodyLos(view.active, en);
-        drawRing(pos.x, pos.z, TARGET_R, hit && view.active.ap >= a.ap ? OK : FAR);
-      }
-      return;
-    }
-    // Reach is a RADIUS, so the honest affordance is a circle on the floor.
-    // Highlighting whole tiles would draw a plus-with-corners that lies about
-    // the shape, and without any affordance a long weapon is an invisible
-    // statistic - the player would feel the extra tile without being told why.
-    // Drawn on the ACTOR's continuous position, which is what the rule measures,
-    // and ONLY while a coworker is under the cursor - the same hoverFoe the
-    // crosshair and the readout key off, so the three affordances can't
-    // disagree about whether you're aiming at someone. It's the answer to "can
-    // I hit them from here?", a question you only ask while aiming; always-on,
-    // it was just a circle that followed you around.
-    // A RANGED attack is not answered by this circle: its rule is a Chebyshev
-    // square plus a line of sight, which a radius describes wrongly at the
-    // corners, and the melee reach drawn under a staple gun says the opposite
-    // of the truth. The per-enemy rings below answer it exactly for those.
-    if (hoverFoe?.alive && !ask.rangeOf(id)) {
-      const me = ask.posOf(view.active);
-      const r = a.type === 'shove' ? REACH.SHOVE : ask.isPull(a) ? REACH.PULL : ask.reachOfUnit(view.active);
-      drawRing(me.x, me.z, r, REACH_RING);
-    }
-    // Props are targets too, and nothing ever said so. A shove that puts a
-    // filing cabinet on somebody is strictly the better move where it is
-    // available - it damages, it stuns, and it leaves cover the other side has
-    // to walk around - so the affordance for it should not be "the player
-    // happened to try it". Eight neighbours, the same scan the AI runs, and
-    // `topplePlan` is the same rule the click runs: a green ring here is the
-    // same promise it is anywhere else on this bar.
-    if (a.type === 'shove') {
-      const b = ask.bodyOf(view.active);
-      const afford = view.active.ap >= a.ap;
-      for (const { x, z, plan } of ask.toppleRings(b.x, b.z, {
-        isToppleableAt: (px, pz) => ask.isToppleable(world.tileDefAt(px, pz)),
-        planAt: (px, pz) => ask.topplePlan(view.active, px, pz),
-        // The same continuous-body reach the tile click applies.
-        reaches: (px, pz) => ask.toppleReaches(px, pz),
-      })) {
-        const canDrop = !!plan && afford;
-        drawRing(x, z, 0.42, canDrop ? OK : FAR);
-        // ...and WHERE it lands (designer, 2026-07-30): the fall is
-        // sign-derived from where you stand, so the read must be too - a
-        // smaller ring on the landing tile, tied to the prop's by a line.
-        if (plan) {
-          drawRing(plan.lx, plan.lz, 0.28, canDrop ? OK : FAR);
-          app.drawLine(new pc.Vec3(x, 0.14, z),
-            new pc.Vec3(plan.lx, 0.14, plan.lz), canDrop ? OK : FAR);
-        }
-      }
-      for (const { x, z, clear } of ask.partitionRings(b.x, b.z, world)) {
-        drawRing(x, z, 0.42, clear && afford ? OK : FAR);
-      }
-    }
-    // Breakable cover rings under an ARMED attack (TACTICS_PLAN M8) - the
-    // same promise the shove's prop rings make: green means the click lands
-    // the hit. A melee swing rings its neighbourhood, a ranged attack
-    // everything it could hit; adjacent partitions ring like the shove's do
-    // (a DISTANT partition stays un-rung - the shove's own partial-affordance
-    // precedent `[proposed]` - though the ranged click still resolves).
-    //
-    // ARMED is load-bearing, and was not enforced. The coworker rings above
-    // are deliberately drawn with nothing armed, because a bare click still
-    // swings; these are not the same. `aimsAtProps` passes for the plain
-    // basic attack, so every partition edge you stood beside rang green for
-    // the whole fight - a ring on the tile ACROSS a cubicle wall, promising
-    // a verb nobody had reached for (designer, 2026-07-31). Breaking cover
-    // down is a thing you go looking for; its affordance appears when you do.
-    if (view.armed) {
-      const b = ask.bodyOf(view.active);
-      const paid = (!a.ammoCost || view.active.sheet.paper >= ask.ammoCostOf(id)) && view.active.ap >= a.ap;
-      const { props, edges } = ask.breakRings(a, b.x, b.z, ask.rangeOf(id), {
-        tileDefAt: world.tileDefAt,
-        planAt: (px, pz) => ask.breakPlanAt(id, px, pz),
-        edgeHpBetween: world.edgeHpBetween,
-      });
-      for (const { x, z, landable } of props) {
-        drawRing(x, z, 0.42, landable && paid ? OK : FAR);
-      }
-      for (const { x, z } of edges) drawRing(x, z, 0.42, paid ? OK : FAR);
-    }
-    // The verdict ladder is combat-targeting.enemyRingOk; everything gathered
-    // here is a leaf fact only this file can answer. The lazy getters matter:
-    // shotOutcome and pullPlanFor are not free, and only one branch of the
-    // ladder ever reads them.
-    const range = ask.rangeOf(id);
-    for (const en of world.liveEnemies()) {
-      if (!en.entity) continue;
-      // ONE shotOutcome per enemy, memoised and LAZY, because it runs
-      // crouchStateOf - which lazily BREAKS a stale crouch. Idempotent (a
-      // second call finds nothing left to break), but this is a per-frame path
-      // and asking twice where one answer will do is waste.
-      //
-      // Lazy is safe, and worth saying why: the ladder's `&&` chain means an
-      // out-of-range or blind target never reads it, so the incidental
-      // revalidation this used to do every frame no longer happens here. It
-      // does not need to. `refresh()` is the OWNER of crouch revalidation
-      // (it walks every crouch), and every event that can stale one - a shove
-      // glide, a topple taking the shield, a swap, a step - goes through it.
-      // Between refreshes only the cursor moves, and a cursor cannot invalidate
-      // a crouch.
-      let shot = null;
-      const outcome = () => (shot ??= ask.shotOutcome(view.active, en));
-      const ok = ask.enemyRingOk(a, {
-        ap: view.active.ap,
-        ammoOk: !a.ammoCost || view.active.sheet.paper >= ask.ammoCostOf(id),
-        range,
-        dist: ask.bodyDist(view.active, en),
-        los: ask.bodyLos(view.active, en),
-        get shoveReach() { return ask.canReach(view.active, en, REACH.SHOVE); },
-        get pullOk() { return !!ask.pullPlanFor(en); },
-        get controlRefused() {
-          return ask.controlProblem(a, {
-            dist: ask.bodyDist(view.active, en),
-            los: ask.bodyLos(view.active, en),
-            ap: view.active.ap,
-            usesLeft: a.uses ? view.active.usesLeft[id] ?? 0 : null,
-            alive: en.alive,
-          });
-        },
-        get shotBlocked() { return !!outcome().blocked; },
-        get shotRedirectedToAlly() {
-          const so = outcome();
-          return !!so.redirected && !!so.target?.sheet;
-        },
-        get meleeReachable() { return ask.canReach(view.active, en) || ask.hasSwingSpot(en); },
-      });
-      const pos = en.entity.getPosition();
-      drawRing(pos.x, pos.z, TARGET_R, ok ? OK : FAR);
-    }
-    // A purge can also target yourself - ring the caster too.
-    if (a.purge && view.active.actor.entity) {
-      const pp = view.active.actor.entity.getPosition();
-      drawRing(pp.x, pp.z, 0.5, view.active.ap >= a.ap ? OK : FAR);
-    }
+    bodyTargets.draw(a, id);
   }
 
   return {
