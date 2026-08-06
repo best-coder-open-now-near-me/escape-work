@@ -17,13 +17,14 @@ public static class EscapeWorkHumanoidBake
     [Serializable] class Manifest
     {
         public string outputRoot;
-        public BakeSpec bake;
+        public List<BakeSpec> bakes;
         public List<CharacterSpec> characters;
         public List<ClipSpec> clips;
     }
 
     [Serializable] class BakeSpec
     {
+        public string id;
         public string characterId;
         public int sampleRate = 30;
         public string rootMotion;
@@ -91,6 +92,7 @@ public static class EscapeWorkHumanoidBake
         public bool success;
         public string error;
         public string characterId;
+        public string rigId;
         public string prefab;
         public bool avatarIsHuman;
         public string rootMotion;
@@ -124,7 +126,20 @@ public static class EscapeWorkHumanoidBake
         Transform hips = animator.GetBoneTransform(HumanBodyBones.Hips);
         if (hips == null)
             throw new InvalidOperationException("Humanoid avatar has no Hips transform");
-        return hips.GetComponentsInChildren<Transform>(true).ToList();
+        SkinnedMeshRenderer[] renderers = animator
+            .GetComponentsInChildren<SkinnedMeshRenderer>(true);
+        HashSet<Transform> skinBones = new HashSet<Transform>(
+            renderers.SelectMany(renderer => renderer.bones)
+                .Where(bone => bone != null)
+        );
+        if (skinBones.Count == 0)
+            throw new InvalidOperationException("Humanoid prefab has no skinned bones");
+        Transform rigRoot = renderers.Select(renderer => renderer.rootBone)
+            .FirstOrDefault(root => root != null && (root == hips || hips.IsChildOf(root)))
+            ?? hips;
+        skinBones.Add(rigRoot);
+        return rigRoot.GetComponentsInChildren<Transform>(true)
+            .Where(skinBones.Contains).ToList();
     }
 
     static BonePose Capture(Transform root, Transform bone)
@@ -222,21 +237,27 @@ public static class EscapeWorkHumanoidBake
             Manifest manifest = JsonUtility.FromJson<Manifest>(
                 File.ReadAllText(manifestPath)
             );
-            if (manifest == null || manifest.bake == null)
-                throw new InvalidDataException("Manifest has no bake configuration");
+            if (manifest == null || manifest.bakes == null || manifest.bakes.Count == 0)
+                throw new InvalidDataException("Manifest has no bake configurations");
+            string requestedRig = Argument("-escapeWorkBakeRig");
+            BakeSpec bake = string.IsNullOrEmpty(requestedRig)
+                ? manifest.bakes[0]
+                : manifest.bakes.FirstOrDefault(item => item.id == requestedRig);
+            if (bake == null)
+                throw new InvalidDataException("Unknown bake rig " + requestedRig);
             CharacterSpec character = manifest.characters.FirstOrDefault(
-                item => item.id == manifest.bake.characterId
+                item => item.id == bake.characterId
             );
             if (character == null)
                 throw new InvalidDataException(
-                    "Unknown bake character " + manifest.bake.characterId
+                    "Unknown bake character " + bake.characterId
                 );
-            int sampleRate = Mathf.Max(1, manifest.bake.sampleRate);
+            int sampleRate = Mathf.Max(1, bake.sampleRate);
             outputPath = Path.GetFullPath(Argument(
                 "-escapeWorkBakeOutput",
                 Path.Combine(
                     Path.GetDirectoryName(manifestPath), "..",
-                    manifest.outputRoot, manifest.bake.output
+                    manifest.outputRoot, bake.output
                 )
             ));
 
@@ -262,9 +283,10 @@ public static class EscapeWorkHumanoidBake
 
                 List<Transform> bones = RigBones(animator);
                 report.characterId = character.id;
+                report.rigId = bake.id;
                 report.prefab = prefabPath;
                 report.avatarIsHuman = animator.avatar.isHuman;
-                report.rootMotion = manifest.bake.rootMotion;
+                report.rootMotion = bake.rootMotion;
                 report.sampleRate = sampleRate;
                 report.restPose = CaptureRest(instance.transform, bones);
 

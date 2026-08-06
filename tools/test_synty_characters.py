@@ -34,6 +34,7 @@ class SyntyCharacterManifestTests(unittest.TestCase):
                     }],
                     'characters': [{
                         'id': 'worker', 'source': 'Pack/Characters.fbx',
+                        'rig': 'pack-humanoid',
                         'mesh': 'Worker', 'prefab': 'Pack/Worker.prefab',
                         'output': 'characters/worker.glb',
                     }],
@@ -45,6 +46,7 @@ class SyntyCharacterManifestTests(unittest.TestCase):
             self.assertEqual(resolved[0:3], (synty, animations, output))
             self.assertEqual(resolved[3], [{
                 'id': 'worker',
+                'rig': 'pack-humanoid',
                 'mesh': 'Worker',
                 'src': os.path.join(synty, 'Pack', 'Characters.fbx'),
                 'prefab': os.path.join(synty, 'Pack', 'Worker.prefab'),
@@ -74,11 +76,41 @@ class SyntyCharacterManifestTests(unittest.TestCase):
         with open(manifest, encoding='utf8') as stream:
             data = json.load(stream)
         character_ids = {character['id'] for character in data['characters']}
-        self.assertIn(data['bake']['characterId'], character_ids)
-        self.assertGreaterEqual(data['bake']['sampleRate'], 24)
-        self.assertEqual(data['bake']['rootMotion'], 'in-place')
-        self.assertTrue(data['bake']['output'].endswith('.json'))
+        bake_ids = {bake['id'] for bake in data['bakes']}
+        self.assertEqual(bake_ids, {character['rig'] for character in data['characters']})
+        for bake in data['bakes']:
+            self.assertIn(bake['characterId'], character_ids)
+            self.assertGreaterEqual(bake['sampleRate'], 24)
+            self.assertEqual(bake['rootMotion'], 'in-place')
+            self.assertTrue(bake['output'].endswith('.json'))
         self.assertTrue(data['outputRoot'].startswith('assets/licensed/'))
+
+    def test_animation_bakes_are_selected_by_rig_id(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, 'shops.json')
+            with open(path, 'w', encoding='utf8') as stream:
+                json.dump({'success': True, 'rigId': 'shops'}, stream)
+            loaded = CONVERTER.load_animation_bakes({
+                'bakes': [{'id': 'shops', 'output': 'shops.json'}]
+            }, root)
+            self.assertEqual(loaded['shops']['rigId'], 'shops')
+
+    def test_unity_pose_basis_conversion_is_explicit(self):
+        source = os.path.join(SCRIPT_DIR, 'synty-character-to-glb.py')
+        with open(source, encoding='utf8') as stream:
+            implementation = stream.read()
+        self.assertIn("-position['x'], -position['z'], position['y']", implementation)
+        self.assertIn("rotation['w'], rotation['x'], rotation['z'], -rotation['y']", implementation)
+        self.assertIn("export_animation_mode='ACTIONS'", implementation)
+
+    def test_unity_duplicate_bone_suffix_maps_to_blender(self):
+        self.assertEqual(
+            CONVERTER._blender_bone_name('Finger_01 1', {'Finger_01.001'}),
+            'Finger_01.001',
+        )
+        self.assertIsNone(
+            CONVERTER._blender_bone_name('Hair_Attachment', {'Hips', 'Head'})
+        )
 
 
 if __name__ == '__main__':

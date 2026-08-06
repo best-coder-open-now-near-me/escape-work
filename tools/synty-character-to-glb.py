@@ -6,9 +6,9 @@ select a body and assign its atlas material; Blender sees every body and a
 generic material name. The manifest makes that selection explicit.
 
 Source animation is intentionally stripped. The selected Explosive LLC clips
-are Unity Humanoid animations on another hierarchy and must be retargeted and
-baked onto the Synty skeleton before export; pretending the raw tracks are
-compatible would produce a T-pose in PlayCanvas.
+are Unity Humanoid animations on another hierarchy. EscapeWorkHumanoidBake.cs
+samples Unity's retargeted target-rig pose; this script maps that bake back to
+the Blender armature and includes named actions in the GLB.
 """
 
 import argparse
@@ -64,6 +64,7 @@ def manifest_jobs(manifest_path, selected=None, synty_root=None,
             continue
         jobs.append({
             'id': character['id'],
+            'rig': character['rig'],
             'mesh': character['mesh'],
             'src': os.path.join(source_root, *character['source'].split('/')),
             'prefab': os.path.join(source_root, *character['prefab'].split('/')),
@@ -93,7 +94,154 @@ def _dimensions(obj):
     }
 
 
-def convert(job, materials_by_guid):
+def _unity_pose_matrix(pose):
+    """Convert a Unity root-relative pose to Blender's world basis.
+
+    Unity is left-handed Y-up; Blender is right-handed Z-up. The FBX import
+    maps Unity (X, Y, Z) to Blender (-X, -Z, Y). Quaternion vectors are axial,
+    so the handedness reflection contributes one additional sign reversal.
+    The fixed bone-basis offset calculated from both rest poses then absorbs
+    FBX import roll choices, including automatic_bone_orientation.
+    """
+    from mathutils import Matrix, Quaternion, Vector
+    position = pose['position']
+    rotation = pose['rotation']
+    translation = Matrix.Translation(Vector((
+        -position['x'], -position['z'], position['y'],
+    )))
+    quaternion = Quaternion((
+        rotation['w'], rotation['x'], rotation['z'], -rotation['y'],
+    ))
+    return translation @ quaternion.to_matrix().to_4x4()
+
+
+def _set_linear_interpolation(action):
+    for curve in action.fcurves:
+        for keyframe in curve.keyframe_points:
+            keyframe.interpolation = 'LINEAR'
+
+
+def _blender_bone_name(unity_name, known):
+    if unity_name in known:
+        return unity_name
+    # Unity appends ` 1` to duplicate FBX transform names; Blender uses `.001`.
+    # The suffix is deterministic for each importer, so translate it explicitly.
+    head, separator, suffix = unity_name.rpartition(' ')
+    if separator and suffix.isdigit():
+        candidate = f'{head}.{int(suffix):03d}'
+        if candidate in known:
+            return candidate
+    return None
+
+
+def load_animation_bakes(manifest, output_root, override=None):
+    specs = {spec['id']: spec for spec in manifest.get('bakes', [])}
+    paths = [os.path.abspath(override)] if override else [
+        os.path.join(output_root, *spec['output'].split('/'))
+        for spec in specs.values()
+    ]
+    loaded = {}
+    for path in paths:
+        if not os.path.isfile(path):
+            continue
+        with open(path, encoding='utf8') as stream:
+            bake = json.load(stream)
+        rig_id = bake.get('rigId')
+        if rig_id not in specs:
+            raise ValueError(
+                f'Unity bake {path} has unknown or missing rigId {rig_id!r}'
+            )
+        loaded[rig_id] = bake
+    return loaded
+
+
+def apply_animation_bake(armature, bake):
+    if not bake.get('success'):
+        raise ValueError(f'Unity Humanoid bake failed: {bake.get("error", "unknown error")}')
+    rest = bake.get('restPose', [])
+    if not rest:
+        raise ValueError('Unity Humanoid bake has no rest pose')
+    known = {bone.name for bone in armature.data.bones}
+    bone_map = {
+        bone['bone']: _blender_bone_name(bone['bone'], known)
+        for bone in rest
+    }
+    missing = [name for name, mapped in bone_map.items() if mapped is None]
+    if missing:
+        raise ValueError(
+            f'Unity bake and Blender armature differ; missing bones: {missing}'
+        )
+
+    from mathutils import Matrix
+    armature.animation_data_create()
+    inverse_armature = armature.matrix_world.inverted()
+    offsets = {}
+    for rest_bone in rest:
+        name = rest_bone['bone']
+        blender_name = bone_map[name]
+        unity_rest = _unity_pose_matrix(rest_bone)
+        blender_rest = (
+            armature.matrix_world @ armature.data.bones[blender_name].matrix_local
+        )
+        offsets[name] = unity_rest.inverted() @ blender_rest
+
+    sample_rate = int(bake.get('sampleRate', 30))
+    bpy.context.scene.render.fps = sample_rate
+    actions = []
+    for baked_clip in bake.get('clips', []):
+        action = bpy.data.actions.new(baked_clip['id'])
+        action.use_fake_user = True
+        action['escape_work_loop'] = bool(baked_clip.get('loop'))
+        action['escape_work_source_clip'] = baked_clip.get('sourceClip', '')
+        armature.animation_data.action = action
+        for pose_bone in armature.pose.bones:
+            pose_bone.rotation_mode = 'QUATERNION'
+            pose_bone.matrix_basis = Matrix.Identity(4)
+        bpy.context.view_layer.update()
+
+        for baked_frame in baked_clip.get('frames', []):
+            # Convert desired world matrices to each bone's local matrix_basis
+            # directly. Assigning pose_bone.matrix sequentially lets Blender's
+            # dependency graph re-evaluate a keyed parent before its child and
+            # can bake a child against stale parent state.
+            frame = round(float(baked_frame.get('time', 0)) * sample_rate)
+            desired = {}
+            for sample in baked_frame.get('bones', []):
+                name = sample['bone']
+                target_world = _unity_pose_matrix(sample) @ offsets[name]
+                desired[bone_map[name]] = inverse_armature @ target_world
+            for rest_bone in rest:
+                blender_name = bone_map[rest_bone['bone']]
+                data_bone = armature.data.bones[blender_name]
+                pose_bone = armature.pose.bones[blender_name]
+                parent = data_bone.parent
+                if parent is not None and parent.name in desired:
+                    basis = data_bone.convert_local_to_pose(
+                        desired[blender_name], data_bone.matrix_local,
+                        parent_matrix=desired[parent.name],
+                        parent_matrix_local=parent.matrix_local,
+                        invert=True,
+                    )
+                else:
+                    basis = data_bone.convert_local_to_pose(
+                        desired[blender_name], data_bone.matrix_local,
+                        invert=True,
+                    )
+                pose_bone.matrix_basis = basis
+                pose_bone.keyframe_insert('location', frame=frame, group=blender_name)
+                pose_bone.keyframe_insert(
+                    'rotation_quaternion', frame=frame, group=blender_name
+                )
+                pose_bone.keyframe_insert('scale', frame=frame, group=blender_name)
+        _set_linear_interpolation(action)
+        actions.append(action.name)
+
+    if actions:
+        armature.animation_data.action = bpy.data.actions[actions[0]]
+    return actions
+
+
+def convert(job, materials_by_guid, bake=None):
     if bpy is None:
         raise RuntimeError('Character conversion must run under Blender')
     bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -152,6 +300,8 @@ def convert(job, materials_by_guid):
         bpy.data.actions.remove(action)
     armature.animation_data_clear()
 
+    dimensions = _dimensions(target)
+    exported_actions = apply_animation_bake(armature, bake) if bake else []
     os.makedirs(os.path.dirname(job['out']), exist_ok=True)
     bpy.ops.export_scene.gltf(
         filepath=job['out'],
@@ -159,7 +309,11 @@ def convert(job, materials_by_guid):
         export_yup=True,
         export_materials='EXPORT',
         export_image_format='AUTO',
-        export_animations=False,
+        export_animations=bool(exported_actions),
+        export_animation_mode='ACTIONS',
+        export_anim_single_armature=True,
+        export_anim_slide_to_zero=True,
+        export_force_sampling=True,
         export_skins=True,
         use_selection=True,
     )
@@ -169,8 +323,8 @@ def convert(job, materials_by_guid):
         'material_texture': material_spec.get('texture'),
         'bones': [bone.name for bone in armature.data.bones],
         'source_actions_stripped': source_actions,
-        'animations_exported': False,
-        **_dimensions(target),
+        'animations_exported': exported_actions,
+        **dimensions,
     }
 
 
@@ -181,9 +335,10 @@ def main():
     parser.add_argument('--synty-root')
     parser.add_argument('--animation-root')
     parser.add_argument('--out')
+    parser.add_argument('--bake')
     parser.add_argument('--report')
     args = parser.parse_args(sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else None)
-    synty_root, _animation_root, _output_root, jobs, clips, contract = manifest_jobs(
+    synty_root, _animation_root, output_root, jobs, clips, contract = manifest_jobs(
         args.manifest, args.character, args.synty_root, args.animation_root, args.out
     )
     missing_clips = [clip['path'] for clip in clips if not os.path.isfile(clip['path'])]
@@ -192,6 +347,13 @@ def main():
         for path in missing_clips:
             print(f'  - {path}')
     _materials, materials_by_guid = read_material_libraries(synty_root)
+    with open(args.manifest, encoding='utf8') as stream:
+        manifest = json.load(stream)
+    bakes = load_animation_bakes(manifest, output_root, args.bake)
+    if bakes:
+        print('[synty-character] Unity Humanoid bakes -> ' + ', '.join(sorted(bakes)))
+    else:
+        print('[synty-character] Unity Humanoid bakes unavailable; exporting rigs only')
     report = {
         'rig_contract': contract,
         'clips': [{
@@ -203,7 +365,13 @@ def main():
         'characters': {},
     }
     for job in jobs:
-        info = convert(job, materials_by_guid)
+        bake = bakes.get(job['rig'])
+        if bake is None:
+            print(
+                f'[synty-character] no {job["rig"]} bake for {job["id"]}; '
+                'exporting rig only'
+            )
+        info = convert(job, materials_by_guid, bake)
         report['characters'][job['id']] = info
         print(
             f'[synty-character] OK {job["id"]:30s} '

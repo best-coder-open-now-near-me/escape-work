@@ -79,6 +79,7 @@ Unity.exe -batchmode -nographics `
   -projectPath C:\private\escape-work-character-bake `
   -executeMethod EscapeWorkHumanoidBake.Run `
   -escapeWorkManifest E:\GodotGames\escape-work\tools\synty-characters.json `
+  -escapeWorkBakeRig synty-shops `
   -escapeWorkSyntyAssetRoot Assets/Synty `
   -escapeWorkAnimationAssetRoot "Assets/ExplosiveLLC/RPG Character Mecanim Animation Pack FREE/Animations" `
   -logFile C:\private\escape-work-character-bake.log
@@ -89,7 +90,15 @@ and writes target-rig rest and pose data beneath the ignored licensed output
 root. Source animation events are retained as authoring metadata; PlayCanvas
 gameplay events remain owned by the game's combat/timing data. A slowed run is
 currently the temporary `walk` because the free animation pack has no true
-walk cycle.
+walk cycle. Run it once per manifest `bakes` entry; each unique rig/rest-pose
+family gets its own bake while every body on that rig shares the result.
+
+Run `synty-character-to-glb.py` again after the bake. It discovers the bake at
+the manifest's ignored output path (or accepts `--bake <path>`), maps Unity's
+world poses through the target rig's Blender rest pose, and exports one named
+glTF action per manifest clip. This rest-pose mapping is what makes the bridge
+robust to Blender's FBX bone-roll conversion instead of relying on source and
+target bone axes accidentally matching.
 
 ### Why it reads the Unity metadata
 

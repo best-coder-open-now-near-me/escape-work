@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "status": "pipeline-spike",
+  "status": "validated-pipeline-spike",
   "syntyRoot": "assets/Synty",
   "animationRoot": "assets/ExplosiveLLC/RPG Character Mecanim Animation Pack FREE/Animations",
   "outputRoot": "assets/licensed/synty",
@@ -12,7 +12,7 @@
   "rigContract": {
     "modelRig": "Synty Humanoid",
     "animationRig": "Unity Humanoid/Mecanim",
-    "adapter": "mecanim-bake-required",
+    "adapter": "unity-humanoid-json-bake",
     "runtimeClips": [
       "idle",
       "walk",
@@ -20,13 +20,22 @@
     ],
     "note": "The source animation FBXs target a different skeleton. Unity can retarget both Humanoid avatars, but the result must be baked onto the Synty hierarchy before glTF export."
   },
-  "bake": {
-    "characterId": "shops-worker-male",
-    "sampleRate": 30,
-    "rootMotion": "in-place",
-    "output": "animations/synty-rpg-humanoid-bake.json",
-    "note": "One canonical body bakes the shared Synty rig. Change characterId when a future model introduces a different skeleton/rest pose."
-  },
+  "bakes": [
+    {
+      "id": "synty-shops",
+      "characterId": "shops-worker-male",
+      "sampleRate": 30,
+      "rootMotion": "in-place",
+      "output": "animations/synty-shops-rpg-humanoid-bake.json"
+    },
+    {
+      "id": "synty-generic",
+      "characterId": "generic-business-male",
+      "sampleRate": 30,
+      "rootMotion": "in-place",
+      "output": "animations/synty-generic-rpg-humanoid-bake.json"
+    }
+  ],
   "clips": [
     {
       "id": "idle",
@@ -75,6 +84,7 @@
   "characters": [
     {
       "id": "shops-worker-male",
+      "rig": "synty-shops",
       "source": "PolygonShops/Models/Characters.fbx",
       "mesh": "SM_Chr_Worker_Male_01",
       "prefab": "PolygonShops/Prefabs/Characters/SM_Chr_Worker_Male_01.prefab",
@@ -83,6 +93,7 @@
     },
     {
       "id": "shops-worker-female",
+      "rig": "synty-shops",
       "source": "PolygonShops/Models/Characters.fbx",
       "mesh": "SM_Chr_Worker_Female_01",
       "prefab": "PolygonShops/Prefabs/Characters/SM_Chr_Worker_Female_01.prefab",
@@ -91,6 +102,7 @@
     },
     {
       "id": "shops-clerk-male",
+      "rig": "synty-shops",
       "source": "PolygonShops/Models/Characters.fbx",
       "mesh": "SM_Chr_Clerk_Male_01",
       "prefab": "PolygonShops/Prefabs/Characters/SM_Chr_Clerk_Male_01.prefab",
@@ -99,6 +111,7 @@
     },
     {
       "id": "shops-clerk-female",
+      "rig": "synty-shops",
       "source": "PolygonShops/Models/Characters.fbx",
       "mesh": "SM_Chr_Clerk_Female_01",
       "prefab": "PolygonShops/Prefabs/Characters/SM_Chr_Clerk_Female_01.prefab",
@@ -107,6 +120,7 @@
     },
     {
       "id": "generic-business-male",
+      "rig": "synty-generic",
       "source": "PolygonGeneric/Models/Generic_Characters.fbx",
       "mesh": "SM_Gen_Chr_Business_Male_01",
       "prefab": "PolygonGeneric/Prefabs/Characters/SM_Gen_Chr_Business_Male_01.prefab",
@@ -115,6 +129,7 @@
     },
     {
       "id": "generic-business-female",
+      "rig": "synty-generic",
       "source": "PolygonGeneric/Models/Generic_Characters.fbx",
       "mesh": "SM_Gen_Chr_Business_Female_01",
       "prefab": "PolygonGeneric/Prefabs/Characters/SM_Gen_Chr_Business_Female_01.prefab",
