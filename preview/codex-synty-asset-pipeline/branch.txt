@@ -1,0 +1,1 @@
+codex/synty-asset-pipeline
