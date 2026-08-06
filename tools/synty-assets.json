@@ -105,6 +105,132 @@
           "ground": false
         }
       ]
+    },
+    {
+      "id": "office-detail-candidates",
+      "pack": "PolygonShops",
+      "goal": "Visually reviewed alternates for mail-room dressing, workstation composition, breakable clutter, and a glass office-door treatment.",
+      "assets": [
+        {
+          "id": "papers-scatter-wide",
+          "source": "PolygonShops/Models/SM_Props_Papers_02.fbx",
+          "output": "office/papers-scatter-wide.glb",
+          "role": "paper-surface visual variant",
+          "ground": true
+        },
+        {
+          "id": "papers-scatter-dense",
+          "source": "PolygonShops/Models/SM_Props_Papers_03.fbx",
+          "output": "office/papers-scatter-dense.glb",
+          "role": "paper-surface visual variant",
+          "ground": true
+        },
+        {
+          "id": "papers-scatter-brochures",
+          "source": "PolygonShops/Models/SM_Props_Papers_04.fbx",
+          "output": "office/papers-scatter-brochures.glb",
+          "role": "paper-surface visual variant",
+          "ground": true
+        },
+        {
+          "id": "papers-scatter-light",
+          "source": "PolygonShops/Models/SM_Props_Papers_05.fbx",
+          "output": "office/papers-scatter-light.glb",
+          "role": "paper-surface visual variant",
+          "ground": true
+        },
+        {
+          "id": "papers-scatter-mail",
+          "source": "PolygonShops/Models/SM_Props_Papers_06.fbx",
+          "output": "office/papers-scatter-mail.glb",
+          "role": "paper-surface visual variant",
+          "ground": true
+        },
+        {
+          "id": "printer-paper",
+          "source": "PolygonShops/Models/SM_Prop_Computer_Printer_Paper_01.fbx",
+          "output": "office/printer-paper.glb",
+          "role": "desk and printer attachment",
+          "ground": false
+        },
+        {
+          "id": "inkjet-printer",
+          "source": "PolygonShops/Models/SM_Prop_Computer_Printer_02.fbx",
+          "output": "office/inkjet-printer.glb",
+          "role": "printer visual alternate",
+          "ground": true
+        },
+        {
+          "id": "tall-rubbish-bin",
+          "source": "PolygonShops/Models/SM_Prop_Rubbish_Bin_02.fbx",
+          "output": "office/tall-rubbish-bin.glb",
+          "role": "office waste container",
+          "ground": true
+        },
+        {
+          "id": "short-rubbish-bin",
+          "source": "PolygonShops/Models/SM_Prop_Rubbish_Bin_03.fbx",
+          "output": "office/short-rubbish-bin.glb",
+          "role": "office waste container",
+          "ground": true
+        },
+        {
+          "id": "open-cardboard-box",
+          "source": "PolygonShops/Models/SM_Prop_Cardboard_Box_02.fbx",
+          "output": "office/open-cardboard-box.glb",
+          "role": "mail-room storage",
+          "ground": true
+        },
+        {
+          "id": "closed-cardboard-box",
+          "source": "PolygonShops/Models/SM_Prop_Cardboard_Box_04.fbx",
+          "output": "office/closed-cardboard-box.glb",
+          "role": "mail-room storage",
+          "ground": true
+        },
+        {
+          "id": "glass-office-door",
+          "source": "PolygonShops/Models/SM_Bld_Door_03.fbx",
+          "output": "office/glass-office-door.glb",
+          "role": "door visual alternate",
+          "ground": true
+        },
+        {
+          "id": "flat-monitor",
+          "source": "PolygonShops/Models/SM_Prop_Computer_Monitor_02.fbx",
+          "output": "office/flat-monitor.glb",
+          "role": "desk attachment",
+          "ground": false
+        },
+        {
+          "id": "laptop",
+          "source": "PolygonShops/Models/SM_Prop_Computer_Laptop_01.fbx",
+          "output": "office/laptop.glb",
+          "role": "desk attachment",
+          "ground": false
+        },
+        {
+          "id": "keyboard",
+          "source": "PolygonShops/Models/SM_Prop_Computer_Keyboard_01.fbx",
+          "output": "office/keyboard.glb",
+          "role": "desk attachment",
+          "ground": false
+        },
+        {
+          "id": "mouse",
+          "source": "PolygonShops/Models/SM_Prop_Computer_Mouse_01.fbx",
+          "output": "office/mouse.glb",
+          "role": "desk attachment",
+          "ground": false
+        },
+        {
+          "id": "cordless-phone",
+          "source": "PolygonShops/Models/SM_Prop_Computer_Phone_Cordless_01.fbx",
+          "output": "office/cordless-phone.glb",
+          "role": "desk attachment",
+          "ground": false
+        }
+      ]
     }
   ]
 }
