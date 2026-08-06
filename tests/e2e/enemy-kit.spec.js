@@ -20,7 +20,7 @@
 import { test, expect } from '@playwright/test';
 import {
   bootStash, enterCombat, waitForPlayerTurn, refillAp,
-  combatState, endTurnUntilPlayer,
+  combatState, endTurnUntilPlayer, withWorldStill,
 } from './helpers.js';
 
 const beats = (page) => page.evaluate(() => window.__combat?.bout?.beats ?? {});
@@ -71,12 +71,22 @@ const ESCORT_HALL = {
 test('the Security Guard strikes from a tile bare hands cannot answer', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, ESCORT_HALL, 'office-drone');
-  expect(await page.evaluate(() => window.__god.fight()), 'the fight opened in place').toBe(true);
+  // Coworkers wander while the renderer warms. Freeze staging and put the
+  // player exactly two tiles from wherever the guard currently stands; the
+  // test is about reach, not whether a 600ms boot happened to include a step.
+  let opened = false;
+  await withWorldStill(page, async () => {
+    const guard = await enemyAt(page, 'Security Guard');
+    await page.evaluate(({ x, z }) => window.__god.teleport(x >= 3 ? x - 2 : x + 2, z), guard);
+    opened = await page.evaluate(() => window.__god.fight());
+  });
+  expect(opened, 'the fight opened in place').toBe(true);
   await waitForPlayerTurn(page);
 
   const before = await page.evaluate(() => window.__god.player.hp);
   const gapBefore = await enemyAt(page, 'Security Guard');
-  expect(gapBefore.x - 1, 'he starts two tiles off').toBe(2);
+  const leadBefore = await page.evaluate(() => window.__game.playerTile);
+  expect(Math.abs(gapBefore.x - leadBefore.x), 'he starts two tiles off').toBe(2);
 
   const b = await playRounds(page, 3);
 
@@ -91,7 +101,8 @@ test('the Security Guard strikes from a tile bare hands cannot answer', async ({
   // ends up adjacent the test still sees damage, so this is the assertion that
   // makes it about reach rather than about a coworker walking up.
   const after = await enemyAt(page, 'Security Guard');
-  expect(after.x - 1, 'he never had to close the gap').toBeGreaterThanOrEqual(2);
+  const leadAfter = await page.evaluate(() => window.__game.playerTile);
+  expect(Math.abs(after.x - leadAfter.x), 'he never had to close the gap').toBeGreaterThanOrEqual(2);
 });
 
 // --- HR's triage (AI_PLAN M6, the `support` beat) ----------------------------

@@ -18,7 +18,7 @@ export function createGodDebug(d) {
         d.switchLeader(i);
         return true;
       }
-      return !!d.combat?.steerMember(d.party?.members[i]);
+      return !!d.steerMember(d.party?.members[i]);
     },
     reviveMember(i) {
       const member = d.party?.members[i];

@@ -2602,6 +2602,9 @@ function startGame(level) {
     get pendingGodPick() { return run.pendingGodPick; },
     setPendingGodPick: (callback) => { run.pendingGodPick = callback; },
     switchLeader: (...a) => switchLeader(...a),
+    // God mode displays the diagnostic combat projection, but steering is a
+    // controller command. Keep those two surfaces distinct.
+    steerMember: (member) => run.combat?.steerMember(member) ?? false,
     helpUp: (...a) => helpUp(...a),
     canRecruit: (...a) => canRecruit(...a),
     recruitCompanion: (...a) => recruitCompanion(...a),

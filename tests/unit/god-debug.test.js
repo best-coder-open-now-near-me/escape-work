@@ -11,7 +11,7 @@ function fixture() {
     party: { cash: 5, active: 0, members: [member] },
     inCombat: false,
     gameOver: false,
-    combat: { steerMember: () => false, refresh: () => calls.push('combat-refresh') },
+    combat: { refresh: () => calls.push('combat-refresh') },
     app: { timeScale: 1 },
     runtime: { burningCount: 2, advanceTurn: () => calls.push('fire') },
     actions: { shove: { ap: 2 } },
@@ -34,6 +34,7 @@ function fixture() {
     pendingGodPick: null,
     setPendingGodPick(callback) { this.pendingGodPick = callback; },
     switchLeader: (i) => calls.push(['switch', i]),
+    steerMember: (next) => { calls.push(['steer', next]); return true; },
     helpUp: (m) => { m.sheet.hp = 1; calls.push(['help', m]); },
     canRecruit: () => false,
     recruitCompanion: () => {},
@@ -70,7 +71,8 @@ test('god-mode steering and revival preserve their runtime gates', () => {
   assert.equal(debug.switchTo(0), true);
   assert.deepEqual(calls[0], ['switch', 0]);
   state.inCombat = true;
-  assert.equal(debug.switchTo(0), false);
+  assert.equal(debug.switchTo(0), true);
+  assert.deepEqual(calls[1], ['steer', member]);
 
   debug.reviveMember(0);
   assert.equal(member.sheet.hp, 1);

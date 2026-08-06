@@ -79,7 +79,7 @@ const KITS = {
     // inheriting somebody else's silhouette can't happen by omission.
     model: 'manager',
     look: { build: { legs: 1.9, torso: 1.3 } },
-    level: 1, // native tier; a floor deeper than this scales him up (stats.scaleEnemy)
+    level: 1, // native tier; only an explicit placement tier scales him up
     attackAp: 3, // AP one swing costs them in combat
     xp: 8,
     aggression: 'red', // straight to battle
