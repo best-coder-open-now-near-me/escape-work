@@ -523,7 +523,12 @@ function startGame(level) {
   // grid and the scene.
   const stickGum = (x, z) => {
     if (!hasGum(floorAt(x, z))) return false;
-    grid.surfaceField.clearAt(x, z);
+    const record = grid.surfaceField.recordAt(x, z);
+    if (SURFACES[record?.surfaceId]?.consumeGrouping === 'source' && record.sourceKey) {
+      grid.surfaceField.clearSource(record.sourceKey);
+    } else {
+      grid.surfaceField.clearAt(x, z);
+    }
     return true;
   };
   // Dangerous/uncomfortable surfaces cost extra to path through, so

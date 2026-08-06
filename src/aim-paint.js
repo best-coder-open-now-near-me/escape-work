@@ -10,31 +10,104 @@ const pc = new Proxy({}, { get: (_, k) => window.pc[k] });
 // Above the floor and surface decals, below route lines and body rings.
 const PAINT_Y = 0.13;
 const FEATHER_FRACTION = 0.22;
+const CLIP_EPSILON = 1e-7;
 
 const cellIndex = (point, quantum) => ({
   ix: Math.round((point[0] + 0.5) / quantum - 0.5),
   iz: Math.round((point[1] + 0.5) / quantum - 0.5),
 });
 
-function mergedGeometry(cells, quantum) {
+function clipPolygonFor(shape) {
+  if (!shape) return null;
+  if (shape.kind === 'circle') {
+    const segments = Math.max(24, shape.segments || 64);
+    return Array.from({ length: segments }, (_, i) => {
+      const a = i * Math.PI * 2 / segments;
+      return { x: shape.x + Math.cos(a) * shape.radius, z: shape.z + Math.sin(a) * shape.radius };
+    });
+  }
+  if (shape.kind === 'polygon') {
+    const points = (shape.points || []).map(([x, z]) => ({ x, z }));
+    if (points.length > 1
+      && Math.hypot(points[0].x - points.at(-1).x, points[0].z - points.at(-1).z) < CLIP_EPSILON) {
+      points.pop();
+    }
+    return points;
+  }
+  return null;
+}
+
+function polygonArea(points) {
+  let area = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    area += a.x * b.z - b.x * a.z;
+  }
+  return area / 2;
+}
+
+function clipConvex(subject, boundary) {
+  if (!boundary || boundary.length < 3) return subject;
+  const clip = polygonArea(boundary) < 0 ? [...boundary].reverse() : boundary;
+  let output = subject;
+  for (let i = 0; i < clip.length && output.length; i++) {
+    const a = clip[i];
+    const b = clip[(i + 1) % clip.length];
+    const side = (p) => (b.x - a.x) * (p.z - a.z) - (b.z - a.z) * (p.x - a.x);
+    const input = output;
+    output = [];
+    for (let j = 0; j < input.length; j++) {
+      const from = input[j];
+      const to = input[(j + 1) % input.length];
+      const fromSide = side(from);
+      const toSide = side(to);
+      const fromInside = fromSide >= -CLIP_EPSILON;
+      const toInside = toSide >= -CLIP_EPSILON;
+      const crossing = () => {
+        const t = fromSide / (fromSide - toSide);
+        return {
+          x: from.x + (to.x - from.x) * t,
+          z: from.z + (to.z - from.z) * t,
+          alpha: from.alpha + (to.alpha - from.alpha) * t,
+        };
+      };
+      if (fromInside && toInside) output.push(to);
+      else if (fromInside) output.push(crossing());
+      else if (toInside) output.push(crossing(), to);
+    }
+  }
+  return output;
+}
+
+export function buildAimGeometry(cells, quantum, clipShape = null) {
   const positions = [];
   const normals = [];
   const colors = [];
   const indices = [];
+  const clip = clipPolygonFor(clipShape);
+  const clipFeather = quantum * FEATHER_FRACTION;
   const indexed = cells.map((point) => ({ point, ...cellIndex(point, quantum) }));
   const occupied = new Set(indexed.map(({ ix, iz }) => `${ix},${iz}`));
 
   const vertex = (x, z, alpha) => {
+    if (clipShape?.kind === 'circle') {
+      const inset = clipShape.radius - Math.hypot(x - clipShape.x, z - clipShape.z);
+      alpha *= Math.max(0, Math.min(1, inset / clipFeather));
+    }
     const n = positions.length / 3;
     positions.push(x, PAINT_Y, z);
     normals.push(0, 1, 0);
-    colors.push(255, 255, 255, alpha);
+    colors.push(255, 255, 255, Math.round(alpha));
     return n;
   };
   const quad = (corners, alphas = [255, 255, 255, 255]) => {
-    const base = corners.map(([x, z], i) => vertex(x, z, alphas[i]));
+    let polygon = corners.map(([x, z], i) => ({ x, z, alpha: alphas[i] }));
+    polygon = clipConvex(polygon, clip);
+    if (polygon.length < 3) return;
+    const base = polygon.map(({ x, z, alpha }) => vertex(x, z, alpha));
     // x/z geometry needs the reverse winding for an upward normal.
-    indices.push(base[0], base[2], base[1], base[0], base[3], base[2]);
+    for (let i = 2; i < base.length; i++) indices.push(base[0], base[i], base[i - 1]);
   };
 
   const half = quantum / 2;
@@ -96,13 +169,13 @@ export function createAimPaint(app) {
   return {
     // `cellsFn` returns fine-cell world centres as [x,z]. `newKey` names the
     // verb/origin/world epoch; unchanged aims do no geometry work per frame.
-    show(newKey, cellsFn, quantum = 1) {
+    show(newKey, cellsFn, quantum = 1, clipShape = null) {
       if (newKey === key) return;
       key = newKey;
       shownCells = cellsFn();
       clearMesh();
       if (!shownCells.length) return;
-      const geo = mergedGeometry(shownCells, quantum);
+      const geo = buildAimGeometry(shownCells, quantum, clipShape);
       mesh = new pc.Mesh(app.graphicsDevice);
       mesh.setPositions(geo.positions);
       mesh.setNormals(geo.normals);

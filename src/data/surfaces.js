@@ -19,6 +19,10 @@
 //               bigger problems. slipImmune talents (safety tread) ignore it.
 //   style     - 'puddle' | 'cable' | 'gum' | 'paper' (how tile-renderer.js
 //               draws it)
+//   visualGrouping - optional presentation grouping. 'source' renders one
+//               visual for all fine cells created by the same placement.
+//   consumeGrouping - optional retirement grouping. 'source' consumes every
+//               fine cell created by the same placement in one interaction.
 export const SURFACES = {
   water: {
     conducts: true,
@@ -58,6 +62,8 @@ export const SURFACES = {
   },
   gum: {
     style: 'gum',
+    visualGrouping: 'source',
+    consumeGrouping: 'source',
     color: [0.93, 0.5, 0.65],
     pathCost: 0, // nobody routes around gum - that's what makes it a mine
     onEnter: {

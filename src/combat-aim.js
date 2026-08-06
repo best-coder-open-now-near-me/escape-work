@@ -91,13 +91,15 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
       const test = aimPoint && ask.coneTest(action, aimPoint.x, aimPoint.z);
       if (!test) { aimPaint.hide(); return; }
       aimPaint.show(`cone:${armed}:${aimPoint.x},${aimPoint.z}:${paintEpoch}`,
-        () => ask.coneCells(action, test), quantum);
+        () => ask.coneCells(action, test), quantum,
+        { kind: 'polygon', points: ask.conePolyline(action, test) });
       return;
     }
     if (ask.isZone(action)) {
       if (!aimPoint) { aimPaint.hide(); return; }
       aimPaint.show(`zone:${armed}:${aimPoint.x},${aimPoint.z}:${paintEpoch}`,
-        () => ask.zoneCells(action, aimPoint.x, aimPoint.z), quantum);
+        () => ask.zoneCells(action, aimPoint.x, aimPoint.z), quantum,
+        { kind: 'circle', x: aimPoint.x, z: aimPoint.z, radius: action.radius ?? 1 });
       return;
     }
     const spec = ask.reachSpec(armed);
@@ -136,7 +138,7 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
         canInclude: (x, z) => world.terrainOpen(Math.round(x), Math.round(z))
           && world.hasLos(body.x, body.z, x, z) && !walkOnly(x, z),
       },
-    ), quantum);
+    ), quantum, { kind: 'circle', x: body.x, z: body.z, radius: spec.r });
   }
 
   // The walk a click would take, and the ring where it would stop.

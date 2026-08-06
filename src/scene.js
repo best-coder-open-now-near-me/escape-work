@@ -3,7 +3,7 @@
 // shading.js, tile visuals in tile-renderer.js, model loading in models.js,
 // combat FX in fx.js.
 import { TILE_TYPES } from './data/tiles.js';
-import { createTileRenderer, computeCarpetZones } from './tile-renderer.js';
+import { createTileRenderer, computeCarpetZones, surfaceVisualGroups } from './tile-renderer.js';
 import { occludes } from './occlusion.js';
 
 // `globalThis.window?.pc` rather than `window.pc`: the bare read runs at IMPORT
@@ -17,6 +17,14 @@ const pc = globalThis.window?.pc;
 // a custom solid is not necessarily a cubicle wall. Kept pure so the material
 // identity contract is testable without PlayCanvas.
 export const wallFadeMaterial = (wall, faded) => (faded ? wall.ghostMat : wall.solidMat);
+
+// Surface-only map characters normalize to plain floor for every rule query,
+// but their authored identity still tells carpet propagation that this cell is
+// an object sitting inside a coloured zone rather than a deliberate gray-floor
+// boundary. Runtime surfaces have no authoredType and naturally keep whatever
+// terrain was already beneath them.
+export const surfaceUnderlayTypeAt = (grid, x, z) =>
+  grid.surfaceField.recordAt(x, z)?.authoredType || grid.typeAt(x, z);
 
 export function createApp(canvas) {
   const app = new pc.Application(canvas, {
@@ -61,7 +69,7 @@ export function createApp(canvas) {
 export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 } = {}) {
   const r = createTileRenderer(app, { root, baseY });
   const walls = [];
-  const surfaceVisuals = new Map(); // fine-cell "ix,iz" -> entity
+  const surfaceVisuals = new Map(); // visual-group key -> { entity, cells }
   const propVisuals = new Map();
   // Everything else `renderMarker` hands back. The two filers below only ever
   // kept `wall`, `surface` and `prop`, so the other two kinds were rendered
@@ -80,7 +88,9 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
     if (list.length) extraVisuals.set(key, list);
   };
 
-  const carpetAt = computeCarpetZones(grid.typeAt, grid.width, grid.height);
+  const carpetAt = computeCarpetZones(
+    (x, z) => surfaceUnderlayTypeAt(grid, x, z), grid.width, grid.height,
+  );
 
   for (let z = 0; z < grid.height; z++) {
     for (let x = 0; x < grid.width; x++) {
@@ -125,7 +135,9 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
           ghostMat: r.wallGhost,
         });
       }
-      else if (res.kind === 'surface') surfaceVisuals.set(x + ',' + z, res.entities[0]);
+      else if (res.kind === 'surface') surfaceVisuals.set(`marker:${x},${z}`, {
+        entity: res.entities[0], cells: [{ x, z }],
+      });
       else if (res.kind === 'prop') {
         propVisuals.set(x + ',' + z, res.entities[0]);
         if (interactive && picking) picking.register(res.entities[0], 'prop', { x, z });
@@ -217,23 +229,25 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
   }
 
   function renderAllSurfaces() {
-    for (const visual of surfaceVisuals.values()) visual.destroy();
+    for (const visual of surfaceVisuals.values()) visual.entity.destroy();
     surfaceVisuals.clear();
-    for (const cell of grid.surfaceField.entries()) {
-      const res = r.renderSurfaceCell(cell, grid.surfaceField, {
-        electrified: grid.isElectrified(cell.x, cell.z),
+    for (const group of surfaceVisualGroups(grid.surfaceField.entries())) {
+      const res = r.renderSurfaceGroup(group.cells, grid.surfaceField, {
+        electrified: group.cells.some((cell) => grid.isElectrified(cell.x, cell.z)),
       });
       if (res.kind === 'surface') {
-        surfaceVisuals.set(grid.surfaceField.keyOf(cell.ix, cell.iz), res.entities[0]);
+        surfaceVisuals.set(group.key, { entity: res.entities[0], cells: group.cells });
       }
     }
   }
   function hideSurfaceVisual(x, z) {
     const cellsPerTile = grid.surfaceField.cellsPerTile;
     for (const [key, visual] of [...surfaceVisuals]) {
-      const [ix, iz] = key.split(',').map(Number);
-      if (Math.floor(ix / cellsPerTile) !== x || Math.floor(iz / cellsPerTile) !== z) continue;
-      visual.destroy();
+      const touchesTile = visual.cells.some((cell) => cell.ix == null
+        ? Math.round(cell.x) === x && Math.round(cell.z) === z
+        : Math.floor(cell.ix / cellsPerTile) === x && Math.floor(cell.iz / cellsPerTile) === z);
+      if (!touchesTile) continue;
+      visual.entity.destroy();
       surfaceVisuals.delete(key);
     }
   }
@@ -307,7 +321,9 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
         if (interactive && picking) picking.register(holder, 'prop', { x, z });
       },
     });
-    if (res.kind === 'surface') surfaceVisuals.set(x + ',' + z, res.entities[0]);
+    if (res.kind === 'surface') surfaceVisuals.set(`marker:${x},${z}`, {
+      entity: res.entities[0], cells: [{ x, z }],
+    });
     else if (res.kind === 'prop') {
       propVisuals.set(x + ',' + z, res.entities[0]);
       if (interactive && picking) picking.register(res.entities[0], 'prop', { x, z });

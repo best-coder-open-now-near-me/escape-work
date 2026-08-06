@@ -311,7 +311,8 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
     drawZoneAim() {
       const aim = queries.zoneAim?.();
       if (!aim) { aimPaint?.hide(); return; }
-      aimPaint?.show(`ooc-zone:${aim.key}`, () => aim.cells, aim.quantum);
+      aimPaint?.show(`ooc-zone:${aim.key}`, () => aim.cells, aim.quantum,
+        { kind: 'circle', x: aim.x, z: aim.z, radius: aim.radius });
       if (aim.problem) ring(aim.x, aim.z, 0.42, RING_FAR);
       else ring(aim.x, aim.z, aim.radius, RING_OK);
     },
@@ -324,7 +325,8 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
     drawConeAim() {
       const aim = queries.coneAim?.();
       if (!aim) { aimPaint?.hide(); return; }
-      aimPaint?.show(`ooc:${aim.key}`, () => aim.cells, aim.quantum);
+      aimPaint?.show(`ooc:${aim.key}`, () => aim.cells, aim.quantum,
+        { kind: 'polygon', points: aim.line });
       const y = 0.14;
       const color = aim.usable ? RING_OK : RING_FAR;
       for (let i = 1; i < aim.line.length; i++) {

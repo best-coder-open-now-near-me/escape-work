@@ -135,6 +135,18 @@ export function createSurfaceField({ width, height, quantum = SURFACE_QUANTUM })
     });
     return changed;
   };
+  const clearSource = (sourceKey) => {
+    if (sourceKey == null) return false;
+    let changed = false;
+    edit(() => {
+      for (const [key, record] of [...cells]) {
+        if (record.sourceKey !== sourceKey) continue;
+        const [ix, iz] = key.split(',').map(Number);
+        changed = clearCell(ix, iz) || changed;
+      }
+    });
+    return changed;
+  };
 
   const recordAt = (x, z) => {
     const index = pointToCell(x, z);
@@ -231,6 +243,7 @@ export function createSurfaceField({ width, height, quantum = SURFACE_QUANTUM })
     clearAt,
     fillTile,
     clearTile,
+    clearSource,
     edit,
     entries,
     traceSegment,

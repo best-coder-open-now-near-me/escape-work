@@ -13,6 +13,24 @@ import { tileArt } from './data/art-profiles.js';
 
 const pc = globalThis.window?.pc;
 
+// Fine cells are the rules/storage resolution, not necessarily the visual
+// instancing resolution. Most surfaces draw per cell; a definition can ask to
+// draw once per authored/runtime source (gum is one wad, not four wads because
+// an authored movement tile happens to contain four fine cells).
+export function surfaceVisualGroups(cells) {
+  const groups = new Map();
+  for (const cell of cells) {
+    const def = SURFACES[cell.surfaceId];
+    const sourceGrouped = def?.visualGrouping === 'source' && cell.sourceKey;
+    const key = sourceGrouped
+      ? `${cell.surfaceId}:source:${cell.sourceKey}`
+      : `${cell.surfaceId}:cell:${cell.ix},${cell.iz}`;
+    if (!groups.has(key)) groups.set(key, { key, cells: [] });
+    groups.get(key).cells.push(cell);
+  }
+  return [...groups.values()];
+}
+
 // `root` (default app.root) parents everything drawn, so a layered level can
 // show/hide a whole storey by toggling one entity; `baseY` lifts every world
 // Y by the storey's base height. Flat levels pass neither and are untouched.
@@ -313,6 +331,34 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
     else if (surf.style === 'paper') vis = addPaper(cell.x, cell.z, field.quantum);
     else if (surf.style === 'gum') vis = addGumWad(cell.x, cell.z, field.quantum);
     else vis = addPoolCell(cell, field, electrified);
+    return { kind: 'surface', entities: [vis] };
+  }
+  function renderSurfaceGroup(cells, field, { electrified = false } = {}) {
+    if (!cells?.length) return { kind: 'none', entities: [] };
+    if (cells.length === 1) return renderSurfaceCell(cells[0], field, { electrified });
+    const surf = SURFACES[cells[0].surfaceId];
+    if (!surf?.style) return { kind: 'none', entities: [] };
+    const x = cells.reduce((sum, cell) => sum + cell.x, 0) / cells.length;
+    const z = cells.reduce((sum, cell) => sum + cell.z, 0) / cells.length;
+    // Preserve roughly the same authored footprint when N fine cells become
+    // one presentation object. A 2x2 authored source at quantum .5 is size 1.
+    const size = field.quantum * Math.sqrt(cells.length);
+    let vis;
+    if (surf.style === 'cable') vis = addCable(x, z, size);
+    else if (surf.style === 'paper') vis = addPaper(x, z, size);
+    else if (surf.style === 'gum') vis = addGumWad(x, z, size);
+    else {
+      // Liquid fields intentionally remain per cell so neighbouring metaball
+      // patches share their exact boundaries. A future source-grouped liquid
+      // still degrades honestly instead of silently disappearing.
+      const holder = new pc.Entity();
+      for (const cell of cells) {
+        const child = addPoolCell(cell, field, electrified);
+        child.reparent(holder);
+      }
+      parent.addChild(holder);
+      vis = holder;
+    }
     return { kind: 'surface', entities: [vis] };
   }
   function addTrash(x, z) {
@@ -698,7 +744,8 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
   }
 
   return {
-    renderFloor, renderMarker, renderSurface, renderSurfaceCell, renderEdgeWall, renderDoor, renderStair,
+    renderFloor, renderMarker, renderSurface, renderSurfaceCell, renderSurfaceGroup,
+    renderEdgeWall, renderDoor, renderStair,
     addFlame, explosionFlash, animate,
     addExitBeacon,
     addSmoke, removeSmoke,
