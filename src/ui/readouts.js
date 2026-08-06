@@ -1,7 +1,8 @@
 // The passive readouts: things the game SAYS, with nothing to click. The
 // narrator box, the focus banner naming whatever the cursor is over, and the
-// loot toast. All of them are pointer-events:none by design - narration must
-// never be able to swallow a click meant for the world.
+// loot toast. Their CONTENT is pointer-events:none so narration never swallows
+// a world click. The narrator's small Advanced disclosure is the sole opt-in
+// control island; it stops its own events before they reach the game.
 // `type` is the line's METADATA, not its look: every entry carries one
 // ('narration' unless the caller says otherwise - combat's initiative rolls
 // say 'initiative'), so a later filter can drop a whole category of line
@@ -23,11 +24,42 @@ export function say(text, type = 'narration') {
 // during a fight went nowhere at all, and out of combat you had five seconds
 // to read one. Now it is always on screen once a class is in play and it
 // ACCUMULATES: new lines append, the oldest scroll off, and the box holds the
-// last NARRATION_KEEP lines so you can read back what just happened.
-const NARRATION_KEEP = 8;
+// last NARRATION_KEEP lines so you can read back what just happened. Formula
+// diagnostics make combat intentionally chattier, so the retained history is
+// larger than the visible viewport and scrolls inside it.
+const NARRATION_KEEP = 64;
+const NARRATION_FILTERS = [
+  ['narration', 'Narration'],
+  ['combat', 'Combat'],
+  ['formula', 'Formulas'],
+  ['initiative', 'Initiative'],
+];
 let narratorEl = null;
+let narratorListEl = null;
 let narrationOk = false;
 const narrationLines = [];
+const narrationFilterState = Object.fromEntries(NARRATION_FILTERS.map(([type]) => [type, true]));
+
+function renderNarrator(animateNewest = false) {
+  if (!narratorListEl) return;
+  const visible = narrationLines.filter((line) => narrationFilterState[line.type] !== false);
+  narratorListEl.replaceChildren();
+  visible.forEach((entry, i) => {
+    const line = document.createElement('div');
+    line.dataset.narrationType = entry.type;
+    line.textContent = entry.count > 1 ? `${entry.text} (×${entry.count})` : entry.text;
+    // Older lines recede so the newest reads first.
+    line.style.opacity = String(0.35 + (0.65 * (i + 1)) / visible.length);
+    narratorListEl.appendChild(line);
+  });
+  narratorListEl.scrollTop = narratorListEl.scrollHeight;
+  if (animateNewest) {
+    narratorListEl.lastElementChild?.animate?.(
+      [{ opacity: 0.2 }, { opacity: 1 }],
+      { duration: 220, easing: 'ease-out' },
+    );
+  }
+}
 
 function ensureNarrator() {
   if (narratorEl) return narratorEl;
@@ -35,15 +67,61 @@ function ensureNarrator() {
   narratorEl.id = 'narration-box';
   Object.assign(narratorEl.style, {
     position: 'fixed', right: '14px', bottom: '20px',
-    zIndex: '27', width: 'min(360px, 46vw)', maxHeight: '30vh', boxSizing: 'border-box',
+    zIndex: '27', width: 'min(390px, 48vw)', maxHeight: '38vh', boxSizing: 'border-box',
     pointerEvents: 'none', textAlign: 'left', overflow: 'hidden',
-    display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: '4px',
+    display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: '7px',
     background: 'rgba(18,18,30,.9)', border: '1px solid #3a3a52', borderRadius: '12px',
     padding: '11px 16px', color: '#e9e7f2',
     font: 'italic 14px Georgia, "Times New Roman", serif', lineHeight: '1.45',
     boxShadow: '0 8px 24px rgba(0,0,0,.5)',
     opacity: '0', transition: 'opacity .2s ease',
   });
+
+  narratorListEl = document.createElement('div');
+  narratorListEl.id = 'narration-lines';
+  Object.assign(narratorListEl.style, {
+    minHeight: '0', overflowY: 'auto', overscrollBehavior: 'contain',
+    display: 'flex', flexDirection: 'column', gap: '4px', pointerEvents: 'none',
+    scrollbarWidth: 'thin',
+  });
+
+  const advanced = document.createElement('details');
+  advanced.id = 'narration-advanced';
+  Object.assign(advanced.style, {
+    pointerEvents: 'auto', alignSelf: 'flex-end', maxWidth: '100%',
+    font: '11px system-ui, sans-serif', fontStyle: 'normal', color: '#aaa8ba',
+  });
+  // The app's world handlers live above this DOM island. A filter click is a
+  // UI choice, never a click-through order to walk or attack.
+  for (const event of ['pointerdown', 'mousedown', 'mouseup', 'click', 'contextmenu']) {
+    advanced.addEventListener(event, (e) => e.stopPropagation());
+  }
+  const summary = document.createElement('summary');
+  summary.textContent = 'Advanced';
+  Object.assign(summary.style, { cursor: 'pointer', userSelect: 'none', textAlign: 'right' });
+  advanced.appendChild(summary);
+
+  const controls = document.createElement('div');
+  Object.assign(controls.style, {
+    display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '6px 10px',
+    marginTop: '6px', paddingTop: '6px', borderTop: '1px solid #353548',
+  });
+  NARRATION_FILTERS.forEach(([type, labelText]) => {
+    const label = document.createElement('label');
+    Object.assign(label.style, { display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' });
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.id = `narration-filter-${type}`;
+    input.checked = narrationFilterState[type];
+    input.addEventListener('change', () => {
+      narrationFilterState[type] = input.checked;
+      renderNarrator();
+    });
+    label.append(input, labelText);
+    controls.appendChild(label);
+  });
+  advanced.appendChild(controls);
+  narratorEl.append(narratorListEl, advanced);
   document.body.appendChild(narratorEl);
   return narratorEl;
 }
@@ -78,16 +156,8 @@ function narrate(text, type = 'narration') {
     while (narrationLines.length > NARRATION_KEEP) narrationLines.shift();
   }
   const el = ensureNarrator();
-  el.innerHTML = '';
-  narrationLines.forEach((t, i) => {
-    const p = document.createElement('div');
-    p.textContent = t.count > 1 ? `${t.text} (×${t.count})` : t.text;
-    // Older lines recede so the newest reads first.
-    p.style.opacity = String(0.35 + (0.65 * (i + 1)) / narrationLines.length);
-    el.appendChild(p);
-  });
+  renderNarrator(narrationFilterState[type] !== false);
   el.style.opacity = narrationOk ? '1' : '0';
-  el.lastElementChild?.animate?.([{ opacity: 0.2 }, { opacity: 1 }], { duration: 220, easing: 'ease-out' });
 }
 
 // The narration box's current lines, newest last - for the e2e suite.

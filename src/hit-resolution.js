@@ -17,7 +17,8 @@
 // is wearing - and splitting it from `surfaceStepCost` would put one
 // multiplication in a different file from the other two.
 import { toHitTerms, positionMods, inReach, dist, shieldedFaces, shieldingFace } from './tactics.js';
-import { accuracy, dodge, hitChance, rollHit, moveCostOf, MOVE } from './stats.js';
+import { accuracy, dodge, hitChance, moveCostOf, HIT, MOVE } from './stats.js';
+import { formatHitFormula, formatProcFormula } from './combat-formulas.js';
 import { statusFx, hasStatus } from './statuses.js';
 import { SURFACES } from './data/surfaces.js';
 import { blocksSight, shieldsCell } from './data/tiles.js';
@@ -40,10 +41,30 @@ export function createHitResolution(d) {
   // One attack roll (HIT_PLAN.md): base + attacker accuracy - defender dodge +
   // mods, rolled against combat's injectable `rng` (unless pinned above). The
   // computed chance and outcome are stashed on `lastRoll` for the debug surface.
-  const resolveHit = (accFrac, dodgeFrac, mods = 0) => {
+  const resolveHit = (accFrac, dodgeFrac, mods = 0, meta = null) => {
     const chance = hitChance(accFrac, dodgeFrac, mods);
-    const hit = forceHit !== null ? forceHit : rollHit(chance, d.rng);
-    lastRoll = { chance, hit };
+    // Capture the exact draw instead of asking rollHit to hide it. This is the
+    // same comparison and consumes the same single RNG value; it merely lets
+    // the dialogue show the number the resolver actually judged.
+    const draw = forceHit === null ? d.rng() : null;
+    const hit = forceHit !== null ? forceHit : draw < chance;
+    lastRoll = { chance, hit, roll: draw, forced: forceHit };
+    if (meta && d.formula) {
+      d.formula(formatHitFormula({
+        attacker: meta.attacker,
+        target: meta.target,
+        base: HIT.BASE,
+        accuracy: accFrac,
+        dodge: dodgeFrac,
+        position: mods,
+        clampLow: HIT.CLAMP_LO,
+        clampHigh: HIT.CLAMP_HI,
+        chance,
+        roll: draw,
+        forced: forceHit,
+        hit,
+      }));
+    }
     return hit;
   };
   // A combatant here is either a party-side MEMBER ({ sheet, actor, ap }) or
@@ -178,10 +199,29 @@ export function createHitResolution(d) {
   // Roll that attack (honors the forceHit pin, records lastRoll).
   const rollAgainst = (attacker, defender) => {
     const t = attackMods(attacker, defender);
-    return resolveHit(t.acc, t.dodge, t.mods);
+    const displayName = (unit) => d.nameOf?.(unit) || unit?.sheet?.name || unit?.def?.name || 'Unknown';
+    return resolveHit(t.acc, t.dodge, t.mods, {
+      attacker: displayName(attacker),
+      target: displayName(defender),
+    });
   };
   // A weapon's on-hit proc chance, honoring the debug pin.
-  const resolveProc = (chance) => (forceProc !== null ? forceProc : rollHit(chance, d.rng));
+  const resolveProc = (chance, meta = {}) => {
+    const draw = forceProc === null ? d.rng() : null;
+    const hit = forceProc !== null ? forceProc : draw < chance;
+    if (d.formula) {
+      d.formula(formatProcFormula({
+        attacker: meta.attacker || 'Unknown',
+        target: meta.target || 'Unknown',
+        label: meta.label || 'on-hit effect',
+        chance,
+        roll: draw,
+        forced: forceProc,
+        hit,
+      }));
+    }
+    return hit;
+  };
 
   // --- the FX vocabulary ------------------------------------------------------
   // Combat's cosmetics all route through these four, so a swing that lands in

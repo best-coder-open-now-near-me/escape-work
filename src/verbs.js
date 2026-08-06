@@ -401,7 +401,25 @@ export function createVerbs(d) {
         }
         continue;
       }
-      const dmg = soakHit(d.ambushDmg(d.rand(a.min, a.max) + damageBonus(d.active.sheet)), en.combat.deflect);
+      const rolled = d.rand(a.min, a.max);
+      const bonus = damageBonus(d.active.sheet);
+      const beforeAmbush = rolled + bonus;
+      const afterAmbush = d.ambushDmg(beforeAmbush);
+      const dmg = soakHit(afterAmbush, en.combat.deflect);
+      d.reportDamage?.({
+        attacker: d.active.sheet.name,
+        target: en.def.name,
+        action: a.label,
+        roll: rolled,
+        min: a.min,
+        max: a.max,
+        additions: [{ label: 'damage bonus', value: bonus }],
+        stages: [
+          { label: 'ambush', before: beforeAmbush, after: afterAmbush },
+          { label: `Composure soak ${en.combat.deflect || 0}`, before: afterAmbush, after: dmg },
+        ],
+        result: dmg,
+      });
       const died = en.takeDamage(dmg);
       d.hitFx(en, 'paper', d.active);
       if (died) d.deathFx(en);

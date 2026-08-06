@@ -224,8 +224,20 @@ export function createDemolition(d) {
       d.active.actor.lunge(aimX, aimZ);
     }
     d.faceTarget(d.active, aimX, aimZ);
-    const dmg = d.rand(a.min, a.max) + damageBonus(d.active.sheet);
+    const rolled = d.rand(a.min, a.max);
+    const bonus = damageBonus(d.active.sheet);
+    const dmg = rolled + bonus;
     const { label, left, gone } = breakDown(plan, dmg);
+    d.reportDamage?.({
+      attacker: d.active.sheet.name,
+      target: label,
+      action: a.label,
+      roll: rolled,
+      min: a.min,
+      max: a.max,
+      additions: [{ label: 'damage bonus', value: bonus }],
+      result: dmg,
+    });
     if (gone) {
       d.log(prop
         ? `The ${label} comes apart. The office is short one piece of cover.`

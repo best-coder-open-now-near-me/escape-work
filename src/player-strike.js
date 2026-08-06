@@ -99,12 +99,33 @@ export function createPlayerStrike(d) {
     let dmg = 0;
     let died = false;
     if (hasDice) {
-      dmg = d.rand(a.min, a.max) + damageBonus(d.active.sheet); // carried staplers count
-      if (a.ammoCost) dmg += d.talentFxOf(d.active).paperDamageBonus || 0;
+      const rolled = d.rand(a.min, a.max);
+      const bonus = damageBonus(d.active.sheet); // carried staplers count
+      const paperBonus = a.ammoCost ? (d.talentFxOf(d.active).paperDamageBonus || 0) : 0;
+      dmg = rolled + bonus + paperBonus;
+      const beforeAmbush = dmg;
       dmg = d.ambushDmg(dmg);
+      const beforeSoak = dmg;
       // Their Composure shaves the hit exactly as a member's shaves an enemy's
       // (combat.js unitStrikesMember) - same soak, other direction.
       dmg = soakHit(dmg, en.combat.deflect);
+      d.reportDamage?.({
+        attacker: d.active.sheet.name,
+        target: en.def.name,
+        action: a.label,
+        roll: rolled,
+        min: a.min,
+        max: a.max,
+        additions: [
+          { label: 'damage bonus', value: bonus },
+          { label: 'paper talent', value: paperBonus },
+        ],
+        stages: [
+          { label: 'ambush', before: beforeAmbush, after: beforeSoak },
+          { label: `Composure soak ${en.combat.deflect || 0}`, before: beforeSoak, after: dmg },
+        ],
+        result: dmg,
+      });
       died = en.takeDamage(dmg);
       // Anything that arrived from over there lands as a projectile hit, not a
       // punch: light debris thrown away from the shooter.
@@ -139,7 +160,11 @@ export function createPlayerStrike(d) {
     // weapon's own swing (swing the gum stapler, fling gum).
     const proc = weaponProc(d.active.sheet);
     if (proc && !died && id === equippedAction(d.active.sheet)
-      && d.resolveProc(proc.chance) && applyStatus(en, proc.applies, {}, en.combat.statusResist)) {
+      && d.resolveProc(proc.chance, {
+        attacker: d.active.sheet.name,
+        target: en.def.name,
+        label: proc.applies,
+      }) && applyStatus(en, proc.applies, {}, en.combat.statusResist)) {
       d.statusFxAt(en, proc.applies);
       line += ` ${d.appliesLine(proc, en.def.name)}`;
     }

@@ -9,6 +9,7 @@
 // the fight; enemies have persistent map HP and take surface damage like you
 // do. Fire keeps burning throughout.
 import { createPlayerStrike } from './player-strike.js';
+import { formatDamageFormula } from './combat-formulas.js';
 import { createActionBar } from './action-bar.js';
 import { createClickVerbs } from './click-verbs.js';
 import { createDemolition } from './demolition.js';
@@ -161,6 +162,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     crouchStateOf: (...a) => crouchStateOf(...a),
     crouchFacesOf: (...a) => crouchFacesOf(...a),
     log: (...a) => log(...a),
+    formula: (...a) => formula(...a),
   });
   const {
     resolveHit, statusesOf, accuracyOf, dodgeOf, canReach, bodyDist, bodyLos,
@@ -1115,7 +1117,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
 
   function log(text) {
     readout.say(text);
-    callbacks.say(text);
+    callbacks.say(text, 'combat');
+  }
+  // Detailed arithmetic belongs in the accumulating dialogue, not in the
+  // compact action panel whose one line should remain the outcome. Callers
+  // provide values captured at resolution time; the formatter never rerolls
+  // or re-derives combat state.
+  function formula(text) {
+    callbacks.say(text, 'formula');
+  }
+  function reportDamage(details) {
+    formula(formatDamageFormula(details));
   }
   function refresh() {
     // Anything worth redrawing the HUD for may also have reshaped what the
@@ -1283,6 +1295,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     talentFxOf: (...a) => talentFxOf(...a),
     appliesLine: (...a) => appliesLine(...a),
     immunityLine: (...a) => immunityLine(...a),
+    reportDamage: (...a) => reportDamage(...a),
   });
   // Put a body somewhere else, and resolve what it hits. ONE resolver for both
   // sides (Q4-A): `aiShoveMember` used to be a hand-written parallel of this,
@@ -1450,6 +1463,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     hostilesRemain: (...a) => hostilesRemain(...a),
     notifyMemberDown: (...a) => notifyMemberDown(...a),
     immunityLine: (...a) => immunityLine(...a),
+    reportDamage: (...a) => reportDamage(...a),
   });
   // verb treats any body as a shield ("any character as cover", designer).
   function unitStandingAt(x, z) {
@@ -1818,11 +1832,21 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const aimZ = prop ? plan.tz : (plan.a[1] + plan.b[1]) / 2;
     unit.lunge(aimX, aimZ);
     faceTarget(unit, aimX, aimZ);
-    const dmg = rand(line.min, line.max);
+    const rolled = rand(line.min, line.max);
+    const dmg = rolled;
     // The break is demolition.breakDown - the same one the player's verb runs.
     // What is left here is what an AI break actually differs by: a random
     // attack line off its own kit, and third-person narration.
     const { label, left, gone } = breakDown(plan, dmg);
+    reportDamage({
+      attacker: unit.def.name,
+      target: label,
+      action: line.label || 'Break cover',
+      roll: rolled,
+      min: line.min,
+      max: line.max,
+      result: dmg,
+    });
     if (gone) {
       log(prop
         ? `${unit.def.name} takes the ${label} apart. One less thing between you.`
@@ -1874,6 +1898,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     coneTest: (...a) => coneTest(...a),
     ambushDmg: (...a) => ambushDmg(...a),
     immunityLine: (...a) => immunityLine(...a),
+    reportDamage: (...a) => reportDamage(...a),
     // A module-level const in this file; imported back would be circular.
     appliesLine: (...a) => appliesLine(...a),
     setLastClickOutcome: (v) => { lastClickOutcome = v; },
@@ -2101,7 +2126,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function unitStrikesMember(unit, m, atk) {
     // The same Savvy-derived bonus a member's swing adds (stats.damageBonus) -
     // a unit's attack lines are its weapon, the bonus is its hands.
-    let dmg = rand(atk.min, atk.max) + (unit.combat.dmgBonus || 0);
+    const rolled = rand(atk.min, atk.max);
+    const bonus = unit.combat.dmgBonus || 0;
+    let dmg = rolled + bonus;
     // The attack roll. A miss skips damage, the deflect interaction, the
     // flinch, and any applied status; the enemy's AP was already committed
     // by the caller.
@@ -2117,7 +2144,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     let line = atk.log;
     // Composure soaks a flat slice off the hit (one point always lands),
     // before the Deflect Blame stance (incomingMult) halves whatever is left.
-    dmg = soakHit(dmg, deflect(m.sheet));
+    const beforeSoak = dmg;
+    const soak = deflect(m.sheet);
+    dmg = soakHit(dmg, soak);
+    const beforeStance = dmg;
     const inMult = statusFx(m.sheet).incomingMult ?? 1;
     if (inMult < 1) {
       dmg = Math.max(1, Math.ceil(dmg * inMult));
@@ -2125,6 +2155,20 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     } else {
       line += ` ${dmg} damage.`;
     }
+    reportDamage({
+      attacker: unit.def.name,
+      target: m.sheet.name,
+      action: atk.label || 'attack',
+      roll: rolled,
+      min: atk.min,
+      max: atk.max,
+      additions: [{ label: 'damage bonus', value: bonus }],
+      stages: [
+        { label: `Composure soak ${soak}`, before: beforeSoak, after: beforeStance },
+        { label: `Deflect stance ×${inMult}`, before: beforeStance, after: dmg },
+      ],
+      result: dmg,
+    });
     m.actor.flinch();
     bout.dmgDealt += dmg;
     const dead = applyDamage(m.sheet, dmg);
@@ -2362,7 +2406,25 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // Roll, bonus, soak: the mirror of unitStrikesMember with the roles
       // reversed - the defender's Composure shaves this hit like a member's
       // shaves theirs.
-      const dmg = soakHit(rand(a.min, a.max) + damageBonus(attacker.sheet), defender.combat.deflect);
+      const rolled = rand(a.min, a.max);
+      const bonus = damageBonus(attacker.sheet);
+      const beforeSoak = rolled + bonus;
+      const dmg = soakHit(beforeSoak, defender.combat.deflect);
+      reportDamage({
+        attacker: attacker.sheet.name,
+        target: defender.def.name,
+        action: `${a.label} reaction`,
+        roll: rolled,
+        min: a.min,
+        max: a.max,
+        additions: [{ label: 'damage bonus', value: bonus }],
+        stages: [{
+          label: `Composure soak ${defender.combat.deflect || 0}`,
+          before: beforeSoak,
+          after: dmg,
+        }],
+        result: dmg,
+      });
       const died = defender.takeDamage(dmg);
       hitFx(defender, 'melee', attacker);
       if (died) deathFx(defender);
