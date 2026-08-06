@@ -165,7 +165,7 @@ r = def.reach ?? REACH.DEFAULT                     // AI units, via unitCombat
 | R2 | **Reach is an upgrade axis only; the default is the floor** | A weapon shorter than 1.41 cannot hit a diagonally adjacent target, which reads as broken no matter how well it's justified in flavour. So the letter opener's shortness is expressed through `dmg`/`acc` (as it already is), and `reach` in `stats` is additive-positive. **Rejected:** signed reach with short weapons at 1.2 — thematically nice, unshippable in a grid the player reads as squares. |
 | R3 | **Reach uses its own edge test, not `stepOpen`** | `stepOpen`'s diagonal rule demands all four edges around the crossed corner so nobody slips past a partition's end. Correct for *bodies*; wrong for *arms* — reaching diagonally past the end of a cubicle wall is a legitimate swing. Reach uses the orthogonal-face shape `hasCover` already uses. |
 | R4 | **Shove keeps its own range, and it is not weapon reach** | A shove is arms-length regardless of what you're holding; a broom does not let you shove someone from two tiles away. `SHOVE_REACH` as its own constant (start at `DEFAULT`), so a reach weapon doesn't silently become a telekinesis upgrade. |
-| R5 | **Areas stay tile-based** | The surprise radius (`SURPRISE_RADIUS`), summon placement (`summonRange`), and the printer blast are *areas*, not reach — Chebyshev is the right model for "which cells are affected" and they read correctly on a grid. Only reach changes. |
+| R5 | **Partially superseded by DEGRID D11.** Engagement/surprise remain grid-authored areas; summon placement and printer body damage are continuous. | The 2026-08-06 playtest showed the two visible exceptions did not read correctly: summons refused real gaps and the square blast disagreed with bodies walking continuously. Summons now search body-clear points around their declared anchor; printer damage intersects body circles. `[ratified]` (designer, 2026-08-06). |
 | R6 | **Throw range stays out of scope** | `THROW_RANGE = 5` is Chebyshev too and has the same class of defect, but proportionally tiny (5 vs a 5.66 worst case) and it costs a duplicated constant in `main.js` to touch. Noted, deferred. |
 
 ### The hard part: opportunity attacks
@@ -801,12 +801,11 @@ None. See decision #6.
    their target types. Looked up (2026-07-29): DOS2 actually greys the
    out-of-range ground and draws an aim line that reports "Path is
    Interrupted" — it does not shadow the range region by sight. The designer's
-   version is stronger and is what shipped: while a verb is armed, every tile
-   the aim can legally land on — range AND line of sight — is painted
-   translucent blue (`aim-paint.js`, pooled quads keyed so an unchanged aim
-   costs nothing per frame; `powers.aimRangeOf`/`rangeTiles` are the pure
-   geometry, each branch reading the same `*Of` helper its problem-function
-   reads so the paint and the refusal can never disagree). Blockers visibly
+   version is stronger and is what shipped: while a verb is armed, the exact
+   fine-cell region where aim can legally land — range AND line of sight — is
+   painted as one translucent merged mesh (`aim-paint.js` +
+   `surface-mask.js`; `powers.aimRangeOf` supplies the same range defaults the
+   problem functions read). Blockers visibly
    bite shadows out of the wash, which is the whole lesson. Colors
    `[stated]`: "green red blue yellow should cover everything" — mapping
    `[proposed]`: green = a click that works now, red = a visible but refused
@@ -930,7 +929,8 @@ low barrier's absence legible to the shot).
   little gain — the geometry has direct unit coverage and rides the same
   `attackMods` wiring cover already proves in-browser.
 - **M6a/M7 (2026-07-29):** unit — `blocksSight`/`sightOpenCell`
-  (grid.test.js), `aimRangeOf`/`rangeTiles` (powers.test.js); suite at 460.
+  (grid.test.js), `aimRangeOf` (powers.test.js), and fine aim masks
+  (surface-mask.test.js); suite coverage grows with the registry.
   e2e — a throw sails over a desk where it used to read "no clear line"
   (throwing.spec), a desk on the defender's near face costs exactly
   `COVER_DODGE` with the tag reading "in cover" (tactics.spec, the partition

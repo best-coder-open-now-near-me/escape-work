@@ -145,10 +145,10 @@ export function createActionBar(d) {
 
   // --- targeted summoning -------------------------------------------------------
   // Post the role AT a spot you pick (Divinity-style placement) rather than
-  // wherever the summoner happens to stand: arm the action, then click a tile
-  // within `range` with a clear line to it. The employees take that tile and
-  // the free tiles ringing outward from it, so a click into open floor puts
-  // them exactly where you wanted them - flanking, or screening a corridor.
+  // wherever the summoner happens to stand: arm the action, then click an exact
+  // point within `range` with a clear line to it. Employees take body-clear
+  // continuous rests around that point, so open floor puts the first arrival
+  // exactly where you wanted them - flanking, or screening a corridor.
   // Why a spot is unusable, or null when it's good. Shared by the click and the
   // hover preview so the ring you see is the rule that runs.
   // The same ladder main.js runs out of combat - with the two legs a FIGHT owns

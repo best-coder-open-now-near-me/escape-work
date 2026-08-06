@@ -178,8 +178,8 @@ export function createSurfaceRuntime({ grid, hooks, onExplosion }) {
     }
     // 4) Tick the fuses that were already burning at the START of this turn.
     //    A fuse ARMED by step 1's spread must not also age here, or it would
-    //    detonate on the very turn the fire reached it - PRINTER_FUSE_TURNS = 1
-    //    behaved as a zero-turn fuse and nobody ever got the telegraphed turn
+    //    detonate on the very turn the fire reached it - a declared one-turn
+    //    fuse behaved as zero and nobody ever got the telegraphed turn
     //    to step clear. Same snapshot rule as the fires and the smoke above.
     for (const [k, f] of activeFuses) {
       f.turnsLeft -= 1;

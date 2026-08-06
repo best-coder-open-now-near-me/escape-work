@@ -287,10 +287,14 @@ export function createClickVerbs(d) {
     // as cover" - crouching behind your enemy is legal, if bold).
     if (kind === 'cover') { d.performTakeCover(en.x, en.z); return; }
     if (kind === 'cone') { d.fireCone(posOf(en).x, posOf(en).z); return; }
-    // Placing a summon on top of a coworker: the tile is taken, so they report
-    // to the free ground ringing outward from it. Aiming at the enemy you want
-    // them to swarm is a reasonable thing to click.
-    if (kind === 'summon') { d.placeSummon(en.x, en.z); return; }
+    // Placing a summon on a coworker's body: their footprint is occupied, so
+    // the continuous landing search takes the nearest body-clear ground around
+    // it. Aiming at the enemy you want them to swarm is reasonable.
+    if (kind === 'summon') {
+      const p = posOf(en);
+      d.placeSummon(p.x, p.z);
+      return;
+    }
     // Aiming a zone at a coworker is a reasonable thing to click - you want it
     // under THEM - so it resolves on their tile rather than refusing. Their own
     // tile is excluded from the footprint (zoneCells), so what lands is the

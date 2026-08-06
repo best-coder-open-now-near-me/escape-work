@@ -528,13 +528,13 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
     // `verbKind`'s, which is how `pull` came to be missing from the body gate
     // while `enemyRingOk` carried a live pull arm nothing could reach.
     const sides = ask.verbSides(a, ask.rangeOf(id));
-    // A zone rings the tiles it would actually cover - the same list the click
-    // paints (zoneCells), so a tile that shows a ring is a tile that gets the
-    // surface. Red on the aim point alone when the placement itself is refused.
+    // A zone draws the fine mask it would actually cover - the same list the
+    // click paints (zoneCells). Red on the aim point alone when placement is
+    // refused.
     if (sides.kind === 'zone' && drawZoneRings(a, id)) return;
-    // A summon rings the tiles its employees would actually land on (green),
-    // or the aimed tile alone in red when the spot is unusable - so "where do
-    // they go?" is answered before the AP is spent.
+    // A summon rings the continuous rest points its employees would actually
+    // take (green), or the exact aim alone in red when it is unusable - so
+    // "where do they go?" is answered before the AP is spent.
     if (sides.kind === 'summon' && drawSummonRings(a, id)) return;
     // Take Cover rings the SPOT YOU WOULD STAND, in the cover yellow, and
     // draws the faces that would shield it. Ringing the shield instead was

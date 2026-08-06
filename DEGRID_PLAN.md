@@ -138,8 +138,8 @@ true distance, which fixes the walk-up stop point and the arrival promise in
 one stroke (`trimToFirst` already samples continuously). Targeted ranges go
 Euclid per the D4 inventory: attack/throw far-gates, zone/summon/buff/swap/
 control aim ranges, `oocTargetOk`, breakPlan's ranged gates, the enemy-ring
-ladder, and the aim wash flips with its gate (`rangeTiles` euclid for every
-targeted verb, not just cones). The cone collapses to ONE geometry - body
+ladder, and the fine-cell aim wash uses that same true-distance gate for every
+targeted verb. The cone collapses to ONE geometry - body
 origin, aimed point kept, the wedge itself as the only gate - in combat, in
 `fireOocCone`, and in the `engageWithAction` opener (which currently re-aims
 at the target's tile centre and gates on cheb + tile LOS while the preview

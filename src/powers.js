@@ -272,26 +272,6 @@ export const isZone = (a) => !!a && a.type === 'zone';
 export const zoneRangeOf = (a) => a.range ?? 5;
 export const zoneRadiusOf = (a) => a.radius ?? 1;
 
-// The tiles a zone covers, as [x, z] pairs. A DISC measured on tile centres,
-// not the square the loop bounds suggest: a square blast would carpet the
-// diagonal corners a player can plainly see are further away than the tiles
-// the ring excludes, and the preview draws this exact list.
-export function zoneTiles(cx, cz, radius) {
-  const out = [];
-  const r = Math.max(0, radius);
-  const lim = Math.ceil(r) + 1;
-  // The centre may be a continuous aim point (DEGRID M6: a zone lands where
-  // you POINTED, not on the tile the point rounds to); the cells are tiles.
-  const bx = Math.round(cx);
-  const bz = Math.round(cz);
-  for (let z = bz - lim; z <= bz + lim; z++) {
-    for (let x = bx - lim; x <= bx + lim; x++) {
-      if (Math.hypot(x - cx, z - cz) <= r + 1e-9) out.push([x, z]);
-    }
-  }
-  return out;
-}
-
 // Why this zone cannot be placed there, or null. Placement legality per TILE
 // (is it plain floor? is somebody standing on it?) stays with the caller -
 // that needs the grid - but the spend rules and the aim rules live here.
@@ -378,25 +358,4 @@ export function aimRangeOf(a) {
   if (aimsAtAlly(a)) return { r: buffRangeOf(a) };
   if (isControl(a)) return controlIsRanged(a) ? { r: a.range } : null;
   return a.range ? { r: a.range } : null;
-}
-
-// The tiles that aim can legally land on right now, as [x, z] pairs: within
-// `range` of the aimer's BODY (a continuous point - the wash must agree with
-// gates that measure from where the model actually stands) and passing
-// `canSee(x, z)`. ONE distance rule since DEGRID D4: every targeted range is
-// a true-distance circle, so the `euclid` flag is gone with the cheb branch
-// it selected.
-export function rangeTiles(cx, cz, range, canSee) {
-  const out = [];
-  const lim = Math.ceil(range) + 1;
-  const bx = Math.round(cx);
-  const bz = Math.round(cz);
-  for (let z = bz - lim; z <= bz + lim; z++) {
-    for (let x = bx - lim; x <= bx + lim; x++) {
-      if (Math.hypot(x - cx, z - cz) > range + 1e-9) continue;
-      if (!canSee(x, z)) continue;
-      out.push([x, z]);
-    }
-  }
-  return out;
 }

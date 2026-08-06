@@ -105,7 +105,7 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
         // one moment it is offered. Track it exactly like a primitive prop's
         // visual: `removePropVisual` is otherwise a silent no-op for it, and
         // ARCHITECTURE.md's growth path promises a new prop is pure DATA - so
-        // the first model prop given `explosive: true` would have had its grid
+        // the first model prop given an `explosive` descriptor would have its grid
         // cell cleared to walkable floor with the mesh still standing on it,
         // still registered for picking.
         onAsync: (holder) => {

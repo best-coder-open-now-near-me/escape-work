@@ -103,8 +103,8 @@ export function createHitResolution(d) {
   // Targeted ranges and sight measure body to body (DEGRID D4/D6): a range is
   // a true-distance circle from where the model actually stands, and a line
   // is traced between the stances - not between the tile centres their
-  // positions round to. Tiles remain the far end only when the target IS a
-  // tile (a zone's aim cell, a summon's drop spot).
+  // positions round to. Authored grid objects remain tile targets; zones and
+  // summons retain their exact ground aim points.
   const bodyDist = (u, v) => {
     const a = d.posOf(u);
     const b = d.posOf(v);

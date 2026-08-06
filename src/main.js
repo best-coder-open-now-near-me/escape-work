@@ -800,25 +800,6 @@ function startGame(level) {
   // (Furniture is no longer set dressing here - props are solid tiles in the
   // level data, rendered by buildLevel and respected by pathfinding.)
 
-  // Summon reinforcements: drop up to `n` archetype units (a class id - e.g.
-  // 'employee' - or an ENEMY_TYPES id) onto free tiles, wire their models, and
-  // hand the records back to whoever asked.
-  //   enemy team -> an EnemyActor filed into `enemies` (AI-driven); every
-  //     existing enemy system applies for free. Returned as the actor.
-  //   player team -> a { sheet, actor } pair filed into `summons`: a real
-  //     character sheet (HP, AP, actions) on a CompanionActor body, so it's
-  //     CONTROLLED like a party member on its initiative turn. The actor
-  //     registers as a 'summon' pick kind (contextual clicks in combat select
-  //     it, like a teammate).
-  // `at` is a chosen drop point ({x,z}) - the arrivals take that tile and the
-  // free tiles ringing outward from it; without one (enemy AI) they file in
-  // beside their summoner.
-  //
-  // This lives out here rather than on the `world` object handed to combat
-  // because posting a req is no longer something only a fight can do: the
-  // out-of-combat post (postSummonAt) needs the same spawn path, and a second
-  // copy of it would be a second set of rules about who gets a body and a
-  // sheet.
   // The out-of-combat verbs (ooc-verbs.js). This cluster WRITES shared state,
   // so those four arrive as named setters - a `setArmedOoc(id)` call is
   // greppable in a way that `armedOoc = id` from anywhere in this file is not.

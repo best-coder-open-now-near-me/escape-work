@@ -736,15 +736,12 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   Losing, aborting and a floor change still clear them outright.
   Caps + cooldowns are data too: the HR enemy's `summon` (data/enemies.js) and
   the HR class's Post the Role (`summon-applicants`, data/actions.js).
-  **A player summon is TARGETED**: it arms like an attack, and you click the
-  spot where they should report - within the action's `range` (data), with a
-  clear line to it. They fill the clicked tile first, then the free ground
-  ringing outward from it (`world.summonSpots`/`freeTilesNear(…, minR: 0)`);
-  the armed hover rings exactly those tiles, so the preview is the rule. An
-  enemy `summon` descriptor carries no `range` and drops its reinforcements
-  beside the summoner as before. `world.spawnSummon` (main.js) places them;
-  `resolveSummon` (combat.js) enforces the live cap and files each onto the
-  right side.
+  Placement is descriptor policy: player Escalate declares
+  `placement.anchor: 'aim'`; enemy HR declares `'summoner'`, and both declare
+  hazard avoidance. The same deterministic continuous body-clear search feeds
+  preview and spawn, so the armed hover rings exact rest points the click will
+  use. `resolveSummon` preserves the full descriptor through
+  `world.spawnSummon`; physical wall/body clearance remains a system invariant.
 - **New furniture/prop**: a tile entry with `model` (a .glb under `assets/`) and
   `solid: true` - it blocks movement and renders as the model in both game and
   editor. Props are level data, never hardcoded set dressing.

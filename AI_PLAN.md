@@ -586,8 +586,8 @@ scoreDestination(routes, q = {})
   runs — no new pathfinding, and the degenerate self-path keeps its
   absolute priority (footgun 7).
 - **Ranged candidates:** tiles within `range` with LOS to the target —
-  reuse the aim geometry (`powers.aimRangeOf`/`rangeTiles`) with roles
-  reversed, cap to the nearest ~12 by `cheb` BEFORE routing so the A*
+  reuse the aim's true-distance and LOS predicates with roles reversed, cap to
+  the nearest ~12 by `cheb` BEFORE routing so the A*
   fan stays bounded by the same budget the melee fan already pays.
 
 ```
