@@ -19,7 +19,7 @@
 // shove glide already uses ("forced movement never provokes", TACTICS_PLAN #9)
 // - so granted movement joins forced movement rather than growing a second
 // exemption the threat code would have to learn about.
-import { TARGET_R, playerSideAt, posOf, zoneCellsFor } from './combat-geometry.js';
+import { TARGET_R, posOf, zoneCellsFor } from './combat-geometry.js';
 import { verb } from './creation.js';
 import { ACTIONS } from './data/actions.js';
 import { STATUSES } from './data/statuses.js';
@@ -29,7 +29,7 @@ import { aimsAtAlly, buffOutcome, buffProblem, controlIsRanged, controlOutcome, 
 import { damageBonus, roundAp, soakHit } from './stats.js';
 import { applyStatus, blockedBy, clearStatuses, statusList } from './statuses.js';
 import { dist, inReach } from './tactics.js';
-import { livingMemberAt } from './member-rules.js';
+import { fineConeCells } from './surface-mask.js';
 
 export function createVerbs(d) {
   // Repositioning that the AP economy cannot buy. A dash carries you a fixed
@@ -135,10 +135,13 @@ export function createVerbs(d) {
   // Sighted from the aimer's BODY - the same origin the aim range measures
   // from, so a cell the wash paints is a cell the drop covers.
   const zoneCells = (a, tx, tz) => zoneCellsFor(a, posOf(d.active), tx, tz, {
+    surfaceField: d.world.surfaceField(),
     canTakeSurface: d.world.canTakeSurface,
     hasLos: d.world.hasLos,
-    occupied: (x, z) => !!livingMemberAt(d.members, x, z)
-      || d.world.liveEnemies().some((e) => e.x === x && e.z === z),
+    bodies: [
+      ...d.members.filter((m) => m.sheet.hp > 0).map(posOf),
+      ...d.world.liveEnemies().map(posOf),
+    ],
   });
 
   function performZone(id, tx, tz) {
@@ -155,15 +158,12 @@ export function createVerbs(d) {
     if (a.uses) d.active.usesLeft[id] -= 1;
     d.faceTarget(d.active, tx, tz);
     d.active.actor.lunge(tx, tz);
-    let laid = 0;
-    for (const [x, z] of cells) {
-      if (d.world.leaveSurface(x, z, a.leaves, a.leavesTurns || 0)) laid += 1;
-    }
+    const laid = d.world.leaveSurfaceCells(cells, a.leaves, a.leavesTurns || 0);
     // Saying how much of it landed matters more here than on any other verb:
     // the tiles a zone can take are whatever happens to be plain floor, so the
     // same click over carpet and over a cubicle row spends the same AP for
     // very different results, and silence would read as a dud.
-    d.log(laid ? `${a.log} ${laid} tile${laid > 1 ? 's' : ''} covered.` : `${a.log} Nothing here will take it.`);
+    d.log(laid ? `${a.log} The paper settles where shown.` : `${a.log} Nothing here will take it.`);
     d.disarm();
     d.refresh();
   }
@@ -436,18 +436,7 @@ export function createVerbs(d) {
       hits += 1;
       if (died) d.callbacks.onEnemyKilled(en);
     }
-    if (a.leaves) {
-      const R = Math.ceil(a.cone.range);
-      for (let z = Math.floor(test.origin.z) - R; z <= Math.ceil(test.origin.z) + R; z++) {
-        for (let x = Math.floor(test.origin.x) - R; x <= Math.ceil(test.origin.x) + R; x++) {
-          if (!test(x, z)) continue;
-          // No carpeting a tile anybody on the player side is standing on.
-          if (playerSideAt(d.members, x, z)) continue;
-          if (!d.losToTile(d.active, x, z)) continue;
-          d.world.leaveSurface(x, z, a.leaves, a.leavesTurns || 0);
-        }
-      }
-    }
+    if (a.leaves) d.world.leaveSurfaceCells(coneCells(a, test), a.leaves, a.leavesTurns || 0);
     d.log(isControl(a)
       ? (hits
         ? `${a.log} ${hits} caught.`
@@ -458,6 +447,18 @@ export function createVerbs(d) {
     d.disarm();
     d.refresh();
     if (!d.hostilesRemain()) d.victory();
+  }
+
+  // Bulk Mail deliberately spares the player side while allowing paper under
+  // coworkers it attacks. The same pure mask drives its filled preview and
+  // this commit, so neither side can quietly round a different set of cells.
+  function coneCells(a, test) {
+    return fineConeCells(d.world.surfaceField(), test, a.cone.range, {
+      canInclude: d.world.canTakeSurface,
+      hasLos: d.world.hasLos,
+      origin: test.origin,
+      excludeBodies: d.members.filter((m) => m.sheet.hp > 0).map(posOf),
+    });
   }
 
   // Clicking a coworker with nothing armed is an attack - the basic swing from
@@ -480,5 +481,6 @@ export function createVerbs(d) {
     performBuff,
     handleAllyClick,
     fireCone,
+    coneCells,
   };
 }

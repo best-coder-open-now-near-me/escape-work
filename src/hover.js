@@ -80,7 +80,7 @@ const bodyRings = () => (_bodyRings ??= {
 // `vision` (src/vision.js, optional) is the impaired-sight layer. This module
 // still owns WHAT the cursor says; while a status is swaying the aim, vision
 // owns whether the OS draws it at all - it is drawing three of them itself.
-export function createHoverLayer({ app, canvas, picking, controls, ui, queries, vision = null }) {
+export function createHoverLayer({ app, canvas, picking, controls, ui, queries, vision = null, aimPaint = null }) {
   // The shared floor marks (ground-marks.js). `ring`/`faces` were byte-identical
   // copies of combat.js's; the palette was the same four colours under other
   // names.
@@ -278,6 +278,7 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
       // enough, because the next modifier press just drew it again.
       hoverTarget = null;
       clearHighlight();
+      aimPaint?.hide();
       setCursor(null);
       ui.setFocusBanner(null);
     },
@@ -311,7 +312,8 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
     // cannot disagree about what a cone covers.
     drawConeAim() {
       const aim = queries.coneAim?.();
-      if (!aim) return;
+      if (!aim) { aimPaint?.hide(); return; }
+      aimPaint?.show(`ooc:${aim.key}`, () => aim.cells, aim.quantum);
       const y = 0.14;
       const color = aim.usable ? RING_OK : RING_FAR;
       for (let i = 1; i < aim.line.length; i++) {
@@ -322,6 +324,7 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
       // ...and ring whoever it would actually catch, the same as in combat.
       for (const [x, z] of aim.caught) ring(x, z, 0.5, RING_OK);
     },
+    hideAimPaint() { aimPaint?.hide(); },
     // A SHOVE armed out of combat: ring what the hovered aim would topple,
     // and WHERE it lands - the fall is sign-derived from where you stand, so
     // the landing has to be readable before the shoulder goes in. The data is

@@ -168,6 +168,9 @@ export function createFrame(d) {
       // cover stops being the armed verb - gated at the call site, a disarm
       // would leave the ease pointing at wherever cover was last aimed.
       if (show && !d.inCombat) { d.hover.drawHeldCover(); d.hover.drawCoverAim(dt); }
+      if (!show || d.inCombat || !d.armedOoc || !d.ACTIONS[d.armedOoc].cone) {
+        d.hover.hideAimPaint();
+      }
       if (show && !d.inCombat && d.armedOoc) {
         if (d.ACTIONS[d.armedOoc].type === 'summon') d.hover.drawSummonDrop();
         else if (d.ACTIONS[d.armedOoc].cone) d.hover.drawConeAim();

@@ -51,6 +51,7 @@ const deps = () => ({
     removeEdgeBetween: () => {},
     stepOpen: () => true,
     edgeOpen: () => true,
+    surfaceField: { quantum: 0.5 },
   },
   runtime: {
     surfaceAt: () => null,
@@ -84,6 +85,7 @@ const deps = () => ({
   rawSurfDamage: () => 0,
   effectiveSurfDamage: () => 0,
   leaveSurfaceAt: () => {},
+  leaveSurfaceCells: () => 0,
   freeTilesNear: () => [],
   spawnSummonUnits: () => [],
   dismissSummon: () => {},

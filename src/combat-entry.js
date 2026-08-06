@@ -146,6 +146,7 @@ export function createCombatEntry(d) {
         rawSurfDamage: d.rawSurfDamage,
         effectiveSurfDamage: d.effectiveSurfDamage,
         leaveSurfaceAt: d.leaveSurfaceAt,
+        leaveSurfaceCells: d.leaveSurfaceCells,
         onTemporaryAllyStep: d.onTemporaryAllyStep,
         onTemporaryAllyTravel: d.onTemporaryAllyTravel,
         spawnSummonUnits: d.spawnSummonUnits,

@@ -105,6 +105,7 @@ test('the aim view preserves a cone cursor point until its boundary draws', () =
     },
   };
   let washHidden = 0;
+  let painted = [];
   const aim = createAimView({
     app: { drawLine: (...args) => lines.push(args) },
     pc: { Vec3 },
@@ -112,9 +113,12 @@ test('the aim view preserves a cone cursor point until its boundary draws', () =
       OK: 'ok', FAR: 'far', COVER: 'cover', REACH: 'reach',
       ring: () => {}, faces: () => {},
     },
-    aimPaint: { hide: () => { washHidden += 1; } },
+    aimPaint: {
+      hide: () => { washHidden += 1; },
+      show: (_key, cells) => { painted = cells(); },
+    },
     actions: { 'mail-cone': action },
-    world: { liveEnemies: () => [], doorsBeside: () => [] },
+    world: { liveEnemies: () => [], doorsBeside: () => [], surfaceField: () => ({ quantum: 0.5 }) },
     costTag: { style: {} },
     REACH: {},
     view,
@@ -125,6 +129,7 @@ test('the aim view preserves a cone cursor point until its boundary draws', () =
       rangeOf: () => 0,
       verbSides: () => ({ kind: 'cone', allies: false, enemies: true }),
       coneTest: () => (() => true),
+      coneCells: () => [[1.25, 1.25], [1.75, 1.25]],
       conePolyline: () => [[1, 1], [2, 2], [3, 2]],
       bodyLos: () => true,
     },
@@ -135,5 +140,6 @@ test('the aim view preserves a cone cursor point until its boundary draws', () =
 
   assert.deepEqual(aim.aimPoint, { x: 3, z: 2 }, 'draw pass must not erase the cursor it consumes');
   assert.equal(lines.length, 2, 'the cone boundary drew from that cursor point');
-  assert.equal(washHidden, 1, 'a cone hides the unrelated circular range wash');
+  assert.equal(washHidden, 0, 'a cone replaces the unrelated circular range wash');
+  assert.deepEqual(painted, [[1.25, 1.25], [1.75, 1.25]], 'the exact cone mask is filled');
 });

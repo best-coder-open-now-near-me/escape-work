@@ -33,7 +33,7 @@ import {
 import { cheb, toHitTerms, provokedBy, positionMods, inReach, dist, dirOctant, TACTICS, shieldingFace } from './tactics.js';
 import { crouchFacesAt as facesAtCrouch, crouchProblem, enterCrouch } from './crouch-rules.js';
 import {
-  buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, aimsAtAnyone, isPurge, coneFrom, conePolyline, aimRangeOf, rangeTiles, isBreakable, aimsAtProps, isPull,
+  buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, aimsAtAnyone, isPurge, coneFrom, conePolyline, aimRangeOf, isBreakable, aimsAtProps, isPull,
 } from './powers.js';
 import { createAimPaint } from './aim-paint.js';
 import { createAimView } from './combat-aim.js';
@@ -853,12 +853,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       aimsAtAnyone: (a) => aimsAtAnyone(a),
       posOf: (u) => posOf(u),
       verbReaches: (id, en, x, z) => verbReaches(id, en, x, z),
-      rangeTiles: (x, z, r, ok) => rangeTiles(x, z, r, ok),
       crouchStateOf: (u) => crouchStateOf(u),
       zoneProblem: (a, q) => zoneProblem(a, q),
       distToTile: (u, x, z) => distToTile(u, x, z),
       losToTile: (u, x, z) => losToTile(u, x, z),
       zoneCells: (a, x, z) => zoneCells(a, x, z),
+      coneCells: (a, test) => coneCells(a, test),
       summonSpotProblem: (a, x, z) => summonSpotProblem(a, x, z),
       coverSpotProblem: (x, z) => coverSpotProblem(x, z),
       crouchFacesAt: (x, z) => crouchFacesAt(x, z),
@@ -1871,7 +1871,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const {
     performDash, performSwap, zoneCells, performZone, performControl, strike,
     friendlies, allyAtPoint, allyProblemFor, buffReach, performBuff,
-    handleAllyClick, fireCone,
+    handleAllyClick, fireCone, coneCells,
   } = createVerbs({
     world,
     fx,

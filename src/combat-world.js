@@ -112,6 +112,10 @@ export function createCombatWorld(d) {
     // asked of this same sheet; handing over the sheet is what stops the
     // facade growing a method every time a new one comes up (Q900).
     floorAt: d.floorAt,
+    // Surface geometry is finer than movement terrain. Powers rasterise their
+    // exact preview against this field, then hand the returned centres to the
+    // atomic writer below.
+    surfaceField: () => d.grid.surfaceField,
     traceSurfaceSegment: (...a) => d.grid.surfaceField.traceSegment(...a),
     // What a tile costs THIS member, after their talents (Q1-A, designer
     // 2026-08-02). The enemy model above consults none, which was right
@@ -134,7 +138,7 @@ export function createCombatWorld(d) {
     // TAKE a surface without painting one to find out - and asking a
     // different question than the commit asks is how a preview starts
     // lying (the rings promised tiles the click then skipped).
-    canTakeSurface: (x, z) => acceptsSurface(d.grid.typeAt(x, z))
+    canTakeSurface: (x, z) => acceptsSurface(d.grid.typeAt(Math.round(x), Math.round(z)))
       && !d.runtime.surfaceAt(x, z),
     // Toppling (POWERS_PLAN M6) needs to read a prop's definition, test
     // whether the tile behind it is clear, and mutate both. setType is the
@@ -185,6 +189,7 @@ export function createCombatWorld(d) {
       return left;
   },
     leaveSurface: d.leaveSurfaceAt,
+    leaveSurfaceCells: (...a) => d.leaveSurfaceCells(...a),
     // Anyone alive is a legal target - bystanders outside the initial
     // engagement get pulled in when attacked.
     // A BORROWED coworker is off this list for the duration (TODO Phase 8).

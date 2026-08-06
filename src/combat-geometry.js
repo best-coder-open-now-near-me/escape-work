@@ -17,7 +17,8 @@
 import { ACTIONS } from './data/actions.js';
 import { reachOf, rangeOf, REACH } from './stats.js';
 import { inReach, dist } from './tactics.js';
-import { aimRangeOf, isControl, controlIsRanged, zoneTiles, zoneRadiusOf } from './powers.js';
+import { aimRangeOf, isControl, controlIsRanged, zoneRadiusOf } from './powers.js';
+import { fineCircleCells } from './surface-mask.js';
 
 // Radius of a target's ring marker. Cone tests use it so a body counts when
 // the wedge CLIPS it, matching what the ring shows.
@@ -166,25 +167,22 @@ export function hasSwingSpot(attacker, en, { isWalkable, approach, stepOpen }) {
   return false;
 }
 
-// Which tiles a zone verb aimed at (tx, tz) would actually cover: in the
-// radius, able to take a surface, in line of sight from the aimer, and nobody
-// standing on them. Nobody gets a surface dropped on their feet - not a
-// coworker, not a teammate, not you. The cone already refused to carpet a
-// member's tile; this extends the same courtesy to everyone, because a zone is
-// aimed deliberately and "I did not mean to stand in that" is the cone's
-// problem, not this verb's.
+// Which fine surface cells a zone aimed at (tx, tz) would actually cover: in
+// the true disc, able to take a surface, in line of sight from the aimer, and
+// outside every living body's physical footprint. Nobody gets a surface
+// dropped on their feet - not a coworker, not a teammate, not you.
 //
 // The rings, the cursor's count and the click all call this, so they cannot
 // disagree about which tiles will take it.
-export function zoneCellsFor(a, origin, tx, tz, { canTakeSurface, hasLos, occupied }) {
-  const out = [];
-  for (const [x, z] of zoneTiles(tx, tz, zoneRadiusOf(a))) {
-    if (!canTakeSurface(x, z)) continue;
-    if (!hasLos(origin.x, origin.z, x, z)) continue;
-    if (occupied(x, z)) continue;
-    out.push([x, z]);
-  }
-  return out;
+export function zoneCellsFor(a, origin, tx, tz, {
+  surfaceField, canTakeSurface, hasLos, bodies = [],
+}) {
+  return fineCircleCells(surfaceField, tx, tz, zoneRadiusOf(a), {
+    canInclude: canTakeSurface,
+    hasLos,
+    origin,
+    excludeBodies: bodies,
+  });
 }
 
 // Who joins this fight: every living coworker within `radius` of the body the

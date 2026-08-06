@@ -75,6 +75,7 @@ import {
 import { createControls } from './controls.js';
 import { createPicker } from './picking.js';
 import { createHoverLayer } from './hover.js';
+import { createAimPaint } from './aim-paint.js';
 import { createVisionLayer } from './vision.js';
 import { createLooting } from './looting.js';
 import { createShopping } from './shopping.js';
@@ -88,7 +89,8 @@ import { summonRange, summonRoom, dropCount, summonSpotProblem } from './summon-
 import { outOfCombatActionState } from './hotbar-model.js';
 import { startCombat } from './combat.js';
 import { verbSides } from './combat-targeting.js';
-import { canReach as canReachAt, engagedAround, playerSideAt } from './combat-geometry.js';
+import { canReach as canReachAt, engagedAround } from './combat-geometry.js';
+import { fineConeCells } from './surface-mask.js';
 import { startEditor } from './editor.js';
 import { NPCS } from './data/npcs.js';
 import { installGodMode } from './god.js';
@@ -591,55 +593,93 @@ function startGame(level) {
   // the floor (nor leave a renewable ammo pile behind it). Tracked here rather
   // than in surfaces-runtime because reverting needs the grid AND the visual,
   // both of which live on this side.
-  const tempSurfaces = new Map(); // "x,z" -> { left, surfaceId }
+  // One clock per CAST/source, not per movement tile. A single continuous
+  // drift can cross several movement tiles and lose individual fine cells to
+  // fire; the surviving pieces still expire together.
+  const tempSurfaces = new Map(); // sourceKey -> { left, surfaceId, cells, tiles }
+  let surfaceSourceSerial = 0;
   const cellsInTile = (x, z) => grid.surfaceField.entries().filter((cell) =>
     Math.floor(cell.ix / grid.surfaceField.cellsPerTile) === x
     && Math.floor(cell.iz / grid.surfaceField.cellsPerTile) === z);
+  const tileHasSurface = (x, z, surfaceId) => cellsInTile(x, z)
+    .some((cell) => cell.surfaceId === surfaceId);
+  const forgetBarePaperTile = (tileKey) => {
+    const [x, z] = tileKey.split(',').map(Number);
+    if (!tileHasSurface(x, z, 'paper')) loot?.forgetPaper?.(x, z);
+  };
   function spendSurfaceFuelAt(x, z) {
     const tileX = Math.round(x);
     const tileZ = Math.round(z);
+    const index = grid.surfaceField.pointToCell(x, z);
+    const before = index ? grid.surfaceField.cellAt(index.ix, index.iz) : null;
     grid.surfaceField.clearAt(x, z);
-    if (!cellsInTile(tileX, tileZ).some((cell) => cell.surfaceId === 'paper')) {
-      tempSurfaces.delete(tileX + ',' + tileZ);
-      loot?.forgetPaper?.(tileX, tileZ);
+    if (before?.sourceKey && index) {
+      const source = tempSurfaces.get(before.sourceKey);
+      if (source) {
+        source.cells.delete(grid.surfaceField.keyOf(index.ix, index.iz));
+        if (!source.cells.size) tempSurfaces.delete(before.sourceKey);
+      }
     }
+    if (!tileHasSurface(tileX, tileZ, 'paper')) loot?.forgetPaper?.(tileX, tileZ);
   }
-  function restoreTempSurfaceAt(x, z) {
-    const key = x + ',' + z;
-    tempSurfaces.delete(key);
+  function restoreTempSurface(sourceKey) {
+    const source = tempSurfaces.get(sourceKey);
+    if (!source) return;
+    tempSurfaces.delete(sourceKey);
     grid.surfaceField.edit(() => {
-      for (const cell of cellsInTile(x, z)) {
-        if (cell.source === 'temporary') grid.surfaceField.clearCell(cell.ix, cell.iz);
+      for (const key of source.cells) {
+        const [ix, iz] = key.split(',').map(Number);
+        if (grid.surfaceField.cellAt(ix, iz)?.sourceKey === sourceKey) {
+          grid.surfaceField.clearCell(ix, iz);
+        }
       }
     });
-    loot?.forgetPaper?.(x, z); // a fresh world drift here later is gatherable
+    // A fresh world drift on any now-bare tile is gatherable again.
+    for (const tileKey of source.tiles) forgetBarePaperTile(tileKey);
   }
   function ageTempSurfaces() {
-    for (const [key, t] of [...tempSurfaces]) {
-      const [x, z] = key.split(',').map(Number);
-      // Fire ate it, or something repainted the tile - either way it is no
-      // longer ours to clean up.
-      if (!cellsInTile(x, z).some((cell) =>
-        cell.surfaceId === t.surfaceId && cell.source === 'temporary')) {
-        tempSurfaces.delete(key);
+    for (const [sourceKey, t] of [...tempSurfaces]) {
+      // Fire may eat only part of a drift. Retire stale keys, but keep the
+      // cast clock alive while any cell with this exact source survives.
+      for (const key of [...t.cells]) {
+        const [ix, iz] = key.split(',').map(Number);
+        if (grid.surfaceField.cellAt(ix, iz)?.sourceKey !== sourceKey) t.cells.delete(key);
+      }
+      if (!t.cells.size) {
+        tempSurfaces.delete(sourceKey);
+        for (const tileKey of t.tiles) forgetBarePaperTile(tileKey);
         continue;
       }
       if (t.left > 1) { t.left -= 1; continue; }
-      restoreTempSurfaceAt(x, z);
+      restoreTempSurface(sourceKey);
     }
   }
-  // Drop a power's surface on open office carpet: field, visual and litter
-  // clock in one write. Terrain stays what it was, including coloured carpet;
-  // the surface is an overlay rather than a temporary terrain replacement.
-  function leaveSurfaceAt(x, z, surfaceId, turns = 0) {
-    const under = grid.typeAt(x, z);
-    if (!acceptsSurface(under) || grid.surfaceAt(x, z)) return false;
-    grid.surfaceField.fillTile(x, z, surfaceId, {
-      source: turns > 0 ? 'temporary' : 'runtime',
-      sourceKey: `${turns > 0 ? 'temporary' : 'runtime'}:${x},${z}`,
-      sourceX: x, sourceZ: z,
+  // Commit an already-rasterised preview mask. This is deliberately the ONLY
+  // surface-placement writer used by zones and cones: geometry is decided
+  // once, then preview and commit consume the same fine-cell centres.
+  function leaveSurfaceCells(points, surfaceId, turns = 0) {
+    const source = turns > 0 ? 'temporary' : 'runtime';
+    const sourceKey = `${source}:${++surfaceSourceSerial}`;
+    const accepted = [];
+    const tiles = new Set();
+    grid.surfaceField.edit(() => {
+      for (const [x, z] of points) {
+        const index = grid.surfaceField.pointToCell(x, z);
+        if (!index || grid.surfaceField.cellAt(index.ix, index.iz)) continue;
+        const tileX = Math.round(x);
+        const tileZ = Math.round(z);
+        if (!acceptsSurface(grid.typeAt(tileX, tileZ))) continue;
+        if (!grid.surfaceField.setCell(index.ix, index.iz, surfaceId, {
+          source, sourceKey, sourceX: x, sourceZ: z,
+        })) continue;
+        accepted.push(grid.surfaceField.keyOf(index.ix, index.iz));
+        tiles.add(`${tileX},${tileZ}`);
+      }
     });
-    if (turns > 0) tempSurfaces.set(x + ',' + z, { left: turns, surfaceId });
+    if (!accepted.length) return 0;
+    if (turns > 0) tempSurfaces.set(sourceKey, {
+      left: turns, surfaceId, cells: new Set(accepted), tiles,
+    });
     // Ammo comes from the WORLD, never from a power. A paper-laying verb
     // that could be harvested afterwards is an AP-to-ammo converter, and
     // expiry alone does not prevent it: harvesting is refused in combat
@@ -650,8 +690,27 @@ function startGame(level) {
     // the surface itself: the sheets still burn, still cut, still fuel a
     // fire. `forgetPaper` drops the mark when the tile reverts to bare
     // floor, so a WORLD drift laid there later is gatherable again.
-    if (surfaceId === 'paper') loot.markPaperSpent?.(x, z);
-    return true;
+    if (surfaceId === 'paper') {
+      for (const tileKey of tiles) {
+        const [x, z] = tileKey.split(',').map(Number);
+        loot.markPaperSpent?.(x, z);
+      }
+    }
+    return accepted.length;
+  }
+  // Compatibility for single-tile/world callers: describe that movement tile
+  // as its fine cells, then use the same atomic writer as shaped powers.
+  function leaveSurfaceAt(x, z, surfaceId, turns = 0) {
+    const points = [];
+    const startX = x * grid.surfaceField.cellsPerTile;
+    const startZ = z * grid.surfaceField.cellsPerTile;
+    for (let iz = startZ; iz < startZ + grid.surfaceField.cellsPerTile; iz++) {
+      for (let ix = startX; ix < startX + grid.surfaceField.cellsPerTile; ix++) {
+        const centre = grid.surfaceField.cellCenter(ix, iz);
+        if (centre) points.push([centre.x, centre.z]);
+      }
+    }
+    return leaveSurfaceCells(points, surfaceId, turns) > 0;
   }
   const portraits = createPortraits(app);
   // The face on the HUD card belongs to whoever the card is SHOWING. It rides
@@ -1724,6 +1783,7 @@ function startGame(level) {
     rawSurfDamage: (...a) => rawSurfDamage(...a),
     effectiveSurfDamage: (...a) => effectiveSurfDamage(...a),
     leaveSurfaceAt: (...a) => leaveSurfaceAt(...a),
+    leaveSurfaceCells: (...a) => leaveSurfaceCells(...a),
     onTemporaryAllyStep: (...a) => onTemporaryAllyStep(...a),
     onTemporaryAllyTravel: (...a) => onTemporaryAllyTravel(...a),
     spawnSummonUnits: (...a) => spawnSummonUnits(...a),
@@ -1790,23 +1850,24 @@ function startGame(level) {
   // and a carpeted wedge, so this is that outcome minus the two things a
   // fight owns (AP, per-fight uses), the same subtraction the out-of-combat
   // summon post makes. `test` is the wedge from coneFrom, aimed at (tx, tz).
+  const bodyPoint = (record) => {
+    const body = record.actor || record;
+    const p = body.entity?.getPosition?.();
+    return p ? { x: p.x, z: p.z } : { x: body.x, z: body.z };
+  };
+  const oocConeCells = (a, test) => fineConeCells(grid.surfaceField, test, a.cone.range, {
+    canInclude: (x, z) => acceptsSurface(grid.typeAt(Math.round(x), Math.round(z)))
+      && !runtime.surfaceAt(x, z),
+    hasLos: (ox, oz, x, z) => hasLos({ x: ox, z: oz }, { x, z }),
+    origin: test.origin,
+    excludeBodies: [...(party?.members || []), ...summons]
+      .filter((m) => m.sheet.hp > 0)
+      .map(bodyPoint),
+  });
   function fireOocCone(a, test, tx, tz) {
     player.lunge(tx, tz); // the fan of envelopes, aimed where you pointed
     if (a.leaves === 'paper') vfx.paperFan(test.origin, test.angle, a.cone);
-    const playerSide = [...(party?.members || []), ...summons];
-    if (a.leaves) {
-      const R = Math.ceil(a.cone.range) + 1;
-      for (let z = Math.floor(player.z) - R; z <= Math.ceil(player.z) + R; z++) {
-        for (let x = Math.floor(player.x) - R; x <= Math.ceil(player.x) + R; x++) {
-          if (!test(x, z)) continue;
-          // No carpeting a tile anybody on your side is standing on. The same
-          // helper guards combat's live member list, which includes summons.
-          if (playerSideAt(playerSide, x, z)) continue;
-          if (!hasLos(leadBody(), { x, z })) continue;
-          leaveSurfaceAt(x, z, a.leaves, a.leavesTurns || 0);
-        }
-      }
-    }
+    if (a.leaves) leaveSurfaceCells(oocConeCells(a, test), a.leaves, a.leavesTurns || 0);
     ui.say(`${a.log} No casualties. Plenty of litter.`); // combat's own zero-hit line
     // One click, one volley: the slot disarms, same as a posted summon.
     run.armedOoc = null;
@@ -2192,6 +2253,7 @@ function startGame(level) {
   // The one rule worth restating at the seam: `armedTargetOk` hands it the
   // CLICK RESOLVER's own test. The rings and the crosshair answer the question
   // the click will answer, rather than a second copy of it that can drift.
+  const oocAimPaint = createAimPaint(app);
   const hover = createHoverLayer({
     app,
     canvas: canvasEl,
@@ -2199,6 +2261,7 @@ function startGame(level) {
     controls,
     ui,
     vision, // it still owns what the cursor SAYS; vision hides the OS one
+    aimPaint: oocAimPaint,
     queries: {
       party: () => party,
       enemies: () => enemies,
@@ -2238,7 +2301,14 @@ function startGame(level) {
         // The wedge is ALWAYS usable - an empty one fires too (fireOocCone),
         // exactly as combat's own preview draws it - so the color must not
         // read as a refusal. `caught` still rings whoever it would open on.
-        return { line: conePolyline(a, test), caught: caught.map((e) => [e.x, e.z]), usable: true };
+        return {
+          key: `${run.armedOoc}:${test.origin.x},${test.origin.z}:${run.oocAim.x},${run.oocAim.z}`,
+          line: conePolyline(a, test),
+          cells: oocConeCells(a, test),
+          quantum: grid.surfaceField.quantum,
+          caught: caught.map((e) => [e.x, e.z]),
+          usable: true,
+        };
       },
       summonDrop: () => {
         if (!run.armedOoc || run.inCombat || !run.oocAim) return null;

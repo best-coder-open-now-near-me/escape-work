@@ -1,4 +1,5 @@
 import { createBodyTargets } from './combat-body-targets.js';
+import { fineCircleCells } from './surface-mask.js';
 
 // The AIM VIEW: everything the ground says about a verb you are pointing but
 // have not committed - the wash, the target rings, the walk preview, the eased
@@ -65,9 +66,8 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
     get hoverFoe() { return hoverFoe; },
   });
 
-  // The ground wash while a ranged verb is armed (TACTICS_PLAN M7): every tile
-  // the aim can legally land on, line of sight included, painted translucent
-  // blue.
+  // The ground wash while a ranged verb is armed: one merged fine-cell region
+  // for generic range, or the exact committed surface mask for a cone/zone.
   function drawAimWash() {
     // Unconditional, and first: the wash must also KNOW to vanish when the turn
     // ends, the verb is disarmed, or the aimer is mid-walk (a wash painted from
@@ -78,13 +78,29 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
     // rings and every walk-up read it, so the three cannot disagree.
     const armed = view.armed;
     const active = view.active;
-    // A cone owns a WEDGE, not a circular landing range. Painting the generic
-    // range wash under it was the whole in-combat/OOC mismatch: the real cone
-    // outline disappeared into what looked like TPS Form Storm's zone.
-    const spec = view.phase === 'player' && armed && !active.actor.moving
-      && !actions[armed].cone
-      ? ask.reachSpec(armed)
-      : null;
+    if (view.phase !== 'player' || !armed || active.actor.moving) {
+      aimPaint.hide();
+      return;
+    }
+    const action = actions[armed];
+    const surfaceField = world.surfaceField();
+    const quantum = surfaceField.quantum;
+    // Surface verbs paint the shape that will be committed, not a separate
+    // circular range wash. The outline/body rings remain immediate-mode on top.
+    if (action.cone) {
+      const test = aimPoint && ask.coneTest(action, aimPoint.x, aimPoint.z);
+      if (!test) { aimPaint.hide(); return; }
+      aimPaint.show(`cone:${armed}:${aimPoint.x},${aimPoint.z}:${paintEpoch}`,
+        () => ask.coneCells(action, test), quantum);
+      return;
+    }
+    if (ask.isZone(action)) {
+      if (!aimPoint) { aimPaint.hide(); return; }
+      aimPaint.show(`zone:${armed}:${aimPoint.x},${aimPoint.z}:${paintEpoch}`,
+        () => ask.zoneCells(action, aimPoint.x, aimPoint.z), quantum);
+      return;
+    }
+    const spec = ask.reachSpec(armed);
     if (!spec) { aimPaint.hide(); return; }
     const ax = active.actor.x;
     const az = active.actor.z;
@@ -105,20 +121,22 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
     const body = ask.posOf(active);
     const walkOnly = (x, z) => {
       if (!twoReaches) return false;
-      const en = world.liveEnemies().find((e) => e.x === x && e.z === z);
+      const en = world.liveEnemies().find((e) => {
+        const p = ask.posOf(e);
+        return Math.hypot(p.x - x, p.z - z) <= TARGET_R;
+      });
       return !!en && !ask.verbReaches(armed, en, body.x, body.z);
     };
     // Painted, ranged and sighted from the BODY (DEGRID D4/D6): the wash must
     // promise exactly what the gates measure, and they measure from where the
     // model stands. The key still uses the tile - a sub-tile shuffle should not
     // repaint the world.
-    aimPaint.show(`${armed}:${ax},${az}:${paintEpoch}`, () => ask.rangeTiles(
-      body.x, body.z, spec.r,
-      // Paintable ground: open floor the aimer can SEE. Solid cells stay
-      // unpainted - they read as objects standing in the wash, and the shadow
-      // they cast behind themselves is the whole lesson.
-      (x, z) => world.terrainOpen(x, z) && world.hasLos(body.x, body.z, x, z) && !walkOnly(x, z),
-    ));
+    aimPaint.show(`${armed}:${ax},${az}:${paintEpoch}`, () => fineCircleCells(
+      surfaceField, body.x, body.z, spec.r, {
+        canInclude: (x, z) => world.terrainOpen(Math.round(x), Math.round(z))
+          && world.hasLos(body.x, body.z, x, z) && !walkOnly(x, z),
+      },
+    ), quantum);
   }
 
   // The walk a click would take, and the ring where it would stop.
@@ -160,7 +178,9 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
       usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
     });
     if (problem) { drawRing(tx, tz, 0.42, FAR); return undefined; }
-    for (const [x, z] of ask.zoneCells(a, tx, tz)) drawRing(x, z, 0.42, OK);
+    // One boundary names the true disc. The merged fill carries its clipped
+    // terrain and body holes; storage cells never receive individual rings.
+    drawRing(tx, tz, a.radius ?? 1, OK);
     return true;
   }
 
@@ -396,8 +416,7 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
       ap: view.active.ap,
       usesLeft: a.uses ? view.active.usesLeft[view.armed] ?? 0 : null,
     });
-    const n = problem ? 0 : ask.zoneCells(a, tx, tz).length;
-    costTag.textContent = problem || `Cover ${n} tile${n === 1 ? '' : 's'} · ${a.ap} AP`;
+    costTag.textContent = problem || `Cover the highlighted floor · ${a.ap} AP`;
     costTag.style.left = `${sx + 14}px`;
     costTag.style.top = `${sy + 14}px`;
     costTag.style.display = 'block';

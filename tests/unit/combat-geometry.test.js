@@ -13,6 +13,7 @@ import {
 import { REACH, THROW_RANGE } from '../../src/stats.js';
 import { ACTIONS } from '../../src/data/actions.js';
 import { CARDINAL_DIRS, DIAGONAL_DIRS, NEIGHBOR_DIRS } from '../../src/directions.js';
+import { createSurfaceField } from '../../src/surface-field.js';
 
 // A body is just a tile. An AI unit carries `combat`; a member carries `sheet`.
 const at = (x, z, extra = {}) => ({ x, z, ...extra });
@@ -171,29 +172,32 @@ test('a long handle finds a swing spot the eight neighbours do not offer', () =>
   assert.equal(hasSwingSpot(unit(0, 0, REACH.DEFAULT + 0.7), en, ringed), true);
 });
 
-test('zoneCellsFor drops tiles that are unseen, unusable, or occupied', () => {
+test('zoneCellsFor drops fine cells that are unseen, unusable, or under a body footprint', () => {
   const a = { radius: 1 };
   const origin = { x: 0, z: 0 };
+  const surfaceField = createSurfaceField({ width: 8, height: 8 });
   const all = zoneCellsFor(a, origin, 3, 3, {
-    canTakeSurface: () => true, hasLos: () => true, occupied: () => false,
+    surfaceField, canTakeSurface: () => true, hasLos: () => true,
   });
   assert.ok(all.length > 1);
-  assert.ok(all.some(([x, z]) => x === 3 && z === 3));
+  assert.ok(all.some(([x, z]) => x === 2.75 && z === 2.75));
 
-  // Nobody gets a surface dropped on their feet - coworker, teammate or you.
+  // Nobody gets a surface dropped on their physical feet - coworker, teammate
+  // or you. One body can overlap several fine storage cells.
   const spared = zoneCellsFor(a, origin, 3, 3, {
-    canTakeSurface: () => true, hasLos: () => true, occupied: (x, z) => x === 3 && z === 3,
+    surfaceField, canTakeSurface: () => true, hasLos: () => true,
+    bodies: [{ x: 3, z: 3 }],
   });
-  assert.equal(spared.length, all.length - 1);
-  assert.ok(!spared.some(([x, z]) => x === 3 && z === 3));
+  assert.ok(spared.length < all.length);
+  assert.ok(!spared.some(([x, z]) => Math.abs(x - 3) === 0.25 && Math.abs(z - 3) === 0.25));
 
-  // No line, no tile: the rings, the cursor count and the click agree.
+  // No line, no cell: the fill and the click agree.
   assert.deepEqual(zoneCellsFor(a, origin, 3, 3, {
-    canTakeSurface: () => true, hasLos: () => false, occupied: () => false,
+    surfaceField, canTakeSurface: () => true, hasLos: () => false,
   }), []);
-  // A tile that cannot hold a surface is out whatever the geometry says.
+  // A cell that cannot hold a surface is out whatever the geometry says.
   assert.deepEqual(zoneCellsFor(a, origin, 3, 3, {
-    canTakeSurface: () => false, hasLos: () => true, occupied: () => false,
+    surfaceField, canTakeSurface: () => false, hasLos: () => true,
   }), []);
 });
 
