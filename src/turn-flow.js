@@ -133,6 +133,13 @@ export function createTurnFlow(d) {
       const dead = d.applyDamage(s.member.sheet, damage);
       d.log(`${s.member.sheet.name} is on fire. -${damage}.`);
       if (!dead) { d.refresh(); return 'stands'; }
+      // A borrowed coworker dies as the enemy body it always was. Returning
+      // it before the order re-reads the outcome prevents a dead player-side
+      // slot from hiding the last hostile forever.
+      if (s.member.isCharmed) {
+        d.releaseDeadCharm(s.member);
+        return 'fell';
+      }
       s.member.toppled = true;
       s.member.actor.clearPath();
       s.member.actor.fx = { kind: 'death', t: 0 };

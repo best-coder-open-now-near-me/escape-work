@@ -235,7 +235,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // back to their own side, and aiAdvance would be assigning over it.
       unit.onTile = null;
       unit.hp = Math.max(0, m.sheet.hp); // whatever happened to them, happened
-      if (!unit.hp) unit.alive = false;
+      // A death while borrowed is still a real enemy death: run the actor's
+      // death path so its loot/body state is the same as any other casualty,
+      // rather than only flipping `alive` and leaving an unlootable shell.
+      if (!unit.hp) {
+        if (unit.alive && unit.die) unit.die();
+        else unit.alive = false;
+      }
       world.setCharmed?.(unit, false);
       removeStatus(unit, 'charmed');
       // Back to their own side, in the same place in the round.
@@ -245,6 +251,22 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // dismissSummon makes when an assignment lapses mid-turn.
     if (session.activeMember === m) makeActive(livingParty()[0] || members[0]);
     refresh();
+  }
+
+  // A borrowed body can fall to an enemy swing, forced movement, a surface,
+  // or a turn-start status. Every path hands it back through this seam before
+  // the turn engine asks who is alive. Keeping this beside releaseCharm makes
+  // it impossible for one damage path to forget the enemy-side death effects.
+  function releaseDeadCharm(m) {
+    if (!m?.isCharmed || m.sheet.hp > 0) return false;
+    const unit = m.unit;
+    log(`${m.sheet.name}'s remote session ends the hard way.`);
+    releaseCharm(m);
+    if (unit) {
+      deathFx(unit);
+      callbacks.onEnemyKilled(unit);
+    }
+    return true;
   }
 
   const charmedMembers = () => members.filter((m) => m.isCharmed);
@@ -1092,6 +1114,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // somebody else was steering needs nothing here - steering already flows
   // past the fallen. Defeat only on a party wipe.
   function notifyMemberDown() {
+    let borrowedFell = false;
+    for (const m of [...charmedMembers()]) borrowedFell = releaseDeadCharm(m) || borrowedFell;
+    if (borrowedFell && !hostilesRemain()) { victory(); return; }
     for (const m of members) {
       if (m.sheet.hp > 0 || m.toppled) continue;
       m.toppled = true;
@@ -2029,6 +2054,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     setActing: (v) => { session.acting = v; },
     freeMoveOf: (...a) => freeMoveOf(...a),
     releaseCharm: (...a) => releaseCharm(...a),
+    releaseDeadCharm: (...a) => releaseDeadCharm(...a),
     advanceTurn: (...a) => advanceTurn(...a),
     beginTurn: (...a) => beginTurn(...a),
     livingParty: (...a) => livingParty(...a),
@@ -2198,6 +2224,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     log(line);
     refresh();
     if (dead) {
+      if (releaseDeadCharm(m)) {
+        if (!hostilesRemain()) victory();
+        return;
+      }
       m.toppled = true;
       deathFx(m);
       m.actor.clearPath();
