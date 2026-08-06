@@ -58,3 +58,23 @@ test('the spawn tab spawns an enemy and gives an item', async ({ page }) => {
   await page.locator('#god-panel button', { hasText: /^Give$/ }).click();
   expect(await page.evaluate(() => window.__game.inventory.length)).toBe(invBefore + 1);
 });
+
+test('the spawn tab applies, remembers, and clears a status', async ({ page }) => {
+  await bootAndPick(page);
+  await page.keyboard.press('Backquote');
+  await page.click('#god-tab-spawn');
+
+  // Office Drone starts with Origami Specialist and is legitimately immune to
+  // bleed, so use a status whose application exercises the ordinary path.
+  await page.locator('#god-status').selectOption('gum');
+  await page.locator('input[title="Ticks / steps to apply"]').fill('5');
+  await page.locator('input[title^="Composure"]').fill('0');
+  await page.click('#god-apply-status');
+
+  expect(await page.evaluate(() => window.__god.player.statuses.gum?.left)).toBe(5);
+  await expect(page.locator('#god-status')).toHaveValue('gum');
+  await expect(page.locator('input[title="Ticks / steps to apply"]')).toHaveValue('5');
+
+  await page.locator('#god-panel button', { hasText: 'Clear all' }).click();
+  expect(await page.evaluate(() => window.__god.player.statuses.gum)).toBeUndefined();
+});

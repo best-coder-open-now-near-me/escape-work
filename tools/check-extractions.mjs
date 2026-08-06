@@ -22,6 +22,7 @@ import { readFileSync } from 'node:fs';
 const MODULES = [
   'src/combat-aim.js', 'src/combat-body-targets.js', 'src/combat-world.js', 'src/hotbar-host.js',
   'src/combat-debug.js', 'src/game-debug.js', 'src/god-debug.js',
+  'src/god-targets.js', 'src/god-panel-state.js',
   'src/floor-effects.js', 'src/desk.js', 'src/combat-advance.js', 'src/ooc-verbs.js',
   'src/party-control.js', 'src/sneak-layer.js', 'src/progression-ui.js', 'src/summon-layer.js', 'src/walking.js', 'src/examine.js', 'src/keyboard.js', 'src/mouse.js', 'src/combat-entry.js', 'src/frame.js', 'src/cover-crouch.js', 'src/summon-desk.js', 'src/cover-denial-plans.js', 'src/hit-resolution.js', 'src/ai-verbs.js', 'src/turn-flow.js', 'src/verbs.js', 'src/demolition.js', 'src/click-verbs.js', 'src/action-bar.js', 'src/player-strike.js',
 ];
