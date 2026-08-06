@@ -18,7 +18,6 @@ import { NPCS } from './data/npcs.js';
 import { actorChar, actorLegend, parseActorRef } from './data/actor-registries.js';
 import { LEVELS } from './data/levels.js';
 import { createControls } from './controls.js';
-import { createTileRenderer, computeCarpetZones } from './tile-renderer.js';
 import { worldToScreenCss } from './fx.js';
 import { parseLevel, parseWallRuns, compressWallRuns, TYPE_ALIASES } from './grid.js';
 import { lintLevel } from './level-lint.js';
@@ -31,6 +30,9 @@ import {
   shiftEditorStorey, resizeEditorStorey, paintDocumentCell,
   setDocumentEdge, stampDocumentEdges,
 } from './editor-document.js';
+import { createEditorSession } from './editor-session.js';
+import { createEditorView } from './editor-view.js';
+import { createEditorShell } from './editor-shell.js';
 import { CARDINAL_DIRS } from './directions.js';
 
 const pc = globalThis.window?.pc;
@@ -140,7 +142,7 @@ export function startEditor(app, levelData, stashKey) {
   // level byte-identical through a load/export round trip - and a type with no
   // char, or one whose char is already spoken for, draws the next free one
   // from the pool. The registry is now unbounded; the real limit is how many
-  // DISTINCT types one level uses, which is the pool size (~90).
+  // DISTINCT types one level uses, which is the pool size (186 characters).
   //
   // `runtimeOnly` tiles (the fallen twins, POWERS_PLAN M6) are never painted,
   // so they never draw a character and never reach a legend.
@@ -177,11 +179,9 @@ export function startEditor(app, levelData, stashKey) {
     if (hit) { delete tileByChar[hit]; delete charByType[id]; }
     const want = TILE_TYPES[id]?.char;
     const ch = free(want) ? want : CHAR_POOL.find(free);
-    // Pool exhausted. There are 86 paintable tile types against 85 usable
-    // characters, so this is reachable, not theoretical - and it used to
-    // substitute floor in silence under a comment promising it would "say so".
-    // (A level only hits it by using that many DISTINCT types, but a tiered
-    // placement mints from the same pool, so a busy floor gets there sooner.)
+    // Pool exhaustion is unlikely with the Latin-1 headroom, but still a real
+    // document limit: tiered placements reserve characters from the same pool.
+    // Refuse explicitly rather than silently substituting floor.
     if (!ch) {
       toast(`No map character left for "${TILE_TYPES[id]?.label || id}" - this level already uses every one.`);
       return null;
@@ -199,329 +199,66 @@ export function startEditor(app, levelData, stashKey) {
   const enemyByChar = {};
   for (const [id, def] of Object.entries(ENEMY_TYPES)) enemyByChar[def.char] = id;
 
-  // --- rendering ---------------------------------------------------------------
-  // The SAME renderer the game uses (tile-renderer.js), so what you paint is what the
-  // game shows - puddles, cables, paper drifts, props, glowing exits and all.
-  const renderer = createTileRenderer(app);
-  // The camera focus, and the per-frame call that actually MOVES the rig.
-  // `controls.pan()` and `recenter()` only mutate the rig's target; `follow()`
-  // is the one thing that writes its position, and it was called from exactly
-  // one place in the repo - inside startGame. So in the editor the camera was
-  // pinned to wherever boot put it, and any pan would have been inert.
-  const focus = { x: 0, z: 0 };
-  const refocus = () => { focus.x = (width - 1) / 2; focus.z = (height - 1) / 2; };
-  let updateViewportOrientation = () => {};
-  app.on('update', (dt) => {
-    renderer.animate(dt);
-    controls.follow(focus, dt);
-    updateViewportOrientation();
+  // The editor scene has its own owner. startEditor supplies the live document
+  // and mutation-aware callbacks; editor-view.js owns every PlayCanvas entity,
+  // derived preview and render cache.
+  const view = createEditorView({
+    app,
+    pc,
+    tileTypes: TILE_TYPES,
+    playerChar: PLAYER_CHAR,
+    actorIdByChar,
+    document: {
+      get rows() { return rows; },
+      get width() { return width; },
+      get height() { return height; },
+      get active() { return active; },
+      get storeys() { return storeys; },
+      get tierCharIds() { return tierCharIds; },
+      get propRot() { return propRot; },
+      get tileByChar() { return tileByChar; },
+      get hWalls() { return hWalls; },
+      get vWalls() { return vWalls; },
+      get hDoors() { return hDoors; },
+      get vDoors() { return vDoors; },
+    },
+    serialize: () => toJson(),
+    follow: (point, dt) => controls.follow(point, dt),
+    onSize: () => updateSizeLabel(),
+    onStatus: () => setStatus(),
   });
-  // Actor spawn markers are editor-only affordances (the game replaces them
-  // with character models).
-  const mat = (rgb) => {
-    const m = new pc.StandardMaterial();
-    m.diffuse = new pc.Color(rgb[0], rgb[1], rgb[2]);
-    m.update();
-    return m;
-  };
-  const playerMat = mat([0.3, 0.8, 0.45]);
-  // One colour per actor ID, derived rather than drawn from a fixed list. The
-  // list held three colours and was indexed `i % 3` across four enemy types, so
-  // the Manager and the Security Guard painted the identical red box - two
-  // bodies with different stats, AP and loot, indistinguishable on the map you
-  // are balancing. A hash also means the fifth enemy type does not collide the
-  // day it is added.
-  const hueToRgb = (h, s = 0.62, l = 0.58) => {
-    const k = (n) => (n + h * 12) % 12;
-    const a = s * Math.min(l, 1 - l);
-    const f = (n) => l - a * Math.max(-1, Math.min(Math.min(k(n) - 3, 9 - k(n)), 1));
-    return [f(0), f(8), f(4)];
-  };
-  const actorMats = {};
-  function actorMat(id) {
-    if (!actorMats[id]) {
-      let h = 0;
-      for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-      // Away from the player's green, so a spawn never reads as a coworker.
-      actorMats[id] = mat(hueToRgb(((h % 300) + 60) / 360));
-    }
-    return actorMats[id];
-  }
+  const focus = view.focus;
+  const refocus = () => view.refocus();
+  const renderCell = (...args) => view.renderCell(...args);
+  const renderAllEdges = () => view.renderAllEdges();
+  const refreshElectrified = (...args) => view.refreshElectrified(...args);
+  const refreshCarpet = (...args) => view.refreshCarpet(...args);
+  const renderAll = () => view.renderAll();
+  const edgeInRange = (...args) => view.edgeInRange(...args);
+  const nearestEdge = (...args) => view.nearestEdge(...args);
 
-  // Live conduction preview: recompute electrified pools from the current map
-  // exactly the way the game will (grid.js), so painting a cable next to
-  // water lights the pool up right in the editor.
-  let electrified = new Set();
-  function computeElectrifiedSet() {
-    const s = new Set();
-    try {
-      const g = parseLevel(JSON.parse(toJson()));
-      for (let z = 0; z < g.height; z++) {
-        for (let x = 0; x < g.width; x++) {
-          if (g.isElectrified(x, z)) s.add(x + ',' + z);
-        }
-      }
-    } catch { /* mid-edit levels can be momentarily unparsable */ }
-    return s;
-  }
-
-  // Live carpet preview: the game lets carpet flow under items (see
-  // computeCarpetZones in tile-renderer.js), so the editor must too - otherwise every
-  // prop punches a gray hole in its room. The effective type grid matches
-  // what parseLevel produces: actor tiles are plain floor, spaces are void.
-  let carpet = new Map();
-  const effectiveTypeAt = (x, z) => {
-    const ch = rows[z]?.[x];
-    if (ch === undefined || ch === ' ') return null;
-    if (ch === PLAYER_CHAR || actorIdByChar[ch] || tierCharIds[ch]) return 'floor';
-    return tileByChar[ch] || 'floor';
-  };
-  const computeCarpet = () => computeCarpetZones(effectiveTypeAt, width, height);
-
-  // --- per-cell rendering --------------------------------------------------------
-  const cellEntities = new Map(); // "x,z" -> [entities]
-  const cellVersion = new Map(); // guards async model loads against repaints
-  const addBox = (material, x, y, z, sx, sy, sz) => {
-    const e = new pc.Entity();
-    e.addComponent('render', { type: 'box', material });
-    e.setLocalScale(sx, sy, sz);
-    e.setPosition(x, y, z);
-    app.root.addChild(e);
-    return e;
-  };
-
-  function renderCell(x, z) {
-    const key = x + ',' + z;
-    const version = (cellVersion.get(key) || 0) + 1;
-    cellVersion.set(key, version);
-    for (const e of cellEntities.get(key) || []) e.destroy();
-    const out = [];
-    cellEntities.set(key, out);
-    const ch = rows[z][x];
-    if (ch === ' ') return;
-    const isActor = ch === PLAYER_CHAR || !!actorIdByChar[ch] || !!tierCharIds[ch];
-    // Inherited carpet wins, exactly as buildLevel renders it in the game.
-    out.push(renderer.renderFloor(x, z, carpet.get(key) || (isActor ? 'floor' : tileByChar[ch] || 'floor')));
-    if (ch === PLAYER_CHAR) {
-      out.push(addBox(playerMat, x, 0.35, z, 0.55, 0.5, 0.55));
-    } else if (actorIdByChar[ch] || tierCharIds[ch]) {
-      // A companion, an NPC or a tiered placement gets a marker too. They used
-      // to render as bare floor, so a carpet drag erased one with nothing
-      // visibly vanishing - the load path went to real trouble to preserve
-      // them and the canvas quietly did not show them.
-      out.push(addBox(actorMat(actorIdByChar[ch] || tierCharIds[ch]), x, 0.35, z, 0.55, 0.5, 0.55));
-    } else {
-      const type = tileByChar[ch] || 'floor';
-      if (type === 'floor') return;
-      const res = renderer.renderMarker(x, z, type, {
-        electrified: electrified.has(key),
-        rotY: propRot.get(key) ?? null,
-        surfaceAt: (sx, sz) => {
-          const c = rows[sz]?.[sx];
-          return c && c !== ' ' ? TILE_TYPES[tileByChar[c]]?.surface || null : null;
-        },
-        onAsync: (holder) => {
-          // The cell may have been repainted while the model loaded.
-          if (cellVersion.get(key) !== version) holder.destroy();
-          else out.push(holder);
-        },
-      });
-      out.push(...res.entities);
-    }
-  }
-
-  // --- edge walls (partitions) ---------------------------------------------------
-  const edgeEntities = new Map(); // "h:x,z" / "v:x,z" -> entity
-
-  function edgeInRange(o, x, z) {
-    // Boundary edges (x == width / z == height) are valid: the far side of
-    // the last row/column.
-    if (o === 'h') return x >= 0 && x < width && z >= 0 && z <= height;
-    return x >= 0 && x <= width && z >= 0 && z < height;
-  }
-
-  // The partition brush works on the EDGE nearest the clicked ground point.
-  function nearestEdge(g) {
-    if (!g) return null;
-    const x = Math.round(g.x);
-    const z = Math.round(g.z);
-    const dx = g.x - x;
-    const dz = g.z - z;
-    if (Math.abs(dx) >= Math.abs(dz)) return { o: 'v', x: dx > 0 ? x + 1 : x, z };
-    return { o: 'h', x, z: dz > 0 ? z + 1 : z };
-  }
-
-  // Paint or erase the edge under the partition/door brush. Walls and doors
-  // are mutually exclusive on an edge (painting one replaces the other);
-  // erasing clears whichever is there.
+  // Mutation stays with the document owner; the view only projects the edge
+  // after editor-document has made walls and doors mutually exclusive.
   function paintEdge(edge, add) {
     if (!edge || !edgeInRange(edge.o, edge.x, edge.z)) return;
     const wallSet = edge.o === 'h' ? hWalls : vWalls;
     const doorSet = edge.o === 'h' ? hDoors : vDoors;
-    const k = edge.x + ',' + edge.z;
+    const key = edge.x + ',' + edge.z;
     const kind = add ? (brush === 'door' ? 'door' : 'wall') : null;
     if (add) {
       const target = brush === 'door' ? doorSet : wallSet;
       const other = brush === 'door' ? wallSet : doorSet;
-      if (target.has(k) && !other.has(k)) return;
+      if (target.has(key) && !other.has(key)) return;
       commitStroke();
     } else {
-      if (!wallSet.has(k) && !doorSet.has(k)) return;
+      if (!wallSet.has(key) && !doorSet.has(key)) return;
       commitStroke();
     }
     setDocumentEdge(activeDocumentStorey(), edge.o, edge.x, edge.z, kind);
-    const ek = edge.o + ':' + k;
-    edgeEntities.get(ek)?.destroy();
-    edgeEntities.delete(ek);
-    if (wallSet.has(k)) edgeEntities.set(ek, renderer.renderEdgeWall(edge.x, edge.z, edge.o));
-    else if (doorSet.has(k)) edgeEntities.set(ek, renderer.renderDoor(edge.x, edge.z, edge.o, false).holder);
-    refreshElectrified(); // a partition can dam (or free) a conducting pool
+    view.renderEdge(edge.o, edge.x, edge.z);
+    refreshElectrified();
   }
-
-  function renderAllEdges() {
-    for (const e of edgeEntities.values()) e.destroy();
-    edgeEntities.clear();
-    for (const k of hWalls) {
-      const [x, z] = k.split(',').map(Number);
-      edgeEntities.set('h:' + k, renderer.renderEdgeWall(x, z, 'h'));
-    }
-    for (const k of vWalls) {
-      const [x, z] = k.split(',').map(Number);
-      edgeEntities.set('v:' + k, renderer.renderEdgeWall(x, z, 'v'));
-    }
-    for (const k of hDoors) {
-      const [x, z] = k.split(',').map(Number);
-      edgeEntities.set('h:' + k, renderer.renderDoor(x, z, 'h', false).holder);
-    }
-    for (const k of vDoors) {
-      const [x, z] = k.split(',').map(Number);
-      edgeEntities.set('v:' + k, renderer.renderDoor(x, z, 'v', false).holder);
-    }
-  }
-
-  // Recompute conduction and re-render only the cells whose electrified state
-  // flipped (skipping one cell the caller is about to render anyway).
-  function refreshElectrified(skipX = null, skipZ = null) {
-    const next = computeElectrifiedSet();
-    const dirty = [];
-    for (const k of next) if (!electrified.has(k)) dirty.push(k);
-    for (const k of electrified) if (!next.has(k)) dirty.push(k);
-    electrified = next;
-    for (const k of dirty) {
-      const [cx, cz] = k.split(',').map(Number);
-      if (cx !== skipX || cz !== skipZ) renderCell(cx, cz);
-    }
-  }
-
-  // Same diff-and-rerender for inherited carpet: painting carpet (or erasing
-  // it) recolors the floor under nearby props, exactly as the game would.
-  function refreshCarpet(skipX = null, skipZ = null) {
-    const next = computeCarpet();
-    const dirty = new Set();
-    for (const [k, t] of next) if (carpet.get(k) !== t) dirty.add(k);
-    for (const k of carpet.keys()) if (!next.has(k)) dirty.add(k);
-    carpet = next;
-    for (const k of dirty) {
-      const [cx, cz] = k.split(',').map(Number);
-      if (cx !== skipX || cz !== skipZ) renderCell(cx, cz);
-    }
-  }
-
-  // --- grid, rulers, boundary (C7) ---------------------------------------------
-  // `renderFloor` draws continuous carpet with +/-0.018 tint variation, with the
-  // explicit intent that surfaces "read as continuous carpet instead of a grid
-  // of tiles" (tile-renderer.js). Correct for the game and wrong for the tool:
-  // counting cells was done by eye against a surface engineered to hide cell
-  // boundaries. Editor-only, so the game's look is untouched.
-  let gridEntities = [];
-  let gridMat = null;
-  let showGrid = true;
-  function renderGrid() {
-    for (const e of gridEntities) e.destroy();
-    gridEntities = [];
-    if (!showGrid || !width || !height) return;
-    if (!gridMat) {
-      gridMat = new pc.StandardMaterial();
-      gridMat.diffuse = new pc.Color(0.1, 0.1, 0.14);
-      gridMat.emissive = new pc.Color(0.28, 0.3, 0.38);
-      gridMat.opacity = 0.3;
-      gridMat.blendType = pc.BLEND_NORMAL;
-      gridMat.depthWrite = false;
-      gridMat.update();
-    }
-    const line = (x, y, z, sx, sz) => {
-      const e = new pc.Entity();
-      e.addComponent('render', { type: 'box', material: gridMat });
-      e.setLocalScale(sx, 0.01, sz);
-      e.setPosition(x, y, z);
-      app.root.addChild(e);
-      gridEntities.push(e);
-    };
-    // Every fifth line is brighter, which is what makes counting possible at a
-    // glance rather than one tile at a time.
-    for (let x = 0; x <= width; x++) {
-      line(x - 0.5, 0.02, height / 2 - 0.5, x % 5 === 0 ? 0.06 : 0.02, height);
-    }
-    for (let z = 0; z <= height; z++) {
-      line(width / 2 - 0.5, 0.02, z - 0.5, width, z % 5 === 0 ? 0.06 : 0.02);
-    }
-  }
-
-  // A faint copy of the storey below, so painting a mezzanine is not done blind
-  // over a floor you cannot see. Flat quads only - the real renderer would cost
-  // a whole second map of props for something that is a positioning aid.
-  let onionEntities = [];
-  let onionMat = null;
-  function renderOnionSkin() {
-    for (const e of onionEntities) e.destroy();
-    onionEntities = [];
-    if (active === 0) return;
-    const below = storeys[active - 1];
-    if (!below) return;
-    if (!onionMat) {
-      onionMat = new pc.StandardMaterial();
-      onionMat.diffuse = new pc.Color(0.45, 0.62, 0.85);
-      onionMat.opacity = 0.22;
-      onionMat.blendType = pc.BLEND_NORMAL;
-      onionMat.depthWrite = false;
-      onionMat.update();
-    }
-    for (let z = 0; z < below.rows.length; z++) {
-      for (let x = 0; x < below.rows[z].length; x++) {
-        const ch = below.rows[z][x];
-        if (ch === ' ') continue;              // void below shows as nothing
-        if (rows[z]?.[x] !== undefined && rows[z][x] !== ' ') continue; // covered anyway
-        const e = new pc.Entity();
-        e.addComponent('render', { type: 'box', material: onionMat });
-        e.setLocalScale(0.92, 0.02, 0.92);
-        e.setPosition(x, -0.06, z);
-        app.root.addChild(e);
-        onionEntities.push(e);
-      }
-    }
-  }
-
-  function renderAll() {
-    for (const list of cellEntities.values()) for (const e of list) e.destroy();
-    cellEntities.clear();
-    // Deliberately NOT cellVersion.clear(): the versions are what tell a model
-    // load still in flight that its cell has moved on. Resetting them restarted
-    // the counter at 1, so a .glb requested before a load/resize compared equal
-    // on arrival, passed the staleness guard, and pushed itself into the
-    // orphaned entity list - an undeletable prop floating over the new map.
-    for (const [k, v] of cellVersion) cellVersion.set(k, v + 1);
-    electrified = computeElectrifiedSet();
-    carpet = computeCarpet();
-    for (let z = 0; z < height; z++) for (let x = 0; x < width; x++) renderCell(x, z);
-    renderAllEdges();
-    renderGrid();
-    renderOnionSkin();
-    updateSizeLabel();
-    refocus();
-    setStatus();
-  }
-
-  function loadLevel(data) {
+  function loadLevel(data, { resetHistory = false } = {}) {
     // A layered level's storeys share one legend; only the maps and edge runs
     // differ. Storey 0 is the working set and the rest park until you switch.
     const layerDefs = Array.isArray(data.layers) && data.layers.length
@@ -546,8 +283,7 @@ export function startEditor(app, levelData, stashKey) {
     // one session-long map, so what you exported depended on what you had
     // opened before it.
     resetAllocator();
-    history = [];
-    future = [];
+    if (resetHistory) session.resetHistory();
     tierChars = new Map();
     tierCharIds = {};
     for (const [ch, val] of Object.entries(data.actors || {})) {
@@ -633,10 +369,6 @@ export function startEditor(app, levelData, stashKey) {
   // Full snapshots rather than a diff format: at the 40x40 ceiling a snapshot
   // is ~1600 characters plus four small Sets, which is cheaper to write and
   // very much cheaper to reason about than an inverse-operation log.
-  const HISTORY_CAP = 60;
-  let history = [];
-  let future = [];
-  let dirty = false;
   const documentStoreys = () => {
     const source = storeys.length ? storeys : [captureStorey()];
     return source.map((st, i) => cloneStorey(i === active ? captureStorey() : st));
@@ -664,51 +396,23 @@ export function startEditor(app, levelData, stashKey) {
   };
   // A gesture ARMS a snapshot; the first mutation inside it commits. Pushing
   // eagerly on press meant a click on empty space created an undo step that
-  // undid nothing, which reads as a broken Ctrl+Z.
-  let pendingStroke = null;
-  const beginStroke = () => { pendingStroke = snapshot(); };
-  function pushHistory() {
-    history.push(pendingStroke || snapshot());
-    pendingStroke = null;
-    if (history.length > HISTORY_CAP) history.shift();
-    future = [];
-    markDirty();
-  }
-  // Called by paint/paintEdge once they know they are really changing something.
-  function commitStroke() {
-    if (pendingStroke) pushHistory();
-    else markDirty();
-  }
-  function undo() {
-    if (!history.length) { toast('Nothing to undo.'); return; }
-    future.push(snapshot());
-    restore(history.pop());
-    markDirty();
-    toast(`Undo. (${history.length} step${history.length === 1 ? '' : 's'} left)`);
-  }
-  function redo() {
-    if (!future.length) { toast('Nothing to redo.'); return; }
-    history.push(snapshot());
-    restore(future.pop());
-    markDirty();
-    toast('Redo.');
-  }
-
-  // Autosave is SEPARATE from the playtest stash. The stash is a hand-off slot
-  // written only when you press Playtest; before this, closing the tab or
-  // hitting Reset threw away everything since that press - and a reload
-  // silently restored the stash, which could be an hour old.
-  const DRAFT_KEY = 'escape-work.editor.draft';
-  let draftTimer = null;
-  function markDirty() {
-    dirty = true;
-    runLint();
-    clearTimeout(draftTimer);
-    draftTimer = setTimeout(() => {
-      try { localStorage.setItem(DRAFT_KEY, toJson()); } catch { /* private mode, quota */ }
-    }, 700);
-  }
-  const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ } };
+  // undid nothing, which reads as a broken Ctrl+Z. Draft persistence lives
+  // beside those stacks in editor-session.js; the host supplies only document
+  // capture/restore and the lint repaint caused by a mutation.
+  const session = createEditorSession({
+    snapshot,
+    restore,
+    serialize: () => toJson(),
+    onDirty: () => runLint(),
+    notify: toast,
+  });
+  const beginStroke = () => session.beginStroke();
+  const pushHistory = () => session.pushHistory();
+  const commitStroke = () => session.commitStroke();
+  const undo = () => session.undo();
+  const redo = () => session.redo();
+  const markDirty = () => session.markDirty();
+  const clearDraft = () => session.clearDraft();
 
   // --- painting -------------------------------------------------------------------
   let brush = 'wall'; // a tile type id, 'player', or 'enemy:<typeId>'
@@ -946,11 +650,6 @@ export function startEditor(app, levelData, stashKey) {
     });
     if (!change) return;
     pushHistory();
-    const ow = Math.min(change.width, oldWidth);
-    const oh = Math.min(change.height, oldHeight);
-    // Conduction and carpet are global passes, so a NEW cell can recolour an
-    // old one; only a pure shrink leaves the interior provably untouched.
-    const grew = change.width > oldWidth || change.height > oldHeight;
     adoptStorey(change.storey);
     warnLostActors(change.lostActors);
     // Incremental. `renderAll` destroys and re-creates EVERY entity on the map
@@ -959,27 +658,11 @@ export function startEditor(app, levelData, stashKey) {
     // click, which is the worst possible cost curve for the one interaction
     // that reaches the advertised limit. Only the cells that appeared or
     // vanished need touching.
-    for (const [k, list] of [...cellEntities]) {
-      const [cx, cz] = k.split(',').map(Number);
-      if (cx < width && cz < height) continue;
-      for (const e of list) e.destroy();
-      cellEntities.delete(k);
-      cellVersion.set(k, (cellVersion.get(k) || 0) + 1); // orphan any in-flight model load
-    }
-    electrified = computeElectrifiedSet();
-    carpet = computeCarpet();
-    for (let z = 0; z < height; z++) {
-      for (let x = 0; x < width; x++) {
-        if (x < ow && z < oh && !grew) continue; // untouched interior
-        renderCell(x, z);
-      }
-    }
-    renderAllEdges();
-    renderGrid();
-    renderOnionSkin();
-    updateSizeLabel();
-    refocus();
-    setStatus();
+    view.resizeRefresh({
+      // A new cell can extend a carpet or conduction zone into the existing
+      // map. Pure shrink leaves the surviving interior unchanged.
+      repaintExisting: change.width > oldWidth || change.height > oldHeight,
+    });
     markDirty();
   }
 
@@ -1503,144 +1186,22 @@ export function startEditor(app, levelData, stashKey) {
   // --- editor UI ----------------------------------------------------------------------
   // The map gets the screen it needs. Tools, inspection and analysis are
   // separate regions around it instead of one expanding panel over the work.
-  const bar = document.createElement('div');
-  bar.id = 'editor-shell';
-  bar.dataset.toolsOpen = 'false';
-  bar.dataset.inspectorOpen = 'false';
-  const topbar = document.createElement('div');
-  topbar.id = 'editor-topbar';
-  topbar.className = 'editor-surface';
-  const identity = document.createElement('div');
-  identity.id = 'editor-identity';
-  const status = document.createElement('div');
-  status.id = 'ed-status';
-  identity.appendChild(status);
-  const toolPanel = document.createElement('section');
-  toolPanel.id = 'editor-tools';
-  toolPanel.className = 'editor-surface';
-  const toolHeading = document.createElement('div');
-  toolHeading.id = 'editor-tools-heading';
-  toolHeading.innerHTML = '<span>Tools</span><small>Paint and place</small>';
-  const toolMode = document.createElement('div');
-  toolMode.id = 'editor-tool-mode';
-  const inspector = document.createElement('aside');
-  inspector.id = 'editor-inspector';
-  inspector.className = 'editor-surface';
-  const inspectorHeading = document.createElement('div');
-  inspectorHeading.id = 'editor-inspector-heading';
-  inspectorHeading.innerHTML = '<span>Inspector</span><small>Selection and level</small>';
-  const inspectorBody = document.createElement('div');
-  inspectorBody.id = 'editor-inspector-body';
-  const selectionInfo = document.createElement('div');
-  selectionInfo.id = 'editor-selection';
-  const analysis = document.createElement('section');
-  analysis.id = 'editor-analysis';
-  const analysisHeading = document.createElement('div');
-  analysisHeading.id = 'editor-analysis-heading';
-  analysisHeading.textContent = 'Analysis';
-  const problems = document.createElement('div');
-  problems.id = 'editor-problems';
-  const orientation = document.createElement('div');
-  orientation.id = 'editor-orientation';
-  orientation.setAttribute('role', 'img');
-  orientation.setAttribute('aria-label', 'Viewport orientation: X and Y axes');
-  const orientationAxes = document.createElement('div');
-  orientationAxes.id = 'editor-orientation-axes';
-  orientationAxes.setAttribute('aria-hidden', 'true');
-  const orientationAxis = (axis, label) => {
-    const line = document.createElement('div');
-    line.className = 'editor-orientation-axis';
-    line.dataset.axis = axis;
-    const name = document.createElement('span');
-    name.textContent = label;
-    line.appendChild(name);
-    return line;
-  };
-  const orientationOrigin = document.createElement('span');
-  orientationOrigin.className = 'editor-orientation-origin';
-  orientationAxes.append(
-    orientationAxis('x', '+X'),
-    orientationAxis('y', '+Y'),
-    orientationOrigin,
-  );
-  orientation.appendChild(orientationAxes);
+  const shell = createEditorShell(BUTTON_CHROME);
+  const {
+    bar, status, toolPanel, toolMode, inspector, selectionInfo, problems,
+    palette, commands, levelRow, viewRow, levelDetails, storeyDetails,
+    inspectorField, btn, divider,
+  } = shell;
   let viewportYaw = null;
-  updateViewportOrientation = () => {
+  const updateViewportOrientation = () => {
     const yaw = ((controls.yaw % 360) + 360) % 360;
     if (yaw === viewportYaw) return;
     viewportYaw = yaw;
-    orientationAxes.style.setProperty('--editor-orientation-yaw', `${yaw}deg`);
+    shell.setOrientationYaw(yaw);
   };
+  view.setOrientationUpdater(updateViewportOrientation);
   updateViewportOrientation();
-
-  // Palette construction remains registry-driven; the shell simply gives it a
-  // dedicated scroll region rather than making it compete with commands.
-  const palette = document.createElement('div');
-  palette.id = 'editor-palette';
-  const commands = document.createElement('div');
-  commands.id = 'editor-commands';
-  const levelRow = document.createElement('div');
-  levelRow.id = 'editor-level-row';
-  const inspectorSection = (id, title) => {
-    const section = document.createElement('section');
-    section.id = id;
-    section.className = 'editor-inspector-section';
-    const heading = document.createElement('div');
-    heading.className = 'editor-inspector-section-heading';
-    heading.textContent = title;
-    const body = document.createElement('div');
-    body.className = 'editor-inspector-section-body';
-    section.append(heading, body);
-    return { section, body };
-  };
-  const inspectorField = (labelText, control) => {
-    const field = document.createElement('label');
-    field.className = 'editor-inspector-field';
-    field.htmlFor = control.id;
-    const label = document.createElement('span');
-    label.textContent = labelText;
-    field.append(label, control);
-    return field;
-  };
-  const levelDetails = inspectorSection('editor-level-details', 'Level');
-  const storeyDetails = inspectorSection('editor-storey-details', 'Storeys');
-  levelRow.append(levelDetails.section, storeyDetails.section);
-  const viewRow = document.createElement('div');
-  viewRow.id = 'editor-view-row';
-  const btn = (id, label, host = palette) => {
-    const b = document.createElement('button');
-    b.id = id;
-    b.textContent = label;
-    Object.assign(b.style, BUTTON_CHROME, {
-      padding: '7px 9px', borderRadius: '5px', minHeight: '32px', cursor: 'pointer',
-    });
-    b.classList.add('editor-command');
-    host.appendChild(b);
-    return b;
-  };
-  const divider = (host = commands) => {
-    const s = document.createElement('div');
-    Object.assign(s.style, { width: '1px', alignSelf: 'stretch', background: '#3a3a52', margin: '0 2px' });
-    host.appendChild(s);
-  };
-  const frameViewport = () => {
-    const canvasRect = document.getElementById('app').getBoundingClientRect();
-    const topbarRect = topbar.getBoundingClientRect();
-    let left = canvasRect.left + 10;
-    let right = canvasRect.right - 10;
-    const top = Math.max(canvasRect.top + 10, topbarRect.bottom + 10);
-    const bottom = canvasRect.bottom - 10;
-    if (window.matchMedia('(min-width: 981px)').matches) {
-      left = Math.max(left, toolPanel.getBoundingClientRect().right + 10);
-      right = Math.min(right, inspector.getBoundingClientRect().left - 10);
-    }
-    const middleX = canvasRect.left + canvasRect.width / 2;
-    const middleY = canvasRect.top + canvasRect.height / 2;
-    return {
-      width: Math.max(1, 2 * Math.min(middleX - left, right - middleX)),
-      height: Math.max(1, 2 * Math.min(middleY - top, bottom - middleY)),
-    };
-  };
+  const frameViewport = () => shell.frameViewport();
   const frameLevel = () => {
     refocus();
     controls.recenter();
@@ -2216,10 +1777,10 @@ export function startEditor(app, levelData, stashKey) {
     // Loading REPLACES the document. It used to do that with no prompt, so
     // browsing for "the floor with the break room I liked" cost you your work.
     // eslint-disable-next-line no-alert
-    if (dirty && !window.confirm(`Load “${LEVELS[id].name || id}”?\n\nUnsaved painting will be lost.`)) return;
+    if (session.dirty && !window.confirm(`Load “${LEVELS[id].name || id}”?\n\nUnsaved painting will be lost.`)) return;
     pushHistory();
     loadLevel(LEVELS[id]);
-    dirty = false;
+    session.markClean({ clearDraft: true });
     toast(`Loaded “${levelName}”.`);
   };
   commands.appendChild(select);
@@ -2229,7 +1790,7 @@ export function startEditor(app, levelData, stashKey) {
   // you into the editor on whatever floor your campaign save is on.
   btn('ed-new', '✚ New', commands).onclick = () => {
     // eslint-disable-next-line no-alert
-    if (dirty && !window.confirm('Start a new floor?\n\nUnsaved painting will be lost.')) return;
+    if (session.dirty && !window.confirm('Start a new floor?\n\nUnsaved painting will be lost.')) return;
     // eslint-disable-next-line no-alert
     const size = window.prompt('New floor size (width×height):', '20x16');
     if (size == null) return;
@@ -2259,7 +1820,6 @@ export function startEditor(app, levelData, stashKey) {
       actors: { '@': 'player' },
       map: grid,
     });
-    dirty = true;
     markDirty();
     toast(`New ${w}×${h} floor. Name it in the strip, then paint.`);
   };
@@ -2297,7 +1857,7 @@ export function startEditor(app, levelData, stashKey) {
       window.alert('This browser will not store the level, so there is nothing to playtest. Export the JSON instead.');
       return;
     }
-    dirty = false; // the stash IS a save - leaving for it is not losing work
+    session.markClean(); // the stash IS a save - leaving for it is not losing work
     clearDraft();
     let last = null;
     try { last = localStorage.getItem(PLAYTEST_CLASS_KEY); } catch { /* ignore */ }
@@ -2361,7 +1921,7 @@ export function startEditor(app, levelData, stashKey) {
     Object.assign(b.style, { borderColor: '#7a3a4a', color: '#ffd9e0' });
     b.onclick = () => {
       // eslint-disable-next-line no-alert
-      if (dirty && !window.confirm(confirmText)) return;
+      if (session.dirty && !window.confirm(confirmText)) return;
       act();
     };
     return b;
@@ -2411,9 +1971,7 @@ export function startEditor(app, levelData, stashKey) {
     if (e.key === 'Tab') { e.preventDefault(); toggleCollapse(); return; }
     if (k === 'g') {
       e.preventDefault();
-      showGrid = !showGrid;
-      renderGrid();
-      toast(showGrid ? 'Grid on.' : 'Grid off.');
+      toast(view.toggleGrid() ? 'Grid on.' : 'Grid off.');
       return;
     }
     if (k === 'r') {
@@ -2460,7 +2018,7 @@ export function startEditor(app, levelData, stashKey) {
   // The browser's own "you have unsaved changes" prompt is the only thing that
   // survives a tab close, a back button, or a reload typed into the bar.
   window.addEventListener('beforeunload', (e) => {
-    if (!dirty) return undefined;
+    if (!session.dirty) return undefined;
     e.preventDefault();
     e.returnValue = '';
     return '';
@@ -2521,13 +2079,7 @@ export function startEditor(app, levelData, stashKey) {
   };
   try { collapsed = localStorage.getItem(COLLAPSE_KEY) === '1'; } catch { /* ignore */ }
 
-  topbar.append(identity, commands, collapseBtn, inspectorToggle);
-  toolPanel.append(toolHeading, toolMode, filterBox, palette);
-  inspectorBody.append(selectionInfo, levelRow);
-  analysis.append(analysisHeading, viewRow, problems);
-  inspector.append(inspectorHeading, inspectorBody, analysis);
-  bar.append(topbar, toolPanel, inspector, orientation);
-  document.body.appendChild(bar);
+  shell.mount({ filterBox, collapseBtn, inspectorToggle });
   applyCollapse();
 
   function brushLabel() {
@@ -2746,7 +2298,7 @@ export function startEditor(app, levelData, stashKey) {
     get cameraFocus() { return controls.focus; },
     get walls() { return compressWallRuns(hWalls, vWalls); },
     get doors() { return compressWallRuns(hDoors, vDoors); },
-    carpetAt: (x, z) => carpet.get(x + ',' + z) || null,
+    carpetAt: (x, z) => view.carpetAt(x, z),
     project(x, z) {
       const s = worldToScreenCss(controls.cameraEntity, x, 0, z);
       return { x: s.x, y: s.y };
@@ -2760,14 +2312,12 @@ export function startEditor(app, levelData, stashKey) {
   // you press Playtest - so a crash or a stray reload lost everything since
   // that press, and the reload silently came back with the stale stash instead.
   let restoredDraft = false;
-  try {
-    const draft = localStorage.getItem(DRAFT_KEY);
-    if (draft) {
-      const parsed = JSON.parse(draft);
-      if (isLevelDocument(parsed)) { loadLevel(parsed); restoredDraft = true; }
-    }
-  } catch { /* a corrupt draft is not worth refusing to open the editor over */ }
-  if (!restoredDraft) loadLevel(levelData);
+  const draft = session.readDraft();
+  if (isLevelDocument(draft)) {
+    loadLevel(draft, { resetHistory: true });
+    restoredDraft = true;
+  }
+  if (!restoredDraft) loadLevel(levelData, { resetHistory: true });
   // The game's HUD ships in index.html unconditionally and `updateStatsHud` is
   // only ever called from startGame, so in editor mode `#stats` sat empty in
   // the bottom-left as a bordered pill with nothing in it. Take the corner.
@@ -2776,7 +2326,7 @@ export function startEditor(app, levelData, stashKey) {
   validateNow();
   window.__editor = exposeEditor();
   if (restoredDraft) {
-    dirty = true; // it is unsaved by definition - it never reached a stash
+    session.markDirty({ save: false }); // it never reached a stash
     toast(`Restored your unsaved draft of “${levelName}”. Reset discards it.`);
   } else {
     toast('Floor ready.');

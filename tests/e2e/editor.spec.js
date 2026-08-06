@@ -158,6 +158,29 @@ test('storey creation and undo restore the entire level document', async ({ page
   ).toEqual({ layers: 0, hasMap: true });
 });
 
+test('loading a level is undoable and retires the discarded draft', async ({ page }) => {
+  await page.goto('/#editor');
+  await page.waitForFunction(() => window.__editor, null, { timeout: 90_000 });
+  await waitForSmoothFrames(page);
+
+  await page.getByLabel('Level name').fill('Draft Before Load');
+  await page.waitForTimeout(800); // let the debounced draft reach storage
+  expect(await page.evaluate(() => localStorage.getItem('escape-work.editor.draft'))).toBeTruthy();
+
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.selectOption('#ed-level', 'level2');
+  await expect.poll(
+    () => page.getByLabel('Level name').inputValue(),
+    { timeout: 30_000 },
+  ).not.toBe('Draft Before Load');
+  expect(await page.evaluate(() => localStorage.getItem('escape-work.editor.draft'))).toBeNull();
+
+  // The level select retains focus and intentionally ignores editor hotkeys;
+  // use the visible command a user can press from that state.
+  await page.click('#ed-undo');
+  await expect(page.locator('#ed-name')).toHaveValue('Draft Before Load');
+});
+
 test('palette categories collapse, expand, and reveal filter matches', async ({ page }) => {
   await page.goto('/#editor');
   await page.waitForFunction(() => window.__editor, null, { timeout: 90_000 });
