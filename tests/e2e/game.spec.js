@@ -77,9 +77,15 @@ test('clicking a closed door walks up and swings it open', async ({ page }) => {
   const doors = await page.evaluate(() => window.__game.doors);
   expect(doors.length).toBeGreaterThan(0);
   expect(doors.every((d) => !d.open)).toBe(true); // all start closed
-  // Click just shy of the cubicle-row door on the north edge of (8, 5) -
-  // the walk-up crosses open corridor from the spawn.
-  const p = await page.evaluate(() => window.__game.project(8, 4.58));
+  // Click the visible cubicle-row door panel itself. The threshold is ordinary
+  // walkable floor and deliberately is not a ghost interaction target.
+  const p = await page.evaluate(() => window.__game.project3(8, 0.55, 4.5));
+  expect(onScreen(p)).toBe(true);
+  await page.mouse.move(p.x, p.y);
+  await expect.poll(
+    () => page.evaluate(() => window.__game.hoverKind),
+    { timeout: 15_000 },
+  ).toBe('door');
   await page.mouse.click(p.x, p.y);
   await expect.poll(
     () => page.evaluate(() => window.__game.doors.find((d) => d.key === 'h:8,5')?.open),

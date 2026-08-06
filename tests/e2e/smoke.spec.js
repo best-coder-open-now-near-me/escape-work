@@ -14,7 +14,7 @@
 // the next - if you need a pristine world, write an isolated test in the
 // spec file for that feature instead of adding a step here.
 import { test, expect } from '@playwright/test';
-import { bootAndPick, waitStill } from './helpers.js';
+import { bootAndPick, onScreen, waitStill } from './helpers.js';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -67,7 +67,16 @@ test.describe('smoke', () => {
     // work together - the thing most likely to break silently.
     const doors = await page.evaluate(() => window.__game.doors);
     expect(doors.length).toBeGreaterThan(0);
-    const p = await page.evaluate(() => window.__game.project(8, 4.58));
+    // Doors are direct-use controls: aim at the visible panel rather than the
+    // floor/threshold around it, and prove the object picker agrees before
+    // committing the click.
+    const p = await page.evaluate(() => window.__game.project3(8, 0.55, 4.5));
+    expect(onScreen(p)).toBe(true);
+    await page.mouse.move(p.x, p.y);
+    await expect.poll(
+      () => page.evaluate(() => window.__game.hoverKind),
+      { timeout: 15_000 },
+    ).toBe('door');
     await page.mouse.click(p.x, p.y);
     await expect.poll(
       () => page.evaluate(() => window.__game.doors.find((d) => d.key === 'h:8,5')?.open),
