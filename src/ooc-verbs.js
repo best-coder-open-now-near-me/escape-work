@@ -67,12 +67,13 @@ export function createOocVerbs(d) {
     const problem = d.summonDropProblem(a, tx, tz);
     if (problem) { d.ui.say(problem); return; }
     const spawned = d.spawnSummonUnits(
-      a.archetype, 'player', d.player, d.dropCount(a, d.roomFor(a)), { x: tx, z: tz },
+      a, 'player', d.player, d.dropCount(a, d.roomFor(a)), { x: tx, z: tz },
     );
     if (!spawned.length) { d.ui.say('No room - nobody can find a free desk there.'); return; }
     for (const rec of spawned) {
       rec.actor.summonTurns = a.lifetimeTurns ?? null;
-      d.vfx.impact(rec.actor.x, rec.actor.z, 'toner', { y: 0.5, scale: 0.55 });
+      const p = rec.actor.entity?.getPosition?.() || rec.actor.spawnPoint || rec.actor;
+      d.vfx.impact(p.x, p.z, 'toner', { y: 0.5, scale: 0.55 });
     }
     d.player.faceToward(tx, tz); // you gesture at where you posted them
     d.ui.say(`${a.log} ${d.arrivalLine(spawned.length)}`);

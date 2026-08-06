@@ -195,6 +195,7 @@ const KITS = {
       cap: 2,
       cooldownRounds: 2,
       ap: 3,
+      placement: { anchor: 'summoner', avoidHazards: true },
       lifetimeTurns: 5,
       log: 'HR posts the role internally. Employees materialize, résumés in hand.',
     },

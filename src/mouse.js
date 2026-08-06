@@ -117,7 +117,11 @@ export function createMouse(d) {
       // says why and stays armed (postSummonAt), so the next click can just be
       // a better one.
       if (d.armedOoc && d.ACTIONS[d.armedOoc].type === 'summon') {
-        if (tile) d.postSummonAt(d.armedOoc, tile.x, tile.z);
+        if (tile) d.postSummonAt(
+          d.armedOoc,
+          point ? point.x : tile.x,
+          point ? point.z : tile.z,
+        );
         return;
       }
       // A CONE is aimed at a DIRECTION, so the ground is its natural target -

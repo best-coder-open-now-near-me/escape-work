@@ -85,7 +85,9 @@ import {
 } from './step-rules.js';
 import { createDoors, atDoor, COMBAT_DOOR_AP } from './doors.js';
 import { createDialogue, shopKeyForNpc, sayRecruited } from './dialogue.js';
-import { summonRange, summonRoom, dropCount, summonSpotProblem } from './summon-rules.js';
+import {
+  summonRange, summonRoom, dropCount, summonSpotProblem, summonLandingPoints,
+} from './summon-rules.js';
 import { outOfCombatActionState } from './hotbar-model.js';
 import { startCombat } from './combat.js';
 import { verbSides } from './combat-targeting.js';
@@ -473,7 +475,7 @@ function startGame(level) {
     summonSpotProblem,
     dropCount,
     dressUp: (...a) => dressUp(...a),
-    freeTilesNear: (...a) => freeTilesNear(...a),
+    summonPointsNear: (...a) => summonPointsNear(...a),
     leadBody: (...a) => leadBody(...a),
     hasLos: (...a) => hasLos(...a),
   });
@@ -555,35 +557,35 @@ function startGame(level) {
   const clearOfHazards = (x, z) => isWalkable(x, z) && !isHazard(x, z);
   const enemyClearOfHazards = (x, z) => isWalkable(x, z) && !enemyIsHazard(x, z);
 
-  // The nearest open tiles around (cx,cz) for dropping summoned units onto:
-  // walkable (no walls, bodies, or NPCs - isWalkable already excludes living
-  // enemies), off any party member, and clear of the hazards a fresh arrival
-  // shouldn't materialize into. Rings outward so reinforcements appear beside
-  // their summoner, not across the room; returns up to `n` [x,z] pairs (fewer
-  // when the area is boxed in). Used by world.spawnSummon.
-  //   `minR` is the first ring to consider: 1 for "beside the summoner" (enemy
-  //   reinforcements), 0 for a player-CHOSEN drop point, where the clicked tile
-  //   itself is the first place they should try to stand.
-  function freeTilesNear(cx, cz, n, minR = 1) {
-    const spotOk = (x, z) =>
-      isWalkable(x, z) && !partyAt(x, z) && !summonAt(x, z) && !enemyIsHazard(x, z);
-    const out = [];
-    for (let r = minR; r <= 4 && out.length < n; r++) {
-      if (r === 0) {
-        if (spotOk(cx, cz)) out.push([cx, cz]);
-        continue;
-      }
-      for (let dz = -r; dz <= r && out.length < n; dz++) {
-        for (let dx = -r; dx <= r && out.length < n; dx++) {
-          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue; // this ring shell only
-          const x = cx + dx;
-          const z = cz + dz;
-          if (!spotOk(x, z)) continue;
-          out.push([x, z]);
-        }
-      }
+  // Every summon rests at continuous body-clear points around its descriptor's
+  // anchor. Terrain/partitions remain authored on movement tiles; bodies and
+  // hazards are sampled where they physically are.
+  function summonPointsNear(cx, cz, n, placement = {}) {
+    const records = [
+      ...(party?.members || []),
+      ...summons,
+      ...enemies.filter((en) => en.alive),
+      ...npcs,
+    ];
+    const seen = new Set();
+    const bodies = [];
+    for (const record of records) {
+      const actor = record.actor || record;
+      if (!actor || seen.has(actor) || record.sheet?.hp <= 0) continue;
+      const p = actor.entity?.getPosition?.() || actor.spawnPoint || actor;
+      if (!Number.isFinite(p.x) || !Number.isFinite(p.z)) continue;
+      seen.add(actor);
+      bodies.push({ x: p.x, z: p.z });
     }
-    return out;
+    return summonLandingPoints(cx, cz, n, {
+      isOpen: grid.terrainOpen,
+      edgeOpen: grid.stepOpen,
+      pointOpen: placement.avoidHazards === false
+        ? () => true
+        : (x, z) => !enemyIsHazard(x, z),
+      bodies,
+      maxSearchRadius: placement.searchRadius ?? 4,
+    });
   }
 
   // --- populate the scene -----------------------------------------------------
@@ -1774,7 +1776,7 @@ function startGame(level) {
     stickGum: (...a) => stickGum(...a),
     sightClear: (...a) => sightClear(...a),
     smoothFromBody: (...a) => smoothFromBody(...a),
-    freeTilesNear: (...a) => freeTilesNear(...a),
+    summonPointsNear: (...a) => summonPointsNear(...a),
     hazardCostFor: (...a) => hazardCostFor(...a),
     hazardSegmentCostFor: (...a) => hazardSegmentCostFor(...a),
     enemyHazardCost: (...a) => enemyHazardCost(...a),
@@ -2314,8 +2316,8 @@ function startGame(level) {
         if (!run.armedOoc || run.inCombat || !run.oocAim) return null;
         const a = ACTIONS[run.armedOoc];
         if (a.type !== 'summon') return null;
-        const x = Math.round(run.oocAim.x);
-        const z = Math.round(run.oocAim.z);
+        const x = run.oocAim.x;
+        const z = run.oocAim.z;
         return { x, z, problem: summonDropProblem(a, x, z), spots: summonDropSpots(a, x, z) };
       },
       // What the hovered SHOVE aim would topple and where it lands, or null

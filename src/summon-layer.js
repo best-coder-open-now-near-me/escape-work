@@ -21,7 +21,9 @@
 //   - who summoned whom outlives the fight it happened in. A summon with turns
 //     left walks out with you and into the next fight (SUMMON_PLAN #7), and the
 //     per-summoner live cap can only count it if that link survives the trip.
-import { countLiveSummons } from './summon-rules.js';
+import {
+  countLiveSummons, summonAnchorPoint, summonPlacement,
+} from './summon-rules.js';
 import { livingMemberAt } from './member-rules.js';
 
 export function createSummonLayer(d) {
@@ -65,18 +67,30 @@ export function createSummonLayer(d) {
   // isWalkable deliberately ignores them, so members walk right through.
   const summonAt = (x, z) => !!livingMemberAt(d.summons, x, z);
 
-  function spawnSummonUnits(archetypeId, team, summoner, n, at = null) {
+  function spawnSummonUnits(spec, team, summoner, n, aim = null) {
+    const archetypeId = spec?.archetype;
     const def = d.CLASSES[archetypeId] || d.ENEMY_TYPES[archetypeId];
     if (!def) return [];
     const ally = team === 'player';
     const out = [];
-    const spots = at
-      ? d.freeTilesNear(at.x, at.z, n, 0)
-      : d.freeTilesNear(summoner.x, summoner.z, n, 1);
+    // The descriptor survives all the way to the system that consumes it.
+    // `placement.anchor` chooses the origin; the landing search itself owns
+    // non-negotiable physical clearance for every character it creates.
+    const summonerPoint = summoner.entity?.getPosition?.() || summoner.spawnPoint || summoner;
+    const anchor = summonAnchorPoint(spec, summonerPoint, aim);
+    const spots = anchor
+      ? d.summonPointsNear(anchor.x, anchor.z, n, summonPlacement(spec))
+      : [];
     for (const [x, z] of spots) {
+      const tileX = Math.round(x);
+      const tileZ = Math.round(z);
       const actor = ally
-        ? new d.CompanionActor(x, z, archetypeId, def)
-        : new d.EnemyActor(x, z, archetypeId, def, { team, summoned: true, summonedBy: summoner });
+        ? new d.CompanionActor(tileX, tileZ, archetypeId, def)
+        : new d.EnemyActor(tileX, tileZ, archetypeId, def, { team, summoned: true, summonedBy: summoner });
+      // The logical movement tile is derived from the rest point; keep the
+      // latter while the async model load is still pending so FX and later
+      // placement passes see where the body physically arrived.
+      actor.spawnPoint = { x, z };
       // Who called them is part of the record, not just of the fight they were
       // called in: a summon that outlives its fight walks into the NEXT one,
       // and the per-summoner live cap can only see it if the link survives the
@@ -99,15 +113,19 @@ export function createSummonLayer(d) {
   }
 
   // Rebuild the compact records party.js carried across a floor. Placement is
-  // anchored at the party entry; freeTilesNear fans each arrival onto the next
-  // open neighbouring tile. The archetype supplies all static sheet data again.
+  // anchored at the exact party entry and the same continuous landing search
+  // fans each arrival into body-clear space. The archetype supplies all static
+  // sheet data again.
   function restoreSummons(saved, party, at) {
     const out = [];
     for (const state of saved || []) {
       const summoner = party?.members[state.summonedBy]?.actor
         || party?.members[party.active]?.actor;
       if (!summoner) continue;
-      const [rec] = spawnSummonUnits(state.archetypeId, 'player', summoner, 1, at);
+      const [rec] = spawnSummonUnits({
+        archetype: state.archetypeId,
+        placement: { anchor: 'aim', avoidHazards: true },
+      }, 'player', summoner, 1, at);
       if (!rec) continue; // unknown archetype or no safe entry tile
       rec.sheet.hp = Math.min(rec.sheet.maxHp, state.hp);
       rec.sheet.statuses = { ...(state.statuses || {}) };
@@ -121,18 +139,21 @@ export function createSummonLayer(d) {
   // The same ladder combat runs, minus the two legs a FIGHT owns - there is no
   // AP pool to spend out here and no per-fight `uses` to ration, so those
   // fields simply are not supplied.
+  const landingSpots = (a, tx, tz, n) => d.summonPointsNear(
+    tx, tz, n, summonPlacement(a),
+  );
   const summonDropProblem = (a, tx, tz) => d.summonSpotProblem(a, {
-    // The drop range is a circle from the poster's body; the SPOT is a tile.
+    // The drop range is a circle from the poster's body to the exact aim.
     dist: Math.hypot(d.leadBody().x - tx, d.leadBody().z - tz),
     los: d.hasLos(d.leadBody(), { x: tx, z: tz }),
-    hasRoomToStand: d.freeTilesNear(tx, tz, 1, 0).length > 0,
+    hasRoomToStand: landingSpots(a, tx, tz, 1).length > 0,
     room: roomFor(a),
   });
-  // The tiles the arrivals would land on: the clicked tile first, then the free
-  // ground ringing outward, bounded by `count` and by what the cap has left.
+  // The continuous points the arrivals would land on: the exact click first,
+  // then body-clear ground ringing outward, bounded by `count` and cap room.
   const summonDropSpots = (a, tx, tz) => (summonDropProblem(a, tx, tz)
     ? []
-    : d.freeTilesNear(tx, tz, d.dropCount(a, roomFor(a)), 0));
+    : landingSpots(a, tx, tz, d.dropCount(a, roomFor(a))));
 
   return {
     dismissSummon,

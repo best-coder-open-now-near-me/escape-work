@@ -108,6 +108,10 @@ test('enemy summon descriptors reference a valid, combat-ready archetype', () =>
     assert.ok((s.cooldownRounds ?? 0) >= 0, `${id}.summon.cooldownRounds >= 0`);
     assert.ok(s.ap > 0, `${id}.summon.ap costs something`);
     assert.ok(s.lifetimeTurns > 0, `${id}.summon.lifetimeTurns is a real budget`);
+    assert.equal(s.placement?.anchor, 'summoner',
+      `${id}.summon placement is declared rather than inferred from a missing click`);
+    assert.equal(typeof s.placement?.avoidHazards, 'boolean',
+      `${id}.summon declares its hazard policy`);
   }
 });
 
@@ -148,6 +152,10 @@ test('summon actions reference a valid, combat-ready archetype', () => {
     assert.ok((a.cap ?? a.count) >= a.count, `${id}.cap >= count`);
     assert.ok(a.ap > 0, `${id}.ap costs something`);
     assert.ok(a.lifetimeTurns > 0, `${id}.lifetimeTurns is a real budget`);
+    assert.equal(a.placement?.anchor, 'aim',
+      `${id}.placement declares that the action needs an aimed point`);
+    assert.equal(typeof a.placement?.avoidHazards, 'boolean',
+      `${id}.placement declares its hazard policy`);
   }
 });
 

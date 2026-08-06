@@ -86,6 +86,7 @@ seam disagreements:
 | D10 | Replace the generic square-chip aim wash with one merged, soft-edged, LOS-clipped region for every ranged/ground aim. Body target rings remain because they communicate a different fact. Zone and cone footprints draw their exact committed mask/shape, never one ring per storage cell. | `[ratified]` (designer, 2026-08-06: "agree") |
 | D11 | Post the Role lands at continuous body-clear points around the clicked point, and printer damage uses a true circular body-intersection test. This supersedes TACTICS_PLAN R5 only for these two visible mechanics; engagement/surprise and grid-authored objects keep their existing rules. | `[ratified]` (designer, 2026-08-06: "agree") |
 | D12 | A movement `step` is world distance, not a tile or surface-cell boundary. Step-clock statuses and repeated surface exposure accumulate distance; entering a surface applies its entry beat immediately, then continued exposure retriggers at a world-distance interval scaled by Composure. Higher Composure therefore lets a character cover more ground before the next movement-triggered exposure; it does not suppress the initial entry beat. Placement excludes physical body footprints, while contact samples the feet. Fine resolution must not multiply damage, slips, status clocks, fire speed or loot. | `[ratified]` (designer, 2026-08-06: "shouldnt really matter if tiles or not that way" and "composure seems like the appropriate stat") |
+| D13 | Action behavior crosses system boundaries as the complete data descriptor, with namespaced policy objects (`placement`, `area`, `surface`) rather than positional arguments or missing values that secretly select behavior. Content declares choices such as summon anchor and hazard policy; universal physics such as character body clearance remains a system invariant. | `[stated]` (designer, 2026-08-06: "open a generic seam to inject data for each action into") |
 
 ## Milestones (each keeps `npm test` green)
 
@@ -195,7 +196,9 @@ while paper may settle beneath enemies. The same pure mask builder feeds
 preview and commit.
 
 The aim wash becomes a merged LOS-clipped mesh (D10). Summon placement searches
-deterministic continuous body-clear points around its exact aim; the printer
+deterministic continuous body-clear points around the anchor declared by the
+summon's `placement` policy; the complete descriptor reaches the spawn system
+instead of a nullable point choosing behavior by accident (D13). The printer
 blast uses a named world radius against body circles (D11). Surface resolution
 never defines tuning: damage cadence, movement rates, spread speed, expiry and
 harvest yield stay expressed in world distance/area/turns.

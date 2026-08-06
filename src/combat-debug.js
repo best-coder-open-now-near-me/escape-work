@@ -150,6 +150,7 @@ export function createCombatDebug(d) {
         archetype: id,
         count: n,
         cap: n,
+        placement: { anchor: 'summoner', avoidHazards: true },
         lifetimeTurns,
       });
     },

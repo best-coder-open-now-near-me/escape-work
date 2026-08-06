@@ -52,8 +52,9 @@ export function createSummonDesk(d) {
   //   player team -> temporary MEMBERS you control: a real sheet + body, its own
   //     action bar and AP, a `{member}` initiative slot. Not in party.members
   //     (outside the cap, unsaved); combat owns them, despawned at fight's end.
-  //   `at` is the player's chosen drop point ({x,z}); without one (enemy AI,
-  //   the debug hook) they report beside the summoner as before.
+  //   `spec.placement` says whether the chosen point or the summoner anchors
+  //   placement. The descriptor is kept intact all the way to the spawn layer;
+  //   a nullable point no longer doubles as an undocumented behavior flag.
   // How many bodies this descriptor could post RIGHT NOW - the question half,
   // with no spawning in it.
   //
@@ -79,23 +80,24 @@ export function createSummonDesk(d) {
   function resolveSummon(summoner, team, spec, at = null) {
     const n = postableNow(summoner, spec);
     if (n <= 0) return 0;
-    const spawned = d.world.spawnSummon(spec.archetype, team, summoner, n, at) || [];
+    const spawned = d.world.spawnSummon(spec, team, summoner, n, at) || [];
     for (const rec of spawned) {
       // The contract. `lifetimeTurns` is how many of its OWN turns the unit
       // serves before it files out (beginTurn spends them; main.js's world
       // clock spends them out of combat). Omit it and the summon is permanent,
       // which is the old behavior and still what a descriptor gets by default.
       const body = team === 'enemy' ? rec : rec.actor;
+      const landing = body.entity?.getPosition?.() || body.spawnPoint || body;
       body.summonTurns = spec.lifetimeTurns ?? null;
       if (team === 'enemy') {
         if (!d.engaged.includes(rec)) d.engaged.push(rec);
         d.applyStatus(rec, 'surprised');
         // Arriving is an event: the temp lands in a puff of onboarding.
-        d.fx.impact(body.x, body.z, 'toner', { y: 0.5, scale: 0.55 });
+        d.fx.impact(landing.x, landing.z, 'toner', { y: 0.5, scale: 0.55 });
         d.insertSlot(d.unitSlot(rec));
       } else {
         const m = d.asMember(rec, { isSummon: true, summonedBy: summoner });
-        d.fx.impact(body.x, body.z, 'toner', { y: 0.5, scale: 0.55 });
+        d.fx.impact(landing.x, landing.z, 'toner', { y: 0.5, scale: 0.55 });
         d.members.push(m);
         d.insertSlot(d.memberSlot(m)); // slots in by its own roll; acts when its turn comes
       }

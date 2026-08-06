@@ -186,9 +186,9 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
 
   function drawSummonRings(a) {
     if (!view.armed || !aimPoint) return undefined;
-    const tx = Math.round(aimPoint.x);
-    const tz = Math.round(aimPoint.z);
-    const spots = ask.summonSpotProblem(a, tx, tz) ? [] : world.summonSpots(tx, tz, a.count);
+    const tx = aimPoint.x;
+    const tz = aimPoint.z;
+    const spots = ask.summonSpotProblem(a, tx, tz) ? [] : world.summonSpots(a, tx, tz, a.count);
     if (!spots.length) { drawRing(tx, tz, 0.42, FAR); return undefined; }
     for (const [sx, sz] of spots) drawRing(sx, sz, 0.42, OK);
     return true;
@@ -391,10 +391,10 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
   function showSummonPreview(point, sx, sy) {
     setPreview(null); // the drop zone replaces the trail, same as the hit readout
     const a = actions[view.armed];
-    const tx = Math.round(point.x);
-    const tz = Math.round(point.z);
+    const tx = point.x;
+    const tz = point.z;
     const problem = ask.summonSpotProblem(a, tx, tz);
-    const room = problem ? 0 : world.summonSpots(tx, tz, a.count).length;
+    const room = problem ? 0 : world.summonSpots(a, tx, tz, a.count).length;
     costTag.textContent = problem
       || `Post ${room} employee${room === 1 ? '' : 's'} here · ${a.ap} AP`;
     costTag.style.left = `${sx + 14}px`;

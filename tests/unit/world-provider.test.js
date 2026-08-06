@@ -86,7 +86,7 @@ const deps = () => ({
   effectiveSurfDamage: () => 0,
   leaveSurfaceAt: () => {},
   leaveSurfaceCells: () => 0,
-  freeTilesNear: () => [],
+  summonPointsNear: () => [],
   spawnSummonUnits: () => [],
   dismissSummon: () => {},
   onTemporaryAllyStep: () => {},

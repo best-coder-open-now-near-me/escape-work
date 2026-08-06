@@ -158,7 +158,7 @@ export function createActionBar(d) {
     usesLeft: d.active.usesLeft[d.armed],
     dist: d.distToTile(d.active, tx, tz),
     los: d.losToTile(d.active, tx, tz),
-    hasRoomToStand: d.world.summonSpots(tx, tz, 1).length > 0,
+    hasRoomToStand: d.world.summonSpots(a, tx, tz, 1).length > 0,
     // The live headcount. main.js's out-of-combat twin has always passed this;
     // combat's did not, so the shared rule's cap leg was skipped in a fight -
     // the rings promised spots a maxed-out req could not fill, and the click

@@ -566,9 +566,11 @@ export const ACTIONS = {
   // the contract runs out and it walks (in combat that is its own initiative
   // turns; out of combat the world clock spends them). TARGETED: arm it, then click where they should
   // report - `range` is how far from the summoner that spot may be (needs line
-  // of sight, like a throw). They land on the clicked tile and the free tiles
-  // ringing outward from it. An enemy `summon` descriptor carries no `range`
-  // and drops its reinforcements beside the summoner instead.
+  // of sight, like a throw). `placement` is the system's generic content seam:
+  // the action declares what anchors the search and whether ordinary hazards
+  // are refused, while the spawn system always enforces physical wall/body
+  // clearance. Enemy summons declare their own summoner-anchored policy rather
+  // than having it inferred from a missing click.
   //
   // ONE per post. It shipped at two, and a posting that drops a pair reads as a
   // batch rather than a hire: you point at a spot and two bodies appear, one of
@@ -592,6 +594,7 @@ export const ACTIONS = {
     cap: 3,
     uses: 2,
     range: 5,
+    placement: { anchor: 'aim', avoidHazards: true },
     lifetimeTurns: 6,
     label: 'Escalate',
     icon: '📢',

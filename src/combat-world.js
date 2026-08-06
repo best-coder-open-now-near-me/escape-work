@@ -218,10 +218,9 @@ export function createCombatWorld(d) {
     // not. The shared stepper also gives this body a named narrator line.
     borrowedStep: (carrier, x, z, done, changed) => d.onTemporaryAllyStep(carrier, x, z, done, changed),
     borrowedTravel: (carrier, segment) => d.onTemporaryAllyTravel(carrier, segment),
-    // The tiles a summon aimed at (tx,tz) would actually land on - the
-    // placement preview draws these rings, and spawnSummon fills them, so
-    // what you see is where they stand.
-    summonSpots: (tx, tz, n) => d.freeTilesNear(tx, tz, n, 0),
+    // Continuous body-clear rests around the exact aim. Preview and spawn call
+    // the same deterministic search, so every ring is an actual arrival.
+    summonSpots: (spec, tx, tz, n) => d.summonPointsNear(tx, tz, n, spec.placement),
     // A summon whose assignment lapsed (or one that fell) leaves the board
     // here - combat.js decides when, main.js owns the lists and the body.
     dismissSummon: (body) => d.dismissSummon(body),

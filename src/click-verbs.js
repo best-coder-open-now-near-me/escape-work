@@ -433,8 +433,12 @@ export function createClickVerbs(d) {
       const a = ACTIONS[d.armed];
       // Cones fire at wherever you click - ground included.
       if (a.cone && point) { d.fireCone(point.x, point.z); return; }
-      // A summon is placed at the clicked tile (the whole point of arming it).
-      if (a.type === 'summon') { d.placeSummon(tile.x, tile.z); return; }
+      // A summon rests around the exact clicked point; the movement tile is
+      // derived only after the body-clear point has been chosen.
+      if (a.type === 'summon') {
+        d.placeSummon(point ? point.x : tile.x, point ? point.z : tile.z);
+        return;
+      }
       // A zone lands where you clicked - ground, and only ground.
       if (isZone(a)) {
         // The exact clicked point when the pick has one - the zone's disc is

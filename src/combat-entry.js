@@ -137,7 +137,7 @@ export function createCombatEntry(d) {
         smoothPath: d.smoothPath,
         smoothFromBody: d.smoothFromBody,
         routeOpen: d.routeOpen,
-        freeTilesNear: d.freeTilesNear,
+        summonPointsNear: d.summonPointsNear,
         hazardCostFor: d.hazardCostFor,
         hazardSegmentCostFor: d.hazardSegmentCostFor,
         enemyHazardCost: d.enemyHazardCost,
