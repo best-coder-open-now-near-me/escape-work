@@ -3,10 +3,12 @@
 // copies the HTML shell alongside it. No PlayCanvas cloud involved: everything
 // that makes the game is in this repo.
 import * as esbuild from 'esbuild';
-import { cpSync, mkdirSync, rmSync, existsSync } from 'node:fs';
-import { sep } from 'node:path';
+import { cpSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { relative, sep } from 'node:path';
 
 const OUT = 'build/web';
+const ASSET_SOURCE = process.env.ESCAPE_WORK_ASSET_SOURCE || 'assets';
+const ASSET_MANIFEST = process.env.ESCAPE_WORK_ASSET_MANIFEST || 'assets.runtime.json';
 // PlayCanvas's prebuilt UMD engine build. We ship it as-is (a <script> tag in
 // index.html loads it and exposes a global `pc`) rather than bundling it - its
 // internals reference Node worker modules that a browser bundler can't resolve.
@@ -44,7 +46,27 @@ cpSync(ENGINE, `${OUT}/playcanvas.min.js`);
 // rigs - a build that ships a broken game to save 200KB is a bad trade. There
 // are twelve of them; they all ship.
 //
-// Everything that is not a .glb (textures, audio, sprites) is copied as before.
+// Only manifest-approved roots are considered. This boundary is deliberately
+// data-driven: local licensed source packs may sit beside runtime exports, and
+// a private repository checkout can be injected with ESCAPE_WORK_ASSET_SOURCE,
+// but neither is permission to publish every file it contains.
+const manifest = JSON.parse(readFileSync(ASSET_MANIFEST, 'utf8'));
+if (!Array.isArray(manifest.include) || !manifest.include.length) {
+  throw new Error(`${ASSET_MANIFEST} must contain a non-empty "include" array.`);
+}
+const runtimeIncludes = manifest.include.map((entry) => {
+  const clean = String(entry).replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/$/, '');
+  if (!clean || clean.startsWith('/') || clean.split('/').includes('..')) {
+    throw new Error(`${ASSET_MANIFEST} contains an unsafe asset path: ${entry}`);
+  }
+  return clean;
+});
+const approvedRuntimeAsset = (rel) => runtimeIncludes.some(
+  (entry) => rel === entry || rel.startsWith(`${entry}/`),
+);
+
+// Everything approved that is not a .glb (textures, audio, sprites) is copied
+// as before.
 const referencedProps = new Set();
 {
   const { TILE_TYPES } = await import('./src/data/tiles.js');
@@ -52,20 +74,26 @@ const referencedProps = new Set();
 }
 let shipped = 0;
 let skipped = 0;
-const CHARACTERS = `characters${sep}`;
-if (existsSync('assets')) {
-  cpSync('assets', `${OUT}/assets`, {
-    recursive: true,
-    filter: (src) => {
-      if (!src.endsWith('.glb')) return true;
-      const rel = src.replace(/^assets[\\/]/, '');
-      if (rel.startsWith(CHARACTERS) || rel.startsWith('characters/')) return true; // rigs always ship
-      const keep = referencedProps.has(rel.split(sep).join('/'));
-      if (keep) shipped += 1; else skipped += 1;
-      return keep;
-    },
-  });
+const excludedRoots = new Set();
+if (!existsSync(ASSET_SOURCE)) {
+  throw new Error(`Asset source does not exist: ${ASSET_SOURCE}`);
 }
+cpSync(ASSET_SOURCE, `${OUT}/assets`, {
+  recursive: true,
+  filter: (src) => {
+    const rel = relative(ASSET_SOURCE, src).split(sep).join('/');
+    if (!rel) return true;
+    if (!approvedRuntimeAsset(rel)) {
+      excludedRoots.add(rel.split('/')[0]);
+      return false;
+    }
+    if (!src.endsWith('.glb')) return true;
+    if (rel.startsWith('characters/')) return true; // rigs always ship
+    const keep = referencedProps.has(rel);
+    if (keep) shipped += 1; else skipped += 1;
+    return keep;
+  },
+});
 
 // If the sweep drops a prop a tile type names, the build has just shipped a
 // guaranteed 404 - fail here rather than at someone's first playthrough. (The
@@ -80,4 +108,7 @@ if (existsSync('assets')) {
   }
 }
 
-console.log(`Build complete -> ${OUT}/  (${shipped} prop models + all character rigs shipped, ${skipped} unreferenced props skipped)`);
+console.log(
+  `Build complete -> ${OUT}/  (${shipped} prop models + all character rigs shipped, `
+  + `${skipped} unreferenced props skipped, ${excludedRoots.size} unapproved asset root(s) excluded)`,
+);
