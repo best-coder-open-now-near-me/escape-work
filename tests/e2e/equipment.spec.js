@@ -1,7 +1,20 @@
 // Equipment verbs (EQUIPMENT_PLAN M2): equip a weapon from the pockets into
 // its slot and stow it back, driven through the real inventory-panel DOM.
 import { test, expect } from '@playwright/test';
-import { bootAndPick, withWorldStill } from './helpers.js';
+import {
+  bootAndPick, bootStash, enterCombat, refillAp, withWorldStill,
+} from './helpers.js';
+
+const EQUIP_ARENA = {
+  name: 'Equipment Arena',
+  tiles: { '#': 'wall', '.': 'floor' },
+  actors: { '@': 'player', M: 'manager' },
+  map: [
+    '#####',
+    '#.@M#',
+    '#####',
+  ],
+};
 
 test('equip a weapon from the pockets, then stow it back', async ({ page }) => {
   test.setTimeout(300_000);
@@ -71,6 +84,57 @@ test('a basic weapon attack is always on the bar; the weapon defines it', async 
   await page.click('#equip-unequip-weapon');
   await expect(page.locator('#hotbar-act-punch')).toBeVisible();
   expect(await page.locator('#hotbar-act-staple-jab').count()).toBe(0);
+});
+
+test('equipping and stowing gear in combat costs 2 AP and refreshes the live kit', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, EQUIP_ARENA, 'office-drone');
+  await page.evaluate(() => { window.__god.player.inventory = ['red-stapler']; });
+  await enterCombat(page);
+  await refillAp(page);
+
+  await page.keyboard.press('i');
+  await expect(page.locator('#inventory-panel')).toBeVisible();
+  const weaponAp = await page.evaluate(() => window.__combat.ap);
+  await page.click('#inv-equip-0');
+
+  await expect.poll(() => page.evaluate(() => window.__game.stats.equipped.weapon)).toBe('red-stapler');
+  await expect.poll(() => page.evaluate(() => window.__combat.ap)).toBe(weaponAp - 2);
+  await expect(page.locator('#hotbar-act-staple-jab')).toBeVisible();
+  expect(await page.locator('#hotbar-act-punch').count()).toBe(0);
+
+  // A refused swap is atomic: no item moves and no AP is charged.
+  await page.evaluate(() => {
+    window.__god.player.inventory = ['stapler'];
+    window.__combat.ap = 1;
+  });
+  await page.keyboard.press('i');
+  await page.keyboard.press('i');
+  await page.click('#inv-equip-0');
+  await expect(page.locator('#subtitle')).toContainText('Not enough AP');
+  expect(await page.evaluate(() => ({
+    weapon: window.__game.stats.equipped.weapon,
+    inventory: window.__game.stats.inventory,
+    ap: window.__combat.ap,
+  }))).toEqual({ weapon: 'red-stapler', inventory: ['stapler'], ap: 1 });
+
+  // The rule covers every gear slot, and stowing pays the same price.
+  await page.evaluate(() => {
+    window.__god.player.inventory = ['company-fleece'];
+    window.__combat.ap = window.__combat.maxAp;
+  });
+  await page.keyboard.press('i');
+  await page.keyboard.press('i');
+  const outfitAp = await page.evaluate(() => window.__combat.ap);
+  await page.click('#inv-equip-0');
+  await expect.poll(() => page.evaluate(() => window.__game.stats.equipped.outfit)).toBe('company-fleece');
+  await expect.poll(() => page.evaluate(() => window.__combat.ap)).toBe(outfitAp - 2);
+
+  const stowAp = await page.evaluate(() => window.__combat.ap);
+  await page.click('#equip-unequip-outfit');
+  await expect.poll(() => page.evaluate(() => window.__game.stats.equipped.outfit)).toBe(null);
+  await expect.poll(() => page.evaluate(() => window.__combat.ap)).toBe(stowAp - 2);
+  expect(await page.evaluate(() => window.__game.stats.inventory)).toEqual(['company-fleece']);
 });
 
 test('outfits and trinkets fill their own slots and lift derived stats', async ({ page }) => {

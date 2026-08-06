@@ -485,6 +485,18 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     m.sheet,
     [...m.sheet.actions, equippedAction(m.sheet), ...UNIVERSAL_ACTIONS, ...throwablesFor(m)],
   );
+  // A weapon equipped after initiative was rolled can introduce a per-fight
+  // limited-use action that `asMember` could not seed at combat start. Seed it
+  // once when the live kit is repainted; swapping away and back keeps the same
+  // counter, while a genuinely new weapon starts with its authored allowance.
+  const syncActionUses = (m) => {
+    if (!m) return;
+    for (const id of actionIdsOf(m)) {
+      if (ACTIONS[id]?.uses && m.usesLeft[id] === undefined) {
+        m.usesLeft[id] = ACTIONS[id].uses;
+      }
+    }
+  };
   // The acting member's cost for a throw - the shared rule (stats.js), bound to
   // whoever currently has the floor.
   const ammoCostOf = (id) => ammoCost(session.activeMember.sheet, id);
@@ -1157,6 +1169,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     formula(formatDamageFormula(details));
   }
   function refresh() {
+    syncActionUses(session.activeMember);
     // Anything worth redrawing the HUD for may also have reshaped what the
     // aim can see (a door toggled, smoke landed, a prop toppled) - stale the
     // aim wash's key so its next frame recomputes.

@@ -8,7 +8,9 @@
 // accessors): getActor, getSheet, isInCombat, isGameOver - plus approachAndDo
 // so overlay clicks walk the leader in.
 import { ITEMS, LOOT_TABLES, rollLoot } from './data/items.js';
-import { PAPER_CAP, equipItem, unequipItem, inventoryCapOf } from './stats.js';
+import {
+  PAPER_CAP, EQUIP_SLOTS, equipItem, unequipItem, inventoryCapOf,
+} from './stats.js';
 import { placeDroppedItem } from './tile-renderer.js';
 import * as ui from './ui.js';
 import { CARDINAL_DIRS } from './directions.js';
@@ -303,6 +305,10 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
   // is billed, so this is too - and 2 AP is the shove's price, the cheapest
   // real verb in the game.
   const COMBAT_USE_AP = 2;
+  // Rearranging equipped gear is the same size of combat commitment as using
+  // a consumable or shoving somebody. The combat host owns the actual pool;
+  // this module only asks it to bill the acting character before the mutation.
+  const COMBAT_EQUIP_AP = 2;
 
   // Using something from your pockets. This used to refuse outright while
   // `isInCombat()`, which switched off the entire consumable economy in the one
@@ -349,14 +355,25 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
   }
 
   // Equip the item at pocket index `i` into its slot; the incumbent (if any)
-  // swaps back to the bag. Out of combat only - swapping gear mid-fight would
-  // change your derived numbers under the initiative order (EQUIPMENT decision
-  // #6). The stat fold is stats.js's job; here we gate, narrate, and refresh.
+  // swaps back to the bag. In combat the acting character pays before any
+  // mutation; out of combat it remains free. The stat fold is stats.js's job;
+  // here we bill, narrate, and refresh.
   function equip(i) {
     const sheet = getSheet();
     if (!sheet || i >= sheet.inventory.length) return;
-    if (isInCombat()) { ui.say('Not mid-fight - swap your kit on your own time.'); return; }
     const id = sheet.inventory[i];
+    const def = ITEMS[id];
+    // Validate before charging so even a stale/malformed row is an atomic
+    // refusal rather than two AP spent on an item that never moved.
+    if (!EQUIP_SLOTS.includes(def?.slot)) {
+      ui.say('That is not something you can equip.'); return;
+    }
+    if (isInCombat()) {
+      if (!spendCombatAp) { ui.say('You cannot rearrange your kit right now.'); return; }
+      if (!spendCombatAp(COMBAT_EQUIP_AP)) {
+        ui.say(`Not enough AP - equipping something costs ${COMBAT_EQUIP_AP}.`); return;
+      }
+    }
     if (equipItem(sheet, i)) {
       ui.say(`You equip the ${itemName(id)}.`);
       invPanel.refresh(sheet);
@@ -372,9 +389,19 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
   function unequip(slot) {
     const sheet = getSheet();
     if (!sheet) return;
-    if (isInCombat()) { ui.say('Not mid-fight - swap your kit on your own time.'); return; }
     const id = sheet.equipped?.[slot];
     if (!id) return;
+    // Capacity is a refusal, not a paid action. Check it before the combat bill
+    // so a full bag leaves both the gear and the AP pool untouched.
+    if ((sheet.inventory?.length || 0) >= inventoryCapOf(sheet)) {
+      ui.say('Pockets are full - nowhere to stow it.'); return;
+    }
+    if (isInCombat()) {
+      if (!spendCombatAp) { ui.say('You cannot rearrange your kit right now.'); return; }
+      if (!spendCombatAp(COMBAT_EQUIP_AP)) {
+        ui.say(`Not enough AP - stowing something costs ${COMBAT_EQUIP_AP}.`); return;
+      }
+    }
     if (unequipItem(sheet, slot, inventoryCapOf(sheet))) {
       ui.say(`You stow the ${itemName(id)}.`);
       invPanel.refresh(sheet);

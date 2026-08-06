@@ -417,8 +417,13 @@ function startGame(level) {
     approachAndDo: (x, z, run) => approachAndDo(x, z, run),
     extraEntries: () => doors.overlayEntries(), // doors share the Alt overlay
     // Equipping changes derived stats AND the basic weapon swing on the bars -
-    // refresh the HUD, hotbar, and char sheet.
-    onGearChange: () => refreshProgressUi(),
+    // refresh the HUD, hotbar, and char sheet. In a fight combat gets the final
+    // repaint so the acting member (not the out-of-combat leader) owns the HUD,
+    // AP pips, action availability, and newly granted weapon swing.
+    onGearChange: () => {
+      refreshProgressUi();
+      if (run.inCombat) run.combat?.refresh?.();
+    },
     // The pockets stay usable with a merchant open, and every verb in them
     // splices the bag - so the shop's sell column has to be repainted from the
     // live inventory rather than left holding the indexes it rendered with.
