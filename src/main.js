@@ -32,8 +32,9 @@ import { applyStatus, removeStatus, statusFx, hasStatus, tickStep, tickTurn, sta
 import { createDraft, createCharacter, draftModel, draftLook } from './creation.js';
 import { CUSTOM_RIGS } from './data/looks.js';
 import { aimsAtAlly, coneFrom, conePolyline, isToppleable } from './powers.js';
-import { PARTITION_TOPPLE, blocksSight, shieldsCell } from './data/tiles.js';
-import { cheb as chebOf, shieldedFaces } from './tactics.js';
+import { PARTITION_TOPPLE, blocksSight } from './data/tiles.js';
+import { cheb as chebOf } from './tactics.js';
+import { crouchFacesAt, leaveCrouch } from './crouch-rules.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel, buildLayeredLevel } from './scene.js';
@@ -1150,9 +1151,12 @@ function startGame(level) {
   function clearOocCrouch(quiet = false) {
     legQueue.length = 0; // a deliberate walk abandons any queued storey route
     if (!oocCrouch) return;
-    oocCrouch = null;
-    removeStatus(sheet, 'covered');
-    if (player) player.crouched = false; // stand the body up (actors.js)
+    leaveCrouch({
+      body: player,
+      carrier: sheet,
+      clearState: () => { oocCrouch = null; return true; },
+      removeStatus,
+    });
     if (!quiet) ui.say('You come out of cover.');
   }
 
@@ -1799,17 +1803,17 @@ function startGame(level) {
   const memberBodyAt = (x, z) => livingMemberAt(
     [...(party?.members || []), ...summons], x, z,
   );
-  const oocCoverCell = (x, z) => {
-    const d = grid.defAt(x, z);
-    if (shieldsCell(d)) return true;
-    return !!(enemyAt(x, z) || npcAt(x, z) || partyAt(x, z) || summonAt(x, z));
-  };
   // Which faces of a tile would shield a crouch there. One helper, read by the
   // aim preview, the click and the held-crouch affordance, so none of the
   // three can describe a different crouch from the others.
-  const oocCoverFaces = (x, z) => shieldedFaces(x, z, {
+  const oocCoverFaces = (x, z) => crouchFacesAt(x, z, {
     edgeOpen: grid.stepOpen,
-    coverCell: (cx, cz) => (cx === player.x && cz === player.z ? false : oocCoverCell(cx, cz)),
+    tileDefAt: grid.defAt,
+    bodyAt: (cx, cz) => (
+      cx === player.x && cz === player.z
+        ? null
+        : enemyAt(cx, cz) || npcAt(cx, cz) || memberBodyAt(cx, cz)
+    ),
   });
   // Why this spot is not a crouch, or null when it is one.
   // What is covering a spot, in words - the out-of-combat twin of combat's

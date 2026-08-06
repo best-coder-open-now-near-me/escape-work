@@ -23,8 +23,8 @@
 // `def` now. That collision is a documented trap in tools/check-extractions.mjs
 // and it was sitting in the code before the cut began.
 import { shieldingFace } from './tactics.js';
-import { shieldsCell } from './data/tiles.js';
 import { coverNameAt, coverNames as namesOfCover } from './cover-names.js';
+import { crouchCoverCell, crouchFacesAt, leaveCrouch } from './crouch-rules.js';
 
 export function createCrouch(d) {
   // Is somebody holding a `guard` stance on this exact tile? Read by the cover
@@ -81,10 +81,13 @@ export function createCrouch(d) {
   const coverNames = (x, z, faces) => namesOfCover(x, z, faces, coverWorld);
   const carrierOf = (u) => u.sheet || u;
   function breakCrouch(unit, quiet = false) {
-    if (!d.crouched.delete(unit)) return;
-    d.removeStatus(carrierOf(unit), 'covered');
     const b = d.bodyOf(unit);
-    if (b) b.crouched = false; // stand the body up (actors.js holds the pose)
+    if (!leaveCrouch({
+      body: b,
+      carrier: carrierOf(unit),
+      clearState: () => d.crouched.delete(unit),
+      removeStatus: d.removeStatus,
+    })) return;
     if (!quiet) d.log(`${nameOf(unit)} is out of cover.`);
   }
   // What shields a CELL, for the crouch: a prop a shot passes over (the M6a
@@ -95,10 +98,12 @@ export function createCrouch(d) {
   // a filing cabinet is, and stops being one by walking away or falling over.
   // `exclude` keeps a croucher from shielding themselves.
   const coverCellFor = (...exclude) => (cx, cz) => {
-    const def = d.world.tileDefAt(cx, cz);
-    if (shieldsCell(def)) return true;
-    const u = d.unitStandingAt(cx, cz);
-    return !!u && !exclude.includes(u) && d.standing(u);
+    return crouchCoverCell(cx, cz, {
+      tileDefAt: d.world.tileDefAt,
+      bodyAt: d.unitStandingAt,
+      standing: d.standing,
+      exclude,
+    });
   };
   // Which faces of the tile `unit` stands on are shielded, right now. Read
   // LIVE off the world on every consult - a partition that fell, a cabinet
@@ -112,9 +117,12 @@ export function createCrouch(d) {
   const crouchFacesOf = (unit, against = null) => {
     const b = d.bodyOf(unit);
     if (!b) return [];
-    return d.shieldedFaces(b.x, b.z, {
+    return crouchFacesAt(b.x, b.z, {
       edgeOpen: d.world.stepOpen,
-      coverCell: coverCellFor(unit, against),
+      tileDefAt: d.world.tileDefAt,
+      bodyAt: d.unitStandingAt,
+      standing: d.standing,
+      exclude: [unit, against],
     });
   };
   // The validated crouch, or null - the ONE owner of "is that cover still

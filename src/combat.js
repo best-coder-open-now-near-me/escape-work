@@ -29,9 +29,8 @@ import {
   applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy,
   statusSeverity, tickStep,
 } from './statuses.js';
-import { cheb, toHitTerms, provokedBy, positionMods, inReach, dist, dirOctant, shieldedFaces, TACTICS, shieldingFace,
-  crouchProblem,
-} from './tactics.js';
+import { cheb, toHitTerms, provokedBy, positionMods, inReach, dist, dirOctant, TACTICS, shieldingFace } from './tactics.js';
+import { crouchFacesAt as facesAtCrouch, crouchProblem, enterCrouch } from './crouch-rules.js';
 import {
   buffProblem, buffOutcome, buffRangeOf, isFriendly, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, aimsAtAnyone, isPurge, coneFrom, conePolyline, aimRangeOf, rangeTiles, isBreakable, aimsAtProps, isPull,
 } from './powers.js';
@@ -517,7 +516,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     members,
     ACTIONS,
     posOf,
-    shieldedFaces,
     blocksSight,
     applyStatus,
     removeStatus,
@@ -930,9 +928,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
 
   // The faces that would shield a crouch on this tile - the aim's twin of
   // `crouchFacesOf`, which asks the same of a unit already standing somewhere.
-  const crouchFacesAt = (tx, tz) => shieldedFaces(tx, tz, {
+  const crouchFacesAt = (tx, tz) => facesAtCrouch(tx, tz, {
     edgeOpen: world.stepOpen,
-    coverCell: coverCellFor(active),
+    tileDefAt: world.tileDefAt,
+    bodyAt: unitStandingAt,
+    standing,
+    exclude: [active],
   });
 
   // The cover aim's eased ring position, and the frame's dt for the easing -
@@ -1476,9 +1477,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const b = bodyOf(unit);
     const faces = crouchFacesOf(unit);
     if (!faces.length) return false;
-    crouched.set(unit, { at: { x: b.x, z: b.z }, faces });
-    b.crouched = true; // the held pose (actors.js): torso down onto the legs
-    applyStatus(carrierOf(unit), 'covered');
+    enterCrouch({
+      body: b,
+      carrier: carrierOf(unit),
+      faces,
+      setState: (state) => crouched.set(unit, state),
+      applyStatus,
+    });
     statusFxAt(unit, 'covered');
     const fx_ = faces.reduce((acc, [ox, oz]) => [acc[0] + ox, acc[1] + oz], [0, 0]);
     if (fx_[0] || fx_[1]) (unit.actor || unit).faceToward?.(b.x + fx_[0], b.z + fx_[1]);
@@ -1501,7 +1506,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   //
   // A spot is legal when you could stand on it and at least one of its faces
   // is shielded. What is doing the shielding never comes up.
-  // The fight half of tactics.crouchProblem - same ladder, same words as the
+  // The fight half of crouch-rules.crouchProblem - same ladder, same words as the
   // out-of-combat crouch, which is what stops a spot from refusing on the map
   // and accepting the moment initiative rolls.
   function coverSpotProblem(tx, tz) {
@@ -1509,9 +1514,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return crouchProblem({
       here: active.actor.x === tx && active.actor.z === tz,
       roomFree: world.isWalkable(tx, tz) && !(occupant && occupant !== active),
-      faces: shieldedFaces(tx, tz, {
+      faces: facesAtCrouch(tx, tz, {
         edgeOpen: world.stepOpen,
-        coverCell: coverCellFor(active),
+        tileDefAt: world.tileDefAt,
+        bodyAt: unitStandingAt,
+        standing,
+        exclude: [active],
       }).length,
     });
   }

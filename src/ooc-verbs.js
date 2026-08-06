@@ -12,12 +12,12 @@
 // thousand lines is not.
 import { topplePlan } from './combat-plans.js';
 import { engagedAround } from './combat-geometry.js';
-import { crouchProblem } from './tactics.js';
+import { crouchProblem, enterCrouch } from './crouch-rules.js';
 import { CARDINAL_DIRS } from './directions.js';
 import { coverNames } from './cover-names.js';
 
 export function createOocVerbs(d) {
-  // The map half of tactics.crouchProblem - same ladder, same words, the other
+  // The map half of crouch-rules.crouchProblem - same ladder, same words, the other
   // side of a fight starting.
   function oocCoverProblem(x, z) {
     return crouchProblem({
@@ -43,14 +43,6 @@ export function createOocVerbs(d) {
     terrainOpen: (x, z) => d.grid.terrainOpen(x, z),
     stepOpen: (x, z, tx, tz) => d.grid.stepOpen(x, z, tx, tz),
   });
-
-  function oocCoverNames(x, z) {
-    return coverNames(x, z, d.oocCoverFaces(x, z), {
-      bodyAt: (cx, cz) => d.enemyAt(cx, cz) || d.npcAt(cx, cz) || d.memberBodyAt(cx, cz),
-      nameOf: (body) => body.sheet?.name || body.def?.name || 'them',
-      tileDefAt: (cx, cz) => d.grid.defAt(cx, cz),
-    });
-  }
 
   function oocFriendlyOn(id, m) {
     const a = d.ACTIONS[id];
@@ -174,11 +166,20 @@ export function createOocVerbs(d) {
       // Re-ask on ARRIVAL: a coworker who wandered off during the walk is a
       // crouch that never happens, not one that lands on empty carpet.
       if (oocCoverProblem(tile.x, tile.z)) { d.ui.say('The moment passes - no cover taken.'); return; }
-      d.setOocCrouch({ at: { x: tile.x, z: tile.z } });
-      d.applyStatus(d.sheet, 'covered');
-      d.player.crouched = true; // the held pose (actors.js): torso down onto the legs
+      const faces = d.oocCoverFaces(tile.x, tile.z);
+      enterCrouch({
+        body: d.player,
+        carrier: d.sheet,
+        faces,
+        setState: d.setOocCrouch,
+        applyStatus: d.applyStatus,
+      });
       d.paintHud(d.sheet);
-      d.ui.say(`You tuck in behind ${oocCoverNames(tile.x, tile.z)}.`);
+      d.ui.say(`You tuck in behind ${coverNames(tile.x, tile.z, faces, {
+        bodyAt: (cx, cz) => d.enemyAt(cx, cz) || d.npcAt(cx, cz) || d.memberBodyAt(cx, cz),
+        nameOf: (body) => body.sheet?.name || body.def?.name || 'them',
+        tileDefAt: (cx, cz) => d.grid.defAt(cx, cz),
+      })}.`);
       d.setArmedOoc(null);
       d.hotbarHost.hotbar?.setArmed(null);
     };

@@ -361,25 +361,3 @@ export function positionMods(ax, az, dx, dz, opts = {}) {
     behind,
   };
 }
-
-// Why this tile is not a crouch, or null when it is one.
-//
-// Two callers, one in a fight and one out of it, and they had this written out
-// twice - the same ladder in the same order, down to both refusal strings. The
-// player is told the same two things either side of a fight starting, which is
-// the point: a spot that refuses "nothing to hide behind" while you are walking
-// must not silently become a legal crouch the moment initiative rolls.
-//
-// What legitimately differs is only what the caller can SEE, so it comes in as
-// two answers rather than two implementations: `roomFree` (is the tile free for
-// me to stand in - combat asks its unit list, the map asks the party and the
-// coworkers) and `faces` (how many sides are shielded, which each side computes
-// with its own cover predicate). Standing where you already are is always
-// "room enough", because tucking in on the spot is the common case.
-export const CROUCH_NO_ROOM = 'No room to tuck in there.';
-export const CROUCH_NO_COVER = 'Nothing there to hide behind.';
-export function crouchProblem({ here, roomFree, faces }) {
-  if (!here && !roomFree) return CROUCH_NO_ROOM;
-  if (!faces) return CROUCH_NO_COVER;
-  return null;
-}
