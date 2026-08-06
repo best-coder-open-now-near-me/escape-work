@@ -89,12 +89,11 @@ export async function withWorldStill(page, steps) {
   }
 }
 
-// `seed` makes every fight in the run reproducible: it feeds startCombat's
-// injected rng, which reaches EVERY in-fight roll - hits, damage, the AI's
-// line picks, slips, and initiative, so turn ORDER is pinned too. That last
-// one is what a positional AI test needs: whether the coworker or the party
-// acts first decides whether a staged barrier is still standing by the time
-// the beat under test is reached.
+// `seed` pins the first fight's combat-owned rolls: hits, damage, AI line
+// picks, enemy slips, and initiative. Member slips and loot roll outside that
+// stream, and later fights continue from however far the first advanced it.
+// This helper is therefore for one-fight fixtures whose staged geometry and
+// turn order need to replay; see main.js beside `combatRng` for the full seam.
 export async function bootStash(page, level, classId = 'office-drone', { seed = null } = {}) {
   await page.addInitScript((lvl) => {
     localStorage.clear(); // no campaign progress bleeding into a bespoke arena

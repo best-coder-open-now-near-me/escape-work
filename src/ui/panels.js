@@ -347,7 +347,7 @@ export function createDialoguePanel() {
 // `show()` takes a fully-resolved view (shopping.js owns the arithmetic):
 //   { name, greeting, cash, buys,
 //     stock: [{ item, name, icon, qty, price, affordable }],
-//     sellable: [{ index, name, icon, paid }] }
+//     sellable: [{ id, index, name, icon, paid }] }
 export function createShopPanel({ onBuy, onSell, onClose }) {
   const panel = document.createElement('div');
   panel.id = 'shop-panel';

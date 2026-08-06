@@ -10,7 +10,6 @@
 // sit between actions instead of replacing one. Costs are deliberately coarse
 // - 2 for most things - so the arithmetic stays readable mid-fight.
 //   defend - halves the next incoming hit
-//   heal   - restores `amount` HP, limited to `uses` per fight
 //   summon - conjures `count` allies of `archetype` (a class id) on your side,
 //            up to a live `cap`; instant, `uses` per fight. Each one serves
 //            `lifetimeTurns` of its own turns and then files out (SUMMON_PLAN)
@@ -48,6 +47,11 @@
 //            them on their feet, fail wears `crush` damage plus the existing
 //            stun and pin. No to-hit roll: the save IS the resistance, the
 //            same shape as the topple's crush.
+//   shove  - pushes an enemy or topples adjacent furniture; a useful landing
+//            (collision or hazard) is required before the AP is spent.
+//   cover  - walks to and crouches behind furniture, an edge, or a teammate.
+//   purge  - targets either side and clears every status on the target.
+//   zone   - places a temporary ground effect at a point within `range`.
 // Modifiers:
 //   purge (on an attack) - hitting a target also wipes their status effects,
 //   harmful and helpful alike; click your own tile while armed to self-cast

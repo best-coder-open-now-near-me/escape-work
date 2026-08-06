@@ -181,14 +181,10 @@ function tick(target, clock) {
   if (!map) return result;
   for (const id in map) {
     const def = STATUSES[id];
-    // A status id that has LEFT the registry is dropped on sight. It used to be
-    // skipped, and skipped is immortal: no clock ticked it, and both sweep
-    // options passed over it too (`harmfulOnly` reads `def.harmful`,
-    // the combat-end sweep reads `def.clock` - an absent def fails both, and
-    // both spare what they cannot classify). So a save written before a status
-    // was renamed or retired carried it forever, with `hasStatus` still
-    // answering yes. Deleting mid-`for...in` is safe, and this is the loop that
-    // visits every id on every clock.
+    // A status id that has LEFT the registry is dropped on sight. Skipping it
+    // would make it immortal: no clock could classify it, while `hasStatus`
+    // would keep answering yes. Deleting mid-`for...in` is safe, and this is
+    // the loop that visits every id on every clock.
     if (!def) { delete map[id]; continue; }
     if (def.clock !== clock) continue;
     const entry = map[id];
@@ -209,20 +205,13 @@ function tick(target, clock) {
 export const tickTurn = (target) => tick(target, 'turn');
 export const tickStep = (target) => tick(target, 'step');
 
-// Remove statuses. Purge (reboot) clears everything; the combat-end sweep
-// passes `{ clock: 'turn' }` (step-clock statuses persist on the map);
-// `{ harmfulOnly: true }` would spare buffs. Returns the ids removed.
-export function clearStatuses(target, { harmfulOnly = false, clock = null } = {}) {
+// Remove every status. This is the full purge used by reboot and debug tools;
+// ordinary expiry belongs to the turn/step tick functions above.
+export function clearStatuses(target) {
   const map = target?.statuses;
   const removed = [];
   if (!map) return removed;
   for (const id in map) {
-    const def = STATUSES[id];
-    // Same rule as the tick: an id the registry no longer knows is removed by
-    // any sweep, not spared by every one of them. Both filters below ask the
-    // def a question, and an absent def answered "not me" to both.
-    if (def && harmfulOnly && !def.harmful) continue;
-    if (def && clock && def.clock !== clock) continue;
     delete map[id];
     removed.push(id);
   }

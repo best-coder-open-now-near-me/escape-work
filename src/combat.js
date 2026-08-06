@@ -492,7 +492,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Targeted actions already worked this way: arm, then commit. Right-click
   // backs out of either. (Summons are targeted now - you pick the spot - so
   // they arm like an attack instead of confirming in place.)
-  const INSTANT_CONFIRM = new Set(['defend', 'heal', 'stance']);
+  const INSTANT_CONFIRM = new Set(['defend', 'stance']);
   // Who is holding an overwatch right now: combatant -> the action id they
   // took it with (POWERS_PLAN M5). A stance lasts until the holder's OWN next
   // turn, so it is cleared in beginTurn rather than on a timer - "until your

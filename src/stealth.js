@@ -7,13 +7,6 @@ import { STEALTH } from './stats.js';
 
 const DEG = Math.PI / 180;
 
-// A facing vector from an actor's yaw, in the heading convention actors.js
-// uses everywhere (atan2(dx, dz): yaw 0 looks down +z). Wanderers look where
-// they walk, so their cone follows their amble for free.
-export function facingFromYaw(yawDeg) {
-  return { x: Math.sin(yawDeg * DEG), z: Math.cos(yawDeg * DEG) };
-}
-
 // The direction with the longest run of open floor - a coworker who has
 // never moved looks down their corridor, not into the wall behind their
 // desk (SNEAK_PLAN D7: levels store no facing, so v1 derives one).

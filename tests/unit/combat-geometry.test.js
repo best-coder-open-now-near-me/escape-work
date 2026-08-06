@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import {
   cheb, AROUND, ORTHO, reachOfUnit, posOf, withinReach, canReach,
   reachSpecOf, actRangeOf, verbReaches, swingPointAt, hasSwingSpot,
-  zoneCellsFor, edgeShieldedTile, playerSideAt, TARGET_R, SURPRISE_RADIUS,
+  zoneCellsFor, playerSideAt, TARGET_R, SURPRISE_RADIUS,
 } from '../../src/combat-geometry.js';
 import { REACH, THROW_RANGE } from '../../src/stats.js';
 import { ACTIONS } from '../../src/data/actions.js';
@@ -199,13 +199,6 @@ test('zoneCellsFor drops tiles that are unseen, unusable, or occupied', () => {
   assert.deepEqual(zoneCellsFor(a, origin, 3, 3, {
     canTakeSurface: () => false, hasLos: () => true, occupied: () => false,
   }), []);
-});
-
-test('edgeShieldedTile is a walkable tile with a partition on some face', () => {
-  assert.equal(edgeShieldedTile(1, 0, open), false); // open plan: nothing to tuck against
-  assert.equal(edgeShieldedTile(1, 0, walled), true); // the (1,0)-(2,0) edge
-  // Somewhere you cannot stand is never a legal take-cover aim.
-  assert.equal(edgeShieldedTile(1, 0, { ...walled, isWalkable: () => false }), false);
 });
 
 test('the shared constants keep the numbers they are documented with', () => {

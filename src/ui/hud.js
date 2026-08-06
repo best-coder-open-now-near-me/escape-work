@@ -391,7 +391,6 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
     destroy: () => { bar.remove(); refreshDockVisibility(); },
   };
 }
-
 // --- party bar ----------------------------------------------------------------
 // The roster, top-left: one slot per member (#party-slot-<i> for the tests)
 // with name, an HP bar, a DOWN marker, and a highlight on the member being
@@ -509,9 +508,4 @@ export function createLevelUpPip({ onOpen }) {
     // pip, and only one of them keeps the memo true.
   };
 }
-
-// The allocation screen: attribute steppers + the class ability track. Dumb
-// like the dialogue panel - main.js owns spendAttrPoint/spendClassPoint and
-// hands over the sheet + callbacks (and a `nodesFor()` returning the current
-// track view-models); we re-read the mutated sheet to redraw. onDone fires when
-// the player closes it.
+// Modal allocation belongs to screens.js; this module ends with HUD affordances.

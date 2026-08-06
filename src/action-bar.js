@@ -139,7 +139,7 @@ export function createActionBar(d) {
           : `${a.label} armed. Click a target.`);
       d.refresh();
     } else if (d.INSTANT_CONFIRM.has(a.type)) {
-      // Instant self-actions (Deflect, a heal) used to fire the moment you
+      // Instant self-actions (Deflect and stances) used to fire the moment you
       // touched the button - easy to spend a turn's AP by accident. First
       // press ARMS it, second press commits (right-click, or the button
       // again, backs out). Targeted actions already worked this way.
@@ -182,16 +182,6 @@ export function createActionBar(d) {
       const chip = a.mode === 'guard' ? 'guarding' : 'watching';
       applyStatus(d.active.sheet, chip);
       d.statusFxAt(d.active, chip);
-      d.log(a.log);
-      d.refresh();
-    } else if (a.type === 'heal') {
-      if (a.uses && d.active.usesLeft[id] <= 0) return;
-      if (d.active.sheet.hp >= d.active.sheet.maxHp) { d.log('Already at full health. Savor it.'); return; }
-      if (a.uses) d.active.usesLeft[id] -= 1;
-      d.active.ap = roundAp(d.active.ap - a.ap);
-      d.active.sheet.hp = Math.min(d.active.sheet.maxHp, d.active.sheet.hp + a.amount);
-      d.hitFx(d.active, 'heal');
-      d.fx.damageText(d.active.actor.x, d.active.actor.z, `+${a.amount}`, '#8adf76');
       d.log(a.log);
       d.refresh();
     }

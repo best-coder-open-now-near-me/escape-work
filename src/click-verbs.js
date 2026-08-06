@@ -21,7 +21,6 @@ import { ACTIONS } from './data/actions.js';
 import { routeToFiringPosition, trimToFirst, truncateByBudget } from './pathfinding.js';
 import { aimsAtAlly, aimsAtProps, isMobility, isPull, isToppleable, isZone } from './powers.js';
 import { REACH, rangeOf, roundAp } from './stats.js';
-import { clearStatuses, hasStatus } from './statuses.js';
 import { dist, inReach, shieldingFace } from './tactics.js';
 
 export function createClickVerbs(d) {
@@ -442,11 +441,9 @@ export function createClickVerbs(d) {
         d.performZone(d.armed, point ? point.x : tile.x, point ? point.z : tile.z);
         return;
       }
-      // A buff aimed at the ground resolves to whoever is STANDING there -
-      // yourself included. This branch sits above the purge self-cast below
-      // deliberately: Remote Restart is a `buff` that happens to purge, and
-      // falling through to the attack-purge path would clear your statuses
-      // without spending the use, then narrate it as a reboot.
+      // An ally/any-side verb aimed at the ground resolves to whoever is
+      // STANDING there - yourself included. Reboot declares `side: 'any'`, so
+      // its self-cast follows this same billed, narrated path.
       if (aimsAtAlly(a)) {
         const m = d.allyAtPoint(point)
           || d.friendlies().find((f) => f.actor.x === tile.x && f.actor.z === tile.z);
@@ -460,20 +457,6 @@ export function createClickVerbs(d) {
       // A dash is aimed at the ground, like a walk - because that is what it
       // is, bought at a flat price and free of opportunity attacks.
       if (isMobility(a)) { d.performDash(d.armed, tile.x, tile.z, point); return; }
-      // A purge (reboot) can target YOURSELF: wipes your statuses too -
-      // paper-cut bleeding stops, but so does your Deflect.
-      if (a.purge && tile.x === d.active.actor.x && tile.z === d.active.actor.z) {
-        if (d.active.ap < a.ap) { d.log('Not enough AP.'); return; }
-        d.active.ap = roundAp(d.active.ap - a.ap);
-        const hadBleed = hasStatus(d.active.sheet, 'bleed');
-        clearStatuses(d.active.sheet);  // reboot wipes every status - Deflect, bleed, gum
-        d.disarm();
-        d.log(hadBleed
-          ? 'You turn yourself off and on again. The bleeding stops. So does everything else.'
-          : 'You turn yourself off and on again. All effects cleared. Classic fix.');
-        d.refresh();
-        return;
-      }
       // Take Cover aimed at the ground resolves on whatever the tile holds -
       // furniture or a body - and performTakeCover says why when it is
       // neither (TACTICS_PLAN M6).

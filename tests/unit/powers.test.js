@@ -24,7 +24,6 @@ test('buffRangeOf defaults, and an action may override it', () => {
 test('isFriendly is true only for the buff verb', () => {
   assert.equal(isFriendly({ type: 'buff' }), true);
   assert.equal(isFriendly({ type: 'attack' }), false);
-  assert.equal(isFriendly({ type: 'heal' }), false); // self-only, not friendly-TARGETED
   assert.equal(isFriendly(null), false);
 });
 

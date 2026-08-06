@@ -13,8 +13,8 @@ import { ITEMS } from './data/items.js';
 // "why not just buy it all back": a round trip costs you more than half.
 export const SELL_RATE = 0.4;
 
-// What an item is worth before any merchant touches it. 0 for the things
-// nobody would take (matches, a half-eaten sandwich someone already found).
+// What an item is worth before any merchant touches it. Cash pickups are
+// banked immediately rather than sold from inventory, so they carry no value.
 export const valueOf = (itemId) => ITEMS[itemId]?.value || 0;
 
 // What the merchant charges YOU. Rounded up (the house never eats the

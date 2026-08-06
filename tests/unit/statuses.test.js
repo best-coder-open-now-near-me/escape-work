@@ -95,17 +95,15 @@ test('resisting a stun shortens the window it buys - Composure is not paid twice
   assert.equal(statusLeft(stoic, 'training-credit'), 1 * IMMUNITY_WINDOW_MULT);
 });
 
-test('the window is a status like any other: charted, spared by a debuff sweep, purged', () => {
+test('the window is a status like any other: charted and purged', () => {
   const t = {};
   applyStatus(t, 'stunned');
   const chip = statusList(t).find((s) => s.id === 'training-credit');
   assert.deepEqual(chip, {
     id: 'training-credit', left: 3, sev: 1, name: 'Training Credit', icon: '✅', harmful: false,
   });
-  clearStatuses(t, { harmfulOnly: true });          // the stun goes, the credit stays
+  clearStatuses(t);                                  // a full purge takes both
   assert.equal(hasStatus(t, 'stunned'), false);
-  assert.equal(hasStatus(t, 'training-credit'), true);
-  clearStatuses(t);                                  // a full purge takes it too
   assert.equal(hasStatus(t, 'training-credit'), false);
   assert.equal(applyStatus(t, 'stunned'), true);      // so a reboot re-opens the target
 });
@@ -161,20 +159,7 @@ test('turn-clock and step-clock statuses never tick each other', () => {
   assert.equal(statusLeft(t, 'burning'), 1);  // ...and leaves burning alone
 });
 
-test('clearStatuses: clock sweep, harmful-only, and full purge', () => {
-  const sweep = {};
-  applyStatus(sweep, 'gum'); applyStatus(sweep, 'deflecting'); applyStatus(sweep, 'burning');
-  clearStatuses(sweep, { clock: 'turn' });          // the combat-end sweep
-  assert.equal(hasStatus(sweep, 'gum'), true);       // step-clock persists
-  assert.equal(hasStatus(sweep, 'deflecting'), false);
-  assert.equal(hasStatus(sweep, 'burning'), false);
-
-  const debuffs = {};
-  applyStatus(debuffs, 'gum'); applyStatus(debuffs, 'deflecting');
-  clearStatuses(debuffs, { harmfulOnly: true });
-  assert.equal(hasStatus(debuffs, 'gum'), false);       // harmful cleared
-  assert.equal(hasStatus(debuffs, 'deflecting'), true); // the buff is spared
-
+test('clearStatuses fully purges and reports what it removed', () => {
   const purge = {};
   applyStatus(purge, 'gum'); applyStatus(purge, 'bleed'); applyStatus(purge, 'deflecting');
   const removed = clearStatuses(purge);              // purge wipes everything
@@ -383,16 +368,10 @@ test('a status id the registry no longer knows is dropped by the tick', () => {
   assert.equal('retired-in-v7' in t.statuses, false, 'gone from the map, not just expired');
 });
 
-test('a sweep removes an unknown id instead of sparing it', () => {
-  // Both filters ask the DEF a question, and an absent def used to answer
-  // "not me" to every one of them - so the id no sweep could classify was the
-  // one id no sweep would take.
-  const harm = { statuses: { 'retired-in-v7': { left: 3 } } };
-  clearStatuses(harm, { harmfulOnly: true });
-  assert.deepEqual(Object.keys(harm.statuses), []);
-  const endOfFight = { statuses: { 'retired-in-v7': { left: 3 } } };
-  clearStatuses(endOfFight, { clock: 'turn' });
-  assert.deepEqual(Object.keys(endOfFight.statuses), []);
+test('a purge removes an unknown legacy id too', () => {
+  const target = { statuses: { 'retired-in-v7': { left: 3 } } };
+  clearStatuses(target);
+  assert.deepEqual(Object.keys(target.statuses), []);
 });
 
 test('a duration that is not a finite number applies nothing, and says so', () => {

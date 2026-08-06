@@ -82,9 +82,8 @@ export function itemCountsFor(s) {
 // Why this action can't be used with no fight on, or null when it can be.
 // Attacks, shoves and throws OPEN a fight; a summon posts on the spot. What's
 // left is the reactive pair, and both need a fight to mean anything: Deflect
-// Blame halves an incoming hit nobody is throwing, and a heal out here would be
-// a free, per-fight-refilling pool of HP - which is precisely the thing the
-// pockets exist to sell you.
+// Blame halves an incoming hit nobody is throwing, and a stance watches for a
+// turn that is not running.
 //
 // A purge is at its MOST useful out here: bleed runs on a step clock, so
 // between fights is exactly when you want it gone. Take Cover works out here
@@ -98,7 +97,6 @@ export function itemCountsFor(s) {
 // The real reason is that out of combat there is no AP economy to buy distance
 // with, and you can simply walk.
 const OUT_OF_COMBAT_REFUSAL = {
-  heal: (a) => `${a.label} is for a fight - out here, heal from your pockets.`,
   defend: (a) => `${a.label} only means something once someone is swinging at you.`,
   stance: (a) => `${a.label} watches for a turn that is not coming - start the fight first.`,
   mobility: (a) => `No need for ${a.label.toLowerCase()} out here. Just walk.`,

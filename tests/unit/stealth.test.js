@@ -3,7 +3,7 @@
 // coordinates like every geometry table in this suite.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { seesBody, coneBoundary, deriveFacing, facingFromYaw } from '../../src/stealth.js';
+import { seesBody, coneBoundary, deriveFacing } from '../../src/stealth.js';
 
 const openFloor = () => true;
 const opts = (over = {}) => ({ sightClearLow: openFloor, ...over });
@@ -64,13 +64,6 @@ test('deriveFacing looks down the longest open run', () => {
   assert.deepEqual(deriveFacing(isOpen, 0, 0), { x: 1, z: 0 });
   // Boxed in on all sides: the default gaze, deterministically.
   assert.deepEqual(deriveFacing(() => false, 0, 0), { x: 0, z: 1 });
-});
-
-test('facingFromYaw matches the actors.js heading convention', () => {
-  const f0 = facingFromYaw(0);
-  assert.ok(Math.abs(f0.x) < 1e-9 && Math.abs(f0.z - 1) < 1e-9, 'yaw 0 looks down +z');
-  const f90 = facingFromYaw(90);
-  assert.ok(Math.abs(f90.x - 1) < 1e-9 && Math.abs(f90.z) < 1e-9, 'yaw 90 looks down +x');
 });
 
 test('coneBoundary stops each ray where the sight rule does', () => {

@@ -115,8 +115,8 @@ export const STATUSES = {
   },
   // The anti-chain window `stunned` grants when it lands. Carries no effects at
   // all - its entire job is to exist, be seen (a HUD chip with a countdown),
-  // and turn the next stun away. Not harmful, so a debuff-only sweep spares it;
-  // a full purge (reboot) clears it with everything else, which is the honest
+  // and turn the next stun away. A full purge (reboot) clears it with
+  // everything else, which is the honest
   // reading of power-cycling somebody.
   //
   // Named off the stun it guards: the stun IS mandatory training, so the

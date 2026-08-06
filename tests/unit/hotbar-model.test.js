@@ -58,10 +58,6 @@ test('the reactive pair is fight-only; the useful-out-here verbs are not', () =>
   // A purge is at its MOST useful out here - bleed runs on a step clock.
   const purge = Object.keys(ACTIONS).find((id) => ACTIONS[id].type === 'purge');
   if (purge) assert.equal(combatOnlyReason(purge), null);
-  // A heal out here would be a free, refilling pool of HP - which is precisely
-  // the thing the pockets exist to sell you.
-  const heal = Object.keys(ACTIONS).find((id) => ACTIONS[id].type === 'heal');
-  if (heal) assert.match(combatOnlyReason(heal), /pockets/);
 });
 
 test('the bar always has a spare slot, padded out to whole rows', () => {

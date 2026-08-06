@@ -197,13 +197,6 @@ export function zoneCellsFor(a, origin, tx, tz, { canTakeSurface, hasLos, occupi
   return out;
 }
 
-// A walkable tile with a partition (or closed door) on any face - the other
-// thing this office calls cover, and a legal take-cover aim.
-export function edgeShieldedTile(tx, tz, { isWalkable, stepOpen }) {
-  return isWalkable(tx, tz)
-    && ORTHO.some(([dx, dz]) => !stepOpen(tx, tz, tx + dx, tz + dz));
-}
-
 // Who joins this fight: every living coworker within `radius` of the body the
 // fight opens around, who can actually take part in it.
 //
