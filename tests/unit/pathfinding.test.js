@@ -2,7 +2,8 @@
 // '#' solid, '.' open. No PlayCanvas, no DOM - plain node --test.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findPath, segmentClear, clampToClearance, approachPoint, truncateByBudget, smoothPath, routeOpen, routeToFiringPosition, trimToFirst } from '../../src/pathfinding.js';
+import { findPath, segmentClear, clampToClearance, approachPoint, truncateByBudget, smoothPath, routeOpen, routeToFiringPosition, trimToFirst, BODY_RADIUS,
+} from '../../src/pathfinding.js';
 
 // Build isWalkable from rows of '.'/'#'; everything off-map is solid.
 const walkableFrom = (rows) => (x, z) =>
@@ -139,6 +140,13 @@ test('truncateByBudget charges double through expensive cells', () => {
   assert.ok(cost > 5 && cost < 7, `mixed-rate cost ~6.5ish, got ${cost}`);
 });
 
+test('truncateByBudget prices the continuous point rather than a rounded tile', () => {
+  const seen = [];
+  truncateByBudget([[0.1, 0], [0.3, 0]], 10, (x) => { seen.push(x); return 1; });
+  assert.ok(seen.some((x) => x > 0.1 && x < 0.3));
+  assert.ok(seen.every((x) => !Number.isInteger(x)), `sampled exact feet: ${seen}`);
+});
+
 test('smoothPath collapses a dog-leg with clear line of sight', () => {
   const w = walkableFrom([
     '...',
@@ -149,6 +157,27 @@ test('smoothPath collapses a dog-leg with clear line of sight', () => {
   assert.ok(s.length < 5, 'fewer waypoints than the raw path');
   assert.deepEqual(s[0], [0, 0]);
   assert.deepEqual(s[s.length - 1], [2, 2]);
+});
+
+test('smoothPath refuses a shortcut with more fine-surface penalty than its route', () => {
+  const w = walkableFrom(['...', '...', '...']);
+  const raw = [[0, 1], [0, 0], [1, 0], [2, 0], [2, 1]];
+  const penalty = (ax, az, bx, bz) => {
+    const len = Math.hypot(bx - ax, bz - az);
+    let cost = 0;
+    const n = Math.max(1, Math.ceil(len / 0.05));
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n;
+      const x = ax + (bx - ax) * t;
+      const z = az + (bz - az) * t;
+      if (Math.hypot(x - 1, z - 1) < 0.35) cost += len / n;
+    }
+    return cost;
+  };
+  const s = smoothPath(w, raw, null, penalty);
+  let cost = 0;
+  for (let i = 1; i < s.length; i++) cost += penalty(...s[i - 1], ...s[i]);
+  assert.ok(cost < 1e-8, `smoothed route stays out of the fine hazard: ${JSON.stringify(s)}`);
 });
 
 // --- smoothing from where the body ACTUALLY stands ---------------------------
@@ -478,4 +507,128 @@ test('trimToFirst honors a long range - a straw does not walk to the elbow', () 
   const far = trimToFirst(path, (x) => x <= 6);
   const near = trimToFirst(path, (x) => x <= 1.5);
   assert.ok(far[far.length - 1][0] > near[near.length - 1][0] + 4);
+});
+
+// --- the LEGS, not just the vertices ------------------------------------------
+// The corner test above walks the output's VERTICES and asserts each sits on
+// open floor. That is not the property the smoother has to hold: a walk is the
+// segments BETWEEN the points, and roundBends' rejection path could emit a leg
+// it had already proved illegal (`p1` lies on a->b, so a failed a->p1 check
+// condemns a->b, and the fallback pushed `b` regardless). Every vertex was
+// legal; the line between two of them crossed a partition.
+
+// Sample a segment densely and assert every sample is somewhere a body may be.
+const legClear = (walk, w, steps = 24) => {
+  for (let i = 1; i < walk.length; i++) {
+    const [ax, az] = walk[i - 1];
+    const [bx, bz] = walk[i];
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps;
+      const x = ax + (bx - ax) * t;
+      const z = az + (bz - az) * t;
+      if (!w(Math.round(x), Math.round(z))) {
+        return `leg ${i} (${ax},${az})->(${bx},${bz}) passes through (${Math.round(x)},${Math.round(z)})`;
+      }
+    }
+  }
+  return null;
+};
+
+test('every LEG of a smoothed walk stays inside the corridor, not just the vertices', () => {
+  // The same L-corridor the vertex test uses, walked as segments.
+  const w = (x, z) => (x === 1 && z >= 0 && z <= 2) || (z === 2 && x >= 1 && x <= 3);
+  const s = smoothPath(w, [[1, 0], [1, 1], [1, 2], [2, 2], [3, 2]]);
+  assert.equal(legClear(s, w), null);
+});
+
+test('a chain of tight bends never emits a leg through a wall', () => {
+  // A zig-zag: consecutive bends, so each arc moves the point the NEXT leg
+  // leaves from - which is the case that could strand the walk off the
+  // validated polyline. Every leg must still be clear.
+  const open = new Set(['1,1', '2,1', '2,2', '3,2', '3,3', '4,3']);
+  const w = (x, z) => open.has(`${x},${z}`);
+  const s = smoothPath(w, [[1, 1], [2, 1], [2, 2], [3, 2], [3, 3], [4, 3]]);
+  assert.equal(legClear(s, w), null);
+  assert.deepEqual(s[0], [1, 1]);
+  assert.deepEqual(s[s.length - 1], [4, 3]);
+});
+
+test('a corridor one tile wide is walked without leaving it', () => {
+  // The narrowest case: nothing to round into, so every bend must fall back to
+  // the sharp turn rather than a curve that clips the wall.
+  const w = (x, z) => (z === 1 && x >= 0 && x <= 3) || (x === 3 && z >= 1 && z <= 4);
+  const s = smoothPath(w, [[0, 1], [1, 1], [2, 1], [3, 1], [3, 2], [3, 3], [3, 4]]);
+  assert.equal(legClear(s, w), null);
+});
+
+// The concrete case the leg tests above kept missing, found by sweeping random
+// 8x8 rooms: `legClear` samples TILE CENTRES, and a leg can clip a wall while
+// every sample still rounds onto open floor. Asking `segmentClear` - the same
+// primitive `walkableCorridor` uses for the travel line - is the real question.
+// Here two bends in a row round, so the second bend's `a` is the first arc's
+// exit point; its `a -> p1` check fails, and the old fallback pushed the sharp
+// corner anyway, sending the walk from (3.80,4.47) to (4.73,5.81) straight
+// through the solid cell at (4,5).
+test('a rejected arc never falls back onto the leg it just proved illegal', () => {
+  const w = walkableFrom([
+    '...###..',
+    '...##...',
+    '#...#.#.',
+    '#...###.',
+    '.#...#.#',
+    '#..#.#..',
+    '........',
+    '...#....',
+  ]);
+  const raw = findPath(w, 0, 0, 7, 7);
+  const s = smoothPath(w, raw);
+  for (let i = 1; i < s.length; i++) {
+    assert.ok(segmentClear(w, s[i - 1][0], s[i - 1][1], s[i][0], s[i][1]),
+      `leg ${i} (${s[i - 1]}) -> (${s[i]}) leaves the open floor`);
+  }
+});
+
+test('a search on an unbounded world gives up instead of hanging', () => {
+  // Not reachable through the shipped grid - `defAt` returns the wall def out
+  // of bounds, so every real world is sealed. This is the guard for when that
+  // stops being true, and for a goal the frontier can never land on. Without
+  // the cap this call never returns.
+  assert.equal(findPath(() => true, 0, 0, NaN, 3), null);
+});
+
+test('the cap never fires on a search a real map could produce', () => {
+  // A wide-open 60x60 room is far larger than any shipped floor, and must still
+  // route normally - a cap that trips on real geometry would be worse than none.
+  const w = (x, z) => x >= 0 && x < 60 && z >= 0 && z < 60;
+  const p = findPath(w, 0, 0, 59, 59);
+  assert.ok(p && p.length > 1, 'a big open room still routes');
+  assert.deepEqual(p[p.length - 1], [59, 59]);
+});
+
+test('a body keeps clear of a partition END POST, not just the wall', () => {
+  // The corner repulsion tested the diagonal TILE and nothing else, so it could
+  // not see a wall segment that terminates at the post. A body in the tile
+  // beside the partition's row rounded the end and clipped through it - 0.25 of
+  // a tile of overlap at BODY_RADIUS 0.3, i.e. 0.05 from a post it must keep
+  // 0.3 from.
+  const isOpen = () => true;                      // every TILE is open...
+  // ...but one partition sits between (0,0) and (1,0), ending at post (0.5,0.5).
+  const edgeOpen = (x, z, nx, nz) => !(Math.round(z) === 0 && Math.round(nz) === 0
+    && Math.min(Math.round(x), Math.round(nx)) === 0
+    && Math.max(Math.round(x), Math.round(nx)) === 1);
+  for (let i = 0; i <= 20; i++) {
+    const pz = 0.10 + (i / 20) * 0.60;
+    const [x, z] = clampToClearance(isOpen, edgeOpen, 0.45, pz);
+    const d = Math.hypot(x - 0.5, z - 0.5);
+    assert.ok(d >= BODY_RADIUS - 1e-9,
+      `body at (${x.toFixed(3)},${z.toFixed(3)}) is ${d.toFixed(3)} from the end post`);
+  }
+});
+
+test('open ground is not repelled by posts that carry no wall', () => {
+  // The other half: a corner with nothing at it must leave the point alone, or
+  // the fix would shove bodies around in empty rooms.
+  const [x, z] = clampToClearance(() => true, () => true, 0.45, 0.45);
+  assert.equal(x, 0.45);
+  assert.equal(z, 0.45);
 });

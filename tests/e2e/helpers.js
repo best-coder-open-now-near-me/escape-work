@@ -89,12 +89,17 @@ export async function withWorldStill(page, steps) {
   }
 }
 
-export async function bootStash(page, level, classId = 'office-drone') {
+// `seed` pins the first fight's combat-owned rolls: hits, damage, AI line
+// picks, enemy slips, and initiative. Member slips and loot roll outside that
+// stream, and later fights continue from however far the first advanced it.
+// This helper is therefore for one-fight fixtures whose staged geometry and
+// turn order need to replay; see main.js beside `combatRng` for the full seam.
+export async function bootStash(page, level, classId = 'office-drone', { seed = null } = {}) {
   await page.addInitScript((lvl) => {
     localStorage.clear(); // no campaign progress bleeding into a bespoke arena
     localStorage.setItem('escape-work.playtest', JSON.stringify(lvl));
   }, level);
-  await page.goto(`/#class=${classId}`);
+  await page.goto(`/${seed == null ? '' : `?seed=${seed}`}#class=${classId}`);
   await page.waitForFunction(() => window.__game && window.__game.stats);
   await settleCamera(page);
 }
@@ -158,6 +163,29 @@ export async function combatOrWalkDone(page, capMs) {
 // on the next enemy means an unintended fight.
 export const onCanvas = (page, p) => page.evaluate(
   ([x, y]) => document.elementFromPoint(x, y)?.id === 'app', [p.x, p.y]);
+
+// Resolve a door through the same visible-mesh pick the player uses. Ground
+// and threshold coordinates are deliberately not accepted: a doorway remains
+// ordinary walkable floor, with no invisible interaction target around it.
+export async function hoverDoorPanel(page, x, y, z, timeout = 20_000) {
+  let p = null;
+  await expect.poll(async () => {
+    p = await page.evaluate(
+      ([wx, wy, wz]) => window.__game.project3(wx, wy, wz),
+      [x, y, z],
+    );
+    if (!onScreen(p) || !(await onCanvas(page, p))) return 'off-canvas';
+    await page.mouse.move(p.x, p.y);
+    return page.evaluate(() => window.__game.hoverKind);
+  }, { timeout, intervals: [200] }).toBe('door');
+  return p;
+}
+
+export async function clickDoorPanel(page, x, y, z, timeout = 20_000) {
+  const p = await hoverDoorPanel(page, x, y, z, timeout);
+  await page.mouse.click(p.x, p.y);
+  return p;
+}
 
 // Click live enemies until a fight starts. Two things make a naive round-robin
 // flaky: some coworkers spawn SEALED behind walls + a closed door (no walk-up
@@ -387,4 +415,38 @@ export async function endTurnUntilPlayer(page) {
     () => page.evaluate(() => window.__combat?.phase),
     { timeout: 60_000 },
   ).toBe('player');
+}
+
+// Click a living coworker's BODY, with the pick pinned.
+//
+// The naive version of this - project the body, click the pixel - was copied
+// into four specs and flaked in three of them (Q905). It has two silent failure
+// modes and no guard against either: the camera may still be easing, so the
+// projection is of where the body WAS; and the point may land off-canvas or on
+// a HUD panel, where the click is swallowed and the test waits out its timeout
+// on an action that never happened.
+//
+// So this proves the pick landed before it commits: it settles the camera,
+// re-projects the LIVE position each attempt (a coworker takes turns and moves),
+// and polls `hoverKind` - which is the game's own pick, not a guess about it -
+// until it says `enemy`. Only then does it click.
+//
+// `y` is how far up the body to aim. 0.9 is chest height for a standing body;
+// a crouched one is a squashed pose and wants something nearer the floor.
+export async function clickEnemyBody(page, y = 0.9) {
+  const pp = await page.evaluate(() => window.__game.playerPos);
+  await stableProject(page, pp.x, pp.z).catch(() => {});
+  let p = null;
+  await expect.poll(async () => {
+    p = await page.evaluate((yy) => {
+      const en = window.__game.enemies.find((e) => e.alive);
+      return en ? window.__game.project3(en.px ?? en.x, yy, en.pz ?? en.z) : null;
+    }, y);
+    if (!onScreen(p) || !(await onCanvas(page, p))) return 'off-canvas';
+    // The move is what makes the game run its pick; hoverKind is that pick.
+    await page.mouse.move(p.x, p.y);
+    return page.evaluate(() => window.__game.hoverKind);
+  }, { timeout: 20_000, intervals: [200] }).toBe('enemy');
+  await page.mouse.click(p.x, p.y);
+  return p;
 }

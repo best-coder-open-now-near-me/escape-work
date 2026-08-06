@@ -6,12 +6,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  cheb, AROUND, ORTHO, reachOfUnit, posOf, withinReach, canReach,
+  reachOfUnit, posOf, withinReach, canReach,
   reachSpecOf, actRangeOf, verbReaches, swingPointAt, hasSwingSpot,
-  zoneCellsFor, edgeShieldedTile, TARGET_R, SURPRISE_RADIUS,
+  zoneCellsFor, playerSideAt, TARGET_R, SURPRISE_RADIUS,
 } from '../../src/combat-geometry.js';
 import { REACH, THROW_RANGE } from '../../src/stats.js';
 import { ACTIONS } from '../../src/data/actions.js';
+import { CARDINAL_DIRS, DIAGONAL_DIRS, NEIGHBOR_DIRS } from '../../src/directions.js';
+import { createSurfaceField } from '../../src/surface-field.js';
 
 // A body is just a tile. An AI unit carries `combat`; a member carries `sheet`.
 const at = (x, z, extra = {}) => ({ x, z, ...extra });
@@ -32,17 +34,12 @@ const walled = {
     !((ax === 1 && az === 0 && bx === 2 && bz === 0) || (ax === 2 && az === 0 && bx === 1 && bz === 0)),
 };
 
-test('cheb is the tile metric: a diagonal costs what an orthogonal does', () => {
-  assert.equal(cheb(0, 0, 3, 0), 3);
-  assert.equal(cheb(0, 0, 3, 3), 3);
-  assert.equal(cheb(0, 0, -2, 1), 2);
-});
-
-test('the neighbour sets are the eight and the four faces', () => {
-  assert.equal(AROUND.length, 8);
-  assert.equal(ORTHO.length, 4);
-  // Cover is a face relationship, so no diagonal may sneak into ORTHO.
-  assert.ok(ORTHO.every(([dx, dz]) => Math.abs(dx) + Math.abs(dz) === 1));
+test('the canonical neighbour sets compose eight from four faces and four diagonals', () => {
+  assert.equal(NEIGHBOR_DIRS.length, 8);
+  assert.equal(CARDINAL_DIRS.length, 4);
+  assert.equal(DIAGONAL_DIRS.length, 4);
+  assert.deepEqual(NEIGHBOR_DIRS, [...CARDINAL_DIRS, ...DIAGONAL_DIRS]);
+  assert.ok(CARDINAL_DIRS.every(([dx, dz]) => Math.abs(dx) + Math.abs(dz) === 1));
 });
 
 test('reachOfUnit reads a unit\'s def and falls back to the floor', () => {
@@ -59,6 +56,18 @@ test('posOf prefers the continuous body, and falls back to the tile', () => {
   // No body yet (a unit mid-spawn, or a test): the logical tile stands in.
   assert.deepEqual(posOf(at(3, 4)), { x: 3, z: 4 });
   assert.deepEqual(posOf({ actor: at(5, 6) }), { x: 5, z: 6 });
+});
+
+test('player-side occupancy treats party members and summons by the same record shape', () => {
+  const party = { sheet: { hp: 4 }, actor: { x: 2, z: 3 } };
+  const summon = { sheet: { hp: 1 }, actor: { x: 4, z: 3 } };
+  const down = { sheet: { hp: 0 }, actor: { x: 5, z: 3 } };
+  const records = [party, summon, down];
+
+  assert.equal(playerSideAt(records, 2, 3), true);
+  assert.equal(playerSideAt(records, 4, 3), true);
+  assert.equal(playerSideAt(records, 5, 3), false);
+  assert.equal(playerSideAt(records, 6, 3), false);
 });
 
 test('withinReach measures distance and ignores what stands between', () => {
@@ -148,37 +157,48 @@ test('hasSwingSpot is true when any of the eight neighbours works', () => {
   assert.equal(hasSwingSpot(me, at(5, 5), { ...open, isWalkable: () => false }), false);
 });
 
-test('zoneCellsFor drops tiles that are unseen, unusable, or occupied', () => {
-  const a = { radius: 1 };
-  const origin = { x: 0, z: 0 };
-  const all = zoneCellsFor(a, origin, 3, 3, {
-    canTakeSurface: () => true, hasLos: () => true, occupied: () => false,
-  });
-  assert.ok(all.length > 1);
-  assert.ok(all.some(([x, z]) => x === 3 && z === 3));
-
-  // Nobody gets a surface dropped on their feet - coworker, teammate or you.
-  const spared = zoneCellsFor(a, origin, 3, 3, {
-    canTakeSurface: () => true, hasLos: () => true, occupied: (x, z) => x === 3 && z === 3,
-  });
-  assert.equal(spared.length, all.length - 1);
-  assert.ok(!spared.some(([x, z]) => x === 3 && z === 3));
-
-  // No line, no tile: the rings, the cursor count and the click agree.
-  assert.deepEqual(zoneCellsFor(a, origin, 3, 3, {
-    canTakeSurface: () => true, hasLos: () => false, occupied: () => false,
-  }), []);
-  // A tile that cannot hold a surface is out whatever the geometry says.
-  assert.deepEqual(zoneCellsFor(a, origin, 3, 3, {
-    canTakeSurface: () => false, hasLos: () => true, occupied: () => false,
-  }), []);
+test('a long handle finds a swing spot the eight neighbours do not offer', () => {
+  // The coworker is boxed in: every one of their eight neighbours is occupied
+  // or blocked, so the only place to stand is a tile further out. A default
+  // reach genuinely has no melee option here - but the reach-grabber's 2.2
+  // does, and scanning AROUND alone said no to both, making the long weapon
+  // strictly worse than the short one in the case it exists for.
+  const en = at(5, 5);
+  const ringed = {
+    ...open,
+    isWalkable: (x, z) => Math.max(Math.abs(x - 5), Math.abs(z - 5)) !== 1,
+  };
+  assert.equal(hasSwingSpot(unit(0, 0, REACH.DEFAULT), en, ringed), false);
+  assert.equal(hasSwingSpot(unit(0, 0, REACH.DEFAULT + 0.7), en, ringed), true);
 });
 
-test('edgeShieldedTile is a walkable tile with a partition on some face', () => {
-  assert.equal(edgeShieldedTile(1, 0, open), false); // open plan: nothing to tuck against
-  assert.equal(edgeShieldedTile(1, 0, walled), true); // the (1,0)-(2,0) edge
-  // Somewhere you cannot stand is never a legal take-cover aim.
-  assert.equal(edgeShieldedTile(1, 0, { ...walled, isWalkable: () => false }), false);
+test('zoneCellsFor drops fine cells that are unseen, unusable, or under a body footprint', () => {
+  const a = { radius: 1 };
+  const origin = { x: 0, z: 0 };
+  const surfaceField = createSurfaceField({ width: 8, height: 8 });
+  const all = zoneCellsFor(a, origin, 3, 3, {
+    surfaceField, canTakeSurface: () => true, hasLos: () => true,
+  });
+  assert.ok(all.length > 1);
+  assert.ok(all.some(([x, z]) => x === 2.75 && z === 2.75));
+
+  // Nobody gets a surface dropped on their physical feet - coworker, teammate
+  // or you. One body can overlap several fine storage cells.
+  const spared = zoneCellsFor(a, origin, 3, 3, {
+    surfaceField, canTakeSurface: () => true, hasLos: () => true,
+    bodies: [{ x: 3, z: 3 }],
+  });
+  assert.ok(spared.length < all.length);
+  assert.ok(!spared.some(([x, z]) => Math.abs(x - 3) === 0.25 && Math.abs(z - 3) === 0.25));
+
+  // No line, no cell: the fill and the click agree.
+  assert.deepEqual(zoneCellsFor(a, origin, 3, 3, {
+    surfaceField, canTakeSurface: () => true, hasLos: () => false,
+  }), []);
+  // A cell that cannot hold a surface is out whatever the geometry says.
+  assert.deepEqual(zoneCellsFor(a, origin, 3, 3, {
+    surfaceField, canTakeSurface: () => false, hasLos: () => true,
+  }), []);
 });
 
 test('the shared constants keep the numbers they are documented with', () => {

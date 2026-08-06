@@ -24,23 +24,19 @@ complete all of the work weve identified").
    if the straight run reads as "ignoring the hazard", the revert is one
    predicate swap. Recommendation: keep the straight run - the AP surcharge
    already tells the story. `[proposed]`
-2. **Surface look: is the per-tile chunkiness gone after M6's presentation
-   pass, or do surfaces need a finer grid?** M6 keeps surfaces stored per
-   movement tile and makes only the *rendering* organic. If spills still read
-   as squares afterward, the follow-up is a 2x2 surface subgrid (quantum 0.5,
-   DOS2's ratio) that only surfaces see. Do not build it speculatively.
-   `[proposed]`
-3. **Overwatch: does the watch circle go Euclidean with everything else?**
+2. **Overwatch: does the watch circle go Euclidean with everything else?**
    It is a reaction range, so "circles for targeted" (D4) says yes, and M5
    also moves its trigger to the same continuous metric opportunity attacks
    already use. Implemented per this recommendation - flagged because it
    changes when overwatch fires; the revert is one gate. `[proposed]`
-4. **The aim wash's look.** M6 jitters the wash's per-tile chips (nudge,
-   turn, size - deterministic per cell) so its edge stops tracing the grid;
-   the old dead-square look's stated rationale ("the seams are the grid the
-   aim thinks in") went stale when M5 made the aim think in circles from the
-   body. Needs eyes; the alternative is a merged soft-edged region
-   (pool-style marching squares), a bigger renderer change. `[proposed]`
+
+The two former playtest questions are answered. Surface chunkiness survived
+M6 in both presentation and rules: TPS Form Storm refused visibly open gaps,
+bare-looking ground inside a paper tile still dealt damage, and a path tracing
+the visible edge was billed as though it crossed the drift. The square-chip
+aim wash also read as "squares with circles in them" rather than one aiming
+shape. Both answers are recorded as D8 and D10 below. `[ratified]` (designer,
+2026-08-06, this task)
 
 ## What the review established (evidence, 2026-07-31)
 
@@ -81,12 +77,16 @@ seam disagreements:
 | D1 | Fix, don't scrap. No rewrite of movement/LOS/objects. | `[stated]` (designer, 2026-07-31, accepting the review verdict: "you can complete all of the work weve identified") |
 | D2 | Cover stays, as this game's own design - not BG3's (which has no cover system at all: bg3.wiki 5e-changes, verified 2026-07-31). Face cover, uncapped shielded faces, pincers, backstab all keep. | `[stated]` (designer, 2026-07-31: "were not making a clone, trying to do our own thing weith the cover") |
 | D3 | Octant thresholds keep; their INPUTS go continuous. The 8-sector bucketing is a necessary threshold on direction; the bug is measuring it between tile centres. Direction is quantized around the defender's *body*, sector boundaries at the 22.5-degree lines. Cover *sources* (faces, cells) stay tile-shaped - the furniture genuinely is. | `[stated]` (designer, 2026-07-31: "octant cover seems like a necessary threshhold to enforce, not really tiled if the initial point isnt tile centered") |
-| D4 | Targeted verb ranges become true-distance circles, measured body-to-body: throws, straws, zone/summon/buff/swap/control aim ranges, walk-up stop points. Area/engagement footprints stay Chebyshev/ring-shaped: ENGAGE_RADIUS, SURPRISE_RADIUS, summon drop rings, AI adjacency (TACTICS_PLAN R5 upheld; R6's deferral superseded). Zone *footprints* were already Euclid discs (powers.js zoneTiles). | `[stated]` (designer, 2026-07-31: "yes do circles for targeted") |
-| D5 | Tile-keyed effect storage stays; the PRESENTATION goes organic. Verified: DOS2 stores surfaces as integer cell sets on its 0.5m AI grid (ositools Surface.h: `SurfaceCell { i16vec2 Position }`; docs.larian.game AI grid) under a blobby rendered skin - the benchmark organic look is this architecture. | `[stated]` (designer, 2026-07-31: "you just dont get the organic look that way no matter what" - resolved by the looked-up evidence into: change the skin, keep the data) |
+| D4 | Targeted verb ranges are true-distance circles, measured body-to-body: throws, straws, zone/summon/buff/swap/control aim ranges, walk-up stop points. Engagement membership, surprise, AI adjacency, cover and physical office objects remain tile/edge authored. The former carve-out for summon drop rings and printer blasts is superseded by D11: those two player-visible areas go continuous too. | `[stated]` (designer, 2026-07-31: "yes do circles for targeted"), revised `[ratified]` (designer, 2026-08-06: agreed to continuous summon/printer areas) |
+| D5 | Effect storage stays cell-keyed, but surfaces get their OWN finer integer field rather than borrowing movement cells. The field is the rule and the skin: placement, rendering, contact, path cost, fire, conduction, ignition, expiry and harvesting all read it. The movement grid remains the terrain/object model. | `[stated]` foundation (designer, 2026-07-31: "you just dont get the organic look that way"), resolution revised `[ratified]` after the 2026-08-06 playtest showed that an organic skin over whole-tile rules still lies |
 | D6 | LOS is measured body-to-body; BLOCKERS stay grid-shaped (door edges, smoke cells, tall solids - world objects the grid legitimately models). `segmentClear` already takes continuous coordinates; the work is the ~30 call sites. | `[ratified]` (proposed in review, approved in the designer's blanket "complete all of the work weve identified", 2026-07-31) |
 | D7 | Smoothing straightens across hazard cells the route CHOSE, never ones it avoided (`routeOpen`). | `[proposed]` - implemented per recommendation; question 1 above |
-| D8 | Surfaces subgrid 2x2 only if chunkiness survives M6. | `[proposed]` - question 2 above |
+| D8 | Surface chunkiness survived M6; build an authoritative fine surface field. Resolution is an engineering constant (begin at quantum 0.5, do not bake 2x2 assumptions into consumers). Existing authored surface tiles seed the field; runtime surface state never keeps a second truth in `grid.typeAt`. | `[ratified]` (designer, 2026-08-06: agreed the audit "will incorporate the entirety of the issues") |
 | D9 | Facing stays the LOGICAL sign-vector combat writes at act/move time, never the model's eased visual yaw - a damage rule cannot hang off a cosmetic tween (TACTICS_PLAN #5). Unchanged by M4. | `[stated]` (standing decision, reaffirmed in review) |
+| D10 | Replace the generic square-chip aim wash with one merged, soft-edged, LOS-clipped region for every ranged/ground aim. Body target rings remain because they communicate a different fact. Zone and cone footprints draw their exact committed mask/shape, never one ring per storage cell. | `[ratified]` (designer, 2026-08-06: "agree") |
+| D11 | Post the Role lands at continuous body-clear points around the clicked point, and printer damage uses a true circular body-intersection test. This supersedes TACTICS_PLAN R5 only for these two visible mechanics; engagement/surprise and grid-authored objects keep their existing rules. | `[ratified]` (designer, 2026-08-06: "agree") |
+| D12 | A movement `step` is world distance, not a tile or surface-cell boundary. Step-clock statuses and repeated surface exposure accumulate distance; entering a surface applies its entry beat immediately, then continued exposure retriggers at a world-distance interval scaled by Composure. Higher Composure therefore lets a character cover more ground before the next movement-triggered exposure; it does not suppress the initial entry beat. Placement excludes physical body footprints, while contact samples the feet. Fine resolution must not multiply damage, slips, status clocks, fire speed or loot. | `[ratified]` (designer, 2026-08-06: "shouldnt really matter if tiles or not that way" and "composure seems like the appropriate stat") |
+| D13 | Action behavior crosses system boundaries as the complete data descriptor, with namespaced policy objects (`placement`, `area`, `surface`) rather than positional arguments or missing values that secretly select behavior. Content declares choices such as summon anchor and hazard policy; universal physics such as character body clearance remains a system invariant. | `[stated]` (designer, 2026-08-06: "open a generic seam to inject data for each action into") |
 
 ## Milestones (each keeps `npm test` green)
 
@@ -138,8 +138,8 @@ true distance, which fixes the walk-up stop point and the arrival promise in
 one stroke (`trimToFirst` already samples continuously). Targeted ranges go
 Euclid per the D4 inventory: attack/throw far-gates, zone/summon/buff/swap/
 control aim ranges, `oocTargetOk`, breakPlan's ranged gates, the enemy-ring
-ladder, and the aim wash flips with its gate (`rangeTiles` euclid for every
-targeted verb, not just cones). The cone collapses to ONE geometry - body
+ladder, and the fine-cell aim wash uses that same true-distance gate for every
+targeted verb. The cone collapses to ONE geometry - body
 origin, aimed point kept, the wedge itself as the only gate - in combat, in
 `fireOocCone`, and in the `engageWithAction` opener (which currently re-aims
 at the target's tile centre and gates on cheb + tile LOS while the preview
@@ -174,6 +174,35 @@ with hash tints - so the remaining grid-tracing layer was the aim wash,
 whose chips now carry deterministic per-cell jitter (question 4). Storage,
 conduction, spread, electrification: untouched (D5).
 
+**M8 - The surface field is the rule.** The M6 playtest proved that a blobby
+skin over movement-tile rules is still a tiled mechanic. Introduce one
+integer-keyed fine surface field and normalize authored surface tiles into it
+at level load. Every surface consumer reads the field: render mask, TPS Form
+Storm and Bulk Mail placement, foot contact, distance clocks, travel/AP cost,
+path smoothing, forced landings, fire/smoke, conduction, ignition, temporary
+expiry and paper harvesting. Surface mutations produce one change set that
+invalidates visuals, aim and routes together. `grid.typeAt` owns terrain and
+objects only; it must never remain a parallel surface ledger.
+
+Normal travel reports continuous segments. A surface contact tracker applies
+the entry beat at bare-to-surface crossing and accumulates world distance for
+repeat exposure and step-clock statuses, with Composure scaling the repeat
+distance but never negating entry contact (D12); forced slides explicitly
+resolve only their landing. Route straightening compares the integrated
+surface cost of a shortcut with the path it replaces instead of opening an
+entire chosen movement tile. TPS Form Storm carves every living body
+footprint; Bulk Mail retains its intentional policy of carving the player side
+while paper may settle beneath enemies. The same pure mask builder feeds
+preview and commit.
+
+The aim wash becomes a merged LOS-clipped mesh (D10). Summon placement searches
+deterministic continuous body-clear points around the anchor declared by the
+summon's `placement` policy; the complete descriptor reaches the spawn system
+instead of a nullable point choosing behavior by accident (D13). The printer
+blast uses a named world radius against body circles (D11). Surface resolution
+never defines tuning: damage cadence, movement rates, spread speed, expiry and
+harvest yield stay expressed in world distance/area/turns.
+
 ## Testing
 
 - **Unit** (with each milestone): corridor endpoint-forgiveness scenarios,
@@ -185,8 +214,9 @@ conduction, spread, electrification: untouched (D5).
   during a post-interaction walk and bounds lateral deviation from the
   click line - the assertion that would have caught the jut; the existing
   tactics/cover/cone specs stay green through M4/M5.
-- **Play**: questions 1 and 2 are playtest questions; no spec can answer
-  "does it read right".
+- **Play**: straightening across a deliberately chosen spill remains a playtest
+  question. Surface chunkiness and the square-chip wash were answered in the
+  2026-08-06 playtest and promoted to D8/D10.
 
 ## Risks and open questions (engineering)
 

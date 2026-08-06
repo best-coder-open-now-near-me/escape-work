@@ -7,7 +7,10 @@
 // documented as a copy of another rule is a rule waiting to drift.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { summonRange, summonRoom, dropCount, summonSpotProblem } from '../../src/summon-rules.js';
+import {
+  countLiveSummons, summonRange, summonRoom, dropCount, summonSpotProblem,
+  summonLandingPoints, summonPlacement, summonAnchorPoint, SUMMON_ANCHORS,
+} from '../../src/summon-rules.js';
 
 const POST = { ap: 2, count: 2, cap: 3, uses: 1 };
 
@@ -31,6 +34,21 @@ test('the cap is per-summoner and counts who is still standing', () => {
   assert.equal(summonRoom(POST, 9), 0);
   // No declared cap means the count IS the cap.
   assert.equal(summonRoom({ count: 2 }, 0), 2);
+});
+
+test('one cap counter understands map, fight, and borrowed record shapes', () => {
+  const owner = {};
+  const other = {};
+  const records = [
+    { summonedBy: owner, alive: true, hp: 4 },
+    { summonedBy: owner, alive: false, hp: 4 },
+    { summonedBy: owner, sheet: { hp: 3 }, actor: {} },
+    { summonedBy: owner, sheet: { hp: 0 }, actor: {} },
+    { unit: { summonedBy: owner }, sheet: { hp: 2 }, actor: {} },
+    { summonedBy: other, alive: true, hp: 4 },
+  ];
+  assert.equal(countLiveSummons(owner, records), 3);
+  assert.equal(countLiveSummons(other, records), 1);
 });
 
 test('how many arrive is what the action posts, bounded by the cap', () => {
@@ -78,4 +96,61 @@ test('an action\'s own range narrows the reach without touching the message', ()
   const close = { ...POST, range: 2 };
   assert.equal(summonSpotProblem(close, ok({ dist: 2 })), null);
   assert.match(summonSpotProblem(close, ok({ dist: 3 })), /Too far/);
+});
+
+test('placement policy comes from the descriptor while physical clearance stays systemic', () => {
+  const aimed = {
+    placement: { anchor: SUMMON_ANCHORS.AIM, avoidHazards: false, searchRadius: 2.5 },
+  };
+  assert.deepEqual(summonPlacement(aimed), {
+    anchor: 'aim', avoidHazards: false, searchRadius: 2.5,
+  });
+  assert.deepEqual(summonAnchorPoint(aimed, { x: 9, z: 9 }, { x: 1.2, z: 3.4 }), {
+    x: 1.2, z: 3.4,
+  });
+  const beside = { placement: { anchor: SUMMON_ANCHORS.SUMMONER } };
+  assert.deepEqual(summonAnchorPoint(beside, { x: 6.1, z: 7.2 }, { x: 1, z: 1 }), {
+    x: 6.1, z: 7.2,
+  });
+});
+
+test('an undeclared or incomplete placement does not infer behavior from a nullable aim', () => {
+  assert.equal(summonAnchorPoint({}, { x: 1, z: 1 }, { x: 2, z: 2 }), null);
+  assert.equal(summonAnchorPoint({ placement: { anchor: 'aim' } }, { x: 1, z: 1 }), null);
+  assert.equal(summonAnchorPoint({ placement: { anchor: 'nowhere' } }, { x: 1, z: 1 }), null);
+});
+
+test('summon landing keeps the exact legal aim point and derives more body-clear rests around it', () => {
+  const points = summonLandingPoints(2.18, 2.31, 3, {
+    isOpen: () => true,
+  });
+  assert.deepEqual(points[0], [2.18, 2.31]);
+  assert.equal(points.length, 3);
+  for (let i = 0; i < points.length; i++) {
+    for (let j = i + 1; j < points.length; j++) {
+      assert.ok(Math.hypot(points[i][0] - points[j][0], points[i][1] - points[j][1]) >= 0.64);
+    }
+  }
+});
+
+test('summon landing clears bodies and clamps away from authored walls', () => {
+  const points = summonLandingPoints(1.45, 1, 1, {
+    isOpen: (x) => x <= 1,
+    edgeOpen: (x, z, nx, nz) => !(x === 1 && z === 1 && nx === 2 && nz === 1),
+    bodies: [{ x: 1.15, z: 1 }],
+  });
+  assert.equal(points.length, 1);
+  assert.ok(points[0][0] <= 1.2, 'the wall face keeps a radius-0.3 body inside the tile');
+  assert.ok(Math.hypot(points[0][0] - 1.15, points[0][1] - 1) >= 0.64,
+    'an occupied footprint forces the deterministic search to another rest point');
+});
+
+test('summon landing rejects hazardous points without turning hazard resolution into tile snapping', () => {
+  const points = summonLandingPoints(1.1, 1.1, 1, {
+    isOpen: () => true,
+    pointOpen: (x) => x >= 1.5,
+  });
+  assert.equal(points.length, 1);
+  assert.ok(points[0][0] >= 1.5);
+  assert.notDeepEqual(points[0], [2, 1], 'the fallback is still a continuous ring sample');
 });

@@ -1,5 +1,5 @@
 {
-  "name": "Floor 2 \u2014 Open Plan",
+  "name": "Floor 2 — Open Plan",
   "depth": 2,
   "tiles": {
     ".": "floor",
@@ -25,31 +25,33 @@
     "i": "it-floor",
     "!": "rug",
     "8": "plant-small",
-    "9": "plant-tiny"
+    "9": "plant-tiny",
+    "F": "fridge",
+    "f": "filing-cabinet"
   },
   "actors": {
     "@": "player",
-    "M": "manager",
-    "H": "hr",
     "V": "mail-room",
     "E": "executive",
     "G": "manager@3",
-    "s": "security-guard"
+    "s": "security-guard",
+    "Z": "manager@2",
+    "J": "hr@2"
   },
   "map": [
     "............................",
     "............................",
     "..@.........................",
-    "....................mmMmmS..",
+    "....................mmZmmS..",
     ".........iTpppR.....mm.mmmE.",
-    ".9.......iiipiiM....cDDDcm..",
+    ".9.......iiipiiZ....cDDDcm..",
     ".......!.iiiiii.....mmgm.m..",
     "....................mmmmmm..",
-    "..kkkLCk$...................",
+    "..kkkLFk$...................",
     "..kkkkkkkV..............s...",
     "..kT%%kgk.................P.",
     "..kk%kgkk...................",
-    "..Bkkkkkk...8..H............",
+    "..fkkkkkk...8..J............",
     "...........*~~~.............",
     "......!.....~~.....#G.....B.",
     "............................",

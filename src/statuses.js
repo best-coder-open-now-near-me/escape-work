@@ -104,13 +104,32 @@ export function applyStatus(target, id, opts = {}, resist = 0) {
   if (blockedBy(target, id)) return false;
   let dur = opts.duration != null ? opts.duration : def.duration;
   if (def.resistable && resist > 0) dur = Math.max(1, dur - resist);
-  if (dur <= 0) return false;
+  // FINITE and positive. `dur <= 0` alone let two impossible durations through,
+  // because neither comparison is true of them: NaN wrote `left: NaN`, which no
+  // clock can decrement and no reader counts as present - and this still
+  // returned true, so the caller narrated and billed for a status that was
+  // never applied. Infinity wrote a status nothing can ever expire. A duration
+  // that is not a number is a caller bug; refusing it is how it gets found.
+  if (!Number.isFinite(dur) || dur <= 0) return false;
   const map = mapOf(target);
   const cur = map[id]?.left || 0;
   // A re-apply takes the WORSE of the two severities, for the same reason it
   // takes the longer of the two durations: refreshing a status must never be a
   // way to weaken one that is already biting.
-  const sev = Math.max(map[id]?.sev ?? 0, severityFor(id, resist));
+  //
+  // The floor distinguishes NO ENTRY from an entry with no `sev`, which a bare
+  // `?? 0` could not:
+  //   - nothing there yet -> 0, so a first application takes its own severity,
+  //     resist included. This is what makes a resisted status land blunted.
+  //   - an entry without `sev` -> 1, because that is what every OTHER reader
+  //     assumes (statusSeverity, the tick, statusList). Reading it as 0 here
+  //     made this the one site that disagreed, and it disagreed in the
+  //     direction the rule above forbids: a resisted re-apply on a
+  //     severity-less entry - one carried from a pre-severity save, or the
+  //     immunity window written below - replaced an effective 1 with a smaller
+  //     number, weakening a status by refreshing it.
+  const prior = map[id] ? (map[id].sev ?? 1) : 0;
+  const sev = Math.max(prior, severityFor(id, resist));
   map[id] = { left: Math.max(cur, dur), sev };
   // Grant the anti-chain window LAST, so it can never block the application
   // that created it, and size it off `dur` - the duration actually applied,
@@ -162,7 +181,12 @@ function tick(target, clock) {
   if (!map) return result;
   for (const id in map) {
     const def = STATUSES[id];
-    if (!def || def.clock !== clock) continue;
+    // A status id that has LEFT the registry is dropped on sight. Skipping it
+    // would make it immortal: no clock could classify it, while `hasStatus`
+    // would keep answering yes. Deleting mid-`for...in` is safe, and this is
+    // the loop that visits every id on every clock.
+    if (!def) { delete map[id]; continue; }
+    if (def.clock !== clock) continue;
     const entry = map[id];
     if (!(entry.left > 0)) continue;
     // Dots take severity too, so "Composure blunts it" means the same thing
@@ -181,17 +205,13 @@ function tick(target, clock) {
 export const tickTurn = (target) => tick(target, 'turn');
 export const tickStep = (target) => tick(target, 'step');
 
-// Remove statuses. Purge (reboot) clears everything; the combat-end sweep
-// passes `{ clock: 'turn' }` (step-clock statuses persist on the map);
-// `{ harmfulOnly: true }` would spare buffs. Returns the ids removed.
-export function clearStatuses(target, { harmfulOnly = false, clock = null } = {}) {
+// Remove every status. This is the full purge used by reboot and debug tools;
+// ordinary expiry belongs to the turn/step tick functions above.
+export function clearStatuses(target) {
   const map = target?.statuses;
   const removed = [];
   if (!map) return removed;
   for (const id in map) {
-    const def = STATUSES[id];
-    if (harmfulOnly && !def?.harmful) continue;
-    if (clock && def?.clock !== clock) continue;
     delete map[id];
     removed.push(id);
   }

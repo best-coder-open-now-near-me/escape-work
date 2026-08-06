@@ -17,12 +17,8 @@
 import { ACTIONS } from './data/actions.js';
 import { reachOf, rangeOf, REACH } from './stats.js';
 import { inReach, dist } from './tactics.js';
-import { aimRangeOf, isControl, controlIsRanged, zoneTiles, zoneRadiusOf } from './powers.js';
-
-// Chebyshev tile distance - THE metric this game measures range in (a diagonal
-// step costs what an orthogonal one does), as distinct from `tactics.dist`,
-// which is the continuous Euclidean distance reach measures against.
-export const cheb = (ax, az, bx, bz) => Math.max(Math.abs(ax - bx), Math.abs(az - bz));
+import { aimRangeOf, isControl, controlIsRanged, zoneRadiusOf } from './powers.js';
+import { fineCircleCells } from './surface-mask.js';
 
 // Radius of a target's ring marker. Cone tests use it so a body counts when
 // the wedge CLIPS it, matching what the ring shows.
@@ -30,12 +26,6 @@ export const TARGET_R = 0.5;
 
 // Engaged from beyond this = loses the first turn.
 export const SURPRISE_RADIUS = 2;
-
-// The eight neighbours, and the four that sit on a FACE. Cover is a
-// face-relationship (a shield on a diagonal shields nothing), which is why the
-// crouch scans ORTHO while a swing scans AROUND.
-export const AROUND = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
-export const ORTHO = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
 // A member's reach comes from their weapon, an AI unit's from its def (like
 // attackAp). REACH.DEFAULT is the floor for both.
@@ -56,6 +46,14 @@ export function posOf(u) {
     return { x: p.x, z: p.z };
   }
   return { x: a.x, z: a.z };
+}
+
+// Does a living record on the player side occupy this tile? Party members and
+// player summons share the same { sheet, actor } shape, so surface placement
+// should not need separate, drift-prone roster checks in and out of combat.
+export function playerSideAt(records, x, z) {
+  return records.some((m) => m.sheet.hp > 0
+    && m.actor && m.actor.x === x && m.actor.z === z);
 }
 
 // Is the defender within the attacker's reach DISTANCE? Ignores anything solid
@@ -146,34 +144,66 @@ export function swingPointAt(attacker, en, gx, gz, { isWalkable, approach, stepO
 // Does ANY tile beside them offer a legal swing? The cheap read the target
 // rings use - pure geometry, no pathfinding, so it can run per frame. A route
 // to the spot is the click's own (more expensive) test.
-export function hasSwingSpot(attacker, en, world) {
-  return AROUND.some(([dx, dz]) => swingPointAt(attacker, en, en.x + dx, en.z + dz, world));
+export function hasSwingSpot(attacker, en, { isWalkable, approach, stepOpen }) {
+  const world = { isWalkable, approach, stepOpen };
+  // Out to the attacker's REACH, not the eight neighbours. A long handle
+  // (the reach-grabber puts a swing at 2.2 tile-units) can hit from a tile
+  // further out, and scanning only the immediate neighbour ring told it there
+  // was no melee option
+  // whenever the ring was full - a coworker boxed in by their own colleagues,
+  // or one the far side of a partition whose neighbours cannot be walked to.
+  // That is the same mistake `routeToFiringPosition` was written to fix for
+  // shots, and it made a long weapon strictly worse than a short one in the
+  // one situation it exists for. Default reach rounds to 2, which still walks
+  // the eight neighbours plus a ring that `swingPointAt` rejects on distance -
+  // per-frame work stays proportional to the reach that earned it.
+  const r = Math.ceil(reachOfUnit(attacker));
+  for (let dz = -r; dz <= r; dz++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (!dx && !dz) continue;
+      if (swingPointAt(attacker, en, en.x + dx, en.z + dz, world)) return true;
+    }
+  }
+  return false;
 }
 
-// Which tiles a zone verb aimed at (tx, tz) would actually cover: in the
-// radius, able to take a surface, in line of sight from the aimer, and nobody
-// standing on them. Nobody gets a surface dropped on their feet - not a
-// coworker, not a teammate, not you. The cone already refused to carpet a
-// member's tile; this extends the same courtesy to everyone, because a zone is
-// aimed deliberately and "I did not mean to stand in that" is the cone's
-// problem, not this verb's.
+// Which fine surface cells a zone aimed at (tx, tz) would actually cover: in
+// the true disc, able to take a surface, in line of sight from the aimer, and
+// outside every living body's physical footprint. Nobody gets a surface
+// dropped on their feet - not a coworker, not a teammate, not you.
 //
 // The rings, the cursor's count and the click all call this, so they cannot
 // disagree about which tiles will take it.
-export function zoneCellsFor(a, origin, tx, tz, { canTakeSurface, hasLos, occupied }) {
-  const out = [];
-  for (const [x, z] of zoneTiles(tx, tz, zoneRadiusOf(a))) {
-    if (!canTakeSurface(x, z)) continue;
-    if (!hasLos(origin.x, origin.z, x, z)) continue;
-    if (occupied(x, z)) continue;
-    out.push([x, z]);
-  }
-  return out;
+export function zoneCellsFor(a, origin, tx, tz, {
+  surfaceField, canTakeSurface, hasLos, bodies = [],
+}) {
+  return fineCircleCells(surfaceField, tx, tz, zoneRadiusOf(a), {
+    canInclude: canTakeSurface,
+    hasLos,
+    origin,
+    excludeBodies: bodies,
+  });
 }
 
-// A walkable tile with a partition (or closed door) on any face - the other
-// thing this office calls cover, and a legal take-cover aim.
-export function edgeShieldedTile(tx, tz, { isWalkable, stepOpen }) {
-  return isWalkable(tx, tz)
-    && ORTHO.some(([dx, dz]) => !stepOpen(tx, tz, tx + dx, tz + dz));
+// Who joins this fight: every living coworker within `radius` of the body the
+// fight opens around, who can actually take part in it.
+//
+// The second half is not a refinement, it is what stops a fight from being
+// unwinnable. Chebyshev distance alone pulls in somebody sealed behind a closed
+// door - and doors cannot be opened in combat and closed doors block sight, so
+// that coworker can never be reached, shot or seen while victory still requires
+// them down. `canTakePart` is the caller's side test, because only combat knows
+// which bodies are on which side.
+//
+// `primary` is the one the fight is ABOUT - the coworker you clicked, the one
+// who spotted you - and it joins whether or not it made the radius, because a
+// thrown opener reaches further than the auto-engage does. Three of the four
+// call sites had written that line out themselves; it belongs with the filter
+// that makes it necessary.
+export function engagedAround(enemies, origin, radius, canTakePart, primary = null) {
+  const engaged = enemies.filter((e) => e.alive
+    && Math.max(Math.abs(e.x - origin.x), Math.abs(e.z - origin.z)) <= radius
+    && canTakePart(origin, e));
+  if (primary && !engaged.includes(primary)) engaged.push(primary);
+  return engaged;
 }

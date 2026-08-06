@@ -17,8 +17,8 @@
 // The scene's key lights are DIRECTIONAL, which is what makes the staging trick
 // work: direction doesn't depend on position, so the staged rig is lit exactly
 // as it would be on the floor.
-const pc = window.pc;
-import { placeModel, applyCharacterProportions } from './models.js';
+const pc = globalThis.window?.pc;
+import { cloneMaterials, tintMaterials, placeModel, applyCharacterProportions } from './models.js';
 
 const SIZE = 128;
 const STAGE_Y = -1000;
@@ -71,20 +71,17 @@ export function createPortraits(app) {
     return true;
   }
 
-  // Tint an entity's materials. Portrait rigs are throwaway, but the .glb's
-  // materials are SHARED with every character built from it - so clone first,
-  // exactly as GridActor.attach does for the real bodies.
-  function tint(entity, rgb) {
-    if (!rgb) return;
-    for (const rc of entity.findComponents('render')) {
-      for (const mi of rc.meshInstances) {
-        const m = mi.material.clone();
-        m.diffuse.set(m.diffuse.r * rgb[0], m.diffuse.g * rgb[1], m.diffuse.b * rgb[2]);
-        m.update();
-        mi.material = m;
-      }
-    }
-  }
+  // Tint an entity's materials, through the same pair every other body uses
+  // (models.js). Portrait rigs are throwaway, but the .glb's materials are
+  // SHARED with every character built from it, so the clone is not optional.
+  //
+  // This was a fourth hand-written copy of "tint a body", and the only one left
+  // doing the compounding in-place multiply the other three were rewritten to
+  // remove: it multiplied the clone's CURRENT diffuse rather than a pristine
+  // snapshot, so a second call darkened an already-tinted body. Safe today only
+  // because a portrait rig is tinted once and thrown away - which is a fact
+  // about the caller, not a property of the function.
+  const tint = (entity, rgb) => tintMaterials(cloneMaterials(entity), rgb);
 
   function readTarget() {
     const device = app.graphicsDevice;

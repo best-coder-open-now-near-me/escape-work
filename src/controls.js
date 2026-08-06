@@ -3,7 +3,7 @@
 // and zooming are handled entirely in here - game logic never sees them.
 import { applyCameraPostFx } from './shading.js';
 
-const pc = window.pc;
+const pc = globalThis.window?.pc;
 
 // `onTacticalChange` fires whenever the tactical view goes on or off - by the
 // button, by the T key, by a pitch drag, or by a raw setView. Anything PAINTING
@@ -16,7 +16,12 @@ const pc = window.pc;
 // the WORLD a question goes through it first. Deliberately only the left click
 // and the hover - the right-click menu and the editor's drag-paint stay exact,
 // because blind should make you fumble a swing, not a menu.
-export function createControls({ app, canvas, focus, onLeftClickTile, onRightClickTile, onAnyLeftPress, onLeftDragTile, onHover, onHoverLeave, onTacticalChange = null, aim = null }) {
+// `mods` on the click/drag callbacks carries the modifier keys held at the
+// moment of the event, and `onLeftRelease` / `onRightDragTile` complete the
+// gesture vocabulary. The editor needs all three for shift-rectangles,
+// alt-eyedropper and right-drag erase; the game passes none of them and is
+// unaffected.
+export function createControls({ app, canvas, focus, onLeftClickTile, onRightClickTile, onAnyLeftPress, onLeftDragTile, onLeftRelease, onRightDragTile, onHover, onHoverLeave, onTacticalChange = null, aim = null, altShiftOrbit = true }) {
   // Rig: camYaw (spins around the focus) -> camPitch (tilts) -> camera (sits
   // back at a fixed distance, looking at the focus).
   const camYaw = new pc.Entity('camYaw');
@@ -99,24 +104,45 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   let lastX = 0;
   let lastY = 0;
   let haveMouse = false;
+  let rightHeld = false;
+  // PlayCanvas mouse events don't carry modifier state, so track it off the
+  // window. Chords arrive as a plain object rather than the raw event, so a
+  // consumer can't reach past it into the DOM.
+  const mods = { shift: false, alt: false, ctrl: false };
+  const readMods = (e) => { mods.shift = e.shiftKey; mods.alt = e.altKey; mods.ctrl = e.ctrlKey || e.metaKey; };
+  window.addEventListener('keydown', readMods);
+  window.addEventListener('keyup', readMods);
+  window.addEventListener('mousedown', readMods, true);
+  window.addEventListener('mousemove', readMods, true);
   const aimed = (sx, sy) => (aim ? aim(sx, sy) : [sx, sy]);
   app.mouse.on(pc.EVENT_MOUSEDOWN, (e) => {
     if (!onCanvas(e)) return;
-    if (e.button === pc.MOUSEBUTTON_MIDDLE) {
+    if (e.button === pc.MOUSEBUTTON_MIDDLE || (altShiftOrbit && e.button === pc.MOUSEBUTTON_LEFT && mods.alt && mods.shift)) {
+      // Alt+Shift+left is the optional second orbit binding. A trackpad without
+      // a middle button needs it in the game; the editor disables it because
+      // that host owns the same chord for region capture.
       orbiting = true;
     } else if (e.button === pc.MOUSEBUTTON_LEFT) {
       leftHeld = true;
-      onAnyLeftPress && onAnyLeftPress();
+      onAnyLeftPress && onAnyLeftPress({ ...mods });
       const [ax, ay] = aimed(e.x, e.y);
-      onLeftClickTile && onLeftClickTile(screenToTile(ax, ay), screenToGround(ax, ay), ax, ay);
+      onLeftClickTile && onLeftClickTile(screenToTile(ax, ay), screenToGround(ax, ay), ax, ay, { ...mods });
     } else if (e.button === pc.MOUSEBUTTON_RIGHT) {
-      onRightClickTile && onRightClickTile(screenToTile(e.x, e.y), e.x, e.y, screenToGround(e.x, e.y));
+      rightHeld = true;
+      onRightClickTile && onRightClickTile(screenToTile(e.x, e.y), e.x, e.y, screenToGround(e.x, e.y), { ...mods });
     }
   });
   // Releases are never filtered - an orbit/drag must end even over UI.
   app.mouse.on(pc.EVENT_MOUSEUP, (e) => {
     if (e.button === pc.MOUSEBUTTON_MIDDLE) orbiting = false;
-    if (e.button === pc.MOUSEBUTTON_LEFT) leftHeld = false;
+    if (e.button === pc.MOUSEBUTTON_LEFT) {
+      if (orbiting) { orbiting = false; return; } // an alt+shift orbit, not a stroke
+      leftHeld = false;
+      // The end of a drag is where a rubber-banded tool COMMITS. Without this
+      // hook a rectangle could only ever be previewed, never applied.
+      onLeftRelease && onLeftRelease(screenToTile(e.x, e.y), screenToGround(e.x, e.y), { ...mods });
+    }
+    if (e.button === pc.MOUSEBUTTON_RIGHT) rightHeld = false;
   });
   app.mouse.on(pc.EVENT_MOUSEMOVE, (e) => {
     if (orbiting) {
@@ -129,7 +155,9 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
       CAM.pitch = pc.math.clamp(CAM.pitch + e.dy * 0.3, CAM.minPitch, CAM.maxPitch);
       apply();
     } else if (leftHeld && onLeftDragTile && onCanvas(e)) {
-      onLeftDragTile(screenToTile(e.x, e.y), screenToGround(e.x, e.y));
+      onLeftDragTile(screenToTile(e.x, e.y), screenToGround(e.x, e.y), { ...mods });
+    } else if (rightHeld && onRightDragTile && onCanvas(e)) {
+      onRightDragTile(screenToTile(e.x, e.y), screenToGround(e.x, e.y), { ...mods });
     } else if (onCanvas(e)) {
       hoveringCanvas = true;
       lastX = e.x;
@@ -307,6 +335,32 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     return !!tactical;
   }
 
+  // Frame a rectangular ground area inside the portion of the canvas the host
+  // leaves unobscured by its own UI. This deliberately raises the instance's
+  // zoom ceiling when needed: a 40x40 editor map cannot fit through the
+  // gameplay camera's normal 42-unit ceiling.
+  function frameGroundBounds({ width, height, viewportWidth, viewportHeight, padding = 1.12 } = {}) {
+    const mapWidth = Math.max(1, Number(width) || 1);
+    const mapHeight = Math.max(1, Number(height) || 1);
+    const canvasWidth = Math.max(1, canvas.clientWidth || 1);
+    const canvasHeight = Math.max(1, canvas.clientHeight || 1);
+    const visibleWidth = pc.math.clamp(Number(viewportWidth) || canvasWidth, 1, canvasWidth);
+    const visibleHeight = pc.math.clamp(Number(viewportHeight) || canvasHeight, 1, canvasHeight);
+    const verticalHalfFov = cameraEntity.camera.fov * pc.math.DEG_TO_RAD / 2;
+    const verticalTangent = Math.tan(verticalHalfFov);
+    const horizontalTangent = verticalTangent * (canvasWidth / canvasHeight);
+    const distance = Math.max(
+      mapWidth * canvasWidth / (2 * horizontalTangent * visibleWidth),
+      mapHeight * canvasHeight / (2 * verticalTangent * visibleHeight),
+    ) * padding;
+
+    setTactical(true);
+    CAM.maxDist = Math.max(CAM.maxDist, distance);
+    CAM.dist = Math.max(CAM.minDist, distance);
+    apply();
+    return CAM.dist;
+  }
+
   return {
     cameraEntity,
     screenToTile,
@@ -333,9 +387,12 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     // The point the rig is looking at (pre-shake), for tests that assert on
     // where a pan or a recenter actually sent the view.
     get focus() { return { x: baseX, z: baseZ }; },
+    get yaw() { return CAM.yaw; },
+    get view() { return { dist: CAM.dist, pitch: CAM.pitch, yaw: CAM.yaw, tactical: !!tactical }; },
     setView,
     setTactical,
     toggleTactical: () => setTactical(!tactical),
+    frameGroundBounds,
     get tactical() { return !!tactical; },
   };
 }

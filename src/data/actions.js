@@ -10,7 +10,6 @@
 // sit between actions instead of replacing one. Costs are deliberately coarse
 // - 2 for most things - so the arithmetic stays readable mid-fight.
 //   defend - halves the next incoming hit
-//   heal   - restores `amount` HP, limited to `uses` per fight
 //   summon - conjures `count` allies of `archetype` (a class id) on your side,
 //            up to a live `cap`; instant, `uses` per fight. Each one serves
 //            `lifetimeTurns` of its own turns and then files out (SUMMON_PLAN)
@@ -48,6 +47,11 @@
 //            them on their feet, fail wears `crush` damage plus the existing
 //            stun and pin. No to-hit roll: the save IS the resistance, the
 //            same shape as the topple's crush.
+//   shove  - pushes an enemy or topples adjacent furniture; a useful landing
+//            (collision or hazard) is required before the AP is spent.
+//   cover  - walks to and crouches behind furniture, an edge, or a teammate.
+//   purge  - targets either side and clears every status on the target.
+//   zone   - places a temporary ground effect at a point within `range`.
 // Modifiers:
 //   purge (on an attack) - hitting a target also wipes their status effects,
 //   harmful and helpful alike; click your own tile while armed to self-cast
@@ -79,6 +83,7 @@ export const ACTIONS = {
   attack: {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Passive-Aggressive Email',
     icon: '✉️',
     desc: 'Your basic swing. No frills, no cost beyond the AP.',
@@ -94,6 +99,7 @@ export const ACTIONS = {
   'paper-storm': {
     type: 'zone',
     ap: 2,
+    exploration: { mode: 'zone' },
     // The id stays `paper-storm`: it is a slug, and `sheet.actions` persists
     // ids into saves (party.SAVE_VERSION), so renaming it would orphan the
     // power on every character who already knows it.
@@ -115,6 +121,10 @@ export const ACTIONS = {
   defend: {
     type: 'defend',
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Deflect Blame only means something once someone is swinging at you.',
+    },
     label: 'Deflect Blame',
     icon: '🛡️',
     desc: 'Brace for the next hit. Incoming damage is halved until your next turn.',
@@ -129,6 +139,7 @@ export const ACTIONS = {
   delegate: {
     type: 'control',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Delegate Ruthlessly',
     icon: '📤',
     desc: 'Make it someone else\'s problem. They spend their next turn on it instead of on you.',
@@ -159,6 +170,7 @@ export const ACTIONS = {
   'all-hands': {
     type: 'control',
     ap: 3,
+    exploration: { mode: 'cone' },
     label: 'All-Hands',
     icon: '📣',
     desc: 'Call the room into a meeting. Everyone in the wedge is held where they stand.',
@@ -171,8 +183,15 @@ export const ACTIONS = {
 
   // --- IT Support ---------------------------------------------------------------
   reboot: {
+    // Two-sided by declaration (Q3-A, designer 2026-08-02): power-cycling
+    // somebody strips their statuses whoever they are, so this is the one verb
+    // whose `type` cannot say where it points. TODO.md settled the behaviour
+    // ("reboot targets anything - self, ally, enemy, and props"); this is that
+    // decision written where the engine reads it.
+    side: 'any',
     type: 'purge',
     ap: 2,
+    exploration: { mode: 'any-target' },
     label: 'Turn It Off And On Again',
     icon: '🔌',
     desc: 'Power-cycle anyone - yourself, a coworker, a colleague. Clears EVERY status they are carrying, the good ones too.',
@@ -198,6 +217,7 @@ export const ACTIONS = {
   'remote-session': {
     type: 'control',
     ap: 3,
+    exploration: { mode: 'opener' },
     label: 'Remote Session',
     icon: '🖥️',
     desc: 'Remote into a coworker and drive them yourself for a few turns. They fight their own side while you do.',
@@ -214,6 +234,7 @@ export const ACTIONS = {
   'percussive-maintenance': {
     type: 'control',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Percussive Maintenance',
     icon: '🔨',
     desc: 'Hit it until it works. Hit them until they do not. They lose their next turn.',
@@ -232,6 +253,7 @@ export const ACTIONS = {
   'mail-cone': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'cone' },
     cone: { range: 4, halfAngle: 35 },
     leaves: 'paper',
     // The drifts are litter, not terrain - they clear this many rounds later
@@ -254,6 +276,10 @@ export const ACTIONS = {
     type: 'mobility',
     mode: 'dash',
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Courier Route buys movement with AP; outside a fight, ordinary walking is free.',
+    },
     icon: '↩️',
     label: 'Courier Route',
     distance: 5,
@@ -266,6 +292,10 @@ export const ACTIONS = {
     type: 'mobility',
     mode: 'swap',
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Hand-Off has no exploration swap order yet.',
+    },
     label: 'Hand-Off',
     icon: '🔄',
     range: 6,
@@ -285,6 +315,7 @@ export const ACTIONS = {
   detain: {
     type: 'control',
     ap: 3,
+    exploration: { mode: 'opener' },
     label: 'Detain',
     icon: '🔒',
     desc: 'Ask them to wait right there. They keep their turn - they just cannot leave.',
@@ -302,6 +333,10 @@ export const ACTIONS = {
     type: 'stance',
     mode: 'guard',
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Hold the Line guards teammates during a turn order that has not started.',
+    },
     label: 'Hold the Line',
     icon: '🛡️',
     desc: 'Plant yourself. Teammates on the far side of you are in cover from anything thrown.',
@@ -312,6 +347,7 @@ export const ACTIONS = {
   lockdown: {
     type: 'control',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Badge Lockdown',
     icon: '🚫',
     desc: 'Kill their badge from the panel. They are held where they stand - from across the floor.',
@@ -332,6 +368,10 @@ export const ACTIONS = {
     type: 'stance',
     mode: 'watch',
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Stand Post watches for movement in a turn order that has not started.',
+    },
     radius: 4,
     label: 'Stand Post',
     icon: '🚧',
@@ -340,9 +380,18 @@ export const ACTIONS = {
   },
 
   // --- universal ----------------------------------------------------------------
+  // `universal: true` is what puts a verb on EVERY character's bar (the
+  // UNIVERSAL_ACTIONS export below) and files it in the bar's universal
+  // bucket (stats.orderedActionIds). One flag, because the three verbs used
+  // to be claimed universal three different ways - a hand-kept list in
+  // hotbar-model, a `type === 'shove'` check in the sorter, and this section
+  // header - and only shove satisfied all three: Take Cover and Pull sorted
+  // in with the class powers as if a class had granted them (Q217-A).
   shove: {
     type: 'shove',
+    universal: true,
     ap: 2,
+    exploration: { mode: 'shove' },
     label: 'Shove',
     icon: '👐',
     desc: 'Two-handed push. Into a wall it stuns; into a hazard, it hurts.',
@@ -354,7 +403,9 @@ export const ACTIONS = {
   // movement by the same engine every step uses, and this is the tuck itself.
   'take-cover': {
     type: 'cover',
+    universal: true,
     ap: 1,
+    exploration: { mode: 'cover' },
     label: 'Take Cover',
     icon: '🧎',
     desc: 'Get behind something solid - or someone brave. Ranged attacks from the shielded side cannot touch you until you move.',
@@ -369,7 +420,12 @@ export const ACTIONS = {
   // arrived at from the other side of the cover).
   pull: {
     type: 'pull',
+    universal: true,
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Pull Over needs a combat crouch to haul somebody out of.',
+    },
     label: 'Pull Over',
     icon: '🫳',
     desc: 'Haul whoever is dug in behind cover over it, onto your side. The cover stays up; their footing may not.',
@@ -386,6 +442,7 @@ export const ACTIONS = {
   punch: {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Throw a Punch',
     icon: '👊',
     desc: 'Bare hands. Everyone always has this.',
@@ -397,6 +454,7 @@ export const ACTIONS = {
   'staple-jab': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Staple Jab',
     icon: '📎',
     desc: 'The stapler, used as intended by nobody.',
@@ -408,6 +466,7 @@ export const ACTIONS = {
   'grabber-swipe': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Grabber Swipe',
     icon: '🦾',
     desc: 'Swipe at arm\'s length plus a metre. Reaches further than it hurts.',
@@ -419,6 +478,7 @@ export const ACTIONS = {
   'letter-opener-stab': {
     type: 'attack',
     ap: 2, // no longer the cheap one now every attack is 2 - its edge is accuracy
+    exploration: { mode: 'opener' },
     label: 'Letter Opener Stab',
     icon: '🗡️',
     desc: 'Technically for envelopes. Precise, if not heavy.',
@@ -444,6 +504,7 @@ export const ACTIONS = {
   'staple-gun-fire': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     range: 4,
     label: 'Staple Gun',
     icon: '📌',
@@ -459,6 +520,7 @@ export const ACTIONS = {
   'spitball-shot': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     range: 6,
     label: 'Spitball',
     icon: '🥤',
@@ -476,6 +538,7 @@ export const ACTIONS = {
   'action-item': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Action Item',
     icon: '📋',
     desc: 'A task, assigned at speed.',
@@ -494,6 +557,10 @@ export const ACTIONS = {
   'performance-review': {
     type: 'buff',
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Performance Review has per-battle uses but no exploration charge or cooldown yet.',
+    },
     label: 'Performance Review',
     icon: '⭐',
     desc: 'Tell a coworker in writing that they are doing great. They start connecting.',
@@ -518,6 +585,10 @@ export const ACTIONS = {
   triage: {
     type: 'buff',
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Triage has per-battle uses but no exploration charge or cooldown yet.',
+    },
     label: 'Triage',
     icon: '🩹',
     desc: 'Patch somebody up - anyone on your side, yourself included. The only real heal there is.',
@@ -529,6 +600,10 @@ export const ACTIONS = {
   onboarding: {
     type: 'buff',
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Onboarding has per-battle uses but no exploration charge or cooldown yet.',
+    },
     label: 'Onboarding',
     icon: '🧭',
     desc: 'Walk a coworker through the fire exits. They take less punishment, and pick up a little.',
@@ -546,9 +621,11 @@ export const ACTIONS = {
   // the contract runs out and it walks (in combat that is its own initiative
   // turns; out of combat the world clock spends them). TARGETED: arm it, then click where they should
   // report - `range` is how far from the summoner that spot may be (needs line
-  // of sight, like a throw). They land on the clicked tile and the free tiles
-  // ringing outward from it. An enemy `summon` descriptor carries no `range`
-  // and drops its reinforcements beside the summoner instead.
+  // of sight, like a throw). `placement` is the system's generic content seam:
+  // the action declares what anchors the search and whether ordinary hazards
+  // are refused, while the spawn system always enforces physical wall/body
+  // clearance. Enemy summons declare their own summoner-anchored policy rather
+  // than having it inferred from a missing click.
   //
   // ONE per post. It shipped at two, and a posting that drops a pair reads as a
   // batch rather than a hire: you point at a spot and two bodies appear, one of
@@ -567,11 +644,13 @@ export const ACTIONS = {
   escalate: {
     type: 'summon',
     ap: 4,
+    exploration: { mode: 'summon' },
     archetype: 'employee',
     count: 1,
     cap: 3,
     uses: 2,
     range: 5,
+    placement: { anchor: 'aim', avoidHazards: true },
     lifetimeTurns: 6,
     label: 'Escalate',
     icon: '📢',
@@ -583,6 +662,7 @@ export const ACTIONS = {
   kick: {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Steel-Toe Kick',
     icon: '🥾',
     desc: 'Steel-toe boot. Needs footing - gum on your shoe prevents it.',
@@ -598,6 +678,7 @@ export const ACTIONS = {
   'paper-ball': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     ammoCost: 1,
     label: 'Paper Ball',
     icon: '📄',
@@ -617,6 +698,7 @@ export const ACTIONS = {
   'ream-throw': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     ammoCost: 5,
     // Priced in paper, but NOT one of the throws everybody has: it is learned
     // off the Drone's track. Without this, `ammoCost` alone would have put it
@@ -634,10 +716,16 @@ export const ACTIONS = {
   'paper-airplane': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     ammoCost: 2,
     label: 'Paper Airplane',
     icon: '✈️',
     desc: 'A folded dart to the eyes - blinds them. Origami Specialists only.',
+    // What the shot looks like in flight. Combat defaults to 'shot' (a flat
+    // pellet) and lobs a 'ball' for anything that spends paper; a dart is
+    // neither, and until this field existed combat.js knew that by checking
+    // for this action's id by name.
+    flight: 'plane',
     // Gated on a talent effect (combat.throwablesFor): folding a dart that
     // lands in an eye is a craft. The Drone's Origami Specialist talent
     // already advertises it ("airplanes fold for 1 sheet").
@@ -652,6 +740,14 @@ export const ACTIONS = {
     missLog: 'The dart banks left and augers into a monitor.',
   },
 };
+
+// The verbs EVERY character has, whatever their class - derived from the flag
+// so the list and the flag cannot disagree. This lived in hotbar-model.js as a
+// hand-written array while the bar's sorter recognised universality by
+// `type === 'shove'`; two definitions of "universal" is how two of the three
+// verbs ended up filed as class powers (Q217-A). Order here is bar order.
+export const UNIVERSAL_ACTIONS = Object.keys(ACTIONS)
+  .filter((id) => ACTIONS[id].universal === true);
 
 // How a posting's arrivals are announced. One line, shared by the in-combat
 // posting (combat.js placeSummon) and the out-of-combat one (main.js

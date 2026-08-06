@@ -8,8 +8,28 @@ import { SURFACES, ELECTRIFIED, FIRE } from './data/surfaces.js';
 import { makeMaterial, makeSpriteMaterial } from './shading.js';
 import { placeModel } from './models.js';
 import { burst } from './fx.js';
+import { CARDINAL_DIRS } from './directions.js';
+import { tileArt } from './data/art-profiles.js';
 
-const pc = window.pc;
+const pc = globalThis.window?.pc;
+
+// Fine cells are the rules/storage resolution, not necessarily the visual
+// instancing resolution. Most surfaces draw per cell; a definition can ask to
+// draw once per authored/runtime source (gum is one wad, not four wads because
+// an authored movement tile happens to contain four fine cells).
+export function surfaceVisualGroups(cells) {
+  const groups = new Map();
+  for (const cell of cells) {
+    const def = SURFACES[cell.surfaceId];
+    const sourceGrouped = def?.visualGrouping === 'source' && cell.sourceKey;
+    const key = sourceGrouped
+      ? `${cell.surfaceId}:source:${cell.sourceKey}`
+      : `${cell.surfaceId}:cell:${cell.ix},${cell.iz}`;
+    if (!groups.has(key)) groups.set(key, { key, cells: [] });
+    groups.get(key).cells.push(cell);
+  }
+  return [...groups.values()];
+}
 
 // `root` (default app.root) parents everything drawn, so a layered level can
 // show/hide a whole storey by toggling one entity; `baseY` lifts every world
@@ -31,7 +51,8 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
   // their own set, everything else shares the base floor's.
   const carpetMats = new Map();
   function floorMatsFor(type) {
-    const def = TILE_TYPES[type];
+    const baseDef = TILE_TYPES[type];
+    const def = baseDef && tileArt(type, baseDef);
     const key = def?.carpet ? type : 'floor';
     if (!carpetMats.has(key)) {
       const base = def?.carpet || TILE_TYPES.floor.color;
@@ -74,18 +95,15 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
   };
 
   // --- organic liquid pools ----------------------------------------------------
-  // Spills used to be three stacked disks per tile, so multi-tile pools read
-  // as a row of separate splats. Instead, every 'puddle' tile renders ITS
-  // clip of a shared metaball field: each same-surface cell contributes a
-  // blob, marching squares extracts the iso-contour inside this tile, and
-  // because adjacent tiles evaluate the same field over the same sources,
-  // patches meet exactly at tile borders - a multi-tile spill is one
-  // continuous liquid shape, while hide/electrify/repaint stay per-tile.
+  // Spills used to be separate splats stamped on movement tiles. Instead,
+  // every occupied fine cell renders its clip of a shared metaball field.
+  // Adjacent cells evaluate the same sources, so their patches meet at the
+  // field boundary and read as one spill; the movement grid is uninvolved.
   // Two layers per pool: a darker damp ring under the glossy liquid.
   // Per-cell hashes wobble radii and lobes so no two spills repeat. Pools
-  // stay inside their painted tiles (the hazard is tile-keyed - the visual
-  // must not overpromise) and merge orthogonally, like conduction pools.
-  const POOL_SIGMA2 = 0.3; // blob falloff: w * exp(-d^2 / (SIGMA2 * wobble))
+  // stay inside the fine cells carrying the rule, so the visual does not
+  // overpromise, and merge orthogonally like conduction pools.
+  const POOL_SIGMA2 = 0.3; // in cell-size squared: w * exp(-d^2 / (SIGMA2 * wobble))
   const POOL_ISO_LIQUID = 0.587; // lone-cell liquid radius ~0.40
   const POOL_ISO_RING = 0.509; // lone-cell damp-ring radius ~0.45
   const POOL_STEPS = 12; // marching-squares resolution per tile
@@ -98,16 +116,18 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
   // Every same-surface cell near (x, z) that can shape this tile's patch.
   // The 5x5 window plus the distance cutoff in poolFieldAt guarantee two
   // adjacent tiles agree on every source that matters at their shared edge.
-  function poolSources(x, z, surfId, surfaceAt) {
+  function poolSources(ix, iz, surfId, field) {
     const sources = [];
     for (let dz = -2; dz <= 2; dz++) {
       for (let dx = -2; dx <= 2; dx++) {
-        const sx = x + dx;
-        const sz = z + dz;
-        if (!(dx === 0 && dz === 0) && (!surfaceAt || surfaceAt(sx, sz) !== surfId)) continue;
+        const sx = ix + dx;
+        const sz = iz + dz;
+        if (field.cellAt(sx, sz)?.surfaceId !== surfId) continue;
+        const centre = field.cellCenter(sx, sz);
         sources.push({
-          x: sx,
-          z: sz,
+          x: centre.x,
+          z: centre.z,
+          size: field.quantum,
           w: 0.92 + 0.22 * hash01(sx, sz, 1),
           p1: hash01(sx, sz, 2) * Math.PI * 2,
           p2: hash01(sx, sz, 3) * Math.PI * 2,
@@ -123,10 +143,10 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
       const dx = px - s.x;
       const dz = pz - s.z;
       const d2 = dx * dx + dz * dz;
-      if (d2 > 2.6) continue;
+      if (d2 > 2.6 * s.size * s.size) continue;
       const a = Math.atan2(dz, dx);
       const wobble = 1 + 0.1 * Math.sin(3 * a + s.p1) + 0.05 * Math.sin(5 * a + s.p2);
-      f += s.w * Math.exp(-d2 / (POOL_SIGMA2 * wobble));
+      f += s.w * Math.exp(-d2 / (POOL_SIGMA2 * s.size * s.size * wobble));
     }
     return f;
   }
@@ -135,12 +155,16 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
   // indices } in tile-local coordinates, or null if the contour misses the
   // tile. Cells are walked around their perimeter keeping inside corners and
   // interpolated crossings, then fan-triangulated - handles all 16 cases.
-  function poolPatchGeometry(x, z, sources, iso) {
+  function poolPatchGeometry(x, z, size, sources, iso) {
     const N = POOL_STEPS;
     const F = new Float32Array((N + 1) * (N + 1));
     for (let j = 0; j <= N; j++) {
       for (let i = 0; i <= N; i++) {
-        F[j * (N + 1) + i] = poolFieldAt(sources, x - 0.5 + i / N, z - 0.5 + j / N);
+        F[j * (N + 1) + i] = poolFieldAt(
+          sources,
+          x - size / 2 + i * size / N,
+          z - size / 2 + j * size / N,
+        );
       }
     }
     const positions = [];
@@ -156,12 +180,12 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
       }
       return idx;
     };
-    const step = 1 / N;
+    const step = size / N;
     for (let j = 0; j < N; j++) {
       for (let i = 0; i < N; i++) {
         const corners = [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]].map(([ci, cj]) => ({
-          x: -0.5 + ci * step,
-          z: -0.5 + cj * step,
+          x: -size / 2 + ci * step,
+          z: -size / 2 + cj * step,
           f: F[cj * (N + 1) + ci],
         }));
         const poly = [];
@@ -198,26 +222,28 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
     parent.addChild(e);
   }
 
-  function addPool(x, z, surfId, electrified, surfaceAt) {
-    const sources = poolSources(x, z, surfId, surfaceAt);
+  function addPoolCell(cell, field, electrified) {
+    const { ix, iz, x, z, surfaceId } = cell;
+    const sources = poolSources(ix, iz, surfaceId, field);
     const holder = new pc.Entity();
-    const ring = poolPatchGeometry(x, z, sources, POOL_ISO_RING);
-    if (ring) addPoolLayer(holder, ring, ringMats[surfId], -0.01);
-    const liquid = poolPatchGeometry(x, z, sources, POOL_ISO_LIQUID);
-    if (liquid) addPoolLayer(holder, liquid, electrified ? electricMat : surfaceMats[surfId], 0);
+    const ring = poolPatchGeometry(x, z, field.quantum, sources, POOL_ISO_RING);
+    if (ring) addPoolLayer(holder, ring, ringMats[surfaceId], -0.01);
+    const liquid = poolPatchGeometry(x, z, field.quantum, sources, POOL_ISO_LIQUID);
+    if (liquid) addPoolLayer(holder, liquid, electrified ? electricMat : surfaceMats[surfaceId], 0);
     holder.setPosition(x, surfaceTop + baseY, z);
     parent.addChild(holder);
     return holder;
   }
   // A trodden gum wad: small pink blobs, mine-sized - easy to not notice.
   const gumMat = makeMaterial(SURFACES.gum.color, { gloss: 0.6 });
-  function addGumWad(x, z) {
+  function addGumWad(x, z, size = 1) {
     const holder = new pc.Entity();
+    const footprint = Math.min(1, size / 0.5);
     for (const [ox, oz, s] of [[0, 0, 0.34], [0.14, 0.1, 0.2], [-0.13, 0.08, 0.16]]) {
       const b = new pc.Entity();
       b.addComponent('render', { type: 'sphere', material: gumMat });
-      b.setLocalScale(s, s * 0.35, s);
-      b.setLocalPosition(ox, 0, oz);
+      b.setLocalScale(s * footprint, s * 0.35, s * footprint);
+      b.setLocalPosition(ox * footprint, 0, oz * footprint);
       holder.addChild(b);
     }
     holder.setEulerAngles(0, ((x * 47 + z * 113) % 8) * 45, 0);
@@ -233,42 +259,107 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
   // one spread), rotation, size and tint, and the count varies per tile - a
   // continuous mess of paper rather than repeated clusters. A per-tile base
   // height plus a tiny per-sheet rise keeps overlapping sheets from z-fighting.
-  function addPaper(x, z) {
+  function addPaper(x, z, size = 1) {
     const holder = new pc.Entity();
-    const baseY = hash01(x, z, 50) * 0.014;
-    const n = 6 + Math.floor(hash01(x, z, 99) * 3); // 6-8 sheets
+    // NOT `baseY` - that name belongs to the storey lift, and shadowing it
+    // here rendered an upper storey's paper drift on the ground floor.
+    const rise = hash01(x, z, 50) * 0.014;
+    const n = Math.max(1, Math.round((6 + hash01(x, z, 99) * 2) * size * size));
     for (let i = 0; i < n; i++) {
-      const ox = (hash01(x, z, i * 4 + 1) - 0.5) * 0.86;
-      const oz = (hash01(x, z, i * 4 + 2) - 0.5) * 0.86;
+      const ox = (hash01(x, z, i * 4 + 1) - 0.5) * 0.86 * size;
+      const oz = (hash01(x, z, i * 4 + 2) - 0.5) * 0.86 * size;
       const ry = hash01(x, z, i * 4 + 3) * 360;
       const s = 0.24 + hash01(x, z, i * 4 + 4) * 0.15; // 0.24-0.39
       const e = new pc.Entity();
       e.addComponent('render', { type: 'box', material: paperTints[i % paperTints.length] });
       e.setLocalScale(s, 0.02, s * 0.74);
-      e.setLocalPosition(ox, baseY + 0.006 * i, oz);
+      e.setLocalPosition(ox, rise + 0.006 * i, oz);
       e.setLocalEulerAngles(0, ry, 0);
       holder.addChild(e);
     }
-    holder.setPosition(x, surfaceTop + baseY, z);
+    holder.setPosition(x, surfaceTop + rise + baseY, z);
     parent.addChild(holder);
     return holder;
   }
   // A frayed power strip: dark bar plus a glowing live end.
-  function addCable(x, z) {
+  function addCable(x, z, size = 1) {
     const holder = new pc.Entity();
     const bar = new pc.Entity();
     bar.addComponent('render', { type: 'box', material: surfaceMats.cable });
-    bar.setLocalScale(0.85, 0.07, 0.2);
+    bar.setLocalScale(size * 0.9, 0.07, Math.min(0.2, size * 0.4));
     holder.addChild(bar);
     const tip = new pc.Entity();
     tip.addComponent('render', { type: 'box', material: electricMat });
     tip.setLocalScale(0.14, 0.09, 0.14);
-    tip.setLocalPosition(0.38, 0.01, 0);
+    tip.setLocalPosition(size * 0.4, 0.01, 0);
     holder.addChild(tip);
     holder.setEulerAngles(0, ((x * 53 + z * 97) % 4) * 45 + 20, 0);
     holder.setPosition(x, surfaceTop + baseY, z);
     parent.addChild(holder);
     return holder;
+  }
+
+  // Render a surface from its own registry id. Runtime terrain no longer uses
+  // a surface tile type as storage, so scene.js calls this directly from the
+  // authoritative SurfaceField. renderMarker keeps delegating here for the
+  // editor, whose palette/document format still authors surface tile types.
+  function renderSurface(x, z, surfaceId, { electrified = false, surfaceAt = null } = {}) {
+    const surf = SURFACES[surfaceId];
+    if (!surf?.style) return { kind: 'none', entities: [] };
+    let vis;
+    if (surf.style === 'cable') vis = addCable(x, z);
+    else if (surf.style === 'paper') vis = addPaper(x, z);
+    else if (surf.style === 'gum') vis = addGumWad(x, z);
+    else {
+      // Editor-only compatibility: its document still paints surface tile
+      // types. Runtime calls renderSurfaceCell below with the real field.
+      const fakeField = {
+        quantum: 1,
+        cellAt: (ix, iz) => (ix === 0 && iz === 0 ? { surfaceId } : null),
+        cellCenter: () => ({ x, z }),
+      };
+      vis = addPoolCell({ ix: 0, iz: 0, x, z, surfaceId }, fakeField, electrified);
+    }
+    return { kind: 'surface', entities: [vis] };
+  }
+
+  function renderSurfaceCell(cell, field, { electrified = false } = {}) {
+    const surf = SURFACES[cell.surfaceId];
+    if (!surf?.style) return { kind: 'none', entities: [] };
+    let vis;
+    if (surf.style === 'cable') vis = addCable(cell.x, cell.z, field.quantum);
+    else if (surf.style === 'paper') vis = addPaper(cell.x, cell.z, field.quantum);
+    else if (surf.style === 'gum') vis = addGumWad(cell.x, cell.z, field.quantum);
+    else vis = addPoolCell(cell, field, electrified);
+    return { kind: 'surface', entities: [vis] };
+  }
+  function renderSurfaceGroup(cells, field, { electrified = false } = {}) {
+    if (!cells?.length) return { kind: 'none', entities: [] };
+    if (cells.length === 1) return renderSurfaceCell(cells[0], field, { electrified });
+    const surf = SURFACES[cells[0].surfaceId];
+    if (!surf?.style) return { kind: 'none', entities: [] };
+    const x = cells.reduce((sum, cell) => sum + cell.x, 0) / cells.length;
+    const z = cells.reduce((sum, cell) => sum + cell.z, 0) / cells.length;
+    // Preserve roughly the same authored footprint when N fine cells become
+    // one presentation object. A 2x2 authored source at quantum .5 is size 1.
+    const size = field.quantum * Math.sqrt(cells.length);
+    let vis;
+    if (surf.style === 'cable') vis = addCable(x, z, size);
+    else if (surf.style === 'paper') vis = addPaper(x, z, size);
+    else if (surf.style === 'gum') vis = addGumWad(x, z, size);
+    else {
+      // Liquid fields intentionally remain per cell so neighbouring metaball
+      // patches share their exact boundaries. A future source-grouped liquid
+      // still degrades honestly instead of silently disappearing.
+      const holder = new pc.Entity();
+      for (const cell of cells) {
+        const child = addPoolCell(cell, field, electrified);
+        child.reparent(holder);
+      }
+      parent.addChild(holder);
+      vis = holder;
+    }
+    return { kind: 'surface', entities: [vis] };
   }
   function addTrash(x, z) {
     const holder = new pc.Entity();
@@ -364,8 +455,12 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
       e.setLocalScale(s, 1, s);
       holder.addChild(e);
     }
-    holder.setPosition(x, floorDef.height / 2, z);
-    app.root.addChild(holder);
+    // The storey's own root and lift, like every other tile visual here.
+    // Parenting to `app.root` and dropping `baseY` put a mezzanine's plants
+    // on the lobby floor, where they also never hid with their storey - the
+    // cutaway toggles the storey root, and these were not under it.
+    holder.setPosition(x, floorDef.height / 2 + baseY, z);
+    parent.addChild(holder);
     return holder;
   }
 
@@ -422,12 +517,15 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
     const holder = new pc.Entity(); // sits at the hinge end of the edge
     const panel = new pc.Entity();
     panel.addComponent('render', { type: 'box', material: doorMat });
-    panel.setLocalScale(0.92, DOOR_HEIGHT, 0.09);
+    // The depth is visible interaction surface, not a hidden pick proxy. A
+    // paper-thin open edge was difficult to acquire from the default camera;
+    // this slightly sturdier office door gives the cursor real geometry to hit.
+    panel.setLocalScale(0.92, DOOR_HEIGHT, 0.14);
     panel.setLocalPosition(0.48, DOOR_HEIGHT / 2, 0);
     holder.addChild(panel);
     const knob = new pc.Entity();
     knob.addComponent('render', { type: 'sphere', material: knobMat });
-    knob.setLocalScale(0.07, 0.07, 0.07);
+    knob.setLocalScale(0.09, 0.09, 0.09);
     knob.setLocalPosition(0.82, DOOR_HEIGHT * 0.55, 0.06);
     holder.addChild(knob);
     // Hinge at the west/north end of the edge; open swings into the room.
@@ -446,17 +544,22 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
   // Returns { kind, entities }; model props arrive via onAsync(holder).
   // `surfaceAt(x, z)` (optional) reports the surface id of any cell so
   // liquid pools can merge with their same-surface neighbours.
-  function renderMarker(x, z, type, { electrified = false, onAsync = null, surfaceAt = null } = {}) {
+  function renderMarker(x, z, type, { electrified = false, onAsync = null, surfaceAt = null, rotY = null } = {}) {
     const def = TILE_TYPES[type];
     if (!def) return { kind: 'none', entities: [] };
     // Carpet variants ARE the floor - renderFloor already drew them recolored.
     if (def.carpet) return { kind: 'none', entities: [] };
     if (def.model) {
       placeModel(app, `assets/${def.model}.glb`, x, z, {
-        // Models parent to app.root inside placeModel, so they sit outside a
-        // storey's show/hide root - keep model props off upper storeys until
-        // the layered builder owns their parenting.
-        scale: def.scale || 1, rotY: def.rotY || 0, lift: floorDef.height / 2 + baseY,
+        // Parented under THIS renderer's root, so a prop hides and shows with
+        // the storey it stands on. It used to go to app.root regardless, which
+        // put every model prop outside its storey's show/hide root - the reason
+        // upper storeys were primitives-only through the spike. Positions still
+        // carry baseY themselves (the root sits at the origin), so this does
+        // not double-count the height.
+        parent,
+        // A per-PLACEMENT rotation wins over the type's own (grid.rotAt).
+        scale: def.scale || 1, rotY: rotY ?? def.rotY ?? 0, lift: floorDef.height / 2 + baseY,
         // A toppled prop lies over (POWERS_PLAN M6). Data, so a new fallen
         // twin is a registry entry rather than a renderer change.
         tiltX: def.tiltX || 0, tiltZ: def.tiltZ || 0,
@@ -474,13 +577,7 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
       return { kind: 'prop', entities: builder ? [builder(x, z)] : [] };
     }
     if (def.surface) {
-      const surf = SURFACES[def.surface];
-      let vis;
-      if (surf.style === 'cable') vis = addCable(x, z);
-      else if (surf.style === 'paper') vis = addPaper(x, z);
-      else if (surf.style === 'gum') vis = addGumWad(x, z);
-      else vis = addPool(x, z, def.surface, electrified, surfaceAt);
-      return { kind: 'surface', entities: [vis] };
+      return renderSurface(x, z, def.surface, { electrified, surfaceAt });
     }
     if (def.solid) {
       // Full-size so adjacent walls merge into continuous surfaces.
@@ -647,7 +744,9 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
   }
 
   return {
-    renderFloor, renderMarker, renderEdgeWall, renderDoor, renderStair, addFlame, explosionFlash, animate,
+    renderFloor, renderMarker, renderSurface, renderSurfaceCell, renderSurfaceGroup,
+    renderEdgeWall, renderDoor, renderStair,
+    addFlame, explosionFlash, animate,
     addExitBeacon,
     addSmoke, removeSmoke,
     tileMats, wallGhost, doorMat, doorGhost, floorHeight: floorDef.height,
@@ -681,7 +780,7 @@ export function computeCarpetZones(typeAt, width, height) {
         const t = typeAt(x, z);
         if (t === null || t === 'floor' || carpetAt.has(key)) continue;
         const counts = new Map();
-        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        for (const [dx, dz] of CARDINAL_DIRS) {
           const n = carpetAt.get((x + dx) + ',' + (z + dz));
           if (n) counts.set(n, (counts.get(n) || 0) + 1);
         }

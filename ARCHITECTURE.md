@@ -104,17 +104,30 @@ src/
                      turns, movement, ranged/melee, AI-driven units - costs
                      from data. Owns the BODIES, the AP ledger, the FX and
                      the frame clock; the rules below are what it asks
+  combat-session.js  Mutable encounter lifecycle: steered member, player/AI/
+                     done phase, acting AI unit and scramble deal
+  combat-intent.js   Mutually-exclusive next-click intent: aimed action or
+                     instant confirmation; disarm also clears the aim view
+  combat-formulas.js Pure diagnostic projections for the actual hit, damage
+                     and proc inputs used by the combat resolvers
   combat-geometry.js Reach, the two range vocabularies (what a verb's WASH
                      covers vs what its CLICK acts from), the walk-up's
                      stand point, a zone's covered tiles     (pure logic)
   combat-plans.js    Where a verb LANDS: the plan half of every plan/perform
-                     pair - topple, break, pull, take cover, displace. A
+                     pair - topple, shove, break, pull, displace. A
                      plan returns the shape the perform half needs or the
                      reason it refuses, never both                (pure)
   combat-ai.js       What an AI unit DECIDES: who to fight, where to stand,
-                     and `chooseBeat` - the ladder of beats a turn walks
-                     (reinforce, topple, swing, close, tuck in, pass)
-                     (pure logic)
+                     and `chooseBeat` - the ladder of beats a turn walks, in
+                     the order that IS the design: support, summon, pull,
+                     topple, shove, attack, entrench, shoot, advance, break,
+                     crouch, pass. Each beat outranks what it strictly beats
+                     (topple sits above shove because it is shove-plus;
+                     entrench must precede shoot or a shooter never crouches
+                     first). `beatStateFrom` assembles the ladder's input from
+                     plain values, so the AP gating is testable; a `refused`
+                     set masks a beat whose doing spent nothing, which is what
+                     makes a turn always terminate.        (pure logic)
   combat-targeting.js What the target rings PROMISE, and `verbKind` - the
                      ONE classifier saying which branch a body-aimed verb
                      takes. The rings and the click both dispatch on it, so
@@ -149,14 +162,16 @@ src/
   hotbar-model.js    The bar's VIEW-MODEL: what belongs on it, in what
                      order, in which slot, and what each slot says about
                      itself. ui/hud.js renders it             (pure logic)
+  action-tooltip.js  One power description/number formatter shared by the
+                     unlock list and both hotbar modes         (pure logic)
   shopping.js        The merchant runtime: per-instance stock, the shop panel,
                      the buy/sell verbs (ECONOMY_PLAN.md)
   ui.js              All DOM. The FRONT DOOR only - it re-exports ui/,
                      so every caller keeps `import * as ui from './ui.js'`
   ui/                grouped by what a thing IS on screen:
     chrome.js          shared palette + the bottom-left HUD rail
-    readouts.js        narrator box, focus banner, loot toast (nothing
-                       to click)
+    readouts.js        retained, typed narrator/combat/formula/initiative log;
+                       collapsed Advanced filters; focus banner + loot toast
     hud.js             profile card + status chips, tactical button,
                        the paged action hotbar, party bar, level-up pip
     menus.js           context menu, Alt loot labels (at the cursor)
@@ -172,8 +187,13 @@ src/
                        the rest - combat.js hands it a decided picture
   god.js             God-mode tweak panel (` / F8): live-reflects the sheet,
                      enemies, combat + world; edit/pin values, pause, spawn
-  editor.js          In-browser level editor (paint/erase, export, playtest)
-  main.js            Entry point: routes game vs #editor, owns game flow
+  editor-document.js Pure storey transforms and editor document invariants
+  editor-session.js  Undo/redo, stroke checkpoints, dirty state + draft policy
+  editor-view.js     Editor PlayCanvas entities, render caches + derived previews
+  editor-shell.js    Editor structural DOM, accessibility + layout measurement
+  editor.js          Editor composition, commands, export + playtest handoff
+  run-session.js     Mutable cross-system run/floor coordination state
+  main.js            Entry point: routes game vs #editor, composes game flow
   index.html         Shell; loads engine + bundle
 build.mjs            esbuild bundle + static copies -> build/web/
 tests/unit/          node --test suite for the pure modules + level linting
@@ -188,8 +208,11 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - `grid`, `pathfinding`, `stats`, `party`, `surfaces-runtime`, `initiative`,
   `turn-order`, `statuses`, `tactics`, `occlusion`, `shop`, `powers`,
   `combat-geometry`, `combat-plans`, `combat-ai`, `combat-targeting`,
-  `step-rules`, `summon-rules`, `hotbar-model`, `door-edges` are pure JS (no
-  PlayCanvas, no DOM) - unit tested in isolation (tests/unit).
+  `step-rules`, `summon-rules`, `hotbar-model`, `action-tooltip`,
+  `combat-formulas`, `door-edges`,
+  `combat-session`, `combat-intent`, `run-session`, `editor-document` and
+  `editor-session` are pure JS (no PlayCanvas, no DOM) - unit tested in
+  isolation (tests/unit).
 - **A rules module that needs the world takes a HOST, not the world.**
   `turn-order.js` is the pattern: it owns the turn walk and asks an injected
   host the questions only combat can answer (is this slot still standing, is
@@ -199,9 +222,10 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   a body or the DOM stays in `combat.js`. Reach for this shape when logic worth
   testing is trapped inside something that has to touch the engine.
 - `scene`, `shading`, `tile-renderer`, `models`, `controls`, `picking`,
-  `actors` touch PlayCanvas; `ui` touches the DOM; `fx`, `combat`, `hover` and
-  `looting` touch both (combat draws its own previews/rings; hover writes the
-  canvas cursor and draws rings; looting spawns dropped-item entities).
+  `actors` and `editor-view` touch PlayCanvas; `ui` and `editor-shell` touch
+  the DOM; `fx`, `combat`, `hover`, `looting` and the editor host touch both
+  (combat draws its own previews/rings; hover writes the canvas cursor and
+  draws rings; looting spawns dropped-item entities).
   `combat.js` no longer BUILDS a panel - the readout is `ui/combat.js` and the
   bar is main.js's hotbar - so what it still owns of the DOM is the movement
   cost tag and nothing else.
@@ -231,8 +255,11 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   summon spot rules (two, one of them documented as a copy of the other), and
   the pull's plan-vs-refusal (two hand-parallel walks down five legs). When you
   find yourself writing "the same questions X asks, less Y", that is the seam.
-- Only `main.js` sees everything. It owns game state (`inCombat`, `gameOver`)
-  and game flow (what a click means, when combat starts, tile effects).
+- Only `main.js` sees everything and composes game flow (what a click means,
+  when combat starts, tile effects). `run-session.js` owns cross-system mutable
+  run coordination: combat/game-over, active layer, climb/path state,
+  out-of-combat intent and pending interactions. The `sheet`/`player` leader
+  bindings and `party` roster stay in `main.js` because they connect the owners.
 - Enemy AI decisions (pathing costs, wander avoidance) use a talent-free
   hazard model - the player's talents discount only the player's own costs,
   never what enemies fear.
@@ -258,20 +285,25 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
 - **Doors live on edges too** ("doors" runs in the level JSON; a door
   replaces any wall on its edge). Closed doors block movement AND sight
   (they go floor to frame); conduction ignores them - water finds the gap
-  underneath, so pools stay static. Click a door (or its Alt label) to walk
-  up and toggle it; state lives in `grid.doors`, visuals re-render via
-  `scene.refreshDoor`. Enemies don't open doors. The editor has a door
-  brush next to the partition brush.
+  underneath, so pools stay static. Click the visible door panel or knob to
+  walk up and toggle it; there is deliberately no ground/threshold "ghost"
+  click area (`[stated]`, designer task text 2026-08-05: "directly on door
+  only"). Picking tests the mesh-local bounds of each rendered instance,
+  and cyan hover highlighting shows exactly when the door itself is targeted.
+  State lives in `grid.doors`; visuals re-render via `scene.refreshDoor`.
+  Enemies don't open doors. The editor has a door brush next to the partition
+  brush.
 - **Left-click is contextual (Divinity-style): the target picks the verb.**
   `picking.js` ray-tests the cursor against registered interactable holders
   (doors, living enemies, NPCs, rummageable props) and returns the nearest
   hit; `main.js`'s `dispatchHit` maps its `kind` to a verb - attack a
   coworker, talk to an NPC, open a door, rummage a prop - falling back to the
-  ground tile (`doorNearPoint`, corpses, dropped items, then walk-here) when
-  the ray misses. This is what makes a click on a TALL mesh land on the object
-  and not the floor a tile behind it (the old ground-plane-only projection
-  silently missed raised doors); it also drives the hover cursor and the
-  BG3-style coloured outline (`shading.addHighlight`/`setHighlight`, one shell
+  ground tile (corpses, dropped items, then walk-here) when the ray misses.
+  Door interaction is the direct per-instance geometry test described above,
+  never a nearby-ground fallback. This makes a click on a TALL mesh land on
+  the object and not the floor a tile behind it (the old ground-plane-only
+  projection silently missed raised doors); it also drives the hover cursor
+  and the BG3-style coloured outline (`shading.addHighlight`/`setHighlight`, one shell
   per interactable, coloured by kind). Register a holder as it's created;
   destroyed holders auto-unregister.
 - **The camera** (`controls.js`): an orbit rig - yaw/pitch drag, wheel zoom -
@@ -426,8 +458,11 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   small dialogue tree on left-click (`ui.createDialoguePanel`; the tree is
   `{ start, nodes: { text, options:[{label,next}] } }`, `next:null` ends it).
   They live in their own `npcs` array, never in `enemies`, so combat never
-  touches them. (The editor doesn't paint NPCs yet - it normalises unknown
-  actor chars to floor, so re-exporting a level in the editor drops them.)
+  touches them. (The editor has no NPC/companion BRUSH yet, but it no longer
+  loses them: a load remaps through `actor-registries.js` and the export names
+  every registry, so re-exporting a level keeps its coworkers - fixed
+  2026-07-27, pinned by `tests/e2e/editor.spec.js`. They draw as markers on the
+  canvas too, so a brush stroke can no longer erase one invisibly.)
 - **Movement is free-form, the grid is the data model.** Actors stand at
   continuous points (a click walks you to the exact spot, clamped clear of
   walls by `clampToClearance`); routes come from grid Dijkstra and are
@@ -440,8 +475,14 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   bindings; everything a member does with their feet (surfaces, slips, gum,
   ammo pickup) runs against THAT member's own sheet via `onMemberStep`. The
   exit and walk-up interactions stay leader-only. Combat fields every member
-  with per-member AP/deflect/uses (`combat.js` `members`, `active`); enemies
-  target the nearest living member, ties to the bloodied one. Campaign saves
+  with per-member AP/deflect/uses; `combat-session.js` owns which member is
+  currently steered. Who the enemies target is `combat-ai.pickTarget`, a
+  scored choice, not a nearest-first
+  rule (AI_PLAN M2) - an ENGAGEABLE member outranks any unreachable one
+  whatever the score, and within that tier nearness, kill-securability,
+  fragility and stickiness to last turn's target are blended by the def's own
+  `focus`. At `focus: 0` the blend collapses back to the pre-M2 rule (nearest,
+  bloodied tiebreak), which is why that reading survived here so long. Campaign saves
   are at `party.SAVE_VERSION` (`{ version, levelId, party: [sheets], active }`
   - v3 added attributes, v4 statuses, v5 equipment); old single-sheet
   saves migrate on load (`party.parseProgress`), and recruited companions
@@ -514,10 +555,13 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   carries deliberate LIVE setters god mode and the specs drive: `ap`,
   `defended`, `usesLeft` (edit in place, then `refresh()`), `applyStatus`,
   `summonAlly(archetypeId, n)`, and the determinism pins `forceHit` /
-  `forceProc` (`true` always, `false` never, `null` rolls honestly). NOTE
-  those pins cover the hit and proc rolls only - damage and initiative still
-  roll on `Math.random`, so a fight is never fully deterministic. Keep all of
-  it in sync when adding state. `window.__god` is the
+  `forceProc` (`true` always, `false` never, `null` rolls honestly), and
+  `bout` - the sparring tally (rounds, AI damage landed, the chosen-beat
+  histogram, reactions fired) that `?seed=` exists to make legible. A seeded
+  fight DOES replay: damage rolls through `rand`/`randWith(rng, ...)` and
+  initiative through `initRng`, both off the one injected stream, so a seed
+  reproduces a whole fight rather than most of one. Keep all of it in sync
+  when adding state. `window.__god` is the
   exception: it hands out LIVE references and mutators for the god-mode panel
   (god.js) to edit runtime state in place - including the party
   (`__god.party`, `switchTo`, `reviveMember`, `recruit`; the panel's Player
@@ -539,10 +583,14 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   one while still calling himself mail room. An override means DEPARTING from the class;
   a lint fails the build if one merely repeats what the class already says.
   Registries export their raw kit tables (`COMPANION_KITS`, `ENEMY_KITS`) for
-  it. Enemies drop the inherited `maxHp` - they spell it `hp`, and `unitCombat`
-  prefers `maxHp`, so keeping it would silently outrank their own. Characters
-  with no class twin (The Manager, the Executive) stay written out; don't invent
-  a class just to inherit from one.
+  it. A class-backed enemy inherits `maxHp` like everything else - the old
+  `hp`-vs-`maxHp` double spelling (and the `drop: ['maxHp']` machinery it
+  needed) is gone, because a mandatory override is invisible to the lint and
+  the Guard sat at 20 against Security's 26 with nothing to say so. The one
+  character with no class twin (the Executive) stays written out - The Manager
+  looked like a second one until `middle-manager` turned out to have been in
+  the registry all along, the same way `human-resources` had; don't invent a
+  class just to inherit from one, and check before declaring there's no twin.
 - **New enemy**: entry in `data/enemies.js` + character in a level's `actors`
   legend + a .glb in `assets/characters/`. If it's a playable job, give it a
   `classId` instead of restating the class.
@@ -577,10 +625,17 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   `maxHp`/`maxAp` are recomputed from `attr` + an innate `base` floor by
   `recomputeDerived(sheet)`; **never assign `sheet.maxHp`/`sheet.maxAp` directly**
   (they'd drift on the next recompute). Any code that changes an attribute calls
-  `recomputeDerived`. AI-driven units (enemies, and enemy-side summons) are NOT
-  sheets — they read stats through `unitCombat(def)` and scale on the enemy
-  curve, not attributes. (A PLAYER-side summon is the exception: it's a
-  controllable temporary member with a real sheet — see **Summons** below.)
+  `recomputeDerived`. AI-driven units (enemies, and enemy-side summons) are not
+  sheets, but attributes are their source too: `unitCombat(def)` derives
+  accuracy (Savvy), dodge (Hustle), damage bonus (Savvy), deflect and status
+  resist (Composure), grit saves and initiative speed (Hustle) from `def.attr`
+  through the SAME functions a sheet uses — everything is the same in enemies
+  as allies; no stat gets a side-local substitute (designer, 2026-08-05). The
+  storage differs, never the rules: a def's flat `accuracy`/`dodge`/`soak` are
+  its gear-equivalent innate lines, stacked on top of the derivation the way a
+  sheet stacks equipment. Only max HP/AP stay authored per def (enemies level
+  on the placement curve, `scaleEnemy`, not by spending points). (A PLAYER-side
+  summon is an actual member: it carries a real sheet — see **Summons** below.)
 - **Talents**: per-class in `data/classes.js` (shown on the resume cards).
   Effects the code understands: paperDamageBonus, paperAmmoDiscount,
   paperCutImmune, shockImmune, slipImmune, surfaceDamageResist, hasLighter,
@@ -681,15 +736,12 @@ assets/              .glb models + shared textures (CC0, see CREDITS.md)
   Losing, aborting and a floor change still clear them outright.
   Caps + cooldowns are data too: the HR enemy's `summon` (data/enemies.js) and
   the HR class's Post the Role (`summon-applicants`, data/actions.js).
-  **A player summon is TARGETED**: it arms like an attack, and you click the
-  spot where they should report - within the action's `range` (data), with a
-  clear line to it. They fill the clicked tile first, then the free ground
-  ringing outward from it (`world.summonSpots`/`freeTilesNear(…, minR: 0)`);
-  the armed hover rings exactly those tiles, so the preview is the rule. An
-  enemy `summon` descriptor carries no `range` and drops its reinforcements
-  beside the summoner as before. `world.spawnSummon` (main.js) places them;
-  `resolveSummon` (combat.js) enforces the live cap and files each onto the
-  right side.
+  Placement is descriptor policy: player Escalate declares
+  `placement.anchor: 'aim'`; enemy HR declares `'summoner'`, and both declare
+  hazard avoidance. The same deterministic continuous body-clear search feeds
+  preview and spawn, so the armed hover rings exact rest points the click will
+  use. `resolveSummon` preserves the full descriptor through
+  `world.spawnSummon`; physical wall/body clearance remains a system invariant.
 - **New furniture/prop**: a tile entry with `model` (a .glb under `assets/`) and
   `solid: true` - it blocks movement and renders as the model in both game and
   editor. Props are level data, never hardcoded set dressing.

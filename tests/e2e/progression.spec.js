@@ -90,8 +90,12 @@ test('a prereq-gated node stays Locked until its prereq is paid', async ({ page 
   // timed out" - which looks like a hung UI rather than a working gate.
   expect(await page.evaluate(() => window.__god.player.actions.includes('all-hands'))).toBe(false);
   const gated = page.locator('#lvlup-node-mgr-all-hands');
+  const unlockRow = page.locator('[data-unlock-action="all-hands"]');
   await expect(gated).toBeDisabled();
   await expect(gated).toHaveText('Locked');
+  const unlockTip = await unlockRow.getAttribute('title');
+  expect(unlockTip).toContain('Call the room into a meeting.');
+  expect(unlockTip).toContain('Cone - 4 tiles');
 
   // Pay the prereq, and now it takes.
   await page.click('#lvlup-node-mgr-stonewall');
@@ -101,28 +105,44 @@ test('a prereq-gated node stays Locked until its prereq is paid', async ({ page 
 
   await page.click('#lvlup-done');
   await expect(page.locator('#levelup-screen')).toHaveCount(0);
+  // Learning adds the slot, and its hover begins with the exact same shared
+  // description the unlock row used. Only the hotbar's assignment hint is
+  // appended after it.
+  await expect(page.locator('#hotbar-act-all-hands')).toHaveAttribute('title', new RegExp(`^${unlockTip.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
 });
 
-test('a floor deeper than an enemy tier scales that enemy up', async ({ page }) => {
+// INVERTED 2026-08-02. This spec used to assert the floor curve: a Manager on a
+// depth-3 floor spawned at level 3 with more HP. The designer struck that rule
+// ("things shouldnt autoscale thats absurd... thats just lazy";
+// PROGRESSION_PLAN.md decisions 13-14), so the assertion is now that depth does
+// NOT touch an enemy - and that a placement asking for a tier still gets one,
+// which is the mechanism that replaced it.
+test('floor depth does not scale an enemy; a placed tier does', async ({ page }) => {
   test.setTimeout(120_000);
-  // The Manager is native level 1; on a depth-3 floor he spawns at level 3 with
-  // more than his base 14 HP (stats.scaleEnemy / effectiveLevel).
+  // Both Managers are native level 1. The floor is depth 3. `M` asks for
+  // nothing and must stay level 1; `Z` asks for tier 3 and must get it.
   const DEEP_LEVEL = {
     name: 'Deep Floor',
     depth: 3,
     tiles: { '#': 'wall', '.': 'floor', '>': 'exit' },
-    actors: { '@': 'player', M: 'manager' },
+    actors: { '@': 'player', M: 'manager', Z: 'manager@3' },
     map: [
-      '########',
-      '#@...M>#',
-      '########',
+      '##########',
+      '#@..M.Z.>#',
+      '##########',
     ],
   };
   await bootStash(page, DEEP_LEVEL);
-  const foe = await page.evaluate(() =>
-    window.__game.enemies.find((e) => e.name === 'The Manager'));
-  expect(foe.level).toBe(3);
-  expect(foe.maxHp).toBeGreaterThan(14); // base Manager is 14 HP at level 1
+  const foes = await page.evaluate(() =>
+    window.__game.enemies.filter((e) => e.name === 'The Manager')
+      .map((e) => ({ level: e.level, maxHp: e.maxHp })).sort((a, b) => a.level - b.level));
+  expect(foes).toHaveLength(2);
+  // The untiered one is untouched by the depth-3 floor.
+  expect(foes[0].level).toBe(1);
+  expect(foes[0].maxHp).toBeGreaterThan(0);
+  // The tiered one is the only thing on the floor that scaled, because it asked.
+  expect(foes[1].level).toBe(3);
+  expect(foes[1].maxHp).toBeGreaterThan(foes[0].maxHp);
 });
 
 test('the character sheet toggles with C and shows attributes', async ({ page }) => {

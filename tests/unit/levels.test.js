@@ -4,16 +4,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
+import { lintLevel } from '../../src/level-lint.js';
 import { parseLevel } from '../../src/grid.js';
 import { findPath } from '../../src/pathfinding.js';
 import { existsSync } from 'node:fs';
-import { TILE_TYPES, blocksSight } from '../../src/data/tiles.js';
+import { TILE_TYPES, blocksSight, SIGHT_BLOCK_HEIGHT, TILE_CATEGORIES } from '../../src/data/tiles.js';
+import { CHAR_POOL } from '../../src/editor.js';
 import { ENEMY_TYPES, ENEMY_KITS } from '../../src/data/enemies.js';
 import { TALENTS, TALENT_EFFECT_KEYS, STARTING_TALENT_BY_CLASS } from '../../src/data/talents.js';
 import { parseActorRef } from '../../src/data/actor-registries.js';
 import { NPCS } from '../../src/data/npcs.js';
 import { COMPANIONS, COMPANION_KITS } from '../../src/data/companions.js';
 import { CLASSES, MERGED_PER_KEY } from '../../src/data/classes.js';
+import { CUSTOM_RIGS } from '../../src/data/looks.js';
 import { ACTIONS, summonSpec } from '../../src/data/actions.js';
 import { ITEMS, LOOT_TABLES } from '../../src/data/items.js';
 import { SHOPS } from '../../src/data/shops.js';
@@ -24,6 +27,35 @@ import { SURFACES, ELECTRIFIED, FIRE } from '../../src/data/surfaces.js';
 
 const files = readdirSync('levels').filter((f) => f.endsWith('.json'));
 const load = (f) => JSON.parse(readFileSync(`levels/${f}`, 'utf8'));
+
+function campaignLootTables() {
+  const used = new Set();
+  const seen = new Set();
+  let id = FIRST_LEVEL;
+  while (id && LEVELS[id] && !seen.has(id)) {
+    seen.add(id);
+    const level = LEVELS[id];
+    const maps = level.map ? [level.map] : (level.layers || []).map((layer) => layer.map);
+    for (const map of maps) {
+      for (const ch of map.flatMap((row) => row.split(''))) {
+        const type = level.tiles?.[ch];
+        const table = TILE_TYPES[type]?.loot;
+        if (table) used.add(table);
+      }
+    }
+    id = level.next;
+  }
+  return used;
+}
+
+// B5: levels/dev/ was outside this file's reach purely by directory, so a
+// second dev level would have got no validation at all. They are not campaign
+// floors - no `next`, not on the chain, and the layered one has actors the flat
+// rules do not describe - so they get the checks that DO apply: they parse, and
+// they are registered.
+const devFiles = existsSync('levels/dev')
+  ? readdirSync('levels/dev').filter((f) => f.endsWith('.json'))
+  : [];
 
 test('there are shipped levels', () => {
   assert.ok(files.length >= 1);
@@ -56,15 +88,23 @@ test('every registry cross-reference resolves', () => {
   // restatement is what let the mail room companion keep the old rig and the old
   // kit after the Mail Room class moved on - a silent copy that drifts. An
   // override is for DEPARTING from the class; matching it means delete the line.
-  // `maxHp` is exempt: enemies spell it `hp` and fromClass drops the inherited
-  // one, so an enemy's own value can legitimately equal the class's.
-  // `name` is NOT exempt any more: it is inherited like everything else, so a
+  // `maxHp` is NOT exempt any more, and neither is the `hp` spelling: an enemy
+  // now inherits health like it inherits everything else (data/enemies.js), so
+  // a departure is an override under the class's own key and gets compared like
+  // any other. The exemption is why the Guard could sit at 20 against
+  // Security's 26 with nothing to say so.
+  // `name` is NOT exempt either: it is inherited like everything else, so a
   // kit that restates the class's own label is the same silent copy as any
   // other - and the two companions that used to carry invented names are
   // exactly where that copy was hiding.
+  //
+  // What IS exempt is what only one SIDE of a fight has: a map char, an XP
+  // bounty, a body's loot, the AI's damage rolls and how it reads on the focus
+  // banner. Those aren't a second implementation of a shared stat - a party
+  // member has no `xp` reward because nobody kills him for it.
   const IDENTITY = new Set([
     'classId', 'char', 'examine', 'dialogue', 'recruitedDialogue',
-    'level', 'hp', 'xp', 'loot', 'attacks', 'attackAp', 'aggression', 'summon',
+    'level', 'xp', 'loot', 'attacks', 'attackAp', 'aggression', 'summon',
   ]);
   // The check's granularity follows the MERGE's: a field merged per key (attr)
   // is checked per key, or three verbatim attributes hide behind one that
@@ -86,6 +126,20 @@ test('every registry cross-reference resolves', () => {
         assert.notDeepEqual(val, base[key],
           `${regName}.${id}.${key} just repeats ${kit.classId}.${key} - delete it and inherit`);
       }
+    }
+  }
+
+  // One stat, one spelling. The check above can only compare keys the class
+  // ALSO has, so a kit writing `hp` where the class writes `maxHp` slips past
+  // it untouched however far the two values diverge - which is precisely how
+  // the Guard's 20 lived next to Security's 26 for as long as it did. A second
+  // name for a shared stat is a parallel implementation with extra steps.
+  for (const [regName, kits] of ARCHETYPE_KITS) {
+    for (const [id, kit] of Object.entries(kits)) {
+      if (!kit.classId) continue;
+      assert.equal(kit.hp, undefined,
+        `${regName}.${id} spells max HP \`hp\` while ${kit.classId} spells it \`maxHp\` - `
+        + 'inherit the class\'s health, or depart from it under its own key so the check above sees it');
     }
   }
 
@@ -189,7 +243,7 @@ test('every registry cross-reference resolves', () => {
   }
   for (const it of Object.values(ITEMS)) if (it.attack) reachable.add(it.attack);
   for (const [id, a] of Object.entries(ACTIONS)) {
-    if (a.ammoCost) reachable.add(id); // throwables join the bar automatically
+    if (a.ammoCost && a.universal !== false) reachable.add(id); // universal throws join automatically
   }
   for (const id of Object.keys(ACTIONS)) {
     assert.ok(reachable.has(id), `action "${id}" is reachable by somebody`);
@@ -203,16 +257,36 @@ test('every registry cross-reference resolves', () => {
     assert.ok(TILE_TYPES[a.leaves], `action "${id}" leaves a real tile type ("${a.leaves}")`);
     assert.ok(TILE_TYPES[a.leaves].surface,
       `action "${id}" leaves "${a.leaves}", which must carry a surface to be worth painting`);
+    assert.ok(Number.isFinite(a.leavesTurns) && a.leavesTurns > 0,
+      `action "${id}" gives its temporary surface a positive leavesTurns lifetime`);
   }
   for (const [id, def] of Object.entries(ENEMY_TYPES)) {
     // summonSpec, because a descriptor may inherit its archetype from the
     // ACTION it is the AI-side twin of rather than restating it.
     const arch = summonSpec(def.summon)?.archetype;
     if (def.summon) assert.ok(CLASSES[arch] || ENEMY_TYPES[arch], `enemy "${id}" summons a real archetype`);
+    if (def.focus != null) {
+      assert.ok(Number.isFinite(def.focus) && def.focus >= 0 && def.focus <= 1,
+        `enemy "${id}" focus is a number from 0 to 1`);
+    }
+    if (def.support) {
+      const s = def.support;
+      assert.ok(Array.isArray(s.heal) && s.heal.length === 2
+        && s.heal.every(Number.isFinite) && s.heal[0] <= s.heal[1],
+      `enemy "${id}" support heal is a finite [min, max] pair`);
+      assert.ok(Number.isFinite(s.ap) && s.ap > 0, `enemy "${id}" support costs positive AP`);
+      assert.ok(Number.isFinite(s.range) && s.range > 0, `enemy "${id}" support has positive range`);
+      assert.ok(Number.isInteger(s.uses) && s.uses > 0, `enemy "${id}" support has positive integer uses`);
+      assert.ok(Number.isInteger(s.cooldownRounds) && s.cooldownRounds >= 0,
+        `enemy "${id}" support cooldown is a non-negative integer`);
+    }
   }
   // Tile loot tables exist, and every table entry names a real item.
   for (const [id, def] of Object.entries(TILE_TYPES)) {
-    if (def.loot) assert.ok(LOOT_TABLES[def.loot], `tile "${id}" loot table "${def.loot}" exists`);
+    if (def.loot) {
+      assert.ok(LOOT_TABLES[def.loot], `tile "${id}" loot table "${def.loot}" exists`);
+      assert.ok(def.lootIcon, `lootable tile "${id}" owns an Alt-overlay icon`);
+    }
   }
   // Merchants (ECONOMY_PLAN.md). Anything that can open a shop names a real
   // one, and a shop only stocks things a merchant could actually price - an
@@ -245,7 +319,14 @@ test('every registry cross-reference resolves', () => {
   // it prices, it just never reaches a player. (This caught a `coin-return`
   // authored for a machine-shaking verb that was then deliberately not built.)
   const obtainable = new Set();
-  for (const entries of Object.values(LOOT_TABLES)) for (const e of entries) obtainable.add(e.item);
+  const reachableTables = campaignLootTables();
+  for (const table of Object.keys(LOOT_TABLES)) {
+    assert.ok(reachableTables.has(table),
+      `loot table "${table}" is never placed on the campaign chain`);
+  }
+  for (const table of reachableTables) {
+    for (const e of LOOT_TABLES[table]) obtainable.add(e.item);
+  }
   for (const def of Object.values(ENEMY_TYPES)) for (const e of def.loot || []) obtainable.add(e.item);
   for (const shop of Object.values(SHOPS)) for (const r of shop.stock || []) obtainable.add(r.item);
   for (const reg of [CLASSES, COMPANIONS]) {
@@ -368,73 +449,56 @@ test('every registry cross-reference resolves', () => {
 });
 
 for (const f of files) {
-  test(`${f} parses and has a player spawn and an exit`, () => {
-    const data = load(f);
-    const g = parseLevel(data); // throws on unknown tile types
-    const playerChar = Object.entries(data.actors).find(([, v]) => v === 'player')?.[0];
-    assert.ok(playerChar, 'actors legend names a player');
-    assert.ok(data.map.some((row) => row.includes(playerChar)), 'player is on the map');
-    let hasExit = false;
-    for (let z = 0; z < g.height; z++) {
-      for (let x = 0; x < g.width; x++) if (g.typeAt(x, z) === 'exit') hasExit = true;
-    }
-    assert.ok(hasExit, 'level has an exit');
+  // The playability rules moved to src/level-lint.js so the EDITOR can run them
+  // too - they used to live here as assertions, which meant they only ever ran
+  // over files already in levels/ and the tool that produces those files could
+  // not ask. This is now the same call the editor makes on every edit.
+  test(`${f} is playable`, () => {
+    const findings = lintLevel(load(f));
+    assert.deepEqual(findings, [],
+      `${f}: ${findings.map((x) => `${x.level} ${x.rule}: ${x.message}`).join('; ')}`);
   });
 
-  test(`${f} every map character is declared in a legend`, () => {
-    // parseLevel silently defaults an unknown tile char to 'floor' (grid.js), so
-    // a typo'd map char would ship as invisible walkable floor. Guard the map
-    // against any char that isn't in the tiles OR actors legend (space = void).
-    const data = load(f);
-    const declared = new Set([...Object.keys(data.tiles || {}), ...Object.keys(data.actors || {})]);
-    for (let z = 0; z < data.map.length; z++) {
-      for (const ch of data.map[z]) {
-        if (ch === ' ') continue;
-        assert.ok(declared.has(ch), `map char "${ch}" (row ${z}) is declared in a legend`);
-      }
-    }
-  });
-
-  test(`${f} the exit is reachable from the player spawn`, () => {
-    // A walled-off exit would make the floor uncompletable while passing every
-    // other check. Doors are openable, so they count as passable for reach.
-    const data = load(f);
-    const g = parseLevel(data);
-    let exit = null;
-    for (let z = 0; z < g.height && !exit; z++) {
-      for (let x = 0; x < g.width; x++) if (g.typeAt(x, z) === 'exit') { exit = { x, z }; break; }
-    }
-    assert.ok(exit, 'level has an exit tile');
-    const stepPassable = (x, z, nx, nz) => g.edgeOpen(x, z, nx, nz) || !!g.doorBetween(x, z, nx, nz);
-    const route = findPath(g.terrainOpen, g.playerSpawn.x, g.playerSpawn.z, exit.x, exit.z, null, stepPassable);
-    assert.ok(route, 'a walk-up route from the spawn to the exit exists (doors count as openable)');
-  });
-
-  test(`${f} legend matches the registries' canonical characters`, () => {
+  // RELAXED 2026-08-02 (designer deferred the call: "i dont know the difference,
+  // ill defer to your judgement"; EDITOR_INVENTORY.md IQ3 answer A). A map
+  // character belongs to the LEVEL, not the registry.
+  //
+  // This used to demand every legend char equal the registry's canonical one,
+  // which the editor structurally could not always satisfy: it allocates chars
+  // per level, and there are 87 paintable tile types against 86 usable
+  // characters, so a collision hands out a pool char and the export failed CI on
+  // a file the author had no way to fix from inside the tool. The registry's
+  // `char` stays a PREFERRED hint - taken when free, which is what keeps
+  // hand-authored levels round-tripping unchanged - but it is no longer a rule.
+  //
+  // What is actually load-bearing is what `parseLevel` needs, and that is all
+  // still checked: every legend entry names a real type, no character means two
+  // things at once, and a tile never borrows a character the actors legend has
+  // claimed (parseLevel checks `actors` first, so it would silently become that
+  // actor).
+  test(`${f} legend is internally consistent`, () => {
     const data = load(f);
     for (const [ch, type] of Object.entries(data.tiles)) {
       assert.ok(TILE_TYPES[type], `tile type "${type}" exists`);
-      assert.equal(TILE_TYPES[type].char, ch,
-        `char "${ch}" is canonical for "${type}" (the editor round-trips on canonical chars)`);
+      assert.ok(!data.actors[ch],
+        `char "${ch}" is a tile AND an actor in ${f} - parseLevel reads actors first, so the tile would vanish`);
     }
+    const seen = new Map();
     for (const [ch, ref] of Object.entries(data.actors)) {
+      assert.ok(!seen.has(ch), `char "${ch}" is declared twice in ${f}`);
+      seen.set(ch, ref);
       if (ref === 'player') continue;
-      const { id: actor, level: tier } = parseActorRef(ref);
+      const { id: actor } = parseActorRef(ref);
       const reg = ENEMY_TYPES[actor] || NPCS[actor] || COMPANIONS[actor]; // enemies, NPCs, or recruits
       assert.ok(reg, `actor type "${actor}" exists`);
-      if (tier == null) {
-        assert.equal(reg.char, ch, `char "${ch}" is canonical for "${actor}"`);
-        continue;
-      }
-      // A TIERED placement must NOT use the canonical char: that char already
-      // means "this actor at the floor's depth", so sharing it would make the
-      // two indistinguishable on the map and collapse them on an editor round
-      // trip. It just has to be a char nothing else in this level has claimed.
-      assert.notEqual(reg.char, ch,
-        `char "${ch}" is canonical for "${actor}" - a tiered placement needs its own`);
-      assert.ok(!data.tiles[ch], `char "${ch}" is already a tile in ${f}`);
-      assert.equal(Object.keys(data.actors).filter((c) => c === ch).length, 1);
     }
+    // Two placements of the SAME actor at different tiers still need different
+    // characters, or the map cannot tell them apart and an editor round trip
+    // collapses one into the other - that part was never about canonical chars.
+    const byRef = [...seen.entries()].filter(([, r]) => r !== 'player');
+    const refs = byRef.map(([, r]) => r);
+    assert.equal(new Set(refs).size, refs.length,
+      `${f} declares the same actor reference under two characters`);
   });
 
   test(`${f} wall and door runs stay inside the map`, () => {
@@ -647,4 +711,183 @@ test('every talent a class is seeded with exists, and every class is covered', (
     if (def.playable === false) continue;
     assert.ok(STARTING_TALENT_BY_CLASS[id], `playable class "${id}" has no seeded talent`);
   }
+});
+
+
+// --- the campaign as a graph (EDITOR_INVENTORY B4) ---------------------------
+// Every check above is about ONE file. The designer's unit of work is a
+// campaign, and none of these were checked anywhere: that `FIRST_LEVEL` even
+// resolves (a bad value silently disables campaign saves entirely), that the
+// chain reaches every floor, that it terminates, and that it does not loop.
+test('FIRST_LEVEL names a registered level', () => {
+  assert.ok(LEVELS[FIRST_LEVEL],
+    `FIRST_LEVEL is "${FIRST_LEVEL}", which is not in LEVELS - campaign saves would never restore`);
+});
+
+test('the campaign chain terminates, reaches every campaign floor, and does not loop', () => {
+  // Dev levels are reachable by ?level= and are deliberately off the chain.
+  const devIds = new Set(devFiles.map((f) => f.replace(/\.json$/, '')));
+  const campaign = Object.keys(LEVELS).filter((id) => !devIds.has(id));
+
+  const walked = [];
+  const seen = new Set();
+  let id = FIRST_LEVEL;
+  while (id) {
+    assert.ok(!seen.has(id), `the chain loops at "${id}" - a run could never finish`);
+    seen.add(id);
+    walked.push(id);
+    const next = LEVELS[id].next;
+    if (!next) break;
+    assert.ok(LEVELS[next], `"${id}".next names "${next}", which is not registered`);
+    id = next;
+  }
+  for (const c of campaign) {
+    assert.ok(seen.has(c), `"${c}" is registered but the chain from ${FIRST_LEVEL} never reaches it`);
+  }
+  const terminals = campaign.filter((c) => !LEVELS[c].next);
+  assert.equal(terminals.length, 1,
+    `exactly one floor should end the run; found ${terminals.length} (${terminals.join(', ')})`);
+});
+
+test('depth does not go backwards along the chain', () => {
+  // `depth` is the floor's NUMBER since the curve was struck, so a chain that
+  // descends is a bookkeeping error rather than a difficulty one - but it is
+  // still the kind of thing nobody notices until a save restores oddly.
+  let id = FIRST_LEVEL;
+  let last = 0;
+  while (id && LEVELS[id]) {
+    const d = LEVELS[id].depth ?? 1;
+    assert.ok(d >= last, `"${id}" has depth ${d}, below the floor before it (${last})`);
+    last = d;
+    id = LEVELS[id].next;
+  }
+});
+
+for (const f of devFiles) {
+  test(`dev/${f} parses and is registered`, () => {
+    const data = JSON.parse(readFileSync(`levels/dev/${f}`, 'utf8'));
+    // A layered dev level is parsed by floors.test.js, which knows about
+    // storeys; a flat one has to satisfy the ordinary parser here.
+    if (!data.layers) assert.doesNotThrow(() => parseLevel(data));
+    const id = f.replace(/\.json$/, '');
+    assert.ok(LEVELS[id], `levels/dev/${f} is registered as LEVELS["${id}"]`);
+  });
+}
+
+// --- the shipped levels are load-bearing test fixtures (EDITOR_INVENTORY K8) --
+// The tool ARCHITECTURE.md points at for editing levels/ is pointed at the files
+// the e2e suite measures itself against. Moving a desk in level1's break room
+// turns the suite red in specs whose names have nothing to do with levels
+// (combat-bar, economy, exit), and the failure reads as unrelated.
+//
+// Migrating ~20 specs onto their own fixture floor is the real fix and is NOT
+// done here - it is a large mechanical change to a suite that takes hours to
+// run, and doing it blind would trade one flavour of red for another. What is
+// here is the cheap half that fixes the CONFUSION: a fingerprint of the
+// properties those specs actually lean on, so an edit to a shipped level fails
+// in one obvious place with a message naming the cause, in 1.5 seconds, instead
+// of somewhere unrecognisable an hour later.
+//
+// Updating these numbers when you deliberately change a floor is correct and
+// expected. Being told to is the entire point.
+test('shipped levels keep the shape the e2e suite is written against', () => {
+  const shape = (f) => {
+    const g = parseLevel(load(f));
+    let walkable = 0;
+    let exits = 0;
+    for (let z = 0; z < g.height; z++) {
+      for (let x = 0; x < g.width; x++) {
+        if (g.terrainOpen(x, z)) walkable += 1;
+        if (g.typeAt(x, z) === 'exit') exits += 1;
+      }
+    }
+    return {
+      width: g.width, height: g.height, walkable, exits,
+      spawn: `${g.playerSpawn.x},${g.playerSpawn.z}`,
+      enemies: g.enemySpawns.length,
+      companions: g.companionSpawns.length,
+    };
+  };
+  // level1: the smoke, exit, combat-bar, economy and editor specs all click
+  // precise points on this floor.
+  assert.deepEqual(shape('level1.json'), {
+    width: 24, height: 18, walkable: 412, exits: 1, spawn: '2,2', enemies: 3, companions: 1,
+  }, 'level1 changed shape - the e2e specs that click its tiles need re-checking');
+  // level2: the campaign-transition and progression specs land here.
+  assert.deepEqual(shape('level2.json'), {
+    width: 28, height: 20, walkable: 538, exits: 1, spawn: '2,2', enemies: 6, companions: 1,
+  }, 'level2 changed shape - the e2e specs that walk it need re-checking');
+});
+
+test('the fbx converter reports the same sight-block threshold the game uses', () => {
+  // tools/fbx-to-glb.py runs inside Blender's Python and cannot import the
+  // game's modules, so it duplicates SIGHT_BLOCK_HEIGHT to tell a conversion
+  // whether the model it just measured will stop thrown attacks. A duplicated
+  // constant is fine as long as something fails when they drift.
+  const src = readFileSync('tools/fbx-to-glb.py', 'utf8');
+  const m = /^SIGHT_BLOCK_HEIGHT\s*=\s*([\d.]+)/m.exec(src);
+  assert.ok(m, 'the converter declares SIGHT_BLOCK_HEIGHT');
+  assert.equal(Number(m[1]), SIGHT_BLOCK_HEIGHT,
+    'tools/fbx-to-glb.py and src/data/tiles.js disagree about what blocks sight');
+});
+
+test('every character rig on disk is a rig the game can legitimately ask for', () => {
+  // build.mjs prunes unreferenced PROP models and deliberately exempts
+  // assets/characters/ - rigs are named by string interpolation from sheet, def
+  // and wardrobe data in eight places, so a static sweep cannot follow them. An
+  // earlier version tried to enumerate those sources and silently dropped the
+  // four CUSTOM_RIGS, which shipped a game where a custom character had no body.
+  //
+  // This is the guard that makes the exemption safe to keep: every rig on disk
+  // is accounted for by some registry or by the wardrobe, so "ship them all" is
+  // never shipping junk, and adding a rig nobody references fails here.
+  const rigs = readdirSync('assets/characters')
+    .filter((f) => f.endsWith('.glb')).map((f) => f.replace(/\.glb$/, ''));
+  const claimed = new Set(CUSTOM_RIGS);
+  for (const reg of [CLASSES, ...ACTOR_REGISTRIES]) {
+    for (const def of Object.values(reg)) if (def.model) claimed.add(def.model);
+  }
+  for (const rig of rigs) {
+    assert.ok(claimed.has(rig),
+      `assets/characters/${rig}.glb is claimed by no class, actor or CUSTOM_RIGS entry`);
+  }
+});
+
+test('every tile category is one the editor palette knows how to order', () => {
+  // The category order used to be a const inside editor.js, so a tile could
+  // declare a category the palette had never heard of and its brush would sort
+  // silently to the end. `snack-machine` did exactly that with `furniture`.
+  // Now the order is content (data/tiles.js) and this refuses the next one.
+  const known = new Set(TILE_CATEGORIES);
+  const orphans = [];
+  for (const [id, def] of Object.entries(TILE_TYPES)) {
+    if (def.runtimeOnly || !def.category) continue; // no category = the 'basics' bucket
+    if (!known.has(def.category)) orphans.push(`${id} -> '${def.category}'`);
+  }
+  assert.deepEqual(orphans, [],
+    `these declare a category TILE_CATEGORIES does not list: ${orphans.join(', ')}`);
+});
+
+test('the category order carries no names nothing uses', () => {
+  // The other direction: a stale entry is harmless but it is a lie about the
+  // content, and it is how the list drifts out of step in the first place.
+  const used = new Set(['basics']); // the bucket for an uncategorised def
+  for (const def of Object.values(TILE_TYPES)) if (def.category) used.add(def.category);
+  const stale = TILE_CATEGORIES.filter((c) => !used.has(c));
+  assert.deepEqual(stale, [], `TILE_CATEGORIES lists unused categories: ${stale.join(', ')}`);
+});
+
+test('the editor can name every paintable tile type', () => {
+  // The editor allocates a legend character per DISTINCT type a level uses,
+  // so the ceiling is the pool size minus what is reserved off it. It was
+  // reached: 87 paintable types against 86 allocatable characters, and the
+  // 87th painted plain floor (Q056). The failure had no symptom a level
+  // author could act on, which is what makes it worth a test rather than a
+  // comment - the pool must be able to name every type, with room to grow.
+  const paintable = Object.values(TILE_TYPES).filter((d) => !d.runtimeOnly).length;
+  const reserved = new Set(['@', ' ', ...Object.keys(actorLegend())]);
+  const allocatable = CHAR_POOL.filter((c) => !reserved.has(c)).length;
+  assert.ok(allocatable >= paintable,
+    `the editor's character pool holds ${allocatable} allocatable characters for `
+    + `${paintable} paintable tile types - a level using them all would silently paint floor`);
 });

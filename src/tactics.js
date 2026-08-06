@@ -12,6 +12,7 @@
 // `positional` is the seam the later milestones fill in (cover, flanking,
 // backstab). It is 0 everywhere today, so this milestone changes no number.
 import { HIT, REACH } from './stats.js';
+import { CARDINAL_DIRS } from './directions.js';
 
 // The to-hit terms for one attacker/defender pair, in the shape
 // stats.hitChance consumes: { acc, dodge, mods }.
@@ -212,10 +213,6 @@ export function hasCover(ax, az, dx, dz, edgeOpen, coverCell = null) {
     ax, az, dx, dz);
 }
 
-// The four orthogonal faces, in a fixed order so a UI drawing them gets the
-// same list twice running.
-export const FACES = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-
 // WHICH faces of (dx, dz) have something shielding them - a wall, partition or
 // closed door on the edge, or a cell-shaped shield (a solid prop, a fallen
 // one, a BODY) standing on the neighbour. Returns the offsets, not a boolean.
@@ -238,7 +235,7 @@ export function shieldedFaces(dx, dz, { edgeOpen = null, coverCell = null } = {}
   const cells = typeof coverCell === 'function';
   if (!edges && !cells) return [];
   const out = [];
-  for (const [ox, oz] of FACES) {
+  for (const [ox, oz] of CARDINAL_DIRS) {
     const nx = dx + ox;
     const nz = dz + oz;
     if ((edges && !edgeOpen(dx, dz, nx, nz)) || (cells && coverCell(nx, nz))) {
@@ -257,10 +254,25 @@ export function shieldedFaces(dx, dz, { edgeOpen = null, coverCell = null } = {}
 // most once per attack" true for the to-hit modifier: more covered faces means
 // more covered DIRECTIONS, never a deeper discount along one of them.
 export function facesShieldFrom(faces, ax, az, dx, dz) {
+  return !!shieldingFace(faces, ax, az, dx, dz);
+}
+
+// WHICH face does the shielding, or null. The same question `facesShieldFrom`
+// asks, answered with the face rather than a yes - because a refusal has to
+// NAME the thing in the way ("their cover is a person", "the partition").
+//
+// combat.js carried its own `shieldingFaceFrom` for exactly this, identical
+// line for line but for the return type, which is two copies of the cover rule
+// one edit apart from disagreeing about what cover IS.
+//
+// A diagonal attacker is blocked by either of the two faces their way; when
+// both are shielded the x face answers first, which only matters for naming the
+// blocker. Continuous or tile inputs both work - dirOctant buckets the angle.
+export function shieldingFace(faces, ax, az, dx, dz) {
   const { x: sx, z: sz } = dirOctant(ax, az, dx, dz);
-  if (sx === 0 && sz === 0) return false; // standing on them - no angle at all
-  return faces.some(([ox, oz]) =>
-    (sx !== 0 && ox === sx && oz === 0) || (sz !== 0 && oz === sz && ox === 0));
+  if (sx === 0 && sz === 0) return null; // standing on them - no angle at all
+  return (faces || []).find(([ox, oz]) =>
+    (sx !== 0 && ox === sx && oz === 0) || (sz !== 0 && oz === sz && ox === 0)) || null;
 }
 
 // --- flanking (TACTICS_PLAN M4) ---------------------------------------------

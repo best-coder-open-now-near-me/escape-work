@@ -12,7 +12,7 @@ import { makeMaterial, toonifyMaterial } from './shading.js';
 import { STATUSES } from './data/statuses.js';
 import { TILE_TYPES } from './data/tiles.js';
 
-const pc = window.pc;
+const pc = globalThis.window?.pc;
 
 // World point -> CSS-pixel screen point. Every DOM element tracking a world
 // position (damage popups, loot labels, test helpers) projects through this.
@@ -29,11 +29,20 @@ const pc = window.pc;
 // Input and output vectors MUST be distinct: worldToScreen re-reads the
 // world point after writing the result (for the perspective divide), so
 // passing one vector as both corrupts the projection.
-const _projIn = new pc.Vec3();
-const _projOut = new pc.Vec3();
+// Scratch vectors for the world->screen projection, built on FIRST USE rather
+// than at import. Constructing engine objects at module scope is what kept this
+// file - and tile-renderer, scene and editor, which import it - out of node.
+let _projIn = null;
+let _projOut = null;
+const projScratch = () => {
+  _projIn ??= new pc.Vec3();
+  _projOut ??= new pc.Vec3();
+  return [_projIn, _projOut];
+};
 export function worldToScreenCss(cameraEntity, wx, wy, wz) {
-  cameraEntity.camera.worldToScreen(_projIn.set(wx, wy, wz), _projOut);
-  return { x: _projOut.x, y: _projOut.y, behind: _projOut.z < 0 };
+  const [vin, vout] = projScratch();
+  cameraEntity.camera.worldToScreen(vin.set(wx, wy, wz), vout);
+  return { x: vout.x, y: vout.y, behind: vout.z < 0 };
 }
 
 // Body landmarks, in world units above the floor's top face. Characters are
@@ -375,12 +384,16 @@ export function statusBurst(app, x, z, id) {
       life: 0.8, gravity: -2.2, drag: 1.1, jitter: 0.3,
     });
     flash(app, { x, y: HEAD_Y, z }, { color, size: 0.24, life: 0.22, grow: 2 });
-  } else { // 'pop' - straight out from the head, for the instantaneous ones
+  } else if (mode === 'pop') { // straight out from the head, the instantaneous ones
     flash(app, { x, y: HEAD_Y, z }, { color, size: 0.24, life: 0.2, grow: 2.4 });
     burst(app, { x, y: HEAD_Y, z }, {
       count: 10, color, speed: 2, up: 1, size: 0.12, life: 0.55, gravity: -3, drag: 1.8,
     });
   }
+  // Anything else shows nothing. `pop` used to be the bare `else`, so
+  // `burst: 'none'` - again only `sneaking` - announced the sneak with the
+  // LOUDEST of the three (Q053/Q212). A status that opts out of a burst gets
+  // no burst; the harmful/harmless default above still covers omitting the key.
 }
 
 // While a status is LIVE it wears an aura: a trickle of particles the shape of
@@ -437,11 +450,19 @@ export function createAuraLayer(app) {
         });
         break;
       case 'shield':
-      default:
         burst(app, { x: p.x, y: p.y + 0.35, z: p.z }, {
           count: 1, color, speed: 0.2, up: 1.1, size: 0.1, life: 0.75,
           gravity: -0.6, drag: 0.9, jitter: 0.3, floor: false,
         });
+        break;
+      // An aura kind this module does not implement shows NOTHING. It used to
+      // share a label with 'shield', which meant `aura: 'none'` - the only
+      // out-of-vocabulary value in data/statuses.js, and it is on `sneaking` -
+      // wore the shield's glowing motes for the whole held sneak. The one
+      // state whose entire point is not being seen was the one continuously
+      // trailing particles (Q053). Silence is also the right answer for a
+      // typo, which this arm used to swallow.
+      default:
         break;
     }
   }
@@ -508,8 +529,9 @@ let decalTex = null;
 function decalTextures(app) {
   if (decalTex) return decalTex;
   const TAU = Math.PI * 2;
-  // A shoe sole: the ball of the foot and a heel, toe toward -v (which the
-  // plane maps to +Z, the direction the walker is facing).
+  // A shoe sole: the ball of the foot and a heel, toe toward canvas -v. A
+  // PlayCanvas plane maps that end to local -Z, so the decal rotation below
+  // turns it 180 degrees relative to the actor's +Z forward axis.
   const foot = makeTexture(app, 64, (ctx, s) => {
     ctx.fillStyle = '#fff';
     ctx.beginPath();
@@ -623,6 +645,11 @@ const FOOT_COLORS = {
   coffee: [0.22, 0.14, 0.09],
 };
 
+// Generated foot texture points toward local -Z; actors define yaw zero as
+// +Z (actors.js faceToward). Keep that coordinate-system conversion named and
+// testable so a future texture cleanup cannot silently reverse every trail.
+export const footprintDecalYaw = (actorYaw) => actorYaw + 180;
+
 // One tile entered. `bleeding` means the walker is dripping (a bleed status, or
 // simply badly hurt); `surface` is what they just stepped IN, which both stains
 // the shoe for the next few tiles and decides how vivid this print is.
@@ -663,7 +690,9 @@ export function footstep(app, actor, x, z, { bleeding = false, surface = null, o
       tex: decalTextures(app).foot,
       color: FOOT_COLORS[kind],
       size: 0.38,
-      yaw: yaw + rnd(-7, 7),
+      // The generated texture's toe is local -Z while GridActor yaw zero faces
+      // +Z. Without this half-turn, every trail pointed back at its walker.
+      yaw: footprintDecalYaw(yaw) + rnd(-7, 7),
       life: kind === 'blood' ? 34 : 14,
       alpha: back ? alpha * 0.85 : alpha,
     });
@@ -682,13 +711,15 @@ function ensureFxMats() {
   if (fxMats) return fxMats;
   fxMats = {
     paper: makeMaterial([0.97, 0.96, 0.9], { gloss: 0.3 }),
+    paperFold: makeMaterial([0.82, 0.84, 0.86], { gloss: 0.2 }),
     trail: makeMaterial([1, 1, 1], { opacity: 0.4 }),
   };
   return fxMats;
 }
 
-// A thrown paper ball ('ball') or airplane ('plane') arcing from one tile to
-// another, shedding a fading trail. Fire and forget. It leaves the thrower's
+// A thrown paper ball ('ball'), airplane ('plane'), or flat envelope
+// ('envelope') arcing from one tile to another, shedding a fading trail. Fire
+// and forget. It leaves the thrower's
 // hand in a puff of loose sheets and shreds itself on arrival - the arc used
 // to simply blink out of existence at the target.
 //
@@ -700,6 +731,7 @@ function ensureFxMats() {
 export function throwProjectile(app, from, to, kind = 'ball') {
   const m = ensureFxMats();
   const shot = kind === 'shot';
+  const sheetFlight = kind === 'plane' || kind === 'envelope';
   const holder = new pc.Entity('projectile');
   if (kind === 'plane') {
     const spine = new pc.Entity();
@@ -714,6 +746,19 @@ export function throwProjectile(app, from, to, kind = 'ball') {
       wing.setLocalEulerAngles(0, 0, side * 24);
       holder.addChild(wing);
     }
+  } else if (kind === 'envelope') {
+    const body = new pc.Entity();
+    body.addComponent('render', { type: 'box', material: m.paper });
+    body.setLocalScale(0.25, 0.018, 0.34);
+    holder.addChild(body);
+    // A small contrasting flap makes the silhouette read as an envelope at
+    // the game's camera distance, not a white ball or anonymous projectile.
+    const flap = new pc.Entity();
+    flap.addComponent('render', { type: 'box', material: m.paperFold });
+    flap.setLocalScale(0.19, 0.012, 0.13);
+    flap.setLocalPosition(0, 0.017, -0.055);
+    flap.setLocalEulerAngles(0, 45, 0);
+    holder.addChild(flap);
   } else {
     const wad = new pc.Entity();
     wad.addComponent('render', { type: 'sphere', material: m.paper });
@@ -749,7 +794,7 @@ export function throwProjectile(app, from, to, kind = 'ball') {
       const k = Math.min(1, t / dur);
       const y = Y + Math.sin(Math.PI * k) * arc;
       holder.setPosition(from.x + dx * k, y, from.z + dz * k);
-      if (kind === 'plane') {
+      if (sheetFlight) {
         const vy = (Math.PI / dur) * Math.cos(Math.PI * k) * arc;
         const pitch = Math.atan2(vy, dist / dur) * pc.math.RAD_TO_DEG;
         holder.setEulerAngles(-pitch, yaw, 0);
@@ -760,11 +805,13 @@ export function throwProjectile(app, from, to, kind = 'ball') {
       while (acc > 0.024) {
         acc -= 0.024;
         const p = new pc.Entity();
-        p.addComponent('render', { type: 'sphere', material: m.trail });
-        p.setLocalScale(0.09, 0.09, 0.09);
+        p.addComponent('render', { type: sheetFlight ? 'box' : 'sphere', material: m.trail });
+        const base = sheetFlight ? [0.075, 0.012, 0.055] : [0.09, 0.09, 0.09];
+        p.setLocalScale(base[0], base[1], base[2]);
+        if (sheetFlight) p.setEulerAngles(0, yaw + parts.length * 29, parts.length % 2 ? 18 : -18);
         p.setPosition(holder.getPosition());
         app.root.addChild(p);
-        parts.push({ e: p, life: 0.32 });
+        parts.push({ e: p, life: 0.32, base });
       }
       if (k >= 1) {
         flying = false;
@@ -786,12 +833,31 @@ export function throwProjectile(app, from, to, kind = 'ball') {
         parts.splice(i, 1);
         continue;
       }
-      const s = 0.09 * (p.life / 0.32);
-      p.e.setLocalScale(s, s, s);
+      const fade = p.life / 0.32;
+      p.e.setLocalScale(p.base[0] * fade, p.base[1] * fade, p.base[2] * fade);
     }
     if (!flying && !parts.length) app.off('update', tick);
   };
   app.on('update', tick);
+}
+
+// Bulk Mail is a FAN, even when nobody happens to be standing in it. Five
+// envelopes fly along the same angular limits the rules carpet, so the effect
+// communicates the wedge instead of looking like one Paper Ball aimed at one
+// target. Resolution remains instant and entirely separate from these visuals.
+export function throwPaperFan(app, from, angle, cone, count = 5) {
+  const half = (cone.halfAngle * Math.PI) / 180;
+  for (let i = 0; i < count; i++) {
+    const t = count === 1 ? 0.5 : i / (count - 1);
+    const a = angle - half + t * half * 2;
+    // Alternate the reach slightly so the leading edge reads as scattered
+    // mail rather than five synchronized missiles.
+    const reach = cone.range * (0.78 + (i % 3) * 0.09);
+    throwProjectile(app, from, {
+      x: from.x + Math.cos(a) * reach,
+      z: from.z + Math.sin(a) * reach,
+    }, 'envelope');
+  }
 }
 
 // ---------------------------------------------------------------------------

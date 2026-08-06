@@ -141,7 +141,7 @@ const KITS = {
   },
   'mail-room': {
     // He is a mail room person. That is the entire stat block: the rig, the
-    // kit (Bulk Mail, Return to Sender, the snack cart), Warehouse Soles and
+    // kit (Bulk Mail, Courier Route), Warehouse Soles and
     // the mail room's own progression all come from the class, and follow it
     // wherever it goes next.
     classId: 'mail-room',

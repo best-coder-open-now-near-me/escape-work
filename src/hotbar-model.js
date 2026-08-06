@@ -14,7 +14,8 @@
 // member's AP, uses and paper), and out of one it gets them from this module.
 // Same slot, same fields, two rule-owners.
 
-import { ACTIONS } from './data/actions.js';
+import { ACTIONS, UNIVERSAL_ACTIONS } from './data/actions.js';
+import { actionTooltip } from './action-tooltip.js';
 import { ITEMS } from './data/items.js';
 import { orderedActionIds, equippedAction, ammoCostOf } from './stats.js';
 
@@ -29,10 +30,14 @@ import { orderedActionIds, equippedAction, ammoCostOf } from './stats.js';
 // The ORDER is stats.orderedActionIds - the same one combat's bar renders, so
 // the kit reads the same in and out of a fight. A throwable the character can't
 // fold (needsTalent) is not theirs to list.
+// The universal verbs ride in from data/actions.js, derived from the actions'
+// own `universal: true` - the hand-written copy of the list that used to live
+// here was one of the two extra definitions of "universal" Q217 was about.
+
 export function actionIdsFor(s) {
   if (!s) return [];
   return orderedActionIds(s, [
-    ...s.actions, equippedAction(s), 'shove', 'take-cover', 'pull', ...throwablesFor(s),
+    ...s.actions, equippedAction(s), ...UNIVERSAL_ACTIONS, ...throwablesFor(s),
   ]);
 }
 
@@ -76,24 +81,46 @@ export function itemCountsFor(s) {
 }
 
 // Why this action can't be used with no fight on, or null when it can be.
-// Attacks, shoves and throws OPEN a fight; a summon posts on the spot. What's
-// left is the reactive pair, and both need a fight to mean anything: Deflect
-// Blame halves an incoming hit nobody is throwing, and a heal out here would be
-// a free, per-fight-refilling pool of HP - which is precisely the thing the
-// pockets exist to sell you.
-//
-// A purge is at its MOST useful out here: bleed runs on a step clock, so
-// between fights is exactly when you want it gone. Take Cover works out here
-// too (designer, 2026-07-30): crouch before anyone has noticed you, and the
-// crouch rides into the fight.
+// Availability belongs to the action entry, beside the behavior it describes:
+// `exploration.mode` tells the exploration dispatcher whether this is an
+// opener, a ground placement, a world verb, or deliberately combat-only. The
+// old type table here made every control and zone combat-only even after those
+// systems gained honest exploration resolvers. It also meant adding a new
+// action silently inherited policy from an implementation category rather
+// than declaring its own intent.
 export function combatOnlyReason(id) {
   const a = ACTIONS[id];
-  const t = a?.type;
-  if (!a || t === 'attack' || t === 'shove' || t === 'summon' || t === 'purge' || t === 'cover') {
-    return null;
-  }
-  if (t === 'heal') return `${a.label} is for a fight - out here, heal from your pockets.`;
-  return `${a.label} only means something once someone is swinging at you.`;
+  // An unknown id is NOT usable. This returned null for one - the same answer
+  // it gives a live attack - so a slot holding a stale or misspelled id read as
+  // ready to press, and the bar drew it enabled.
+  if (!a) return 'That is not something you know how to do.';
+  if (!a.exploration) return `${a.label} has no exploration behavior configured.`;
+  return a.exploration.mode === 'combat-only'
+    ? (a.exploration.reason || `${a.label} is for a fight.`)
+    : null;
+}
+
+// The complete out-of-combat answer for one action. The hotbar renders this
+// state and the press handler consults the same state, so resource counts,
+// dimming, and the spoken refusal cannot disagree.
+export function outOfCombatActionState(id, s) {
+  const a = ACTIONS[id];
+  if (!a) return null;
+  const ammoCost = ammoCostOf(s, id);
+  const ammoRemaining = s?.paper ?? 0;
+  const resourceAvailable = !ammoCost || ammoRemaining >= ammoCost;
+  const known = actionIdsFor(s).includes(id);
+  const reason = !known
+    ? `${a.label} is not something you can do right now.`
+    : combatOnlyReason(id)
+      || (!resourceAvailable ? `Needs ${ammoCost} paper - you have ${ammoRemaining}.` : null);
+  return {
+    affordable: !reason,
+    reason,
+    ammoCost,
+    ammoRemaining,
+    resourceAvailable,
+  };
 }
 
 // The layout the BAR shows: what the character has, plus at least one empty
@@ -152,24 +179,33 @@ export function slotViewModel(entry, s) {
   if (entry.kind === 'item') {
     const def = ITEMS[entry.id];
     if (!def) return null;
+    const count = itemCountsFor(s).get(entry.id) || 0;
     return {
       kind: 'item', id: entry.id, label: def.name, icon: def.icon,
-      count: itemCountsFor(s).get(entry.id) || 0,
+      count,
+      affordable: count > 0,
+      resourceAvailable: count > 0,
     };
   }
   const a = ACTIONS[entry.id];
   if (!a) return null;
-  const available = actionIdsFor(s).includes(entry.id);
+  const state = outOfCombatActionState(entry.id, s);
   return {
     kind: 'action',
     id: entry.id,
     label: a.label,
     icon: a.icon, // the face it wears on the bar (data/actions.js)
     ap: a.ap,
-    ammoCost: ammoCostOf(s, entry.id),
-    unavailable: available
-      ? combatOnlyReason(entry.id)
-      : `${a.label} is not something you can do right now.`,
+    ammoCost: state.ammoCost,
+    ammoRemaining: state.ammoRemaining,
+    affordable: state.affordable,
+    resourceAvailable: state.resourceAvailable,
+    unavailable: state.reason,
+    tip: actionTooltip(entry.id, {
+      sheet: s,
+      ammoCost: state.ammoCost,
+      ammoRemaining: state.ammoRemaining,
+    }),
   };
 }
 
@@ -188,11 +224,14 @@ export function combatSlotViewModel(entry, state, actingName) {
     icon: a.icon,
     ap: a.ap,
     ammoCost: state?.ammoCost || 0,
+    ammoRemaining: state?.ammoRemaining ?? null,
     uses: state?.uses ?? null,
     // Armed (aiming) or awaiting its confirm click - the bar rings them
     // differently, as combat's own bar used to.
     live: state?.live || null,
-    tip: state?.tip || null,
+    tip: state?.tip || actionTooltip(entry.id),
+    affordable: !!state && (state.affordable || !!state.live),
+    resourceAvailable: state?.resourceAvailable ?? true,
     unavailable: !state
       ? `${a.label} is not something ${actingName} can do.`
       : (state.affordable || state.live) ? null : state.reason,

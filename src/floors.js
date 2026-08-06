@@ -56,7 +56,16 @@ function findStairRuns(name, layers) {
     const cells = new Set();
     for (let z = 0; z < g.height; z++) {
       for (let x = 0; x < g.width; x++) {
-        if (g.typeAt(x, z) === 'stairway') cells.add(x + ',' + z);
+        // The DEF's flag, not the tile id: `stairs: true` exists in
+        // data/tiles.js for exactly this, and scene.js:77 already reads it to
+        // decide what to draw. Asking the id here made two owners of "what is
+        // a staircase" that only agree because `stairway` is currently the
+        // one tile carrying the flag - so a second stair tile added as pure
+        // data would RENDER as a flight and have no run, no entry and no
+        // landing (Q109/Q110). `defAt` falls back to the wall def out of
+        // bounds, which carries no `stairs`, so void cells stay false exactly
+        // as the id compare did.
+        if (g.defAt(x, z).stairs) cells.add(x + ',' + z);
       }
     }
     if (cells.size && l === layers.length - 1) {
@@ -66,8 +75,7 @@ function findStairRuns(name, layers) {
     for (const key of cells) {
       if (seen.has(key)) continue;
       const [x, z] = key.split(',').map(Number);
-      // A run extends along one axis; a single cell defaults to z and lets
-      // the landing checks resolve which way it faces.
+      // A run extends along one axis, read off its neighbours.
       const alongX = cells.has((x + 1) + ',' + z) || cells.has((x - 1) + ',' + z);
       const dx = alongX ? 1 : 0;
       const dz = alongX ? 0 : 1;
@@ -79,10 +87,45 @@ function findStairRuns(name, layers) {
         run.push({ x: cx, z: cz });
         seen.add(cx + ',' + cz);
       }
-      runs.push(resolveRun(name, layers, l, run, dx, dz));
+      // A LONE cell has no neighbour to read, so it used to be assumed to run
+      // along z - and an east-west one-cell flight was then refused with a
+      // message naming the wrong reason (Q058). The axis of a single cell is
+      // not a property of the cells at all; it is decided by where the landing
+      // is, which is `resolveRun`'s question. So ask it both ways.
+      runs.push(run.length === 1
+        ? resolveLoneCell(name, layers, l, run)
+        : resolveRun(name, layers, l, run, dx, dz));
     }
   }
   return runs;
+}
+
+// The one-cell case: let the landing rules pick the axis instead of guessing
+// ahead of them. z first, so a flight that only works north-south resolves
+// exactly as it always did. Both axes working is a real authoring ambiguity
+// and gets its own named error, in this module's existing house style - name
+// the mistake rather than pick one and hope (see the top-storey check).
+function resolveLoneCell(name, layers, l, run) {
+  const found = [];
+  const failures = [];
+  for (const [dx, dz] of [[0, 1], [1, 0]]) {
+    try {
+      found.push(resolveRun(name, layers, l, run, dx, dz));
+    } catch (e) {
+      failures.push(e);
+    }
+  }
+  if (found.length === 1) return found[0];
+  const where = `single-cell stairs at (${run[0].x},${run[0].z}) on storey ${l}`;
+  if (found.length === 2) {
+    throw new Error(`Level "${name}": ${where} has a landing on storey ${l + 1} BOTH `
+      + `north-south and east-west, so which way it climbs is ambiguous - `
+      + `extend the flight to two cells to say.`);
+  }
+  // Neither axis worked. Both messages are honest now, because both were
+  // really tried; lead with the north-south one, which is the shape the old
+  // code assumed and so the one an author most likely meant.
+  throw failures[0];
 }
 
 function resolveRun(name, layers, l, run, dx, dz) {
@@ -144,12 +187,18 @@ export function layeredGrid(floors, level, getActive) {
     npcSpawns: floors.layers[0].npcSpawns,
     companionSpawns: floors.layers[0].companionSpawns,
   };
-  const METHODS = ['typeAt', 'defAt', 'terrainOpen', 'sightOpenCell', 'surfaceAt', 'isElectrified',
+  // Every function a single-storey grid exposes. Hand-maintained lists rot:
+  // this one silently omitted `sightOpenCellLow` and `sightOpenLow`, which the
+  // sneak cone sweep calls, so sneaking on a layered level threw a TypeError
+  // (REVIEW.md 2026-08-02 section 1.14). `floors.test.js` now derives the
+  // expected set from a real grid and fails on any future omission.
+  const METHODS = ['typeAt', 'defAt', 'terrainOpen', 'sightOpenCell', 'sightOpenCellLow',
+    'sightOpenLow', 'surfaceAt', 'surfaceCellEdgeOpen', 'isElectrified',
     'setType', 'propHpAt', 'damageProp', 'edgeHpBetween', 'damageEdge', 'edgeOpen', 'stepOpen',
-    'sightOpen', 'wallEdgeBetween', 'removeEdgeBetween', 'doorBetween', 'setDoorOpen'];
+    'sightOpen', 'rotAt', 'wallEdgeBetween', 'removeEdgeBetween', 'doorBetween', 'setDoorOpen'];
   for (const m of METHODS) facade[m] = (...args) => g()[m](...args);
   // Sets and maps are read as properties, so they need live getters.
-  for (const p of ['hWalls', 'vWalls', 'doors']) {
+  for (const p of ['hWalls', 'vWalls', 'doors', 'surfaceField']) {
     Object.defineProperty(facade, p, { get: () => g()[p] });
   }
   return facade;
@@ -167,20 +216,46 @@ export function planCrossLayerRoute(floors, from, to, walkableOn, costOn = () =>
     if (ax === bx && az === bz) return [[ax, az]];
     return findPath(walkableOn(l), ax, az, bx, bz, costOn(l), floors.layers[l].stepOpen);
   };
-  function fromLayer(px, pz, l) {
+  // Every stair a storey can board, in BOTH directions. The search used to
+  // take only the flights that moved toward `to.layer`, which quietly assumed
+  // the building is a stack of fully-connected floors: the moment a storey's
+  // two flights do not share a walkable region - the mezzanine you cross to
+  // reach the far stairwell, the lobby you drop back into to get around a
+  // sealed corridor - the honest route is up-and-back-down (or down-and-back-
+  // up), and monotonic search calls it "no way to get there from here".
+  const boardable = (l) => {
+    const out = [];
+    for (const s of floors.stairs) {
+      if (s.layer === l) out.push({ s, gate: s.entry, exit: s.top, to: s.upper });
+      if (s.upper === l) out.push({ s, gate: s.top, exit: s.entry, to: s.layer });
+    }
+    return out;
+  };
+  // Both directions means a route can revisit a storey, so the walk needs a
+  // cycle guard the monotonic version got for free. It counts FLIGHTS, not
+  // storeys: coming back to a floor you have already been on is the whole
+  // point (up the west stair, across, down the east one), so a storey guard
+  // would forbid the routes this exists to find. Riding the same flight twice
+  // on one branch never helps - it returns you to a storey you could already
+  // leave from anywhere - so barring that is enough to terminate, and it
+  // leaves every legitimate route on the table.
+  function fromLayer(px, pz, l, seen = new Set()) {
+    let best = null;
+    // Standing on the destination storey is a CANDIDATE, not an answer. It was
+    // an early return, so a goal on this storey that the walk cannot reach -
+    // two wings joined only by the floor above, a corridor sealed off - was
+    // reported unreachable while a perfectly good route up and back down sat
+    // there. The stair search below still runs, and the cheaper of the two
+    // wins.
     if (l === to.layer) {
       const p = walkLeg(l, px, pz, to.x, to.z);
-      return p ? { legs: [{ kind: 'walk', layer: l, path: p }], cost: p.length } : null;
+      if (p) best = { legs: [{ kind: 'walk', layer: l, path: p }], cost: p.length };
     }
-    const up = to.layer > l;
-    let best = null;
-    for (const s of floors.stairs) {
-      if (up ? s.layer !== l : s.upper !== l) continue;
-      const gate = up ? s.entry : s.top; // where this storey boards the flight
-      const exit = up ? s.top : s.entry; // where the next storey receives you
+    for (const { s, gate, exit, to: next } of boardable(l)) {
+      if (seen.has(s)) continue;
       const p = walkLeg(l, px, pz, gate.x, gate.z);
       if (!p) continue;
-      const rest = fromLayer(exit.x, exit.z, up ? s.upper : s.layer);
+      const rest = fromLayer(exit.x, exit.z, next, new Set(seen).add(s));
       if (!rest) continue;
       const cost = p.length + s.cells.length + 2 + rest.cost;
       if (!best || cost < best.cost) {
@@ -191,7 +266,7 @@ export function planCrossLayerRoute(floors, from, to, walkableOn, costOn = () =>
             {
               kind: 'climb',
               from: { x: gate.x, z: gate.z, layer: l },
-              to: { x: exit.x, z: exit.z, layer: up ? s.upper : s.layer },
+              to: { x: exit.x, z: exit.z, layer: next },
               run: s.cells.length,
             },
             ...rest.legs,

@@ -24,24 +24,6 @@ export function createDoors({
   isInCombat, isGameOver, getCombat, getPlayer,
   isWalkable, approachAndDo, onWorldChanged,
 }) {
-  // Only a key the grid actually has is a door. Kept separate from the pure
-  // `doorKeyNear` so the arithmetic stays testable without a grid.
-  //
-  // An OPEN door is not claimed from the ground at all. An open doorway is a
-  // gap you walk through - it is the tile you most want to click ON - and
-  // letting the floor there resolve to the door meant a step through a
-  // doorway pulled it shut instead (designer, 2026-07-31). Closing it is
-  // still one click: the swung-open panel is a registered pick target, so
-  // aiming at the door itself works, as do the right-click menu and the Alt
-  // overlay. Every ground-point surface reads this - the cursor, the focus
-  // banner, the click - so they cannot disagree about what the floor means.
-  const doorNearPoint = (point) => {
-    const key = doorKeyNear(point);
-    if (!key) return null;
-    const door = grid.doors.get(key);
-    return door && !door.open ? key : null;
-  };
-
   // The door a click or a hover means IN COMBAT, or null. One predicate, read
   // by both the cursor and the click, so the pointer can never promise a swing
   // of the handle that the click then declines.
@@ -52,17 +34,21 @@ export function createDoors({
   // the cursor stayed a plain arrow over the one piece of terrain you can
   // change.
   //
-  // Hitting the door MESH always counts - you aimed at the door, there is
-  // nothing else you could have meant. A ground point merely NEAR a door edge
-  // only counts when you are already standing beside it, because
-  // `doorNearPoint` claims a band either side of the edge and movement is
-  // the expensive thing in a fight: a click on the floor by a doorway has to
-  // stay a step, not become a refusal - or, worse, a 2 AP door swing.
-  const combatDoorAt = (hit, point) => {
-    if (hit?.kind === 'door') return hit.ref;
-    const key = point ? doorNearPoint(point) : null;
-    return key && atDoor(key, getCombat()?.actingActor) ? key : null;
-  };
+  // Only the visible door mesh counts. The floor beside a door is floor: no
+  // threshold band, proxy, or other invisible click target (designer,
+  // 2026-08-05).
+  const combatDoorAt = (hit) => hit?.kind === 'door' ? hit.ref : null;
+
+  // The terrain edit alone: no gating, no price, no narration. Combat owns
+  // the AP on its own side of the board - the player's active member pays
+  // through toggleDoor below, an AI unit pays from its own ledger - exactly
+  // as setType / toppleEdge / damageEdge already split the world edit from
+  // whoever is being charged for it (AI_PLAN A10).
+  function setDoorOpen(key, open) {
+    grid.setDoorOpen(key, open);
+    scene.refreshDoor(key);
+    onWorldChanged(); // every route in the level may have just changed
+  }
 
   function toggleDoor(key) {
     if (isGameOver()) return;
@@ -82,10 +68,7 @@ export function createDoors({
       }
     }
     const open = !grid.doors.get(key).open;
-    grid.setDoorOpen(key, open);
-    scene.refreshDoor(key);
-    // Every route in the level may have just changed - theirs and yours.
-    onWorldChanged();
+    setDoorOpen(key, open);
     ui.say(open ? 'The door swings open.' : 'You pull the door shut.');
     if (loot.labelsVisible) loot.showLabels();
   }
@@ -122,16 +105,29 @@ export function createDoors({
   // worth walking over to use had no affordance at all. The price rides along
   // rather than being re-declared in combat.js: one number, owned by the rule
   // that charges it.
+  // `key`, `open` and `to` ride along for the AI's sake (AI_PLAN A10): a
+  // sealed unit needs to know a door is SHUT and which side it leads to
+  // before it can decide that opening it beats standing there. The rings
+  // read only x/z/ap, so they are unaffected.
   function doorsBeside(x, z) {
     const out = [];
     for (const key of grid.doors.keys()) {
-      if (!doorSides(key).some(([sx, sz]) => sx === x && sz === z)) continue;
-      out.push({ ...doorMidpoint(key), ap: COMBAT_DOOR_AP });
+      const sides = doorSides(key);
+      if (!sides.some(([sx, sz]) => sx === x && sz === z)) continue;
+      const far = sides.find(([sx, sz]) => !(sx === x && sz === z)) || sides[0];
+      out.push({
+        ...doorMidpoint(key),
+        ap: COMBAT_DOOR_AP,
+        key,
+        open: !!grid.doors.get(key).open,
+        to: far,
+      });
     }
     return out;
   }
 
   return {
-    doorNearPoint, combatDoorAt, toggleDoor, approachDoor, overlayEntries, doorsBeside, atDoor,
+    combatDoorAt, toggleDoor, setDoorOpen, approachDoor,
+    overlayEntries, doorsBeside, atDoor,
   };
 }

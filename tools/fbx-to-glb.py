@@ -32,6 +32,13 @@ import re
 import json
 import argparse
 
+# Mirrors SIGHT_BLOCK_HEIGHT in src/data/tiles.js. Duplicated rather than
+# imported because this script runs inside Blender's Python, which has no view
+# of the game's modules - and a wrong number here is a misleading report rather
+# than a broken build. tests/unit/levels.test.js pins the JS side.
+SIGHT_BLOCK_HEIGHT = 0.75
+
+
 # --- Unity YAML sidecars ------------------------------------------------------
 # Unity's .meta/.mat files are YAML, but pulling in a YAML parser to read three
 # scalars is not worth it - and .mat files use Unity's `!u!21 &2100000` tag
@@ -256,6 +263,8 @@ def main():
 
     cache = {}
     report = {}
+    print(f'[fbx-to-glb] sight-block threshold is {SIGHT_BLOCK_HEIGHT} '
+          f'(src/data/tiles.js) - a prop at or above it stops thrown attacks')
     for root, _dirs, files in os.walk(args.src):
         for fn in sorted(files):
             if not fn.lower().endswith('.fbx'):
@@ -270,10 +279,18 @@ def main():
             if info is None:
                 print(f'[fbx-to-glb] SKIP (no mesh) {fn}')
                 continue
+            # The `height` a tile type declares is not decoration: at or above
+            # SIGHT_BLOCK_HEIGHT the prop stops thrown attacks and blocks the
+            # line a fight is decided on (data/tiles.js blocksSight). That
+            # threshold was invisible at conversion time, so whether a new
+            # bookcase was cover or a wall was discovered in play. The script
+            # already measures the model; say what the measurement implies.
+            info['blocks_sight'] = info['height'] >= SIGHT_BLOCK_HEIGHT
             report[stem] = info
+            sight = 'BLOCKS SIGHT' if info['blocks_sight'] else 'shoot over'
             print(f'[fbx-to-glb] OK {stem:40s} '
                   f'W={info["width"]:.3f} D={info["depth"]:.3f} H={info["height"]:.3f} '
-                  f'tris={info["tris"]}')
+                  f'tris={info["tris"]:6d}  -> {sight}')
 
     if args.report:
         with open(args.report, 'w') as fh:

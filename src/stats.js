@@ -4,6 +4,7 @@ import { COMPANIONS } from './data/companions.js';
 import { ITEMS } from './data/items.js';
 import { ACTIONS } from './data/actions.js';
 import { TALENTS, STARTING_TALENT_BY_CLASS } from './data/talents.js';
+import { ATTR_KEYS } from './data/attributes.js';
 
 // Thrown-weapon ammo: paper picked up from spills, spent on throws. There is
 // no longer a carry limit - hoarding sheets is the whole fantasy, and the cap
@@ -41,13 +42,13 @@ export const PROGRESSION = {
   XP_GROWTH: 1.5,       // each promotion multiplies the threshold by this
 };
 
-// The breather between floors: everyone comes up by `amount`, capped at their
-// maximum. The `Math.max(hp, 0)` is the load-bearing part - a DOWNED character
-// sits at or below zero, and adding to a negative would land them still down,
-// or up by less than everybody else. They are carried to the landing and come
-// to there, which is the rule this expresses.
-export const stairwellHeal = (sheet, amount) =>
-  Math.min(sheet.maxHp, Math.max(sheet.hp, 0) + amount);
+// `stairwellHeal(sheet, amount)` used to live here: the between-floors top-up,
+// whose `Math.max(hp, 0)` was also the ONLY thing standing a downed character
+// back up on the landing. Both halves are gone (TODO.md, designer 2026-08-02:
+// "i also never asked for auto healing between floors"). Damage and casualties
+// both carry to the next floor now, and the revive that replaced the hidden one
+// is an object you have to be carrying - an item with `revive`, spent through
+// main.js `helpUp`.
 
 // The xp threshold a character at `level` should be sitting on. Replays the
 // same rounding gainXp applies step by step, so a rebuilt value and a value
@@ -64,8 +65,18 @@ export function xpNextForLevel(level) {
 // A DOS2-style percentage hit model: hitChance = BASE + accuracy(attacker) -
 // dodge(defender) + mods, clamped. Accuracy derives from Savvy, dodge from
 // Hustle - the same "attributes are the source, numbers are derived" shape the
-// rest of the sheet uses. Enemies aren't sheets, so their innate accuracy/dodge
-// ride through unitCombat(def).
+// rest of the sheet uses, and it is the shape for EVERY combatant. A member and
+// a coworker are the same kind of thing standing on opposite sides of a fight;
+// neither side gets a private hit model.
+//
+// This used to be two models. A sheet derived accuracy from Savvy and dodge
+// from Hustle; an AI unit read a flat authored number and defaulted to ZERO, so
+// the Security Guard's Savvy 5 bought him nothing and every coworker in the game
+// swung at exactly HIT.BASE. `accFromSavvy`/`dodgeFromHustle` below are that one
+// formula, factored out so both storage shapes reach it: a sheet passes its
+// effective attributes and adds gear, a def passes `attr` and adds whatever the
+// entry states innately. The innate fields are the coworker's equivalent of a
+// worn item - a bonus ON TOP of the derivation, never a replacement for it.
 //
 // The model is LIVE (milestone 2): a base 85% hit, nudged ±5% per accuracy/
 // dodge step, clamped to [35%, 95%] so a 1-in-20 whiff always remains and a
@@ -117,18 +128,31 @@ export const MOVE = {
   COST_PER_TILE: 0.5, // AP per tile of clean floor (was an implicit 1.0)
 };
 
+// AP is spent in tenths - a half-tile step, a talent shaving a cost - so float
+// subtraction leaves dust, and a pool of 1.7999999999999998 has to print as
+// "1.8" wherever it is shown. One rounding and one printed shape for the whole
+// game, because the two readouts that show AP are in different files: the
+// combat bar in combat.js and the party bar in ui/hud.js each grew their own
+// copy of this, and the second one pinned itself to the first by COMMENT.
+export const roundAp = (v) => Math.round((Number(v) || 0) * 10) / 10;
+export const fmtAp = (v) => String(roundAp(v));
+
 // --- sneaking (SNEAK_PLAN) ---------------------------------------------------
-// The cone every coworker watches through, and what sneaking costs. All
-// first drafts, deferred to playtest like every other magnitude (SNEAK_PLAN
-// question 1). The cone shape follows DOS2's reported ~90-degree base;
-// SPEED_MULT is its reported -30% sneak penalty; AMBUSH_DMG is Guerrilla's
-// confirmed +40% - sources in SNEAK_PLAN's inspirations section.
+// The cone every coworker watches through. First drafts, deferred to playtest
+// like every other magnitude (SNEAK_PLAN question 1); the shape follows DOS2's
+// reported ~90-degree base - sources in SNEAK_PLAN's inspirations section.
+//
+// Only the cone lives here, and that is the rule rather than an accident: a
+// cone is GEOMETRY, which stealth.js asks for as a system. The other three
+// magnitudes this block used to declare - the sneak speed penalty, Disgruntled's
+// ambush bonus, Forgettable Face's cone shrink - were read by nothing, because
+// each is CONTENT and already lives where content lives: `sneaking.effects
+// .speedMult` in data/statuses.js, and `ambushDamage` / `coneShrink` in
+// data/talents.js. All three matched their live twin to the digit, so this was
+// a silent second source of truth waiting for one of them to be tuned (Q175).
 export const STEALTH = {
   CONE_HALF_ANGLE: 45, // degrees either side of the watcher's facing
   CONE_RANGE: 6,       // true-distance tiles, body to body
-  SPEED_MULT: 0.7,     // sneaking movement speed multiplier
-  AMBUSH_DMG: 0.4,     // Disgruntled: bonus on a sneak-opened fight's first strike
-  CONE_SHRINK: 15,     // Forgettable Face: degrees off every cone's half-angle
 };
 
 // --- reach (TACTICS_PLAN "Revision - reach is a DISTANCE") -------------------
@@ -166,7 +190,9 @@ export const REACH = {
 // keep private copies held together by a `// must match combat.js` comment.
 export const THROW_RANGE = 5;
 
-export const ATTR_KEYS = ['grit', 'hustle', 'savvy', 'composure'];
+// Kept as a stats export for callers that consume the numeric model; the
+// authored order, labels, and blurbs live together in data/attributes.js.
+export { ATTR_KEYS };
 
 // Equipment slots (EQUIPMENT_PLAN.md): a damage choice, a defense choice, a
 // wildcard, and footwear (the floor is a hazard). Rendered as In Hand / Dress
@@ -360,10 +386,17 @@ export function scaleEnemy(def, level) {
   return out;
 }
 
-// The level an enemy actually spawns at on a floor of the given depth: never
-// below its native tier, so a high variant keeps its tier on a shallow floor
-// and a base enemy scales up on a deep one.
-export const effectiveLevel = (def, depth) => Math.max(def.level || 1, depth || 1);
+// `effectiveLevel(def, depth)` used to live here: the floor curve, which spawned
+// any enemy at max(nativeTier, floorDepth) so a base coworker got beefier the
+// deeper you went. It is GONE by design - the designer struck it 2026-08-02
+// ("things shouldnt autoscale thats absurd... by floor i mean. thats just
+// lazy"; PROGRESSION_PLAN.md decisions 13-14). An enemy now spawns at the tier
+// it was PLACED at, and a floor is made harder by authoring harder placements
+// (`"Z": "manager@2"`) or by placing a tougher variant.
+//
+// `scaleEnemy` stays and is still the one curve: a tiered placement has to be
+// derived from somewhere. What changed is who picks the level - the author,
+// not the floor number.
 
 // Normalize any unit archetype - an ENEMY_TYPES def or a class - into the
 // combat stats the AI reads. The only field that differs by registry is max
@@ -381,15 +414,53 @@ export function unitCombat(def) {
     attacks: def.attacks || [],
     xp: def.xp ?? 0,
     loot: def.loot || [],
-    // Innate hit-chance stats for AI units (fractions, default 0). Enemies
-    // aren't sheets, so this is the seam their accuracy/dodge ride through -
-    // the same passthrough every other unit stat uses (HIT_PLAN.md).
-    accuracy: def.accuracy || 0,
-    dodge: def.dodge || 0,
+    // Hit-chance stats, DERIVED from attributes by the same two functions a
+    // sheet uses, plus whatever the entry states innately. A def has no gear
+    // slots, so its flat `accuracy`/`dodge` are its equivalent of worn items -
+    // the Executive's sharper aim, the Guard's trained footing - and they add
+    // to the derivation rather than standing in for it.
+    //
+    // They used to BE it: this read `def.accuracy || 0` and nothing else, so an
+    // AI unit's Savvy and Hustle were inert and every coworker without an
+    // innate line attacked and defended at exactly HIT.BASE. That is the same
+    // bug REVIEW.md found in `grit` one line down, in the same seam, for the
+    // same reason - the attributes were sitting right there on the def and the
+    // read asked for a top-level field instead (HIT_PLAN.md).
+    accuracy: accFromSavvy(def.attr?.savvy) + (def.accuracy || 0),
+    dodge: dodgeFromHustle(def.attr?.hustle) + (def.dodge || 0),
+    // The other three attribute-derived combat stats, by the same rule and for
+    // the same reason. Members had all three and AI units had none: a
+    // coworker's swings rolled bare dice while a member's added Savvy, a
+    // member shaved every hit by Composure while a coworker soaked nothing,
+    // and applyStatus took a resist that every unit call site hardcoded to 0 -
+    // demolition.js even documented "members carry a resist; coworkers do not"
+    // as if it were a rule. It never was ("everything should be the same in
+    // enemies as allies" - designer, 2026-08-05). `soak`/`bonusDmg`, where a
+    // def states them, are the gear-equivalent innate lines, on top.
+    dmgBonus: dmgFromSavvy(def.attr?.savvy) + (def.bonusDmg || 0),
+    deflect: deflectFromComposure(def.attr?.composure) + (def.soak || 0),
+    statusResist: deflectFromComposure(def.attr?.composure),
+    // Raw Composure remains available for continuous movement exposure. The
+    // distance clock is linear per point rather than stepping through the
+    // coarser deflect/status-resist thresholds.
+    composure: def.attr?.composure ?? 0,
     // Melee reach. An AI unit wears no weapon, so its reach is stated on the
     // def outright rather than derived from equipment - a coworker with a long
     // handled thing sets `reach` and everyone else inherits the floor.
     reach: def.reach ?? REACH.DEFAULT,
+    // Grit, for the saves a manhandled body rolls (gritSaveChance). Read
+    // through the same passthrough as accuracy/dodge because an AI unit is not
+    // a sheet - and read from `attr`, which is where the data actually is: the
+    // save sites asked for a top-level `def.grit` that no registry entry has
+    // ever defined, so every enemy in the game saved at the `?? 2` fallback and
+    // the Guard's Grit 7 was silently discarded (REVIEW.md 2026-08-02 sec 1.5).
+    grit: def.grit ?? def.attr?.grit ?? 2,
+    // Hustle, for initiative: everybody rolls d20 + Hustle (initiative.js).
+    // Enemies used to roll d20 + AP under a comment claiming they had no
+    // attributes - which handed the action BUDGET a second job as quickness,
+    // the exact double-counting the member model does through one stat on
+    // purpose (invest in Hustle: act earlier AND do more, coherently).
+    hustle: def.attr?.hustle ?? 0,
   };
 }
 
@@ -420,15 +491,25 @@ export function equippedStats(sheet) {
   return out;
 }
 
-// The equipped weapon's on-hit proc (EQUIPMENT_PLAN #8), or null. A proc is
-// { applies: '<status>', chance, appliesLog? } - combat rolls it when you land
-// the weapon's own swing.
-// A sheet's footwear movement multiplier (1 = ordinary shoes). Multiplied into
-// the per-tile cost, so <1 is faster and >1 is slower.
+// A sheet's movement multiplier (1 = ordinary shoes, no talent). Multiplied
+// into the per-tile cost, so <1 is faster and >1 is slower.
+//
+// Footwear AND the talent, because `moveCost` is on TALENT_EFFECT_KEYS with the
+// comment "stats.js: multiplies the AP a tile costs" and this is that site -
+// it read equipment only, so `corner-office-traction`, whose entire effect is
+// `moveCost: 0.9`, did literally nothing (Q054). Composed rather than summed:
+// good boots and a talent should stack the way boots and a spill already do.
+// One caveat if a SECOND talent ever grants the key: `applyEffect` merges
+// numbers additively, so two grants would reach here as 1.8 rather than 0.81.
+// The "no effect key has two homes" lint is what currently prevents that.
 export function moveCostOf(sheet) {
-  return equippedStats(sheet).moveCost;
+  return equippedStats(sheet).moveCost * (sheet?.talent?.effects?.moveCost ?? 1);
 }
 
+// The equipped weapon's on-hit proc (EQUIPMENT_PLAN #8), or null. A proc is
+// { applies: '<status>', chance, appliesLog? } - combat rolls it when you land
+// the weapon's own swing. (This block spent a while stranded above
+// `moveCostOf`, which left both functions describing the other one - Q192.)
 export function weaponProc(sheet) {
   return ITEMS[sheet?.equipped?.weapon]?.proc || null;
 }
@@ -452,7 +533,7 @@ export function equippedAction(sheet) {
 //
 // The order is by WHERE A POWER CAME FROM, cheapest and most-used first:
 //   1. the basic attack   - the class's own swing (the punch when it has none)
-//   2. shove              - everyone has it, it costs nothing to know
+//   2. universal verbs    - shove, take-cover, pull: everyone has them
 //   3. throwables         - paper ball, then anything folded from it
 //   4. class powers       - the rest of the class list, in the class's order
 //   5. talent powers      - what a talent or a spent class point granted
@@ -460,7 +541,7 @@ export function equippedAction(sheet) {
 // Within a bucket, ties keep the order they arrived in, so a class list stays
 // readable as the class wrote it.
 const ORDER_BASIC = 0;
-const ORDER_SHOVE = 1;
+const ORDER_UNIVERSAL = 1;
 const ORDER_THROW = 2;
 const ORDER_CLASS = 3;
 const ORDER_TALENT = 4;
@@ -505,15 +586,18 @@ function actionBuckets(sheet) {
  * what a character can reach; this only decides where each one sits), and the
  * return is a new array, deduplicated: a class that lists the swing its weapon
  * also brings would otherwise render the same button twice, under one DOM id.
- * Ids not accounted for by any bucket - shove and the throwables, which belong
- * to nobody in particular - fall into their own.
+ * Ids not accounted for by any bucket - the universal verbs and the
+ * throwables, which belong to nobody in particular - fall into their own.
  */
 export function orderedActionIds(sheet, ids) {
   const bucket = actionBuckets(sheet);
   const rank = (id) => {
     if (bucket.has(id)) return bucket.get(id);
     const a = ACTIONS[id];
-    if (a?.type === 'shove') return ORDER_SHOVE;
+    // The action's own flag, not a type check: recognising universality by
+    // `type === 'shove'` is how Take Cover and Pull - universal verbs both -
+    // spent their time filed with the class powers (Q217-A).
+    if (a?.universal === true) return ORDER_UNIVERSAL;
     if (a?.ammoCost) return ORDER_THROW;
     return ORDER_CLASS; // an id from somewhere new: with the powers, not adrift
   };
@@ -540,8 +624,8 @@ export function effectiveAttr(sheet) {
 // every current class - damage now grows by spending points into Savvy). The
 // old "best carried stapler counts" rule is gone: a weapon only counts in hand.
 export function damageBonus(sheet) {
-  const savvy = Math.floor((effectiveAttr(sheet).savvy || 0) / PROGRESSION.DMG_PER_SAVVY);
-  return (sheet.bonusDmg || 0) + savvy + equippedStats(sheet).dmg;
+  return (sheet.bonusDmg || 0) + dmgFromSavvy(effectiveAttr(sheet).savvy)
+    + equippedStats(sheet).dmg;
 }
 
 // A sheet's melee reach in tile-units: the floor every character has, plus
@@ -601,29 +685,58 @@ export function ammoCostOf(sheet, actionId) {
 // incoming hit (one point of damage always lands, so it never fully negates).
 // Outfit/trinket `soak` stacks on top.
 export function deflect(sheet) {
-  return Math.floor((effectiveAttr(sheet).composure || 0) / PROGRESSION.COMP_PER_DEFLECT)
-    + equippedStats(sheet).soak;
+  return deflectFromComposure(effectiveAttr(sheet).composure) + equippedStats(sheet).soak;
 }
 
 // Composure also shakes off applied statuses faster - it shortens the sticky
 // ones (a combat gum flick) by this many turns. Poise on a different axis.
 export function statusResist(sheet) {
-  return Math.floor((effectiveAttr(sheet).composure || 0) / PROGRESSION.COMP_PER_DEFLECT);
+  return deflectFromComposure(effectiveAttr(sheet).composure);
+}
+
+// The two derivations, as pure functions of one attribute. Every combatant in
+// the game reaches its accuracy and its dodge through these - the sheet
+// wrappers below, and `unitCombat` for an AI-driven unit. Kept separate from
+// those wrappers for exactly one reason: the two sides store their attributes
+// differently (a sheet has `attr` plus gear and talents, a def has `attr`), and
+// that storage difference is the ONLY thing either wrapper is allowed to be
+// about. The moment a formula lives in the wrapper, the two sides drift.
+export function accFromSavvy(savvy) {
+  return Math.floor((savvy || 0) / HIT.ACC_PER_SAVVY) * HIT.STEP;
+}
+export function dodgeFromHustle(hustle) {
+  return Math.floor((hustle || 0) / HIT.DODGE_PER_HUSTLE) * HIT.STEP;
+}
+export function dmgFromSavvy(savvy) {
+  return Math.floor((savvy || 0) / PROGRESSION.DMG_PER_SAVVY);
+}
+// One derivation for BOTH of Composure's defensive jobs - the flat damage
+// shave (`deflect`) and the status shortening (`statusResist`) ride the same
+// step, which is why there aren't two functions here.
+export function deflectFromComposure(composure) {
+  return Math.floor((composure || 0) / PROGRESSION.COMP_PER_DEFLECT);
+}
+
+// Soak applied to one landed hit: a shaved hit always leaves one point, so
+// deflect never fully negates. THE damage-mitigation arithmetic for every
+// combatant - the member sink (combat.js unitStrikesMember) and the
+// member-swings-at-a-coworker sites all call this rather than each keeping a
+// private max().
+export function soakHit(dmg, soak) {
+  return soak > 0 ? Math.max(1, dmg - soak) : dmg;
 }
 
 // A sheet's accuracy: how much its Savvy (+ gear acc) adds to the hit chance,
 // as a fraction (0.05 per step). Layered onto the attacker side of hitChance.
 export function accuracy(sheet) {
-  return Math.floor((effectiveAttr(sheet).savvy || 0) / HIT.ACC_PER_SAVVY) * HIT.STEP
-    + equippedStats(sheet).acc;
+  return accFromSavvy(effectiveAttr(sheet).savvy) + equippedStats(sheet).acc;
 }
 
 // A sheet's dodge: how much its Hustle (+ gear dodge) subtracts from an
 // attacker's hit chance, as a fraction. Hustle already buys AP and initiative;
 // this is its defensive second job (HIT_PLAN #2).
 export function dodge(sheet) {
-  return Math.floor((effectiveAttr(sheet).hustle || 0) / HIT.DODGE_PER_HUSTLE) * HIT.STEP
-    + equippedStats(sheet).dodge;
+  return dodgeFromHustle(effectiveAttr(sheet).hustle) + equippedStats(sheet).dodge;
 }
 
 // The chance an attack lands: base + attacker accuracy - defender dodge + any
@@ -644,10 +757,24 @@ export function rollHit(chance, rng = Math.random) {
   return rng() < chance;
 }
 
+// Inclusive integer roll shared by combat resolution and deterministic tests.
+// Keeping the conversion beside rollHit prevents a test from hand-copying a
+// private damage formula that can drift away from the live fight.
+export function rollInt(rng, lo, hi) {
+  return lo + Math.floor(rng() * (hi - lo + 1));
+}
+
 // Returns true when the character levelled up ("got promoted"). Level-ups fully
 // heal and BANK attribute points; the player spends them on the level-up screen
 // (companions included - nothing auto-allocates). Damage no longer rises
 // automatically - it comes from spending those points into Savvy.
+//
+// The heal skips anyone DOWN: a downed member earns the level (gainXpAll pays
+// everybody, Q107-A) but a promotion is not a revive. Every automatic revive
+// in the game has been struck one by one - the stairwell heal, the victory
+// heal - and the one that remains is an item spent by walking over and
+// offering a hand up (main.js helpUp). A full-heal at 0 HP would be the next
+// hidden one, arriving through the XP path this time.
 export function gainXp(sheet, amount) {
   sheet.xp += amount;
   let promoted = false;
@@ -657,7 +784,7 @@ export function gainXp(sheet, amount) {
     sheet.level += 1;
     sheet.attrPoints = (sheet.attrPoints || 0) + PROGRESSION.ATTR_PER_LEVEL;
     sheet.classPoints = (sheet.classPoints || 0) + PROGRESSION.CP_PER_LEVEL;
-    sheet.hp = sheet.maxHp;
+    if (sheet.hp > 0) sheet.hp = sheet.maxHp;
     promoted = true;
   }
   return promoted;
@@ -672,6 +799,38 @@ export function gainXp(sheet, amount) {
 // finding all five, and missing one left that surface quietly under-reporting
 // points the others were advertising.
 export const pendingPoints = (sheet) => (sheet?.attrPoints || 0) + (sheet?.classPoints || 0);
+
+// The banked points that can ACTUALLY be spent right now - which is not the
+// same number, because class points keep accruing per level while a track is
+// finite. Once a track is bought out its points are unspendable forever, and
+// the fullscreen LEVEL UP modal was queued off `pendingPoints`, so it reopened
+// after every victory for the rest of the run with nothing to buy (Q068). On
+// the shipped campaign that starts partway through floor 2 and never stops.
+//
+// Attribute points are always spendable. Class points count only while the
+// track still offers a node - `nodeAvailable` already accounts for taken,
+// prereq-locked and unaffordable, so a track merely GATED by prereqs stops
+// nagging and starts again the moment a node opens.
+//
+// Deliberately a second reading and not a replacement: `pendingPoints` is
+// still what the character sheet and the party bar show, because the points
+// are real and banked and hiding them would be a different lie. This one
+// answers "is it worth interrupting the player", which is a narrower question.
+export const spendablePoints = (sheet) => (sheet?.attrPoints || 0)
+  + (classTrack(sheet || {}).some((n) => nodeAvailable(sheet, n)) ? (sheet?.classPoints || 0) : 0);
+
+// How much this character can carry. The cap follows effective Grit: five
+// guaranteed slots plus five per point. A five-Grit sheet carries 30 items,
+// while gear that grants Grit carries its capacity with it.
+//
+// This is deliberately an admission gate, never a reconciliation pass. If a
+// cap falls below what is already in the bag, nothing drops; the existing guard
+// sites simply refuse further pickups and stowing until the bag drains.
+export function inventoryCapOf(sheet) {
+  if (!sheet) return 0;
+  const grit = (sheet.attr?.grit || 0) + (equippedStats(sheet).attrBonus.grit || 0);
+  return Math.max(0, 5 + 5 * grit);
+}
 
 // Spend one banked attribute point raising `attr` by 1, then re-derive. Returns
 // false (and changes nothing) if the pool is empty or the attribute unknown.
@@ -690,6 +849,20 @@ export function spendAttrPoint(sheet, attr) {
 // is preserved, not free-healed), and only on a spend: this deliberately lives
 // OUTSIDE recomputeDerived, which also runs on save-load and creation, where
 // healing would be wrong.
+// Taking the trinket OFF gives back what putting it on credited. `recompute`
+// already clamps hp down when it EXCEEDS the new max, which is not the same
+// thing: a wounded character is under the max either way, so the clamp never
+// fired and the credit was kept. Equip, unequip, repeat, and the wound is paid
+// off two HP at a time - a free unlimited heal on any character carrying the
+// World's Okayest Employee mug (REVIEW.md 2026-08-02 section 1.2).
+//
+// Floored at 1: removing gear is not a way to die.
+function debitLostHp(sheet, maxHpBefore) {
+  if (sheet.maxHp < maxHpBefore) {
+    sheet.hp = Math.max(1, Math.min(sheet.hp, sheet.hp - (maxHpBefore - sheet.maxHp)));
+  }
+}
+
 function creditNewHp(sheet, maxHpBefore) {
   if (sheet.maxHp > maxHpBefore) {
     sheet.hp = Math.min(sheet.maxHp, sheet.hp + (sheet.maxHp - maxHpBefore));
@@ -814,13 +987,27 @@ export function unequipItem(sheet, slot, invCap = Infinity) {
   const id = sheet.equipped?.[slot];
   if (!id) return false;
   if ((sheet.inventory?.length || 0) >= invCap) return false; // no room - politely refuse
+  const maxHpBefore = sheet.maxHp;
   sheet.equipped[slot] = null;
   (sheet.inventory = sheet.inventory || []).push(id);
   recomputeDerived(sheet);
+  debitLostHp(sheet, maxHpBefore);
   return true;
 }
 
 export function applyDamage(sheet, amount) {
+  // The same guard `EnemyActor.takeDamage` carries, for the same reason and on
+  // the same class of bug. A non-finite amount is always upstream (an action
+  // with no damage dice reaching a damage roll: `rand(undefined, undefined)` is
+  // NaN). Let it through and `hp` becomes NaN, which is never `<= 0` - the
+  // member can never go down, and anything waiting on that waits forever.
+  // Degrade to a visible no-op: the caller is told nothing dropped, and the bug
+  // reads as an attack that did nothing rather than as a soft-lock.
+  //
+  // The party side went unguarded while the enemy side was fixed, which is the
+  // asymmetry rather than the danger - the two halves of "take damage" should
+  // fail the same way.
+  if (!Number.isFinite(amount)) return false;
   sheet.hp = Math.max(0, sheet.hp - amount);
   return sheet.hp <= 0;
 }

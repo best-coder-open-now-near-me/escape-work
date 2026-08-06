@@ -7,15 +7,23 @@ it. The editor stays ours: the designer weighed the official PlayCanvas Editor
 and external grid tools (Tiled/LDtk) and chose the in-repo one `[stated]`
 ("i dont mind using ours if its easiest", 2026-08-01). The grid stays too:
 "we dont need full flexibility, we dont have organic curves to construct or
-anything like that" `[stated]` (2026-08-01). No code yet — this is the plan.
+anything like that" `[stated]` (2026-08-01). **M0–M4 have landed** — see the
+milestones below and `EDITOR_INVENTORY.md` for the round-by-round record.
+
+`EDITOR_INVENTORY.md` is the companion gap list: a full audit of what the editor
+cannot do and what it does that loses work, sized and evidenced, with its own
+six questions for the designer. This doc stays the record for the editor's
+`[stated]`/`[ratified]` decisions and owns the milestones; the inventory feeds
+M0 and M4 and re-tags nothing here.
 
 ## Questions for the designer
 
 Asked in-session on 2026-08-01. **Q1 is closed**: the designer proposed the
 layer-stack model, directed a feasibility spike ahead of milestone work, and
 approved the built result ("this looks great!", 2026-08-01) — see the spike
-section. Q2 and Q3 remain open and the plan proceeds on the recommended
-defaults, tagged `[proposed]`.
+section. **Q2 is closed** (2026-08-02, answer A — see below). **Q3 is
+closed** (decision 9). Q4 remains open and is deliberately not decided by the
+connection-point interaction.
 
 **Q1 — What does "multifloor in a single level" mean mechanically?** The
 stated scene is "a lobby with a lot of height, multifloor in what is really a
@@ -40,6 +48,10 @@ matters, that is a new question, not a silent extension. Status: `[ratified]`
 ("this looks great!", 2026-08-01); decisions 4 and 6 carry the tags.
 
 **Q2 — Do different heights change combat math, or only geometry?**
+**CLOSED 2026-08-02 — answer A**, `[ratified]`: the designer approved the
+recommendation verbatim ("i approve your recommendation", quoting option A,
+2026-08-02). Decision 8 carries the tag. C stays available later without
+rework — the `hitChance` mods stack is the hook — but it is not v1.
 
 - **A. LOS + reach only (recommended).** Height decides what you can see and
   shoot (no firing through the mezzanine slab; melee never crosses layers)
@@ -71,6 +83,24 @@ NPC/companion/tiered-enemy brushes, save-directly-to-`levels/`. Recommended:
 all four (they're each small-to-medium and M0 is independent of the layer
 work), cutting stamps first if the round needs to shrink.
 
+**Q4 — How do multiple stairwells pair?** A level with one connection between
+each adjacent pair of storeys needs no pairing data. The moment there are two,
+the generator needs to know whether lower point A connects to upper point C or
+D. This does not change the settled drop-point interaction, but it changes the
+format and the validation model.
+
+- **A. One connection per adjacent storey pair (recommended).** Ground has an
+  up point; the top storey has a point from below; an intermediate storey has
+  both. No pairing UI or metadata. *Consequence:* simple, visible v1; a level
+  cannot have two distinct stairwells between the same two storeys yet.
+- **B. Named connection pairs.** Points carry the same connection name/id to
+  opt into a pair. *Consequence:* multiple stairwells work immediately, but
+  the supposedly setting-free workflow gains an identity control and orphan
+  pair validation.
+- **C. Pair by placement order.** The first lower point joins the first upper
+  point, and so on. *Consequence:* no visible metadata, but a reorder can
+  silently change a building's routes. Not recommended.
+
 ## Decisions
 
 | # | Decision | Status | Source / notes |
@@ -79,12 +109,12 @@ work), cutting stamps first if the round needs to shrink.
 | 2 | Levels stay grid + legend + ASCII + edge runs; no freeform geometry | `[stated]` | designer, 2026-08-01: "we dont need full flexibility… no organic curves" |
 | 3 | Verticality is required: tall single-level spaces with multifloor play | `[stated]` | designer, 2026-08-01: "a lobby with a lot of height, multifloor in what is really a single 'floor' level" |
 | 4 | Verticality model: stacked full-storey layers, each authored as an ordinary flat map, with one height setting per layer | `[ratified]` | designer-proposed 2026-08-01 ("full floors with one layer/height setting"), embodied by the spike, approved on sight ("this looks great!", 2026-08-01) |
-| 5 | Format: optional `"layers"` array, one entry per floor, bottom-up; a level without it is a single ground layer | `[proposed]` | every shipped level stays valid unchanged; see format section |
-| 6 | Stairs: a marker run on the lower layer; the staircase — geometry, orientation, the connection — is generated, and the opening above is validated loudly rather than carved silently | `[ratified]` | designer-proposed 2026-08-01 ("a procedurally generated staircase tile/space on each layer"); shipped in the spike and approved with it |
+| 5 | Format: optional `"layers"` array, one entry per floor, bottom-up; a level without it is a single ground layer | `[ratified]` | shipped in the spike (merged 2026-08-01) and now written as well as read by the editor (M4). Documented in `levels/README.md`. `height` on layer *i* is the rise ABOVE storey *i*, not its own ceiling |
+| 6 | Storey connections are authored as start/end drop points on their participating storeys. The generator carves and renders the staircase/portal from those points as needed; there is no global staircase setting or stored stair geometry. A missing expected point generates a fallback staircase but is persistently warned and highlighted red; an invalid explicit opening still fails loudly rather than being carved silently. | `[ratified]` | Designer, 2026-08-05: "more a drop point for each storey as connection points to carve from. then we can generate them as needed," followed by "when no start or end point is set on a storey, generate the staircase anyways, but throw up a warning over it or a red highlight maybe?" This supersedes the earlier lower-storey marker-run wording. |
 | 7 | Movement: within a layer as today; between layers only via stair portals; no hop/fall/jump in v1 | `[proposed]` | cheap reversible default; shoving someone off the balcony is a tempting later verb, not v1 |
-| 8 | Cross-layer combat is LOS + reach only; no high/low-ground stat modifier | `[proposed]` | Q2; keeps the `[stated]` "tactics stay as shipped" record intact (TODO.md) |
-| 9 | Editor QoL for v1: undo/redo, region stamps, actor brushes, save-to-disk | `[proposed]` | Q3; gap list itself confirmed by designer 2026-08-01 |
-| 10 | Save-to-disk = dev-server endpoint writing `levels/<id>.json` + regenerated registry | `[proposed]` | dev-mode only; see M0. Cheap default, easily swapped for export-and-paste |
+| 8 | Cross-layer combat is LOS + reach only; no high/low-ground stat modifier | `[ratified]` | Q2, closed 2026-08-02: designer approved option A verbatim ("i approve your recommendation"). Keeps the `[stated]` "tactics stay as shipped" record intact (TODO.md) |
+| 9 | Editor QoL for v1: undo/redo, region stamps, actor brushes, save-to-disk | `[ratified]` | Q3 answered by IQ1 ("painter", 2026-08-02). All four shipped, plus fill/line/rect/eyedropper, a live playability lint, a metadata strip and per-placement rotation |
+| 10 | Save-to-disk = dev-server endpoint writing `levels/<id>.json` + regenerated registry | *superseded* | The designer's pipeline is `[stated]` — "were just outputting to json and uploading to the git" (2026-08-02). Shipped instead: a Download button (Blob + `<a download>`, no server, works in any build) and an editable paste-back. The dev-server endpoint stays available if the paste step still grates — see `EDITOR_INVENTORY.md` IQ6 |
 | 11 | Camera: cutaway — layers above the active character's floor are hidden, with markers for off-layer combatants | `[proposed]` | the genre-standard answer (X-COM, BG3); the readability risk lives here, see Risks |
 
 ## The layer model (decisions 4–7, in detail)
@@ -114,14 +144,25 @@ actors carry a `layer` index, within-layer queries go to that layer's grid,
 and only the genuinely cross-layer questions (sight, targeting, stair
 traversal) know more than one floor exists.
 
-**Stairs.** The designer authors a single stair marker tile on the *lower*
-layer. Generation does the rest: carve the stairwell opening in the layer
-above (a load-time validation error if that space is occupied — never a
-silent head-bonk), orient the run from the open neighbours on both floors,
-emit the ramp geometry and the portal edge that pathfinding uses. Default
-footprint: two tiles of run per storey `[proposed]` — a single-tile storey
-climb reads as a ladder. Dijkstra needs no new theory: per-layer graphs
-joined by portal edges, and AI routes through stairs for free.
+**Storey connections.** The author drops a start and/or end connection point
+on every storey that participates in a vertical route. Generation does the
+rest: carve the required openings, choose and render the staircase geometry,
+and emit the portal edges pathfinding uses. The points are the durable
+authoring data; generated stair geometry is not.
+
+A missing expected point is not a blocker: the generator chooses a
+deterministic fallback and builds the connection anyway. The editor keeps a
+persistent warning in the Inspector, marks the affected storey red, and draws
+the fallback point as a red spatial highlight until the author provides the
+missing endpoint. An explicitly placed point whose opening is occupied or
+otherwise impossible still fails validation -- generation must not silently
+delete authored content to honour it.
+
+The exact rule for pairing several connection points is intentionally still
+open -- see Q4. The settled v1 shape is visible start/end points on the
+participating storeys, not a level-wide staircase setting and not manually
+painted stair runs. Dijkstra needs no new theory: per-storey graphs joined by
+generated portal edges, and AI routes through them for free.
 
 **Combat and LOS.** Within a layer, every shipped rule applies verbatim.
 Across layers, one new primitive carries the load: a 3D sightline sampled
@@ -217,11 +258,15 @@ above pre-paid parts of M1/M2: what remains in them is listed as deltas.
   wash on two floors, AI routing to stairs and picking targets it can
   actually see. High/low-ground modifiers only if Q2 ratifies them — the
   hook (`hitChance` mods) already exists.
-- **M4 — Editor authors layers** (`src/editor.js`). Layer switcher tabs,
-  add/remove layer, per-layer height field, stair marker brush with live
-  validation, and an onion-skin ghost of the layer below while painting an
-  upper floor. Deliberately small — the point of the layer model is that
-  painting a floor IS the editor's existing job.
+- **M4 — Editor authors layers (landed 2026-08-02).** Storey switcher, add and
+  remove a storey, per-storey height, an onion-skin of the storey below, and
+  the stairway brush enabled only where a run has somewhere to climb to. Live
+  validation runs `parseFloors`, so an unclimbable run or an occupied landing
+  is named in the status strip rather than at load time. `toJson` emits the
+  `layers` array with level-wide legends; a single-storey level exports exactly
+  as it always did. It was indeed small — the point of the layer model is that
+  painting a floor IS the editor's existing job, and the storey switcher is
+  mostly bookkeeping around the flat-map code that already worked.
 
 ## Risks and open questions (engineering)
 

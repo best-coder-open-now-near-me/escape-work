@@ -1,7 +1,7 @@
 // Equipment verbs (EQUIPMENT_PLAN M2): equip a weapon from the pockets into
 // its slot and stow it back, driven through the real inventory-panel DOM.
 import { test, expect } from '@playwright/test';
-import { bootAndPick } from './helpers.js';
+import { bootAndPick, withWorldStill } from './helpers.js';
 
 test('equip a weapon from the pockets, then stow it back', async ({ page }) => {
   test.setTimeout(300_000);
@@ -25,11 +25,11 @@ test('equip a weapon from the pockets, then stow it back', async ({ page }) => {
   expect(await page.evaluate(() => window.__game.stats.inventory.includes('red-stapler'))).toBe(true);
 });
 
-test('unequip always succeeds - there is no carry limit to refuse for', async ({ page }) => {
+test('unequip obeys capacity, then succeeds after the bag drains', async ({ page }) => {
   test.setTimeout(300_000);
   await bootAndPick(page, 'office-drone');
-  // A weapon in hand and a deliberately enormous bag. This used to be refused
-  // at ten items; pockets are unlimited now, so gear always has somewhere to go.
+  // The Office Drone has 30 slots. Existing over-cap contents stay intact, but
+  // stowing another item is an admission and must be refused.
   await page.evaluate(() => {
     const s = window.__god.player;
     s.equipped.weapon = 'red-stapler';
@@ -38,8 +38,18 @@ test('unequip always succeeds - there is no carry limit to refuse for', async ({
   await page.keyboard.press('i');
   await expect(page.locator('#inventory-panel')).toBeVisible();
   await page.click('#equip-unequip-weapon');
+  await expect(page.locator('#subtitle')).toContainText('Pockets are full');
+  await expect.poll(() => page.evaluate(() => window.__game.stats.equipped.weapon)).toBe('red-stapler');
+  expect(await page.evaluate(() => window.__game.stats.inventory.length)).toBe(40);
+
+  // Once there is room, the same verb succeeds and fills the last free slot.
+  await page.evaluate(() => { window.__god.player.inventory.length = 29; });
+  await page.keyboard.press('i');
+  await page.keyboard.press('i');
+  await expect(page.locator('#inventory-panel')).toBeVisible();
+  await page.click('#equip-unequip-weapon');
   await expect.poll(() => page.evaluate(() => window.__game.stats.equipped.weapon)).toBe(null);
-  expect(await page.evaluate(() => window.__game.stats.inventory.length)).toBe(41);
+  expect(await page.evaluate(() => window.__game.stats.inventory.length)).toBe(30);
 });
 
 test('a basic weapon attack is always on the bar; the weapon defines it', async ({ page }) => {
@@ -94,13 +104,37 @@ test('the shoes slot equips footwear', async ({ page }) => {
   await expect(page.locator('#equip-slot-shoes')).toContainText('Warehouse Boots');
 });
 
-test('the Send button hands an item to another party member', async ({ page }) => {
+test('the Send button refuses a full recipient, then hands over after space opens', async ({ page }) => {
   test.setTimeout(300_000);
   await bootAndPick(page, 'office-drone');
-  // Alone, there is nobody to hand anything to - so no button at all.
-  await page.evaluate(() => { window.__god.player.inventory = ['cold-coffee']; });
-  await page.keyboard.press('i');
-  await expect(page.locator('#inventory-panel')).toBeVisible();
-  await expect(page.locator('#inv-row-0')).toBeVisible();
-  expect(await page.locator('#inv-send-0').count()).toBe(0);
+  await withWorldStill(page, async () => {
+    // Alone, there is nobody to hand anything to - so no button at all.
+    await page.evaluate(() => { window.__god.player.inventory = ['cold-coffee']; });
+    await page.keyboard.press('i');
+    await expect(page.locator('#inventory-panel')).toBeVisible();
+    await expect(page.locator('#inv-row-0')).toBeVisible();
+    expect(await page.locator('#inv-send-0').count()).toBe(0);
+
+    // Recruit the intern and fill his bag past any legitimate cap. A refused
+    // hand-off must be atomic: the coffee remains with its sender.
+    expect(await page.evaluate(() => window.__god.recruit('it-support'))).toBe(true);
+    await page.evaluate(() => {
+      const recipient = window.__god.party.members[1].sheet;
+      recipient.inventory = new Array(100).fill('paper-wad');
+      window.__god.player.inventory = ['cold-coffee'];
+      window.__god.refreshHud();
+    });
+    await page.click('#inv-send-0');
+    await page.click('#context-menu >> text=Give to');
+    expect(await page.evaluate(() => window.__god.player.inventory)).toEqual(['cold-coffee']);
+    expect(await page.evaluate(() => window.__god.party.members[1].sheet.inventory.includes('cold-coffee'))).toBe(false);
+    expect(await page.evaluate(() => window.__game.narration.at(-1))).toMatch(/pockets are full/i);
+
+    // Drain the recipient below capacity and retry through the same UI.
+    await page.evaluate(() => { window.__god.party.members[1].sheet.inventory = []; });
+    await page.click('#inv-send-0');
+    await page.click('#context-menu >> text=Give to');
+    expect(await page.evaluate(() => window.__god.player.inventory)).toEqual([]);
+    expect(await page.evaluate(() => window.__god.party.members[1].sheet.inventory)).toEqual(['cold-coffee']);
+  });
 });

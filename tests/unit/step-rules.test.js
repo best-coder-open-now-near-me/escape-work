@@ -10,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   surfaceEffect, rawSurfaceDamage, effectiveSurfaceDamage, slipChance, slips,
-  hasGum, speedUnderStatus, surfacePathCost,
+  hasGum, speedUnderStatus, surfacePathCost, impactKindFor,
 } from '../../src/step-rules.js';
 import { SURFACES, FIRE, ELECTRIFIED } from '../../src/data/surfaces.js';
 
@@ -146,4 +146,27 @@ test('path cost prices fire over current over paint, and only the player\'s tale
 
 test('gum is free to path through - that is what makes it a mine', () => {
   assert.equal(surfacePathCost({ surfaceId: 'gum' }), 0);
+});
+
+// --- what a hurting floor looks like (one rule, two layers) -------------------
+
+test('fire beats electrification beats the painted surface', () => {
+  // The precedence is the design, and it is the thing the two copies disagreed
+  // about: combat.js checked electrification FIRST, so a burning puddle threw
+  // sparks in a fight and flame outside one.
+  assert.equal(impactKindFor({ burning: true, electrified: true, surface: 'water' }, SURFACES), 'fire');
+  assert.equal(impactKindFor({ burning: false, electrified: true, surface: 'water' }, SURFACES), 'zap');
+  assert.equal(impactKindFor({ burning: true, electrified: false, surface: 'paper' }, SURFACES), 'fire');
+});
+
+test('a surface brings its own burst from the registry, not a hardcoded list', () => {
+  assert.equal(impactKindFor({ surface: 'paper' }, SURFACES), 'paper');
+  assert.equal(impactKindFor({ surface: 'cable' }, SURFACES), 'zap');
+});
+
+test('a surface with no burst of its own falls back to the generic slam', () => {
+  assert.equal(impactKindFor({ surface: 'coffee' }, SURFACES), 'slam');
+  assert.equal(impactKindFor({ surface: null }, SURFACES), 'slam');
+  assert.equal(impactKindFor({}, SURFACES), 'slam');
+  assert.equal(impactKindFor(), 'slam', 'no argument at all is still an answer');
 });

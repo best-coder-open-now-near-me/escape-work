@@ -95,17 +95,15 @@ test('resisting a stun shortens the window it buys - Composure is not paid twice
   assert.equal(statusLeft(stoic, 'training-credit'), 1 * IMMUNITY_WINDOW_MULT);
 });
 
-test('the window is a status like any other: charted, spared by a debuff sweep, purged', () => {
+test('the window is a status like any other: charted and purged', () => {
   const t = {};
   applyStatus(t, 'stunned');
   const chip = statusList(t).find((s) => s.id === 'training-credit');
   assert.deepEqual(chip, {
     id: 'training-credit', left: 3, sev: 1, name: 'Training Credit', icon: '✅', harmful: false,
   });
-  clearStatuses(t, { harmfulOnly: true });          // the stun goes, the credit stays
+  clearStatuses(t);                                  // a full purge takes both
   assert.equal(hasStatus(t, 'stunned'), false);
-  assert.equal(hasStatus(t, 'training-credit'), true);
-  clearStatuses(t);                                  // a full purge takes it too
   assert.equal(hasStatus(t, 'training-credit'), false);
   assert.equal(applyStatus(t, 'stunned'), true);      // so a reboot re-opens the target
 });
@@ -161,20 +159,7 @@ test('turn-clock and step-clock statuses never tick each other', () => {
   assert.equal(statusLeft(t, 'burning'), 1);  // ...and leaves burning alone
 });
 
-test('clearStatuses: clock sweep, harmful-only, and full purge', () => {
-  const sweep = {};
-  applyStatus(sweep, 'gum'); applyStatus(sweep, 'deflecting'); applyStatus(sweep, 'burning');
-  clearStatuses(sweep, { clock: 'turn' });          // the combat-end sweep
-  assert.equal(hasStatus(sweep, 'gum'), true);       // step-clock persists
-  assert.equal(hasStatus(sweep, 'deflecting'), false);
-  assert.equal(hasStatus(sweep, 'burning'), false);
-
-  const debuffs = {};
-  applyStatus(debuffs, 'gum'); applyStatus(debuffs, 'deflecting');
-  clearStatuses(debuffs, { harmfulOnly: true });
-  assert.equal(hasStatus(debuffs, 'gum'), false);       // harmful cleared
-  assert.equal(hasStatus(debuffs, 'deflecting'), true); // the buff is spared
-
+test('clearStatuses fully purges and reports what it removed', () => {
   const purge = {};
   applyStatus(purge, 'gum'); applyStatus(purge, 'bleed'); applyStatus(purge, 'deflecting');
   const removed = clearStatuses(purge);              // purge wipes everything
@@ -335,4 +320,69 @@ test('re-applying `covered` each tick holds the crouch chip open', () => {
   // Stop re-applying (the walk that breaks cover) and it lapses on schedule.
   tickTurn(croucher); tickTurn(croucher); tickTurn(croucher);
   assert.equal(hasStatus(croucher, 'covered'), false);
+});
+
+test('a resisted re-apply cannot weaken a severity-less entry', () => {
+  // An entry with no `sev` is at full severity - that is what statusSeverity,
+  // the tick and statusList all assume. applyStatus was the one site reading it
+  // as 0, so `Math.max(0, smaller)` picked the smaller: refreshing a status
+  // weakened it, which is precisely what the rule there forbids. The shapes
+  // that arrive without a `sev` are real - a pre-severity save carried through
+  // party.js's migration, and the anti-chain immunity window.
+  const t = { statuses: { blinded: { left: 3 } } };       // no sev: effectively 1
+  applyStatus(t, 'blinded', {}, 5);                        // a heavily resisted re-apply
+  assert.equal(statusSeverity(t, 'blinded'), 1, 'the bite it already had survives');
+});
+
+test('a re-apply still takes the WORSE severity when the new one is worse', () => {
+  // `blinded` rather than `stunned`: a stun grants an anti-chain window, so a
+  // second stun is REFUSED rather than compared - which is the right behaviour
+  // and the wrong fixture for this rule.
+  const t = {};
+  applyStatus(t, 'blinded', {}, 5);                        // resisted: blunted
+  assert.ok(statusSeverity(t, 'blinded') < 1);
+  applyStatus(t, 'blinded', {}, 0);                        // unresisted: full
+  assert.equal(statusSeverity(t, 'blinded'), 1, 'the worse of the two wins');
+});
+
+test('a resisted FIRST application still lands blunted', () => {
+  // The other side of the floor: with no entry yet the severity must come from
+  // the roll, not from the severity-less default - or Composure would stop
+  // blunting anything.
+  const t = {};
+  applyStatus(t, 'blinded', {}, 5);
+  assert.ok(statusSeverity(t, 'blinded') < 1, 'resist blunts a fresh application');
+});
+
+// --- statuses that outlive their own registry entry --------------------------
+// A save carries status IDS, not definitions, so a status that gets renamed or
+// retired arrives on a live sheet with nothing to look it up in.
+
+test('a status id the registry no longer knows is dropped by the tick', () => {
+  // Immortal before: the tick skipped it (no def, no clock), so it never
+  // decremented and never expired, and `hasStatus` went on answering yes.
+  const t = { statuses: { 'retired-in-v7': { left: 3, sev: 1 } } };
+  assert.equal(hasStatus(t, 'retired-in-v7'), true);
+  tickTurn(t);
+  assert.equal(hasStatus(t, 'retired-in-v7'), false);
+  assert.equal('retired-in-v7' in t.statuses, false, 'gone from the map, not just expired');
+});
+
+test('a purge removes an unknown legacy id too', () => {
+  const target = { statuses: { 'retired-in-v7': { left: 3 } } };
+  clearStatuses(target);
+  assert.deepEqual(Object.keys(target.statuses), []);
+});
+
+test('a duration that is not a finite number applies nothing, and says so', () => {
+  const id = Object.keys(STATUSES)[0];
+  const t = { statuses: {} };
+  // NaN passed `dur <= 0` (nothing compares true to NaN) and wrote left: NaN -
+  // an entry no clock can decrement and no reader counts as present - while
+  // still returning true, so the caller narrated and billed for it.
+  assert.equal(applyStatus(t, id, { duration: NaN }), false);
+  assert.deepEqual(Object.keys(t.statuses), []);
+  // Infinity got in the same way and could never expire.
+  assert.equal(applyStatus(t, id, { duration: Infinity }), false);
+  assert.deepEqual(Object.keys(t.statuses), []);
 });

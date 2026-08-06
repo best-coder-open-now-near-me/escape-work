@@ -122,7 +122,7 @@ working untouched.
 | 7 | Summon caps | Per-summoner **live cap** (e.g. 2) + **cooldown** in rounds (e.g. 2), both data on the summon descriptor | Without a cap an enemy HR out-summons your DPS and the fight never ends; without a cooldown a player HR trivializes everything turn one. Both are tunable content, not code. |
 | 8 | Lifespan | ~~**Combat-scoped**: summons live until killed or the fight ends.~~ **Superseded — see the lifespan revision below.** A summon serves `lifetimeTurns` of its OWN turns and files out when they run out, wherever that lands | The combat-scoped rule was the simplest thing that worked, and it played as a bug: an applicant posted two turns ago blinked out the instant the last coworker fell. The timed expiry this row deferred ("nice flavor, more bookkeeping") is what shipped. Summons are still never serialized, so they can't leak across floors. |
 | 9 | Summon death | Summons **die outright** (topple + prune) — no downed/revive. A player-team summon falling is **never** a game-over | The downed courtesy exists to protect characters you've invested in (PARTY_PLAN #7). A summon is spent on purpose; defeat stays "party wipe only." |
-| 10 | Spawn placement | BFS the nearest free, walkable, unoccupied tiles around the summoner; face them outward. Too few free tiles → summon fewer, with a flavor line | Reuses `isWalkable` + the occupancy checks already in `main.js`. Never spawn onto a wall, hazard-locked pocket, or another body. |
+| 10 | Spawn placement | The descriptor declares `placement.anchor` (`aim` or `summoner`) and hazard policy. Search deterministic continuous body-clear rests around that exact anchor; too little room means fewer arrivals. | `[ratified]` by DEGRID D11/D13 (designer, 2026-08-06). Wall/body clearance is a system invariant; anchor and hazard avoidance are content data, and no nullable point secretly selects a mode. |
 | 11 | Occupancy & pathing | Player-team summons **block enemies** (join the `partyAt`/`blockedByParty` set) and are **pass-through for the party** — exactly the companion rule. Enemy-team summons live in `enemies[]`, so they block and are targetable for free | Keeps followers/summons from jamming doorways (PARTY_PLAN follower rule) while still forming a real front line against enemies. |
 | 12 | Which HR gets it | **Enemy side**: the existing `ENEMY_TYPES.hr`. **Player side**: a new **playable Human Resources class** (`hr.glb` already ships) owning a `summon-applicants` action | Resolved per the steer — HR is a class. The action is just an id, so if a recruitable HR *companion* ever wants the same power, it's a one-line data add. |
 
@@ -208,8 +208,9 @@ through `unitCombat(def)` so a class-backed def works as well as an
   stays green.
 - A `summons` array holds player-team AI units (enemy-team summons go straight
   into the shared `enemies`/`engaged` lists and need no new container).
-- `resolveSummon({ summoner, team, descriptor })`: rolls placement tiles
-  (decision #10) via a `world.spawnSummon` hook, builds each actor from the
+- `resolveSummon({ summoner, team, descriptor })`: carries the complete
+  descriptor through `world.spawnSummon`; decision #10 resolves continuous
+  body-clear points around its declared anchor, then builds each actor from the
   referenced class archetype, tags `team/summonedBy/summoned`, and files it
   into the right list. Enforces the live cap + cooldown (decision #7).
 - Enemy AI, before its move/attack decision: if `unit.def.summon` exists, is
@@ -279,8 +280,9 @@ applicants.)
 1. **Faction layer + the archetype seam + enemy HR summon.** ✅ Landed. The
    `playable` flag + AI-combat fields on the class shape; the `applicant`
    non-playable class + picker filter; the `unitCombat` accessor;
-   `team`/`summonedBy`/`summoned` on actors; `world.spawnSummon` + a
-   `freeTilesNear` placement helper; `resolveSummon` (team-parameterized); the
+   `team`/`summonedBy`/`summoned` on actors; `world.spawnSummon` + the original
+   tile placement helper (superseded by decision #10's continuous search);
+   `resolveSummon` (team-parameterized); the
    HR `summon` descriptor and the enemy-AI trigger (off cooldown, under a live
    cap, affordable → posts the req, else fights). Fighting HR now means
    fighting the temps it posts — capped at 2, cooling down 2 rounds, worth no
@@ -297,7 +299,7 @@ applicants.)
    `pickTarget → hostilesFor`/`enemyAttack → aiAttack`/`enemyAdvance →
    aiAdvance` generalization so enemies range over party **+** player summons
    and summons range over enemies; player summons block enemy pathing
-   (`summonAt` in `findEnemyPath`/`freeTilesNear`/`occupied`) yet stay
+   (`summonAt` in `findEnemyPath`/`occupied`) yet stay
    pass-through for the party; friendly Ctrl rings; a non-selectable `summon`
    pick kind. Driven in tests by a `__combat.summonAlly()` debug hook, since no
    player action exists yet. Ally units fight for you and vanish on victory;

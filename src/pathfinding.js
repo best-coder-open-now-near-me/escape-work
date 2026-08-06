@@ -1,8 +1,5 @@
 // Grid pathfinding. Pure logic - no PlayCanvas, no DOM.
-export const DIRS8 = [
-  [1, 0], [-1, 0], [0, 1], [0, -1],
-  [1, 1], [1, -1], [-1, 1], [-1, -1],
-];
+import { DIAGONAL_DIRS, NEIGHBOR_DIRS } from './directions.js';
 
 // Shortest 8-directional path (Dijkstra: diagonals cost sqrt(2)). A diagonal
 // step is only allowed when both adjacent orthogonal tiles are open, so actors
@@ -13,24 +10,45 @@ export const DIRS8 = [
 // individual steps - this is how edge walls (partitions between tiles) block
 // movement without occupying a tile. Returns [[x, z], ...] including the start
 // tile, or null when unreachable.
+// A ceiling on how much floor one search may explore before giving up.
+//
+// The search is bounded in practice by the map's walls - `grid.defAt` returns
+// the tall `wall` def out of bounds, so every shipped world is sealed and the
+// frontier is finite. This is the guard for when that stops being true: an
+// unbounded `isWalkable`, or a non-integer goal the frontier can never land on,
+// makes the loop run until the tab dies. Verified: `findPath(() => true, 0, 0,
+// NaN, 3)` never returns.
+//
+// Kept because the cost is an integer compare in a loop that already runs and
+// the failure it replaces is a frozen browser, not a cosmetic one. The number
+// is far above any real search - the largest shipped floor is well under a
+// thousand tiles - so reaching it means something upstream is wrong, and a null
+// ("no route") is the honest thing to hand back.
+const MAX_EXPLORED = 200_000;
+
 export function findPath(isWalkable, sx, sz, tx, tz, extraCost = null, stepOpen = null) {
   if (!isWalkable(tx, tz)) return null;
   const key = (x, z) => x + ',' + z;
   const dist = new Map([[key(sx, sz), 0]]);
   const prev = new Map();
   const open = [[0, sx, sz]];
+  let explored = 0;
   while (open.length) {
+    if (++explored > MAX_EXPLORED) return null;
     open.sort((a, b) => a[0] - b[0]); // tiny grids; a heap would be overkill
     const [d, x, z] = open.shift();
     if (x === tx && z === tz) break;
     if (d > dist.get(key(x, z))) continue; // stale queue entry
-    for (const [dx, dz] of DIRS8) {
+    for (const [dx, dz] of NEIGHBOR_DIRS) {
       const nx = x + dx;
       const nz = z + dz;
       if (!isWalkable(nx, nz)) continue;
       if (dx !== 0 && dz !== 0 && !(isWalkable(x + dx, z) && isWalkable(x, z + dz))) continue;
       if (stepOpen && !stepOpen(x, z, nx, nz)) continue;
-      const nd = d + (dx !== 0 && dz !== 0 ? Math.SQRT2 : 1) + (extraCost ? extraCost(nx, nz) : 0);
+      // A cost callback may integrate the whole edge (nx,nz <- x,z). Legacy
+      // tile callbacks simply ignore the trailing coordinates.
+      const nd = d + (dx !== 0 && dz !== 0 ? Math.SQRT2 : 1)
+        + (extraCost ? extraCost(nx, nz, x, z) : 0);
       const k = key(nx, nz);
       if (nd < (dist.get(k) ?? Infinity)) {
         dist.set(k, nd);
@@ -163,8 +181,21 @@ export function clampToClearance(isOpen, edgeOpen, px, pz, radius = BODY_RADIUS)
   if (blocked(cx - 1, cz)) x = Math.max(x, cx - 0.5 + radius);
   if (blocked(cx, cz + 1)) z = Math.min(z, cz + 0.5 - radius);
   if (blocked(cx, cz - 1)) z = Math.max(z, cz - 0.5 + radius);
-  for (const [dx, dz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
-    if (isOpen(cx + dx, cz + dz)) continue;
+  // The four corner posts. A post is solid when the DIAGONAL TILE is solid -
+  // or when any wall segment terminates there, which is the case the tile test
+  // alone cannot see.
+  //
+  // The two edges touching the body's own tile are already handled above: an
+  // orthogonal clamp pushes it clear along that axis. The two on the FAR side
+  // were not consulted at all, so a body standing in the tile beside a
+  // partition's row could round its end post and clip straight through it -
+  // measured at 0.25 of a tile with BODY_RADIUS 0.3, i.e. the body ending up
+  // 0.05 from a post it must keep 0.3 from.
+  const postSolid = (dx, dz) => !isOpen(cx + dx, cz + dz)
+    || (edgeOpen && (!edgeOpen(cx + dx, cz, cx + dx, cz + dz)
+      || !edgeOpen(cx, cz + dz, cx + dx, cz + dz)));
+  for (const [dx, dz] of DIAGONAL_DIRS) {
+    if (!postSolid(dx, dz)) continue;
     const kx = cx + dx * 0.5;
     const kz = cz + dz * 0.5;
     const vx = x - kx;
@@ -253,7 +284,9 @@ export function truncateByBudget(path, budget, rate) {
     let t = 0;
     for (let s = 0; s < n; s++) {
       const mid = (t + step / 2) / len;
-      const r = rate(Math.round(ax + (bx - ax) * mid), Math.round(az + (bz - az) * mid));
+      // Rates are continuous world questions now. Integer-based callbacks
+      // remain compatible, while fine surfaces can price the actual feet.
+      const r = rate(ax + (bx - ax) * mid, az + (bz - az) * mid);
       const c = step * r;
       if (cost + c > budget + 1e-9) {
         const within = r > 0 ? Math.max(0, (budget - cost) / r) : step;
@@ -310,7 +343,11 @@ function standsClear(isWalkable, edgeOpen, px, pz) {
 // every candidate must also be a spot a body could legally stand
 // (standsClear). A few rounds propagate the slack along the path.
 const TIGHTEN_ROUNDS = 3;
-function tightenPath(isWalkable, path, edgeOpen) {
+const segmentPenaltyOf = (penalty, a, b) => penalty
+  ? penalty(a[0], a[1], b[0], b[1])
+  : 0;
+
+function tightenPath(isWalkable, path, edgeOpen, segmentPenalty = null) {
   if (path.length <= 2) return path;
   const out = path.map((p) => [p[0], p[1]]);
   for (let r = 0; r < TIGHTEN_ROUNDS; r++) {
@@ -329,7 +366,13 @@ function tightenPath(isWalkable, path, edgeOpen) {
         const t = (lo + hi) / 2;
         const px = b[0] + (mx - b[0]) * t;
         const pz = b[1] + (mz - b[1]) * t;
-        if (standsClear(isWalkable, edgeOpen, px, pz)
+        const p = [px, pz];
+        const oldPenalty = segmentPenaltyOf(segmentPenalty, a, b)
+          + segmentPenaltyOf(segmentPenalty, b, c);
+        const newPenalty = segmentPenaltyOf(segmentPenalty, a, p)
+          + segmentPenaltyOf(segmentPenalty, p, c);
+        if (newPenalty <= oldPenalty + 1e-8
+          && standsClear(isWalkable, edgeOpen, px, pz)
           && walkableCorridor(isWalkable, a[0], a[1], px, pz, edgeOpen)
           && walkableCorridor(isWalkable, px, pz, c[0], c[1], edgeOpen)) lo = t;
         else hi = t;
@@ -353,7 +396,7 @@ function tightenPath(isWalkable, path, edgeOpen) {
 // bend kept whenever the room genuinely is that tight.
 const BEND_RADIUS = 0.4;
 const BEND_STEPS = 3;
-function roundBends(isWalkable, path, edgeOpen) {
+function roundBends(isWalkable, path, edgeOpen, segmentPenalty = null) {
   if (path.length <= 2) return path;
   const out = [path[0]];
   for (let i = 1; i < path.length - 1; i++) {
@@ -390,8 +433,29 @@ function roundBends(isWalkable, path, edgeOpen) {
     for (let s = 1; ok && s < arc.length; s++) {
       ok = walkableCorridor(isWalkable, arc[s - 1][0], arc[s - 1][1], arc[s][0], arc[s][1], edgeOpen);
     }
-    if (ok) out.push(...arc);
-    else out.push(b); // too tight to round - the sharp turn is the truth
+    if (ok && segmentPenalty) {
+      const sharpPenalty = segmentPenaltyOf(segmentPenalty, a, b)
+        + segmentPenaltyOf(segmentPenalty, b, p2);
+      let arcPenalty = segmentPenaltyOf(segmentPenalty, a, p1);
+      for (let s = 1; s < arc.length; s++) {
+        arcPenalty += segmentPenaltyOf(segmentPenalty, arc[s - 1], arc[s]);
+      }
+      ok = arcPenalty <= sharpPenalty + 1e-8;
+    }
+    if (ok) { out.push(...arc); continue; }
+    // Too tight to round - the sharp turn is the truth. But the sharp turn is
+    // only the truth if a -> b is walkable, and the FIRST check above is
+    // exactly `a -> p1`, where p1 sits ON the segment a -> b. So when that is
+    // the check that failed, this fallback used to emit a leg the loop had
+    // just proved illegal, and a smoothed walk crossed a partition.
+    //
+    // `a` is only ever wrong that way when the PREVIOUS bend rounded and left
+    // us on its arc's exit point; the input path's own corner, path[i - 1],
+    // is corridor-connected to b (tightenPath keeps every chord it moves).
+    // Stepping back onto it costs a barely-visible kink at one bend and is
+    // the honest route.
+    if (walkableCorridor(isWalkable, a[0], a[1], b[0], b[1], edgeOpen)) out.push(b);
+    else out.push(path[i - 1], b);
   }
   out.push(path[path.length - 1]);
   return out;
@@ -402,17 +466,33 @@ function roundBends(isWalkable, path, edgeOpen) {
 // corners they round (tightenPath) and curve through them (roundBends), so
 // movement flows at any angle, hugs walls at body radius, and never reads
 // as aiming at waypoints.
-export function smoothPath(isWalkable, path, edgeOpen = null) {
+export function smoothPath(isWalkable, path, edgeOpen = null, segmentPenalty = null) {
   if (!path || path.length <= 2) return path;
   const out = [path[0]];
   let i = 0;
   while (i < path.length - 1) {
     let j = path.length - 1;
-    while (j > i + 1 && !walkableCorridor(isWalkable, path[i][0], path[i][1], path[j][0], path[j][1], edgeOpen)) j--;
+    while (j > i + 1) {
+      const clear = walkableCorridor(
+        isWalkable, path[i][0], path[i][1], path[j][0], path[j][1], edgeOpen,
+      );
+      let routedPenalty = 0;
+      for (let k = i + 1; segmentPenalty && k <= j; k++) {
+        routedPenalty += segmentPenaltyOf(segmentPenalty, path[k - 1], path[k]);
+      }
+      const shortcutPenalty = segmentPenaltyOf(segmentPenalty, path[i], path[j]);
+      if (clear && shortcutPenalty <= routedPenalty + 1e-8) break;
+      j--;
+    }
     out.push(path[j]);
     i = j;
   }
-  return roundBends(isWalkable, tightenPath(isWalkable, out, edgeOpen), edgeOpen);
+  return roundBends(
+    isWalkable,
+    tightenPath(isWalkable, out, edgeOpen, segmentPenalty),
+    edgeOpen,
+    segmentPenalty,
+  );
 }
 
 // The cheapest route to a tile a RANGED attack could fire at (tx, tz) from, or

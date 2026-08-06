@@ -10,10 +10,14 @@
 // and by DERIVING it from a captured base on the other, so a wanderer who got
 // gummed before a fight started wore the slow twice.
 //
-// The three callers keep what genuinely differs - the narration (the lines are
-// written in the player's voice, and a temp is not the player), the FX, whether
-// gum ever wears off (a member's ticks down, a coworker's is for keeps) - and
+// The callers keep what genuinely differs - the narration (the lines are
+// written in the player's voice, and a temp is not the player) and the FX - and
 // share the DECISIONS.
+//
+// "A coworker's gum is for keeps" used to belong in that list and no longer
+// does: combat ticks a unit's wad down on the same step clock a member's uses.
+// It is still for keeps on an out-of-combat amble, which is a gap rather than a
+// rule (Q032), not the deliberate asymmetry this sentence once described.
 //
 // The floor arrives as a plain fact sheet rather than a grid:
 //   { burning, electrified, surfaceId }
@@ -118,4 +122,22 @@ export function surfacePathCost(floor = {}, talents = {}) {
   if (floor.burning) return FIRE.pathCost;
   if (floor.electrified) return talents?.shockImmune ? 1 : ELECTRIFIED.pathCost;
   return SURFACES[floor.surfaceId]?.pathCost || 0;
+}
+
+// What a hurting floor LOOKS like when it bites, in one place.
+//
+// The precedence is the design (main.js's own wording): fire beats
+// electrification beats the painted surface, so a burning puddle throws flame
+// rather than sparks. It is here because it was written twice - `hazardKind` in
+// combat.js and `surfaceImpactKind` in main.js - and the two copies had already
+// drifted into checking fire and electrification in OPPOSITE orders, so a tile
+// that was both showed flame to one layer and sparks to the other.
+//
+// The surface's own burst comes from its registry entry (`impact`), not from a
+// hardcoded list of ids, so a new surface brings its own FX with it.
+export function impactKindFor({ burning = false, electrified = false, surface = null } = {},
+  surfaces = {}) {
+  if (burning) return 'fire';
+  if (electrified) return 'zap';
+  return surfaces[surface]?.impact || 'slam';
 }

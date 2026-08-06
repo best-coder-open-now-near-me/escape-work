@@ -3,10 +3,28 @@
 // shading.js, tile visuals in tile-renderer.js, model loading in models.js,
 // combat FX in fx.js.
 import { TILE_TYPES } from './data/tiles.js';
-import { createTileRenderer, computeCarpetZones } from './tile-renderer.js';
+import { createTileRenderer, computeCarpetZones, surfaceVisualGroups } from './tile-renderer.js';
 import { occludes } from './occlusion.js';
 
-const pc = window.pc;
+// `globalThis.window?.pc` rather than `window.pc`: the bare read runs at IMPORT
+// time and throws under node, which is what kept this module - and anything
+// importing it - out of the unit suite. Nothing here touches `pc` at module
+// scope, so deferring the failure to first USE costs nothing and buys the file
+// an import. Same treatment as actors.js/models.js/shading.js already carry.
+const pc = globalThis.window?.pc;
+
+// The fade transition must return each solid to the material it arrived with;
+// a custom solid is not necessarily a cubicle wall. Kept pure so the material
+// identity contract is testable without PlayCanvas.
+export const wallFadeMaterial = (wall, faded) => (faded ? wall.ghostMat : wall.solidMat);
+
+// Surface-only map characters normalize to plain floor for every rule query,
+// but their authored identity still tells carpet propagation that this cell is
+// an object sitting inside a coloured zone rather than a deliberate gray-floor
+// boundary. Runtime surfaces have no authoredType and naturally keep whatever
+// terrain was already beneath them.
+export const surfaceUnderlayTypeAt = (grid, x, z) =>
+  grid.surfaceField.recordAt(x, z)?.authoredType || grid.typeAt(x, z);
 
 export function createApp(canvas) {
   const app = new pc.Application(canvas, {
@@ -51,10 +69,28 @@ export function createApp(canvas) {
 export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 } = {}) {
   const r = createTileRenderer(app, { root, baseY });
   const walls = [];
-  const surfaceVisuals = new Map(); // "x,z" -> entity
+  const surfaceVisuals = new Map(); // visual-group key -> { entity, cells }
   const propVisuals = new Map();
+  // Everything else `renderMarker` hands back. The two filers below only ever
+  // kept `wall`, `surface` and `prop`, so the other two kinds were rendered
+  // and then forgotten: a `marker` (the toppled partition's floor slab, every
+  // `onFloor` remnant) and the FOLIAGE a model prop wears. Forgotten means
+  // `removePropVisual` cannot reach them, so `refreshTile` drew the new mesh
+  // on top of the old one and a plant that had been toppled kept its leaves.
+  // A tile may own several (a model's holder is filed in propVisuals, its
+  // leaves here), so this one is keyed to a LIST.
+  const extraVisuals = new Map(); // "x,z" -> entity[]
+  const trackExtra = (x, z, entities) => {
+    if (!entities?.length) return;
+    const key = x + ',' + z;
+    const list = extraVisuals.get(key) || [];
+    for (const e of entities) if (e) list.push(e);
+    if (list.length) extraVisuals.set(key, list);
+  };
 
-  const carpetAt = computeCarpetZones(grid.typeAt, grid.width, grid.height);
+  const carpetAt = computeCarpetZones(
+    (x, z) => surfaceUnderlayTypeAt(grid, x, z), grid.width, grid.height,
+  );
 
   for (let z = 0; z < grid.height; z++) {
     for (let x = 0; x < grid.width; x++) {
@@ -73,12 +109,13 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
       const interactive = !!def && (def.loot || def.shop || def.ignitable || def.explosive);
       const res = r.renderMarker(x, z, type, {
         electrified: grid.isElectrified(x, z),
-        surfaceAt: (sx, sz) => TILE_TYPES[grid.typeAt(sx, sz)]?.surface || null,
+        rotY: grid.rotAt?.(x, z) ?? null,
+        surfaceAt: grid.surfaceAt,
         // A model prop's holder only exists once its .glb lands, so this is the
         // one moment it is offered. Track it exactly like a primitive prop's
         // visual: `removePropVisual` is otherwise a silent no-op for it, and
         // ARCHITECTURE.md's growth path promises a new prop is pure DATA - so
-        // the first model prop given `explosive: true` would have had its grid
+        // the first model prop given an `explosive` descriptor would have its grid
         // cell cleared to walkable floor with the mesh still standing on it,
         // still registered for picking.
         onAsync: (holder) => {
@@ -89,14 +126,29 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
       // `top` is the world Y of the wall's top face - the fade test needs it to
       // know whether the sightline clears this wall (see occlusion.js). A solid
       // tile's box is centred at def.height / 2 and def.height tall.
-      if (res.kind === 'wall') walls.push({ entity: res.entities[0], x, z, top: baseY + def.height, faded: false });
-      else if (res.kind === 'surface') surfaceVisuals.set(x + ',' + z, res.entities[0]);
+      if (res.kind === 'wall') {
+        walls.push({
+          entity: res.entities[0], x, z, top: baseY + def.height, faded: false,
+          // Preserve this tile type's own opaque material across a fade. The
+          // generic wall material is only correct for the `wall` tile.
+          solidMat: res.entities[0].render.meshInstances[0].material,
+          ghostMat: r.wallGhost,
+        });
+      }
+      else if (res.kind === 'surface') surfaceVisuals.set(`marker:${x},${z}`, {
+        entity: res.entities[0], cells: [{ x, z }],
+      });
       else if (res.kind === 'prop') {
         propVisuals.set(x + ',' + z, res.entities[0]);
         if (interactive && picking) picking.register(res.entities[0], 'prop', { x, z });
-      }
+      } else trackExtra(x, z, res.entities);
     }
   }
+  // SurfaceField is already seeded when scene construction starts. Draw it
+  // after terrain/props so surface-only authored tiles (normalized to floor)
+  // do not need to masquerade as terrain to get a visual.
+  renderAllSurfaces();
+  grid.surfaceField.onChange(renderAllSurfaces);
   // Edge walls (partitions between tiles) join the same fade list, keyed by
   // their world-space centre - and by their grid key, so a toppled partition
   // (TACTICS_PLAN M6) can find its own mesh to retire.
@@ -104,8 +156,10 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
   const addEdgeWall = (k, orient) => {
     const [x, z] = k.split(',').map(Number);
     const entry = orient === 'h'
-      ? { entity: r.renderEdgeWall(x, z, 'h'), x, z: z - 0.5, top: baseY + r.edgeWallTop, faded: false }
-      : { entity: r.renderEdgeWall(x, z, 'v'), x: x - 0.5, z, top: baseY + r.edgeWallTop, faded: false };
+      ? { entity: r.renderEdgeWall(x, z, 'h'), x, z: z - 0.5, top: baseY + r.edgeWallTop, faded: false,
+        solidMat: r.tileMats.wall, ghostMat: r.wallGhost }
+      : { entity: r.renderEdgeWall(x, z, 'v'), x: x - 0.5, z, top: baseY + r.edgeWallTop, faded: false,
+        solidMat: r.tileMats.wall, ghostMat: r.wallGhost };
     walls.push(entry);
     edgeWallVisuals.set(orient + ':' + k, entry);
   };
@@ -136,7 +190,9 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
     const [orient, coords] = [key[0], key.slice(2)];
     const [x, z] = coords.split(',').map(Number);
     const { holder, panel } = r.renderDoor(x, z, orient, grid.doors.get(key).open);
-    picking?.register(holder, 'door', key);
+    // Doors use their visible, rotated mesh bounds rather than a padded or
+    // world-aligned proxy: a click must be directly on the panel or hardware.
+    picking?.register(holder, 'door', key, { precise: true });
     const wallEntry = {
       entity: panel,
       x: orient === 'v' ? x - 0.5 : x,
@@ -167,35 +223,49 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
       const shouldFade = occludes(w, cam, feet);
       if (shouldFade !== w.faded) {
         w.faded = shouldFade;
-        w.entity.render.meshInstances[0].material = shouldFade
-          ? (w.ghostMat || r.wallGhost)
-          : (w.solidMat || r.tileMats.wall);
+        w.entity.render.meshInstances[0].material = wallFadeMaterial(w, shouldFade);
       }
     }
   }
 
+  function renderAllSurfaces() {
+    for (const visual of surfaceVisuals.values()) visual.entity.destroy();
+    surfaceVisuals.clear();
+    for (const group of surfaceVisualGroups(grid.surfaceField.entries())) {
+      const res = r.renderSurfaceGroup(group.cells, grid.surfaceField, {
+        electrified: group.cells.some((cell) => grid.isElectrified(cell.x, cell.z)),
+      });
+      if (res.kind === 'surface') {
+        surfaceVisuals.set(group.key, { entity: res.entities[0], cells: group.cells });
+      }
+    }
+  }
   function hideSurfaceVisual(x, z) {
-    const v = surfaceVisuals.get(x + ',' + z);
-    if (v) {
-      v.destroy();
-      surfaceVisuals.delete(x + ',' + z);
+    const cellsPerTile = grid.surfaceField.cellsPerTile;
+    for (const [key, visual] of [...surfaceVisuals]) {
+      const touchesTile = visual.cells.some((cell) => cell.ix == null
+        ? Math.round(cell.x) === x && Math.round(cell.z) === z
+        : Math.floor(cell.ix / cellsPerTile) === x && Math.floor(cell.iz / cellsPerTile) === z);
+      if (!touchesTile) continue;
+      visual.entity.destroy();
+      surfaceVisuals.delete(key);
     }
   }
   // Surfaces created at runtime (Bulk Mail leaving paper drifts). Registered
   // in surfaceVisuals so fire can consume them like any painted surface.
   function addSurfaceVisual(x, z, type) {
-    hideSurfaceVisual(x, z);
-    const res = r.renderMarker(x, z, type, {
-      electrified: grid.isElectrified(x, z),
-      surfaceAt: (sx, sz) => TILE_TYPES[grid.typeAt(sx, sz)]?.surface || null,
-    });
-    if (res.kind === 'surface') surfaceVisuals.set(x + ',' + z, res.entities[0]);
+    renderAllSurfaces();
   }
   function removePropVisual(x, z) {
     const v = propVisuals.get(x + ',' + z);
     if (v) {
       v.destroy();
       propVisuals.delete(x + ',' + z);
+    }
+    const extras = extraVisuals.get(x + ',' + z);
+    if (extras) {
+      for (const e of extras) e.destroy();
+      extraVisuals.delete(x + ',' + z);
     }
   }
 
@@ -244,17 +314,20 @@ export function buildLevel(app, grid, { picking = null, root = null, baseY = 0 }
     const interactive = !!def && (def.loot || def.shop || def.ignitable || def.explosive);
     const res = r.renderMarker(x, z, type, {
       electrified: grid.isElectrified(x, z),
-      surfaceAt: (sx, sz) => TILE_TYPES[grid.typeAt(sx, sz)]?.surface || null,
+      rotY: grid.rotAt?.(x, z) ?? null,
+      surfaceAt: grid.surfaceAt,
       onAsync: (holder) => {
         propVisuals.set(x + ',' + z, holder);
         if (interactive && picking) picking.register(holder, 'prop', { x, z });
       },
     });
-    if (res.kind === 'surface') surfaceVisuals.set(x + ',' + z, res.entities[0]);
+    if (res.kind === 'surface') surfaceVisuals.set(`marker:${x},${z}`, {
+      entity: res.entities[0], cells: [{ x, z }],
+    });
     else if (res.kind === 'prop') {
       propVisuals.set(x + ',' + z, res.entities[0]);
       if (interactive && picking) picking.register(res.entities[0], 'prop', { x, z });
-    }
+    } else trackExtra(x, z, res.entities);
   }
 
   return {

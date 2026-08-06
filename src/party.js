@@ -12,7 +12,7 @@ import { STARTING_TALENT_BY_CLASS } from './data/talents.js';
 import { CUSTOM_RIGS } from './data/looks.js';
 
 export const PARTY_CAP = 3; // leader + 2 companions - see PARTY_PLAN.md
-export const SAVE_VERSION = 9; // v9 records which talents a character HOLDS (TALENT_PLAN.md)
+export const SAVE_VERSION = 10; // v10 carries unexpired player-side temporary allies between floors
 
 // Petty Cash is PARTY state, not sheet state (ECONOMY_PLAN #2): one purse the
 // whole roster spends from, so buying a sandwich never means switching leaders
@@ -43,11 +43,19 @@ export function addMember(party, sheet, actor = null) {
   return member;
 }
 
-// XP fan-out: every living member earns the full amount - nobody lags, no
-// split bookkeeping. Returns the members who levelled up, so the caller can
-// announce each promotion.
+// XP fan-out: every member earns the full amount - nobody lags, no split
+// bookkeeping. DOWNED members included (Q107-A, designer 2026-08-05): going
+// down costs you the fight, not the campaign. This used to pay only the
+// standing, which was harmless when three automatic revives put you back on
+// your feet mid-fight - all three are struck now, so the same filter had
+// quietly become "miss the whole fight's XP and fall a level behind, which
+// gets you downed more easily, which..." - the spiral "nobody lags" exists to
+// prevent. (A promotion earned while down banks its points but does NOT heal -
+// see gainXp - so this pays XP, never a hidden revive.)
+// Returns the members who levelled up, so the caller can announce each
+// promotion.
 export function gainXpAll(party, amount) {
-  return party.members.filter((m) => m.sheet.hp > 0 && gainXp(m.sheet, amount));
+  return party.members.filter((m) => gainXp(m.sheet, amount));
 }
 
 // A companion's sheet, promoted to match the leader's level so recruits are
@@ -59,7 +67,10 @@ export function createCompanionSheet(def, id, level = 1) {
 }
 
 // --- campaign progress -------------------------------------------------------
-// current (SAVE_VERSION): { version, levelId, party: [sheet, ...], active, cash }
+// current (SAVE_VERSION):
+//   { version, levelId, party: [sheet, ...], active, cash, temporaryAllies }
+//   - v10 added compact temporary-ally records. Older saves simply read an
+//     empty list; recreating an ally that did not exist would invent state.
 //   - v6 added the shared purse. It is NEW state rather than migrated state,
 //     so an older save simply reads 0 - no invents-state-on-every-load hazard
 //     of the kind the v5 auto-equip needed a version gate for.
@@ -68,14 +79,67 @@ export function createCompanionSheet(def, id, level = 1) {
 // v1 (legacy): { levelId, sheet } - loads as a one-member party.
 // parseProgress reads by SHAPE, so every version above loads without a switch.
 
-export function serializeProgress(party, levelId) {
+// Statuses that are HELD by a live mode rather than counted down by a clock.
+// They only mean anything while the thing holding them exists, and the thing
+// holding them is closure state that dies with the level - so they must not
+// ride a floor transition.
+//
+// `sneaking` is the one that bit: taking the stairs while sneaking saved the
+// status, and the next floor booted with `sneak === null` and the leader still
+// wearing it. `endSneak` early-returns on `!sneak`, so nothing could clear it,
+// and it suppresses fight triggers - the floor could never be contested
+// (REVIEW.md 2026-08-02 section 1.15). `covered` is the same shape: the crouch
+// is a POSITION, revalidated against a world the new floor does not have.
+const HELD_STATUSES = ['sneaking', 'covered'];
+
+// `savedAt` is a wall-clock stamp, not save state: nothing in the run reads it
+// and a save without one loads exactly as before. The desk uses it to tell two
+// runs apart when it offers both (a local Continue beside a cloud one), which
+// is the whole reason a player can be asked to choose between them.
+export function serializeProgress(party, levelId, now = Date.now(), temporaryAllies = []) {
   return {
     version: SAVE_VERSION,
     levelId,
-    party: party.members.map((m) => m.sheet),
+    savedAt: now,
+    party: party.members.map((m) => strippedForSave(m.sheet)),
     active: party.active,
     cash: party.cash || 0,
+    temporaryAllies: temporaryAlliesForSave(party, temporaryAllies),
   };
+}
+
+// Temporary allies are recreated from their archetype on the next floor. Only
+// the state that cannot be derived again crosses the stairwell: wounds, active
+// statuses, assignment time, and which real party member owns their live cap.
+function temporaryAlliesForSave(party, records) {
+  const out = [];
+  for (const rec of records || []) {
+    const archetypeId = rec.actor?.typeId;
+    const turnsLeft = rec.actor?.summonTurns ?? null;
+    if (typeof archetypeId !== 'string' || !archetypeId || !Number.isFinite(rec.sheet?.hp) || rec.sheet.hp <= 0) continue;
+    if (turnsLeft !== null && (!Number.isFinite(turnsLeft) || turnsLeft <= 0)) continue;
+    const owner = party.members.findIndex((m) => m.actor === rec.summonedBy);
+    const savedSheet = strippedForSave(rec.sheet);
+    out.push({
+      archetypeId,
+      hp: rec.sheet.hp,
+      statuses: { ...(savedSheet.statuses || {}) },
+      turnsLeft,
+      summonedBy: owner >= 0 ? owner : party.active,
+    });
+  }
+  return out;
+}
+
+// A copy of the sheet with the held-mode statuses dropped. A COPY, deliberately:
+// serializing must not reach into the live sheet and cancel a mode the player is
+// still in - the save happens mid-run, not at a stopping point.
+function strippedForSave(sheet) {
+  if (!sheet?.statuses) return sheet;
+  if (!HELD_STATUSES.some((id) => sheet.statuses[id])) return sheet;
+  const statuses = { ...sheet.statuses };
+  for (const id of HELD_STATUSES) delete statuses[id];
+  return { ...sheet, statuses };
 }
 
 // Backfill fields older saves may predate, so no math ever meets undefined.
@@ -191,13 +255,33 @@ export function parseProgress(raw) {
   // A save older than v6 has no purse; a corrupted one gets zero rather than a
   // NaN that would poison every later arithmetic.
   const cash = Number.isFinite(raw.cash) && raw.cash > 0 ? Math.floor(raw.cash) : 0;
+  // Absent on every save written before the desk offered two runs at once.
+  const savedAt = Number.isFinite(raw.savedAt) && raw.savedAt > 0 ? raw.savedAt : null;
   if (Array.isArray(raw.party) && raw.party.length) {
     const active = Number.isInteger(raw.active) && raw.active >= 0 && raw.active < raw.party.length
       ? raw.active : 0;
-    return { levelId: raw.levelId, sheets: raw.party.map((s) => normalizeSheet(s, version)), active, cash };
+    const temporaryAllies = parseTemporaryAllies(raw.temporaryAllies, raw.party.length, active);
+    return { levelId: raw.levelId, sheets: raw.party.map((s) => normalizeSheet(s, version)), active, cash, savedAt, temporaryAllies };
   }
   if (raw.sheet && typeof raw.sheet === 'object') {
-    return { levelId: raw.levelId, sheets: [normalizeSheet(raw.sheet, version)], active: 0, cash };
+    return { levelId: raw.levelId, sheets: [normalizeSheet(raw.sheet, version)], active: 0, cash, savedAt, temporaryAllies: [] };
   }
   return null;
+}
+
+function parseTemporaryAllies(raw, partySize, active) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const rec of raw) {
+    if (!rec || typeof rec.archetypeId !== 'string' || !rec.archetypeId) continue;
+    if (!Number.isFinite(rec.hp) || rec.hp <= 0) continue;
+    const turnsLeft = rec.turnsLeft ?? null;
+    if (turnsLeft !== null && (!Number.isFinite(turnsLeft) || turnsLeft <= 0)) continue;
+    const summonedBy = Number.isInteger(rec.summonedBy)
+      && rec.summonedBy >= 0 && rec.summonedBy < partySize ? rec.summonedBy : active;
+    const statuses = rec.statuses && typeof rec.statuses === 'object' && !Array.isArray(rec.statuses)
+      ? { ...rec.statuses } : {};
+    out.push({ archetypeId: rec.archetypeId, hp: rec.hp, statuses, turnsLeft, summonedBy });
+  }
+  return out;
 }

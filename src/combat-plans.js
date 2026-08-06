@@ -20,9 +20,10 @@
 
 import { ACTIONS } from './data/actions.js';
 import { rangeOf, REACH } from './stats.js';
-import { inReach, dist, dirOctant } from './tactics.js';
+import { cheb, inReach, dist, dirOctant } from './tactics.js';
 import { isToppleable, toppleLanding, isBreakable, aimsAtProps, pullLanding } from './powers.js';
-import { cheb, posOf, reachOfUnit, ORTHO, AROUND } from './combat-geometry.js';
+import { posOf, reachOfUnit } from './combat-geometry.js';
+import { CARDINAL_DIRS, NEIGHBOR_DIRS } from './directions.js';
 
 // --- toppling (POWERS_PLAN M6) -----------------------------------------------
 
@@ -51,10 +52,128 @@ export function topplePlan(bx, bz, px, pz, { tileDefAt, terrainOpen, stepOpen })
 //
 // `victimAt(x, z)` is the caller's "is one of THEM standing here" test; only
 // combat knows which side a body is on.
-export function aiTopplePlan(bx, bz, world, victimAt) {
-  for (const [dx, dz] of AROUND) {
+export function aiTopplePlan(bx, bz, { tileDefAt, terrainOpen, stepOpen }, victimAt) {
+  const world = { tileDefAt, terrainOpen, stepOpen };
+  for (const [dx, dz] of NEIGHBOR_DIRS) {
     const plan = topplePlan(bx, bz, bx + dx, bz + dz, world);
     if (plan && victimAt(plan.lx, plan.lz)) return plan;
+  }
+  return null;
+}
+
+// --- the AI's cover-denial plans (AI_PLAN M4) --------------------------------
+
+// Is there a shove WORTH taking - one that slams an adjacent victim into
+// something solid, or lands them in a hazard? A shove that merely moves
+// somebody is refused: it spends real AP to improve nothing, and the ladder
+// sits shove above the swing precisely because the plan only exists when it
+// is strictly better. `disengage` widens the gate for a unit that WANTS the
+// gap (the ranged kit, AI_PLAN A4's carve-out): any legal step-back
+// qualifies, because breaking contact is itself the value - the game's own
+// "shove is the safe disengage" doctrine (TACTICS_PLAN #9), read from the
+// other side.
+//
+// Adjacent-only, like the topple's own aim; `victimAt` is the caller's side
+// test, `hazardAt` its "would landing there hurt" test.
+export function aiShovePlan(bx, bz, { isWalkable, stepOpen, occupied }, victimAt,
+  { hazardAt = null, disengage = false, reaches = null } = {}) {
+  const world = { isWalkable, stepOpen, occupied };
+  for (const [dx, dz] of NEIGHBOR_DIRS) {
+    const vx = bx + dx;
+    const vz = bz + dz;
+    const victim = victimAt(vx, vz);
+    if (!victim) continue;
+    // The PLAYER's shove gate, applied to the AI's (`canReach` at REACH.SHOVE)
+    // [ratified] (designer, 2026-08-05: "a for both q096 and q097"). Tile
+    // adjacency alone let a coworker shove from a diagonal the player could not
+    // and straight across a partition edge, because `NEIGHBOR_DIRS` asks only "is that
+    // tile next to mine" while the player's gate measures body to body and
+    // honours the corner rule. Doctrine #9 - forced movement never provokes,
+    // so shove is the safe disengage - is a rule about the VERB; it should not
+    // reach further in one pair of hands than the other.
+    if (reaches && !reaches(victim)) continue;
+    const plan = displacePlan(vx, vz, dx, dz, world);
+    if (!plan) continue;
+    // The victim goes to `hazardAt` because the caller's test is about THIS
+    // body: what a landing costs depends on whose talents are in the boots.
+    if (plan.blocked || disengage || (hazardAt && hazardAt(plan.tx, plan.tz, victim))) {
+      return { victim, dx, dz, ...plan };
+    }
+  }
+  return null;
+}
+
+// The partition this unit could put a shoulder into WITH somebody behind it
+// - TACTICS_PLAN M6's partition topple, whose AI half was left as "a
+// follow-up" in that plan's landed notes. Square-on like the player's aim;
+// the panel falls AWAY from the shover, so the victim test is the far tile.
+export function aiEdgeTopplePlan(bx, bz, { wallEdgeBetween, terrainOpen }, victimAt) {
+  for (const [dx, dz] of CARDINAL_DIRS) {
+    const tx = bx + dx;
+    const tz = bz + dz;
+    if (!wallEdgeBetween(bx, bz, tx, tz)) continue;
+    if (!terrainOpen(tx, tz)) continue;
+    if (!victimAt(tx, tz)) continue;
+    return { edge: true, tx, tz };
+  }
+  return null;
+}
+
+// Which crouched victim a pull could haul (TACTICS_PLAN M8's verb, the AI
+// half). The rules are pullPlan's own - shield between the bodies,
+// REACH.PULL, landing room - this wrapper only walks the candidates.
+// `crouchOf(v)` returns the victim's live crouch AS THE PULLER SEES IT
+// (faces computed with the puller's own body not counted: standing beside
+// somebody is how you reach over their barrier, not a barrier of your own).
+// The two defaults are repeated VERBATIM from pullPlan's own destructure, and
+// that is the one line here where a slip would change behaviour: combat supplies
+// `bodyAt` and omits `name`, so getting either default wrong silently rewrites
+// a refusal or a reachability test rather than throwing.
+export function aiPullPlan(unit, candidates, crouchOf,
+  { stepOpen, open, name = 'They', bodyAt = null }) {
+  const world = { stepOpen, open, name, bodyAt };
+  for (const v of candidates) {
+    const crouch = crouchOf(v);
+    if (!crouch) continue;
+    const plan = pullPlan(unit, v, crouch, world);
+    if (plan && !plan.refusal) return { victim: v, ...plan };
+  }
+  return null;
+}
+
+// What a SEALED unit batters (AI_PLAN A10): the adjacent breakable prop or
+// partition edge on the way toward where it wants to go. Only consulted when
+// no target is engageable at all - while a route exists, walking beats
+// demolition. v1 is deliberately adjacent-only, on the one or two faces the
+// target's octant names; pathing THROUGH breakables by pool HP is the
+// refinement AI_PLAN names and defers.
+export function aiBreakPlan(bx, bz, tx, tz, { tileDefAt, edgeHpBetween, doorsBeside = null }) {
+  // A shut door FIRST: it is not breakable at all (doors are deliberately not
+  // in the wall sets, so they carry no HP pool), it is the cheapest thing in
+  // reach, and it is the actual passage. Without this arm a unit sealed by a
+  // door somebody closed on it farms crouches forever while the fight cannot
+  // end - the piñata case A10 names. Take the shut door that most reduces the
+  // distance to the target; one that leads away is not a way through.
+  if (doorsBeside) {
+    let best = null;
+    for (const d of doorsBeside(bx, bz)) {
+      if (d.open) continue;
+      const [fx, fz] = d.to;
+      const gain = cheb(bx, bz, tx, tz) - cheb(fx, fz, tx, tz);
+      if (gain <= 0) continue;
+      if (!best || gain > best.gain) best = { d, gain };
+    }
+    if (best) {
+      return { kind: 'door', key: best.d.key, ap: best.d.ap, tx: best.d.to[0], tz: best.d.to[1] };
+    }
+  }
+  const { x: sx, z: sz } = dirOctant(tx, tz, bx, bz); // from the unit toward the target
+  const cands = [];
+  if (sx) cands.push([bx + sx, bz]);
+  if (sz) cands.push([bx, bz + sz]);
+  for (const [nx, nz] of cands) {
+    if (isBreakable(tileDefAt(nx, nz))) return { kind: 'prop', tx: nx, tz: nz };
+    if (edgeHpBetween(bx, bz, nx, nz) !== null) return { kind: 'edge', a: [bx, bz], b: [nx, nz] };
   }
   return null;
 }
@@ -77,7 +196,17 @@ export function breakPlan(id, attacker, tx, tz, { tileDefAt, edgeHpBetween, hasL
 
   if (isBreakable(tileDefAt(tx, tz))) {
     if (range) {
-      if (cheb(ax, az, tx, tz) > range) return { refusal: 'Too far.' };
+      // EUCLIDEAN, from the body, exactly as the same weapon's range is
+      // measured at a coworker (`bodyDist` at the click, DEGRID D4: a range is
+      // a true-distance circle from where the model actually stands)
+      // [ratified] (designer, 2026-08-05: "a for both q096 and q097").
+      //
+      // This measured Chebyshev off the rounded TILE, so one `range: 4` weapon
+      // meant two different distances depending on what you aimed it at: a
+      // body at (3,3) is 4.24 away and refused, a prop on the same tile is
+      // Chebyshev 3 and allowed. The corners of the square were reachable for
+      // props and not for people.
+      if (dist(me.x, me.z, tx, tz) > range) return { refusal: 'Too far.' };
       if (!hasLos(ax, az, tx, tz)) return { refusal: 'No clear line to it.' };
     } else if (!inReach(me.x, me.z, tx, tz, reachOfUnit(attacker), stepOpen)) {
       return { refusal: 'Too far to swing at it.' };

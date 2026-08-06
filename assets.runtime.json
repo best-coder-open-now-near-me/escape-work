@@ -1,0 +1,9 @@
+{
+  "include": [
+    "CREDITS.md",
+    "characters",
+    "foliage",
+    "furniture",
+    "office"
+  ]
+}

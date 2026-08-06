@@ -6,6 +6,7 @@
 import { test, expect } from '@playwright/test';
 import {
   bootStash, waitForPlayerTurn, refillAp, clickAction, onScreen,
+  clickEnemyBody,
 } from './helpers.js';
 
 // The Manager's cell is SEALED on all four faces (partitions block movement,
@@ -31,12 +32,7 @@ async function openWithThrow(page) {
   await page.click('#hotbar-act-paper-ball');
   await expect.poll(() => page.evaluate(() => window.__game.armed), { timeout: 10_000 })
     .toBe('paper-ball');
-  const pm = await page.evaluate(() => {
-    const en = window.__game.enemies.find((e) => e.alive);
-    return window.__game.project3(en.px ?? en.x, 0.9, en.pz ?? en.z);
-  });
-  expect(onScreen(pm)).toBe(true);
-  await page.mouse.click(pm.x, pm.y);
+  await clickEnemyBody(page);
   await expect.poll(() => page.evaluate(() => window.__game.inCombat), { timeout: 30_000 })
     .toBe(true);
   await waitForPlayerTurn(page);
@@ -152,12 +148,7 @@ test('Pull Over hauls a crouched coworker over their cover, which stays up', asy
   await clickAction(page, 'pull');
   // Aim LOW: a crouched body is a squashed pose, so the honest click is the
   // tile - which the pull resolves on whoever holds it (handleTileClick).
-  const p = await page.evaluate(() => {
-    const en = window.__game.enemies.find((e) => e.alive);
-    return window.__game.project3(en.px ?? en.x, 0.3, en.pz ?? en.z);
-  });
-  expect(onScreen(p)).toBe(true);
-  await page.mouse.click(p.x, p.y);
+  await clickEnemyBody(page, 0.3);
 
   // They came over: off their tile, onto a free tile beside the puller...
   await expect.poll(() => page.evaluate(() => {

@@ -82,6 +82,20 @@ test('recruit the intern, he follows, and the party bar hands him the lead', asy
   expect(await page.evaluate(() => window.__game.stats.name)).toBe('IT Support');
   await expect(page.locator('#hotbar-act-reboot')).toBeAttached(); // his kit, his bar
 
+  // An armed ally-facing action advertises the same click the resolver will
+  // take. Before Q111 only enemies received an armed cursor; this valid Reboot
+  // target looked like an inert body even though clicking consumed the cast.
+  await page.click('#hotbar-act-reboot');
+  await expect.poll(async () => {
+    const p = await page.evaluate(() => {
+      const m = window.__game.party.find((x) => !x.active);
+      return window.__game.project3(m.x, 0.45, m.z);
+    });
+    await page.mouse.move(p.x, p.y);
+    return page.evaluate(() => ({ kind: window.__game.hoverKind, cursor: window.__game.cursor }));
+  }, { timeout: 20_000 }).toEqual({ kind: 'party', cursor: 'crosshair' });
+  await page.click('#hotbar-act-reboot'); // disarm before the movement assertion
+
   // Clicks now move HIM - and the ex-leader follows.
   expect(await clickWorld(page, 2, 3)).toBe(true);
   await waitStill(page);

@@ -20,7 +20,7 @@
 // #combat-log, #combat-actions, #combat-end-turn, #combat-strip. Moving a
 // region is not a reason to rename what is in it, and the e2e suite reads them.
 
-import { PANEL_CHROME, actionDock, refreshDockVisibility } from './chrome.js';
+import { PANEL_CHROME, actionDock, refreshDockVisibility, esc } from './chrome.js';
 
 // One initiative row. `s` is the slot's view-model:
 //   { name, hp, dead, finished, current, holds, team, icons, portrait }
@@ -30,7 +30,7 @@ function initiativeRow(s, i) {
   // rides the ACTOR, so it is there for members, summons and enemies alike, and
   // simply absent until the render lands.
   const pic = s.portrait
-    ? `<img src="${s.portrait}" alt="" style="width:22px; height:22px; border-radius:4px;`
+    ? `<img src="${esc(s.portrait)}" alt="" style="width:22px; height:22px; border-radius:4px;`
       + `border:1px solid ${col}; vertical-align:middle; margin-right:5px; flex:none;">`
     : '';
   // The bracket is a left edge + a faint wash, so a shared turn reads as one
@@ -45,7 +45,7 @@ function initiativeRow(s, i) {
     + `font-weight:${s.current ? '700' : '400'}; display:flex; align-items:center;`
     + `gap:2px; margin:1px 0; cursor:pointer; ${brk}">`
     + `<span style="width:11px; flex:none;">${s.current ? '▸' : s.finished ? '✓' : ''}</span>${pic}`
-    + `<span>${s.name} &middot; ${s.dead ? '—' : s.hp}`
+    + `<span>${esc(s.name)} &middot; ${s.dead ? '—' : s.hp}`
     + (s.icons ? ` ${s.icons}` : '') + '</span></div>';
 }
 

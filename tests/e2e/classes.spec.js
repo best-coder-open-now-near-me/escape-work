@@ -3,7 +3,7 @@
 // Detain - which is now a ROOT that deals no damage (POWERS_PLAN M2), not the
 // "attack that also stuns" it used to be.
 import { test, expect } from '@playwright/test';
-import { bootAndPick, bootStash, clickWorld, enterCombat, waitStill, stableProject, onScreen, clickAction } from './helpers.js';
+import { bootAndPick, bootStash, clickWorld, enterCombat, waitForPlayerTurn, waitStill, stableProject, onScreen, clickAction } from './helpers.js';
 
 test('IT Support: kick joins the bar, reboot self-casts as a purge', async ({ page }) => {
   test.setTimeout(300_000);
@@ -92,7 +92,13 @@ test('Mail Room: Bulk Mail cones damage and leave paper drifts', async ({ page }
   // reliably damages this foe.
   await page.evaluate(() => { window.__combat.forceHit = true; });
   await clickAction(page, 'mail-cone');
-  await page.waitForTimeout(800); // camera settle before projecting
+  // The condition the sleep here was guessing at, asked directly.
+  const aim = await stableProject(page, foe.x, foe.z).catch(() => null);
+  if (aim) await page.mouse.move(aim.x, aim.y);
+  await expect.poll(() => page.evaluate(() => window.__combat.aimPoint),
+    { timeout: 10_000 }).not.toBe(null);
+  expect(await page.evaluate(() => window.__combat.aimPaint.count),
+    'a cone should paint its exact fine-cell wedge').toBeGreaterThan(0);
   expect(await clickWorld(page, foe.x, foe.z)).toBe(true);
   await expect.poll(() => page.evaluate(
     ([x, z, hp]) => {
@@ -105,6 +111,77 @@ test('Mail Room: Bulk Mail cones damage and leave paper drifts', async ({ page }
 
   // The wedge's bare floor is carpeted with fresh paper.
   expect(await paperNear()).toBeGreaterThan(paperBefore);
+});
+
+const COLOURED_CARPET_ARENA = {
+  name: 'Paperwork Lab',
+  tiles: { '#': 'wall', 'm': 'meeting-floor' },
+  actors: { '@': 'player', 'M': 'manager' },
+  map: [
+    '#########',
+    '#mmmmmmm#',
+    '#m@mmmMm#',
+    '#mmmmmmm#',
+    '#########',
+  ],
+};
+
+const QUIET_PAPER_ARENA = {
+  name: 'Quiet Paperwork Lab',
+  tiles: { '#': 'wall', 'm': 'meeting-floor' },
+  actors: { '@': 'player' },
+  map: [
+    '#########',
+    '#mmmmmmm#',
+    '#m@mmmmm#',
+    '#mmmmmmm#',
+    '#########',
+  ],
+};
+
+test('Office Drone: TPS Form Storm uses the same fine-cell aim outside combat', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, QUIET_PAPER_ARENA, 'office-drone', { seed: 4 });
+  await page.click('#hotbar-act-paper-storm');
+  expect(await page.evaluate(() => window.__game.armed)).toBe('paper-storm');
+
+  const p = await stableProject(page, 4.2, 2.1);
+  await page.mouse.move(p.x, p.y);
+  await expect.poll(() => page.evaluate(() => window.__game.aimPaint.count),
+    { timeout: 10_000 }).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.__game.aimPaint.cells.some(
+    ([x, z]) => !Number.isInteger(x) || !Number.isInteger(z),
+  )), 'the exploration preview exposes fine cells, not movement tiles').toBe(true);
+
+  await page.mouse.click(p.x, p.y);
+  await expect.poll(() => page.evaluate(() => window.__game.armed),
+    { timeout: 10_000 }).toBe(null);
+  await expect.poll(() => page.evaluate(() => window.__game.surfaceAt(4.2, 2.1)),
+    { timeout: 10_000 }).toBe('paper');
+});
+
+test('Office Drone: TPS Form Storm keeps its zone aim and lands above coloured carpet', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, COLOURED_CARPET_ARENA, 'office-drone', { seed: 4 });
+  expect(await page.evaluate(() => window.__god.fight())).toBe(true);
+  await waitForPlayerTurn(page);
+  await clickAction(page, 'paper-storm');
+
+  const p = await stableProject(page, 4, 2);
+  await page.mouse.move(p.x, p.y);
+  await expect.poll(() => page.evaluate(() => window.__combat.aimPoint),
+    { timeout: 10_000 }).not.toBe(null);
+  expect(await page.evaluate(() => window.__combat.aimPaint.count),
+    'a ground zone paints its exact fine-cell placement mask').toBeGreaterThan(0);
+
+  expect(await clickWorld(page, 4, 2)).toBe(true);
+  await expect.poll(() => page.evaluate(() => {
+    let paper = 0;
+    for (let z = 1; z <= 3; z++) {
+      for (let x = 3; x <= 5; x++) if (window.__game.surfaceAt(x, z) === 'paper') paper += 1;
+    }
+    return paper;
+  }), { timeout: 10_000 }).toBeGreaterThan(0);
 });
 
 // Just you and one Manager, two tiles apart in an open room - the same shape
@@ -122,6 +199,21 @@ const GUARD_ARENA = {
     '#########',
   ],
 };
+
+test('Security: Detain is available as an out-of-combat opener', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, GUARD_ARENA, 'security', { seed: 4 });
+  await page.evaluate(() => window.__game.debugStillEnemies());
+  await page.click('#hotbar-act-detain');
+  expect(await page.evaluate(() => window.__game.armed)).toBe('detain');
+
+  const foe = await page.evaluate(() => window.__game.enemies.find((e) => e.alive));
+  expect(await clickWorld(page, foe.x, foe.z)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__game.inCombat),
+    { timeout: 30_000 }).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__combat?.usesLeft.detain),
+    { timeout: 30_000 }).toBe(1);
+});
 
 test('Security: Detain roots without damaging, and the guard wears the cop rig', async ({ page }) => {
   test.setTimeout(300_000);
@@ -148,7 +240,12 @@ test('Security: Detain roots without damaging, and the guard wears the cop rig',
   for (let i = 0; i < 6; i++) {
     const cur = await foeNow();
     if (cur && cur.statuses.some((s) => s.id === 'detained')) break;
-    await page.waitForTimeout(900); // camera settle before projecting
+    // Settle on the PLAYER, not the foe: that fixes the whole projection,
+    // enemies included, and unlike a settle aimed at the target it cannot be
+    // satisfied by the target coming to rest somewhere new. The aim is still
+    // re-read below, after every await, for the reason written there.
+    const pp = await page.evaluate(() => window.__game.playerPos);
+    await stableProject(page, pp.x, pp.z).catch(() => {});
     if (!(await page.evaluate(() => window.__combat?.phase === 'player'))) continue;
     // Closing the distance spends AP, which can leave the 3 AP Detain
     // unaffordable and its button disabled. This spec is about the root, not

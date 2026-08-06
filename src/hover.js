@@ -17,8 +17,9 @@
 // re-derived here (`armedTargetOk` is the click resolver's own test, not a
 // second copy of it).
 import { addHighlight, setHighlight } from './shading.js';
+import { createGroundMarks } from './ground-marks.js';
 
-const pc = window.pc;
+const pc = globalThis.window?.pc;
 
 // Body-glow colours, by what the thing IS: hostile red, talkable green, party
 // teal, lootable gold, neutral interactable (doors, props) cyan.
@@ -43,16 +44,19 @@ const AGGRO = {
 
 // Ground rings. Immediate-mode lines last exactly one frame, so every one of
 // these has to be reissued on every frame it is meant to be visible.
-const RING_OK = new pc.Color(0.42, 0.78, 0.35);
-const RING_FAR = new pc.Color(0.85, 0.28, 0.24);
-// Yellow, the cover colour (TACTICS_PLAN M7's mapping) - the ring on a
-// hovered take-cover shield, in a fight or out of one.
-const RING_COVER = new pc.Color(0.95, 0.8, 0.3);
-const REACH_RING = new pc.Color(0.55, 0.62, 0.78);
-const RING_PARTY = new pc.Color(0.45, 0.9, 0.8);
-const RING_DOWN = new pc.Color(1.0, 0.82, 0.4);
-const RING_HOSTILE = new pc.Color(1.0, 0.28, 0.2);
-const RING_FRIENDLY = new pc.Color(0.42, 0.85, 0.42);
+// OK / FAR / COVER / REACH come from ground-marks.js, shared with combat.js so
+// the hover ring and the aim ring cannot drift apart. The four below are
+// hover's own - it rings bodies, which combat never does.
+// hover's own body-ring colours - the ones combat never draws. Built on first
+// use, for the same reason ground-marks.js is a factory: `new pc.Color(...)` at
+// module scope runs at import and throws under node.
+let _bodyRings = null;
+const bodyRings = () => (_bodyRings ??= {
+  PARTY: new pc.Color(0.45, 0.9, 0.8),
+  DOWN: new pc.Color(1.0, 0.82, 0.4),
+  HOSTILE: new pc.Color(1.0, 0.28, 0.2),
+  FRIENDLY: new pc.Color(0.42, 0.85, 0.42),
+});
 
 // `queries` is the live world, asked rather than captured - the leader, the
 // sheet and the armed action are all re-pointed by a leader switch, so a
@@ -64,17 +68,26 @@ const RING_FRIENDLY = new pc.Color(0.42, 0.85, 0.42);
 //                                       preview is the rule, so the rings and
 //                                       the crosshair ask the same question the
 //                                       click will
+//   armedHitOk(id, hit)                  the same verdict for an entity under
+//                                       the cursor, including friendly targets
 //   summonDrop()                        for an armed summon: the hovered spot,
 //                                       the tiles its arrivals would fill, and
 //                                       why they couldn't (null if not armed)
-//   doorNear(point) / doorOpen(key)     the door under a ground point
+//   doorOpen(key)                       the state of a picked door
 //   tileDef(x, z) / shopSoldOut(x, z)   what a prop tile is and whether it's out
 //   corpseAt / looseAt / itemName       flat things the pick ray skims over
 //
 // `vision` (src/vision.js, optional) is the impaired-sight layer. This module
 // still owns WHAT the cursor says; while a status is swaying the aim, vision
 // owns whether the OS draws it at all - it is drawing three of them itself.
-export function createHoverLayer({ app, canvas, picking, controls, ui, queries, vision = null }) {
+export function createHoverLayer({ app, canvas, picking, controls, ui, queries, vision = null, aimPaint = null }) {
+  // The shared floor marks (ground-marks.js). `ring`/`faces` were byte-identical
+  // copies of combat.js's; the palette was the same four colours under other
+  // names.
+  const marks = createGroundMarks(app, pc);
+  const { OK: RING_OK, FAR: RING_FAR, COVER: RING_COVER, REACH: REACH_RING } = marks;
+  const ring = marks.ring;
+  const faces = marks.faces;
   // --- highlight shells -----------------------------------------------------
   // BG3-style inverted-hull glow, one shell per interactable, built lazily and
   // cached against the holder so a repeat hover costs nothing.
@@ -124,7 +137,11 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
   let ctrlHeld = false;
   let altHeld = false;
   const glowHeld = () => ctrlHeld || altHeld;
-  const glowLit = () => glowHeld() || queries.inCombat();
+  // Doors are direct-use controls, so their highlight follows plain hover in
+  // and out of combat. Characters and props keep the established inspect-key
+  // gate outside combat; lighting all scenery all the time would turn the cue
+  // into ambient decoration again.
+  const glowLit = () => glowHeld() || queries.inCombat() || hoverTarget?.hit.kind === 'door';
 
   function applyGlow() {
     if (glowLit() && hoverTarget) setHoverHighlight(hoverTarget.entity, hoverTarget.rgb);
@@ -186,11 +203,6 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
         const extra = loose.length > 1 ? ` +${loose.length - 1}` : '';
         return { name: queries.itemName(loose[0].id) + extra, sub: 'Pick up', color: rgbCss(HL.loot) };
       }
-      const doorKey = queries.doorNear(point);
-      if (doorKey) {
-        const open = queries.doorOpen(doorKey);
-        return { name: open ? 'Door · open' : 'Door · closed', sub: open ? 'Close' : 'Open', color: rgbCss(HL.interact) };
-      }
       if (queries.tileDef(tx, tz).loot) return { name: queries.tileDef(tx, tz).label, sub: 'Rummage', color: rgbCss(HL.loot) };
     }
     return null;
@@ -200,7 +212,10 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
   function cursorFor(hit, point) {
     const armed = queries.armed();
     if (armed) {
-      if (hit && hit.kind === 'enemy' && hit.ref.alive) {
+      if (hit && queries.armedHitOk) {
+        const ok = queries.armedHitOk(armed, hit);
+        if (ok !== null) return ok ? 'crosshair' : 'not-allowed';
+      } else if (hit && hit.kind === 'enemy' && hit.ref.alive) {
         return queries.armedTargetOk(armed, hit.ref) ? 'crosshair' : 'not-allowed';
       }
       return 'default';
@@ -215,7 +230,6 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
     if (point) {
       const tx = Math.round(point.x);
       const tz = Math.round(point.z);
-      if (queries.doorNear(point)) return 'pointer';
       if (queries.corpseAt(tx, tz) || queries.looseAt(tx, tz).length || queries.tileDef(tx, tz).loot) return 'pointer';
     }
     return 'default';
@@ -229,26 +243,6 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
   // A tile's shielded faces, as bars along the tile's own edges. The twin of
   // combat's `drawFaces`; both take the face list the cover rule produced, so
   // neither can draw a side the rule would not honour.
-  function faces(cx, cz, list, color, y = 0.15) {
-    const H = 0.42;
-    for (const [ox, oz] of list || []) {
-      const mx = cx + ox * 0.5;
-      const mz = cz + oz * 0.5;
-      app.drawLine(
-        new pc.Vec3(mx - oz * H, y, mz - ox * H),
-        new pc.Vec3(mx + oz * H, y, mz + ox * H), color);
-    }
-  }
-  function ring(cx, cz, r, color, y = 0.14) {
-    const SEGS = 18;
-    let prev = null;
-    for (let i = 0; i <= SEGS; i++) {
-      const a = (i / SEGS) * Math.PI * 2;
-      const p = new pc.Vec3(cx + Math.cos(a) * r, y, cz + Math.sin(a) * r);
-      if (prev) app.drawLine(prev, p, color);
-      prev = p;
-    }
-  }
 
   return {
     // --- what the cursor is on --------------------------------------------
@@ -263,10 +257,10 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
       ui.setFocusBanner(focusInfoFor(hit, point));
       return hit;
     },
-    // The in-combat pass shows CHARACTERS only - combat.js owns the cursor
-    // there (it keys off whether a click would actually swing), so this is the
-    // glow and the banner alone. Pass null to show nothing.
-    showCharacter(hit, point) {
+    // The in-combat pass shows the body or door the click resolver accepted.
+    // Combat owns the cursor (it keys off whether the click can act), so this
+    // is the glow and banner alone. Pass null to show nothing.
+    showCombatTarget(hit, point) {
       hoverKind = hit ? hit.kind : null;
       track(hit);
       ui.setFocusBanner(hit ? focusInfoFor(hit, point) : null);
@@ -284,6 +278,7 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
       // enough, because the next modifier press just drew it again.
       hoverTarget = null;
       clearHighlight();
+      aimPaint?.hide();
       setCursor(null);
       ui.setFocusBanner(null);
     },
@@ -309,6 +304,18 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
         ring(pos.x, pos.z, 0.5, queries.armedTargetOk(armed, en) ? RING_OK : RING_FAR);
       }
     },
+    // A point-placed zone paints the exact fine-cell mask its click will
+    // commit. One boundary ring names the true disc; gaps around bodies and
+    // unusable floor stay holes in the merged fill instead of becoming a
+    // second grid of per-cell circles.
+    drawZoneAim() {
+      const aim = queries.zoneAim?.();
+      if (!aim) { aimPaint?.hide(); return; }
+      aimPaint?.show(`ooc-zone:${aim.key}`, () => aim.cells, aim.quantum,
+        { kind: 'circle', x: aim.x, z: aim.z, radius: aim.radius });
+      if (aim.problem) ring(aim.x, aim.z, 0.42, RING_FAR);
+      else ring(aim.x, aim.z, aim.radius, RING_OK);
+    },
     // A CONE armed out of combat aims at the floor too, and until now drew
     // nothing at all: the geometry lived inside combat's closure, so aiming one
     // outside a fight showed no wedge and a click just walked you there. The
@@ -317,7 +324,9 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
     // cannot disagree about what a cone covers.
     drawConeAim() {
       const aim = queries.coneAim?.();
-      if (!aim) return;
+      if (!aim) { aimPaint?.hide(); return; }
+      aimPaint?.show(`ooc:${aim.key}`, () => aim.cells, aim.quantum,
+        { kind: 'polygon', points: aim.line });
       const y = 0.14;
       const color = aim.usable ? RING_OK : RING_FAR;
       for (let i = 1; i < aim.line.length; i++) {
@@ -328,6 +337,7 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
       // ...and ring whoever it would actually catch, the same as in combat.
       for (const [x, z] of aim.caught) ring(x, z, 0.5, RING_OK);
     },
+    hideAimPaint() { aimPaint?.hide(); },
     // A SHOVE armed out of combat: ring what the hovered aim would topple,
     // and WHERE it lands - the fall is sign-derived from where you stand, so
     // the landing has to be readable before the shoulder goes in. The data is
@@ -394,22 +404,22 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
       for (const m of queries.party()?.members || []) {
         if (!m.actor?.entity) continue;
         const p = m.actor.entity.getPosition();
-        ring(p.x, p.z, 0.42, m.sheet.hp <= 0 ? RING_DOWN : RING_PARTY);
+        ring(p.x, p.z, 0.42, m.sheet.hp <= 0 ? bodyRings().DOWN : bodyRings().PARTY);
       }
       for (const en of queries.enemies()) {
         if (!en.alive || !en.entity) continue;
         const p = en.entity.getPosition();
-        ring(p.x, p.z, 0.5, RING_HOSTILE);
+        ring(p.x, p.z, 0.5, bodyRings().HOSTILE);
       }
       for (const s of queries.summons()) {
         if (s.sheet.hp <= 0 || !s.actor.entity) continue;
         const p = s.actor.entity.getPosition();
-        ring(p.x, p.z, 0.42, RING_PARTY); // your summons ring as friendly
+        ring(p.x, p.z, 0.42, bodyRings().PARTY); // your summons ring as friendly
       }
       for (const npc of queries.npcs()) {
         if (!npc.entity) continue;
         const p = npc.entity.getPosition();
-        ring(p.x, p.z, 0.42, RING_FRIENDLY);
+        ring(p.x, p.z, 0.42, bodyRings().FRIENDLY);
       }
     },
     // How far YOU can swing - so it belongs over a coworker and nowhere else.

@@ -8,9 +8,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   actionIdsFor, itemCountsFor, combatOnlyReason, padLayout, layoutFor, assignInto,
-  slotViewModel, combatSlotViewModel, throwablesFor,
+  slotViewModel, combatSlotViewModel, throwablesFor, outOfCombatActionState,
 } from '../../src/hotbar-model.js';
 import { ACTIONS } from '../../src/data/actions.js';
+import { actionTooltip } from '../../src/action-tooltip.js';
 import { ammoCostOf, createSheet, spendClassPoint, grantTalent } from '../../src/stats.js';
 
 const ROW = 10;
@@ -51,17 +52,16 @@ test('pockets count only what a PRESS would do something with', () => {
   assert.equal(counts.get('stapler'), undefined);
 });
 
-test('the reactive pair is fight-only; the useful-out-here verbs are not', () => {
+test('exploration availability follows each action entry, not its broad type', () => {
   assert.equal(combatOnlyReason('attack'), null);
   assert.equal(combatOnlyReason('shove'), null);
   assert.equal(combatOnlyReason('take-cover'), null); // designer, 2026-07-30
+  assert.equal(combatOnlyReason('paper-storm'), null);
+  assert.equal(combatOnlyReason('delegate'), null);
+  assert.equal(combatOnlyReason('all-hands'), null);
   // A purge is at its MOST useful out here - bleed runs on a step clock.
   const purge = Object.keys(ACTIONS).find((id) => ACTIONS[id].type === 'purge');
   if (purge) assert.equal(combatOnlyReason(purge), null);
-  // A heal out here would be a free, refilling pool of HP - which is precisely
-  // the thing the pockets exist to sell you.
-  const heal = Object.keys(ACTIONS).find((id) => ACTIONS[id].type === 'heal');
-  if (heal) assert.match(combatOnlyReason(heal), /pockets/);
 });
 
 test('the bar always has a spare slot, padded out to whole rows', () => {
@@ -111,6 +111,24 @@ test('a slot carries THIS character\'s ammo cost, not the raw data one', () => {
   const s = sheetOf({ actions: ['attack', throwId] });
   const vm = slotViewModel({ kind: 'action', id: throwId }, s);
   assert.equal(vm.ammoCost, ammoCostOf(s, throwId));
+  assert.equal(vm.ammoRemaining, s.paper);
+  assert.equal(vm.affordable, true);
+  assert.equal(vm.tip, actionTooltip(throwId, {
+    sheet: s, ammoCost: vm.ammoCost, ammoRemaining: vm.ammoRemaining,
+  }));
+});
+
+test('one out-of-combat state owns ammo dimming and the spoken refusal', () => {
+  const throwId = Object.keys(ACTIONS).find((id) => ACTIONS[id].ammoCost && !ACTIONS[id].needsTalent);
+  const s = sheetOf({ actions: ['attack', throwId], paper: 0 });
+  const state = outOfCombatActionState(throwId, s);
+  const vm = slotViewModel({ kind: 'action', id: throwId }, s);
+  assert.equal(state.affordable, false);
+  assert.equal(state.resourceAvailable, false);
+  assert.match(state.reason, /Needs .* paper/);
+  assert.equal(vm.affordable, state.affordable);
+  assert.equal(vm.resourceAvailable, state.resourceAvailable);
+  assert.equal(vm.unavailable, state.reason);
 });
 
 test('a power the character no longer has still renders - greyed, with the reason', () => {
@@ -130,10 +148,13 @@ test('an unknown id renders nothing at all', () => {
 test('in a fight the numbers come from combat, and the slot keeps its shape', () => {
   const entry = { kind: 'action', id: 'attack' };
   const live = combatSlotViewModel(entry, {
-    ammoCost: 2, uses: 1, live: 'armed', tip: 'a tip', affordable: true,
+    ammoCost: 2, ammoRemaining: 6, uses: 1, live: 'armed', tip: 'a tip',
+    affordable: true, resourceAvailable: true,
   }, 'Dana');
   assert.equal(live.ammoCost, 2);
   assert.equal(live.uses, 1);
+  assert.equal(live.ammoRemaining, 6);
+  assert.equal(live.resourceAvailable, true);
   assert.equal(live.live, 'armed');
   assert.equal(live.unavailable, null);
   // Same fields either way - the point of the bar being one widget.
@@ -182,4 +203,28 @@ test('the airplane follows the talent, not the class', () => {
   assert.ok(!throwablesFor(guard).includes('paper-airplane'));
   grantTalent(guard, 'origami-specialist');
   assert.ok(throwablesFor(guard).includes('paper-airplane'));
+});
+
+test('an unknown action id is refused, not silently usable (Q214)', () => {
+  // It used to return null - the same answer a live attack gets - so a slot
+  // holding a stale id drew enabled and pressing it did nothing.
+  assert.ok(combatOnlyReason('no-such-action'));
+  assert.ok(combatOnlyReason(undefined));
+});
+
+test('every action declares its exploration mode and combat-only reasons are its own data', () => {
+  const supportedModes = new Set([
+    'opener', 'zone', 'cone', 'any-target', 'summon', 'shove', 'cover', 'combat-only',
+  ]);
+  for (const [id, a] of Object.entries(ACTIONS)) {
+    assert.ok(a.exploration?.mode, `${id} declares an exploration mode`);
+    assert.ok(supportedModes.has(a.exploration.mode),
+      `${id} uses a supported exploration mode: ${a.exploration.mode}`);
+    if (a.exploration.mode === 'combat-only') {
+      assert.ok(a.exploration.reason, `${id} explains its exploration refusal`);
+      assert.equal(combatOnlyReason(id), a.exploration.reason);
+    } else {
+      assert.equal(combatOnlyReason(id), null, `${id} is available in exploration`);
+    }
+  }
 });

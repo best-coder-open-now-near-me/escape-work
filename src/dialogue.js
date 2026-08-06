@@ -16,10 +16,19 @@ import * as ui from './ui.js';
 // Two filters, both about not offering what cannot be taken:
 //   recruit - only while there is room and they are not already aboard
 //   shop    - only from someone who actually has a cart
+const LEAVE = [{ label: 'Leave', next: null }];
+
 export function nodeOptions(node, { canRecruit = false, hasShop = false } = {}) {
-  return (node?.options || [{ label: 'Leave', next: null }])
+  const offered = (node?.options || [])
     .filter((o) => !o.effect?.recruit || canRecruit)
     .filter((o) => !o.effect?.shop || hasShop);
+  // The way out is applied AFTER the filters, not instead of them. It used to
+  // be the `||` fallback on the raw list, which only fired for a node with NO
+  // options declared - so a node whose every option was gated (a recruit offer
+  // to a full party, a trade line from somebody with no cart) filtered down to
+  // an empty array and the panel had no button to close on. That is the
+  // soft-lock the comment above says this function exists to prevent.
+  return offered.length ? offered : LEAVE;
 }
 
 export function createDialogue({

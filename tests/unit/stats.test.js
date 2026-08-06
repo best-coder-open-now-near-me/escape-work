@@ -3,12 +3,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { COMPANIONS } from '../../src/data/companions.js';
 import {
-  createSheet, grantTalent, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, scaleEnemy, effectiveLevel, statusResist, accuracy, dodge, hitChance, rollHit, unitCombat, equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, stairwellHeal, gritSaveChance, SAVE,
+  createSheet, grantTalent, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, spendablePoints, pendingPoints, scaleEnemy, statusResist, accuracy, dodge, accFromSavvy, dodgeFromHustle, dmgFromSavvy, deflectFromComposure, soakHit, hitChance, rollHit, unitCombat, equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, inventoryCapOf, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, gritSaveChance, SAVE,
 } from '../../src/stats.js';
+import * as stats from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
 import { ITEMS } from '../../src/data/items.js';
-import { ACTIONS } from '../../src/data/actions.js';
+import { ACTIONS, UNIVERSAL_ACTIONS } from '../../src/data/actions.js';
 
 test('createSheet copies class stats and starts clean', () => {
   const s = createSheet('office-drone');
@@ -293,6 +294,36 @@ test('classTrack returns the sheet class own nodes', () => {
   assert.ok(!ids.includes('drone-thick-skin'));
 });
 
+// spendablePoints is the narrower reading of pendingPoints: what can be spent
+// NOW. It exists because class points accrue per level while a track is
+// finite, so a bought-out member kept re-opening the level-up modal with
+// nothing to buy (Q068). These pin the divergence, which is the whole point of
+// having two numbers.
+test('spendablePoints ignores class points a bought-out track cannot take', () => {
+  const s = createSheet('office-drone');
+  s.attrPoints = 0;
+  s.classPoints = 3;
+  s.perks = classTrack(s).map((n) => n.id); // every node taken
+  assert.equal(pendingPoints(s), 3); // still banked, still shown on the sheet
+  assert.equal(spendablePoints(s), 0); // but nothing to interrupt the player for
+});
+
+test('spendablePoints counts class points while a node is still open', () => {
+  const s = createSheet('office-drone');
+  s.attrPoints = 0;
+  s.classPoints = 3;
+  s.perks = [];
+  assert.equal(spendablePoints(s), 3);
+});
+
+test('spendablePoints always counts attribute points', () => {
+  const s = createSheet('office-drone');
+  s.attrPoints = 2;
+  s.classPoints = 1;
+  s.perks = classTrack(s).map((n) => n.id);
+  assert.equal(spendablePoints(s), 2); // the attr half survives a dead track
+});
+
 // --- enemy tiers + floor curve (milestone 4) --------------------------------
 
 test('scaleEnemy returns the def unchanged at its native level', () => {
@@ -301,22 +332,39 @@ test('scaleEnemy returns the def unchanged at its native level', () => {
   assert.equal(scaleEnemy(m, m.level), m);
 });
 
+// The Executive, because this case is specifically about the `hp` SPELLING and
+// he is the last bespoke enemy left carrying it - the Manager used to be the
+// example here and became class-backed, which spells max HP `maxHp`. Both
+// spellings are covered: this test owns `hp`, the one below owns `maxHp`.
 test('scaleEnemy grows hp, xp, and damage with level, leaving the base def intact', () => {
-  const m = ENEMY_TYPES.manager; // level 1, hp 14, xp 8
-  const s = scaleEnemy(m, 3);
-  assert.equal(s.level, 3);
+  const m = ENEMY_TYPES.executive; // level 2, hp 18, xp 10
+  const s = scaleEnemy(m, 4);
+  assert.equal(s.level, 4);
   assert.ok(s.hp > m.hp, 'hp grows');
   assert.ok(s.xp > m.xp, 'xp grows');
   assert.ok(s.attacks[0].max >= m.attacks[0].max, 'damage grows');
-  assert.equal(m.hp, 14); // the registry entry is not mutated
-  assert.equal(s.maxHp, undefined); // enemies carry `hp`, not `maxHp`
+  assert.equal(m.hp, 18); // the registry entry is not mutated
+  assert.equal(s.maxHp, undefined); // a bespoke enemy carries `hp`, not `maxHp`
 });
 
-test('effectiveLevel never drops below the native tier', () => {
-  const exec = ENEMY_TYPES.executive; // level 2
-  assert.equal(effectiveLevel(exec, 1), 2); // shallow floor keeps its tier
-  assert.equal(effectiveLevel(exec, 5), 5); // deep floor scales up
-  assert.equal(effectiveLevel(ENEMY_TYPES.manager, 4), 4);
+// The other spelling, on the same curve. A class-backed enemy inherits `maxHp`
+// and carries no `hp` at all, so a scaling rule that only knew one field name
+// would leave the Manager's health flat at every tier a floor asked for.
+test('scaleEnemy grows the max HP of a class-backed enemy too', () => {
+  const m = ENEMY_TYPES.manager; // classId middle-manager: maxHp, no hp
+  assert.equal(m.hp, undefined, 'a class-backed enemy spells it `maxHp`');
+  const s = scaleEnemy(m, 3);
+  assert.ok(s.maxHp > m.maxHp, 'max HP grows');
+  assert.equal(s.hp, undefined, 'and no second HP field is invented');
+});
+
+// The floor curve is gone (PROGRESSION_PLAN.md decisions 13-14, designer
+// 2026-08-02: enemies do not autoscale with depth). `effectiveLevel` went with
+// it, so what used to be asserted here is now asserted by its absence: an
+// enemy's level comes from its placement, and nothing derives one from a floor.
+test('nothing derives an enemy level from floor depth any more', () => {
+  assert.equal(typeof stats.effectiveLevel, 'undefined',
+    'effectiveLevel is retired - a floor number must not imply a tier');
 });
 
 // A placement may name its own tier (`"G": "manager@3"`), which is how a floor
@@ -329,11 +377,10 @@ test('a tiered placement reproduces the curve, not a second stat block', () => {
   const m = ENEMY_TYPES.manager; // native 1
   const at3 = scaleEnemy(m, 3);
   assert.equal(at3.level, 3);
-  assert.ok(at3.hp > m.hp, 'tougher than the base tier');
+  assert.ok(at3.maxHp > m.maxHp, 'tougher than the base tier');
   assert.ok(at3.xp > m.xp, 'and worth more');
-  // The SAME def a floor of depth 3 would produce - one mechanism, two ways of
-  // asking for it.
-  assert.deepEqual(at3, scaleEnemy(m, effectiveLevel(m, 3)));
+  // Asking for the tier directly is now the ONLY way to ask for it.
+  assert.deepEqual(at3, scaleEnemy(m, 3));
 });
 
 test('scaleEnemy grows AP once the gap reaches AP_PER levels', () => {
@@ -343,13 +390,60 @@ test('scaleEnemy grows AP once the gap reaches AP_PER levels', () => {
   assert.equal(m.ap, 5); // base def untouched
 });
 
-test('innate accuracy/dodge survive unitCombat', () => {
-  // Two enemies, because the two dials are authored on different people: the
-  // Executive aims better, the Security Guard is harder to pin down.
-  assert.ok(unitCombat(ENEMY_TYPES.executive).accuracy > 0, 'the Executive is accurate');
-  assert.ok(unitCombat(ENEMY_TYPES['security-guard']).dodge > 0, 'the guard is evasive');
-  assert.equal(unitCombat(ENEMY_TYPES.manager).accuracy, 0); // the base tier stays plain
-  assert.equal(unitCombat(ENEMY_TYPES.manager).dodge, 0);
+test('an AI unit derives accuracy/dodge from its attributes, like a sheet', () => {
+  // One hit model, both sides (HIT_PLAN): Savvy buys accuracy and Hustle buys
+  // dodge through the same two functions a member's sheet uses. Before this,
+  // unitCombat read only the flat innate fields, so a coworker's attributes
+  // were inert and anyone without an authored line fought at exactly HIT.BASE.
+  const mm = CLASSES['middle-manager'].attr; // the Manager inherits this spread
+  const m = unitCombat(ENEMY_TYPES.manager);
+  assert.equal(m.accuracy, accFromSavvy(mm.savvy));
+  assert.equal(m.dodge, dodgeFromHustle(mm.hustle));
+});
+
+test('innate accuracy/dodge stack ON TOP of the derivation', () => {
+  // A flat field is a def's gear slot - the Guard's trained footing - so it
+  // adds to what the attributes derive, never replaces it.
+  const g = ENEMY_TYPES['security-guard']; // Security's Hustle 4 derives 0.05, plus the innate 0.05
+  assert.equal(unitCombat(g).dodge, dodgeFromHustle(g.attr.hustle) + g.dodge);
+  assert.ok(unitCombat(g).dodge > g.dodge, 'the attributes contribute');
+});
+
+test('a bespoke enemy carries an authored attr block, and it is the source', () => {
+  // The Executive has no class twin, which does not exempt him from the rule
+  // that attributes are where combat stats come from: his aim is his Savvy
+  // now, not the innate line the entry used to carry instead of attributes.
+  const x = ENEMY_TYPES.executive;
+  assert.ok(x.attr, 'the Executive has attributes');
+  const c = unitCombat(x);
+  assert.equal(c.accuracy, accFromSavvy(x.attr.savvy));
+  assert.equal(c.grit, x.attr.grit, 'saves stop falling back to the default');
+});
+
+test('unitCombat derives damage bonus, deflect and status resist for both sides', () => {
+  // The other three attribute-derived stats members always had. Same
+  // functions, same numbers: a coworker's Savvy buys swings the member bonus,
+  // their Composure shaves hits and shortens statuses like a member's does.
+  const m = unitCombat(ENEMY_TYPES.manager); // middle-manager: savvy 4, composure 7
+  const a = CLASSES['middle-manager'].attr;
+  assert.equal(m.dmgBonus, dmgFromSavvy(a.savvy));
+  assert.equal(m.deflect, deflectFromComposure(a.composure));
+  assert.equal(m.statusResist, deflectFromComposure(a.composure));
+  assert.equal(m.composure, a.composure, 'continuous exposure reads raw Composure');
+  // And initiative speed: d20 + Hustle for everybody (initiative.js) - AP
+  // stood in for it on the enemy side only.
+  assert.equal(m.hustle, a.hustle);
+  // The employee's explicit zero spread derives zeros - flimsy on purpose.
+  const e = unitCombat(CLASSES.employee);
+  assert.equal(e.dmgBonus, 0);
+  assert.equal(e.deflect, 0);
+  assert.equal(e.statusResist, 0);
+});
+
+test('soakHit is the one mitigation rule: shaves, never negates', () => {
+  assert.equal(soakHit(5, 2), 3);
+  assert.equal(soakHit(2, 7), 1, 'one point always lands');
+  assert.equal(soakHit(4, 0), 4, 'no soak, untouched');
 });
 
 test('scaleEnemy nudges accuracy up on deep floors, capped', () => {
@@ -364,12 +458,14 @@ test('scaleEnemy nudges accuracy up on deep floors, capped', () => {
 });
 
 test('scaleEnemy adds the depth nudge on top of innate accuracy', () => {
-  const x = ENEMY_TYPES.executive; // native 2, innate accuracy 0.05
-  const scaled = scaleEnemy(x, x.level + ENEMY_SCALING.ACC_PER); // +1 step
-  assert.ok(Math.abs(scaled.accuracy - (x.accuracy + HIT.STEP)) < 1e-9);
-  // Dodge is identity, unscaled - checked on the one who has any.
-  const g = ENEMY_TYPES['security-guard'];
-  assert.ok(Math.abs(scaleEnemy(g, g.level + ENEMY_SCALING.ACC_PER).dodge - g.dodge) < 1e-9);
+  // The Guard carries the innate line now (the Executive's aim moved into his
+  // Savvy); depth stacks onto the flat field, and unitCombat adds the
+  // attribute derivation on top of whatever scaleEnemy wrote.
+  const g = ENEMY_TYPES['security-guard']; // innate dodge 0.05, no innate accuracy
+  const scaled = scaleEnemy(g, g.level + ENEMY_SCALING.ACC_PER); // +1 step
+  assert.ok(Math.abs(scaled.accuracy - HIT.STEP) < 1e-9);
+  // Dodge is identity, unscaled.
+  assert.ok(Math.abs(scaled.dodge - g.dodge) < 1e-9);
 });
 
 test('scaleEnemy scales the maxHp field for a class-backed AI unit', () => {
@@ -515,6 +611,26 @@ test('unequipItem returns gear to the bag, and refuses when the bag is full', ()
   s.inventory = new Array(10).fill('paper-wad'); // at INV_CAP
   assert.equal(unequipItem(s, 'weapon', 10), false);
   assert.equal(s.equipped.weapon, 'red-stapler'); // still equipped
+});
+
+test('inventory capacity follows Grit and leaves an over-cap bag intact', () => {
+  const s = createSheet('office-drone');
+  assert.equal(inventoryCapOf(s), 30); // 5 guaranteed slots + five per Drone Grit
+  s.attr.grit = 6;
+  assert.equal(inventoryCapOf(s), 35);
+
+  s.inventory = new Array(34).fill('paper-wad');
+  s.equipped.weapon = 'red-stapler';
+  assert.equal(unequipItem(s, 'weapon', inventoryCapOf(s)), true);
+  assert.equal(s.inventory.length, 35);
+
+  // Model a later cap loss: no automatic drop, but no further stowing either.
+  s.attr.grit = 4;
+  assert.equal(inventoryCapOf(s), 25);
+  assert.equal(s.inventory.length, 35);
+  s.equipped.weapon = 'stapler';
+  assert.equal(unequipItem(s, 'weapon', inventoryCapOf(s)), false);
+  assert.equal(s.equipped.weapon, 'stapler');
 });
 
 test('equipping a dmg-only weapon leaves maxHp and deflect untouched', () => {
@@ -923,6 +1039,18 @@ test('the same id twice is one button, and an unknown id is none', () => {
   assert.deepEqual(ids, ['attack', 'shove']);
 });
 
+test('all three universal verbs share the bucket beside the basic attack (Q217-A)', () => {
+  // Universality is the action's own flag, and the list every bar splices in
+  // derives from it. The sorter used to recognise it by `type === 'shove'`,
+  // which filed Take Cover and Pull with the class powers - the bar offered
+  // two universal verbs as if a class had granted them.
+  assert.deepEqual(UNIVERSAL_ACTIONS, ['shove', 'take-cover', 'pull']);
+  const s = createSheet('office-drone');
+  const ids = orderedActionIds(s, [...s.actions, equippedAction(s), ...UNIVERSAL_ACTIONS, 'paper-ball']);
+  assert.deepEqual(ids.slice(0, 4), ['attack', 'shove', 'take-cover', 'pull']);
+  assert.ok(ids.indexOf('pull') < ids.indexOf('paper-ball'), 'universal verbs precede the throws');
+});
+
 test('THROW_RANGE is a shared constant, not a per-module copy', () => {
   assert.ok(Number.isInteger(THROW_RANGE) && THROW_RANGE > 0);
 });
@@ -1003,28 +1131,23 @@ test('lookOf falls through to the companion entry, then to null', () => {
   assert.equal(lookOf(null), null, 'and neither does nothing at all');
 });
 
-// --- the stairwell breather (TODO Phase 6) ---------------------------------
-// Was arithmetic inline in a branch of main.js, so the case that matters most -
-// a DOWNED companion - had no coverage at all.
-test('the stairwell breather carries the downed to the landing', () => {
-  const sheet = createSheet('office-drone');
-  // Down, and at or below zero. Adding to a negative would land them still
-  // down, or up by less than everybody else - they were carried, so they come
-  // to on the same terms.
-  sheet.hp = 0;
-  assert.equal(stairwellHeal(sheet, 6), 6);
-  sheet.hp = -4;
-  assert.equal(stairwellHeal(sheet, 6), 6, 'a deeper knockdown is not a worse recovery');
+// --- no automatic healing (designer 2026-08-02) ------------------------------
+// This block used to pin the stairwell breather, including the `Math.max(hp, 0)`
+// that carried a DOWNED companion to the landing. Both are struck, so what is
+// pinned now is their absence and the object that replaced them: a downed
+// character is only revived by something carrying `revive`.
+test('the stairwell breather is gone, along with its hidden revive', () => {
+  assert.equal(typeof stats.stairwellHeal, 'undefined',
+    'nothing tops a sheet up just for changing floors');
 });
 
-test('the breather tops up the standing and never overfills', () => {
-  const sheet = createSheet('office-drone');
-  sheet.hp = sheet.maxHp - 2;
-  assert.equal(stairwellHeal(sheet, 6), sheet.maxHp, 'capped at their maximum');
-  sheet.hp = sheet.maxHp;
-  assert.equal(stairwellHeal(sheet, 6), sheet.maxHp, 'and a full character stays full');
-  sheet.hp = 1;
-  assert.equal(stairwellHeal(sheet, 6), 7, 'otherwise it is a flat top-up');
+test('the revive economy exists and is an item, not a rule', () => {
+  const reviving = Object.entries(ITEMS).filter(([, d]) => d.revive > 0);
+  assert.ok(reviving.length > 0, 'at least one item can bring somebody back up');
+  for (const [id, def] of reviving) {
+    assert.ok(def.value > 0, `${id} is worth something, so it can be stocked and sold`);
+    assert.ok(!def.heal, `${id} revives rather than doubling as a heal - one job`);
+  }
 });
 
 test('gritSaveChance scales with Grit and respects its cap (TACTICS_PLAN M6)', () => {
@@ -1032,4 +1155,20 @@ test('gritSaveChance scales with Grit and respects its cap (TACTICS_PLAN M6)', (
   assert.equal(gritSaveChance(null), SAVE.BASE); // enemies without a grit stat
   assert.ok(gritSaveChance(3) > gritSaveChance(1), 'Grit buys escape odds');
   assert.equal(gritSaveChance(99), SAVE.CAP, 'nobody shrugs off a bookcase reliably');
+});
+
+test('applyDamage refuses a non-finite amount, like its actor-side twin', () => {
+  // NaN hp is never <= 0, so a member who takes it can never go down and
+  // anything waiting on that waits forever. EnemyActor.takeDamage has guarded
+  // this for a while; the party half did not, which is the asymmetry.
+  const sheet = { hp: 10, maxHp: 10 };
+  for (const bad of [NaN, Infinity, -Infinity, undefined, null, 'three']) {
+    assert.equal(applyDamage(sheet, bad), false, `${bad} should be a no-op`);
+    assert.equal(sheet.hp, 10, `${bad} must not move hp`);
+  }
+  // A real number still works, and still reports the drop.
+  assert.equal(applyDamage(sheet, 4), false);
+  assert.equal(sheet.hp, 6);
+  assert.equal(applyDamage(sheet, 99), true, 'and an overkill still reports down');
+  assert.equal(sheet.hp, 0, 'clamped, never negative');
 });

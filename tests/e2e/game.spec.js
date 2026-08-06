@@ -8,7 +8,7 @@
 // stays slower than local. Every wait here is therefore generous, and boot
 // helpers gate on frames actually ticking before any projection is trusted.
 import { test, expect } from '@playwright/test';
-import { waitForSmoothFrames, onScreen, bootAndPick, combatOrWalkDone, enterCombat, endTurnUntilPlayer, waitForPlayerTurn, clickAction } from './helpers.js';
+import { waitForSmoothFrames, bootAndPick, combatOrWalkDone, enterCombat, endTurnUntilPlayer, waitForPlayerTurn, clickAction, stableProject, clickDoorPanel } from './helpers.js';
 
 test('the class carousel browses every resume and hires one', async ({ page }) => {
   // This test renders EVERY class's .glb, one per slide, and under CI's
@@ -77,10 +77,9 @@ test('clicking a closed door walks up and swings it open', async ({ page }) => {
   const doors = await page.evaluate(() => window.__game.doors);
   expect(doors.length).toBeGreaterThan(0);
   expect(doors.every((d) => !d.open)).toBe(true); // all start closed
-  // Click just shy of the cubicle-row door on the north edge of (8, 5) -
-  // the walk-up crosses open corridor from the spawn.
-  const p = await page.evaluate(() => window.__game.project(8, 4.58));
-  await page.mouse.click(p.x, p.y);
+  // Click the visible cubicle-row door panel itself. The threshold is ordinary
+  // walkable floor and deliberately is not a ghost interaction target.
+  await clickDoorPanel(page, 8, 0.55, 4.5);
   await expect.poll(
     () => page.evaluate(() => window.__game.doors.find((d) => d.key === 'h:8,5')?.open),
     { timeout: 60_000 },
@@ -135,12 +134,13 @@ test('confronting a coworker starts combat and an attack lands', async ({ page }
   // on arrival rather than swinging instantly - so wait for the damage instead
   // of assuming one click resolves inside 300ms.
   for (let i = 0; i < 6 && (await foeHp([foe.x, foe.z])) >= foe.hp; i++) {
-    await page.waitForTimeout(1000); // camera settle
     if (await page.evaluate(() => window.__combat.armed) !== 'attack') {
       await clickAction(page, 'attack');
       expect(await page.evaluate(() => window.__combat.armed)).toBe('attack');
     }
-    const fp = await page.evaluate(([x, z]) => window.__game.project(x, z), [foe.x, foe.z]);
+    // Settle and project in one step - the fixed sleep this replaces was
+    // guessing at exactly what stableProject polls for.
+    const fp = await stableProject(page, foe.x, foe.z);
     await page.mouse.click(fp.x, fp.y);
     await page.waitForTimeout(1400); // a walk-up plus the strike on arrival
   }

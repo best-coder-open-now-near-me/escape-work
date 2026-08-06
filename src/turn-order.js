@@ -312,7 +312,21 @@ export function createTurnOrder({ entries, rng = Math.random, host }) {
       const i = order.findIndex(match);
       if (i < 0) return null;
       next.init = order[i].init; // the same moment in the round, new owner
+      const old = order[i];
       order[i] = next;
+      // The open span tracks by identity, and `old` no longer HAS one in the
+      // order - `indexOf` would answer -1. When the swapped slot was the
+      // span's last, that -1 dropped the span's high-water mark to some
+      // earlier slot and `advancePastSpan` parked the pointer right back on
+      // this index: the new owner took a turn in the same round it arrived,
+      // inheriting the floor time its predecessor had already spent. The new
+      // slot holds the same array position, so it is the honest stand-in for
+      // what the span covered. Only `spanSlots` - the pointer's book - is
+      // rewritten: `held`, `done` and steering are membership, which froze
+      // when the span opened (INITIATIVE_PLAN #8), and a body that arrived
+      // mid-span has no claim on the floor.
+      const at = spanSlots.indexOf(old);
+      if (at >= 0) spanSlots[at] = next;
       return next;
     },
 

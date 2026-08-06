@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { occludes } from '../../src/occlusion.js';
+import { wallFadeMaterial } from '../../src/scene.js';
 
 // The real rig (controls.js): pitch degrees off the ground plane, dist along
 // the boom. Yaw is irrelevant here, so put the camera due +Z of the character.
@@ -69,4 +70,13 @@ test('a wall off to the side is not ghosted, however close', () => {
 test('a camera directly overhead ghosts nothing (no ground track to be in front of)', () => {
   const overhead = { x: 0, y: 20, z: 0 };
   assert.equal(occludes(wallAt(0.5), overhead, feet), false);
+});
+
+test('a faded custom solid returns to its own opaque material', () => {
+  const custom = { id: 'custom-solid' };
+  const ghost = { id: 'ghost' };
+  const wall = { solidMat: custom, ghostMat: ghost };
+
+  assert.equal(wallFadeMaterial(wall, true), ghost);
+  assert.equal(wallFadeMaterial(wall, false), custom);
 });

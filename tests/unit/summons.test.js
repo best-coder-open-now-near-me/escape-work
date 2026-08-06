@@ -6,18 +6,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { unitCombat } from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
-import { ENEMY_TYPES } from '../../src/data/enemies.js';
+import { ENEMY_TYPES, ENEMY_KITS } from '../../src/data/enemies.js';
 import { ACTIONS, arrivalLine, summonSpec } from '../../src/data/actions.js';
 
 // Resolve a summon descriptor's archetype id the way world.spawnSummon does.
 const archetypeOf = (id) => CLASSES[id] || ENEMY_TYPES[id];
 
-test('unitCombat normalizes an ENEMY_TYPES def (max HP spelled `hp`)', () => {
-  const c = unitCombat(ENEMY_TYPES.hr);
-  assert.equal(c.maxHp, ENEMY_TYPES.hr.hp); // enemies spell it `hp`
-  assert.equal(c.attackAp, ENEMY_TYPES.hr.attackAp);
+test('unitCombat normalizes a bespoke ENEMY_TYPES def (max HP spelled `hp`)', () => {
+  const c = unitCombat(ENEMY_TYPES.executive); // no class twin; his own stat block
+  assert.equal(c.maxHp, ENEMY_TYPES.executive.hp); // bespoke enemies spell it `hp`
+  assert.equal(c.attackAp, ENEMY_TYPES.executive.attackAp);
   assert.ok(Array.isArray(c.attacks) && c.attacks.length > 0);
-  assert.equal(c.xp, ENEMY_TYPES.hr.xp);
+  assert.equal(c.xp, ENEMY_TYPES.executive.xp);
 });
 
 test('unitCombat normalizes a class archetype (max HP spelled `maxHp`)', () => {
@@ -26,6 +26,32 @@ test('unitCombat normalizes a class archetype (max HP spelled `maxHp`)', () => {
   assert.ok(Number.isFinite(c.maxHp));
   assert.ok(Array.isArray(c.attacks) && c.attacks.length > 0);
   assert.equal(typeof c.attackAp, 'number');
+});
+
+// Every enemy has health, whichever way it got one. The class-backed pair used
+// to reach this bar only because both happened to override `hp`: max HP was
+// dropped from the inherited class unconditionally, so deleting an `hp` line -
+// the exact thing "an override is for DEPARTING from the class" asks for - left
+// the enemy with neither field and unitCombat resolving `undefined`. The
+// Manager naming `middle-manager` was the first entry to actually try it.
+test('every enemy resolves a max HP, inherited or stated', () => {
+  for (const [id, def] of Object.entries(ENEMY_TYPES)) {
+    const c = unitCombat(def);
+    assert.ok(Number.isFinite(c.maxHp) && c.maxHp > 0, `${id} has a real max HP`);
+  }
+});
+
+test('a class-backed enemy inherits the class health, no second spelling', () => {
+  // "Everything should be the same in enemies as allies" (designer,
+  // 2026-08-05): a class-backed enemy carries no `hp` of its own - health is
+  // the class's `maxHp`, inherited like every other field, and a departure
+  // would be a `maxHp` override the redundant-override lint can see.
+  for (const [id, def] of Object.entries(ENEMY_TYPES)) {
+    if (!def.classId) continue;
+    assert.equal(ENEMY_KITS[id].hp, undefined, `${id} states no health of its own`);
+    assert.equal(unitCombat(def).maxHp, CLASSES[def.classId].maxHp,
+      `${id} fights at ${def.classId}'s health`);
+  }
 });
 
 test('unitCombat defaults xp/loot for a player class with no AI fields', () => {
@@ -82,6 +108,10 @@ test('enemy summon descriptors reference a valid, combat-ready archetype', () =>
     assert.ok((s.cooldownRounds ?? 0) >= 0, `${id}.summon.cooldownRounds >= 0`);
     assert.ok(s.ap > 0, `${id}.summon.ap costs something`);
     assert.ok(s.lifetimeTurns > 0, `${id}.summon.lifetimeTurns is a real budget`);
+    assert.equal(s.placement?.anchor, 'summoner',
+      `${id}.summon placement is declared rather than inferred from a missing click`);
+    assert.equal(typeof s.placement?.avoidHazards, 'boolean',
+      `${id}.summon declares its hazard policy`);
   }
 });
 
@@ -122,6 +152,10 @@ test('summon actions reference a valid, combat-ready archetype', () => {
     assert.ok((a.cap ?? a.count) >= a.count, `${id}.cap >= count`);
     assert.ok(a.ap > 0, `${id}.ap costs something`);
     assert.ok(a.lifetimeTurns > 0, `${id}.lifetimeTurns is a real budget`);
+    assert.equal(a.placement?.anchor, 'aim',
+      `${id}.placement declares that the action needs an aimed point`);
+    assert.equal(typeof a.placement?.avoidHazards, 'boolean',
+      `${id}.placement declares its hazard policy`);
   }
 });
 

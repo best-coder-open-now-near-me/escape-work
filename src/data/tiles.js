@@ -46,6 +46,11 @@
 //              cover and a pull leaves it standing, so destruction is the
 //              one verb that deletes it. Only the cover-grade set carries
 //              this - the props whose job is to be hidden behind.
+//   explosive - descriptor for a fire-triggered prop explosion:
+//                { fuseTurns, area: { shape, radius },
+//                  damage: { player, enemy }, ignitesSurfaces }
+//              The complete descriptor reaches the resolver. Area and damage
+//              are content policy; body intersection and lifecycle are systems.
 //   onFloor  - draw the marker box ON the floor's top face rather than from
 //              ground level up: a flat remnant (the toppled partition) thinner
 //              than the floor slab would otherwise render inside the carpet
@@ -97,6 +102,36 @@
 export const SIGHT_BLOCK_HEIGHT = 0.75;
 export const blocksSight = (def) =>
   !!def?.solid && (!!def.tall || (def.height ?? 1) >= SIGHT_BLOCK_HEIGHT);
+
+// Does the thing on this cell SHIELD it - the M6a height rule, stated once.
+//
+// One threshold decides both halves, which is the whole point: a prop a shot
+// passes over is a prop you can crouch behind, and a prop tall enough to stop
+// the shot is tall enough that hiding behind it is moot. So a cell shields when
+// it is explicitly `cover`, or when it is solid and SHORT enough to shoot over
+// - `blocksSight` and this are two readings of the same line, and a prop can
+// never both block the shot and grant cover for it.
+//
+// This was written out five times - the crouch's own predicate, the shot
+// resolver's, the AI's, the out-of-combat crouch's and the editor preview's -
+// each a hand-copy of `def.cover || (def.solid && !blocksSight(def))`. It is a
+// fact about a tile DEF, so it lives with the defs.
+export const shieldsCell = (def) => !!def && (!!def.cover || (!!def.solid && !blocksSight(def)));
+
+// The order the editor groups tile brushes in. It lives HERE, with the tiles,
+// because it is a fact about the CONTENT: adding a category to a tile def and
+// having the editor lay it out should be one edit, not two.
+//
+// It was a `CATEGORY_ORDER` const inside editor.js, and it had already fallen
+// behind - `snack-machine` declares `furniture`, which the editor's list did
+// not name, so its brush sorted silently to the end of the palette. A tile
+// whose category is missing here still shows up; it just lands last, which is
+// exactly the kind of quiet wrong the lint below now refuses.
+//
+// `basics` is the bucket for a def with no category at all - floor, walls,
+// hazards, the originals - and leads so the old muscle memory holds.
+export const TILE_CATEGORIES = ['basics', 'work', 'seating', 'tables', 'storage',
+  'breakroom', 'furniture', 'decor', 'structure', 'facilities'];
 
 export const TILE_TYPES = {
   wall: {
@@ -209,6 +244,7 @@ export const TILE_TYPES = {
     ignitable: true,
     label: 'Trash Can',
     loot: 'trash',
+    lootIcon: '🗑️',
   },
   printer: {
     char: 'R',
@@ -216,9 +252,15 @@ export const TILE_TYPES = {
     height: 0.5,
     color: [0.56, 0.56, 0.6],
     primitive: 'printer',
-    explosive: true,
+    explosive: {
+      fuseTurns: 1,
+      area: { shape: 'circle', radius: 1.25 },
+      damage: { player: 8, enemy: 'lethal' },
+      ignitesSurfaces: true,
+    },
     label: 'Printer',
     loot: 'printer',
+    lootIcon: '🖨️',
   },
 
   // Furniture props: solid (they block movement and pathfinding) and rendered
@@ -232,6 +274,7 @@ export const TILE_TYPES = {
     scale: 0.5,
     label: 'Desk',
     loot: 'desk',
+    lootIcon: '🗄️',
   },
   chair: {
     char: 'c',
@@ -480,12 +523,14 @@ export const TILE_TYPES = {
     // The break room is where a floor's healing lives now that the class bars
     // stopped carrying it (POWERS_PLAN M9).
     loot: 'break-room',
+    lootIcon: '🧊',
   },
   'mini-fridge': {
     char: '0', category: 'breakroom', solid: true,
     height: 0.6, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/kitchenFridgeSmall', label: 'Mini Fridge',
     loot: 'break-room',
+    lootIcon: '🧊',
   },
   'microwave': {
     char: '1', category: 'breakroom', solid: true,
@@ -497,6 +542,7 @@ export const TILE_TYPES = {
     height: 0.3, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/kitchenCoffeeMachine', label: 'Coffee Machine',
     loot: 'break-room',
+    lootIcon: '☕',
   },
   'kitchen-sink': {
     char: '3', category: 'breakroom', solid: true,
@@ -693,6 +739,7 @@ export const TILE_TYPES = {
     height: 0.62, scale: 0.5, color: [0.2, 0.42, 0.58],
     model: 'office/cabinets', label: 'Filing Cabinet',
     loot: 'filing-cabinet',
+    lootIcon: '📁',
   },
   'water-cooler': {
     char: '`', category: 'breakroom', solid: true,
@@ -843,3 +890,9 @@ export const PARTITION_TOPPLE = { damage: [1, 3], becomes: 'partition-fallen' };
 // designer 2026-07-30): the topple keeps the board in play, the break-down
 // does not.
 export const PARTITION_HP = 8;
+
+// Floor finishes that can accept a temporary surface. A coloured carpet is
+// still floor: Bulk Mail and TPS Form Storm should land ON it, not silently
+// skip the room because its floor happens to use a palette variant. The
+// caller keeps the original type so the temporary litter can restore it.
+export const acceptsSurface = (type) => type === 'floor' || !!TILE_TYPES[type]?.carpet;

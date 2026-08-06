@@ -8,16 +8,105 @@
 // accessors): getActor, getSheet, isInCombat, isGameOver - plus approachAndDo
 // so overlay clicks walk the leader in.
 import { ITEMS, LOOT_TABLES, rollLoot } from './data/items.js';
-import { PAPER_CAP, equipItem, unequipItem } from './stats.js';
+import { PAPER_CAP, equipItem, unequipItem, inventoryCapOf } from './stats.js';
 import { placeDroppedItem } from './tile-renderer.js';
 import * as ui from './ui.js';
+import { CARDINAL_DIRS } from './directions.js';
 
-// No carry limit. The cap only ever produced overflow-onto-the-floor and
-// "pockets are full" refusals, which is friction without a decision attached -
-// you never chose WHAT to leave behind, the tenth item just fell out. Kept as
-// a named export (Infinity) so every guard site stays honest without each one
-// growing a special case.
-export const INV_CAP = Infinity;
+// The carry limit is effective Grit [ratified] (designer, 2026-08-05), so it is
+// asked of the sheet at every guard site rather than read from a constant here -
+// and the sheet in question is whoever is leading right now, which changes.
+//
+// A bag already over its changed cap remains intact. These are admission gates:
+// they refuse the next pickup or stow until the player drains the excess.
+
+// Atomically move one item between party sheets. Capacity is an admission rule:
+// a recipient at or above their live Grit-derived cap refuses the hand-off, and
+// the sender keeps what they were holding. Kept pure so the inventory panel is
+// presentation over the same rule the tests can exercise directly.
+export function handoffItem(sender, recipient, id) {
+  const at = sender?.inventory?.indexOf(id) ?? -1;
+  if (at < 0 || !recipient?.inventory) return 'missing';
+  if (recipient.inventory.length >= inventoryCapOf(recipient)) return 'full';
+  sender.inventory.splice(at, 1);
+  recipient.inventory.push(id);
+  return 'sent';
+}
+
+// Contiguous paper drifts, 4-connected, as { tiles, cx, cz } - the tiles the
+// patch covers and its centre, which is where its Alt label floats.
+//
+// Pure, and at module scope on purpose: the rest of this file is a closure that
+// builds DOM panels the moment it is constructed, so nothing inside it can be
+// reached from node. The flood fill is the one part of the overlay that is an
+// algorithm rather than a wiring diagram, and it is the part most able to be
+// quietly wrong - a patch that stops at the window edge, a tile counted twice,
+// a centre that drifts off the drift. The caller supplies the leaf facts: how
+// big the grid is, which tiles are in the near window, and which of those still
+// hold gatherable paper.
+//
+// `inWindow` gates the fill as well as the seed, so a drift running out of the
+// window is labelled as the part you can actually see - the same bound the
+// label's own reach check uses.
+// One paper patch as the overlay shows it: where the chip floats, and where a
+// click on it actually walks.
+//
+// These are deliberately two DIFFERENT points, which is the part worth pinning.
+// The chip floats at the patch's centre so it reads as one label for the whole
+// drift rather than sitting on an arbitrary corner of it - but a centre is an
+// average, and the average of a horseshoe or an L is a tile nobody can stand on
+// (or one that is not even paper). So the walk goes to the patch tile NEAREST
+// the walker, by the same Chebyshev step the rest of movement uses.
+//
+// Lifted to module scope for the same reason `paperPatches` was: the rest of
+// looting.js builds DOM the moment it is constructed and cannot be reached from
+// node, and the arm that picks a walk target is worth more than a comment.
+export function paperLabel({ tiles, cx, cz }, me) {
+  let target = tiles[0];
+  let bestD = Infinity;
+  for (const [px, pz] of tiles) {
+    const d = Math.max(Math.abs(px - me.x), Math.abs(pz - me.z));
+    if (d < bestD) { bestD = d; target = [px, pz]; }
+  }
+  const n = tiles.length;
+  return {
+    text: n > 1 ? `Loose paper ×${n}` : 'Loose paper',
+    world: { x: cx, y: 0.85, z: cz },
+    target,
+  };
+}
+
+export function paperPatches({ width, height }, inWindow, harvestable) {
+  const patches = [];
+  const visited = new Set();
+  const key = (x, z) => x + ',' + z;
+  for (let z = 0; z < height; z++) {
+    for (let x = 0; x < width; x++) {
+      if (visited.has(key(x, z)) || !inWindow(x, z) || !harvestable(x, z)) continue;
+      const tiles = [];
+      let sx = 0;
+      let sz = 0;
+      const stack = [[x, z]];
+      visited.add(key(x, z));
+      while (stack.length) {
+        const [cx, cz] = stack.pop();
+        tiles.push([cx, cz]);
+        sx += cx;
+        sz += cz;
+        for (const [dx, dz] of CARDINAL_DIRS) {
+          const nx = cx + dx;
+          const nz = cz + dz;
+          if (!visited.has(key(nx, nz)) && inWindow(nx, nz) && harvestable(nx, nz)) {
+            visited.add(key(nx, nz));
+            stack.push([nx, nz]);
+          }
+        }
+      }
+      patches.push({ tiles, cx: sx / tiles.length, cz: sz / tiles.length });
+    }
+  }
+  return patches;
+}
 
 // `extraEntries` (optional) lets the host add non-loot entries to the Alt
 // overlay (doors) without this module knowing what they are.
@@ -28,7 +117,10 @@ export const INV_CAP = Infinity;
 export function createLooting({ app, grid, runtime, enemies, getActor, getSheet, isInCombat, isGameOver, approachAndDo, extraEntries = null, onGearChange = null, onBagChange = null, recipients = null, addCash = null, getCash = null, openShop = null, shopSoldOut = null, spendCombatAp = null }) {
   const containerLoot = new Map(); // "x,z" -> remaining item ids (rolled on first rummage)
   const looseItems = []; // { x, z, id, entity } - dropped/overflowed floor items
-  const harvestedPaper = new Set(); // "x,z" of paper drifts already gathered for ammo
+  // Source keys, not fine-cell keys: changing SurfaceField resolution must not
+  // mint more ammunition. One authored/runtime drop is one gatherable source
+  // even though several fine cells draw and govern it.
+  const harvestedPaper = new Set();
 
   const itemName = (id) => ITEMS[id]?.name || id;
 
@@ -50,17 +142,27 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
   }
   // A temporary drift that expires takes its harvested-here mark with it, so a
   // later drift on the same tile is gatherable again (main.js ageTempSurfaces).
-  const forgetPaper = (x, z) => harvestedPaper.delete(x + ',' + z);
+  const surfaceCellsInTile = (x, z) => grid.surfaceField.entries().filter((cell) =>
+    Math.floor(cell.ix / grid.surfaceField.cellsPerTile) === x
+    && Math.floor(cell.iz / grid.surfaceField.cellsPerTile) === z);
+  const paperSourceKey = (cell) => cell.sourceKey
+    || `${cell.source || 'surface'}:${cell.sourceX ?? Math.round(cell.x)},${cell.sourceZ ?? Math.round(cell.z)}`;
+  const forgetPaper = (x, z) => {
+    const suffix = `:${x},${z}`;
+    for (const key of [...harvestedPaper]) if (key.endsWith(suffix)) harvestedPaper.delete(key);
+  };
   const looseAt = (x, z) => looseItems.filter((li) => li.x === x && li.z === z);
   // Live, still-gatherable paper: a paper drift (not burning/burnt - runtime
   // reports 'fire'/null for those) that hasn't been picked clean yet. The
   // sheets stay and keep cutting after harvest; only the ammo is spent.
-  const paperHarvestable = (x, z) =>
-    runtime.surfaceAt(x, z) === 'paper' && !harvestedPaper.has(x + ',' + z);
+  const harvestablePaperAt = (x, z) => surfaceCellsInTile(x, z)
+    .filter((cell) => cell.surfaceId === 'paper')
+    .filter((cell) => !harvestedPaper.has(paperSourceKey(cell)));
+  const paperHarvestable = (x, z) => harvestablePaperAt(x, z).length > 0;
   const corpseAt = (x, z) =>
     enemies.find((e) => !e.alive && e.loot?.length && e.x === x && e.z === z) || null;
 
-  const invPanel = ui.createInventoryPanel(ITEMS, INV_CAP, {
+  const invPanel = ui.createInventoryPanel(ITEMS, inventoryCapOf, {
     onUse: (i) => useItem(i),
     onDrop: (i) => dropItem(i),
     onExamine: (i) => ui.say(ITEMS[getSheet().inventory[i]]?.examine || 'It is what it is.'),
@@ -71,9 +173,9 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     getCash,
   });
 
-  // Hand an item to another party member. Pockets are unlimited, so this can
-  // never fail for space - the only reason it is unavailable is having nobody
-  // to hand it TO, which is why the button hides itself when travelling alone.
+  // Hand an item to another party member. The recipient's live capacity is an
+  // admission gate just like pickup and stow: refusal leaves the sender's bag
+  // unchanged. The button still hides when there is nobody to hand it to.
   function sendItem(i, btn) {
     const sheet = getSheet();
     if (!sheet || i >= sheet.inventory.length) return;
@@ -84,10 +186,12 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     ui.showMenu(r ? r.right + 4 : 200, r ? r.top : 200, to.map((m) => ({
       label: `Give to ${m.name}`,
       action: () => {
-        const at = sheet.inventory.indexOf(id);
-        if (at < 0) return; // it moved while the menu was open
-        sheet.inventory.splice(at, 1);
-        m.take(id);
+        const result = handoffItem(sheet, m.sheet, id);
+        if (result === 'missing') return; // it moved while the menu was open
+        if (result === 'full') {
+          ui.say(`${m.name}'s pockets are full - they cannot take the ${itemName(id)}.`);
+          return;
+        }
         ui.say(`You hand the ${itemName(id)} to ${m.name}.`);
         invPanel.refresh(sheet);
         onBagChange?.();
@@ -121,7 +225,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
         taken.push(`${itemName(id)} (${money}💵)`);
         continue;
       }
-      if (sheet.inventory.length < INV_CAP) {
+      if (sheet.inventory.length < inventoryCapOf(sheet)) {
         sheet.inventory.push(id);
         taken.push(itemName(id));
       } else {
@@ -180,11 +284,12 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     const sheet = getSheet();
     if (!sheet || isInCombat() || isGameOver()) return;
     let sheets = 0;
+    const sources = new Set();
     for (const [x, z] of patch) {
-      if (!paperHarvestable(x, z)) continue;
-      harvestedPaper.add(x + ',' + z);
-      sheets += 1;
+      for (const cell of harvestablePaperAt(x, z)) sources.add(paperSourceKey(cell));
     }
+    for (const source of sources) harvestedPaper.add(source);
+    sheets = sources.size;
     if (!sheets) return;
     const before = sheet.paper;
     sheet.paper = Math.min(PAPER_CAP, sheet.paper + sheets);
@@ -210,6 +315,14 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     if (!sheet || i >= sheet.inventory.length) return;
     const id = sheet.inventory[i];
     const def = ITEMS[id] || {};
+    // A revive is not used FROM the pockets: the person who needs it is at 0 HP
+    // and cannot act, so it is spent by walking to them and choosing the hand
+    // up (main.js helpUp). Say so rather than letting it read as inert flavour -
+    // it is the one item whose whole point is easy to miss.
+    if (def.revive && !def.heal && !def.ammo) {
+      ui.say(`${def.name} is for somebody who is down. Walk to them and offer a hand up.`);
+      return;
+    }
     // Flavor first: something with no heal and no ammo is not consumed, costs
     // nothing, and can be read at any time.
     if (!def.heal && !def.ammo) { ui.say(def.examine || 'It is what it is.'); return; }
@@ -254,15 +367,15 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     }
   }
 
-  // Unequip a slot back to the pockets - refused politely when the bag is full
-  // (INV_CAP), so gear never vanishes.
+  // Unequip a slot back to the pockets - refused politely when the bag is full,
+  // so gear never vanishes.
   function unequip(slot) {
     const sheet = getSheet();
     if (!sheet) return;
     if (isInCombat()) { ui.say('Not mid-fight - swap your kit on your own time.'); return; }
     const id = sheet.equipped?.[slot];
     if (!id) return;
-    if (unequipItem(sheet, slot, INV_CAP)) {
+    if (unequipItem(sheet, slot, inventoryCapOf(sheet))) {
       ui.say(`You stow the ${itemName(id)}.`);
       invPanel.refresh(sheet);
       onBagChange?.();
@@ -289,14 +402,18 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
   // Everything lootable in the area, as clickable Alt-overlay entries.
   // Clicking a label walks you into reach and loots - same path as clicking
   // the object itself.
-  function lootEntries() {
-    const out = [];
-    const me = getActor();
-    const near = (x, z) => Math.max(Math.abs(x - me.x), Math.abs(z - me.z)) <= 10;
-    // One label per TILE, not per item: picking up takes the whole tile anyway
-    // (pickUpAt), and a stack of dropped items used to render a stack of chips
-    // at the identical screen position, each hiding the one behind it. The
-    // label lists what is actually down there.
+  //
+  // Five scans, one per kind of lootable thing, and the ORDER they concatenate
+  // in is the order the labels were built in before they were named - loose
+  // piles, containers, machines, bodies, paper, then whatever the host adds.
+  // Kept, because the overlay renders in list order and nothing has said which
+  // way it should be.
+
+  // One label per TILE, not per item: picking up takes the whole tile anyway
+  // (pickUpAt), and a stack of dropped items used to render a stack of chips at
+  // the identical screen position, each hiding the one behind it. The label
+  // lists what is actually down there.
+  function looseEntries(near) {
     const byTile = new Map();
     for (const li of looseItems) {
       if (!near(li.x, li.z)) continue;
@@ -304,49 +421,51 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
       if (!byTile.has(key)) byTile.set(key, []);
       byTile.get(key).push(li);
     }
-    for (const pile of byTile.values()) {
-      const [first, ...rest] = pile;
-      out.push({
-        icon: ITEMS[first.id]?.icon,
-        text: itemName(first.id),
-        also: rest.map((li) => `${ITEMS[li.id]?.icon || '📦'} ${itemName(li.id)}`),
-        // Floated above the item rather than through it - the chip is a tag on
-        // the loot, not a lid over it.
-        world: { x: first.x, y: 0.9, z: first.z },
-        onClick: () => approachAndDo(first.x, first.z, () => pickUpAt(first.x, first.z)),
-      });
-    }
+    return [...byTile.values()].map(([first, ...rest]) => ({
+      icon: ITEMS[first.id]?.icon,
+      text: itemName(first.id),
+      also: rest.map((li) => `${ITEMS[li.id]?.icon || '📦'} ${itemName(li.id)}`),
+      // Floated above the item rather than through it - the chip is a tag on
+      // the loot, not a lid over it.
+      world: { x: first.x, y: 0.9, z: first.z },
+      onClick: () => approachAndDo(first.x, first.z, () => pickUpAt(first.x, first.z)),
+    }));
+  }
+
+  // Containers and merchant machines share ONE grid sweep - they ask the same
+  // tile the same question - but stay two lists, because containers labelled
+  // ahead of machines before this was split and the overlay renders in order.
+  //
+  // Merchant props (ECONOMY_PLAN M2) label alongside the containers: a machine
+  // you can't see from the corridor is a machine you never find. A sold-out one
+  // still labels, saying so, rather than silently vanishing and leaving you to
+  // walk over and discover it.
+  function propEntries(near) {
+    const containers = [];
+    const shops = [];
     for (let z = 0; z < grid.height; z++) {
       for (let x = 0; x < grid.width; x++) {
+        if (!near(x, z)) continue;
         const def = grid.defAt(x, z);
-        if (!def.loot || !near(x, z)) continue;
-        const rolled = containerLoot.get(x + ',' + z);
-        if (rolled && !rolled.length) continue; // already cleaned out
         const cx = x;
         const cz = z;
-        out.push({
-          // Keyed by loot table, so a new table needs an entry here or its
-          // Alt label renders with no icon at all.
-          icon: { trash: '🗑️', printer: '🖨️', desk: '🗄️', 'filing-cabinet': '📁' }[def.loot],
-          text: def.label,
-          world: { x, y: def.height + 0.8, z },
-          onClick: () => approachAndDo(cx, cz, () => lootContainer(cx, cz)),
-        });
-      }
-    }
-    // Merchant props (ECONOMY_PLAN M2) label alongside the containers - a
-    // machine you can't see from the corridor is a machine you never find. A
-    // sold-out one still labels, saying so, rather than silently vanishing and
-    // leaving you to walk over and discover it.
-    if (openShop) {
-      for (let z = 0; z < grid.height; z++) {
-        for (let x = 0; x < grid.width; x++) {
-          const def = grid.defAt(x, z);
-          if (!def.shop || !near(x, z)) continue;
+        // `rolled && !rolled.length` is "already cleaned out" - an unrolled
+        // container has no entry yet and still labels.
+        const rolled = def.loot ? containerLoot.get(x + ',' + z) : null;
+        if (def.loot && !(rolled && !rolled.length)) {
+          containers.push({
+            // The container owns its face. Two props may draw the same loot
+            // table without being the same object (a fridge and coffee
+            // machine both source break-room supplies).
+            icon: def.lootIcon,
+            text: def.label,
+            world: { x, y: def.height + 0.8, z },
+            onClick: () => approachAndDo(cx, cz, () => lootContainer(cx, cz)),
+          });
+        }
+        if (def.shop && openShop) {
           const empty = shopSoldOut?.(x + ',' + z);
-          const cx = x;
-          const cz = z;
-          out.push({
+          shops.push({
             icon: '🥤',
             text: empty ? `${def.label} (sold out)` : def.label,
             world: { x, y: def.height + 0.8, z },
@@ -355,6 +474,11 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
         }
       }
     }
+    return [...containers, ...shops];
+  }
+
+  function bodyEntries(near) {
+    const out = [];
     for (const en of enemies) {
       if (en.alive || !en.loot?.length || !en.entity || !near(en.x, en.z)) continue;
       out.push({
@@ -364,50 +488,35 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
         onClick: () => approachAndDo(en.x, en.z, () => lootBody(en)),
       });
     }
-    // Harvestable paper: one label per contiguous drift near the player
-    // (4-connected flood fill, bounded to the near window). Clicking walks to
-    // the patch's nearest tile and gathers the whole drift's ammo at once.
-    const visited = new Set();
-    for (let z = 0; z < grid.height; z++) {
-      for (let x = 0; x < grid.width; x++) {
-        if (visited.has(x + ',' + z) || !near(x, z) || !paperHarvestable(x, z)) continue;
-        const patch = [];
-        let sx = 0;
-        let sz = 0;
-        const stack = [[x, z]];
-        visited.add(x + ',' + z);
-        while (stack.length) {
-          const [cx, cz] = stack.pop();
-          patch.push([cx, cz]);
-          sx += cx;
-          sz += cz;
-          for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-            const nx = cx + dx;
-            const nz = cz + dz;
-            if (!visited.has(nx + ',' + nz) && near(nx, nz) && paperHarvestable(nx, nz)) {
-              visited.add(nx + ',' + nz);
-              stack.push([nx, nz]);
-            }
-          }
-        }
-        const n = patch.length;
-        // Approach the patch tile nearest the player; label sits at its centre.
-        let target = patch[0];
-        let bestD = Infinity;
-        for (const [px, pz] of patch) {
-          const d = Math.max(Math.abs(px - me.x), Math.abs(pz - me.z));
-          if (d < bestD) { bestD = d; target = [px, pz]; }
-        }
-        out.push({
-          icon: '📄',
-          text: n > 1 ? `Loose paper ×${n}` : 'Loose paper',
-          world: { x: sx / n, y: 0.85, z: sz / n },
-          onClick: () => approachAndDo(target[0], target[1], () => harvestPaperPatch(patch)),
-        });
-      }
-    }
-    if (extraEntries) out.push(...extraEntries());
     return out;
+  }
+
+  // One label per contiguous drift near the player. The fill itself is the pure
+  // `paperPatches` above; what is left here is the label - it floats at the
+  // patch's centre, and clicking walks to the patch tile NEAREST the player
+  // rather than to that centre, which may be a tile you cannot stand on.
+  function paperEntries(near, me) {
+    return paperPatches(grid, near, paperHarvestable).map((patch) => {
+      const { text, world, target } = paperLabel(patch, me);
+      return {
+        icon: '📄',
+        text,
+        world,
+        onClick: () => approachAndDo(target[0], target[1], () => harvestPaperPatch(patch.tiles)),
+      };
+    });
+  }
+
+  function lootEntries() {
+    const me = getActor();
+    const near = (x, z) => Math.max(Math.abs(x - me.x), Math.abs(z - me.z)) <= 10;
+    return [
+      ...looseEntries(near),
+      ...propEntries(near),
+      ...bodyEntries(near),
+      ...paperEntries(near, me),
+      ...(extraEntries ? extraEntries() : []),
+    ];
   }
   function showLabels() { lootLabels.show(lootEntries()); }
 
@@ -436,7 +545,11 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     // paper call this as they paint, so a cone or a zone can never become a
     // renewable ammo pile: ammo comes from the world, not from spending AP.
     // The sheets themselves stay - they still burn, cut and fuel.
-    markPaperSpent: (x, z) => harvestedPaper.add(x + ',' + z),
+    markPaperSpent: (x, z) => {
+      for (const cell of surfaceCellsInTile(x, z)) {
+        if (cell.surfaceId === 'paper') harvestedPaper.add(paperSourceKey(cell));
+      }
+    },
     // Read-only views for the window.__game debug/test surface.
     debug: {
       looseItems: () => looseItems.map((li) => ({ x: li.x, z: li.z, id: li.id })),

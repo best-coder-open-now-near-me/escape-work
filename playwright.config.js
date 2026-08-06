@@ -3,11 +3,16 @@
 // read-only handles for assertions (see ARCHITECTURE.md).
 import { defineConfig } from '@playwright/test';
 
+// Keep test and assertion budgets aligned. A per-test timeout does not extend
+// Playwright's independent default for expect(), which otherwise remains 5s.
+const E2E_TIMEOUT = 120_000;
+
 export default defineConfig({
   testDir: 'tests/e2e',
   // Generous: CI renders through software GL, where boot alone can eat 30s+
   // of shader compilation. Locally everything exits early.
-  timeout: 120_000,
+  timeout: E2E_TIMEOUT,
+  expect: { timeout: E2E_TIMEOUT },
   retries: process.env.CI ? 1 : 0,
   // A red run should cost minutes, not half an hour. Every test boots the whole
   // engine under software GL (~40s each), so letting a broken build grind
@@ -16,8 +21,17 @@ export default defineConfig({
   maxFailures: process.env.CI ? 3 : 0,
   // NB: billing is runner WALL-CLOCK, so in-runner parallelism is free money -
   // but these tests are CPU-bound on software GL, and over-subscribing the
-  // runner's 4 vCPUs trades flakes (and re-runs) for the time it saves. Left at
-  // Playwright's default; raise deliberately, with a flake check.
+  // runner's 4 vCPUs trades flakes (and re-runs) for the time it saves.
+  //
+  // That warning was written before anyone measured it, and the measurement is
+  // in: Playwright's default (cores/2 = 2 on a 4-vCPU box) manufactures
+  // failures. A six-file run reported two cover.spec crouch failures that both
+  // pass solo, and a near-identical contention run earlier reported fourteen.
+  // Every one of them read as a regression and none were. One worker is the
+  // only configuration that produces a signal worth acting on here, and a red
+  // run you cannot trust costs far more than the wall-clock it saved.
+  // Raise it only with a flake check behind it.
+  workers: 1,
   // A retry turns a flake green, so make the flakes visible: 'list' prints
   // every retried test, and the HTML report lands in the CI artifact next to
   // the traces below. Without these, a failure on CI left nothing to debug -
@@ -40,11 +54,5 @@ export default defineConfig({
     launchOptions: process.env.CHROMIUM_PATH
       ? { executablePath: process.env.CHROMIUM_PATH }
       : {},
-  },
-  webServer: {
-    command: 'npm run build && node serve.mjs --port 8173',
-    url: 'http://127.0.0.1:8173',
-    reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
   },
 });

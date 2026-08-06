@@ -4,7 +4,7 @@
 // tile behind a tall mesh - the same fix that makes a click on the raised door
 // panel actually open the door.
 import { test, expect } from '@playwright/test';
-import { bootAndPick, bootStash, onScreen, onCanvas, waitStill, combatOrWalkDone, stableProject, enterCombat } from './helpers.js';
+import { bootAndPick, bootStash, onScreen, onCanvas, waitStill, combatOrWalkDone, stableProject, enterCombat, hoverDoorPanel, clickDoorPanel } from './helpers.js';
 
 // Hover the on-screen position of a world point (a tall mesh, y > 0). Returns
 // false if it projects off-screen so the caller can bail.
@@ -18,18 +18,18 @@ async function hover3(page, x, y, z) {
 test('hovering the door mesh highlights it and shows the interact cursor', async ({ page }) => {
   await bootAndPick(page);
   // Aim at the door PANEL (mid-height on the h:8,5 edge), not the floor.
-  expect(await hover3(page, 8, 0.4, 4.5)).toBe(true);
-  await expect.poll(() => page.evaluate(() => window.__game.hoverKind), { timeout: 15_000 }).toBe('door');
+  await hoverDoorPanel(page, 8, 0.4, 4.5);
   expect(await page.evaluate(() => window.__game.cursor)).toBe('pointer');
+  // Doors are direct-use controls, so their cyan mesh glow does not require
+  // the inspect modifier that character highlighting does out of combat.
+  expect(await page.evaluate(() => window.__game.hoverGlow)).toBe(true);
 });
 
 test('clicking the raised door mesh opens it (parallax fix)', async ({ page }) => {
   await bootAndPick(page);
   // Click the door's BODY, well above the floor - the ground point under this
   // pixel lands past the door, so only entity picking resolves it.
-  const p = await page.evaluate(() => window.__game.project3(8, 0.55, 4.5));
-  expect(onScreen(p)).toBe(true);
-  await page.mouse.click(p.x, p.y);
+  await clickDoorPanel(page, 8, 0.55, 4.5);
   await expect.poll(
     () => page.evaluate(() => window.__game.doors.find((d) => d.key === 'h:8,5')?.open),
     { timeout: 60_000 },

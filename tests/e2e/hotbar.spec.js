@@ -40,21 +40,21 @@ test('the kit is in canonical order, on one row, with room to grow', async ({ pa
   await bootStash(page, QUIET, 'office-drone');
   await expect(page.locator('#hotbar')).toBeVisible();
 
-  // Basic swing, shove, the throws, then the class powers, then the universal
-  // cover verbs - Take Cover (TACTICS_PLAN M6) and Pull Over (M8) - and the
-  // bare-handed swing that stands in for a weapon (data/actions.js,
+  // Basic swing, then the universal bucket (shove plus the cover verbs), the
+  // throws, the class powers, and the bare-handed swing that stands in for a
+  // weapon (data/actions.js,
   // stats.orderedActionIds). The trailing empty slot is deliberate: it is
   // where the zone goes, and the reason a player ever right-clicks a slot.
   const all = await slots(page);
   expect(all.map((s) => s.id)).toEqual([
     'hotbar-act-attack',
     'hotbar-act-shove',
+    'hotbar-act-take-cover',
+    'hotbar-act-pull',
     'hotbar-act-paper-ball',
     'hotbar-act-paper-airplane',
     'hotbar-act-defend',
     'hotbar-act-paper-storm',
-    'hotbar-act-take-cover',
-    'hotbar-act-pull',
     'hotbar-act-punch',
     'hotbar-slot-9',
   ]);
@@ -66,7 +66,10 @@ test('the kit is in canonical order, on one row, with room to grow', async ({ pa
   // Slots are numbered from 1 within the row, which is what the keys address
   // ('0' answers for the tenth), and the tooltip is where the name lives.
   expect(all[0].text).toMatch(/^1/);
-  expect(all[0].title).toMatch(/^Passive-Aggressive Email · 2AP/);
+  // The unlock card and hotbar share actionTooltip(), so hold the browser
+  // surface to that full description rather than the retired label-only title.
+  expect(all[0].title).toMatch(/^Passive-Aggressive Email - 2 AP\nYour basic swing\./);
+  expect(all[0].title).toMatch(/Damage 3-5/);
   expect(all[9].text).toMatch(/^0—$/);
   expect(all[9].title).toMatch(/Empty slot/);
 
@@ -110,23 +113,25 @@ test('right-click a slot to reassign it; assigning swaps rather than duplicates'
   await expect.poll(async () => (await slots(page)).map((s) => s.id)).toEqual([
     'hotbar-act-paper-storm',
     'hotbar-act-shove',
+    'hotbar-act-take-cover',
+    'hotbar-act-pull',
     'hotbar-act-paper-ball',
     'hotbar-act-paper-airplane',
     'hotbar-act-defend',
     'hotbar-act-attack',
-    'hotbar-act-take-cover',
-    'hotbar-act-pull',
     'hotbar-act-punch',
     'hotbar-slot-9',
   ]);
 
   // The layout rides on the SHEET, so pressing key 1 now arms what is in slot 1.
-  // (TPS Form Storm is combat-only out here, so it refuses and says why - which is
-  // proof the press landed on the zone and not on the email that used to be
-  // there. The refusal is the zone's, not a heal's: the message names swinging
-  // rather than pockets.)
+  // TPS Form Storm is a real exploration ground action now, so the same press
+  // proves both the saved layout and the action's availability.
   await page.keyboard.press('1');
-  expect(await page.evaluate(() => window.__game.narration.at(-1))).toMatch(/swinging/i);
+  const ready = await page.evaluate(() => window.__game.narration.at(-1));
+  expect(ready).toMatch(/TPS Form Storm/i);
+  expect(ready).toMatch(/floor|place/i);
+  expect(await page.evaluate(() => window.__game.armed)).toBe('paper-storm');
+  await page.keyboard.press('1'); // lower it before opening the slot menu
   expect(await page.evaluate(() => window.__game.armed)).toBe(null);
 
   // Clearing a slot leaves it empty and addressable, not collapsed.

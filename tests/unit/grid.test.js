@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseLevel, parseWallRuns, compressWallRuns } from '../../src/grid.js';
-import { TILE_TYPES, blocksSight, SIGHT_BLOCK_HEIGHT, PARTITION_HP } from '../../src/data/tiles.js';
+import { TILE_TYPES, acceptsSurface, blocksSight, SIGHT_BLOCK_HEIGHT, PARTITION_HP } from '../../src/data/tiles.js';
 
 const level = (map, extra = {}) => ({
   name: 'test-floor',
@@ -64,6 +64,16 @@ test('blocksSight is a height rule, with tall as the structural override (M6a)',
   assert.equal(blocksSight(TILE_TYPES.paneling), true);         // structure, same family
   assert.equal(blocksSight(TILE_TYPES['cabinet-fallen']), false); // solid on its side, but LOW
   assert.equal(blocksSight(null), false);
+});
+
+test('temporary surfaces land on plain and coloured carpet, not props or hazards', () => {
+  assert.equal(acceptsSurface('floor'), true);
+  assert.equal(acceptsSurface('meeting-floor'), true);
+  assert.equal(acceptsSurface('break-floor'), true);
+  assert.equal(acceptsSurface('it-floor'), true);
+  assert.equal(acceptsSurface('desk'), false);
+  assert.equal(acceptsSurface('paper'), false);
+  assert.equal(acceptsSurface('water'), false);
 });
 
 test('the big plants conceal a crouch without blocking a shot (SNEAK)', () => {
@@ -148,7 +158,21 @@ test('parseLevel throws on unknown tile types and applies aliases', () => {
   const g = parseLevel({
     name: 'old-save', tiles: { 'w': 'wet-floor' }, actors: {}, map: ['w'],
   });
-  assert.equal(g.typeAt(0, 0), 'water'); // TYPE_ALIASES upgrade old exports
+  assert.equal(g.typeAt(0, 0), 'floor', 'surface syntax normalizes to terrain');
+  assert.equal(g.surfaceAt(0, 0), 'water', 'TYPE_ALIASES still upgrades the authored surface');
+});
+
+test('authored surfaces seed the fine field without remaining terrain types', () => {
+  const g = parseLevel(level(['~p']));
+  assert.equal(g.typeAt(0, 0), 'floor');
+  assert.equal(g.typeAt(1, 0), 'floor');
+  assert.equal(g.surfaceAt(0, 0), 'water');
+  assert.equal(g.surfaceAt(1, 0), 'paper');
+  assert.equal(g.surfaceField.size, 8, 'two authored tiles seed fine cells');
+  assert.deepEqual(
+    new Set(g.surfaceField.entries().map((cell) => cell.source)),
+    new Set(['authored']),
+  );
 });
 
 test('edge walls block single edges; diagonals must clear the corner', () => {
@@ -207,6 +231,17 @@ test('setType recomputes conduction pools', () => {
   assert.equal(g.isElectrified(2, 0), true);
   g.setType(1, 0, 'floor');
   assert.equal(g.isElectrified(1, 0), false);
+  assert.equal(g.isElectrified(2, 0), false);
+});
+
+test('legacy surface setType writes only the field and clearing retires it', () => {
+  const g = parseLevel(level(['*.~']));
+  g.setType(1, 0, 'water');
+  assert.equal(g.typeAt(1, 0), 'floor', 'surface never becomes terrain truth');
+  assert.equal(g.surfaceAt(1, 0), 'water');
+  assert.equal(g.isElectrified(2, 0), true);
+  g.setType(1, 0, 'floor');
+  assert.equal(g.surfaceAt(1, 0), null);
   assert.equal(g.isElectrified(2, 0), false);
 });
 
@@ -296,4 +331,67 @@ test('edge pools: partitions dent, and the pool dies with the edge', () => {
   const e = g.removeEdgeBetween(0, 0, 1, 0);
   assert.ok(e);
   assert.equal(g.edgeHpBetween(0, 0, 1, 0), null);
+});
+
+// --- per-placement rotation (EDITOR_INVENTORY IQ4, designer 2026-08-02) ------
+// `rotY` was a property of the tile TYPE, so every desk on every floor faced the
+// same way. An optional `props` sibling array carries per-CELL overrides.
+test('a props entry rotates one placement without touching the type', () => {
+  const g = parseLevel({
+    name: 'rot',
+    tiles: { '.': 'floor', D: 'desk' },
+    actors: { '@': 'player' },
+    map: ['@.D.', '..D.'],
+    props: [{ x: 2, z: 0, rotY: 90 }],
+  });
+  assert.equal(g.rotAt(2, 0), 90, 'the placement with an entry uses it');
+  assert.equal(g.rotAt(2, 1), TILE_TYPES.desk.rotY || 0,
+    'the placement without one falls back to the type');
+});
+
+test('rotation quantises to the four orientations and drops no-ops', () => {
+  const g = parseLevel({
+    name: 'rot',
+    tiles: { '.': 'floor', D: 'desk' },
+    actors: { '@': 'player' },
+    map: ['@DDD'],
+    props: [{ x: 1, z: 0, rotY: 91 }, { x: 2, z: 0, rotY: -90 }, { x: 3, z: 0, rotY: 360 }],
+  });
+  assert.equal(g.rotAt(1, 0), 90, '91 rounds to 90');
+  assert.equal(g.rotAt(2, 0), 270, 'negatives wrap into range');
+  assert.equal(g.rotAt(3, 0), TILE_TYPES.desk.rotY || 0, '360 is no rotation at all');
+});
+
+test('a level with no props array behaves exactly as before', () => {
+  const g = parseLevel({
+    name: 'rot',
+    tiles: { '.': 'floor', D: 'desk' },
+    actors: { '@': 'player' },
+    map: ['@.D.'],
+  });
+  assert.equal(g.rotAt(2, 0), TILE_TYPES.desk.rotY || 0);
+  assert.deepEqual(g.props, []);
+});
+
+test('a diagonal pair shares no edge, and both lookups say so (Q219)', () => {
+  // They used to answer anyway: the first `nx > x` test won, so (0,0)->(1,1)
+  // came back as the vertical edge at (1,0) - a real edge, between two cells
+  // that share none. A caller passing a diagonal has a bug, and an answer that
+  // sounds plausible is exactly what hides it.
+  const g = parseLevel({
+    name: 'Edge Lab',
+    tiles: { '#': 'wall', '.': 'floor' },
+    actors: { '@': 'player' },
+    map: [
+      '#####',
+      '#@..#',
+      '#...#',
+      '#####',
+    ],
+  });
+  assert.equal(g.doorBetween(1, 1, 2, 2), null, 'no door on a diagonal');
+  assert.equal(g.wallEdgeBetween(1, 1, 2, 2), null, 'no wall edge on a diagonal');
+  // ...and the orthogonal neighbours still answer normally.
+  assert.equal(g.doorBetween(1, 1, 2, 1), null); // no door painted, but a legal ask
+  assert.notEqual(g.terrainOpen(2, 1), undefined);
 });

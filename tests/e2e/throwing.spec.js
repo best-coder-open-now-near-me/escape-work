@@ -12,7 +12,7 @@
 // (true always lands, false always misses), which is what lets a test assert on
 // the MISS branch at all.
 import { test, expect } from '@playwright/test';
-import { bootStash, enterCombat, waitForPlayerTurn } from './helpers.js';
+import { bootStash, enterCombat, waitForPlayerTurn, clickEnemyBody } from './helpers.js';
 
 // The Manager three tiles east of the player: inside the throw range of 5, with
 // a clear line, and too far to melee.
@@ -61,6 +61,18 @@ const DESK_ARENA = {
 
 // A '#' cell wall is solid all the way up, and DOES stop a throw. The Manager
 // sits in a side pocket with no line to the player.
+//
+// The pocket is sealed on all four sides, and that is load-bearing rather than
+// scenery. It used to open onto row 3, and coworkers WANDER (actors.js gives
+// every EnemyActor a leash and an amble timer), so he would stroll out of the
+// pocket a second or two after boot - taking the arena's whole premise with
+// him. The click then landed on empty floor where he had been standing, and
+// the failure never said so: it surfaced either as nothing happening at all
+// (the throw unresolved, the narrator still on the arming line) or, when the
+// floor he had vacated was walkable, as the player walking around the wall and
+// opening a fight. Sealing him is what makes "no line" a property of the map
+// instead of a race against his amble timer - the same way ranged.spec.js's
+// own SEALED_ARENA pocket is walled in.
 const SEALED_ARENA = {
   name: 'No Line',
   tiles: { '#': 'wall', '.': 'floor' },
@@ -68,7 +80,7 @@ const SEALED_ARENA = {
   map: [
     '#######',
     '#.@.#M#',
-    '#...#.#',
+    '#...###',
     '#.....#',
     '#######',
   ],
@@ -82,13 +94,19 @@ const setPaper = (page, n) => page.evaluate((v) => {
 const managerHp = (page) => page.evaluate(() =>
   window.__combat.enemies.find((e) => e.name === 'The Manager')?.hp ?? null);
 const lastLine = (page) => page.evaluate(() => window.__game.narration.at(-1) || '');
-const clickManager = async (page) => {
-  const p = await page.evaluate(() => {
-    const en = window.__game.enemies.find((e) => e.alive);
-    return window.__game.project3(en.px ?? en.x, 0.9, en.pz ?? en.z);
-  });
-  await page.mouse.click(p.x, p.y);
-};
+// Click the Manager's BODY, having first ASKED the game whether the cursor is
+// on him rather than projecting a point and hoping the ray lands.
+//
+// Out of combat there is no near-a-body fallback - that one is combat's own
+// `enemyAtPoint` - so the pick has to hit the mesh. `hoverKind` is the game's
+// OWN pick under the cursor, so moving there and polling until it says `enemy`
+// means the click that follows lands on the body the game just confirmed.
+//
+// The camera settle is the other half: a walk-up or an intro glide leaves it
+// easing, and a stale projection lands the click a tile off. Settle on the
+// PLAYER, not the target - that fixes the whole projection, enemies included,
+// which is what helpers.enterCombat relies on.
+
 
 // Arm a throw on the COMBAT bar and send it at the Manager. The projectile is
 // cosmetic - the fight resolved before it existed - so a short settle is enough.
@@ -96,7 +114,7 @@ async function throwInCombat(page, actionId) {
   await waitForPlayerTurn(page);
   await page.click(`#hotbar-act-${actionId}`);
   expect(await page.evaluate(() => window.__combat.armed)).toBe(actionId);
-  await clickManager(page);
+  await clickEnemyBody(page);
   await page.waitForTimeout(700);
 }
 
@@ -118,7 +136,7 @@ test('a solid wall refuses the throw, and the refusal is free', async ({ page })
   // this failed on CI: "expected inCombat false, received true".
   await expect.poll(() => page.evaluate(() => window.__game.armed),
     { timeout: 10_000 }).toBe('paper-ball');
-  await clickManager(page);
+  await clickEnemyBody(page);
   await page.waitForTimeout(900);
 
   expect(await page.evaluate(() => window.__game.inCombat)).toBe(false); // no fight opened
@@ -135,7 +153,7 @@ test('a chest-high partition does NOT stop a throw', async ({ page }) => {
   expect(await page.evaluate(() => window.__game.losClear(2, 1, 5, 1))).toBe(true);
 
   await page.click('#hotbar-act-paper-ball');
-  await clickManager(page);
+  await clickEnemyBody(page);
   // The opener IS the throw: combat starts with the paper already spent.
   await expect.poll(() => page.evaluate(() => window.__game.inCombat), { timeout: 30_000 }).toBe(true);
   await page.waitForTimeout(700);
@@ -151,7 +169,7 @@ test('a desk does not stop a throw either - short solids are shot over (M6a)', a
   expect(await page.evaluate(() => window.__game.losClear(2, 1, 5, 1))).toBe(true);
 
   await page.click('#hotbar-act-paper-ball');
-  await clickManager(page);
+  await clickEnemyBody(page);
   // Same promise the partition test makes: the opener IS the throw.
   await expect.poll(() => page.evaluate(() => window.__game.inCombat), { timeout: 30_000 }).toBe(true);
   await page.waitForTimeout(700);

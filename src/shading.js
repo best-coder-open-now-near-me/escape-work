@@ -281,7 +281,19 @@ export function makeSpriteMaterial(app, url, rgb, { alphaTest = 0.35 } = {}) {
   let asset = app.assets.find(url);
   if (!asset) {
     asset = new pc.Asset(url, 'texture', { url });
-    asset.on('error', (err) => console.warn('sprite load failed:', url, err));
+    // A sprite that never loads must draw NOTHING. The card's alpha comes
+    // entirely from the opacity map, so a missing PNG left the material at a
+    // uniform opacity of 1 and the plane rendered as a solid tinted rectangle
+    // - a bush becoming a flat green slab across the office, which reads as a
+    // bug in the level rather than a missing file. Failing invisibly is the
+    // honest fallback for decoration; the warning is still how you find out.
+    asset.on('error', (err) => {
+      console.warn('sprite load failed:', url, err);
+      m.opacity = 0;
+      m.alphaTest = 0;
+      m.blendType = pc.BLEND_NORMAL;
+      m.update();
+    });
     app.assets.add(asset);
   }
   const bind = () => {

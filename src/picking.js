@@ -9,7 +9,7 @@
 //
 // It is camera-agnostic at construction (the camera rig is built after the
 // scene): pick(cameraEntity, sx, sy) takes the camera each call.
-const pc = window.pc;
+const pc = globalThis.window?.pc;
 
 export function createPicker() {
   // holder entity -> { kind, ref, instances: MeshInstance[] }. The mesh
@@ -17,7 +17,7 @@ export function createPicker() {
   // live as the holder moves, so a wandering enemy stays pickable.
   const items = new Map();
 
-  function register(entity, kind, ref) {
+  function register(entity, kind, ref, { precise = false } = {}) {
     if (!entity || items.has(entity)) return;
     const instances = [];
     for (const rc of entity.findComponents('render')) {
@@ -27,7 +27,7 @@ export function createPicker() {
       for (const mi of rc.meshInstances) instances.push(mi);
     }
     if (!instances.length) return;
-    items.set(entity, { kind, ref, instances });
+    items.set(entity, { kind, ref, instances, precise });
     // Auto-forget when the entity is destroyed (doors re-render on every
     // toggle; loose items vanish when picked up).
     entity.once('destroy', () => items.delete(entity));
@@ -74,8 +74,52 @@ export function createPicker() {
     return tmin;
   }
 
+  // A hidden storey must not eat clicks. The cutaway hides a whole floor by
+  // disabling its root entity (scene.js `updateCutaway`), but a disabled
+  // entity's mesh instances keep their world AABBs - so the ray went on
+  // hitting doors and props on a storey the player cannot even see, and the
+  // door they clicked THROUGH never got the click. `layeredPick` already
+  // scans top-down through visible storeys for the same reason; this is the
+  // body picker learning the same rule. Walks the chain rather than reading
+  // `entity.enabled`, which is the LOCAL flag: the item's own flag stays true
+  // while its storey root is the thing switched off.
+  function visible(entity) {
+    for (let e = entity; e; e = e.parent) if (e.enabled === false) return false;
+    return true;
+  }
+
   const _o = new pc.Vec3();
   const _f = new pc.Vec3();
+  const _localO = new pc.Vec3();
+  const _localF = new pc.Vec3();
+  const _inverse = new pc.Mat4();
+
+  // Intersect a mesh's own oriented bounds. The segment parameter survives an
+  // affine transform, so the returned t remains comparable with world-AABB
+  // hits. Primitive door panels use their exact local box here: unlike their
+  // world AABB, it contains no empty corners after the door swings open.
+  function preciseHit(instances, ox, oy, oz, fx, fy, fz) {
+    let best = null;
+    _o.set(ox, oy, oz);
+    _f.set(fx, fy, fz);
+    for (const mi of instances) {
+      const local = mi.mesh?.aabb;
+      const node = mi.node;
+      if (!local || !node?.getWorldTransform) continue;
+      _inverse.copy(node.getWorldTransform()).invert();
+      _inverse.transformPoint(_o, _localO);
+      _inverse.transformPoint(_f, _localF);
+      _min.copy(local.getMin());
+      _max.copy(local.getMax());
+      const t = raySlab(
+        _localO.x, _localO.y, _localO.z,
+        _localF.x - _localO.x, _localF.y - _localO.y, _localF.z - _localO.z,
+      );
+      if (t !== null && (best === null || t < best)) best = t;
+    }
+    return best;
+  }
+
   // Nearest interactable under the screen pixel, or null. Returns a fresh
   // { entity, kind, ref } so callers never hold the internal record.
   function pick(cameraEntity, sx, sy) {
@@ -89,8 +133,14 @@ export function createPicker() {
     let bestT = Infinity;
     let best = null;
     for (const [entity, item] of items) {
-      if (!bounds(item)) continue;
-      const t = raySlab(_o.x, _o.y, _o.z, dx, dy, dz);
+      if (!visible(entity)) continue;
+      let t;
+      if (item.precise) {
+        t = preciseHit(item.instances, _o.x, _o.y, _o.z, _f.x, _f.y, _f.z);
+      } else {
+        if (!bounds(item)) continue;
+        t = raySlab(_o.x, _o.y, _o.z, dx, dy, dz);
+      }
       if (t !== null && t < bestT) {
         bestT = t;
         best = { entity, kind: item.kind, ref: item.ref };

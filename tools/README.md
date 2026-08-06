@@ -5,6 +5,23 @@ Authoring-time scripts. Nothing here runs at build time or ships in the game -
 the `.glb` files `assets/` holds, and you run them by hand when new art
 arrives.
 
+## Optional licensed art profile
+
+Licensed source and converted files stay under ignored `assets/licensed/`.
+The opt-in Synty profile copies only the six runtime GLBs allowlisted in
+`src/data/art-profiles.js`; normal builds copy none of them.
+
+```sh
+npm run build:synty
+npm run serve:synty
+```
+
+The default source is `assets/licensed/synty`. Set
+`ESCAPE_WORK_SYNTY_SOURCE` to a different private checkout before running the
+profile if the converted tree lives elsewhere. Gameplay keeps its existing
+class and tile ids: the profile changes presentation only, so removing it or
+replacing the art does not migrate saves or levels.
+
 ## fbx-to-glb.py — Unity `.fbx` → game `.glb`
 
 ### Why this exists

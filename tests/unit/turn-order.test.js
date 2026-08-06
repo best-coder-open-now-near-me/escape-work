@@ -371,6 +371,30 @@ test('replace leaves the pointer alone - nobody is skipped or repeated', () => {
     'the index cannot move, which is precisely why this is not remove-then-insert');
 });
 
+// The span books slots by IDENTITY, and `replace` destroys the identity it
+// swaps out. When the swapped slot was the span's LAST, the span's high-water
+// mark fell back to an earlier slot and the pointer landed on this very index
+// - so the new owner acted immediately, on floor time its predecessor had
+// already spent. Charming the trailing member of a shared turn is exactly the
+// shape that reaches it.
+test('replace on the span\'s last slot does not hand the new owner a free turn', () => {
+  const log = [];
+  const a = slot('a', 9, { ctl: true });
+  const b = slot('b', 7, { ctl: true });
+  const f = slot('f', 1);
+  const { turns } = harness([a, b, f], ctlHost(log));
+  turns.begin(); // a and b open as one span; f is next
+  assert.deepEqual(turns.held, [a, b]);
+
+  const borrowed = { name: 'b2', initMod: 0, carrier: {}, alive: true };
+  turns.replace((s) => s.name === 'b', borrowed);
+
+  turns.finish(a);
+  turns.finish(b);
+  assert.equal(turns.current, f,
+    'the span ends on the slot AFTER it, not back on the swapped-in owner');
+});
+
 test('replace reports a miss rather than guessing', () => {
   const { turns } = harness([slot('a', 30)]);
   turns.begin();

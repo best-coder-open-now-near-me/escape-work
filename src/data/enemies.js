@@ -1,16 +1,38 @@
 // Enemy type registry. Adding an enemy = adding an entry here and giving it a
 // character in a level's "actors" legend. `model` is a .glb under
-// assets/characters/. `attacks` are picked at random each enemy turn; the log
-// line gets the rolled damage appended. `loot` (data/items.js ids) rolls onto
-// their body when they fall - bodies stay on the floor and can be looted.
+// assets/characters/. `attacks` are drawn per SWING, not per turn, and the
+// draw is weighted rather than flat: combat.js's `pickLine` rolls the fight's
+// rng over `combat-ai.lineWeights`, where a line whose `applies` status the
+// target is not already wearing counts AI.STATUS_WEIGHT instead of 1 - so a
+// guard blinds you on purpose, sometimes, and stops re-blinding you once it
+// sticks. The pool is split first: a line with `range` is ranged and the two
+// pools are never drawn from together (see below). The log line gets the
+// rolled damage appended. `loot` (data/items.js ids) rolls onto their body
+// when they fall - bodies stay on the floor and can be looted.
 //
-// `aggression` is their disposition toward starting a fight, surfaced as the
-// dots flanking their name in the focus banner:
-//   'green'  - no intention of initiating; only fights if provoked
-//   'yellow' - will talk first, then maybe escalate
-//   'red'    - straight to battle
+// `aggression` is a DISPLAY signal only, despite the name: the dots flanking
+// their name in the focus banner, read in exactly one place
+// (`hover.js` AGGRO). Nothing gates fight initiation on it - what starts a
+// fight is proximity and the sight cones (`checkCombatTrigger`), the same for
+// every def. Treat it as how they LOOK to the player, not what they will do:
+//   'yellow' - reads as "will talk first, then maybe escalate"
+//   'red'    - reads as "straight to battle"
+// A third value, 'green', was documented here for a long time and is carried
+// by no entry in this file; the dot table falls back to red for anything it
+// does not know, so adding one is a hover.js change too.
+//
+// `focus` (0..1, default combat-ai.AI.FOCUS_DEFAULT) is targeting discipline
+// once the fight is on (AI_PLAN M2): 0 harasses whoever is closest, 1 picks
+// the member it can actually finish and works them. Personality data, read
+// by one shared rule - like `aggression`, it says who they are, not how the
+// game works.
 import { fromClass } from './classes.js';
 
+// An attack entry with `range` is a RANGED line (AI_PLAN M5): the AI fires
+// it only out of reach, gated on line of sight and a clear shot (the crouch
+// game's shotOutcome - object shields refuse it, human shields take it), at
+// the same attackAp as any line. Entries without `range` are the melee pool.
+//
 // id -> either a standalone stat block, or `{ classId, ...overrides }` for a
 // coworker who IS one of the playable classes. The Security Guard and the HR
 // Representative are those: each is the same job as a class, so each names it
@@ -26,21 +48,42 @@ import { fromClass } from './classes.js';
 // The rule below is right; it had been asserted about five entries and checked
 // on none. Check it when you add one.
 //
-// The Manager and the Executive genuinely have no twin: no class is about
-// being either, and neither imitates one. Don't invent a class just to inherit
-// from it - and don't leave a twin unnamed just because writing it out is
-// quicker.
+// It was then asserted a second time, about The Manager, and was wrong again
+// for the same reason: `middle-manager` has been in the class registry the
+// whole time, and being a middle manager is exactly what The Manager is. He
+// names it now. The tell both times was a rig: a job with two .glb files
+// (`manager` and `midmanager`, `hr` and `hrrep`) is a job written down twice.
+//
+// The Executive is the last entry with no twin, and genuinely has none: no
+// class is about being one, and he imitates none. Don't invent a class just to
+// inherit from it - and don't leave a twin unnamed just because writing it out
+// is quicker.
 const KITS = {
   manager: {
+    // The same job as the playable Middle Manager class, so he IS one: the rig,
+    // the build baseline, the attributes and the kit come from it. What is left
+    // below is only what makes him the one you FIGHT.
+    classId: 'middle-manager',
     char: 'M',
+    // He keeps a name because he is a PERSON you meet, not the job in the
+    // abstract - the same deliberate line the Security Guard carries against
+    // the Security class.
     name: 'The Manager',
+    // Where the Guard and HR depart from their class by BUILD on a shared rig,
+    // he departs by wearing a different body outright - `manager.glb` is his,
+    // `midmanager.glb` is the player's. That makes the build override below
+    // load-bearing rather than decorative: `look` is replaced whole, never
+    // merged (classes.js MERGED_PER_KEY), and the class's 1.68 legs are a
+    // stretch tuned against the OTHER rig. These are the engine defaults
+    // (models.js PROPORTIONS) - what he has always been - written out so that
+    // inheriting somebody else's silhouette can't happen by omission.
     model: 'manager',
-    level: 1, // native tier; a floor deeper than this scales him up (stats.scaleEnemy)
-    hp: 14,
-    ap: 5,
+    look: { build: { legs: 1.9, torso: 1.3 } },
+    level: 1, // native tier; only an explicit placement tier scales him up
     attackAp: 3, // AP one swing costs them in combat
     xp: 8,
     aggression: 'red', // straight to battle
+    focus: 0.2, // harasses whoever is closest - pettiness, not strategy
     examine: 'The Manager: radiates unread-email energy.',
     loot: [
       { item: 'performance-review', chance: 1 },
@@ -53,7 +96,8 @@ const KITS = {
       { min: 2, max: 3, log: 'The Manager asks for "just one more thing".', missLog: 'The "one more thing" gets lost in your inbox.' },
       { min: 2, max: 3, log: 'The Manager CCs your skip-level.', missLog: 'The CC bounces - wrong distribution list.' },
       { min: 2, max: 4, log: '"Per my last email..."', missLog: 'Per your last email, you were already out of office.' },
-      // applies: 'gum' - sticks gum to the target's shoe (see GUM in surfaces.js)
+      // applies: 'gum' - sticks gum to the target's shoe (see the `gum` status
+      // in data/statuses.js, which owns its numbers)
       { min: 1, max: 2, log: 'The Manager parks his gum on your shoe. A power move.', applies: 'gum', appliesLog: 'Gum. On your shoe.', missLog: 'The Manager reaches for your shoe and misses. Reprieve.' },
     ],
   },
@@ -68,8 +112,17 @@ const KITS = {
     ap: 5,
     attackAp: 3,
     xp: 10,
-    accuracy: 0.05, // sharper aim than the base coworkers (HIT_PLAN)
+    // The one bespoke enemy left, and bespoke does not mean statless: every
+    // combatant derives accuracy, dodge, damage, deflect and saves from the
+    // same four attributes (stats.unitCombat), so his are authored here where
+    // a class twin would have carried them. Written to read as the man: hard
+    // to fluster (the deflect and the resist are his), sharp (the Savvy is
+    // where "sharper aim than the base coworkers" now comes from - it also
+    // buys his swings the same damage bonus a member's Savvy buys), soft hands
+    // (grit), and he has never hurried in his life.
+    attr: { grit: 4, hustle: 2, savvy: 6, composure: 8 },
     aggression: 'red', // descended from the floors above; negotiation is beneath him
+    focus: 0.9, // picks the kill and works it - restructuring is a discipline
     examine: 'An Executive, down from the floors above. The air pressure changes around him.',
     loot: [
       { item: 'performance-review', chance: 1 },
@@ -82,6 +135,11 @@ const KITS = {
     ],
     attacks: [
       { min: 3, max: 5, log: 'The Executive restructures your reporting line.' },
+      // The ranged line (AI_PLAN M5, the ratified Q1 pick): the first enemy
+      // in the game that shoots, which is what makes the PLAYER's crouch,
+      // human shields and Pull Over finally matter. Range matches the throw
+      // precedent; no ammo - an executive never runs out of deadlines.
+      { min: 2, max: 4, range: 5, log: 'The Executive sets a hard deadline from across the room.', missLog: 'The deadline sails past. It was aspirational.' },
       // A reorg, delivered as a question. The action bar comes back in a
       // different order for a couple of turns (statuses: `confused`).
       { min: 2, max: 4, log: 'The Executive asks what it is you even do here.', applies: 'confused', appliesLog: 'Good question. Your whole remit swims for a moment.' },
@@ -104,10 +162,10 @@ const KITS = {
     // Security Guard from the player's guard.
     look: { build: { legs: 1.82, torso: 1.24 } },
     level: 1,
-    hp: 12,
     attackAp: 3,
     xp: 6,
     aggression: 'yellow', // wants a "culture-fit conversation" before the knives
+    focus: 0.4, // a people person - spreads the attention around, mostly
     examine: 'HR: smiles warmly. Never stops taking notes.',
     loot: [
       { item: 'hr-pamphlet', chance: 1 },
@@ -137,8 +195,22 @@ const KITS = {
       cap: 2,
       cooldownRounds: 2,
       ap: 3,
+      placement: { anchor: 'summoner', avoidHazards: true },
       lifetimeTurns: 5,
       log: 'HR posts the role internally. Employees materialize, résumés in hand.',
+    },
+    // Enemy-side triage (AI_PLAN M6, Q4 ratified): she patches the worst-off
+    // colleague she can reach, RATIONED - `uses` per fight, cooldown-paced -
+    // because M9 cut the player's heal ritual and the enemy side must not
+    // reintroduce it from the other direction. The numbers mirror the shape
+    // of her summon descriptor: everything the AI reads lives on the def.
+    support: {
+      heal: [4, 7],
+      uses: 2,
+      cooldownRounds: 1,
+      ap: 2,
+      range: 4,
+      log: 'HR approves emergency self-care. Attendance is mandatory.',
     },
   },
 
@@ -157,9 +229,10 @@ const KITS = {
     // guard, who stands taller and less padded on the same rig.
     look: { build: { torso: 1.34 } },
     level: 2,
-    hp: 20,
     attackAp: 3,
     xp: 11,
+    // ON TOP of the dodge his Hustle already derives (stats.unitCombat) - the
+    // def has no shoes to put it in, so a trained foot is stated outright.
     dodge: 0.05, // trained to stay on his feet (HIT_PLAN)
     // The maglite is already in his attack lines, and a long one is genuinely a
     // reach weapon (TACTICS_PLAN revision M5). 2.1 clears a full orthogonal tile
@@ -170,6 +243,7 @@ const KITS = {
     // Badge first, force second: he wants to see your lanyard before anything
     // escalates, which is exactly what 'yellow' means.
     aggression: 'yellow',
+    focus: 0.5, // steady, procedural; STICKINESS does his character work
     examine: 'Security. Knows the badge policy by heart. Has never once been asked about it.',
     loot: [
       { item: 'laminated-lanyard', chance: 1 },
@@ -197,9 +271,22 @@ const KITS = {
 export const ENEMY_TYPES = Object.fromEntries(
   Object.entries(KITS).map(([id, kit]) => [
     id,
-    // `maxHp`: enemies spell it `hp`, and unitCombat prefers `maxHp` - leaving
-    // the class's would silently outrank this enemy's own HP.
-    kit.classId ? fromClass(kit, { drop: ['maxHp'] }) : kit,
+    // No `drop` any more, and no special case for health. A class-backed enemy
+    // inherits `maxHp` like it inherits everything else, and departs from it -
+    // if it ever should - by overriding `maxHp` under the class's own spelling,
+    // where the redundant-override lint can see it like any other field.
+    //
+    // The old `drop: ['maxHp']` existed because these entries spelled health
+    // `hp` while the class spelled it `maxHp`, and unitCombat prefers `maxHp`,
+    // so the class's would have outranked the enemy's. That is a second name
+    // for one stat, and it did the damage a second name always does: dropping
+    // the inherited field made an `hp` line MANDATORY (delete it and the enemy
+    // had no health at all), and because the override was mandatory it was
+    // invisible - the Guard sat at 20 against Security's 26 and HR at 12
+    // against Human Resources' 20, and the lint that exists to catch a silent
+    // copy exempts `hp`, so nothing ever said so. One spelling, one value,
+    // checked like everything else.
+    kit.classId ? fromClass(kit) : kit,
   ]),
 );
 export { KITS as ENEMY_KITS };

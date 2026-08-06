@@ -2,8 +2,11 @@
 // lose overlays, the boot-time class picker, the game menu and the playtest
 // badge. Each owns the frame it is in, so they share the `overlay` shell and
 // its button below rather than each inventing one.
-import { BUTTON_CHROME } from './chrome.js';
+import { BUTTON_CHROME, esc,
+} from './chrome.js';
 import { TALENTS, STARTING_TALENT_BY_CLASS } from '../data/talents.js';
+import { ATTRIBUTES } from '../data/attributes.js';
+import { pendingPoints } from '../stats.js';
 
 // --- end-of-game overlays ----------------------------------------------------
 function overlay(id, inner) {
@@ -28,8 +31,7 @@ function overlay(id, inner) {
 // rendered on the level-up card, the party bar and the résumé. Escaping at the
 // interpolation site means the rule holds wherever the string came from, rather
 // than depending on every future caller having sanitised it first.
-const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
-  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// (moved to chrome.js so every ui/ module can reach it - see the note there)
 
 const button = (id, label) =>
   `<button id="${id}" style="padding:10px 26px; border-radius:8px; border:1px solid #3a3a52;
@@ -61,13 +63,6 @@ export function showLoseScreen(message) {
   div.querySelector('#restart').onclick = () => location.reload();
 }
 
-const LEVELUP_ATTRS = [
-  { key: 'grit', label: 'Grit', blurb: 'Toughness — raises max HP.' },
-  { key: 'hustle', label: 'Hustle', blurb: 'Tempo — raises max AP (move + actions).' },
-  { key: 'savvy', label: 'Savvy', blurb: 'Precision — raises attack damage.' },
-  { key: 'composure', label: 'Composure', blurb: 'Poise — softens incoming hits.' },
-];
-
 export function showLevelUpScreen(sheet, { onSpend, onLearn, nodesFor, onDone } = {}) {
   document.getElementById('levelup-screen')?.remove();
   const host = document.createElement('div');
@@ -84,7 +79,12 @@ export function showLevelUpScreen(sheet, { onSpend, onLearn, nodesFor, onDone } 
     const ap = sheet.attrPoints || 0;
     const cp = sheet.classPoints || 0;
     const nodes = nodesFor ? nodesFor() : [];
-    const pending = ap + cp;
+    // stats.js owns "how many points are banked" (pendingPoints). This screen
+    // re-derived it as `ap + cp`, which made it the FIFTH place that sum was
+    // written - and the one place where getting it wrong is visible while the
+    // player is spending. It still reads `ap` and `cp` separately just above,
+    // because the two rows are labelled separately; only the total is shared.
+    const pending = pendingPoints(sheet);
     host.innerHTML = `
       <div style="background:#232334; border:1px solid #3a3a52; border-radius:12px;
         padding:22px 26px; min-width:380px; max-width:460px; max-height:86vh; overflow:auto;
@@ -102,7 +102,7 @@ export function showLevelUpScreen(sheet, { onSpend, onLearn, nodesFor, onDone } 
           ${button('lvlup-done', pending > 0 ? 'Spend later' : 'Done')}</div>
       </div>`;
     const rows = host.querySelector('#lvlup-rows');
-    for (const info of LEVELUP_ATTRS) {
+    for (const info of ATTRIBUTES) {
       const row = document.createElement('div');
       Object.assign(row.style, {
         display: 'flex', alignItems: 'center', gap: '12px',
@@ -132,6 +132,8 @@ export function showLevelUpScreen(sheet, { onSpend, onLearn, nodesFor, onDone } 
     if (track) {
       for (const n of nodes) {
         const row = document.createElement('div');
+        if (n.actionId) row.dataset.unlockAction = n.actionId;
+        if (n.tooltip) row.title = n.tooltip;
         Object.assign(row.style, {
           display: 'flex', alignItems: 'center', gap: '10px',
           padding: '6px 9px', borderRadius: '7px', background: '#2a2a3e',
@@ -466,16 +468,37 @@ export function showGameMenu(items, hints = null) {
 
 // Small corner badge shown while playtesting an editor level.
 
-export function showPlaytestBadge(onBack) {
-  const b = document.createElement('button');
-  b.id = 'playtest-badge';
-  b.textContent = '⏸ PLAYTEST — back to editor';
-  Object.assign(b.style, {
+// The badge carries TWO actions now. It used to offer only "back to editor",
+// which meant a stale playtest stash hijacked every boot with no way out that
+// did not also destroy something: the stash sits at the top of the boot cascade,
+// so the floor-select desk and its Continue button never rendered while one
+// existed, and the only documented escape (Restart run) wiped the campaign save.
+export function showPlaytestBadge(onBack, onLeave) {
+  const wrap = document.createElement('div');
+  wrap.id = 'playtest-badge-wrap';
+  Object.assign(wrap.style, {
     position: 'fixed', top: '12px', right: '12px', zIndex: '25',
+    display: 'flex', gap: '6px', alignItems: 'center',
+  });
+  const chrome = {
     background: '#3a2e46', color: '#e8d8f5', border: '1px solid #6a5a80',
     borderRadius: '7px', padding: '7px 11px', font: '12px system-ui, sans-serif',
     cursor: 'pointer',
-  });
+  };
+  const b = document.createElement('button');
+  b.id = 'playtest-badge';
+  b.textContent = '⏸ PLAYTEST — back to editor';
+  Object.assign(b.style, chrome);
   b.onclick = onBack;
-  document.body.appendChild(b);
+  wrap.appendChild(b);
+  if (onLeave) {
+    const l = document.createElement('button');
+    l.id = 'playtest-leave';
+    l.textContent = '✕ Leave playtest';
+    l.title = 'Drop the playtest level and boot your own run. Your campaign save is untouched.';
+    Object.assign(l.style, chrome);
+    l.onclick = onLeave;
+    wrap.appendChild(l);
+  }
+  document.body.appendChild(wrap);
 }

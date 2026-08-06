@@ -18,19 +18,9 @@ import {
   unspendDraftPoint, spentOn,
 } from '../creation.js';
 import { CUSTOM_RIGS } from '../data/looks.js';
-import { ATTR_KEYS } from '../stats.js';
+import { ATTRIBUTES } from '../data/attributes.js';
 
 const PRONOUN_LABEL = { she: 'she/her', he: 'he/him', they: 'they/them' };
-
-// The same four descriptions the level-up screen shows. Creation used to print
-// the bare lowercase keys, so the one screen where a player has never seen
-// these words was the one that explained them least.
-const ATTR_BLURB = {
-  grit: 'Toughness — raises max HP.',
-  hustle: 'Tempo — raises max AP (move + actions).',
-  savvy: 'Precision — raises attack damage.',
-  composure: 'Poise — softens incoming hits.',
-};
 
 const CARD = {
   background: '#232334', border: '1px solid #3a3a52', borderRadius: '12px',
@@ -184,7 +174,7 @@ export function showCreationStep(draft, { onCommit, onBack, onPreview }) {
   // spendAttrPoint.
   const saLabel = label('Self-assessment');
   card.appendChild(saLabel);
-  const attrRows = ATTR_KEYS.map((key) => {
+  const attrRows = ATTRIBUTES.map(({ key, label: attrLabel, blurb: attrBlurb }) => {
     const r = document.createElement('div');
     Object.assign(r.style, {
       display: 'flex', alignItems: 'center', gap: '10px', padding: '5px 9px',
@@ -194,10 +184,10 @@ export function showCreationStep(draft, { onCommit, onBack, onPreview }) {
     Object.assign(text.style, { flex: '1' });
     const nameEl = document.createElement('div');
     Object.assign(nameEl.style, { fontSize: '13px', textTransform: 'capitalize', fontWeight: '600' });
-    nameEl.textContent = key;
+    nameEl.textContent = attrLabel;
     const blurb = document.createElement('div');
     Object.assign(blurb.style, { opacity: '.6', fontSize: '11px' });
-    blurb.textContent = ATTR_BLURB[key] || '';
+    blurb.textContent = attrBlurb;
     text.append(nameEl, blurb);
     const value = document.createElement('span');
     Object.assign(value.style, { opacity: '.85', fontWeight: '600', minWidth: '1.2em', textAlign: 'right' });
@@ -274,7 +264,13 @@ export function showCreationStep(draft, { onCommit, onBack, onPreview }) {
 
   function repaintSummary() {
     const job = draft.className || '';
-    const who = custom ? (draft.name || '').trim() : job;
+    // `draftName` and not a hand-rolled trim: it is the rule that decides the
+    // name the character is actually CREATED with, and this line is a preview
+    // of exactly that. The hand-rolled version disagreed with it on a blank
+    // field - the summary read ", they/them, Intern." while the character you
+    // got was named Intern - and on internal whitespace, which draftName
+    // collapses (Q177).
+    const who = draftName(draft);
     sub.textContent = custom
       ? 'Nobody here yet. Say who.'
       : `${job}. This is who you are.`;

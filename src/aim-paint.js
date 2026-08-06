@@ -1,105 +1,215 @@
-// The ground read while aiming (TACTICS_PLAN M7): every tile the armed verb
-// could legally land on RIGHT NOW, painted as a translucent wash on the floor.
-// DOS2 answers "can I use this here?" by greying the ground out of range and
-// interrupting the aim line (looked up 2026-07-29 - it greys, it does not
-// shadow); the designer asked for the stronger read - paint what IS mine,
-// with line of sight already factored in - so a blocker visibly bites a
-// shadow out of the wash and barriers explain themselves.
-//
-// This module only owns the QUADS: which tiles to paint, and when, is
-// combat's call (drawTargets computes the list from powers.rangeTiles with
-// the world's own sight rules). Pooled plane entities rather than a rebuilt
-// mesh, the same shape tile-renderer gives surface decals: the pool grows to
-// the largest aim ever shown and then re-shows for free, and a keyed show()
-// means an unchanged aim costs nothing per frame.
+// The ground read while aiming: one merged, soft-edged region covering the
+// exact fine cells the armed verb can use. Storage cells are an implementation
+// detail, so there is one mesh and no per-tile chips, jitter, or circles. Body
+// target rings remain separate in ground-marks/combat-body-targets.
 import { makeMaterial } from './shading.js';
 
-// Lazy, like shading.js: nothing here runs outside a browser, but the import
-// chain must stay loadable under node for the unit suite.
+// Lazy like shading.js: the unit suite can import this chain without a DOM.
 const pc = new Proxy({}, { get: (_, k) => window.pc[k] });
 
-// Above the floor top (0.1) and the surface decals (0.12), below the preview
-// lines and rings (0.14): the wash sits under every affordance drawn on it.
+// Above the floor and surface decals, below route lines and body rings.
 const PAINT_Y = 0.13;
-// A whisker under full tile size. The seams used to be justified as "the
-// grid the aim thinks in" - but since DEGRID M5 the aim thinks in a circle
-// from the body, so the chips are jittered (below) to read as a scattered
-// wash rather than graph paper. Look is `[proposed]` pending designer eyes
-// (DEGRID_PLAN M6).
-const QUAD = 0.94;
+const FEATHER_FRACTION = 0.22;
+const CLIP_EPSILON = 1e-7;
 
-// Deterministic per-cell hash (tile-renderer's house pattern): the jitter
-// must not swim between frames or differ between two shows of the same aim.
-const hash01 = (x, z, salt) => {
-  const n = Math.sin(x * 127.1 + z * 311.7 + salt * 74.7) * 43758.5453;
-  return n - Math.floor(n);
-};
+const cellIndex = (point, quantum) => ({
+  ix: Math.round((point[0] + 0.5) / quantum - 0.5),
+  iz: Math.round((point[1] + 0.5) / quantum - 0.5),
+});
+
+function clipPolygonFor(shape) {
+  if (!shape) return null;
+  if (shape.kind === 'circle') {
+    const segments = Math.max(24, shape.segments || 64);
+    return Array.from({ length: segments }, (_, i) => {
+      const a = i * Math.PI * 2 / segments;
+      return { x: shape.x + Math.cos(a) * shape.radius, z: shape.z + Math.sin(a) * shape.radius };
+    });
+  }
+  if (shape.kind === 'polygon') {
+    const points = (shape.points || []).map(([x, z]) => ({ x, z }));
+    if (points.length > 1
+      && Math.hypot(points[0].x - points.at(-1).x, points[0].z - points.at(-1).z) < CLIP_EPSILON) {
+      points.pop();
+    }
+    return points;
+  }
+  return null;
+}
+
+function polygonArea(points) {
+  let area = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    area += a.x * b.z - b.x * a.z;
+  }
+  return area / 2;
+}
+
+function clipConvex(subject, boundary) {
+  if (!boundary || boundary.length < 3) return subject;
+  const clip = polygonArea(boundary) < 0 ? [...boundary].reverse() : boundary;
+  let output = subject;
+  for (let i = 0; i < clip.length && output.length; i++) {
+    const a = clip[i];
+    const b = clip[(i + 1) % clip.length];
+    const side = (p) => (b.x - a.x) * (p.z - a.z) - (b.z - a.z) * (p.x - a.x);
+    const input = output;
+    output = [];
+    for (let j = 0; j < input.length; j++) {
+      const from = input[j];
+      const to = input[(j + 1) % input.length];
+      const fromSide = side(from);
+      const toSide = side(to);
+      const fromInside = fromSide >= -CLIP_EPSILON;
+      const toInside = toSide >= -CLIP_EPSILON;
+      const crossing = () => {
+        const t = fromSide / (fromSide - toSide);
+        return {
+          x: from.x + (to.x - from.x) * t,
+          z: from.z + (to.z - from.z) * t,
+          alpha: from.alpha + (to.alpha - from.alpha) * t,
+        };
+      };
+      if (fromInside && toInside) output.push(to);
+      else if (fromInside) output.push(crossing());
+      else if (toInside) output.push(crossing(), to);
+    }
+  }
+  return output;
+}
+
+export function buildAimGeometry(cells, quantum, clipShape = null) {
+  const positions = [];
+  const normals = [];
+  const colors = [];
+  const indices = [];
+  const clip = clipPolygonFor(clipShape);
+  const clipFeather = quantum * FEATHER_FRACTION;
+  const indexed = cells.map((point) => ({ point, ...cellIndex(point, quantum) }));
+  const occupied = new Set(indexed.map(({ ix, iz }) => `${ix},${iz}`));
+
+  const vertex = (x, z, alpha) => {
+    if (clipShape?.kind === 'circle') {
+      const inset = clipShape.radius - Math.hypot(x - clipShape.x, z - clipShape.z);
+      alpha *= Math.max(0, Math.min(1, inset / clipFeather));
+    }
+    const n = positions.length / 3;
+    positions.push(x, PAINT_Y, z);
+    normals.push(0, 1, 0);
+    colors.push(255, 255, 255, Math.round(alpha));
+    return n;
+  };
+  const quad = (corners, alphas = [255, 255, 255, 255]) => {
+    let polygon = corners.map(([x, z], i) => ({ x, z, alpha: alphas[i] }));
+    polygon = clipConvex(polygon, clip);
+    if (polygon.length < 3) return;
+    const base = polygon.map(({ x, z, alpha }) => vertex(x, z, alpha));
+    // x/z geometry needs the reverse winding for an upward normal.
+    for (let i = 2; i < base.length; i++) indices.push(base[0], base[i], base[i - 1]);
+  };
+
+  const half = quantum / 2;
+  const feather = quantum * FEATHER_FRACTION;
+  for (const { point: [x, z], ix, iz } of indexed) {
+    const minX = x - half;
+    const maxX = x + half;
+    const minZ = z - half;
+    const maxZ = z + half;
+    // Full-cell cores touch exactly. With one coplanar mesh there are no gaps,
+    // rotations, or material boundaries to reveal the storage lattice.
+    quad([[minX, minZ], [maxX, minZ], [maxX, maxZ], [minX, maxZ]]);
+    if (!occupied.has(`${ix - 1},${iz}`)) {
+      quad([[minX - feather, minZ], [minX, minZ], [minX, maxZ], [minX - feather, maxZ]],
+        [0, 255, 255, 0]);
+    }
+    if (!occupied.has(`${ix + 1},${iz}`)) {
+      quad([[maxX, minZ], [maxX + feather, minZ], [maxX + feather, maxZ], [maxX, maxZ]],
+        [255, 0, 0, 255]);
+    }
+    if (!occupied.has(`${ix},${iz - 1}`)) {
+      quad([[minX, minZ - feather], [maxX, minZ - feather], [maxX, minZ], [minX, minZ]],
+        [0, 0, 255, 255]);
+    }
+    if (!occupied.has(`${ix},${iz + 1}`)) {
+      quad([[minX, maxZ], [maxX, maxZ], [maxX, maxZ + feather], [minX, maxZ + feather]],
+        [255, 255, 0, 0]);
+    }
+  }
+  return { positions, normals, colors, indices };
+}
 
 export function createAimPaint(app) {
   const holder = new pc.Entity('aim-paint');
   app.root.addChild(holder);
-  // The aiming blue: kin to the reach ring's steel (combat.js REACH_RING),
-  // washed thin - it must tint the carpet, not hide the surface decals under
-  // it. Emissive so the toon lighting can't band it into stripes. First
-  // screenshot shipped at 0.17 and read as fog rather than an affordance;
-  // 0.3 is the low end of legible. A playtest knob, like every magnitude.
-  const mat = makeMaterial([0.3, 0.52, 0.92], { opacity: 0.3, emissive: [0.16, 0.3, 0.6] });
-  const pool = [];
-  let used = 0;
-  let key = null;
+  const mat = makeMaterial([0.3, 0.52, 0.92], {
+    opacity: 0.3,
+    emissive: [0.16, 0.3, 0.6],
+  });
+  mat.opacityVertexColor = true;
+  mat.opacityVertexColorChannel = 'a';
+  mat.update();
 
-  function quadAt(x, z) {
-    let e = pool[used];
-    if (!e) {
-      e = new pc.Entity();
-      e.addComponent('render', { type: 'plane', material: mat });
-      e.render.castShadows = false;
-      e.setLocalScale(QUAD, 1, QUAD);
-      holder.addChild(e);
-      pool.push(e);
-    }
-    e.enabled = true;
-    // Nudged, turned and sized a hair per cell so the wash's edge stops
-    // tracing the grid. Small enough that the e2e debug read (Math.round of
-    // the position) still names the right tile.
-    e.setLocalPosition(
-      x + (hash01(x, z, 1) - 0.5) * 0.06,
-      PAINT_Y,
-      z + (hash01(x, z, 2) - 0.5) * 0.06);
-    e.setLocalEulerAngles(0, (hash01(x, z, 3) - 0.5) * 18, 0);
-    const s = QUAD * (0.9 + hash01(x, z, 4) * 0.08);
-    e.setLocalScale(s, 1, s);
-    used += 1;
+  let key = null;
+  let entity = null;
+  let mesh = null;
+  let shownCells = [];
+
+  function clearMesh() {
+    // Destroying the render component releases its MeshInstance; PlayCanvas
+    // then destroys an unreferenced mesh. Only destroy directly if construction
+    // stopped before an entity took ownership.
+    if (entity) entity.destroy();
+    else mesh?.destroy();
+    entity = null;
+    mesh = null;
   }
 
   return {
-    // Paint `tilesFn()`'s [x, z] list. `newKey` names the aim this list is
-    // for (verb + origin + world epoch); a repeat key skips the recompute
-    // entirely, which is what makes calling this every frame affordable.
-    show(newKey, tilesFn) {
+    // `cellsFn` returns fine-cell world centres as [x,z]. `newKey` names the
+    // verb/origin/world epoch; unchanged aims do no geometry work per frame.
+    show(newKey, cellsFn, quantum = 1, clipShape = null) {
       if (newKey === key) return;
       key = newKey;
-      used = 0;
-      for (const [x, z] of tilesFn()) quadAt(x, z);
-      for (let i = used; i < pool.length; i++) pool[i].enabled = false;
+      shownCells = cellsFn();
+      clearMesh();
+      if (!shownCells.length) return;
+      const geo = buildAimGeometry(shownCells, quantum, clipShape);
+      mesh = new pc.Mesh(app.graphicsDevice);
+      mesh.setPositions(geo.positions);
+      mesh.setNormals(geo.normals);
+      mesh.setColors32(geo.colors);
+      mesh.setIndices(geo.indices);
+      mesh.update(pc.PRIMITIVE_TRIANGLES);
+      entity = new pc.Entity('aim-region');
+      entity.addComponent('render', { meshInstances: [new pc.MeshInstance(mesh, mat)] });
+      entity.render.castShadows = false;
+      holder.addChild(entity);
     },
     hide() {
-      if (key === null) return;
+      if (key === null && !entity) return;
       key = null;
-      used = 0;
-      for (const e of pool) e.enabled = false;
+      shownCells = [];
+      clearMesh();
     },
-    destroy() { holder.destroy(); },
-    // For the e2e suite: how many tiles the wash covers, for which aim, and
-    // WHICH tiles - a spec asserting the wash does not over-promise has to
-    // name the tile it expects left out, which a count cannot express.
+    destroy() {
+      clearMesh();
+      mat.destroy();
+      holder.destroy();
+    },
+    // Preserve the debug contract's movement-tile projection while exposing
+    // the real fine-cell centres for assertions that need continuous detail.
     get debug() {
+      const seen = new Set();
       const tiles = [];
-      for (let i = 0; i < used; i++) {
-        const p = pool[i].getLocalPosition();
-        tiles.push([Math.round(p.x), Math.round(p.z)]);
+      for (const [x, z] of shownCells) {
+        const k = `${Math.round(x)},${Math.round(z)}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        tiles.push(k.split(',').map(Number));
       }
-      return { key, count: used, tiles };
+      return { key, count: shownCells.length, tiles, cells: shownCells.map((p) => [...p]) };
     },
   };
 }

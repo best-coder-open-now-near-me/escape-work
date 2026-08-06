@@ -3,7 +3,9 @@
 // view-model and callbacks, and it renders and reports clicks. None of them
 // knows a rule.
 import { EQUIP_SLOTS, pendingPoints } from '../stats.js';
-import { PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, registerHudButton, layoutHudRail, railHooks } from './chrome.js';
+import { ATTRIBUTES } from '../data/attributes.js';
+import { PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, registerHudButton, layoutHudRail, railHooks, esc,
+} from './chrome.js';
 
 // --- inventory panel ----------------------------------------------------------
 // The pockets. Toggled with I or the bag button. Rows come straight from the
@@ -12,7 +14,10 @@ import { PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, registerHudButton, layo
 // Equip-slot display names (In Hand / Dress Code / Flair).
 const SLOT_LABELS = { weapon: 'In Hand', outfit: 'Dress Code', trinket: 'Flair', shoes: 'On Foot' };
 
-export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onEquip, onUnequip, onSend, canSend, getCash }) {
+// `capOf` is asked per refresh, not captured: the carry limit is a stat, so it
+// moves with the character and with whoever is currently the leader. A panel
+// built once with a number would print the boot-time cap forever.
+export function createInventoryPanel(ITEMS, capOf, { onUse, onDrop, onExamine, onEquip, onUnequip, onSend, canSend, getCash }) {
   // The bag sits immediately right of the bottom-left profile card, where your
   // eye already is for HP - not up in the top-left corner it used to share with
   // nothing. Its exact left edge is measured from the card each layout pass,
@@ -105,6 +110,7 @@ export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onE
 
   function refresh(sheet) {
     const inv = sheet?.inventory || [];
+    const cap = capOf(sheet);
     panel.innerHTML = `<div style="font-weight:700; letter-spacing:1px; margin-bottom:7px;">
       POCKETS <span style="opacity:.6; font-weight:400;">${Number.isFinite(cap) ? `${inv.length}/${cap}` : inv.length}</span></div>`;
     if (sheet?.equipped) renderEquipStrip(sheet);
@@ -224,8 +230,6 @@ export function createInventoryPanel(ITEMS, cap, { onUse, onDrop, onExamine, onE
   };
 }
 
-const CHARSHEET_ATTRS = [['grit', 'Grit'], ['hustle', 'Hustle'], ['savvy', 'Savvy'], ['composure', 'Composure']];
-
 export function createCharacterSheet({ onLevelUp } = {}) {
   const host = document.createElement('div');
   host.id = 'character-sheet';
@@ -244,15 +248,15 @@ export function createCharacterSheet({ onLevelUp } = {}) {
   function render(vm) {
     const pending = pendingPoints(vm);
     const xpPct = Math.max(0, Math.min(100, Math.round((vm.xp / vm.xpNext) * 100)));
-    const attrRows = CHARSHEET_ATTRS.map(([k, l]) =>
+    const attrRows = ATTRIBUTES.map(({ key, label: attrLabel }) =>
       `<div style="display:flex; justify-content:space-between; padding:1px 0;">
-        <span style="opacity:.85;">${l}</span><b id="charsheet-attr-${k}">${vm.attr[k] ?? 0}</b></div>`).join('');
+        <span style="opacity:.85;">${attrLabel}</span><b id="charsheet-attr-${key}">${vm.attr[key] ?? 0}</b></div>`).join('');
     const perks = vm.perks.length
       ? vm.perks.map((n) => `<div style="opacity:.82;">• ${n}</div>`).join('')
       : '<div style="opacity:.45;">None yet</div>';
     host.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
-        <div style="font-weight:700; color:#8adf76;">${vm.name}</div>
+        <div style="font-weight:700; color:#8adf76;">${esc(vm.name)}</div>
         <button id="charsheet-close" style="border:none; background:none; color:#aaa;
           font-size:15px; cursor:pointer; line-height:1;">✕</button></div>
       <div style="opacity:.7; font-size:12px; margin-bottom:8px;">${vm.className} · Level ${vm.level}</div>
@@ -342,7 +346,7 @@ export function createDialoguePanel() {
 // `show()` takes a fully-resolved view (shopping.js owns the arithmetic):
 //   { name, greeting, cash, buys,
 //     stock: [{ item, name, icon, qty, price, affordable }],
-//     sellable: [{ index, name, icon, paid }] }
+//     sellable: [{ id, index, name, icon, paid }] }
 export function createShopPanel({ onBuy, onSell, onClose }) {
   const panel = document.createElement('div');
   panel.id = 'shop-panel';

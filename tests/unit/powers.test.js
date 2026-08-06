@@ -3,7 +3,7 @@
 // rather than re-derives.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buffProblem, buffOutcome, buffRangeOf, isFriendly, BUFF_RANGE, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneTiles, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, coneFrom, conePolyline, aimRangeOf, rangeTiles, isBreakable, aimsAtProps, isPull, pullLanding } from '../../src/powers.js';
+import { buffProblem, buffOutcome, buffRangeOf, isFriendly, BUFF_RANGE, controlProblem, controlOutcome, controlIsRanged, isControl, isZone, zoneProblem, zoneRadiusOf, zoneRangeOf, isMobility, aimsAtAlly, mobilityProblem, mobilityRangeOf, dashDistanceOf, isStance, watchRadiusOf, watchTriggers, isToppleable, toppleLanding, aimsAtAnyone, coneFrom, conePolyline, aimRangeOf, isBreakable, aimsAtProps, isPull, pullLanding } from '../../src/powers.js';
 import { TILE_TYPES, blocksSight } from '../../src/data/tiles.js';
 import { ACTIONS } from '../../src/data/actions.js';
 import { STATUSES } from '../../src/data/statuses.js';
@@ -24,7 +24,6 @@ test('buffRangeOf defaults, and an action may override it', () => {
 test('isFriendly is true only for the buff verb', () => {
   assert.equal(isFriendly({ type: 'buff' }), true);
   assert.equal(isFriendly({ type: 'attack' }), false);
-  assert.equal(isFriendly({ type: 'heal' }), false); // self-only, not friendly-TARGETED
   assert.equal(isFriendly(null), false);
 });
 
@@ -186,28 +185,6 @@ test('isZone, and the zone defaults', () => {
   assert.equal(zoneRadiusOf({}), 1);
   assert.equal(zoneRangeOf({}), 5);
   assert.equal(zoneRadiusOf(ZONE), 1.5);
-});
-
-test('zoneTiles is a DISC, not the bounding square', () => {
-  // radius 1: the centre and its four orthogonal neighbours. The diagonals sit
-  // at 1.41, outside it - a square footprint would carpet corners the player
-  // can plainly see are further away than tiles the ring leaves out.
-  const r1 = zoneTiles(0, 0, 1);
-  assert.equal(r1.length, 5);
-  assert.ok(r1.some(([x, z]) => x === 0 && z === 0));
-  assert.ok(r1.some(([x, z]) => x === 1 && z === 0));
-  assert.ok(!r1.some(([x, z]) => x === 1 && z === 1), 'the diagonal is outside radius 1');
-  // radius 1.5 reaches the diagonals (1.41) but not two tiles out.
-  const r15 = zoneTiles(0, 0, 1.5);
-  assert.ok(r15.some(([x, z]) => x === 1 && z === 1));
-  assert.ok(!r15.some(([x, z]) => x === 2 && z === 0));
-  assert.equal(r15.length, 9);
-});
-
-test('zoneTiles is centred where you aimed it', () => {
-  const cells = zoneTiles(4, 7, 1);
-  assert.ok(cells.some(([x, z]) => x === 4 && z === 7));
-  assert.ok(cells.every(([x, z]) => Math.hypot(x - 4, z - 7) <= 1 + 1e-9));
 });
 
 test('a zone is gated by AP, uses, range and line', () => {
@@ -527,25 +504,6 @@ test('aimRangeOf mirrors each verb\'s own range rule', () => {
   assert.deepEqual(aimRangeOf({ type: 'buff' }), { r: BUFF_RANGE }); // the buff default, not a guess
   assert.deepEqual(aimRangeOf({ type: 'control', range: 5 }), { r: 5 });
   assert.equal(aimRangeOf({ type: 'control' }), null); // touch control walks you in
-});
-
-test('rangeTiles paints the true-radius disc, minus what canSee refuses', () => {
-  // One metric since DEGRID D4: every targeted range is a circle, so the
-  // cheb square (and the euclid flag that opted out of it) is gone.
-  const all = rangeTiles(0, 0, 2, () => true);
-  assert.equal(all.length, 13); // r=2 disc on tile centres, origin included
-  const seen = rangeTiles(0, 0, 2, (x) => x >= 0);
-  assert.equal(seen.length, 9);
-  assert.ok(seen.every(([x]) => x >= 0), 'a refused tile never paints');
-});
-
-test('rangeTiles measures from a continuous body, not a tile centre', () => {
-  // The wash follows the model: a body at x=0.4 owns (2,0) (1.6 away) and has
-  // lost (-2,0) (2.4 away) - the disc slides with the stance.
-  const disc = rangeTiles(0.4, 0, 2, () => true);
-  assert.ok(disc.some(([x, z]) => x === 2 && z === 0));
-  assert.ok(!disc.some(([x, z]) => x === -2 && z === 0));
-  assert.ok(!disc.some(([x, z]) => x === 2 && z === 2), 'hypot stays out of range');
 });
 
 // --- destructible cover & Pull Over (TACTICS_PLAN M8) -------------------------

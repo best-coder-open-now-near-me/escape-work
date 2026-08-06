@@ -5,6 +5,11 @@ node_modules/
 build/
 dist/
 
+# Licensed source packs live outside this public repository. Runtime-ready
+# exports are admitted to builds only through assets.runtime.json.
+/assets/Synty/
+/assets/licensed/
+
 # Playwright output
 test-results/
 playwright-report/

@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSurfaceRuntime } from '../../src/surfaces-runtime.js';
+import { parseLevel } from '../../src/grid.js';
 
 // A 1-row world described by two maps: surfaces and tile flags.
 function stubGrid({ surfaces = {}, defs = {}, closedEdges = [] } = {}) {
@@ -28,6 +29,12 @@ function stubGrid({ surfaces = {}, defs = {}, closedEdges = [] } = {}) {
 // Bound to a grid, because spending fuel is a real mutation of the world - the
 // same wiring main.js uses, where it also drops the visual and the harvest mark.
 const hooksFor = (grid) => ({ addFlame: () => null, spendFuel: (x, z) => grid.setType(x, z, 'floor') });
+const EXPLOSIVE = Object.freeze({
+  fuseTurns: 1,
+  area: { shape: 'circle', radius: 1.25 },
+  damage: { player: 8, enemy: 'lethal' },
+  ignitesSurfaces: true,
+});
 
 test('fire spreads through adjacent flammable surfaces, then burns out', () => {
   const grid = stubGrid({ surfaces: { '0,0': 'paper', '1,0': 'paper', '2,0': 'water' } });
@@ -77,7 +84,7 @@ test('fire reaching an explosive prop detonates it exactly once', () => {
   const booms = [];
   const grid = stubGrid({
     surfaces: { '0,0': 'paper' },
-    defs: { '1,0': { explosive: true } },
+    defs: { '1,0': { explosive: EXPLOSIVE } },
   });
   const rt = createSurfaceRuntime({ grid, hooks: hooksFor(grid), onExplosion: (x, z) => booms.push([x, z]) });
   rt.ignite(0, 0);
@@ -87,16 +94,39 @@ test('fire reaching an explosive prop detonates it exactly once', () => {
   assert.deepEqual(booms, [[1, 0]]);
 });
 
+test('the prop descriptor supplies fuse timing and survives the runtime seam intact', () => {
+  const explosion = { ...EXPLOSIVE, fuseTurns: 2, ignitesSurfaces: false };
+  const booms = [];
+  const grid = stubGrid({
+    surfaces: { '0,0': 'paper', '2,0': 'paper' },
+    defs: { '1,0': { explosive: explosion } },
+  });
+  const rt = createSurfaceRuntime({
+    grid,
+    hooks: hooksFor(grid),
+    onExplosion: (...args) => booms.push(args),
+  });
+  rt.ignite(0, 0);
+  rt.advanceTurn(); // arms the declared two-turn fuse
+  rt.advanceTurn(); // one turn left
+  assert.deepEqual(booms, []);
+  rt.advanceTurn(); // detonation
+  assert.equal(booms.length, 1);
+  assert.deepEqual(booms[0].slice(0, 2), [1, 0]);
+  assert.equal(booms[0][2], explosion, 'the resolver receives the exact policy object');
+  assert.equal(rt.isBurning(2, 0), false, 'the descriptor can suppress secondary ignition');
+});
+
 // The fuse is a TELEGRAPH: the turn between "the fire reached the printer" and
 // "the printer goes off" is the turn you get to walk away. A fuse armed by this
 // turn's spread must not also be ticked by this turn's fuse step, or
-// PRINTER_FUSE_TURNS = 1 silently behaves as a zero-turn fuse and the blast
+// a declared one-turn fuse silently behaves as a zero-turn fuse and the blast
 // lands on whoever was standing there with no warning at all.
 test('an armed fuse does not detonate on the same turn the fire reached it', () => {
   const booms = [];
   const grid = stubGrid({
     surfaces: { '0,0': 'paper' },
-    defs: { '1,0': { explosive: true } },
+    defs: { '1,0': { explosive: EXPLOSIVE } },
   });
   const rt = createSurfaceRuntime({ grid, hooks: hooksFor(grid), onExplosion: (x, z) => booms.push([x, z]) });
   rt.ignite(0, 0);
@@ -111,7 +141,7 @@ test('an explosion ignites adjacent flammable surfaces', () => {
   // (2,0) beside the prop. The blast should light that paper.
   const grid = stubGrid({
     surfaces: { '0,0': 'paper', '2,0': 'paper' },
-    defs: { '1,0': { explosive: true } },
+    defs: { '1,0': { explosive: EXPLOSIVE } },
   });
   const rt = createSurfaceRuntime({ grid, hooks: hooksFor(grid), onExplosion: () => {} });
   rt.ignite(0, 0);
@@ -144,7 +174,7 @@ test('ignitable props relight after burning out; paper does not', () => {
 test('an explosion lights its flammable neighbours, but not through a wall', () => {
   const grid = stubGrid({
     surfaces: { '0,0': 'paper', '1,0': 'paper', '2,0': 'paper', '1,1': 'paper' },
-    defs: { '1,0': { explosive: true } },
+    defs: { '1,0': { explosive: EXPLOSIVE } },
     closedEdges: [[1, 0, 1, 1]], // a partition between the printer and the drift below it
   });
   const rt = createSurfaceRuntime({ grid, hooks: hooksFor(grid), onExplosion: () => {} });
@@ -160,7 +190,7 @@ test('a sealed neighbour still cannot catch on later turns', () => {
   // same edge, so the far side stays cold for good.
   const grid = stubGrid({
     surfaces: { '0,0': 'paper', '1,0': 'paper', '1,1': 'paper' },
-    defs: { '1,0': { explosive: true } },
+    defs: { '1,0': { explosive: EXPLOSIVE } },
     closedEdges: [[1, 0, 1, 1]],
   });
   const rt = createSurfaceRuntime({ grid, hooks: hooksFor(grid), onExplosion: () => {} });
@@ -200,4 +230,39 @@ test('a FRESH drift on a burnt tile burns again', () => {
 
   grid.setType(0, 0, 'paper'); // somebody empties the recycling here
   assert.equal(rt.ignite(0, 0), true, 'the new drift catches like any other');
+});
+
+const finePaperGrid = (walls = []) => parseLevel({
+  name: 'fine-fire',
+  tiles: { p: 'paper' },
+  actors: {},
+  map: ['pp'],
+  walls,
+});
+
+const fineHooks = (grid) => ({
+  addFlame: () => null,
+  spendFuel: (x, z) => grid.surfaceField.clearAt(x, z),
+});
+
+test('fine fire consumes and spreads one physical surface cell at a time', () => {
+  const grid = finePaperGrid();
+  const rt = createSurfaceRuntime({ grid, hooks: fineHooks(grid), onExplosion: () => {} });
+  assert.equal(rt.ignite(-0.25, -0.25), true);
+  assert.equal(grid.surfaceAt(-0.25, -0.25), null, 'only the lit fuel cell is consumed');
+  assert.equal(grid.surfaceAt(0.25, -0.25), 'paper', 'paper beside it remains until spread');
+  rt.advanceTurn();
+  assert.equal(rt.isBurning(0.25, -0.25), true, 'the fine neighbour catches next');
+  assert.equal(rt.isBurning(0.75, -0.25), false, 'fire has not skipped a fine-cell beat');
+  rt.advanceTurn();
+  assert.equal(rt.isBurning(0.75, -0.25), true, 'then it crosses the movement-tile seam');
+});
+
+test('a partition dams fine-cell fire at the movement-tile seam', () => {
+  const grid = finePaperGrid(['V 1 0 1']);
+  const rt = createSurfaceRuntime({ grid, hooks: fineHooks(grid), onExplosion: () => {} });
+  rt.ignite(-0.25, -0.25);
+  for (let i = 0; i < 8; i++) rt.advanceTurn();
+  assert.equal(rt.isBurning(0.75, -0.25), false);
+  assert.equal(grid.surfaceAt(0.75, -0.25), 'paper', 'fuel beyond the partition remains');
 });

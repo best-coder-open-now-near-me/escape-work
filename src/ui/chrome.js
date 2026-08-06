@@ -30,6 +30,43 @@ export const BUTTON_CHROME = {
 // created and removed per fight, so neither can be a child of the other. The
 // dock outlives both and is created on demand by whichever arrives first.
 let dockEl = null;
+const DOCK_EDGE_GAP = 10;
+let dockLayoutBound = false;
+
+// Keep the action dock centered when there is room, then nudge it into the
+// live strip between the bottom-left profile card and bottom-right narrator.
+// Both neighbours have content-driven widths, so a fixed left offset only
+// trades one overlap for another as names, filters, or the viewport change.
+export function layoutActionDock() {
+  if (!dockEl?.isConnected || dockEl.style.display === 'none') return;
+  const width = dockEl.getBoundingClientRect().width;
+  if (!width) return;
+
+  const dockRect = dockEl.getBoundingClientRect();
+  const overlapsVertically = (rect) => rect.height
+    && rect.bottom > dockRect.top && rect.top < dockRect.bottom;
+  const stats = document.getElementById('stats')?.getBoundingClientRect();
+  const narrator = document.getElementById('narration-box')?.getBoundingClientRect();
+  const viewportRight = window.innerWidth - DOCK_EDGE_GAP;
+  const minLeft = stats && overlapsVertically(stats)
+    ? stats.right + DOCK_EDGE_GAP
+    : DOCK_EDGE_GAP;
+  const rightEdge = narrator && overlapsVertically(narrator)
+    ? narrator.left - DOCK_EDGE_GAP
+    : viewportRight;
+  const maxLeft = Math.min(viewportRight - width, rightEdge - width);
+  const centered = (window.innerWidth - width) / 2;
+
+  // On very narrow screens the two neighbours can leave less room than the
+  // dock needs. Preserve the actionable dock and narrator in that case; the
+  // passive profile card is the safer surface to overlap.
+  const left = maxLeft >= minLeft
+    ? Math.min(Math.max(centered, minLeft), maxLeft)
+    : Math.max(DOCK_EDGE_GAP, maxLeft);
+  dockEl.style.left = `${Math.round(left)}px`;
+  dockEl.style.transform = 'none';
+}
+
 export function actionDock() {
   if (dockEl && dockEl.isConnected) return dockEl;
   dockEl = document.createElement('div');
@@ -40,6 +77,10 @@ export function actionDock() {
     gap: '8px', padding: '8px 10px', borderRadius: '10px', userSelect: 'none',
   });
   document.body.appendChild(dockEl);
+  if (!dockLayoutBound) {
+    dockLayoutBound = true;
+    window.addEventListener('resize', layoutActionDock);
+  }
   return dockEl;
 }
 // Shown only when it has something to show. Both regions call this after they
@@ -49,6 +90,7 @@ export function refreshDockVisibility() {
   if (!dockEl) return;
   const showing = [...dockEl.children].some((c) => c.style.display !== 'none');
   dockEl.style.display = showing ? 'flex' : 'none';
+  if (showing) layoutActionDock();
 }
 
 // --- the HUD rail -------------------------------------------------------------
@@ -70,8 +112,26 @@ export const HUD_BUTTON_CHROME = {
 };
 
 export function registerHudButton(btn) {
+  bindRailLayout();
   hudRail.push(btn);
   layoutHudRail();
+}
+
+// The rail re-lays itself on resize. Bound on FIRST USE rather than at module
+// scope, because `window.addEventListener(...)` running at import time is what
+// kept this module - and everything downstream of it - out of node.
+//
+// `ui.js` is the barrel every UI consumer imports, so one import-time throw
+// cascaded to the whole `ui/` layer AND to doors.js, dialogue.js and
+// shopping.js: the three modules TODO.md Phase 5 holds up as successfully
+// carved onto host-callback seams, none of which could be unit-tested
+// (REVIEW.md 2026-08-02 section 4). Same lazy treatment `actionDock` already
+// gives its own `createElement`.
+let railBound = false;
+function bindRailLayout() {
+  if (railBound || typeof window === 'undefined') return;
+  railBound = true;
+  window.addEventListener('resize', layoutHudRail);
 }
 export function layoutHudRail() {
   const r = document.getElementById('stats')?.getBoundingClientRect();
@@ -87,7 +147,6 @@ export function layoutHudRail() {
   }
   for (const hook of railHooks) hook(r, bottom);
 }
-window.addEventListener('resize', layoutHudRail);
 
 // A soft radial vignette over the whole viewport - pure atmosphere, makes the
 // flat office glow feel a little more dungeon.
@@ -100,3 +159,17 @@ export function addVignette() {
   });
   document.body.appendChild(v);
 }
+
+// Escape a value before it is interpolated into an `innerHTML` template.
+//
+// It lives HERE, not in screens.js where it started, because every `ui/` module
+// imports chrome.js and none of them could reach it there - so the rule held on
+// the résumé and the level-up card and nowhere else, while a player-typed name
+// went in raw on four other surfaces (REVIEW.md, still open at the 2026-08-02
+// pass). `cleanName` only collapses whitespace and clamps length, so
+// `<svg onload=...>` fits inside NAME_MAX and survives to the HUD intact.
+//
+// Escaping at the INTERPOLATION site means the rule holds wherever the string
+// came from - which now includes a shared cloud store, not just this keyboard.
+export const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

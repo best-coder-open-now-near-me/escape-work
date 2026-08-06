@@ -6,6 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseFloors, layeredGrid, planCrossLayerRoute, STOREY_H } from '../../src/floors.js';
+import { parseLevel } from '../../src/grid.js';
 import spikeLobby from '../../levels/dev/spike-lobby.json' with { type: 'json' };
 
 // Ground: a 4x4 room with a 2-cell stair run at (3,1)-(3,2), entry (3,3).
@@ -65,6 +66,47 @@ test('a run with landings at both ends is ambiguous, not guessed', () => {
       { map: ['....', '.. ', '.. ', '....'] }, // (3,3) open above too
     ],
   })), /exactly one end open/);
+});
+
+// --- the one-cell flight (Q058) ----------------------------------------------
+// A lone stair cell has no neighbour to read its axis off, so the axis is
+// settled by WHERE THE LANDING IS, not by a default. These three pin the three
+// outcomes: one axis works, both do, neither does.
+//
+// Ground for all three: a single 'X' at (2,1), so (1,1)/(3,1) are the east-west
+// ends and (2,0)/(2,2) the north-south ones. Upper rows are ragged on purpose -
+// off-map reads as air, exactly as the 2-cell fixture above relies on.
+const loneCell = (upper) => ({
+  name: 'lone',
+  tiles: { '.': 'floor', '#': 'wall', 'X': 'stairway' },
+  actors: { '@': 'player' },
+  layers: [{ map: ['....', '..X.', '....', '@...'] }, { map: upper }],
+});
+
+test('a one-cell flight running EAST-WEST resolves, and used to be refused', () => {
+  // Landing east at (3,1); both north-south ends are air, so only one axis works.
+  const f = parseFloors(loneCell(['    ', '   .', '    ', '    ']));
+  assert.equal(f.stairs.length, 1);
+  const s = f.stairs[0];
+  assert.deepEqual(s.cells, [{ x: 2, z: 1 }]);
+  assert.deepEqual(s.entry, { x: 1, z: 1 });
+  assert.deepEqual(s.top, { x: 3, z: 1 });
+  assert.deepEqual(s.dir, { dx: 1, dz: 0 }); // the axis the old code could not reach
+});
+
+test('a one-cell flight with a landing on BOTH axes is named, not guessed', () => {
+  // Landing north at (2,0) AND east at (3,1): each axis alone is legal.
+  assert.throws(
+    () => parseFloors(loneCell(['  . ', '   .', '    ', '    '])),
+    /ambiguous/,
+  );
+});
+
+test('a one-cell flight with no landing either way still reports the landing rule', () => {
+  assert.throws(
+    () => parseFloors(loneCell(['    ', '    ', '    ', '    '])),
+    /exactly one end open/,
+  );
 });
 
 test('a run with no walkable entry on its own storey is an error', () => {
@@ -153,6 +195,54 @@ test('an unreachable stair entry refuses the whole route', () => {
   assert.equal(route, null);
 });
 
+// A building whose GROUND storey is two wings with no door between them, and
+// whose upper storey bridges them. `planCrossLayerRoute` only ever reads
+// `floors.stairs` and `floors.layers[l].stepOpen`, so a stub says exactly this
+// shape and nothing else. Two flights: west wing <-> upper, east wing <-> upper.
+const bridged = () => ({
+  layers: [{ stepOpen: () => true }, { stepOpen: () => true }],
+  stairs: [
+    { layer: 0, upper: 1, entry: { x: 1, z: 4 }, top: { x: 1, z: 0 }, cells: [{ x: 1, z: 3 }, { x: 1, z: 2 }] },
+    { layer: 0, upper: 1, entry: { x: 8, z: 4 }, top: { x: 8, z: 0 }, cells: [{ x: 8, z: 3 }, { x: 8, z: 2 }] },
+  ],
+});
+// The ground's wall runs down x=5 and nothing crosses it; upstairs is open.
+const wings = (l) => (x, z) =>
+  x >= 0 && z >= 0 && x <= 9 && z <= 4 && (l === 1 || x !== 5);
+
+test('a goal on your OWN storey routes up and back down when the floor is split', () => {
+  // The whole point: from and to are both on layer 0, and no walk on layer 0
+  // connects them. The old search took the destination storey as an early
+  // return, so it asked findPath once, got null, and refused - while the route
+  // up the west stair, across the mezzanine and down the east one was open the
+  // entire time.
+  const route = planCrossLayerRoute(bridged(),
+    { x: 0, z: 4, layer: 0 }, { x: 9, z: 4, layer: 0 }, wings);
+  assert.ok(route, 'the up-and-back-down route exists');
+  assert.deepEqual(route.legs.map((l) => l.kind), ['walk', 'climb', 'walk', 'climb', 'walk']);
+  assert.equal(route.legs[1].to.layer, 1, 'up the west flight');
+  assert.equal(route.legs[3].to.layer, 0, 'and back down the east one');
+  assert.deepEqual(route.legs[4].path[route.legs[4].path.length - 1], [9, 4]);
+});
+
+test('a plain same-storey walk still beats the detour on cost', () => {
+  // The stair search runs even when the direct walk exists, so it has to LOSE
+  // when the floor is open - or every flat route would go sightseeing.
+  const route = planCrossLayerRoute(bridged(),
+    { x: 0, z: 4, layer: 0 }, { x: 4, z: 4, layer: 0 }, () => () => true);
+  assert.equal(route.legs.length, 1);
+  assert.equal(route.legs[0].kind, 'walk');
+});
+
+test('a genuinely sealed goal still refuses, without looping through storeys', () => {
+  // Both directions on every flight means a route could revisit a storey; the
+  // guard is what stops the search walking up and down forever before it
+  // admits there is nothing there.
+  const sealed = (l) => (x, z) => wings(l)(x, z) && !(l === 1 && x > 5);
+  assert.equal(planCrossLayerRoute(bridged(),
+    { x: 0, z: 4, layer: 0 }, { x: 9, z: 4, layer: 0 }, sealed), null);
+});
+
 // --- the shipped spike level -------------------------------------------------
 test('spike-lobby parses: one 3-cell flight, atrium-height ground storey', () => {
   const f = parseFloors(spikeLobby);
@@ -181,4 +271,34 @@ test('spike-lobby: the under-balcony offices are walkable ground', () => {
   // layer model exists to deliver.
   assert.equal(f.layers[0].terrainOpen(6, 2), true);
   assert.equal(f.layers[1].typeAt(6, 2), 'floor');
+});
+
+// --- the facade contract ------------------------------------------------------
+
+test('the layered facade forwards EVERY function a real grid exposes', () => {
+  // The contract test the two shipped facade bugs both needed. `layeredGrid`
+  // hand-lists the methods it forwards, and the list had silently fallen behind
+  // grid.js: `sightOpenCellLow` and `sightOpenLow` were missing, so the sneak
+  // cone sweep threw a TypeError on any layered level (REVIEW.md 2026-08-02
+  // section 1.14). Deriving the expectation from a real grid means the next
+  // method added to grid.js fails here instead of in a playtest.
+  const flat = parseLevel({
+    name: 'flat', tiles: { '.': 'floor', '#': 'wall' }, actors: { '@': 'player' },
+    map: ['#####', '#.@.#', '#####'],
+  });
+  const g = layeredGrid(parseFloors(fixture()), { name: 'fixture' }, () => 0);
+  const fns = Object.keys(flat).filter((k) => typeof flat[k] === 'function');
+  const missing = fns.filter((k) => typeof g[k] !== 'function');
+  assert.deepEqual(missing, [],
+    `layeredGrid does not forward: ${missing.join(', ')} - add them to METHODS in floors.js`);
+});
+
+test('the forwarded methods actually reach the active storey', () => {
+  // Forwarding the NAME is not the contract; forwarding the CALL is. A facade
+  // that defined every key as undefined would pass the test above.
+  const g = layeredGrid(parseFloors(fixture()), { name: 'fixture' }, () => 0);
+  assert.equal(typeof g.typeAt(0, 0), 'string');
+  // The two that were missing, called for real - this is the sneak sweep's path.
+  assert.equal(typeof g.sightOpenCellLow(0, 0), 'boolean');
+  assert.equal(typeof g.sightOpenLow(0, 0, 1, 0), 'boolean');
 });

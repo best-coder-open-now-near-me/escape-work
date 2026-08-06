@@ -3,10 +3,10 @@
 // The bottom-left profile card and its status chips, the rail's tactical
 // button, the always-on attack hotbar, the party bar and the level-up pip.
 import { statusList } from '../statuses.js';
-import { pendingPoints } from '../stats.js';
+import { pendingPoints, fmtAp } from '../stats.js';
 import {
   PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, registerHudButton, layoutHudRail,
-  actionDock, refreshDockVisibility,
+  actionDock, refreshDockVisibility, esc,
 } from './chrome.js';
 
 // --- player status effects ----------------------------------------------------
@@ -43,7 +43,7 @@ function renderStatusEffects(sheet) {
   for (const c of effectChips(sheet)) {
     const chip = document.createElement('div');
     chip.className = 'status-chip';
-    chip.textContent = `${c.icon} ${c.label}`;
+    chip.textContent = `${c.icon} ${c.label} ·${c.left}`;
     const accent = c.good ? '#6fc86f' : '#e0b23a';
     Object.assign(chip.style, {
       padding: '3px 9px', borderRadius: '6px', whiteSpace: 'nowrap', letterSpacing: '.3px',
@@ -72,12 +72,22 @@ function renderStatusEffects(sheet) {
 // every incidental refresh - using an item, taking a hit - would have to know
 // about portraits just to avoid blanking one.
 let lastPortrait = null;
+// How full an HP bar is: clamped to 0..1, and guarded against a maxHp of 0.
+//
+// The profile card did both of these and the party bar did neither, two hundred
+// lines apart. Overheal (a revive item that heals past max, a buff that raises
+// maxHp after the fact) drew a bar wider than its track; a sheet with maxHp 0 -
+// which is what a half-built or wiped sheet looks like for one frame - divided
+// by zero and drew `NaN%`, and the browser silently keeps the previous width, so
+// the bar freezes at whatever it last showed rather than looking broken.
+const hpFracOf = (s) => Math.max(0, Math.min(1, s?.maxHp ? s.hp / s.maxHp : 0));
+
 export function updateStatsHud(sheet, portraitUrl = undefined) {
   if (portraitUrl !== undefined) lastPortrait = portraitUrl || null;
   const el = document.getElementById('stats');
   if (!el || !sheet) return;
   const portrait = lastPortrait;
-  const hpFrac = Math.max(0, Math.min(1, sheet.maxHp ? sheet.hp / sheet.maxHp : 0));
+  const hpFrac = hpFracOf(sheet);
   const xpFrac = Math.max(0, Math.min(1, sheet.xpNext ? sheet.xp / sheet.xpNext : 0));
   // Green while healthy, amber under half, red when it is nearly over.
   const hpColor = hpFrac > 0.5 ? '#8adf76' : hpFrac > 0.25 ? '#ffd76b' : '#ff6b5e';
@@ -93,7 +103,7 @@ export function updateStatsHud(sheet, portraitUrl = undefined) {
       </span>
       <span style="display:block; min-width:172px;">
         <span style="display:flex; justify-content:space-between; font-size:12px; opacity:.85;">
-          <b style="letter-spacing:.5px;">${sheet.name || ''}</b><span>Lv ${sheet.level}</span>
+          <b style="letter-spacing:.5px;">${esc(sheet.name)}</b><span>Lv ${sheet.level}</span>
         </span>
         <span style="display:block; position:relative; height:13px; margin:3px 0 2px;
           background:#241f28; border:1px solid #3a3a52; border-radius:7px; overflow:hidden;">
@@ -137,7 +147,11 @@ export function createTacticalButton({ onToggle, isOn }) {
   document.body.appendChild(btn);
   registerHudButton(btn);
   paint();
-  return { refresh: paint, setVisible: (v) => { btn.style.display = v ? '' : 'none'; layoutHudRail(); } };
+  // No setVisible: the rail button is up whenever the HUD is, and the one it
+  // used to offer had no caller (Q178). Add it back beside a caller, not ahead
+  // of one - an untested show/hide that also re-runs layoutHudRail is exactly
+  // the sort of thing that works until the first time it is used.
+  return { refresh: paint };
 }
 
 // --- persistent action hotbar -------------------------------------------------
@@ -155,9 +169,9 @@ export function createTacticalButton({ onToggle, isOn }) {
 // borrowing from. `unavailable` is why a slot can't act with no fight on
 // (Deflect Blame, a heal): it dims the slot and titles it with the reason, but
 // leaves it CLICKABLE - the host answers a press with that reason, and a listed
-// power you can ask about beats a power that isn't there. An unaffordable throw
-// (no paper) is the one thing actually disabled: that one is about to change on
-// its own the moment you pick up a sheet.
+// power you can ask about beats a power that isn't there. Resource exhaustion
+// is exposed through aria-disabled but remains mouse-addressable, so the slot
+// can explain itself and still be right-clicked for reassignment.
 // Slots per ROW. The bar holds one row at a time and pages through the rest,
 // which is what lets a kit grow - perks, a talent, a weapon swing, whatever the
 // player assigns - without the row growing until it spans the screen and the
@@ -177,8 +191,9 @@ export function createTacticalButton({ onToggle, isOn }) {
 export const HOTBAR_ROW_SLOTS = 10;
 
 // `slots` is the whole layout, in order, as view-models the host builds:
-//   { kind: 'action', id, label, icon, ap, ammoCost, unavailable }
-//   { kind: 'item',   id, label, icon, count }
+//   { kind: 'action', id, label, icon, ap, ammoCost, ammoRemaining,
+//     affordable, resourceAvailable, unavailable }
+//   { kind: 'item', id, label, icon, count, affordable, resourceAvailable }
 //   null                                   an empty slot, right-clickable
 // The bar shows HOTBAR_ROW_SLOTS of them at a time; `startRow` restores which
 // row was showing across a rebuild. onPress(i) is a left click on slot i (the
@@ -271,14 +286,13 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
   // the one slot you could not reassign. That also contradicted the bar's own
   // rule (see the note above the layout): an unusable slot stays clickable and
   // ANSWERS, because a power you can ask about beats a power that isn't there.
-  // The press handler already says "none left in your pockets" on its own.
+  // The view-model and press path share the same availability owner.
   const setInert = (b, inert) => {
     b.disabled = false;
     b.setAttribute('aria-disabled', inert ? 'true' : 'false');
   };
 
   let armed = null;
-  let sheet = null;
   function render() {
     const many = rowCount > 1;
     prev.style.display = many ? '' : 'none';
@@ -302,8 +316,9 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
         const count = slot.count ?? 0;
         face.textContent = slot.icon || '❔';
         countTag.textContent = count > 1 ? `×${count}` : '';
-        setInert(b, count <= 0);
-        b.style.opacity = count > 0 ? '1' : '.4';
+        setInert(b, !slot.resourceAvailable);
+        b.dataset.affordable = slot.affordable ? 'true' : 'false';
+        b.style.opacity = slot.affordable ? '1' : '.4';
         b.title = count > 0
           ? `${slot.label} ×${count} · from your pockets · right-click to reassign`
           : `${slot.label} · none left`;
@@ -315,28 +330,28 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
       // uses (combat supplies them); a throw counts the sheets it has to spend,
       // where an item counts itself.
       if (slot.uses != null) countTag.textContent = String(slot.uses);
-      else if (slot.ammoCost) countTag.textContent = String(sheet?.paper ?? 0);
-      const fed = !slot.ammoCost || (sheet?.paper ?? 0) >= slot.ammoCost;
+      else if (slot.ammoCost) countTag.textContent = String(slot.ammoRemaining ?? 0);
       // Armed, or awaiting its confirm click. Either way the slot stays live
       // however unaffordable it has become - that press is the way to lower it.
       const live = slot.live || (slot.id === armed ? 'armed' : null);
-      const usable = (fed && !slot.unavailable) || !!live;
+      const usable = slot.affordable || !!live;
       // `aria-disabled` stays exactly what it always meant: there is nothing
       // left to spend. It must NOT be made to track affordability, because an
       // unusable slot deliberately stays PRESSABLE and answers (see setInert),
       // and drivers treat aria-disabled as not-clickable - which would take
       // that away silently, including the right-click that reassigns it.
-      setInert(b, !fed);
+      setInert(b, !slot.resourceAvailable);
       // So "can this be pressed right now" gets its own signal instead: it
       // dims the slot and tells the suite what to wait on, without ever
       // blocking the click that would explain the refusal.
       b.dataset.affordable = usable ? 'true' : 'false';
       b.style.opacity = usable ? '1' : '.4';
-      // In a fight the tip comes from combat (damage, range, uses left against
-      // THIS member's sheet); out of one the bar writes its own.
-      b.title = slot.tip || (slot.unavailable
-        ? `${slot.label} · ${slot.ap}AP · ${slot.unavailable}`
-        : `${slot.label} · ${slot.ap}AP · right-click to reassign`);
+      // Both halves receive the same shared power description, with their own
+      // live values folded in. Availability is a separate runtime fact and is
+      // appended rather than replacing the description the player was trying
+      // to read.
+      const tip = slot.tip || `${slot.label} - ${slot.ap} AP`;
+      b.title = `${tip}${slot.unavailable ? `\nUnavailable: ${slot.unavailable}` : ''}\nRight-click to reassign`;
       // The live one pulses - a static border was too easy to miss mid-fight.
       b.style.borderColor = live ? (live === 'confirm' ? '#ffd76b' : '#8adf76') : '#3a3a52';
       b.style.animation = live ? 'act-pulse 1.1s ease-in-out infinite' : '';
@@ -360,7 +375,6 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
       refreshDockVisibility();
     },
     setArmed: (id) => { armed = id; render(); },
-    refresh: (s) => { sheet = s; render(); },
     flip,
     get armed() { return armed; },
     get row() { return row; },
@@ -377,7 +391,6 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
     destroy: () => { bar.remove(); refreshDockVisibility(); },
   };
 }
-
 // --- party bar ----------------------------------------------------------------
 // The roster, top-left: one slot per member (#party-slot-<i> for the tests)
 // with name, an HP bar, a DOWN marker, and a highlight on the member being
@@ -386,8 +399,6 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
 // Double-clicking asks the host to point the CAMERA at that member - a
 // separate verb, because a member you can't switch to (downed, waiting on
 // their own initiative slot) is still somewhere worth looking.
-// One decimal, and no trailing '.0' - the same shape combat.js prints AP in.
-const fmtAp = (v) => String(Math.round((Number(v) || 0) * 10) / 10).replace(/\.0$/, '');
 
 export function createPartyBar({ onSelect, onLevelUp, onFocus }) {
   const bar = document.createElement('div');
@@ -423,12 +434,12 @@ export function createPartyBar({ onSelect, onLevelUp, onFocus }) {
       });
       slot.innerHTML = `
         <div style="display:flex; justify-content:space-between; gap:8px;">
-          <span style="font-weight:${i === party.active ? '700' : '400'};">${s.name}</span>
+          <span style="font-weight:${i === party.active ? '700' : '400'};">${esc(s.name)}</span>
           <span style="opacity:.8">${down ? 'DOWN' : `${s.hp}/${s.maxHp}${ap}`}</span>
         </div>
         <div style="height:4px; margin-top:4px; background:#1a1a28; border-radius:2px;">
-          <div style="height:100%; width:${Math.max(0, Math.round((s.hp / s.maxHp) * 100))}%;
-            background:${down ? '#5a2a2a' : s.hp / s.maxHp > 0.4 ? '#6fc86f' : '#e0b23a'}; border-radius:2px;"></div>
+          <div style="height:100%; width:${Math.round(hpFracOf(s) * 100)}%;
+            background:${down ? '#5a2a2a' : hpFracOf(s) > 0.4 ? '#6fc86f' : '#e0b23a'}; border-radius:2px;"></div>
         </div>`;
       slot.onclick = () => onSelect(i);
       if (onFocus) {
@@ -478,17 +489,23 @@ export function createLevelUpPip({ onOpen }) {
   b.onmousedown = (e) => e.stopPropagation();
   b.onclick = onOpen;
   document.body.appendChild(b);
+  // `refresh` is called from main.js's per-frame update, not from a level-up
+  // event, so it has to be cheap when nothing has changed - which is almost
+  // always. The memo is the whole point; without it this writes textContent and
+  // a style property sixty times a second for as long as a point sits banked.
+  let shown = null; // the count currently painted; null = nothing painted yet
   return {
     refresh(points) {
+      if (points === shown) return;
+      shown = points;
       if (points > 0) { b.textContent = `⬆ Level Up (${points})`; b.style.display = 'block'; }
       else b.style.display = 'none';
     },
-    setVisible(v) { if (!v) b.style.display = 'none'; },
+    // No setVisible. It existed to hide the pip behind the memo's back, and it
+    // never had a caller (Q178) - because main.js hides the pip the honest way
+    // instead, folding `!modalOpen()` into the count it passes to refresh(),
+    // which drives `shown` rather than going around it. Two ways to hide one
+    // pip, and only one of them keeps the memo true.
   };
 }
-
-// The allocation screen: attribute steppers + the class ability track. Dumb
-// like the dialogue panel - main.js owns spendAttrPoint/spendClassPoint and
-// hands over the sheet + callbacks (and a `nodesFor()` returning the current
-// track view-models); we re-read the mutated sheet to redraw. onDone fires when
-// the player closes it.
+// Modal allocation belongs to screens.js; this module ends with HUD affordances.

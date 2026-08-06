@@ -17,6 +17,8 @@ import { NPCS } from './data/npcs.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { COMPANIONS } from './data/companions.js';
 import { parseActorRef } from './data/actor-registries.js';
+import { CARDINAL_DIRS } from './directions.js';
+import { createSurfaceField } from './surface-field.js';
 
 // Old saves/exports may reference renamed tile types. Exported so the editor
 // can upgrade them when loading a level for editing.
@@ -74,6 +76,11 @@ export function parseLevel(level) {
   const companionSpawns = []; // recruitable bystanders (data/companions.js)
   // typeGrid[z][x] = tile type id, or null for void (space) cells.
   const typeGrid = [];
+  // Authored maps still use one character for "floor carrying this surface".
+  // Parse that syntax here, then keep the surface only in SurfaceField. A
+  // model such as a fallen coat rack remains terrain/object data as well as
+  // seeding its underfoot debris.
+  const surfaceSeeds = [];
 
   for (let z = 0; z < height; z++) {
     const row = [];
@@ -120,7 +127,9 @@ export function parseLevel(level) {
       const raw = tilesLegend[ch] || 'floor';
       const type = TYPE_ALIASES[raw] || raw;
       if (!TILE_TYPES[type]) throw new Error(`Level "${level.name}": unknown tile type "${type}" for char "${ch}"`);
-      row.push(type);
+      const def = TILE_TYPES[type];
+      if (def.surface) surfaceSeeds.push({ x, z, surfaceId: def.surface, authoredType: type });
+      row.push(def.surface && !def.model && !def.primitive ? 'floor' : type);
     }
     typeGrid.push(row);
   }
@@ -139,7 +148,19 @@ export function parseLevel(level) {
   // Out-of-bounds and in-map void both resolve to the tall 'wall' def, so they
   // stay opaque without a bounds check here.
   const sightOpenCell = (x, z) => !blocksSight(defAt(x, z));
-  const surfaceAt = (x, z) => defAt(x, z).surface || null;
+  const surfaceField = createSurfaceField({ width, height });
+  surfaceField.edit(() => {
+    for (const seed of surfaceSeeds) {
+      surfaceField.fillTile(seed.x, seed.z, seed.surfaceId, {
+        source: 'authored',
+        sourceKey: `authored:${seed.x},${seed.z}`,
+        authoredType: seed.authoredType,
+        sourceX: seed.x,
+        sourceZ: seed.z,
+      });
+    }
+  });
+  const surfaceAt = (x, z) => surfaceField.surfaceAt(x, z);
 
   // --- edge walls -------------------------------------------------------------
   const { h: hWalls, v: vWalls } = parseWallRuns(level.walls);
@@ -156,7 +177,15 @@ export function parseLevel(level) {
   const doors = new Map(); // 'h:x,z' | 'v:x,z' -> { open }
   for (const k of hDoorSet) doors.set('h:' + k, { open: false });
   for (const k of vDoorSet) doors.set('v:' + k, { open: false });
+  // Both of the edge lookups below take two 4-ADJACENT cells, and both used to
+  // answer a diagonal pair anyway: the first `nx > x` test won, so (0,0)->(1,1)
+  // came back as the vertical edge at (1,0) - a real edge, between two cells
+  // that share none. A caller passing a diagonal has a bug, and the answer
+  // sounded plausible enough to hide it. `null` is what "these cells share no
+  // edge" means, and it is what both say now.
+  const orthogonal = (x, z, nx, nz) => (x === nx) !== (z === nz);
   const doorKeyBetween = (x, z, nx, nz) => {
+    if (!orthogonal(x, z, nx, nz)) return null;
     if (nx > x) return 'v:' + nx + ',' + z;
     if (nx < x) return 'v:' + x + ',' + z;
     if (nz > z) return 'h:' + x + ',' + nz;
@@ -176,6 +205,9 @@ export function parseLevel(level) {
   // Is the shared edge between two 4-adjacent cells free of a wall? (Static -
   // this is what conduction pools flood against.)
   const wallEdgeOpen = (x, z, nx, nz) => {
+    // A diagonal pair shares no edge, so there is no edge to be free: `false`
+    // is the conservative answer, and conduction only ever steps orthogonally.
+    if (!orthogonal(x, z, nx, nz)) return false;
     if (nx > x) return !vWalls.has(nx + ',' + z);
     if (nx < x) return !vWalls.has(x + ',' + z);
     if (nz > z) return !hWalls.has(x + ',' + nz);
@@ -202,7 +234,7 @@ export function parseLevel(level) {
     if (!e) return null;
     (e.o === 'h' ? hWalls : vWalls).delete(e.k);
     edgeDamage.delete(e.o + ':' + e.k); // the pool dies with the edge
-    electrified = computeElectrified();
+    surfaceField.invalidate('edge-opened');
     return e;
   };
 
@@ -277,35 +309,47 @@ export function parseLevel(level) {
       && edgeOpen(nx, z, nx, nz) && edgeOpen(x, nz, nx, nz);
   };
 
-  // Conduction: flood-fill pools of `conducts` surfaces (4-connected); a pool
-  // with a `powers` surface on any 4-neighbour is electrified. Recomputed
-  // whenever the grid mutates (setType), so a destroyed prop or repainted
-  // tile can never leave a stale live pool behind. Pools do not leak through
-  // edge walls: a partition dams the spill.
+  // Conduction: flood-fill FINE cells of `conducts` surfaces (4-connected); a
+  // pool with a `powers` surface on any fine neighbour is electrified. The
+  // field is authoritative, so any field mutation recomputes this derived
+  // set. Crossing within one movement tile is always open; crossing a tile
+  // boundary consults that boundary's partition (doors still do not dam a
+  // spill).
+  const surfaceTileAt = (ix, iz) => ({
+    x: Math.floor(ix / surfaceField.cellsPerTile),
+    z: Math.floor(iz / surfaceField.cellsPerTile),
+  });
+  const surfaceEdgeOpen = (ix, iz, nix, niz) => {
+    const a = surfaceTileAt(ix, iz);
+    const b = surfaceTileAt(nix, niz);
+    return (a.x === b.x && a.z === b.z) || wallEdgeOpen(a.x, a.z, b.x, b.z);
+  };
   function computeElectrified() {
     const electrified = new Set();
     const seen = new Set();
-    const conducts = (x, z) => SURFACES[surfaceAt(x, z)]?.conducts;
-    const powers = (x, z) => SURFACES[surfaceAt(x, z)]?.powers;
-    const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-    for (let z = 0; z < height; z++) {
-      for (let x = 0; x < width; x++) {
-        if (!conducts(x, z) || seen.has(x + ',' + z)) continue;
+    const surfaceIdAtCell = (ix, iz) => surfaceField.cellAt(ix, iz)?.surfaceId || null;
+    const conducts = (ix, iz) => SURFACES[surfaceIdAtCell(ix, iz)]?.conducts;
+    const powers = (ix, iz) => SURFACES[surfaceIdAtCell(ix, iz)]?.powers;
+    for (let iz = 0; iz < surfaceField.cellHeight; iz++) {
+      for (let ix = 0; ix < surfaceField.cellWidth; ix++) {
+        if (!conducts(ix, iz) || seen.has(surfaceField.keyOf(ix, iz))) continue;
         const pool = [];
-        const queue = [[x, z]];
-        seen.add(x + ',' + z);
+        const queue = [[ix, iz]];
+        seen.add(surfaceField.keyOf(ix, iz));
         let live = false;
         while (queue.length) {
-          const [cx, cz] = queue.pop();
-          pool.push(cx + ',' + cz);
-          for (const [dx, dz] of N4) {
-            const nx = cx + dx;
-            const nz = cz + dz;
-            if (!wallEdgeOpen(cx, cz, nx, nz)) continue; // doors don't dam pools
-            if (powers(nx, nz)) live = true;
-            if (conducts(nx, nz) && !seen.has(nx + ',' + nz)) {
-              seen.add(nx + ',' + nz);
-              queue.push([nx, nz]);
+          const [cix, ciz] = queue.pop();
+          pool.push(surfaceField.keyOf(cix, ciz));
+          for (const [dx, dz] of CARDINAL_DIRS) {
+            const nix = cix + dx;
+            const niz = ciz + dz;
+            if (!surfaceField.inBoundsCell(nix, niz)
+              || !surfaceEdgeOpen(cix, ciz, nix, niz)) continue;
+            if (powers(nix, niz)) live = true;
+            const nk = surfaceField.keyOf(nix, niz);
+            if (conducts(nix, niz) && !seen.has(nk)) {
+              seen.add(nk);
+              queue.push([nix, niz]);
             }
           }
         }
@@ -315,22 +359,63 @@ export function parseLevel(level) {
     return electrified;
   }
   let electrified = computeElectrified();
-  const isElectrified = (x, z) => electrified.has(x + ',' + z);
+  const isElectrified = (x, z) => {
+    const cell = surfaceField.pointToCell(x, z);
+    return !!cell && electrified.has(surfaceField.keyOf(cell.ix, cell.iz));
+  };
+  surfaceField.onChange(() => { electrified = computeElectrified(); });
 
-  // Destructible props (exploding printers) mutate the grid at runtime.
-  // Conduction depends on surfaces, and surfaces hang off tile types - so a
-  // type change re-runs the flood fill.
+  // Destructible props and the legacy surface painters both come through this
+  // adapter. A surface-only tile type becomes ordinary floor plus fine cells;
+  // it never enters typeGrid. Replacing any tile clears what was underfoot in
+  // that movement tile, matching setType's historical replacement semantics.
   const setType = (x, z, type) => {
     if (z >= 0 && z < height && x >= 0 && x < width) {
-      typeGrid[z][x] = type;
+      const def = TILE_TYPES[type];
+      if (!def) throw new Error(`Unknown tile type "${type}"`);
+      typeGrid[z][x] = def.surface && !def.model && !def.primitive ? 'floor' : type;
       propDamage.delete(x + ',' + z); // the pool belonged to what stood here
-      electrified = computeElectrified();
+      surfaceField.edit(() => {
+        surfaceField.clearTile(x, z);
+        if (def.surface) {
+          surfaceField.fillTile(x, z, def.surface, {
+            source: 'runtime-type', sourceKey: `runtime-type:${x},${z}`,
+            authoredType: type, sourceX: x, sourceZ: z,
+          });
+        }
+      });
     }
   };
 
+  // --- per-placement rotation (EDITOR_INVENTORY IQ4, designer 2026-08-02) ------
+  // `rotY` is a property of the tile TYPE, so every desk on every floor faced
+  // the same way and a rotated one meant a whole new registry entry - which
+  // also costs a scarce map character. An optional `props` array carries
+  // per-CELL overrides instead: `"props": [{ "x": 8, "z": 2, "rotY": 90 }]`.
+  //
+  // Deliberately a sibling of `map` rather than new map syntax: every existing
+  // level stays valid untouched, and one character per cell still means one
+  // TYPE per cell. The trade the designer accepted is that the ASCII map is no
+  // longer the complete picture of a level - a reader has to look here to learn
+  // which way that desk faces.
+  const propRot = new Map();
+  for (const p of level.props || []) {
+    if (!Number.isFinite(p?.x) || !Number.isFinite(p?.z)) continue;
+    // Quantised to the four orientations the designer asked for. Anything else
+    // is a typo, and a desk at 37 degrees reads as a bug rather than a choice.
+    const r = ((Math.round((p.rotY || 0) / 90) * 90) % 360 + 360) % 360;
+    if (r) propRot.set(p.x + ',' + p.z, r);
+  }
+  // The rotation a cell's model should be drawn at: the placement's if it has
+  // one, else the type's own.
+  const rotAt = (x, z) => propRot.get(x + ',' + z) ?? (defAt(x, z)?.rotY || 0);
+
   return {
+    props: level.props || [],
+    rotAt,
     name: level.name || '', width, height,
-    typeAt, defAt, terrainOpen, sightOpenCell, sightOpenCellLow, sightOpenLow, surfaceAt, isElectrified, setType,
+    typeAt, defAt, terrainOpen, sightOpenCell, sightOpenCellLow, sightOpenLow,
+    surfaceField, surfaceAt, surfaceCellEdgeOpen: surfaceEdgeOpen, isElectrified, setType,
     propHpAt, damageProp, edgeHpBetween, damageEdge,
     hWalls, vWalls, edgeOpen, stepOpen, sightOpen, wallEdgeBetween, removeEdgeBetween,
     doors, doorBetween, setDoorOpen,
