@@ -50,6 +50,27 @@ blender -b --factory-startup -noaudio --python tools/fbx-to-glb.py -- \
 workspace. The newer Synty packs use `_Albedo_Map` GUID references instead of
 the older pack's single `_MainTex` atlas; `unity_materials.py` resolves both.
 
+## Synty characters
+
+Synty character packs use monolithic FBXs: one shared Humanoid armature plus
+many alternative skinned bodies. `tools/synty-characters.json` selects bodies
+by mesh name and records the separate animation contract. Export a static,
+correctly textured validation body with:
+
+```sh
+blender -b --factory-startup -noaudio --python tools/synty-character-to-glb.py -- \
+    --character shops-worker-male \
+    --animation-root /licensed/RPG-Character/Animations \
+    --report tools/reports/synty-characters.json
+```
+
+The model exporter deliberately strips the pose reel embedded in the Synty
+source FBX. The selected RPG Character Mecanim clips are real Unity Humanoid
+animations, but they target another skeleton. Unity can retarget them because
+both avatars are Humanoid; that retargeted result still must be baked onto the
+Synty hierarchy before glTF export. Until that bake stage exists, the output is
+a material/skin/rig validation artifact, not a runtime character replacement.
+
 ### Why it reads the Unity metadata
 
 A Unity package's `.fbx` files are only half the asset - scale and materials

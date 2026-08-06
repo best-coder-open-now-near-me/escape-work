@@ -1,0 +1,118 @@
+{
+  "schema": 1,
+  "status": "pipeline-spike",
+  "syntyRoot": "assets/Synty",
+  "animationRoot": "assets/ExplosiveLLC/RPG Character Mecanim Animation Pack FREE/Animations",
+  "outputRoot": "assets/licensed/synty",
+  "licenseBoundary": {
+    "commitSource": false,
+    "commitConvertedModels": false,
+    "note": "Character meshes, textures, source animations, and converted GLBs stay in licensed local or private build storage. This public repository stores only the conversion contract and source-relative selections."
+  },
+  "rigContract": {
+    "modelRig": "Synty Humanoid",
+    "animationRig": "Unity Humanoid/Mecanim",
+    "adapter": "mecanim-bake-required",
+    "runtimeClips": [
+      "idle",
+      "walk",
+      "attack-melee-right"
+    ],
+    "note": "The source animation FBXs target a different skeleton. Unity can retarget both Humanoid avatars, but the result must be baked onto the Synty hierarchy before glTF export."
+  },
+  "clips": [
+    {
+      "id": "idle",
+      "source": "Unarmed/RPG-Character@Unarmed-Idle.FBX",
+      "sourceClip": "Unarmed-Idle",
+      "loop": true
+    },
+    {
+      "id": "walk",
+      "source": "Unarmed/RPG-Character@Unarmed-Run-Forward.FBX",
+      "sourceClip": "Unarmed-Run-Forward",
+      "loop": true,
+      "note": "The free pack has a run rather than a walk; runtime speed scaling supplies the first locomotion pass."
+    },
+    {
+      "id": "attack-melee-right",
+      "source": "Unarmed/RPG-Character@Unarmed-Attack-R1.FBX",
+      "sourceClip": "Unarmed-Attack-R1",
+      "loop": false
+    },
+    {
+      "id": "hit-front",
+      "source": "Unarmed/RPG-Character@Unarmed-GetHit-F1.FBX",
+      "sourceClip": "Unarmed-GetHit-F1",
+      "loop": false
+    },
+    {
+      "id": "stunned",
+      "source": "Unarmed/RPG-Character@Unarmed-Stunned.FBX",
+      "sourceClip": "Unarmed-Stunned",
+      "loop": true
+    },
+    {
+      "id": "knockdown",
+      "source": "Unarmed/RPG-Character@Unarmed-Knockdown1.FBX",
+      "sourceClip": "Unarmed-Knockdown1",
+      "loop": false
+    },
+    {
+      "id": "get-up",
+      "source": "Unarmed/RPG-Character@Unarmed-Getup1.FBX",
+      "sourceClip": "Unarmed-Getup1",
+      "loop": false
+    }
+  ],
+  "characters": [
+    {
+      "id": "shops-worker-male",
+      "source": "PolygonShops/Models/Characters.fbx",
+      "mesh": "SM_Chr_Worker_Male_01",
+      "prefab": "PolygonShops/Prefabs/Characters/SM_Chr_Worker_Male_01.prefab",
+      "output": "characters/shops-worker-male.glb",
+      "role": "pipeline validation body"
+    },
+    {
+      "id": "shops-worker-female",
+      "source": "PolygonShops/Models/Characters.fbx",
+      "mesh": "SM_Chr_Worker_Female_01",
+      "prefab": "PolygonShops/Prefabs/Characters/SM_Chr_Worker_Female_01.prefab",
+      "output": "characters/shops-worker-female.glb",
+      "role": "pipeline validation body"
+    },
+    {
+      "id": "shops-clerk-male",
+      "source": "PolygonShops/Models/Characters.fbx",
+      "mesh": "SM_Chr_Clerk_Male_01",
+      "prefab": "PolygonShops/Prefabs/Characters/SM_Chr_Clerk_Male_01.prefab",
+      "output": "characters/shops-clerk-male.glb",
+      "role": "pipeline validation body"
+    },
+    {
+      "id": "shops-clerk-female",
+      "source": "PolygonShops/Models/Characters.fbx",
+      "mesh": "SM_Chr_Clerk_Female_01",
+      "prefab": "PolygonShops/Prefabs/Characters/SM_Chr_Clerk_Female_01.prefab",
+      "output": "characters/shops-clerk-female.glb",
+      "role": "pipeline validation body"
+    },
+    {
+      "id": "generic-business-male",
+      "source": "PolygonGeneric/Models/Generic_Characters.fbx",
+      "mesh": "SM_Gen_Chr_Business_Male_01",
+      "prefab": "PolygonGeneric/Prefabs/Characters/SM_Gen_Chr_Business_Male_01.prefab",
+      "output": "characters/generic-business-male.glb",
+      "role": "office-cast candidate"
+    },
+    {
+      "id": "generic-business-female",
+      "source": "PolygonGeneric/Models/Generic_Characters.fbx",
+      "mesh": "SM_Gen_Chr_Business_Female_01",
+      "prefab": "PolygonGeneric/Prefabs/Characters/SM_Gen_Chr_Business_Female_01.prefab",
+      "output": "characters/generic-business-female.glb",
+      "role": "office-cast candidate"
+    }
+  ]
+}
