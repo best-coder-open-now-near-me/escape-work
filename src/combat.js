@@ -38,6 +38,7 @@ import {
 import { createAimPaint } from './aim-paint.js';
 import { createAimView } from './combat-aim.js';
 import { createCombatIntent } from './combat-intent.js';
+import { createCombatDebug } from './combat-debug.js';
 import { createAiAdvance } from './combat-advance.js';
 import { STATUSES } from './data/statuses.js';
 import { blocksSight, PARTITION_TOPPLE } from './data/tiles.js';
@@ -2706,184 +2707,42 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   app.on('update', update);
   log('Combat!');
 
-  // Read-only handle for tests, plus a few live setters god mode (god.js) uses
-  // to edit turn state in place. Tests only ever read phase/ap/armed/enemies;
-  // the added members are harmless to them. Everything single-character maps
-  // to the ACTIVE member.
-  window.__combat = {
+  // The e2e/god-mode handle is a dedicated adapter now. This bag supplies the
+  // live fight; combat-debug.js owns how it is projected and which mutation
+  // doors are allowed.
+  window.__combat = createCombatDebug({
     get phase() { return phase; },
-    // The AI's working state for the unit whose turn it is, or null on a
-    // player turn. This exists for DIAGNOSIS: when a fight stops handing out
-    // turns, the action bar just reads "disabled", and the three explanations -
-    // the AI beat is waiting, the acting unit is stuck part-way through a walk
-    // (the driver returns early while `moving`), or the turn engine stalled -
-    // are indistinguishable from outside. `wait` and `moving` tell them apart.
-    get acting() {
-      if (!acting) return null;
-      const u = acting.unit;
-      return {
-        name: u.def.name, ap: acting.ap, wait: Number(acting.wait?.toFixed?.(2) ?? acting.wait),
-        moving: !!u.moving, alive: !!u.alive, x: u.x, z: u.z,
-      };
-    },
-    get ap() { return active.ap; },
-    // The sparring tally (AI_PLAN M1). dmgTaken is an hp-diff read over the
-    // enemy side, not instrumentation - net damage worn so far, so enemy
-    // healing (M6) will understate it; the passive-party protocol doesn't
-    // care, and the instrumented half (dmgDealt) is the one bouts optimize.
-    get bout() {
-      return {
-        ...bout,
-        beats: { ...bout.beats },
-        dmgTaken: engaged.reduce((s, e) => s + (e.maxHp - Math.max(0, e.hp)), 0),
-      };
-    },
-    // Where the acting member's BODY is (continuous, not the rounded tile) -
-    // what a test aims project3 at to click on themselves. The tile alone is
-    // off by up to half a tile at this camera angle, which is exactly the
-    // mis-click the body-pick-first rule exists to prevent.
-    get actingAt() { const p = posOf(active); return { x: p.x, z: p.z }; },
-    // Who is holding an overwatch, by name (POWERS_PLAN M5). A stance is a
-    // commitment that pays off on somebody ELSE's turn, so a test that cannot
-    // see it can only assert the swing and guess at the cause.
-    get watching() {
-      return [...watching.keys()].map((u) => (u.sheet ? u.sheet.name : u.def.name));
-    },
-    // Who is crouched, and behind which cell (TACTICS_PLAN M6) - the suite's
-    // window into the take-cover commitment and its lazy breaks. Edge-mode
-    // crouches (against a partition) carry `edges` and no cell.
-    // Who is crouched, WHERE, and which faces are covering them. `x, z` is
-    // the tile they stand on - the crouch IS a position now, so there is no
-    // separate shield cell to report - and `faces` is the live list the next
-    // shot resolves against, which is what a spec should assert on.
-    get crouched() {
-      return [...crouched.entries()].map(([u]) => {
-        const s = crouchStateOf(u);
-        return s && {
-          name: nameOf(u), x: s.at.x, z: s.at.z,
-          faces: s.faces.map(([ox, oz]) => `${ox},${oz}`),
-          covers: coverNames(s.at.x, s.at.z, s.faces),
-        };
-      }).filter(Boolean);
-    },
-    // The movement allowance left this turn (MOVEMENT_PLAN M2). 0 for a
-    // character without the talent.
-    get freeAp() { return active.freeAp || 0; },
-    set ap(v) { active.ap = Math.max(0, roundAp(Number(v) || 0)); refresh(); },
-    get armed() { return intent.armed; },
-    // The instant awaiting its confirm click, or null - the other half of
-    // "which slot is lit", which is what the one-live-slot rule asserts on.
-    get pendingConfirm() { return intent.pendingConfirm; },
-    // The hovered door's midpoint, or null - the threshold ring's own gate,
-    // so a spec can assert the ring exists only while the cursor is on it.
-    get hoverDoor() { return aim.hoverDoor; },
-    // The aim wash (TACTICS_PLAN M7): which aim is painted and how many tiles
-    // it covers. A test that can't see the wash can only assert the click.
-    get aimPaint() { return aimPaint.debug; },
-    get enemies() { return engaged.map((e) => ({ name: e.def.name, x: e.x, z: e.z, hp: e.hp, alive: e.alive, statuses: statusList(e) })); },
-    get maxAp() { return active.sheet.maxAp; },
-    get defended() { return hasStatus(active.sheet, 'deflecting'); },
-    set defended(v) {
-      if (v) applyStatus(active.sheet, 'deflecting');
-      else removeStatus(active.sheet, 'deflecting');
-      refresh();
-    },
-    // The hit-roll pin (HIT_PLAN.md): true = always hit, false = always miss,
-    // null = roll honestly. The e2e suite sets it to make combat deterministic.
-    get forceHit() { return hits.forceHit; },
-    set forceHit(v) { hits.setForceHit(v); },
-    // The weapon on-hit proc pin (EQUIPMENT_PLAN #8): true = always proc,
-    // false = never, null = roll. The e2e suite pins it deterministic.
-    get forceProc() { return hits.forceProc; },
-    set forceProc(v) { hits.setForceProc(v); },
-    // The most recent attack roll { chance, hit }, and the to-hit chance the
-    // armed-hover preview is currently showing - both for the e2e suite to
-    // assert the previewed odds match the math that actually rolls.
-    get lastRoll() { return hits.lastRoll; },
-    get hoverHitChance() { return aim.hoverHitChance; },
+    get acting() { return acting; },
+    get active() { return active; },
+    get bout() { return bout; },
+    get engaged() { return engaged; },
+    watching,
+    crouched,
+    intent,
+    aim,
+    aimPaint,
+    hits,
     get lastClickOutcome() { return lastClickOutcome; },
-    // Is the movement trail currently drawn? Aiming at a coworker must replace
-    // it with the to-hit readout, not draw both.
-    get movePreview() { return !!aim.preview; },
-    get usesLeft() { return active.usesLeft; }, // live { actionId: count } - edit in place, then call refresh()
-    get party() {
-      return members.map((m) => ({ name: m.sheet.name, hp: m.sheet.hp, ap: m.ap, active: m === active, statuses: statusList(m.sheet) }));
-    },
-    // Test/debug: apply a status to the active member (STATUS_PLAN e2e). Enemy
-    // statuses arrive naturally (a shove stuns, a fire tile burns).
-    // Debug/e2e pin: land `id` on the acting member. `resist` defaults to 0 -
-    // an unresisted, full-severity application, so a test pinning a status gets
-    // exactly what it asked for - and pass a number to exercise Composure's
-    // blunting (statuses.js severity) without building a character for it.
-    // Apply a status to the acting member, or - with `targetName` - to a named
-    // coworker. The enemy-side target exists because statuses on THEM are half
-    // the system and were unreachable from outside: a spec that wants a
-    // coworker to hold still (to drop a bookcase on them, to measure cover)
-    // could only get there by playing out the power that applies it, which
-    // makes the spec a test of that power instead of the thing it is about.
-    applyStatus: (id, duration, resist = 0, targetName = null) => {
-      const target = targetName
-        ? engaged.find((e) => e.alive && e.def.name === targetName)
-        : active.sheet;
-      if (!target) return false;
-      const ok = applyStatus(target, id, { duration }, resist);
-      // Charm routes through the real borrow, so a spec that pins it exercises
-      // the same code the action does rather than a parallel imitation.
-      if (ok && id === 'charmed' && target !== active.sheet) {
-        charmUnit(target, duration ?? STATUSES.charmed.duration);
-      }
-      refresh();
-      return ok;
-    },
-    // Crouch a named coworker where they stand. Same rationale as the status
-    // pin above: the enemy-side crouch is half of Pull Over's testable surface
-    // (TACTICS_PLAN M8), and the only natural route there is steering the AI
-    // into its turtle beat - which would make a pull spec a test of AI pathing
-    // instead of the verb. Routes through the real `crouchHere`, so the
-    // commitment it plants is the one the pull actually reads - and it returns
-    // false when that tile has no shielded face, rather than planting a crouch
-    // the rules would refuse.
-    crouch: (targetName) => {
-      const u = engaged.find((e) => e.alive && e.def.name === targetName);
-      if (!u || !crouchHere(u)) return false;
-      refresh();
-      return true;
-    },
-    // End the ACTING turn programmatically. The e2e suite needs this: driving
-    // rounds by clicking End Turn costs a DOM round-trip and a settle per turn,
-    // which under software GL is seconds each - a spec that has to advance
-    // three rounds spends its whole budget on the clicking rather than on what
-    // it is testing. Same call the button makes.
-    endTurn: () => { advanceTurn(); refresh(); },
-    // The initiative order, top to bottom, with whose turn it is - for the
-    // tracker UI and the e2e suite.
-    // `current` stays SINGLE under a shared turn - it is the steered slot -
-    // while `held`/`done` say who else is holding the open turn and who has
-    // already ended theirs. `init` stays here for the tests even though the
-    // strip no longer prints it.
-    get order() {
-      const heldSet = new Set(turns.held);
-      return turns.order.map((s, i) => ({
-        name: slotName(s), team: s.team, init: s.init,
-        member: !!s.member, current: i === turns.index, alive: slotAlive(s),
-        held: heldSet.has(s), done: turns.isDone(s),
-      }));
-    },
-    get turn() { return turns.current ? slotName(turns.current) : null; },
-    get summons() {
-      return members.filter((m) => m.isSummon && m.sheet.hp > 0 && m.actor)
-        .map((m) => ({
-          name: m.sheet.name, x: m.actor.x, z: m.actor.z, hp: m.sheet.hp,
-          turnsLeft: m.actor.summonTurns,
-        }));
-    },
-    // Test/debug: drop a player-team summon beside the active member, as the
-    // HR class's Post the Role does. Bypasses caps - callers set the count -
-    // and takes an optional lifetime so a test can watch one time out.
-    summonAlly: (id, n = 1, lifetimeTurns = null) =>
-      resolveSummon(active.actor, 'player', { archetype: id, count: n, cap: n, lifetimeTurns }),
-    refresh,
-  };
+    members,
+    turns,
+    statuses: STATUSES,
+    roundAp,
+    refresh: (...a) => refresh(...a),
+    posOf: (...a) => posOf(...a),
+    crouchStateOf: (...a) => crouchStateOf(...a),
+    nameOf: (...a) => nameOf(...a),
+    coverNames: (...a) => coverNames(...a),
+    statusList: (...a) => statusList(...a),
+    hasStatus: (...a) => hasStatus(...a),
+    applyStatus: (...a) => applyStatus(...a),
+    removeStatus: (...a) => removeStatus(...a),
+    charmUnit: (...a) => charmUnit(...a),
+    crouchHere: (...a) => crouchHere(...a),
+    advanceTurn: (...a) => advanceTurn(...a),
+    slotName: (...a) => slotName(...a),
+    slotAlive: (...a) => slotAlive(...a),
+    resolveSummon: (...a) => resolveSummon(...a),
+  });
 
   // Kick off the initiative order. Started from the persistent hotbar, the
   // initiator AMBUSHES: the throwing member leads off regardless of their roll
