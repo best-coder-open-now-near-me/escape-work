@@ -70,3 +70,21 @@ test('derived-state invalidation uses the same notification seam', () => {
   assert.deepEqual(seen[0].changes, []);
   assert.equal(seen[0].reason, 'edge-opened');
 });
+
+test('traceSegment reports every crossed fine cell with exact distance', () => {
+  const field = createSurfaceField({ width: 2, height: 1 });
+  field.setCell(1, 1, 'paper');
+  const spans = field.traceSegment(-0.4, 0.25, 1.4, 0.25);
+  assert.deepEqual(spans.map((span) => span.ix), [0, 1, 2, 3]);
+  assert.deepEqual(spans.map((span) => span.record?.surfaceId || null),
+    [null, 'paper', null, null]);
+  assert.ok(Math.abs(spans.reduce((sum, span) => sum + span.distance, 0) - 1.8) < 1e-9);
+  assert.ok(spans.every((span) => span.distance > 0));
+});
+
+test('traceSegment does not double-count a diagonal corner crossing', () => {
+  const field = createSurfaceField({ width: 2, height: 2 });
+  const spans = field.traceSegment(-0.25, -0.25, 1.25, 1.25);
+  assert.deepEqual(spans.map(({ ix, iz }) => [ix, iz]), [[0, 0], [1, 1], [2, 2], [3, 3]]);
+  assert.ok(Math.abs(spans.reduce((sum, span) => sum + span.distance, 0) - Math.hypot(1.5, 1.5)) < 1e-9);
+});

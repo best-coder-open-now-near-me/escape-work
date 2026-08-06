@@ -153,6 +153,54 @@ export function createSurfaceField({ width, height, quantum = SURFACE_QUANTUM })
     const [ix, iz] = key.split(',').map(Number);
     return { ix, iz, ...cellCenter(ix, iz), ...value };
   });
+  // Split a straight world-space movement segment wherever it crosses a fine
+  // cell edge. Exact boundary parameters make contact independent of frame
+  // rate and movement speed; callers may sample dynamic fire/electric state at
+  // each span's midpoint without mistaking a skipped cell for bare floor.
+  const traceSegment = (x0, z0, x1, z1) => {
+    const dx = x1 - x0;
+    const dz = z1 - z0;
+    const total = Math.hypot(dx, dz);
+    if (!(total > EPSILON)) return [];
+    const cuts = [0, 1];
+    if (Math.abs(dx) > EPSILON) {
+      for (let ix = 1; ix < cellWidth; ix++) {
+        const boundary = -0.5 + ix * quantum;
+        const t = (boundary - x0) / dx;
+        if (t > EPSILON && t < 1 - EPSILON) cuts.push(t);
+      }
+    }
+    if (Math.abs(dz) > EPSILON) {
+      for (let iz = 1; iz < cellHeight; iz++) {
+        const boundary = -0.5 + iz * quantum;
+        const t = (boundary - z0) / dz;
+        if (t > EPSILON && t < 1 - EPSILON) cuts.push(t);
+      }
+    }
+    cuts.sort((a, b) => a - b);
+    const unique = cuts.filter((t, i) => i === 0 || Math.abs(t - cuts[i - 1]) > EPSILON);
+    const spans = [];
+    for (let i = 1; i < unique.length; i++) {
+      const t0 = unique[i - 1];
+      const t1 = unique[i];
+      const tm = (t0 + t1) / 2;
+      const mx = x0 + dx * tm;
+      const mz = z0 + dz * tm;
+      const index = pointToCell(mx, mz);
+      spans.push({
+        t0,
+        t1,
+        distance: total * (t1 - t0),
+        from: { x: x0 + dx * t0, z: z0 + dz * t0 },
+        to: { x: x0 + dx * t1, z: z0 + dz * t1 },
+        midpoint: { x: mx, z: mz },
+        ix: index?.ix ?? null,
+        iz: index?.iz ?? null,
+        record: index ? cellAt(index.ix, index.iz) : null,
+      });
+    }
+    return spans;
+  };
   const onChange = (listener) => {
     listeners.add(listener);
     return () => listeners.delete(listener);
@@ -185,6 +233,7 @@ export function createSurfaceField({ width, height, quantum = SURFACE_QUANTUM })
     clearTile,
     edit,
     entries,
+    traceSegment,
     onChange,
     invalidate,
     get size() { return cells.size; },

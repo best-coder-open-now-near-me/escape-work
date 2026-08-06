@@ -196,13 +196,13 @@ export function createFloorEffects(d) {
   }
 
   function maybeSlip(ms, actor, x, z, wasSlipProof, say, speaker = null) {
-    if (d.gameOver) return;
+    if (d.gameOver) return false;
     if (!d.slips({
       chance: d.slipChanceAt(x, z),
       roll: Math.random,
       slipProof: wasSlipProof || d.statusFx(ms).slipProof || d.equippedStats(ms).slipProof,
       slipImmune: ms.talent?.effects?.slipImmune,
-    })) return;
+    })) return false;
     actor.clearPath();
     actor.flinch();
     d.vfx.impact(x, z, 'slip', { y: 0.12 });
@@ -210,6 +210,7 @@ export function createFloorEffects(d) {
     if (d.inCombat) d.combat?.notifySlip(speaker);
     else say('The floor was, in fact, wet. You go down. Gracefully? No.',
       'The floor was, in fact, wet. {name} goes down. Gracefully? No.');
+    return true;
   }
 
   return {

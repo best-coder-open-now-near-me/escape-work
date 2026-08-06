@@ -12,7 +12,68 @@
 // is what "where should I stand" actually depends on. It reads exactly one
 // piece of the turn's shared state - `facings` - which is why it could move at
 // all when a same-sized cluster reaching for `active` and `phase` could not.
+import { createEnemyTraveler } from './enemy-travel.js';
+import {
+  advanceTravelExposure,
+  createTravelExposureState,
+  exposureDistanceFromComposure,
+} from './travel-exposure.js';
+
 export function createAiAdvance(d) {
+  const travelEnemy = createEnemyTraveler({
+    advanceTravelExposure,
+    createTravelExposureState,
+    traceSegment: (...a) => d.world.traceSurfaceSegment(...a),
+    floorAt: (...a) => d.world.floorAt(...a),
+    exposureInterval: (unit) => exposureDistanceFromComposure(unit.combat.composure),
+    statusFx: (...a) => d.statusFx(...a),
+    tickStep: (...a) => d.tickStep(...a),
+    syncSpeed: (...a) => d.syncUnitSpeed(...a),
+    surfaceEffect: (...a) => d.surfaceEffect(...a),
+    applyStatus: (...a) => d.applyStatus(...a),
+    surfDamage: (...a) => d.world.enemySurfDamage(...a),
+    hasStatus: (...a) => d.hasStatus(...a),
+    stickGum: (...a) => d.world.stickGum(...a),
+    slips: (...a) => d.slips(...a),
+    slipChanceAt: (...a) => d.world.slipChanceAt(...a),
+    roll: d.rng,
+    onStatus: (unit, id) => {
+      d.statusFxAt(unit, id);
+      d.refresh();
+    },
+    onDamage: (unit, amount, point, info) => {
+      if (info.kind === 'surface') {
+        d.fx.impact(point.x, point.z, d.hazardKind(point.x, point.z), { y: 0.35 });
+        d.log(`${unit.def.name} stumbles through the hazard. -${amount}.`);
+      }
+      d.fx.damageText(point.x, point.z, `-${amount}`, '#ffd76b', { big: info.died });
+      if (info.died) {
+        d.deathFx(unit);
+        d.callbacks.onEnemyKilled(unit);
+        d.refresh();
+      }
+    },
+    onExpired: () => d.refresh(),
+    onGum: (unit) => {
+      d.statusFxAt(unit, 'gum');
+      d.log(`${unit.def.name} steps in gum. It's theirs now.`);
+    },
+    onSlip: (unit, point) => {
+      unit.slipped = true;
+      d.fx.impact(point.x, point.z, 'slip', { y: 0.12 });
+      d.fx.damageText(point.x, point.z, 'slip!', '#8ad4df');
+      d.log(`${unit.def.name} slips in the water and goes down.`);
+    },
+    onFootprint: (unit, point) => {
+      const surface = d.world.surfaceIdAt(point.x, point.z);
+      d.fx.footstep(unit, point.x, point.z, {
+        bleeding: unit.hp <= unit.maxHp * 0.45,
+        surface,
+        onPaper: surface === 'paper',
+      });
+    },
+  });
+
   function aiAdvance(unit, budget, target) {
     // The whole field of swing-stand routes, scored (AI_PLAN M3): path cost
     // traded against a flanking or rear-arc arrival, the opportunity attacks
@@ -109,109 +170,22 @@ export function createAiAdvance(d) {
     d.beginMove(unit); // a deliberate move - leaving reach can provoke
     unit.onTile = (x, z, done, changed) => {
       if (changed) {
-        // Breaking away from a party-side body hands it a free swing first -
-        // an enemy that repositions out of your reach pays for it too.
+        // Reactions/occupancy remain logical tile events; the floor itself is
+        // resolved from the exact feet segment in onTravel below.
         d.notifyStep(unit, x, z);
-        if (!unit.alive) { unit.onTile = null; return; }
-        // AI units feel the floor too - the damage, and now the riders that
-        // come with it [stated] (designer, 2026-08-03, "yes all fixes").
-        //
-        // The same `surfaceEffect` the member side reads, off the same fact
-        // sheet, because the alternative is a second opinion about what a tile
-        // does. What it carries: a turn-clock status (fire -> burning), and a
-        // `bleed` duration on the drift that cuts. Both were player-only, which
-        // made fire area denial that worked in one direction and left `bleed`
-        // with no way to reach a coworker at all - so the step clock right
-        // below could only ever expire gum.
-        const sfx = d.surfaceEffect(d.world.floorAt(x, z));
-        if (sfx && sfx.applies && sfx.applies !== 'gum' && d.applyStatus(unit, sfx.applies)) {
-          d.statusFxAt(unit, sfx.applies);
-          d.refresh();
-        }
-        const surf = d.world.enemySurfDamage(x, z);
-        if (surf > 0) {
-          // Before the damage: a body that goes down on this tile still went
-          // down bleeding, and the status list is what the death FX reads.
-          if (sfx?.bleed) d.applyStatus(unit, 'bleed', { duration: sfx.bleed });
-          const died = unit.takeDamage(surf);
-          d.fx.impact(x, z, d.hazardKind(x, z), { y: 0.35 });
-          if (died) d.deathFx(unit);
-          d.fx.damageText(x, z, `-${surf}`, '#ffd76b', { big: died });
-          d.log(`${unit.def.name} stumbles through the hazard. -${surf}.`);
-          if (died) {
-            d.callbacks.onEnemyKilled(unit);
-            d.refresh();
-          }
-        }
-        // The STEP clock, on the enemy side (Q2-A, designer 2026-08-02). It
-        // had no caller here at all: ARCHITECTURE.md says "the step clock ticks
-        // per tile walked, wherever you are", and for half the actors on the
-        // floor it never ticked once. Gum on a coworker was permanent - the
-        // comment below used to say so outright - and `bleed`, the only other
-        // step-clocked status, would have dealt zero damage forever the day any
-        // power aimed it at a coworker. Same `tickStep`, same durations, both
-        // sides of the door.
-        // Sampled BEFORE the step clock ticks, exactly as the member side does
-        // (main.js `maybeSlip`, whose comment states the rule): the tile a gum
-        // wad wears off on still keeps its traction. Adding this step clock
-        // above the slip roll quietly undid that on the enemy side only, so a
-        // coworker could lose the wad and their footing on the same tile - and
-        // a slip costs a unit its whole turn.
-        const wasSlipProof = !!d.statusFx(unit).slipProof;
-        if (unit.alive) {
-          const step = d.tickStep(unit);
-          if (step.damage > 0) {
-            const gone = unit.takeDamage(step.damage);
-            d.fx.damageText(x, z, `-${step.damage}`, '#ffd76b', { big: gone });
-            if (gone) {
-              d.deathFx(unit);
-              d.callbacks.onEnemyKilled(unit);
-              d.refresh();
-            }
-          }
-          if (step.expired.length) {
-            d.syncUnitSpeed(unit); // a lapsed gum wad gives its speed back
-            d.refresh();
-          }
-        }
-        // gum wads stick to AI units too: it taxes their movement AP (via the
-        // status's moveCostMult) and grants traction. It now WEARS OFF on the
-        // same step clock a member's does, rather than lasting the fight.
-        if (unit.alive && !d.hasStatus(unit, 'gum') && d.world.stickGum(x, z)) {
-          d.applyStatus(unit, 'gum');
-          d.statusFxAt(unit, 'gum');
-          d.syncUnitSpeed(unit);
-          d.log(`${unit.def.name} steps in gum. It's theirs now.`);
-        }
-        // wet floor: a slip ends their whole turn (they spend it getting up).
-        // Gum is traction (slipProof), so a gummed unit can't slip.
-        // The last direct Math.random in the fight. Through `rng` like the rest,
-        // so a seeded run reproduces the slips too - they end a whole turn, so
-        // an unseeded one is exactly the kind of thing that makes a resolution
-        // test flaky for reasons that have nothing to do with what it asserts.
-        if (unit.alive && d.slips({
-          chance: d.world.slipChanceAt(x, z),
-          roll: d.rng,
-          slipProof: wasSlipProof,
-        })) {
-          unit.clearPath();
-          unit.flinch();
-          unit.slipped = true;
-          d.fx.impact(x, z, 'slip', { y: 0.12 });
-          d.fx.damageText(x, z, 'slip!', '#8ad4df');
-          d.log(`${unit.def.name} slips in the water and goes down.`);
-        }
-        // Coworkers track the floor around too: a wounded one crossing a paper
-        // drift prints blood behind it exactly like a party member does.
-        if (unit.alive) {
-          d.fx.footstep(unit, x, z, {
-            bleeding: unit.hp <= unit.maxHp * 0.45,
-            surface: d.world.surfaceIdAt(x, z),
-            onPaper: d.world.surfaceIdAt(x, z) === 'paper',
-          });
-        }
       }
-      if (done || !unit.alive) unit.onTile = null;
+      if (done || !unit.alive) {
+        unit.onTile = null;
+        unit.onTravel = null;
+      }
+    };
+    unit.onTravel = (segment) => {
+      const allowed = travelEnemy(unit, segment);
+      if (!allowed) {
+        unit.onTile = null;
+        unit.onTravel = null;
+      }
+      return allowed;
     };
     unit.setPath(points);
     return cost;

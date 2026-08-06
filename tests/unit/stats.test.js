@@ -429,6 +429,7 @@ test('unitCombat derives damage bonus, deflect and status resist for both sides'
   assert.equal(m.dmgBonus, dmgFromSavvy(a.savvy));
   assert.equal(m.deflect, deflectFromComposure(a.composure));
   assert.equal(m.statusResist, deflectFromComposure(a.composure));
+  assert.equal(m.composure, a.composure, 'continuous exposure reads raw Composure');
   // And initiative speed: d20 + Hustle for everybody (initiative.js) - AP
   // stood in for it on the enemy side only.
   assert.equal(m.hustle, a.hustle);

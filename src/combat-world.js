@@ -111,6 +111,7 @@ export function createCombatWorld(d) {
     // asked of this same sheet; handing over the sheet is what stops the
     // facade growing a method every time a new one comes up (Q900).
     floorAt: d.floorAt,
+    traceSurfaceSegment: (...a) => d.grid.surfaceField.traceSegment(...a),
     // What a tile costs THIS member, after their talents (Q1-A, designer
     // 2026-08-02). The enemy model above consults none, which was right
     // while only enemies were billed by it - but the AI's shove and pull
@@ -210,6 +211,7 @@ export function createCombatWorld(d) {
     // comes from combat so `notifyStep` can resolve it - a fresh literal could
     // not. The shared stepper also gives this body a named narrator line.
     borrowedStep: (carrier, x, z, done, changed) => d.onTemporaryAllyStep(carrier, x, z, done, changed),
+    borrowedTravel: (carrier, segment) => d.onTemporaryAllyTravel(carrier, segment),
     // The tiles a summon aimed at (tx,tz) would actually land on - the
     // placement preview draws these rings, and spawnSummon fills them, so
     // what you see is where they stand.

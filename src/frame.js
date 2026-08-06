@@ -23,13 +23,17 @@
 // one is read elsewhere in main.js, and a frame is not their owner.
 export function createFrame(d) {
   return (dt) => {
-    // Every party member walks, steps and animates the same way; each one's
-    // tile effects run against their own sheet (onMemberStep).
+    // Every party member walks and animates the same way. Logical tile effects
+    // and exact feet travel are deliberately separate callbacks.
     if (d.party) {
       for (const m of d.party.members) {
         if (!m.actor) continue;
         m.actor.speed = d.memberSpeed(m);
-        m.actor.update(dt, (x, z, done, changed) => d.onMemberStep(m, x, z, done, changed));
+        m.actor.update(
+          dt,
+          (x, z, done, changed) => d.onMemberStep(m, x, z, done, changed),
+          (segment) => d.onMemberTravel(m, segment),
+        );
       }
       if (d.sheet && !d.inCombat && !d.gameOver) d.updateFollowers(dt);
       d.sneakLayer.sweepTick(dt);
@@ -83,6 +87,7 @@ export function createFrame(d) {
       // saves a wanderer is checked by the same rule that saves you.
       slipChanceAt: d.slipChanceAt,
       stickGum: d.stickGum,
+      onTravel: (unit, segment) => d.onEnemyTravel(unit, segment),
       // The same two the other side of the door already has: the tile's raw
       // facts, and what it bills a coworker. An amble runs the floor's rules
       // now [stated] (designer, 2026-08-03), and it runs them off the same
@@ -117,10 +122,13 @@ export function createFrame(d) {
       if (en.x !== beforeX || en.z !== beforeZ) anyoneMoved = true;
     }
     if (anyoneMoved) d.checkCombatTrigger(); // did someone just corner the player?
-    // Temporary player-side allies walk their combat paths and animate like a
-    // member; each one's tile effects run through the shared step pipeline.
+    // Temporary player-side allies use those same two streams.
     for (const s of d.summons) {
-      s.actor.update(dt, (x, z, done, changed) => d.onTemporaryAllyStep(s, x, z, done, changed));
+      s.actor.update(
+        dt,
+        (x, z, done, changed) => d.onTemporaryAllyStep(s, x, z, done, changed),
+        (segment) => d.onTemporaryAllyTravel(s, segment),
+      );
     }
     for (const npc of d.npcs) npc.update(dt); // idle in place, ease their facing
     // The bottom narrator box gets general narration only when nothing else

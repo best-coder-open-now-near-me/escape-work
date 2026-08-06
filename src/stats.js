@@ -440,6 +440,10 @@ export function unitCombat(def) {
     dmgBonus: dmgFromSavvy(def.attr?.savvy) + (def.bonusDmg || 0),
     deflect: deflectFromComposure(def.attr?.composure) + (def.soak || 0),
     statusResist: deflectFromComposure(def.attr?.composure),
+    // Raw Composure remains available for continuous movement exposure. The
+    // distance clock is linear per point rather than stepping through the
+    // coarser deflect/status-resist thresholds.
+    composure: def.attr?.composure ?? 0,
     // Melee reach. An AI unit wears no weapon, so its reach is stated on the
     // def outright rather than derived from equipment - a coworker with a long
     // handled thing sets `reach` and everyone else inherits the floor.

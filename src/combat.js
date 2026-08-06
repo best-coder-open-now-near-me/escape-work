@@ -208,12 +208,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // The lifetime rides the field a summon's does, so the turn engine ages it
     // with no second clock to keep in step. The ENDINGS differ, not the clock.
     unit.summonTurns = turnsLeft;
-    // The floor has to reach them. `GridActor.update` fires `this.onTile`
-    // BEFORE EnemyActor.update's `world.paused` return, so this is the one seam
-    // that reaches a body main.js drives through its enemy loop while a fight
-    // is on. Cleared in releaseCharm, or aiAdvance's own onTile would be
-    // fighting this one for the same field the moment they turn back.
+    // The floor has to reach them. EnemyActor still calls GridActor before its
+    // combat pause, so install both movement streams on the borrowed body.
+    // Cleared in releaseCharm, or aiAdvance would inherit the player's rules
+    // when the body changes hands again.
     unit.onTile = (x, z, done, changed) => world.borrowedStep?.(m, x, z, done, changed);
+    unit.onTravel = (segment) => world.borrowedTravel?.(m, segment);
     members.push(m);
     turns.replace((slot) => slot.unit === unit, memberSlot(m));
     world.setCharmed?.(unit, true); // out of liveEnemies: their side turns on them
@@ -234,6 +234,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // routing their steps through the PLAYER's rules after they have gone
       // back to their own side, and aiAdvance would be assigning over it.
       unit.onTile = null;
+      unit.onTravel = null;
       unit.hp = Math.max(0, m.sheet.hp); // whatever happened to them, happened
       // A death while borrowed is still a real enemy death: run the actor's
       // death path so its loot/body state is the same as any other casualty,

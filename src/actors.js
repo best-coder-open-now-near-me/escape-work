@@ -9,8 +9,6 @@
 // kinds extend GridActor the same way.
 import { rollLoot } from './data/items.js';
 import { unitCombat } from './stats.js';
-import { applyStatus, hasStatus, statusFx, tickStep } from './statuses.js';
-import { slips, speedUnderStatus, surfaceEffect } from './step-rules.js';
 import { cloneMaterials, tintMaterials } from './models.js';
 
 // The engine handle, resolved LAZILY rather than read at module scope.
@@ -50,6 +48,7 @@ export class GridActor {
     this.pathIndex = 0;
     this.slideTo = null; // straight-line glide target (shoves) - {x, z}
     this.onTile = null; // optional (x, z, pathDone, changed) per-tile hook
+    this.onTravel = null; // optional ({from,to,distance,pathDone}) physical walk hook
     this.yaw = 0;
     this.targetYaw = 0;
     // animation state
@@ -303,11 +302,24 @@ export class GridActor {
   // changed) fires on each tile entered so hazards/combat/exits react
   // mid-stride. Shove glides (slideTo) move the body without retracking the
   // logical tile - pushTo already set it.
-  update(dt, onTile = null) {
+  update(dt, onTile = null, onTravel = null) {
     if (!this.entity) return;
     const budget = (this.path || this.slideTo) ? this.speed * dt : 0;
     let remaining = budget;
     let finished = false;
+    let travelAllowed = true;
+    const reportTravel = (from, to, pathDone = false) => {
+      const distance = Math.hypot(to.x - from.x, to.z - from.z);
+      if (!(distance > 1e-9)) return true;
+      const cb = onTravel || this.onTravel;
+      if (!cb) return true;
+      return cb({
+        from: { x: from.x, z: from.z },
+        to: { x: to.x, z: to.z },
+        distance,
+        pathDone,
+      }) !== false;
+    };
     while (this.path && remaining > 0) {
       const [wx, wz] = this.path[this.pathIndex];
       const pos = this.entity.getPosition();
@@ -315,15 +327,22 @@ export class GridActor {
       const dz = wz - pos.z;
       const d = Math.hypot(dx, dz);
       if (d <= remaining) {
+        const from = { x: pos.x, z: pos.z };
         this.entity.setPosition(wx, pos.y, wz);
         remaining -= d;
         if (++this.pathIndex >= this.path.length) {
           this.path = null;
           finished = true;
         }
+        travelAllowed = reportTravel(from, { x: wx, z: wz }, finished);
+        if (!travelAllowed) { this.path = null; break; }
       } else {
-        this.entity.setPosition(pos.x + (dx / d) * remaining, pos.y, pos.z + (dz / d) * remaining);
+        const from = { x: pos.x, z: pos.z };
+        const to = { x: pos.x + (dx / d) * remaining, z: pos.z + (dz / d) * remaining };
+        this.entity.setPosition(to.x, pos.y, to.z);
         this.targetYaw = Math.atan2(dx, dz) * RAD_TO_DEG;
+        travelAllowed = reportTravel(from, to, false);
+        if (!travelAllowed) this.path = null;
         remaining = 0;
       }
     }
@@ -352,7 +371,7 @@ export class GridActor {
     // arrival-only logic (the exit). Arriving on a tile you already entered
     // must not re-apply its effects.
     const changed = tx !== this.x || tz !== this.z;
-    if (changed || finished) {
+    if ((changed || finished) && travelAllowed) {
       this.x = tx;
       this.z = tz;
       const cb = onTile || this.onTile;
@@ -458,6 +477,7 @@ export class EnemyActor extends GridActor {
     this.path = null;
     this.slideTo = null;
     this.onTile = null;
+    this.onTravel = null;
     // Summoned minions leave nothing to rummage - they're spent, not slain
     // (SUMMON_PLAN #6). A hand-placed coworker rolls their loot table.
     this.loot = this.summoned ? [] : rollLoot(this.combat.loot); // body carry (lootable)
@@ -472,7 +492,10 @@ export class EnemyActor extends GridActor {
       if (this.entity) this.updateAnim(dt, 0);
       return;
     }
-    super.update(dt);
+    // Outside combat the world supplies the shared AI feet resolver. During a
+    // fight, aiAdvance (or charm) installs the appropriate resolver directly
+    // on the unit; passing null lets GridActor use that property.
+    super.update(dt, null, world.paused ? null : (segment) => world.onTravel?.(this, segment));
     if (world.paused) return; // combat drives enemy movement itself
     // Simultaneous wanderers can converge on the same spot - stop short
     // rather than visibly overlapping another actor. (Combat movement is
@@ -498,68 +521,6 @@ export class EnemyActor extends GridActor {
     if (world.blockedByParty(tx, tz)) return;
     const p = world.findWanderPath(this, tx, tz);
     if (p && p.length > 1) {
-      // Wet floors are slippery for everyone - a slip ends the amble there.
-      // Gum wads stick to wanderers too: slow forever, but never slip again.
-      this.onTile = (x, z, done, changed) => {
-        // An amble obeys the floor, the same as a walk with dice out [stated]
-        // (designer, 2026-08-03, "yes all fixes"). It used to obey two rules of
-        // the thirteen - gum and slipping - so a coworker could stroll through
-        // flame lit across their route for nothing, on the exact tile that
-        // bills a member 4 HP, and a wad picked up out here was permanent while
-        // the same wad expired the moment a fight started.
-        //
-        // Sampled BEFORE the clock ticks, the same rule both other handlers
-        // state: the tile a wad wears off on still keeps its traction.
-        const wasSlipProof = !!statusFx(this).slipProof;
-        if (changed && this.alive) {
-          const step = tickStep(this);
-          if (step.damage > 0 && this.takeDamage(step.damage)) return;
-          // A lapsed wad gives the legs back. Derived, never scaled in place -
-          // see the note on the pickup below.
-          if (step.expired.length) {
-            if (this.baseSpeed === undefined) this.baseSpeed = this.speed;
-            this.speed = speedUnderStatus(this.baseSpeed, statusFx(this));
-          }
-        }
-        // The floor's own rules, off the same fact sheet and the same pure
-        // `surfaceEffect` combat and the party both read - the damage, the
-        // turn-clock status it applies, and the `bleed` a paper drift leaves.
-        // Silently: the surface messages are written in the player's voice, and
-        // a coworker ambling past is not the player.
-        if (changed && this.alive) {
-          const sfx = surfaceEffect(world.floorAt(x, z));
-          if (sfx?.applies && sfx.applies !== 'gum') applyStatus(this, sfx.applies);
-          const amount = world.surfDamage(x, z);
-          if (amount > 0) {
-            if (sfx?.bleed) applyStatus(this, 'bleed', { duration: sfx.bleed });
-            this.flinch();
-            if (this.takeDamage(amount)) return;
-          }
-        }
-        // Gum is a status now (statuses.js), shared with the combat unit so a
-        // wanderer that steps in a wad is still gummed when a fight starts, and
-        // ticking down on the step clock above wherever it was picked up.
-        if (changed && !hasStatus(this, 'gum') && world.stickGum(x, z)) {
-          applyStatus(this, 'gum');
-          // DERIVE from a captured base, the same way combat's syncUnitSpeed
-          // does, rather than scaling in place. Scaling in place applied the
-          // slow twice on anyone who was gummed before a fight: combat captures
-          // `baseSpeed` lazily on first sync, so it captured an already-slowed
-          // speed and then multiplied the status in on top of it. Deriving is
-          // idempotent, so both sides can run in any order and agree.
-          if (this.baseSpeed === undefined) this.baseSpeed = this.speed;
-          this.speed = speedUnderStatus(this.baseSpeed, statusFx(this));
-        }
-        if (changed && this.alive && slips({
-          chance: world.slipChanceAt(x, z),
-          roll: Math.random,
-          slipProof: wasSlipProof,
-        })) {
-          this.clearPath();
-          this.flinch();
-        }
-        if (done || !this.path) this.onTile = null;
-      };
       this.setPath(p);
     }
   }

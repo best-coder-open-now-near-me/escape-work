@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GridActor, EnemyActor } from '../../src/actors.js';
-import { applyStatus, statusList } from '../../src/statuses.js';
+import { applyStatus, statusList, tickStep } from '../../src/statuses.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
 
 // takeDamage lives on EnemyActor - it is the side that dies. A real def, so the
@@ -121,6 +121,23 @@ test('onTile fires once per tile entered, and once more on arrival', () => {
   assert.deepEqual([a.x, a.z], [3, 0]);
 });
 
+test('onTravel reports exact continuous segments and never reports shove glides', () => {
+  const a = new GridActor(0, 0, { speed: 4 });
+  stubBody(a, 0, 0);
+  const segments = [];
+  a.setPath([[0, 0], [0.5, 0], [0.5, 1]]);
+  a.update(0.5, null, (segment) => segments.push(segment));
+  assert.equal(segments.length, 2, 'the bend remains two physical segments');
+  assert.ok(Math.abs(segments.reduce((sum, segment) => sum + segment.distance, 0) - 1.5) < 1e-9);
+  assert.deepEqual(segments.at(-1).to, { x: 0.5, z: 1 });
+  assert.equal(segments.at(-1).pathDone, true);
+
+  const shoveSegments = [];
+  a.pushTo(1, 1);
+  a.update(1, null, (segment) => shoveSegments.push(segment));
+  assert.deepEqual(shoveSegments, [], 'forced movement resolves only its landing');
+});
+
 test('a bend consumes the whole frame budget - speed is constant through corners', () => {
   // Two units of budget over a two-unit dog-leg. A driver that stopped at the
   // waypoint and resumed next frame would land at (1,0) and still be moving,
@@ -172,6 +189,7 @@ function forceWander(a, world, dt = 0.1) {
 // A floor that is one thing everywhere, which is all these need: `sfx` is the
 // surface's own onEnter record, `damage` what it bills a coworker.
 function floorWorld({ sfx = null, damage = 0, slip = 0, gum = false } = {}) {
+  const touched = new WeakSet();
   return {
     paused: false,
     isWalkable: () => true,
@@ -182,15 +200,24 @@ function floorWorld({ sfx = null, damage = 0, slip = 0, gum = false } = {}) {
     stickGum: () => gum,
     floorAt: () => ({ surfaceId: 'test' }),
     surfDamage: () => damage,
+    // EnemyActor delegates exact feet segments to the world's shared resolver;
+    // enemy-travel.test.js pins that resolver's ordering in isolation. Here we
+    // pin the actor/world seam without recreating the whole floor subsystem.
+    onTravel: (unit, segment) => {
+      if (!touched.has(unit)) {
+        touched.add(unit);
+        if (damage > 0) unit.takeDamage(damage);
+      }
+      if (segment.pathDone) tickStep(unit);
+      return unit.alive;
+    },
     findWanderPath: (en) => [[en.x, en.z], [en.x + 1, en.z]],
   };
 }
 
 // surfaceEffect reads the real SURFACES table, so these tests drive the rules
 // through a world whose floorAt names a surface the table does not carry - the
-// `applies`/`bleed` riders are asserted by injecting them directly below.
-// EnemyActor.update takes the WORLD as its second argument, not an onTile -
-// its own amble callback is the one that fires, which is the point here.
+// `applies`/`bleed` riders are asserted in enemy-travel.test.js.
 function ambleOut(a, world, dt = 0.25, maxFrames = 400) {
   for (let i = 0; i < maxFrames && a.moving; i++) a.update(dt, world);
   assert.equal(a.moving, false, 'the amble finished within the frame budget');

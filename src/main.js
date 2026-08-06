@@ -22,7 +22,7 @@ import {
   createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, grantTalent, classTrack,
   scaleEnemy, damageBonus, deflect, trackNode, PAPER_CAP, EQUIP_SLOTS, equippedAction, equippedStats,
   orderedActionIds, reachOf, rangeOf, ammoCostOf, pendingPoints as pending, spendablePoints,
-  lookOf, REACH, STEALTH,
+  lookOf, REACH, STEALTH, effectiveAttr,
 } from './stats.js';
 import {
   createParty, leader as partyLeader, addMember, gainXpAll, createCompanionSheet,
@@ -41,7 +41,13 @@ import { createApp, buildLevel, buildLayeredLevel } from './scene.js';
 import { createCombatWorld } from './combat-world.js';
 import { createHotbarHost } from './hotbar-host.js';
 import { createFloorEffects } from './floor-effects.js';
-import { createPlayerSideStepper } from './player-side-step.js';
+import { createPlayerSideStepper, createPlayerSideTraveler } from './player-side-step.js';
+import {
+  advanceTravelExposure,
+  createTravelExposureState,
+  exposureDistanceFromComposure,
+} from './travel-exposure.js';
+import { createEnemyTraveler } from './enemy-travel.js';
 import { showLevelMenu } from './desk.js';
 import { createOocVerbs } from './ooc-verbs.js';
 import { createFrame } from './frame.js';
@@ -1698,6 +1704,7 @@ function startGame(level) {
     effectiveSurfDamage: (...a) => effectiveSurfDamage(...a),
     leaveSurfaceAt: (...a) => leaveSurfaceAt(...a),
     onTemporaryAllyStep: (...a) => onTemporaryAllyStep(...a),
+    onTemporaryAllyTravel: (...a) => onTemporaryAllyTravel(...a),
     spawnSummonUnits: (...a) => spawnSummonUnits(...a),
     dismissSummon: (...a) => dismissSummon(...a),
     focusCameraOn: (...a) => focusCameraOn(...a),
@@ -1921,6 +1928,69 @@ function startGame(level) {
     },
   });
 
+  const travelPlayerSide = createPlayerSideTraveler({
+    advanceTravelExposure,
+    createTravelExposureState,
+    traceSegment: grid.surfaceField.traceSegment,
+    floorAt,
+    exposureInterval: (body) => exposureDistanceFromComposure(
+      effectiveAttr(body.sheet).composure,
+    ),
+    get gameOver() { return run.gameOver; },
+    statusFx,
+    tickStepOn,
+    applySurfaceOn,
+    maybeSlip,
+    leaveFootprint,
+  });
+  const travelEnemy = createEnemyTraveler({
+    advanceTravelExposure,
+    createTravelExposureState,
+    traceSegment: grid.surfaceField.traceSegment,
+    floorAt,
+    exposureInterval: (unit) => exposureDistanceFromComposure(unit.combat.composure),
+    statusFx,
+    tickStep,
+    syncSpeed: (unit) => {
+      if (unit.baseSpeed === undefined) unit.baseSpeed = unit.speed;
+      unit.speed = speedUnderStatus(unit.baseSpeed, statusFx(unit));
+    },
+    surfaceEffect,
+    applyStatus,
+    surfDamage: rawSurfDamage,
+    hasStatus,
+    stickGum,
+    slips,
+    slipChanceAt,
+    roll: Math.random,
+    onStatus: (unit, id, point) => vfx.status(point.x, point.z, id),
+    onDamage: (unit, amount, point, info) => {
+      const kind = info.kind === 'surface'
+        ? impactKindFor({
+          burning: !!info.floor?.burning,
+          electrified: !!info.floor?.electrified,
+          surface: info.floor?.surfaceId,
+        }, SURFACES)
+        : 'blood';
+      vfx.impact(point.x, point.z, kind, { y: 0.35 });
+      vfx.damageText(point.x, point.z, `-${amount}`, '#ffd76b', { big: info.died });
+      if (info.died) awardKill(unit);
+    },
+    onGum: (_unit, point) => vfx.status(point.x, point.z, 'gum'),
+    onSlip: (_unit, point) => {
+      vfx.impact(point.x, point.z, 'slip', { y: 0.12 });
+      vfx.damageText(point.x, point.z, 'slip!', '#8ad4df');
+    },
+    onFootprint: (unit, point) => {
+      const surface = runtime.surfaceAt(point.x, point.z);
+      vfx.footstep(unit, point.x, point.z, {
+        bleeding: unit.hp <= unit.maxHp * 0.45,
+        surface,
+        onPaper: surface === 'paper',
+      });
+    },
+  });
+
   function onMemberStep(member, x, z, pathDone, changed = true) {
     const isLeader = member === partyLeader(party);
     if (!stepPlayerSide(member, x, z, {
@@ -1980,6 +2050,13 @@ function startGame(level) {
     checkCombatTrigger();
   }
 
+  function onMemberTravel(member, segment) {
+    return travelPlayerSide(member, segment, {
+      onDown: (message) => downOrLose(member, message),
+      say: ui.say,
+    });
+  }
+
   function onTemporaryAllyStep(s, x, z, done, changed) {
     stepPlayerSide(s, x, z, {
       pathDone: done,
@@ -1988,6 +2065,18 @@ function startGame(level) {
       say: ui.say,
       speaker: s.sheet.name,
     });
+  }
+
+  function onTemporaryAllyTravel(s, segment) {
+    return travelPlayerSide(s, segment, {
+      onDown: () => { if (run.inCombat && run.combat) run.combat.notifyMemberDown(); },
+      say: ui.say,
+      speaker: s.sheet.name,
+    });
+  }
+
+  function onEnemyTravel(unit, segment) {
+    return travelEnemy(unit, segment);
   }
 
   // --- input --------------------------------------------------------------------
@@ -2387,7 +2476,10 @@ function startGame(level) {
     memberSpeed: (...a) => memberSpeed(...a),
     updateFollowers: (...a) => updateFollowers(...a),
     onMemberStep: (...a) => onMemberStep(...a),
+    onMemberTravel: (...a) => onMemberTravel(...a),
     onTemporaryAllyStep: (...a) => onTemporaryAllyStep(...a),
+    onTemporaryAllyTravel: (...a) => onTemporaryAllyTravel(...a),
+    onEnemyTravel: (...a) => onEnemyTravel(...a),
     startNextLeg: (...a) => startNextLeg(...a),
     checkCombatTrigger: (...a) => checkCombatTrigger(...a),
     advanceStatusTurn: (...a) => advanceStatusTurn(...a),
