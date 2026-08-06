@@ -3,9 +3,10 @@
 // startCombat still composes the encounter's systems and owns the currently
 // steered party member. This object owns the state shared by turn order, AI,
 // the action bar, aim previews and the debug adapter, so those systems no
-// longer communicate through three loose closure variables.
-export function createCombatSession() {
+// longer communicate through loose closure variables.
+export function createCombatSession(activeMember = null) {
   return {
+    activeMember,
     phase: 'player',
     acting: null,
     scrambleTurn: 0,
@@ -20,7 +21,7 @@ export function createCombatSession() {
       this.acting = null;
     },
 
-    get active() {
+    get running() {
       return this.phase !== 'done';
     },
   };

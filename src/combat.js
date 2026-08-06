@@ -94,7 +94,7 @@ const immunityLine = (id, name) => {
 
 export function startCombat({ app, party, engaged, world, fx, callbacks, opening = null, allies = [], preCrouch = null, sneakOpened = null, rng = Math.random }) {
   // Per-member turn state: every party member fights with their own AP pool,
-  // deflect stance and limited-use counters. `active` is whose action bar,
+  // deflect stance and limited-use counters. `session.activeMember` is whose action bar,
   // previews and clicks are live - with one member that is simply "you";
   // switching mid-fight arrives with the party bar.
   const asMember = (rec, extra) => {
@@ -122,10 +122,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       members.push(asMember(s, { isSummon: true, summonedBy: s.summonedBy || null }));
     }
   }
-  let active = members[party.active];
   // Shared encounter lifecycle: current driver, AI turn budget and the deal
   // shown by a confused action bar. The systems below all see this one owner.
-  const session = createCombatSession();
+  const session = createCombatSession(members[party.active]);
   // Everyone you control: party members plus any summons you've conjured
   // (temporary members, appended by resolveSummon). `livingParty` is the real
   // roster only - a party WIPE (no real member standing) is the sole game-over;
@@ -147,7 +146,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     members,
     fx,
     rng,
-    get active() { return active; },
+    get active() { return session.activeMember; },
     // A Map declared below this call - a getter, or it is a dead-zone read.
     get facings() { return facings; },
     aiAllies: (...a) => aiAllies(...a),
@@ -242,7 +241,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     }
     // The floor cannot be held by somebody who just left it - the same handoff
     // dismissSummon makes when an assignment lapses mid-turn.
-    if (active === m) makeActive(livingParty()[0] || members[0]);
+    if (session.activeMember === m) makeActive(livingParty()[0] || members[0]);
     refresh();
   }
 
@@ -389,7 +388,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   const ambushDmg = (dmg) => {
     if (!sneakAmbushArmed) return dmg;
     sneakAmbushArmed = false;
-    const b = talentFxOf(active)?.ambushDamage || 0;
+    const b = talentFxOf(session.activeMember)?.ambushDamage || 0;
     if (!b) return dmg;
     log('They never saw it coming.');
     return Math.round(dmg * (1 + b));
@@ -462,7 +461,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   );
   // The acting member's cost for a throw - the shared rule (stats.js), bound to
   // whoever currently has the floor.
-  const ammoCostOf = (id) => ammoCost(active.sheet, id);
+  const ammoCostOf = (id) => ammoCost(session.activeMember.sheet, id);
   // An AI unit's walk speed, DERIVED from its live statuses against a base
   // remembered once - the way a member's is (main.js `memberSpeed`).
   //
@@ -764,7 +763,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     view: {
       get phase() { return session.phase; },
       get armed() { return intent.armed; },
-      get active() { return active; },
+      get active() { return session.activeMember; },
     },
     // Every rule is wrapped rather than passed by reference, and that is not
     // style. This object is built where `aim` is declared, which is ABOVE half
@@ -817,7 +816,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       topplePlan: (u, x, z) => topplePlan(u, x, z),
       // The tile click's own reach test, so the ring cannot promise a topple
       // the click then refuses as "Too far to shove" (Q100).
-      toppleReaches: (x, z) => inReach(posOf(active).x, posOf(active).z, x, z, REACH.SHOVE),
+      toppleReaches: (x, z) => inReach(posOf(session.activeMember).x, posOf(session.activeMember).z, x, z, REACH.SHOVE),
       partitionRings: (x, z, w) => partitionRings(x, z, w),
       breakRings: (a, x, z, r, o) => breakRings(a, x, z, r, o),
       breakPlanAt: (id, x, z) => breakPlanAt(id, x, z),
@@ -876,12 +875,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // for a degenerate walk.
   function previewWalk(rawPath, endPoint, a, stopWhen = null) {
     if (endPoint) rawPath = [...rawPath.slice(0, -1), endPoint];
-    let s = world.smooth(rawPath, active.actor);
+    let s = world.smooth(rawPath, session.activeMember.actor);
     // The identical trim the walk will apply - the ring has to sit where the
     // feet will stop, or the preview is describing a different walk.
     if (stopWhen) s = trimToFirst(s, stopWhen) || s;
     const { points, cost, done, tail } = truncateByBudget(
-      s, Math.max(0, moveBudget(active) - a.ap), stepCost);
+      s, Math.max(0, moveBudget(session.activeMember) - a.ap), stepCost);
     if (points.length < 2) return null;
     aim.setPreview({ reach: points, tail });
     return { end: points[points.length - 1], cost, done };
@@ -931,7 +930,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     tileDefAt: world.tileDefAt,
     bodyAt: unitStandingAt,
     standing,
-    exclude: [active],
+    exclude: [session.activeMember],
   });
 
   // The cover aim's eased ring position, and the frame's dt for the easing -
@@ -941,7 +940,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // The wedge, aimed from the acting member's body. The geometry itself lives
   // in powers.js so the out-of-combat preview draws the identical shape; this
   // only binds the origin.
-  const coneTest = (a, tx, tz) => coneFrom(a, posOf(active), tx, tz);
+  const coneTest = (a, tx, tz) => coneFrom(a, posOf(session.activeMember), tx, tz);
 
   // While an attack/shove is armed, rings mark the targets: green = usable on
   // them right now (melee walks you in), red = out of range / no line / short
@@ -1006,18 +1005,18 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Returns null for a power the acting member does not have at all.
   function actionState(id) {
     const a = ACTIONS[id];
-    if (!a || !actionIdsOf(active).includes(id)) return null;
-    const affordable = session.phase === 'player' && active.ap >= a.ap
-      && (!a.uses || active.usesLeft[id] > 0)
-      && (!a.ammoCost || active.sheet.paper >= ammoCostOf(id))
-      && !(a.footwork && statusFx(active.sheet).noFootwork); // no kicking with gum on the shoe
+    if (!a || !actionIdsOf(session.activeMember).includes(id)) return null;
+    const affordable = session.phase === 'player' && session.activeMember.ap >= a.ap
+      && (!a.uses || session.activeMember.usesLeft[id] > 0)
+      && (!a.ammoCost || session.activeMember.sheet.paper >= ammoCostOf(id))
+      && !(a.footwork && statusFx(session.activeMember.sheet).noFootwork); // no kicking with gum on the shoe
     return {
       ap: a.ap,
-      uses: a.uses ? active.usesLeft[id] : null,
+      uses: a.uses ? session.activeMember.usesLeft[id] : null,
       ammoCost: a.ammoCost ? ammoCostOf(id) : 0,
-      ammoRemaining: active.sheet.paper,
-      resourceAvailable: (!a.uses || active.usesLeft[id] > 0)
-        && (!a.ammoCost || active.sheet.paper >= ammoCostOf(id)),
+      ammoRemaining: session.activeMember.sheet.paper,
+      resourceAvailable: (!a.uses || session.activeMember.usesLeft[id] > 0)
+        && (!a.ammoCost || session.activeMember.sheet.paper >= ammoCostOf(id)),
       affordable,
       // WHY it can't be pressed, in the slot's own tooltip. A dimmed button
       // that doesn't say what it wants teaches nothing, and out of combat the
@@ -1025,10 +1024,10 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // the half of the game where the bar goes quiet.
       reason: affordable ? null
         : session.phase !== 'player' ? 'Not your turn.'
-          : a.uses && active.usesLeft[id] <= 0 ? `${a.label} is spent for this fight.`
-            : a.ammoCost && active.sheet.paper < ammoCostOf(id)
-              ? `Needs ${ammoCostOf(id)} paper - you have ${active.sheet.paper}.`
-              : a.footwork && statusFx(active.sheet).noFootwork
+          : a.uses && session.activeMember.usesLeft[id] <= 0 ? `${a.label} is spent for this fight.`
+            : a.ammoCost && session.activeMember.sheet.paper < ammoCostOf(id)
+              ? `Needs ${ammoCostOf(id)} paper - you have ${session.activeMember.sheet.paper}.`
+              : a.footwork && statusFx(session.activeMember.sheet).noFootwork
                 ? 'Gum on your shoe - no footwork.'
                 : `Not enough AP - ${a.label} costs ${a.ap}.`,
       // An armed action stays pressable even when it has gone unaffordable -
@@ -1051,7 +1050,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // on different slots. Null when nothing is scrambled, so the common path
   // stays identity rather than an allocated 0..n-1.
   function scrambleOrder(n) {
-    if (!statusFx(active.sheet).shuffleActions) return null;
+    if (!statusFx(session.activeMember.sheet).shuffleActions) return null;
     return scrambled(Array.from({ length: n }, (_, i) => i));
   }
 
@@ -1062,7 +1061,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // (INITIATIVE_PLAN): steering moves among the members holding the floor,
   // and everyone else still waits for their own slot to come up.
   function makeActive(m) {
-    active = m;
+    session.activeMember = m;
     // A summon lives outside party.members, so it can't be party.active - leave
     // that pointing at the real member who last held the floor (the post-combat
     // leader). The initiative tracker shows whose turn it actually is.
@@ -1098,16 +1097,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (m.actor) m.actor.fx = { kind: 'death', t: 0 };
     }
     if (!livingParty().length) { defeat(); return; } // party wipe - the only loss
-    if (session.phase === 'player' && active.sheet.hp <= 0) {
-      log(`${active.sheet.name} goes down!`);
-      // Hand the floor to somebody still standing BEFORE advancing. `active` is
-      // what the HUD, the party card and the profile read, and `advanceTurn`
+    if (session.phase === 'player' && session.activeMember.sheet.hp <= 0) {
+      log(`${session.activeMember.sheet.name} goes down!`);
+      // Hand the floor to somebody still standing BEFORE advancing. The active
+      // member is what the HUD, party card and profile read; `advanceTurn`
       // does not rebind it - so a member who dropped on their own turn stayed
       // "active" through every enemy turn that followed, and the HUD sat on a
       // corpse until the order came back round. The same handoff `releaseCharm`
       // makes when the body it borrowed leaves the roster.
       const standing = livingParty()[0];
-      if (standing && standing !== active) makeActive(standing);
+      if (standing && standing !== session.activeMember) makeActive(standing);
       advanceTurn();
     } else {
       refresh();
@@ -1139,7 +1138,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // and only for characters that have one - never advertise a resource a
     // character does not own. Distance-priced movement leaves fractional AP,
     // which apPips renders as a half pip.
-    const freeTag = freeMoveOf(active) > 0 ? `  🥾 ${fmtAp(active.freeAp || 0)} move` : '';
+    const freeTag = freeMoveOf(session.activeMember) > 0 ? `  🥾 ${fmtAp(session.activeMember.freeAp || 0)} move` : '';
     // The verbs repaint on the shared bar, which main.js owns - affordability,
     // tooltips and the armed/confirm ring all come from actionState().
     callbacks.refreshBar?.();
@@ -1162,16 +1161,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // cannot say WHICH of your people is up; an AI turn still needs the
       // enemy's name, because nothing else on screen carries it.
       turnLabel: session.phase === 'player'
-        ? (solo ? '' : active.sheet.name)
+        ? (solo ? '' : session.activeMember.sheet.name)
         : session.phase === 'ai' && session.acting ? `${session.acting.unit.def.name}'s turn` : '',
       apText: apPips({
-        ap: active.ap, maxAp: active.sheet.maxAp, text: fmtAp(active.ap), freeText: freeTag,
+        ap: session.activeMember.ap, maxAp: session.activeMember.sheet.maxAp, text: fmtAp(session.activeMember.ap), freeText: freeTag,
       }),
       endEnabled: session.phase === 'player',
       // Under a shared turn the button names whose turn it ends - each member
       // retires their own (INITIATIVE_PLAN #2), so the label has to say which
       // one a press costs. Alone, it stays the plain verb it always was.
-      endLabel: turns.held.length > 1 ? `End Turn — ${active.sheet.name}` : 'End Turn',
+      endLabel: turns.held.length > 1 ? `End Turn — ${session.activeMember.sheet.name}` : 'End Turn',
       // The turn order top-to-bottom, the current unit marked, your side tinted
       // friendly and the enemies warm. HP rides along; the downed/dead show a
       // dash. The rolled NUMBER is gone from every row (INITIATIVE_PLAN #10
@@ -1202,7 +1201,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Reflect the ACTING member on the persistent HUD, not the leader - in a
     // multi-member fight you control whoever's turn it is (their HP, their gum/
     // bleed chips). Out of combat, main.js's callback falls back to the leader.
-    callbacks.updateHud(active.sheet);
+    callbacks.updateHud(session.activeMember.sheet);
   }
 
   function cleanup() {
@@ -1263,7 +1262,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     world,
     fx,
     callbacks,
-    get active() { return active; },
+    get active() { return session.activeMember; },
     rand: (...a) => rand(...a),
     log: (...a) => log(...a),
     refresh: (...a) => refresh(...a),
@@ -1295,9 +1294,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // `by` is whoever is doing it - the acting member by default, an AI unit when
   // the enemy side shoves - and it decides the narration's subject and who the
   // impact FX are attributed to. Everything else is the same rule.
-  function displaceBody(target, dx, dz, { verb = 'shove', slamDmg = 2, by = active } = {}) {
+  function displaceBody(target, dx, dz, { verb = 'shove', slamDmg = 2, by = session.activeMember } = {}) {
     const v = victimView(target);
-    const mine = by === active;                 // the player's own shove?
+    const mine = by === session.activeMember;                 // the player's own shove?
     const Who = mine ? 'You' : by.def.name;
     const says = (s) => (mine ? `You ${s}` : `${Who} ${s.replace(/^(\w+)/, (w) => `${w}s`)}`);
     const push = displacePlan(v.x, v.z, dx, dz, {
@@ -1437,7 +1436,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     callbacks,
     rng,
     hits,
-    get active() { return active; },
+    get active() { return session.activeMember; },
     rand: (...a) => rand(...a),
     log: (...a) => log(...a),
     refresh: (...a) => refresh(...a),
@@ -1510,14 +1509,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function coverSpotProblem(tx, tz) {
     const occupant = unitStandingAt(tx, tz);
     return crouchProblem({
-      here: active.actor.x === tx && active.actor.z === tz,
-      roomFree: world.isWalkable(tx, tz) && !(occupant && occupant !== active),
+      here: session.activeMember.actor.x === tx && session.activeMember.actor.z === tz,
+      roomFree: world.isWalkable(tx, tz) && !(occupant && occupant !== session.activeMember),
       faces: facesAtCrouch(tx, tz, {
         edgeOpen: world.stepOpen,
         tileDefAt: world.tileDefAt,
         bodyAt: unitStandingAt,
         standing,
-        exclude: [active],
+        exclude: [session.activeMember],
       }).length,
     });
   }
@@ -1537,8 +1536,8 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   function coverSpotFor(tx, tz) {
     if (!coverSpotProblem(tx, tz)) return [tx, tz];
     const occupant = unitStandingAt(tx, tz);
-    if (!occupant || occupant === active) return null;
-    const me = posOf(active);
+    if (!occupant || occupant === session.activeMember) return null;
+    const me = posOf(session.activeMember);
     let best = null;
     let bestD = Infinity;
     for (const [dx, dz] of NEIGHBOR_DIRS) {
@@ -1563,31 +1562,31 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const point = (tx === rawX && tz === rawZ) ? rawPoint : null;
     const problem = coverSpotProblem(tx, tz);
     if (problem) { log(problem); return; }
-    if (active.ap < a.ap) { log('Not enough AP.'); return; }
+    if (session.activeMember.ap < a.ap) { log('Not enough AP.'); return; }
     disarm();
-    if (active.actor.x === tx && active.actor.z === tz) {
+    if (session.activeMember.actor.x === tx && session.activeMember.actor.z === tz) {
       // Your own tile. A click on a meaningfully different POINT within it is
       // a sub-tile shuffle - fine-tune the tuck, billed as the sliver of
       // movement it is - because the marker promised the point, not the tile.
       // Same logical tile, so nothing provokes and the arrival check holds.
-      const pos = posOf(active);
+      const pos = posOf(session.activeMember);
       const end = point ? world.clampPoint(point.x, point.z) : null;
       if (end && Math.hypot(end[0] - pos.x, end[1] - pos.z) > 0.1) {
         const walk = walkActive([[pos.x, pos.z], [tx, tz]],
-          moveBudget(active) - a.ap, end);
+          moveBudget(session.activeMember) - a.ap, end);
         if (walk?.done) { pendingCrouch = { spot: [tx, tz] }; return; }
       }
-      active.ap = roundAp(active.ap - a.ap);
-      crouchHere(active);
+      session.activeMember.ap = roundAp(session.activeMember.ap - a.ap);
+      crouchHere(session.activeMember);
       refresh();
       return;
     }
-    const path = world.findPath(active.actor.x, active.actor.z, tx, tz, active.actor);
+    const path = world.findPath(session.activeMember.actor.x, session.activeMember.actor.z, tx, tz, session.activeMember.actor);
     if (!path || path.length < 2) { log('No clear way in behind it.'); return; }
     // Reserve the crouch's own AP out of the walk budget, exactly as a
     // walk-up shot reserves its trigger pull. Same honest split as the
     // walk-ups: a degenerate route is not an AP problem.
-    const crouchBudget = moveBudget(active) - a.ap;
+    const crouchBudget = moveBudget(session.activeMember) - a.ap;
     // The walk ends at the POINT you clicked, clamped to body clearance -
     // not the tile's dead centre. Bodies in this engine rest at free points
     // (movement, walk-ups and dashes all do), and the crouch was the one
@@ -1646,14 +1645,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // somebody is how you reach over their barrier, not a barrier of your own.
   const pullCrouchOf = (en) => {
     const s = crouchStateOf(en);
-    return s && { ...s, faces: crouchFacesOf(en, active) };
+    return s && { ...s, faces: crouchFacesOf(en, session.activeMember) };
   };
-  const pullPlanned = (en) => pullplanFor(active, en, pullCrouchOf(en), {
+  const pullPlanned = (en) => pullplanFor(session.activeMember, en, pullCrouchOf(en), {
     stepOpen: world.stepOpen,
     open: (x, z) => world.isWalkable(x, z) && !unitStandingAt(x, z),
     bodyAt: (x, z) => {
       const u = unitStandingAt(x, z);
-      return !!u && u !== en && u !== active && standing(u);
+      return !!u && u !== en && u !== session.activeMember && standing(u);
     },
     name: en.def.name,
   });
@@ -1669,14 +1668,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const a = ACTIONS[id];
     const [lx, lz] = plan.landing;
     const what = crouchLabel(plan.s);
-    active.actor.lunge(posOf(en).x, posOf(en).z);
-    faceTarget(active, en.x, en.z);
+    session.activeMember.actor.lunge(posOf(en).x, posOf(en).z);
+    faceTarget(session.activeMember, en.x, en.z);
     // The crouch dies in your fist, quietly - the haul is the story. pushTo
     // is forced movement: no provoke, no per-tile hooks, the shove's seam.
     // The hauled body rests pulled toward YOU, not on the tile's dead centre
     // - deterministic, and inside the landing tile.
     breakCrouch(en, true);
-    const pp = posOf(active);
+    const pp = posOf(session.activeMember);
     const hd = Math.hypot(pp.x - lx, pp.z - lz) || 1;
     const [hpx, hpz] = world.clampPoint(
       lx + ((pp.x - lx) / hd) * 0.25,
@@ -1692,7 +1691,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     } else {
       const dmg = rand(a.crush[0], a.crush[1]);
       const died = en.takeDamage(dmg);
-      hitFx(en, 'slam', active);
+      hitFx(en, 'slam', session.activeMember);
       if (died) deathFx(en);
       fx.damageText(lx, lz, `-${dmg}`, '#ffd76b', { big: died });
       msg += ` They come down hard. -${dmg}.`;
@@ -1846,7 +1845,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     fx,
     members,
     callbacks,
-    get active() { return active; },
+    get active() { return session.activeMember; },
     get armed() { return intent.armed; },
     get phase() { return session.phase; },
     rand: (...a) => rand(...a),
@@ -1879,12 +1878,12 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     appliesLine: (...a) => appliesLine(...a),
     setLastClickOutcome: (v) => { lastClickOutcome = v; },
   });
-  const defaultAttack = () => equippedAction(active.sheet);
+  const defaultAttack = () => equippedAction(session.activeMember.sheet);
   // What a click on a coworker would use RIGHT NOW: whatever you armed, else
   // that basic swing. Every preview reads this - the target rings, the to-hit
   // tag, and (through main.js) the cursor - so the affordances always describe
   // the swing that would actually land rather than only the armed case.
-  const previewAction = () => (session.phase === 'player' && active?.sheet ? (intent.armed || defaultAttack()) : null);
+  const previewAction = () => (session.phase === 'player' && session.activeMember?.sheet ? (intent.armed || defaultAttack()) : null);
 
   // What a click in a fight means (click-verbs.js): the verb arms, the
   // enemy-click dispatcher, the routes a click may walk first, and the
@@ -1898,7 +1897,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     fx,
     members,
     callbacks,
-    get active() { return active; },
+    get active() { return session.activeMember; },
     get armed() { return intent.armed; },
     get phase() { return session.phase; },
     get pendingConfirm() { return intent.pendingConfirm; },
@@ -1966,7 +1965,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     fx,
     watching,
     INSTANT_CONFIRM,
-    get active() { return active; },
+    get active() { return session.activeMember; },
     get armed() { return intent.armed; },
     get phase() { return session.phase; },
     get pendingConfirm() { return intent.pendingConfirm; },
@@ -1999,7 +1998,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     callbacks,
     applyDamage,
     get phase() { return session.phase; },
-    get active() { return active; },
+    get active() { return session.activeMember; },
     get acting() { return session.acting; },
     setPhase: (v) => { session.phase = v; },
     setActing: (v) => { session.acting = v; },
@@ -2040,7 +2039,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     dropCount,
     capRoom,
     countLiveSummons,
-    get active() { return active; },
+    get active() { return session.activeMember; },
     makeActive: (...a) => makeActive(...a),
     livingParty: (...a) => livingParty(...a),
     insertSlot: (...a) => insertSlot(...a),
@@ -2070,7 +2069,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     rng,
     lineWeights,
     hasStatus,
-    get active() { return active; },
+    get active() { return session.activeMember; },
     engageMemo,
     rand: (...a) => rand(...a),
     bodyOf: (...a) => bodyOf(...a),
@@ -2163,7 +2162,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       log(m.isSummon
         ? `${m.sheet.name} is dismissed - back to the employee pool.`
         : `${m.sheet.name} is out cold. They'll sit the rest of this one out.`);
-      // Keep `active` (the sheet the HUD reflects, and the post-combat leader)
+      // Keep the active member (the sheet the HUD reflects and post-combat leader)
       // on a real member still standing - never a summon, which despawns.
       // This can fire mid-PLAYER-turn (an opportunity attack cut the acting
       // member down as they walked), so hand off properly: makeActive rebuilds
@@ -2172,7 +2171,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       // inherits the corpse's initiative slot and its leftover AP, then gets a
       // second full turn when their own slot comes up. During an AI turn the
       // acting enemy is mid-swing, so only the binding moves.
-      if (m === active) {
+      if (m === session.activeMember) {
         makeActive(livingParty()[0]);
         if (session.phase === 'player') advanceTurn();
         else refresh();
@@ -2424,7 +2423,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // Finish a queued walk-up strike, if the walk has landed. Runs every player
   // frame and does nothing on most of them.
   function finishWalkUpStrike() {
-    if (!pendingMelee || active.actor.moving) return;
+    if (!pendingMelee || session.activeMember.actor.moving) return;
     const { en, action } = pendingMelee;
     pendingMelee = null;
     // Did we arrive somewhere this verb can act from? One predicate for
@@ -2432,17 +2431,17 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // reach a touch verb walks into), measured from the BODY - which is
     // where the trim stopped it, so the walk's promise and the arrival
     // check are the same question asked twice.
-    const bp = posOf(active);
+    const bp = posOf(session.activeMember);
     const arrived = verbReaches(action, en, bp.x, bp.z);
     // The crouch is re-resolved ON ARRIVAL (TACTICS_PLAN M6) - the world
     // had a whole walk to change. Blocked here quietly stands down; a
     // human shield takes the arriving shot by the same rule as a
     // standing one, except one of your own, which stands down too.
-    const out = rangeOf(action) ? shotOutcome(active, en) : { target: en };
+    const out = rangeOf(action) ? shotOutcome(session.activeMember, en) : { target: en };
     const fireable = !out.blocked && !(out.redirected && out.target.sheet);
     if (en.alive && arrived && fireable
-      && active.ap >= ACTIONS[action].ap) {
-      active.actor.faceToward(en.x, en.z);
+      && session.activeMember.ap >= ACTIONS[action].ap) {
+      session.activeMember.actor.faceToward(en.x, en.z);
       if (out.redirected) log(`${nameOf(out.target)} takes it instead. That is the job.`);
       strike(action, out.target);
     } else {
@@ -2464,16 +2463,16 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // frame is a real path and always has been. Whether it SHOULD be is a design
   // question; the split is not the place to answer it.
   function finishWalkUpCrouch() {
-    if (!pendingCrouch || active.actor.moving) return;
+    if (!pendingCrouch || session.activeMember.actor.moving) return;
     const { spot } = pendingCrouch;
     pendingCrouch = null;
     const a = ACTIONS['take-cover'];
     // `crouchHere` re-asks the faces on arrival, so a shield that moved or
     // fell during the walk-up is a crouch that never happens rather than
     // one that lands on nothing.
-    if (active.actor.x === spot[0] && active.actor.z === spot[1] && active.ap >= a.ap
-      && crouchHere(active)) {
-      active.ap = roundAp(active.ap - a.ap);
+    if (session.activeMember.actor.x === spot[0] && session.activeMember.actor.z === spot[1] && session.activeMember.ap >= a.ap
+      && crouchHere(session.activeMember)) {
+      session.activeMember.ap = roundAp(session.activeMember.ap - a.ap);
       refresh();
     } else {
       log('The moment passes - no cover taken.');
@@ -2702,7 +2701,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   window.__combat = createCombatDebug({
     get phase() { return session.phase; },
     get acting() { return session.acting; },
-    get active() { return active; },
+    get active() { return session.activeMember; },
     get bout() { return bout; },
     get engaged() { return engaged; },
     watching,
@@ -2795,13 +2794,13 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // Everything else in a turn is billed; a free full heal every round would
     // be the strongest move in the game.
     spendAp: (n) => {
-      if (session.phase !== 'player' || active.ap < n) return false;
+      if (session.phase !== 'player' || session.activeMember.ap < n) return false;
       // Through roundAp like every other spend. Nothing visibly breaks without
       // it - both callers pass whole numbers and every AP reader already
       // defends itself - but this was the last raw `.ap` write in the file, and
       // "the one that does it differently" is how the other three float-AP
       // sites got written in the first place.
-      active.ap = roundAp(active.ap - n);
+      session.activeMember.ap = roundAp(session.activeMember.ap - n);
       refresh();
       return true;
     },
@@ -2824,7 +2823,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (session.phase !== 'player' || !ref) return false;
       const slot = turns.held.find((s) => s.member
         && (s.member === ref || s.member.sheet === ref.sheet || s.member.actor === ref));
-      if (!slot || slot.member === active || turns.isDone(slot)) return false;
+      if (!slot || slot.member === session.activeMember || turns.isDone(slot)) return false;
       return turns.steer(slot);
     },
     // Is this body a member you could grab the wheel of right now? The
@@ -2834,7 +2833,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (session.phase !== 'player' || !ref) return null;
       const slot = turns.held.find((s) => s.member
         && (s.member === ref || s.member.sheet === ref.sheet || s.member.actor === ref));
-      if (!slot || slot.member === active || turns.isDone(slot) || slot.member.sheet.hp <= 0) return null;
+      if (!slot || slot.member === session.activeMember || turns.isDone(slot) || slot.member.sheet.hp <= 0) return null;
       return slot.member.sheet.name;
     },
     // Tab in combat: cycle the floor through the un-done members of the open
@@ -2843,18 +2842,18 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       if (session.phase !== 'player') return false;
       const holders = turns.held.filter((s) => s.member && !turns.isDone(s) && s.member.sheet.hp > 0);
       if (holders.length < 2) return false;
-      const i = holders.findIndex((s) => s.member === active);
+      const i = holders.findIndex((s) => s.member === session.activeMember);
       return turns.steer(holders[(i + 1) % holders.length]);
     },
     // The body whose turn it is - a party member OR a summon you're driving.
     // main.js needs this because party.active can't point at a summon.
-    get actingActor() { return active.actor; },
+    get actingActor() { return session.activeMember.actor; },
     // ...and the sheet the HUD card is reflecting for that turn, so main.js's
     // per-tile hooks repaint the RIGHT character when a step hurts them.
-    get actingSheet() { return active.sheet; },
+    get actingSheet() { return session.activeMember.sheet; },
     // Per-member turn snapshot, for the party bar's in-combat AP readout.
     get party() {
-      return members.map((m) => ({ name: m.sheet.name, hp: m.sheet.hp, ap: m.ap, active: m === active }));
+      return members.map((m) => ({ name: m.sheet.name, hp: m.sheet.hp, ap: m.ap, active: m === session.activeMember }));
     },
     // main.js detected a slip mid-walk (tile effects live there) - narrate it
     notifySlip: (name = null) => log(name
@@ -2875,6 +2874,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return consumed;
     },
     abort: cleanup, // for deaths resolved outside combat (surfaces, explosions)
-    get active() { return session.active; },
+    get active() { return session.running; },
   };
 }
