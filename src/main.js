@@ -87,6 +87,7 @@ import { NPCS } from './data/npcs.js';
 import { installGodMode } from './god.js';
 import { createGameDebug } from './game-debug.js';
 import { createGodDebug } from './god-debug.js';
+import { createRunSession } from './run-session.js';
 import * as ui from './ui.js';
 
 const pc = globalThis.window?.pc;
@@ -269,8 +270,8 @@ function startGame(level) {
   // answer the game's grid questions from the storey the leader is on. Flat
   // levels keep the single parse they always had.
   const floors = level.layers ? parseFloors(level) : null;
-  let playerLayer = 0; // which storey the leader is on
-  const grid = floors ? layeredGrid(floors, level, () => playerLayer) : parseLevel(level);
+  const run = createRunSession();
+  const grid = floors ? layeredGrid(floors, level, () => run.playerLayer) : parseLevel(level);
   // Object picking: a click/hover resolves to the interactable ENTITY under
   // the cursor (door, enemy, NPC, prop), not just the floor tile behind it.
   // Built before the scene so doors/props can register as they're created.
@@ -347,29 +348,18 @@ function startGame(level) {
     npcs.push(new CompanionActor(s.x, s.z, s.type, COMPANIONS[s.type]));
   }
 
-  let inCombat = false;
-  let combat = null; // active tactical-combat controller
   // The sheet whose decisions the player is making right now. Out of combat
   // that is the leader; initiative owns it during a fight. HUD, pockets, and
   // any later steering-aware surface ask this one question.
-  const steeredSheet = () => (inCombat && combat?.actingSheet) || sheet;
-  let gameOver = false;
-  let lastPath = null; // kept for debugging/tests
+  const steeredSheet = () => (run.inCombat && run.combat?.actingSheet) || sheet;
   // Cross-storey walking (layered levels): queued route legs, and the climb
   // currently riding the stairs if any. Inert on flat levels.
   const legQueue = [];
-  let climbAnim = null;
-  let pendingAction = null; // walk-up interaction, runs on arrival
-  let armedOoc = null; // hotbar action armed OUT of combat (a coworker, or a spot)
   // The leader's out-of-combat crouch (TACTICS_PLAN M6 OOC): { x, z, edges,
   // at } in the same shape combat stores, so beginCombat can hand it straight
   // to startCombat's preCrouch and the fight starts with the leader already
   // tucked in. Any deliberate walk or leader change clears it.
-  let oocCrouch = null;
-  let oocAim = null; // last ground point the cursor was over, out of combat
   let tacticalBtn = null; // overhead-camera toggle on the HUD rail (built with the HUD)
-  let pendingGodPick = null; // god-mode click-to-place callback (see window.__god)
-  let oocTurnClock = 0; // out-of-combat real-time accrued toward the next fire/smoke turn
 
   // --- gameplay tuning --------------------------------------------------------
   const ENGAGE_RADIUS = 4; // Chebyshev tiles within which enemies join a fight
@@ -381,8 +371,8 @@ function startGame(level) {
   const shopping = createShopping({
     getSheet: () => sheet,
     getParty: () => party,
-    isInCombat: () => inCombat,
-    isGameOver: () => gameOver,
+    isInCombat: () => run.inCombat,
+    isGameOver: () => run.gameOver,
     // A purchase changes the bag and the purse; a sale changes both too. Both
     // repaint the pockets so the panel behind the shop is never stale.
     onBought: () => loot.refreshPanel(sheet),
@@ -412,10 +402,10 @@ function startGame(level) {
     // decides who acts, so a snack out of the pockets has to come out of THEIR
     // pockets and heal THEIR sheet.
     getSheet: steeredSheet,
-    isInCombat: () => inCombat,
+    isInCombat: () => run.inCombat,
     // A consumable is billed against the acting member's pool (looting.js).
-    spendCombatAp: (n) => combat?.spendAp(n) ?? false,
-    isGameOver: () => gameOver,
+    spendCombatAp: (n) => run.combat?.spendAp(n) ?? false,
+    isGameOver: () => run.gameOver,
     approachAndDo: (x, z, run) => approachAndDo(x, z, run),
     extraEntries: () => doors.overlayEntries(), // doors share the Alt overlay
     // Equipping changes derived stats AND the basic weapon swing on the bars -
@@ -442,11 +432,10 @@ function startGame(level) {
   });
 
   function abortCombat() {
-    if (combat) {
-      combat.abort();
-      combat = null;
+    if (run.combat) {
+      run.combat.abort();
     }
-    inCombat = false;
+    run.clearCombat();
     despawnSummons();
     syncLeaderBindings();
   }
@@ -641,7 +630,7 @@ function startGame(level) {
   // corner readout and the in-fight initiative strip.
   const onPortraitReady = () => {
     paintHud(steeredSheet());
-    if (inCombat) combat?.refresh?.();
+    if (run.inCombat) run.combat?.refresh?.();
   };
   // Put a look ON a body. One order, always: proportions BEFORE the materials
   // are cloned (an actor's attach is what clones them, and it also captures the
@@ -732,17 +721,17 @@ function startGame(level) {
     get party() { return party; },
     get enemies() { return enemies; },
     get summons() { return summons; },
-    get inCombat() { return inCombat; },
-    get gameOver() { return gameOver; },
-    get armedOoc() { return armedOoc; },
-    get oocCrouch() { return oocCrouch; },
-    get pendingAction() { return pendingAction; },
-    get lastPath() { return lastPath; },
+    get inCombat() { return run.inCombat; },
+    get gameOver() { return run.gameOver; },
+    get armedOoc() { return run.armedOoc; },
+    get oocCrouch() { return run.oocCrouch; },
+    get pendingAction() { return run.pendingAction; },
+    get lastPath() { return run.lastPath; },
     get partyBarKey() { return partyBarKey; },
-    setArmedOoc: (v) => { armedOoc = v; },
-    setOocCrouch: (v) => { oocCrouch = v; },
-    setPendingAction: (v) => { pendingAction = v; },
-    setLastPath: (v) => { lastPath = v; },
+    setArmedOoc: (v) => { run.armedOoc = v; },
+    setOocCrouch: (v) => { run.oocCrouch = v; },
+    setPendingAction: (v) => { run.pendingAction = v; },
+    setLastPath: (v) => { run.lastPath = v; },
     setPartyBarKey: (v) => { partyBarKey = v; },
     grid,
     scene,
@@ -817,18 +806,18 @@ function startGame(level) {
     get party() { return party; },
     get summons() { return summons; },
     get npcs() { return npcs; },
-    get inCombat() { return inCombat; },
-    get gameOver() { return gameOver; },
+    get inCombat() { return run.inCombat; },
+    get gameOver() { return run.gameOver; },
     get sneak() { return sneakLayer.sneak; },
-    get armedOoc() { return armedOoc; },
-    get pendingAction() { return pendingAction; },
+    get armedOoc() { return run.armedOoc; },
+    get pendingAction() { return run.pendingAction; },
     get hotbarHost() { return hotbarHost; },
     get loot() { return loot; },
     get runtime() { return runtime; },
     setSheet: (v) => { sheet = v; },
     setPlayer: (v) => { player = v; },
-    setArmedOoc: (v) => { armedOoc = v; },
-    setPendingAction: (v) => { pendingAction = v; },
+    setArmedOoc: (v) => { run.armedOoc = v; },
+    setPendingAction: (v) => { run.pendingAction = v; },
     grid,
     ui,
     picking,
@@ -842,7 +831,7 @@ function startGame(level) {
     get CATCH_UP() { return CATCH_UP; },
     get FOLLOW_NEAR() { return FOLLOW_NEAR; },
     ITEMS,
-    get combat() { return combat; },
+    get combat() { return run.combat; },
     refreshHotbarSlots: (...a) => refreshHotbarSlots(...a),
     canRecruit: (...a) => canRecruit(...a),
     // An OBJECT, not a function - and declared below, so a getter either way.
@@ -997,7 +986,7 @@ function startGame(level) {
   // Every way to die funnels through here: freeze the world, drop any active
   // combat, end the campaign run, roll credits.
   function loseGame(message) {
-    gameOver = true;
+    run.finishRun();
     player.clearPath();
     abortCombat();
     // Only a CAMPAIGN death ends a campaign run. A level launched from the
@@ -1020,7 +1009,7 @@ function startGame(level) {
       return;
     }
     downCompanion(member);
-    if (inCombat && combat) combat.notifyMemberDown();
+    if (run.inCombat && run.combat) run.combat.notifyMemberDown();
     else if (member === partyLeader(party)) forceLeader();
   }
 
@@ -1104,7 +1093,7 @@ function startGame(level) {
     if (sheet) paintHud(sheet);
     for (const m of downed) {
       downOrLose(m, 'PC LOAD LETTER. Fatal.');
-      if (gameOver) return; // that was the wipe
+      if (run.gameOver) return; // that was the wipe
     }
   }
 
@@ -1150,11 +1139,11 @@ function startGame(level) {
   // crouch is being consumed rather than abandoned.
   function clearOocCrouch(quiet = false) {
     legQueue.length = 0; // a deliberate walk abandons any queued storey route
-    if (!oocCrouch) return;
+    if (!run.oocCrouch) return;
     leaveCrouch({
       body: player,
       carrier: sheet,
-      clearState: () => { oocCrouch = null; return true; },
+      clearState: () => { run.oocCrouch = null; return true; },
       removeStatus,
     });
     if (!quiet) ui.say('You come out of cover.');
@@ -1175,10 +1164,10 @@ function startGame(level) {
   const walking = createWalking({
     get player() { return player; },
     get sheet() { return sheet; },
-    get inCombat() { return inCombat; },
-    get gameOver() { return gameOver; },
-    get climbAnim() { return climbAnim; },
-    get playerLayer() { return playerLayer; },
+    get inCombat() { return run.inCombat; },
+    get gameOver() { return run.gameOver; },
+    get climbAnim() { return run.climbAnim; },
+    get playerLayer() { return run.playerLayer; },
     get grid() { return grid; },
     legQueue,
     floors,
@@ -1204,9 +1193,9 @@ function startGame(level) {
     hasLos: (...a) => hasLos(...a),
     clearOocCrouch: (...a) => clearOocCrouch(...a),
     endSneak: (...a) => endSneak(...a),
-    setPendingAction: (v) => { pendingAction = v; },
-    setLastPath: (v) => { lastPath = v; },
-    setClimbAnim: (v) => { climbAnim = v; },
+    setPendingAction: (v) => { run.pendingAction = v; },
+    setLastPath: (v) => { run.lastPath = v; },
+    setClimbAnim: (v) => { run.climbAnim = v; },
   });
   const {
     smoothFromBody, clampPoint, approachTo, walkToExact, approachAndDo, moveTo,
@@ -1228,8 +1217,8 @@ function startGame(level) {
   }
 
   function confront(en) {
-    if (!en || !en.alive || inCombat || gameOver) return;
-    pendingAction = null;
+    if (!en || !en.alive || run.inCombat || run.gameOver) return;
+    run.pendingAction = null;
     const best = bestApproachPath(en.x, en.z);
     if (!best) return;
     if (best.length > 1) {
@@ -1238,7 +1227,7 @@ function startGame(level) {
       best[best.length - 1] = approachTo(gx, gz, bp.x, bp.z);
       const s = smoothFromBody(best);
       player.setPath(s);
-      lastPath = s;
+      run.lastPath = s;
     } else {
       checkCombatTrigger();
     }
@@ -1252,9 +1241,9 @@ function startGame(level) {
     grid,
     scene,
     loot,
-    isInCombat: () => inCombat,
-    isGameOver: () => gameOver,
-    getCombat: () => combat,
+    isInCombat: () => run.inCombat,
+    isGameOver: () => run.gameOver,
+    getCombat: () => run.combat,
     getPlayer: () => player,
     isWalkable,
     approachAndDo,
@@ -1403,15 +1392,15 @@ function startGame(level) {
   // payload means it cannot quietly become a second, cheaper buff path.
   // --- left-click verb dispatch (Divinity-style: the target picks the verb) ---
   function attackOrConfront(en) {
-    const a = armedOoc && ACTIONS[armedOoc];
+    const a = run.armedOoc && ACTIONS[run.armedOoc];
     // "Does this armed verb point at a BODY" - asked of the one owner
     // (combat-targeting.verbSides), not re-derived. This was a hand-written
     // `attack || shove || purge` ladder, which is the same list `ringsAtBodies`
     // carried and the same way it went stale: `pull` was missing from both, so
     // an armed Pull Over clicked on a coworker out here fell straight past this
     // arm into the ordinary walk-up.
-    if (a && verbSides(a, rangeOf(armedOoc)).enemies) {
-      engageWithAction(en, armedOoc);
+    if (a && verbSides(a, rangeOf(run.armedOoc)).enemies) {
+      engageWithAction(en, run.armedOoc);
       return;
     }
     // A sneaking click on a coworker in reach IS the ambush strike (SNEAK
@@ -1439,8 +1428,8 @@ function startGame(level) {
       // reins - there was no way to clear a teammate's bleed outside a fight at
       // all. Combat has had this gate all along (armedIsFriendly); exploration
       // simply never grew one.
-      if (armedOoc && aimsAtAlly(ACTIONS[armedOoc]) && m.sheet.hp > 0) {
-        oocFriendlyOn(armedOoc, m);
+      if (run.armedOoc && aimsAtAlly(ACTIONS[run.armedOoc]) && m.sheet.hp > 0) {
+        oocFriendlyOn(run.armedOoc, m);
         return true;
       }
       if (m.sheet.hp <= 0) { approachAndDo(ref.x, ref.z, () => helpUp(m)); return true; }
@@ -1490,8 +1479,8 @@ function startGame(level) {
     getPlayer: () => player,
     partyCap: PARTY_CAP,
     isRecruitable: (npc) => npc instanceof CompanionActor,
-    isInCombat: () => inCombat,
-    isGameOver: () => gameOver,
+    isInCombat: () => run.inCombat,
+    isGameOver: () => run.gameOver,
     onRecruit: (npc) => recruitCompanion(npc),
     onShop: (npc) => shopping.open(shopKeyForNpc(npc), npc.def.shop),
     onOpen: () => { loot.hideLabels(); hover.clear(); },
@@ -1536,10 +1525,10 @@ function startGame(level) {
   // turn handoffs and must always read the live one.
   const hotbarHost = createHotbarHost({
     get sheet() { return sheet; },
-    get combat() { return combat; },
-    get inCombat() { return inCombat; },
-    get gameOver() { return gameOver; },
-    get armedOoc() { return armedOoc; },
+    get combat() { return run.combat; },
+    get inCombat() { return run.inCombat; },
+    get gameOver() { return run.gameOver; },
+    get armedOoc() { return run.armedOoc; },
     ui,
     loot,
     modalOpen,
@@ -1561,7 +1550,7 @@ function startGame(level) {
     // open SHARED turn (INITIATIVE_PLAN) - combat refuses anyone not holding
     // the floor, so clicking a member who waits on their own slot does nothing,
     // exactly as before spans existed.
-    onSelect: (i) => { if (!inCombat) switchLeader(i); else combat?.steerMember(party.members[i]); },
+    onSelect: (i) => { if (!run.inCombat) switchLeader(i); else run.combat?.steerMember(party.members[i]); },
     // Double-click points the CAMERA at the member, switch or no switch. The
     // first click of the pair already ran onSelect, so out of combat the
     // camera lands on them as the new leader (recenter -> follow); a member
@@ -1575,8 +1564,8 @@ function startGame(level) {
   const progression = createProgressionUi({
     get sheet() { return sheet; },
     get party() { return party; },
-    get inCombat() { return inCombat; },
-    get gameOver() { return gameOver; },
+    get inCombat() { return run.inCombat; },
+    get gameOver() { return run.gameOver; },
     ui,
     ACTIONS,
     ITEMS,
@@ -1628,14 +1617,14 @@ function startGame(level) {
     get sheet() { return sheet; },
     get player() { return player; },
     get party() { return party; },
-    get combat() { return combat; },
-    get inCombat() { return inCombat; },
-    get gameOver() { return gameOver; },
+    get combat() { return run.combat; },
+    get inCombat() { return run.inCombat; },
+    get gameOver() { return run.gameOver; },
     get enemies() { return enemies; },
     get summons() { return summons; },
-    get oocCrouch() { return oocCrouch; },
-    get armedOoc() { return armedOoc; },
-    get pendingAction() { return pendingAction; },
+    get oocCrouch() { return run.oocCrouch; },
+    get armedOoc() { return run.armedOoc; },
+    get pendingAction() { return run.pendingAction; },
     get grid() { return grid; },
     get runtime() { return runtime; },
     get hover() { return hover; },
@@ -1708,20 +1697,20 @@ function startGame(level) {
     anyWatcherSees: (...a) => anyWatcherSees(...a),
     bodyOfMember: (...a) => bodyOfMember(...a),
     inAnyCone: (...a) => inAnyCone(...a),
-    setInCombat: (v) => { inCombat = v; },
-    setCombat: (v) => { combat = v; },
-    setPendingAction: (v) => { pendingAction = v; },
-    setArmedOoc: (v) => { armedOoc = v; },
-    setOocCrouch: (v) => { oocCrouch = v; },
+    setInCombat: (v) => { run.inCombat = v; },
+    setCombat: (v) => { run.combat = v; },
+    setPendingAction: (v) => { run.pendingAction = v; },
+    setArmedOoc: (v) => { run.armedOoc = v; },
+    setOocCrouch: (v) => { run.oocCrouch = v; },
   });
 
   const sneakLayer = createSneakLayer({
     get sheet() { return sheet; },
     get party() { return party; },
     get enemies() { return enemies; },
-    get oocCrouch() { return oocCrouch; },
-    get inCombat() { return inCombat; },
-    get gameOver() { return gameOver; },
+    get oocCrouch() { return run.oocCrouch; },
+    get inCombat() { return run.inCombat; },
+    get gameOver() { return run.gameOver; },
     get grid() { return grid; },
     get runtime() { return runtime; },
     app,
@@ -1770,7 +1759,7 @@ function startGame(level) {
     }
     ui.say(`${a.log} No casualties. Plenty of litter.`); // combat's own zero-hit line
     // One click, one volley: the slot disarms, same as a posted summon.
-    armedOoc = null;
+    run.armedOoc = null;
     hotbarHost.hotbar?.setArmed(null);
   }
 
@@ -1843,10 +1832,10 @@ function startGame(level) {
   const floorFx = createFloorEffects({
     get sheet() { return sheet; },
     get party() { return party; },
-    get combat() { return combat; },
-    get inCombat() { return inCombat; },
-    get gameOver() { return gameOver; },
-    get oocCrouch() { return oocCrouch; },
+    get combat() { return run.combat; },
+    get inCombat() { return run.inCombat; },
+    get gameOver() { return run.gameOver; },
+    get oocCrouch() { return run.oocCrouch; },
     get enemies() { return enemies; },
     get summons() { return summons; },
     grid,
@@ -1892,9 +1881,9 @@ function startGame(level) {
   const stepPlayerSide = createPlayerSideStepper({
     tileEffectAt: (x, z) => grid.defAt(x, z).onEnter,
     notifyStep: (body, x, z) => {
-      if (inCombat && combat) combat.notifyStep(body, x, z);
+      if (run.inCombat && run.combat) run.combat.notifyStep(body, x, z);
     },
-    get gameOver() { return gameOver; },
+    get gameOver() { return run.gameOver; },
     applyDamage,
     statusFx,
     tickStepOn,
@@ -1915,10 +1904,10 @@ function startGame(level) {
     if (!stepPlayerSide(member, x, z, {
       pathDone,
       changed,
-      canExit: !inCombat && isLeader,
+      canExit: !run.inCombat && isLeader,
       onExit: () => {
         const { sheet: ms, actor } = member;
-        gameOver = true;
+        run.finishRun();
         actor.clearPath();
         // Mid-campaign exits lead to the next floor (the party - wounds, XP,
         // coffee habits - carries over via saved progress). The last floor,
@@ -1958,12 +1947,12 @@ function startGame(level) {
     // An `exact` action (a crouch spot, a partition shove side) fires only on
     // its precise tile - "within reach" would settle for a diagonal that
     // shields or shoves nothing.
-    if (isLeader && pendingAction && pathDone
-      && (pendingAction.exact
-        ? x === pendingAction.x && z === pendingAction.z
-        : Math.abs(x - pendingAction.x) <= 1 && Math.abs(z - pendingAction.z) <= 1)) {
-      const act = pendingAction;
-      pendingAction = null;
+    if (isLeader && run.pendingAction && pathDone
+      && (run.pendingAction.exact
+        ? x === run.pendingAction.x && z === run.pendingAction.z
+        : Math.abs(x - run.pendingAction.x) <= 1 && Math.abs(z - run.pendingAction.z) <= 1)) {
+      const act = run.pendingAction;
+      run.pendingAction = null;
       act.run();
     }
     checkCombatTrigger();
@@ -1973,7 +1962,7 @@ function startGame(level) {
     stepPlayerSide(s, x, z, {
       pathDone: done,
       changed,
-      onDown: () => { if (inCombat && combat) combat.notifyMemberDown(); },
+      onDown: () => { if (run.inCombat && run.combat) run.combat.notifyMemberDown(); },
       say: ui.say,
       speaker: s.sheet.name,
     });
@@ -1995,13 +1984,13 @@ function startGame(level) {
       get sheet() { return sheet; },
       get player() { return player; },
       get party() { return party; },
-      get combat() { return combat; },
-      get inCombat() { return inCombat; },
-      get gameOver() { return gameOver; },
-      get climbAnim() { return climbAnim; },
-      get armedOoc() { return armedOoc; },
-      get playerLayer() { return playerLayer; },
-      get pendingGodPick() { return pendingGodPick; },
+    get combat() { return run.combat; },
+    get inCombat() { return run.inCombat; },
+    get gameOver() { return run.gameOver; },
+    get climbAnim() { return run.climbAnim; },
+    get armedOoc() { return run.armedOoc; },
+    get playerLayer() { return run.playerLayer; },
+    get pendingGodPick() { return run.pendingGodPick; },
       get grid() { return grid; },
       get hover() { return hover; },
       get controls() { return controls; },
@@ -2057,8 +2046,8 @@ function startGame(level) {
       examineAt: (...a) => examineAt(...a),
       examineTile: (...a) => examineTile(...a),
       doorExamine: (...a) => doorExamine(...a),
-      setOocAim: (v) => { oocAim = v; },
-      setPendingGodPick: (v) => { pendingGodPick = v; },
+      setOocAim: (v) => { run.oocAim = v; },
+      setPendingGodPick: (v) => { run.pendingGodPick = v; },
     }),
   });
 
@@ -2087,7 +2076,7 @@ function startGame(level) {
       memberOf,
       playerEntity: () => player?.entity || null,
       reach: () => reachOf(sheet),
-      armed: () => armedOoc,
+      armed: () => run.armedOoc,
       armedTargetOk: oocTargetOk,
       armedHitOk: (id, hit) => {
         if (!hit || !ACTIONS[id]) return null;
@@ -2108,10 +2097,10 @@ function startGame(level) {
       // The wedge an armed cone would cover right now, or null. Same geometry
       // combat uses, from the same pure function - only the origin differs.
       coneAim: () => {
-        if (!armedOoc || inCombat || !oocAim || !sheet) return null;
-        const a = ACTIONS[armedOoc];
+        if (!run.armedOoc || run.inCombat || !run.oocAim || !sheet) return null;
+        const a = ACTIONS[run.armedOoc];
         if (!a.cone) return null;
-        const test = coneFrom(a, leadBody(), oocAim.x, oocAim.z);
+        const test = coneFrom(a, leadBody(), run.oocAim.x, run.oocAim.z);
         if (!test) return null;
         const caught = coneCatches(test);
         // The wedge is ALWAYS usable - an empty one fires too (fireOocCone),
@@ -2120,11 +2109,11 @@ function startGame(level) {
         return { line: conePolyline(a, test), caught: caught.map((e) => [e.x, e.z]), usable: true };
       },
       summonDrop: () => {
-        if (!armedOoc || inCombat || !oocAim) return null;
-        const a = ACTIONS[armedOoc];
+        if (!run.armedOoc || run.inCombat || !run.oocAim) return null;
+        const a = ACTIONS[run.armedOoc];
         if (a.type !== 'summon') return null;
-        const x = Math.round(oocAim.x);
-        const z = Math.round(oocAim.z);
+        const x = Math.round(run.oocAim.x);
+        const z = Math.round(run.oocAim.z);
         return { x, z, problem: summonDropProblem(a, x, z), spots: summonDropSpots(a, x, z) };
       },
       // What the hovered SHOVE aim would topple and where it lands, or null
@@ -2135,10 +2124,10 @@ function startGame(level) {
       // approach can land the fall differently - the ring is the aim's
       // honest current answer, not a promise about the future.
       shoveAim: () => {
-        if (!armedOoc || inCombat || !oocAim || !sheet) return null;
-        if (ACTIONS[armedOoc].type !== 'shove') return null;
-        const x = Math.round(oocAim.x);
-        const z = Math.round(oocAim.z);
+        if (!run.armedOoc || run.inCombat || !run.oocAim || !sheet) return null;
+        if (ACTIONS[run.armedOoc].type !== 'shove') return null;
+        const x = Math.round(run.oocAim.x);
+        const z = Math.round(run.oocAim.z);
         if (isToppleable(grid.defAt(x, z))) {
           const plan = oocTopplePlanAt(x, z);
           return { x, z, usable: !!plan, landing: plan ? [plan.lx, plan.lz] : null };
@@ -2159,26 +2148,26 @@ function startGame(level) {
       // (oocCoverProblem / oocCoverFaces), so the two sides of a fight
       // starting cannot promise different crouches.
       coverAim: () => {
-        if (!armedOoc || inCombat || !oocAim || !sheet) return null;
-        if (ACTIONS[armedOoc].type !== 'cover') return null;
-        const x = Math.round(oocAim.x);
-        const z = Math.round(oocAim.z);
+        if (!run.armedOoc || run.inCombat || !run.oocAim || !sheet) return null;
+        if (ACTIONS[run.armedOoc].type !== 'cover') return null;
+        const x = Math.round(run.oocAim.x);
+        const z = Math.round(run.oocAim.z);
         const usable = !oocCoverProblem(x, z);
         // px/pz is the CLAMPED stand point - the continuous marker, and
         // exactly the spot the commit will walk to. The raw cursor point can
         // sit inside a wall's clearance band; a marker there would promise a
         // spot the body cannot occupy.
-        const [px, pz] = clampPoint(oocAim.x, oocAim.z);
+        const [px, pz] = clampPoint(run.oocAim.x, run.oocAim.z);
         return { x, z, px, pz, usable, faces: usable ? oocCoverFaces(x, z) : [] };
       },
       // What is covering the leader RIGHT NOW, whatever is armed - the
       // held-crouch affordance, so a crouch taken before a fight shows its
       // shape out here too rather than only once the dice come out.
       heldCover: () => {
-        if (inCombat || !oocCrouch || !sheet) return null;
-        return { x: oocCrouch.at.x, z: oocCrouch.at.z, faces: oocCoverFaces(oocCrouch.at.x, oocCrouch.at.z) };
+        if (run.inCombat || !run.oocCrouch || !sheet) return null;
+        return { x: run.oocCrouch.at.x, z: run.oocCrouch.at.z, faces: oocCoverFaces(run.oocCrouch.at.x, run.oocCrouch.at.z) };
       },
-      inCombat: () => inCombat && !!combat,
+      inCombat: () => run.inCombat && !!run.combat,
       doorNear: doorNearPoint,
       doorOpen: (key) => grid.doors.get(key)?.open,
       tileDef: (x, z) => grid.defAt(x, z),
@@ -2225,7 +2214,7 @@ function startGame(level) {
   //
   // Follow the acting character (designer, 2026-07-31: "agreed") - which is
   // also what BG3 and DOS2 do with the character whose turn it is.
-  const steeredActor = () => (inCombat && combat ? combat.actingActor || player : player);
+  const steeredActor = () => (run.inCombat && run.combat ? run.combat.actingActor || player : player);
 
   function focusCameraOn(actor) {
     if (!actor) return;
@@ -2249,7 +2238,7 @@ function startGame(level) {
     statsCard.style.pointerEvents = 'auto';
     statsCard.onmousedown = (e) => e.stopPropagation(); // clicks stay off the canvas
     statsCard.ondblclick = () => {
-      if (!sheet || gameOver) return;
+      if (!sheet || run.gameOver) return;
       focusCameraOn(steeredActor());
     };
   }
@@ -2258,9 +2247,9 @@ function startGame(level) {
   // drives the camera rig from it every frame.
   const { panHeld } = createKeyboard({
     get sheet() { return sheet; },
-    get gameOver() { return gameOver; },
-    get inCombat() { return inCombat; },
-    get combat() { return combat; },
+    get gameOver() { return run.gameOver; },
+    get inCombat() { return run.inCombat; },
+    get combat() { return run.combat; },
     get tacticalBtn() { return tacticalBtn; },
     get controls() { return controls; },
     get hotbarHost() { return hotbarHost; },
@@ -2337,17 +2326,17 @@ function startGame(level) {
     get sheet() { return sheet; },
     get player() { return player; },
     get party() { return party; },
-    get combat() { return combat; },
-    get inCombat() { return inCombat; },
-    get gameOver() { return gameOver; },
+    get combat() { return run.combat; },
+    get inCombat() { return run.inCombat; },
+    get gameOver() { return run.gameOver; },
     get enemies() { return enemies; },
     get summons() { return summons; },
     get npcs() { return npcs; },
-    get armedOoc() { return armedOoc; },
-    get climbAnim() { return climbAnim; },
-    get playerLayer() { return playerLayer; },
+    get armedOoc() { return run.armedOoc; },
+    get climbAnim() { return run.climbAnim; },
+    get playerLayer() { return run.playerLayer; },
     get partyBarKey() { return partyBarKey; },
-    get oocTurnClock() { return oocTurnClock; },
+    get oocTurnClock() { return run.oocTurnClock; },
     get grid() { return grid; },
     get runtime() { return runtime; },
     get hover() { return hover; },
@@ -2398,10 +2387,10 @@ function startGame(level) {
     slipChanceAt: (...a) => slipChanceAt(...a),
     stickGum: (...a) => stickGum(...a),
     clampPoint: (...a) => clampPoint(...a),
-    setPlayerLayer: (v) => { playerLayer = v; },
-    setClimbAnim: (v) => { climbAnim = v; },
+    setPlayerLayer: (v) => { run.playerLayer = v; },
+    setClimbAnim: (v) => { run.climbAnim = v; },
     setPartyBarKey: (v) => { partyBarKey = v; },
-    setOocTurnClock: (v) => { oocTurnClock = v; },
+    setOocTurnClock: (v) => { run.oocTurnClock = v; },
   }));
 
   // --- boot -------------------------------------------------------------------------
@@ -2547,18 +2536,18 @@ function startGame(level) {
     classes: CLASSES,
     controls,
     get player() { return player; },
-    get playerLayer() { return playerLayer; },
+    get playerLayer() { return run.playerLayer; },
     get floors() { return floors; },
     legQueue,
-    get climbAnim() { return climbAnim; },
+    get climbAnim() { return run.climbAnim; },
     sneakLayer,
     anyWatcherSees: (...a) => anyWatcherSees(...a),
     steeredActor: (...a) => steeredActor(...a),
     worldToScreenCss,
-    get inCombat() { return inCombat; },
-    get gameOver() { return gameOver; },
+    get inCombat() { return run.inCombat; },
+    get gameOver() { return run.gameOver; },
     get activeLevelId() { return activeLevelId; },
-    get lastPath() { return lastPath; },
+    get lastPath() { return run.lastPath; },
     walls,
     get sheet() { return sheet; },
     statusLeft,
@@ -2570,13 +2559,13 @@ function startGame(level) {
     loot,
     document,
     grid,
-    get oocCrouch() { return oocCrouch; },
+    get oocCrouch() { return run.oocCrouch; },
     enemies,
     playerReaches: (...a) => playerReaches(...a),
     bestApproachPath: (...a) => bestApproachPath(...a),
     npcs,
     summons,
-    get armedOoc() { return armedOoc; },
+    get armedOoc() { return run.armedOoc; },
     hover,
     ui,
     examineTile: (...a) => examineTile(...a),
@@ -2591,8 +2580,8 @@ function startGame(level) {
     get sheet() { return sheet; },
     get player() { return player; },
     get party() { return party; },
-    get inCombat() { return inCombat; },
-    get gameOver() { return gameOver; },
+    get inCombat() { return run.inCombat; },
+    get gameOver() { return run.gameOver; },
     get combat() { return window.__combat || null; },
     app,
     runtime,
@@ -2610,8 +2599,8 @@ function startGame(level) {
     EnemyActor,
     picking,
     lift,
-    get pendingGodPick() { return pendingGodPick; },
-    setPendingGodPick: (callback) => { pendingGodPick = callback; },
+    get pendingGodPick() { return run.pendingGodPick; },
+    setPendingGodPick: (callback) => { run.pendingGodPick = callback; },
     switchLeader: (...a) => switchLeader(...a),
     helpUp: (...a) => helpUp(...a),
     canRecruit: (...a) => canRecruit(...a),
