@@ -104,7 +104,7 @@ test('the shoes slot equips footwear', async ({ page }) => {
   await expect(page.locator('#equip-slot-shoes')).toContainText('Warehouse Boots');
 });
 
-test('the Send button hands an item to another party member', async ({ page }) => {
+test('the Send button refuses a full recipient, then hands over after space opens', async ({ page }) => {
   test.setTimeout(300_000);
   await bootAndPick(page, 'office-drone');
   // Alone, there is nobody to hand anything to - so no button at all.
@@ -113,4 +113,26 @@ test('the Send button hands an item to another party member', async ({ page }) =
   await expect(page.locator('#inventory-panel')).toBeVisible();
   await expect(page.locator('#inv-row-0')).toBeVisible();
   expect(await page.locator('#inv-send-0').count()).toBe(0);
+
+  // Recruit the intern and fill his bag past any legitimate cap. A refused
+  // hand-off must be atomic: the coffee remains with its sender.
+  expect(await page.evaluate(() => window.__god.recruit('it-support'))).toBe(true);
+  await page.evaluate(() => {
+    const recipient = window.__god.party.members[1].sheet;
+    recipient.inventory = new Array(100).fill('paper-wad');
+    window.__god.player.inventory = ['cold-coffee'];
+    window.__god.refreshHud();
+  });
+  await page.click('#inv-send-0');
+  await page.click('#context-menu >> text=Give to');
+  expect(await page.evaluate(() => window.__god.player.inventory)).toEqual(['cold-coffee']);
+  expect(await page.evaluate(() => window.__god.party.members[1].sheet.inventory.includes('cold-coffee'))).toBe(false);
+  expect(await page.evaluate(() => window.__game.narration.at(-1))).toMatch(/pockets are full/i);
+
+  // Drain the recipient below capacity and retry through the same UI.
+  await page.evaluate(() => { window.__god.party.members[1].sheet.inventory = []; });
+  await page.click('#inv-send-0');
+  await page.click('#context-menu >> text=Give to');
+  expect(await page.evaluate(() => window.__god.player.inventory)).toEqual([]);
+  expect(await page.evaluate(() => window.__god.party.members[1].sheet.inventory)).toEqual(['cold-coffee']);
 });

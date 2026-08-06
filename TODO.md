@@ -237,12 +237,15 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
   ↳ DONE — the spec now proves both the refusal and the successful stow after
   the bag drains below capacity.
 
-- [ ] **Q910** `src/looting.js:149`, `src/main.js:428` [design] **(new 2026-08-05, review)**
+- [x] **Q910** `src/looting.js:149`, `src/main.js:428` [design] **(new 2026-08-05, review)**
   Party hand-offs currently bypass `inventoryCapOf`: the sender loses the item
   and the recipient's `take` callback pushes it into their inventory directly.
   The two comments still state that pockets are unlimited. Question 4 records
   the unresolved capacity policy; implement and test the chosen rule, then make
   the comments describe it accurately.
+  DONE — `handoffItem` checks the recipient's live Grit-derived cap before
+  either bag changes. A refusal leaves the item with its sender; unit and
+  browser tests pin the refusal and the successful retry after space opens.
 
 - [x] **Q911** `src/main.js.orig` [dead-code] **(new 2026-08-05, review)**
   DONE — removed the tracked 2,868-line backup. It was not imported, built, or

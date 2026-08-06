@@ -9,7 +9,8 @@
 // that is the patch's own average rather than the seed tile.
 import test from 'node:test';
 import assert from 'node:assert';
-import { paperPatches, paperLabel } from '../../src/looting.js';
+import { handoffItem, paperPatches, paperLabel } from '../../src/looting.js';
+import { createSheet, inventoryCapOf } from '../../src/stats.js';
 
 // A tiny grid painted from rows of characters: '.' is bare floor, 'p' is a
 // live paper drift. Rows are z, columns are x - the same way the e2e arenas
@@ -20,6 +21,23 @@ function paint(rows) {
   return { grid, harvestable };
 }
 const ALL = () => true;
+
+test('a party hand-off obeys recipient capacity and is atomic', () => {
+  const sender = createSheet('office-drone');
+  const recipient = createSheet('it-support');
+  sender.inventory = ['cold-coffee'];
+  recipient.inventory = new Array(inventoryCapOf(recipient)).fill('paper-wad');
+
+  assert.equal(handoffItem(sender, recipient, 'cold-coffee'), 'full');
+  assert.deepEqual(sender.inventory, ['cold-coffee'], 'a refused item stays with its sender');
+  assert.equal(recipient.inventory.includes('cold-coffee'), false);
+
+  recipient.inventory.pop();
+  assert.equal(handoffItem(sender, recipient, 'cold-coffee'), 'sent');
+  assert.deepEqual(sender.inventory, []);
+  assert.equal(recipient.inventory.at(-1), 'cold-coffee');
+  assert.equal(handoffItem(sender, recipient, 'cold-coffee'), 'missing');
+});
 
 test('a single drift tile is one patch, centred on itself', () => {
   const { grid, harvestable } = paint([

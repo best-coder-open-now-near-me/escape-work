@@ -428,12 +428,12 @@ function startGame(level) {
     // ...and an item slot on the hotbar counts what is in the bag, so the bar
     // repaints too - a coffee drunk from slot 3 has to stop offering itself.
     onBagChange: () => { shopping.refreshIfOpen(); refreshHotbarSlots(); },
-    // Everyone else still standing can be handed an item. The recipient's
-    // sheet takes it directly - pockets are unlimited, so there is nothing to
-    // refuse for.
+    // Everyone else still standing can be offered an item. Looting owns the
+    // capacity gate and the atomic transfer; the host only identifies the
+    // recipient sheet.
     recipients: () => (party?.members || [])
       .filter((m) => m !== partyLeader(party) && m.sheet.hp > 0)
-      .map((m) => ({ name: m.sheet.name, take: (id) => m.sheet.inventory.push(id) })),
+      .map((m) => ({ name: m.sheet.name, sheet: m.sheet })),
     // The purse is party state, so looting reaches it through the host rather
     // than the sheet (ECONOMY_PLAN #2).
     addCash: (n) => { if (party) addCash(party, n); },

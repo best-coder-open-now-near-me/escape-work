@@ -19,6 +19,19 @@ import * as ui from './ui.js';
 // A bag already over its changed cap remains intact. These are admission gates:
 // they refuse the next pickup or stow until the player drains the excess.
 
+// Atomically move one item between party sheets. Capacity is an admission rule:
+// a recipient at or above their live Grit-derived cap refuses the hand-off, and
+// the sender keeps what they were holding. Kept pure so the inventory panel is
+// presentation over the same rule the tests can exercise directly.
+export function handoffItem(sender, recipient, id) {
+  const at = sender?.inventory?.indexOf(id) ?? -1;
+  if (at < 0 || !recipient?.inventory) return 'missing';
+  if (recipient.inventory.length >= inventoryCapOf(recipient)) return 'full';
+  sender.inventory.splice(at, 1);
+  recipient.inventory.push(id);
+  return 'sent';
+}
+
 // Contiguous paper drifts, 4-connected, as { tiles, cx, cz } - the tiles the
 // patch covers and its centre, which is where its Alt label floats.
 //
@@ -146,9 +159,9 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     getCash,
   });
 
-  // Hand an item to another party member. Pockets are unlimited, so this can
-  // never fail for space - the only reason it is unavailable is having nobody
-  // to hand it TO, which is why the button hides itself when travelling alone.
+  // Hand an item to another party member. The recipient's live capacity is an
+  // admission gate just like pickup and stow: refusal leaves the sender's bag
+  // unchanged. The button still hides when there is nobody to hand it to.
   function sendItem(i, btn) {
     const sheet = getSheet();
     if (!sheet || i >= sheet.inventory.length) return;
@@ -159,10 +172,12 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     ui.showMenu(r ? r.right + 4 : 200, r ? r.top : 200, to.map((m) => ({
       label: `Give to ${m.name}`,
       action: () => {
-        const at = sheet.inventory.indexOf(id);
-        if (at < 0) return; // it moved while the menu was open
-        sheet.inventory.splice(at, 1);
-        m.take(id);
+        const result = handoffItem(sheet, m.sheet, id);
+        if (result === 'missing') return; // it moved while the menu was open
+        if (result === 'full') {
+          ui.say(`${m.name}'s pockets are full - they cannot take the ${itemName(id)}.`);
+          return;
+        }
         ui.say(`You hand the ${itemName(id)} to ${m.name}.`);
         invPanel.refresh(sheet);
         onBagChange?.();
