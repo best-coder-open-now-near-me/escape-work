@@ -81,43 +81,23 @@ export function itemCountsFor(s) {
 }
 
 // Why this action can't be used with no fight on, or null when it can be.
-// Attacks, shoves and throws OPEN a fight; a summon posts on the spot. What's
-// left is the reactive pair, and both need a fight to mean anything: Deflect
-// Blame halves an incoming hit nobody is throwing, and a stance watches for a
-// turn that is not running.
-//
-// A purge is at its MOST useful out here: bleed runs on a step clock, so
-// between fights is exactly when you want it gone. Take Cover works out here
-// too (designer, 2026-07-30): crouch before anyone has noticed you, and the
-// crouch rides into the fight.
-// Every reason is written for the verb it refuses, because a refusal that is
-// factually wrong is worse than a vague one: it teaches the player something
-// untrue about the game. One sentence used to cover six types - a dash was
-// refused as though it were an overwatch stance ("only means something once
-// someone is swinging at you"), which is not why a dash is pointless out here.
-// The real reason is that out of combat there is no AP economy to buy distance
-// with, and you can simply walk.
-const OUT_OF_COMBAT_REFUSAL = {
-  defend: (a) => `${a.label} only means something once someone is swinging at you.`,
-  stance: (a) => `${a.label} watches for a turn that is not coming - start the fight first.`,
-  mobility: (a) => `No need for ${a.label.toLowerCase()} out here. Just walk.`,
-  pull: (a) => `${a.label} hauls somebody out of position, and nobody is holding one yet.`,
-  control: (a) => `${a.label} needs a fight to change the sides of.`,
-  zone: (a) => `${a.label} holds ground for a turn order that has not started.`,
-};
-
+// Availability belongs to the action entry, beside the behavior it describes:
+// `exploration.mode` tells the exploration dispatcher whether this is an
+// opener, a ground placement, a world verb, or deliberately combat-only. The
+// old type table here made every control and zone combat-only even after those
+// systems gained honest exploration resolvers. It also meant adding a new
+// action silently inherited policy from an implementation category rather
+// than declaring its own intent.
 export function combatOnlyReason(id) {
   const a = ACTIONS[id];
   // An unknown id is NOT usable. This returned null for one - the same answer
   // it gives a live attack - so a slot holding a stale or misspelled id read as
   // ready to press, and the bar drew it enabled.
   if (!a) return 'That is not something you know how to do.';
-  const t = a.type;
-  if (t === 'attack' || t === 'shove' || t === 'summon' || t === 'purge' || t === 'cover') {
-    return null;
-  }
-  const reason = OUT_OF_COMBAT_REFUSAL[t];
-  return reason ? reason(a) : `${a.label} is for a fight.`;
+  if (!a.exploration) return `${a.label} has no exploration behavior configured.`;
+  return a.exploration.mode === 'combat-only'
+    ? (a.exploration.reason || `${a.label} is for a fight.`)
+    : null;
 }
 
 // The complete out-of-combat answer for one action. The hotbar renders this

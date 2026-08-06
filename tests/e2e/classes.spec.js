@@ -98,7 +98,7 @@ test('Mail Room: Bulk Mail cones damage and leave paper drifts', async ({ page }
   await expect.poll(() => page.evaluate(() => window.__combat.aimPoint),
     { timeout: 10_000 }).not.toBe(null);
   expect(await page.evaluate(() => window.__combat.aimPaint.count),
-    'a cone should draw its wedge, not the circular zone/range wash').toBe(0);
+    'a cone should paint its exact fine-cell wedge').toBeGreaterThan(0);
   expect(await clickWorld(page, foe.x, foe.z)).toBe(true);
   await expect.poll(() => page.evaluate(
     ([x, z, hp]) => {
@@ -126,6 +126,40 @@ const COLOURED_CARPET_ARENA = {
   ],
 };
 
+const QUIET_PAPER_ARENA = {
+  name: 'Quiet Paperwork Lab',
+  tiles: { '#': 'wall', 'm': 'meeting-floor' },
+  actors: { '@': 'player' },
+  map: [
+    '#########',
+    '#mmmmmmm#',
+    '#m@mmmmm#',
+    '#mmmmmmm#',
+    '#########',
+  ],
+};
+
+test('Office Drone: TPS Form Storm uses the same fine-cell aim outside combat', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, QUIET_PAPER_ARENA, 'office-drone', { seed: 4 });
+  await page.click('#hotbar-act-paper-storm');
+  expect(await page.evaluate(() => window.__game.armed)).toBe('paper-storm');
+
+  const p = await stableProject(page, 4.2, 2.1);
+  await page.mouse.move(p.x, p.y);
+  await expect.poll(() => page.evaluate(() => window.__game.aimPaint.count),
+    { timeout: 10_000 }).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.__game.aimPaint.cells.some(
+    ([x, z]) => !Number.isInteger(x) || !Number.isInteger(z),
+  )), 'the exploration preview exposes fine cells, not movement tiles').toBe(true);
+
+  await page.mouse.click(p.x, p.y);
+  await expect.poll(() => page.evaluate(() => window.__game.armed),
+    { timeout: 10_000 }).toBe(null);
+  await expect.poll(() => page.evaluate(() => window.__game.surfaceAt(4.2, 2.1)),
+    { timeout: 10_000 }).toBe('paper');
+});
+
 test('Office Drone: TPS Form Storm keeps its zone aim and lands above coloured carpet', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, COLOURED_CARPET_ARENA, 'office-drone', { seed: 4 });
@@ -138,7 +172,7 @@ test('Office Drone: TPS Form Storm keeps its zone aim and lands above coloured c
   await expect.poll(() => page.evaluate(() => window.__combat.aimPoint),
     { timeout: 10_000 }).not.toBe(null);
   expect(await page.evaluate(() => window.__combat.aimPaint.count),
-    'a ground zone keeps the circular placement wash').toBeGreaterThan(0);
+    'a ground zone paints its exact fine-cell placement mask').toBeGreaterThan(0);
 
   expect(await clickWorld(page, 4, 2)).toBe(true);
   await expect.poll(() => page.evaluate(() => {
@@ -165,6 +199,21 @@ const GUARD_ARENA = {
     '#########',
   ],
 };
+
+test('Security: Detain is available as an out-of-combat opener', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, GUARD_ARENA, 'security', { seed: 4 });
+  await page.evaluate(() => window.__game.debugStillEnemies());
+  await page.click('#hotbar-act-detain');
+  expect(await page.evaluate(() => window.__game.armed)).toBe('detain');
+
+  const foe = await page.evaluate(() => window.__game.enemies.find((e) => e.alive));
+  expect(await clickWorld(page, foe.x, foe.z)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__game.inCombat),
+    { timeout: 30_000 }).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__combat?.usesLeft.detain),
+    { timeout: 30_000 }).toBe(1);
+});
 
 test('Security: Detain roots without damaging, and the guard wears the cop rig', async ({ page }) => {
   test.setTimeout(300_000);

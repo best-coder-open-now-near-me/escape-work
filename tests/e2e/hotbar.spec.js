@@ -124,19 +124,14 @@ test('right-click a slot to reassign it; assigning swaps rather than duplicates'
   ]);
 
   // The layout rides on the SHEET, so pressing key 1 now arms what is in slot 1.
-  // (TPS Form Storm is combat-only out here, so it refuses and says why - which is
-  // proof the press landed on the zone and not on the email that used to be
-  // there.)
-  //
-  // Assert on what that proof actually needs: the refusal NAMES the zone, and
-  // is not the heal's. It used to match /swinging/, which pinned one generic
-  // sentence that covered six verb types - so the test went red when each type
-  // got a reason that is true of it (Q214), even though the thing it exists to
-  // prove was still true.
+  // TPS Form Storm is a real exploration ground action now, so the same press
+  // proves both the saved layout and the action's availability.
   await page.keyboard.press('1');
-  const refusal = await page.evaluate(() => window.__game.narration.at(-1));
-  expect(refusal).toMatch(/TPS Form Storm/i);
-  expect(refusal).not.toMatch(/pockets/i);
+  const ready = await page.evaluate(() => window.__game.narration.at(-1));
+  expect(ready).toMatch(/TPS Form Storm/i);
+  expect(ready).toMatch(/floor|place/i);
+  expect(await page.evaluate(() => window.__game.armed)).toBe('paper-storm');
+  await page.keyboard.press('1'); // lower it before opening the slot menu
   expect(await page.evaluate(() => window.__game.armed)).toBe(null);
 
   // Clearing a slot leaves it empty and addressable, not collapsed.

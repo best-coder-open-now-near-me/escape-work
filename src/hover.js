@@ -304,6 +304,17 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
         ring(pos.x, pos.z, 0.5, queries.armedTargetOk(armed, en) ? RING_OK : RING_FAR);
       }
     },
+    // A point-placed zone paints the exact fine-cell mask its click will
+    // commit. One boundary ring names the true disc; gaps around bodies and
+    // unusable floor stay holes in the merged fill instead of becoming a
+    // second grid of per-cell circles.
+    drawZoneAim() {
+      const aim = queries.zoneAim?.();
+      if (!aim) { aimPaint?.hide(); return; }
+      aimPaint?.show(`ooc-zone:${aim.key}`, () => aim.cells, aim.quantum);
+      if (aim.problem) ring(aim.x, aim.z, 0.42, RING_FAR);
+      else ring(aim.x, aim.z, aim.radius, RING_OK);
+    },
     // A CONE armed out of combat aims at the floor too, and until now drew
     // nothing at all: the geometry lived inside combat's closure, so aiming one
     // outside a fight showed no wedge and a click just walked you there. The

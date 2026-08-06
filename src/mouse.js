@@ -110,13 +110,27 @@ export function createMouse(d) {
         tile = res.tile;
         point = res.point;
       }
+      const explorationMode = d.armedOoc
+        ? d.ACTIONS[d.armedOoc]?.exploration?.mode
+        : null;
+      // A point-placed ZONE owns the floor click before entities and ordinary
+      // walking, exactly like its combat counterpart. The resolver consumes
+      // the same plan the hover paints, including holes around living bodies.
+      if (explorationMode === 'zone') {
+        if (point || tile) d.placeZoneAt(
+          d.armedOoc,
+          point ? point.x : tile.x,
+          point ? point.z : tile.z,
+        );
+        return;
+      }
       // An armed SUMMON aims at the floor, so while it is armed the world is a
       // placement grid and nothing else: the click posts the role where you
       // pointed rather than walking there, rummaging the desk behind the point,
       // or opening a fight with whoever is standing in the way. A refused spot
       // says why and stays armed (postSummonAt), so the next click can just be
       // a better one.
-      if (d.armedOoc && d.ACTIONS[d.armedOoc].type === 'summon') {
+      if (explorationMode === 'summon') {
         if (tile) d.postSummonAt(
           d.armedOoc,
           point ? point.x : tile.x,
@@ -132,7 +146,7 @@ export function createMouse(d) {
       // 2026-07-31): it needed a coworker in the way before, which made the
       // one cone whose whole point is the paper behind it the one attack you
       // could not fire at the floor.
-      if (d.armedOoc && d.ACTIONS[d.armedOoc].cone && point) {
+      if (explorationMode === 'cone' && point) {
         const a = d.ACTIONS[d.armedOoc];
         // From the BODY, like the preview and the in-combat wedge - one
         // geometry for the whole click (DEGRID M5).

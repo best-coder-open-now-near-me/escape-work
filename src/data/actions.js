@@ -83,6 +83,7 @@ export const ACTIONS = {
   attack: {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Passive-Aggressive Email',
     icon: '✉️',
     desc: 'Your basic swing. No frills, no cost beyond the AP.',
@@ -98,6 +99,7 @@ export const ACTIONS = {
   'paper-storm': {
     type: 'zone',
     ap: 2,
+    exploration: { mode: 'zone' },
     // The id stays `paper-storm`: it is a slug, and `sheet.actions` persists
     // ids into saves (party.SAVE_VERSION), so renaming it would orphan the
     // power on every character who already knows it.
@@ -119,6 +121,10 @@ export const ACTIONS = {
   defend: {
     type: 'defend',
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Deflect Blame only means something once someone is swinging at you.',
+    },
     label: 'Deflect Blame',
     icon: '🛡️',
     desc: 'Brace for the next hit. Incoming damage is halved until your next turn.',
@@ -133,6 +139,7 @@ export const ACTIONS = {
   delegate: {
     type: 'control',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Delegate Ruthlessly',
     icon: '📤',
     desc: 'Make it someone else\'s problem. They spend their next turn on it instead of on you.',
@@ -163,6 +170,7 @@ export const ACTIONS = {
   'all-hands': {
     type: 'control',
     ap: 3,
+    exploration: { mode: 'cone' },
     label: 'All-Hands',
     icon: '📣',
     desc: 'Call the room into a meeting. Everyone in the wedge is held where they stand.',
@@ -183,6 +191,7 @@ export const ACTIONS = {
     side: 'any',
     type: 'purge',
     ap: 2,
+    exploration: { mode: 'any-target' },
     label: 'Turn It Off And On Again',
     icon: '🔌',
     desc: 'Power-cycle anyone - yourself, a coworker, a colleague. Clears EVERY status they are carrying, the good ones too.',
@@ -208,6 +217,7 @@ export const ACTIONS = {
   'remote-session': {
     type: 'control',
     ap: 3,
+    exploration: { mode: 'opener' },
     label: 'Remote Session',
     icon: '🖥️',
     desc: 'Remote into a coworker and drive them yourself for a few turns. They fight their own side while you do.',
@@ -224,6 +234,7 @@ export const ACTIONS = {
   'percussive-maintenance': {
     type: 'control',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Percussive Maintenance',
     icon: '🔨',
     desc: 'Hit it until it works. Hit them until they do not. They lose their next turn.',
@@ -242,6 +253,7 @@ export const ACTIONS = {
   'mail-cone': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'cone' },
     cone: { range: 4, halfAngle: 35 },
     leaves: 'paper',
     // The drifts are litter, not terrain - they clear this many rounds later
@@ -264,6 +276,10 @@ export const ACTIONS = {
     type: 'mobility',
     mode: 'dash',
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Courier Route buys movement with AP; outside a fight, ordinary walking is free.',
+    },
     icon: '↩️',
     label: 'Courier Route',
     distance: 5,
@@ -276,6 +292,10 @@ export const ACTIONS = {
     type: 'mobility',
     mode: 'swap',
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Hand-Off has no exploration swap order yet.',
+    },
     label: 'Hand-Off',
     icon: '🔄',
     range: 6,
@@ -295,6 +315,7 @@ export const ACTIONS = {
   detain: {
     type: 'control',
     ap: 3,
+    exploration: { mode: 'opener' },
     label: 'Detain',
     icon: '🔒',
     desc: 'Ask them to wait right there. They keep their turn - they just cannot leave.',
@@ -312,6 +333,10 @@ export const ACTIONS = {
     type: 'stance',
     mode: 'guard',
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Hold the Line guards teammates during a turn order that has not started.',
+    },
     label: 'Hold the Line',
     icon: '🛡️',
     desc: 'Plant yourself. Teammates on the far side of you are in cover from anything thrown.',
@@ -322,6 +347,7 @@ export const ACTIONS = {
   lockdown: {
     type: 'control',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Badge Lockdown',
     icon: '🚫',
     desc: 'Kill their badge from the panel. They are held where they stand - from across the floor.',
@@ -342,6 +368,10 @@ export const ACTIONS = {
     type: 'stance',
     mode: 'watch',
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Stand Post watches for movement in a turn order that has not started.',
+    },
     radius: 4,
     label: 'Stand Post',
     icon: '🚧',
@@ -361,6 +391,7 @@ export const ACTIONS = {
     type: 'shove',
     universal: true,
     ap: 2,
+    exploration: { mode: 'shove' },
     label: 'Shove',
     icon: '👐',
     desc: 'Two-handed push. Into a wall it stuns; into a hazard, it hurts.',
@@ -374,6 +405,7 @@ export const ACTIONS = {
     type: 'cover',
     universal: true,
     ap: 1,
+    exploration: { mode: 'cover' },
     label: 'Take Cover',
     icon: '🧎',
     desc: 'Get behind something solid - or someone brave. Ranged attacks from the shielded side cannot touch you until you move.',
@@ -390,6 +422,10 @@ export const ACTIONS = {
     type: 'pull',
     universal: true,
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Pull Over needs a combat crouch to haul somebody out of.',
+    },
     label: 'Pull Over',
     icon: '🫳',
     desc: 'Haul whoever is dug in behind cover over it, onto your side. The cover stays up; their footing may not.',
@@ -406,6 +442,7 @@ export const ACTIONS = {
   punch: {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Throw a Punch',
     icon: '👊',
     desc: 'Bare hands. Everyone always has this.',
@@ -417,6 +454,7 @@ export const ACTIONS = {
   'staple-jab': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Staple Jab',
     icon: '📎',
     desc: 'The stapler, used as intended by nobody.',
@@ -428,6 +466,7 @@ export const ACTIONS = {
   'grabber-swipe': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Grabber Swipe',
     icon: '🦾',
     desc: 'Swipe at arm\'s length plus a metre. Reaches further than it hurts.',
@@ -439,6 +478,7 @@ export const ACTIONS = {
   'letter-opener-stab': {
     type: 'attack',
     ap: 2, // no longer the cheap one now every attack is 2 - its edge is accuracy
+    exploration: { mode: 'opener' },
     label: 'Letter Opener Stab',
     icon: '🗡️',
     desc: 'Technically for envelopes. Precise, if not heavy.',
@@ -464,6 +504,7 @@ export const ACTIONS = {
   'staple-gun-fire': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     range: 4,
     label: 'Staple Gun',
     icon: '📌',
@@ -479,6 +520,7 @@ export const ACTIONS = {
   'spitball-shot': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     range: 6,
     label: 'Spitball',
     icon: '🥤',
@@ -496,6 +538,7 @@ export const ACTIONS = {
   'action-item': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Action Item',
     icon: '📋',
     desc: 'A task, assigned at speed.',
@@ -514,6 +557,10 @@ export const ACTIONS = {
   'performance-review': {
     type: 'buff',
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Performance Review has per-battle uses but no exploration charge or cooldown yet.',
+    },
     label: 'Performance Review',
     icon: '⭐',
     desc: 'Tell a coworker in writing that they are doing great. They start connecting.',
@@ -538,6 +585,10 @@ export const ACTIONS = {
   triage: {
     type: 'buff',
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Triage has per-battle uses but no exploration charge or cooldown yet.',
+    },
     label: 'Triage',
     icon: '🩹',
     desc: 'Patch somebody up - anyone on your side, yourself included. The only real heal there is.',
@@ -549,6 +600,10 @@ export const ACTIONS = {
   onboarding: {
     type: 'buff',
     ap: 2,
+    exploration: {
+      mode: 'combat-only',
+      reason: 'Onboarding has per-battle uses but no exploration charge or cooldown yet.',
+    },
     label: 'Onboarding',
     icon: '🧭',
     desc: 'Walk a coworker through the fire exits. They take less punishment, and pick up a little.',
@@ -589,6 +644,7 @@ export const ACTIONS = {
   escalate: {
     type: 'summon',
     ap: 4,
+    exploration: { mode: 'summon' },
     archetype: 'employee',
     count: 1,
     cap: 3,
@@ -606,6 +662,7 @@ export const ACTIONS = {
   kick: {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     label: 'Steel-Toe Kick',
     icon: '🥾',
     desc: 'Steel-toe boot. Needs footing - gum on your shoe prevents it.',
@@ -621,6 +678,7 @@ export const ACTIONS = {
   'paper-ball': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     ammoCost: 1,
     label: 'Paper Ball',
     icon: '📄',
@@ -640,6 +698,7 @@ export const ACTIONS = {
   'ream-throw': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     ammoCost: 5,
     // Priced in paper, but NOT one of the throws everybody has: it is learned
     // off the Drone's track. Without this, `ammoCost` alone would have put it
@@ -657,6 +716,7 @@ export const ACTIONS = {
   'paper-airplane': {
     type: 'attack',
     ap: 2,
+    exploration: { mode: 'opener' },
     ammoCost: 2,
     label: 'Paper Airplane',
     icon: '✈️',

@@ -52,10 +52,13 @@ test('pockets count only what a PRESS would do something with', () => {
   assert.equal(counts.get('stapler'), undefined);
 });
 
-test('the reactive pair is fight-only; the useful-out-here verbs are not', () => {
+test('exploration availability follows each action entry, not its broad type', () => {
   assert.equal(combatOnlyReason('attack'), null);
   assert.equal(combatOnlyReason('shove'), null);
   assert.equal(combatOnlyReason('take-cover'), null); // designer, 2026-07-30
+  assert.equal(combatOnlyReason('paper-storm'), null);
+  assert.equal(combatOnlyReason('delegate'), null);
+  assert.equal(combatOnlyReason('all-hands'), null);
   // A purge is at its MOST useful out here - bleed runs on a step clock.
   const purge = Object.keys(ACTIONS).find((id) => ACTIONS[id].type === 'purge');
   if (purge) assert.equal(combatOnlyReason(purge), null);
@@ -209,20 +212,19 @@ test('an unknown action id is refused, not silently usable (Q214)', () => {
   assert.ok(combatOnlyReason(undefined));
 });
 
-test('each fight-only verb is refused for its OWN reason (Q214)', () => {
-  // One sentence used to cover six types, and it was wrong for most of them: a
-  // dash is not pointless out here because nobody is swinging, it is pointless
-  // because there is no AP to buy distance with and you can just walk.
-  const byType = (t) => Object.keys(ACTIONS).find((id) => ACTIONS[id].type === t);
-  const dash = byType('mobility');
-  if (dash) assert.match(combatOnlyReason(dash), /walk/i);
-  const stance = byType('stance');
-  if (stance) assert.doesNotMatch(combatOnlyReason(stance), /swinging at you/);
-  // Whatever the type, a refusal names the verb it is refusing.
-  for (const t of ['heal', 'defend', 'stance', 'mobility', 'pull', 'control', 'zone']) {
-    const id = byType(t);
-    if (!id) continue;
-    assert.match(combatOnlyReason(id), new RegExp(ACTIONS[id].label.split(' ')[0], 'i'),
-      `the ${t} refusal does not name the verb`);
+test('every action declares its exploration mode and combat-only reasons are its own data', () => {
+  const supportedModes = new Set([
+    'opener', 'zone', 'cone', 'any-target', 'summon', 'shove', 'cover', 'combat-only',
+  ]);
+  for (const [id, a] of Object.entries(ACTIONS)) {
+    assert.ok(a.exploration?.mode, `${id} declares an exploration mode`);
+    assert.ok(supportedModes.has(a.exploration.mode),
+      `${id} uses a supported exploration mode: ${a.exploration.mode}`);
+    if (a.exploration.mode === 'combat-only') {
+      assert.ok(a.exploration.reason, `${id} explains its exploration refusal`);
+      assert.equal(combatOnlyReason(id), a.exploration.reason);
+    } else {
+      assert.equal(combatOnlyReason(id), null, `${id} is available in exploration`);
+    }
   }
 });

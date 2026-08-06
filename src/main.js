@@ -844,6 +844,16 @@ function startGame(level) {
     enemyAt: (...a) => enemyAt(...a),
     enemyBody: (...a) => enemyBody(...a),
     hasLos: (...a) => hasLos(...a),
+    canTakeSurface: (x, z) => acceptsSurface(grid.typeAt(Math.round(x), Math.round(z)))
+      && !runtime.surfaceAt(x, z),
+    surfaceBodies: () => [
+      ...(party?.members || []), ...summons, ...enemies,
+    ].filter((rec) => (rec.sheet ? rec.sheet.hp > 0 : rec.alive))
+      .map((rec) => {
+        const body = rec.actor || rec;
+        const p = body.entity?.getPosition?.();
+        return p ? { x: p.x, z: p.z } : { x: body.x, z: body.z };
+      }),
     hazardCost: (...a) => hazardCost(...a),
     isWalkable: (...a) => isWalkable(...a),
     leadBody: (...a) => leadBody(...a),
@@ -859,6 +869,7 @@ function startGame(level) {
     roomFor: (...a) => roomFor(...a),
     smoothFromBody: (...a) => smoothFromBody(...a),
     spawnSummonUnits: (...a) => spawnSummonUnits(...a),
+    leaveSurfaceCells: (...a) => leaveSurfaceCells(...a),
     summonDropProblem: (...a) => summonDropProblem(...a),
     applyStatus: (...a) => applyStatus(...a),
     approachAndDo: (...a) => approachAndDo(...a),
@@ -878,6 +889,8 @@ function startGame(level) {
     oocTopplePlanAt,
     oocFriendlyOn,
     postSummonAt,
+    oocZonePlan,
+    placeZoneAt,
     toggleOocArm,
     engageWithAction,
     oocTakeCoverAt,
@@ -1861,7 +1874,9 @@ function startGame(level) {
     player.lunge(tx, tz); // the fan of envelopes, aimed where you pointed
     if (a.leaves === 'paper') vfx.paperFan(test.origin, test.angle, a.cone);
     if (a.leaves) leaveSurfaceCells(oocConeCells(a, test), a.leaves, a.leavesTurns || 0);
-    ui.say(`${a.log} No casualties. Plenty of litter.`); // combat's own zero-hit line
+    ui.say(a.leaves
+      ? `${a.log} No casualties. Plenty of litter.`
+      : `${a.log} Nobody is caught.`);
     // One click, one volley: the slot disarms, same as a posted summon.
     run.armedOoc = null;
     hotbarHost.hotbar?.setArmed(null);
@@ -2225,6 +2240,7 @@ function startGame(level) {
       attackOrConfront: (...a) => attackOrConfront(...a),
       engageWithAction: (...a) => engageWithAction(...a),
       fireOocCone: (...a) => fireOocCone(...a),
+      placeZoneAt: (...a) => placeZoneAt(...a),
       coneCatches: (...a) => coneCatches(...a),
       oocShoveAt: (...a) => oocShoveAt(...a),
       oocTakeCoverAt: (...a) => oocTakeCoverAt(...a),
@@ -2284,6 +2300,10 @@ function startGame(level) {
       // which is the same one the click runs (summonDropProblem).
       // The wedge an armed cone would cover right now, or null. Same geometry
       // combat uses, from the same pure function - only the origin differs.
+      zoneAim: () => {
+        if (!run.armedOoc || run.inCombat || !run.oocAim) return null;
+        return oocZonePlan(run.armedOoc, run.oocAim.x, run.oocAim.z);
+      },
       coneAim: () => {
         if (!run.armedOoc || run.inCombat || !run.oocAim || !sheet) return null;
         const a = ACTIONS[run.armedOoc];
@@ -2765,6 +2785,7 @@ function startGame(level) {
     npcs,
     summons,
     get armedOoc() { return run.armedOoc; },
+    aimPaint: oocAimPaint,
     hover,
     ui,
     examineTile: (...a) => examineTile(...a),

@@ -168,14 +168,18 @@ export function createFrame(d) {
       // cover stops being the armed verb - gated at the call site, a disarm
       // would leave the ease pointing at wherever cover was last aimed.
       if (show && !d.inCombat) { d.hover.drawHeldCover(); d.hover.drawCoverAim(dt); }
-      if (!show || d.inCombat || !d.armedOoc || !d.ACTIONS[d.armedOoc].cone) {
+      const explorationMode = d.armedOoc
+        ? d.ACTIONS[d.armedOoc]?.exploration?.mode
+        : null;
+      if (!show || d.inCombat || (explorationMode !== 'cone' && explorationMode !== 'zone')) {
         d.hover.hideAimPaint();
       }
       if (show && !d.inCombat && d.armedOoc) {
-        if (d.ACTIONS[d.armedOoc].type === 'summon') d.hover.drawSummonDrop();
-        else if (d.ACTIONS[d.armedOoc].cone) d.hover.drawConeAim();
-        else if (d.ACTIONS[d.armedOoc].type === 'cover') { /* drawn above, every frame */ }
-        else if (d.ACTIONS[d.armedOoc].type === 'shove') {
+        if (explorationMode === 'summon') d.hover.drawSummonDrop();
+        else if (explorationMode === 'zone') d.hover.drawZoneAim();
+        else if (explorationMode === 'cone') d.hover.drawConeAim();
+        else if (explorationMode === 'cover') { /* drawn above, every frame */ }
+        else if (explorationMode === 'shove') {
           d.hover.drawArmedTargets();
           d.hover.drawShoveAim();
         } else d.hover.drawArmedTargets();

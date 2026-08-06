@@ -138,6 +138,7 @@ export function createGameDebug(d) {
     },
     get tactical() { return d.controls.tactical; },
     get armed() { return d.armedOoc; },
+    get aimPaint() { return d.aimPaint.debug; },
     get hoverKind() { return d.hover.hoverKind; },
     get narration() { return d.ui.narrationLog(); },
     examineTile: (x, z) => d.examineTile(x, z),

@@ -11,10 +11,11 @@
 // call is greppable in a way that `armedOoc = id` from anywhere in four
 // thousand lines is not.
 import { topplePlan } from './combat-plans.js';
-import { engagedAround } from './combat-geometry.js';
+import { engagedAround, zoneCellsFor } from './combat-geometry.js';
 import { crouchProblem, enterCrouch } from './crouch-rules.js';
 import { CARDINAL_DIRS } from './directions.js';
 import { coverNames } from './cover-names.js';
+import { zoneProblem, zoneRadiusOf } from './powers.js';
 
 export function createOocVerbs(d) {
   // The map half of crouch-rules.crouchProblem - same ladder, same words, the other
@@ -83,6 +84,50 @@ export function createOocVerbs(d) {
     d.hotbarHost.hotbar?.setArmed(null);
   }
 
+  // The exact exploration plan for a point-placed zone. Preview and commit
+  // both consume this record, so TPS Form Storm cannot paint one mask and lay
+  // another. It is combat's zone rule minus the two ledgers only a fight owns:
+  // AP and per-fight uses. Range, line of sight, surface acceptance, existing
+  // surfaces and every living body remain the same questions.
+  function oocZonePlan(id, tx, tz) {
+    const a = d.ACTIONS[id];
+    if (!a || a.exploration?.mode !== 'zone') return null;
+    const origin = d.leadBody();
+    const problem = zoneProblem(a, {
+      dist: Math.hypot(origin.x - tx, origin.z - tz),
+      los: d.hasLos(origin, { x: tx, z: tz }),
+      ap: Infinity,
+      usesLeft: null,
+    });
+    const cells = zoneCellsFor(a, origin, tx, tz, {
+      surfaceField: d.grid.surfaceField,
+      canTakeSurface: d.canTakeSurface,
+      hasLos: (ox, oz, x, z) => d.hasLos({ x: ox, z: oz }, { x, z }),
+      bodies: d.surfaceBodies(),
+    });
+    const maskKey = cells.map(([x, z]) => `${x},${z}`).join(';');
+    return {
+      id, x: tx, z: tz, radius: zoneRadiusOf(a), problem, cells,
+      key: `${id}:${tx},${tz}:${problem || 'ok'}:${maskKey}`,
+      quantum: d.grid.surfaceField.quantum,
+    };
+  }
+
+  function placeZoneAt(id, tx, tz) {
+    const a = d.ACTIONS[id];
+    const plan = oocZonePlan(id, tx, tz);
+    if (!a || !plan) return;
+    if (plan.problem) { d.ui.say(plan.problem); return; }
+    d.player.faceToward(tx, tz);
+    d.player.lunge(tx, tz);
+    const laid = d.leaveSurfaceCells(plan.cells, a.leaves, a.leavesTurns || 0);
+    d.ui.say(laid
+      ? `${a.log} The paper settles where shown.`
+      : `${a.log} Nothing here will take it.`);
+    d.setArmedOoc(null);
+    d.hotbarHost.hotbar?.setArmed(null);
+  }
+
   function toggleOocArm(id) {
     if (!d.sheet || d.inCombat || d.gameOver || d.modalOpen() || !d.ACTIONS[id]) return;
     // A slot a fight owns still ARMS nothing, but it says why. Listed-but-inert
@@ -105,14 +150,17 @@ export function createOocVerbs(d) {
     d.hotbarHost.hotbar?.setArmed(d.armedOoc);
     if (!d.armedOoc) { d.ui.say('You stand down.'); return; }
     const a = d.ACTIONS[d.armedOoc];
-    // What the armed slot is waiting for. A summon aims at the FLOOR, so
-    // "click a coworker" would be aiming instructions for the wrong thing -
-    // and a cone needs no coworker at all, so its hint must not demand one.
-    d.ui.say(a.type === 'summon'
+    // The action-level exploration mode that enabled the slot also tells the
+    // player what it is waiting for. A zone is a floor action like a summon or
+    // cone, not a coworker target inferred from an unrelated type ladder.
+    const mode = a.exploration.mode;
+    d.ui.say(mode === 'summon'
       ? `${a.label} ready — click a spot within ${d.summonRange(a)} tiles to post it.`
-      : a.cone
-        ? `${a.label} ready — point it and click to fire.`
-        : `${a.label} ready — click a coworker to start it.`);
+      : mode === 'zone'
+        ? `${a.label} ready - point at the floor and click to place it.`
+        : mode === 'cone'
+          ? `${a.label} ready — point it and click to fire.`
+          : `${a.label} ready — click a coworker to start it.`);
   }
 
   function engageWithAction(en, actionId, point = null) {
@@ -300,6 +348,8 @@ export function createOocVerbs(d) {
     oocTopplePlanAt,
     oocFriendlyOn,
     postSummonAt,
+    oocZonePlan,
+    placeZoneAt,
     toggleOocArm,
     engageWithAction,
     oocTakeCoverAt,
