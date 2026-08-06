@@ -20,6 +20,13 @@
     ],
     "note": "The source animation FBXs target a different skeleton. Unity can retarget both Humanoid avatars, but the result must be baked onto the Synty hierarchy before glTF export."
   },
+  "bake": {
+    "characterId": "shops-worker-male",
+    "sampleRate": 30,
+    "rootMotion": "in-place",
+    "output": "animations/synty-rpg-humanoid-bake.json",
+    "note": "One canonical body bakes the shared Synty rig. Change characterId when a future model introduces a different skeleton/rest pose."
+  },
   "clips": [
     {
       "id": "idle",

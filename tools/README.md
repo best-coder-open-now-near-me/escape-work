@@ -66,10 +66,30 @@ blender -b --factory-startup -noaudio --python tools/synty-character-to-glb.py -
 
 The model exporter deliberately strips the pose reel embedded in the Synty
 source FBX. The selected RPG Character Mecanim clips are real Unity Humanoid
-animations, but they target another skeleton. Unity can retarget them because
-both avatars are Humanoid; that retargeted result still must be baked onto the
-Synty hierarchy before glTF export. Until that bake stage exists, the output is
-a material/skin/rig validation artifact, not a runtime character replacement.
+animations, but they target another skeleton. Unity 6 has been used to verify
+that idle, forward-run, and unarmed-attack clips all retarget onto the Synty
+Humanoid avatar.
+
+`tools/unity/EscapeWorkHumanoidBake.cs` is the licensed-workspace bridge. Put
+or link it beneath `Assets/Editor` in a Unity project that has the two packs,
+then run Unity in batch mode:
+
+```powershell
+Unity.exe -batchmode -nographics `
+  -projectPath C:\private\escape-work-character-bake `
+  -executeMethod EscapeWorkHumanoidBake.Run `
+  -escapeWorkManifest E:\GodotGames\escape-work\tools\synty-characters.json `
+  -escapeWorkSyntyAssetRoot Assets/Synty `
+  -escapeWorkAnimationAssetRoot "Assets/ExplosiveLLC/RPG Character Mecanim Animation Pack FREE/Animations" `
+  -logFile C:\private\escape-work-character-bake.log
+```
+
+The command samples every manifest clip at 30 fps after Unity retargets it,
+and writes target-rig rest and pose data beneath the ignored licensed output
+root. Source animation events are retained as authoring metadata; PlayCanvas
+gameplay events remain owned by the game's combat/timing data. A slowed run is
+currently the temporary `walk` because the free animation pack has no true
+walk cycle.
 
 ### Why it reads the Unity metadata
 

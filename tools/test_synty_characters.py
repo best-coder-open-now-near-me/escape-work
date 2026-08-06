@@ -69,6 +69,17 @@ class SyntyCharacterManifestTests(unittest.TestCase):
         character_ids = [character['id'] for character in data['characters']]
         self.assertEqual(len(character_ids), len(set(character_ids)))
 
+    def test_bake_uses_a_known_humanoid_body_and_private_output(self):
+        manifest = os.path.join(SCRIPT_DIR, 'synty-characters.json')
+        with open(manifest, encoding='utf8') as stream:
+            data = json.load(stream)
+        character_ids = {character['id'] for character in data['characters']}
+        self.assertIn(data['bake']['characterId'], character_ids)
+        self.assertGreaterEqual(data['bake']['sampleRate'], 24)
+        self.assertEqual(data['bake']['rootMotion'], 'in-place')
+        self.assertTrue(data['bake']['output'].endswith('.json'))
+        self.assertTrue(data['outputRoot'].startswith('assets/licensed/'))
+
 
 if __name__ == '__main__':
     unittest.main()
