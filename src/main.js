@@ -334,9 +334,9 @@ function startGame(level) {
   // Player-team summons (SUMMON_PLAN.md): temporary combatants conjured
   // mid-fight by a summon power. You CONTROL them like party members - each is
   // a { sheet, actor } pair (HP on the sheet, a CompanionActor body), taking
-  // its own initiative turn. Not party members, not saved, not counted against
-  // the party cap - they live only for the combat and are despawned when it
-  // ends. They block enemies (like the party) but are pass-through for the party.
+  // its own initiative turn. Not party members and not counted against the
+  // party cap; a compact record carries an unexpired assignment between floors.
+  // They block enemies (like the party) but are pass-through for the party.
   const summons = [];
   // Grid+mesh edits, paired once (world-edits.js) - combat's facade builds its
   // own from the same factory, so the pairing has one definition either side.
@@ -484,7 +484,7 @@ function startGame(level) {
     hasLos: (...a) => hasLos(...a),
   });
   const {
-    dismissSummon, despawnSummons, ageSummons, summonAt, spawnSummonUnits,
+    dismissSummon, despawnSummons, ageSummons, summonAt, spawnSummonUnits, restoreSummons,
     liveSummonsOf, roomFor, summonDropProblem, summonDropSpots,
   } = summonLayer;
 
@@ -796,7 +796,6 @@ function startGame(level) {
     rangeOf: (...a) => rangeOf(...a),
     statusList: (...a) => statusList(...a),
     walkToExact: (...a) => walkToExact(...a),
-    quiet: (...a) => quiet(...a),
     arrivalLine: (...a) => arrivalLine(...a),
     summonRange: (...a) => summonRange(...a),
   });
@@ -1838,10 +1837,6 @@ function startGame(level) {
   // attacks, step-clock statuses, surfaces, slips, and footprints. The caller
   // supplies only lifecycle policy: can it exit, and what does 0 HP mean?
   //
-  // Temporary allies currently pass `quiet` to preserve their existing
-  // narration behavior. That is compatibility policy, not a design assertion.
-  const quiet = () => {};
-
   // What the floor does to a body (floor-effects.js): the per-step surface
   // effects, the slip roll, and the out-of-combat turn clock. The mutable
   // bindings go in as getters - a floor effect resolves against whoever is
@@ -1941,7 +1936,7 @@ function startGame(level) {
           // out the stairwell heal and the floor-clear screen with it, turning
           // "your save did not persist" into "the game stopped".
           try {
-            const saved = serializeProgress(party, level.next);
+            const saved = serializeProgress(party, level.next, Date.now(), summons);
             localStorage.setItem(PROGRESS_KEY, JSON.stringify(saved));
             campaignSaveIsOurs = true; // the save is this run's from here on
             // Fire-and-forget: the local write above is the save; the cloud
@@ -1980,7 +1975,8 @@ function startGame(level) {
       pathDone: done,
       changed,
       onDown: () => { if (inCombat && combat) combat.notifyMemberDown(); },
-      say: quiet,
+      say: ui.say,
+      speaker: s.sheet.name,
     });
   }
 
@@ -2503,6 +2499,7 @@ function startGame(level) {
         onReady: (e) => { dressUp(e, comp, lookOf(m.sheet), m.sheet.model); picking.register(e, 'party', comp); },
       });
     }
+    restoreSummons(restoredProgress.temporaryAllies, party, grid.playerSpawn);
     loot.refreshPanel(sheet);
     buildHotbar();
     ui.say(`${grid.name}. Keep going.`);

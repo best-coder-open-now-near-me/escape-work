@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createPlayerSideStepper } from '../../src/player-side-step.js';
+import { bodyAwareLine, createPlayerSideStepper } from '../../src/player-side-step.js';
+import { createFloorEffects } from '../../src/floor-effects.js';
 
 function harness({ tileEffect = null, tickDown = false, surfaceDown = false } = {}) {
   const events = [];
@@ -65,4 +66,71 @@ test('the caller owns the downed-body consequence and later effects stop', () =>
   assert.equal(h.step(h.body, 2, 3, { onDown: (reason) => reasons.push(reason) }), false);
   assert.deepEqual(reasons, ['Death by a thousand paper cuts. Well - several.']);
   assert.deepEqual(h.events, ['notify', 'status', 'tick']);
+});
+
+test('a temporary ally receives its named floor narration', () => {
+  const h = harness({
+    tileEffect: {
+      effect: 'damage', amount: 2,
+      message: 'You step on the cable. -2 HP.',
+      namedMessage: '{name} steps on the cable. -2 HP.',
+    },
+  });
+  const lines = [];
+  h.step(h.body, 2, 3, { speaker: 'Employee', say: (line) => lines.push(line) });
+  assert.deepEqual(lines, ['Employee steps on the cable. -2 HP.']);
+});
+
+test('speaker names are inserted literally, including replacement metacharacters', () => {
+  assert.equal(bodyAwareLine('R&D $&', 'You slip.', '{name} slips.'), 'R&D $& slips.');
+});
+
+test('the real surface coordinator preserves the temporary ally voice', () => {
+  const surface = {
+    amount: 2,
+    message: 'You step on a frayed power cable. -2 HP.',
+    namedMessage: '{name} steps on a frayed power cable. -2 HP.',
+  };
+  const floor = createFloorEffects({
+    surfEffect: () => surface,
+    effectiveSurfDamage: () => 2,
+    applyDamage: () => false,
+    impactKindFor: () => 'zap',
+    runtime: { isBurning: () => false, surfaceAt: () => 'cable' },
+    grid: { isElectrified: () => false },
+    vfx: { impact: () => {}, damageText: () => {} },
+    syncHudFor: () => {},
+  });
+  const step = createPlayerSideStepper({
+    tileEffectAt: () => null,
+    notifyStep: () => {},
+    statusFx: () => ({}),
+    tickStepOn: () => false,
+    applySurfaceOn: floor.applySurfaceOn,
+    maybeSlip: () => {},
+    leaveFootprint: () => {},
+    gameOver: false,
+  });
+  const lines = [];
+  step({ sheet: {}, actor: { flinch: () => {} } }, 1, 1, {
+    speaker: 'Employee', say: (line) => lines.push(line),
+  });
+  assert.deepEqual(lines, ['Employee steps on a frayed power cable. -2 HP.']);
+});
+
+test('a combat slip forwards the temporary ally name to the fight log', () => {
+  const names = [];
+  const floor = createFloorEffects({
+    gameOver: false,
+    slips: () => true,
+    slipChanceAt: () => 1,
+    statusFx: () => ({}),
+    equippedStats: () => ({}),
+    inCombat: true,
+    combat: { notifySlip: (name) => names.push(name) },
+    vfx: { impact: () => {}, damageText: () => {} },
+  });
+  floor.maybeSlip({}, { clearPath: () => {}, flinch: () => {} }, 1, 1, false,
+    () => {}, 'Employee');
+  assert.deepEqual(names, ['Employee']);
 });

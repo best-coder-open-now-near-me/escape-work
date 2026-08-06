@@ -3030,7 +3030,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       return members.map((m) => ({ name: m.sheet.name, hp: m.sheet.hp, ap: m.ap, active: m === active }));
     },
     // main.js detected a slip mid-walk (tile effects live there) - narrate it
-    notifySlip: () => log('You slip in the water. The rest of that movement is a donation.'),
+    notifySlip: (name = null) => log(name
+      ? `${name} slips in the water. The rest of that movement is a donation.`
+      : 'You slip in the water. The rest of that movement is a donation.'),
     // A party-side body entered a tile under its own power - main.js owns the
     // per-tile hooks for members and summons, so it reports the step here and
     // combat resolves any opportunity attack it provoked (TACTICS_PLAN M2).

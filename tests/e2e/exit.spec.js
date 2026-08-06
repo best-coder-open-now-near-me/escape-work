@@ -151,7 +151,11 @@ test('the exit mid-campaign banks the save and carries the party to the next flo
   await bootAndPick(page); // the REAL level1 - the only kind with a `next`
   // Clear the floor first: this test is about the stairwell, not about fighting
   // through to it, and a fight on the way would make the walk a coin flip.
+  expect(await page.evaluate(() => window.__god.fight())).toBe(true);
+  expect(await page.evaluate(() => window.__god.summonAlly('employee', 1, 999))).toBe(1);
   await page.evaluate(() => window.__god.enemies.forEach((e) => { if (e.alive) e.die(); }));
+  await expect.poll(() => page.evaluate(() => window.__game.inCombat),
+    { timeout: 20_000 }).toBe(false);
   // Wounded on the way out. Wounds CARRY now: the stairwell breather was struck
   // 2026-08-02 with the rest of the automatic healing ("i also never asked for
   // auto healing between floors"), so this is what a floor transition must NOT
@@ -171,6 +175,9 @@ test('the exit mid-campaign banks the save and carries the party to the next flo
   expect(saved.levelId).toBe('level2');
   expect(saved.party.length).toBeGreaterThanOrEqual(1);
   expect(saved.version).toBeGreaterThanOrEqual(6);
+  expect(saved.temporaryAllies).toHaveLength(1);
+  expect(saved.temporaryAllies[0]).toMatchObject({ archetypeId: 'employee', hp: 5 });
+  expect(saved.temporaryAllies[0].turnsLeft).toBeGreaterThan(0);
   // INVERTED 2026-08-02. This used to assert the stairwell breather healed the
   // party on the way out. There is no breather - you take a floor's damage to
   // the next floor, and casualties with it.
@@ -181,6 +188,9 @@ test('the exit mid-campaign banks the save and carries the party to the next flo
   await page.waitForFunction(() => window.__game && window.__game.stats, null, { timeout: 90_000 });
   expect(await page.evaluate(() => window.__game.levelId)).toBe('level2');
   expect(await page.evaluate(() => window.__god.player.hp)).toBe(4);
+  await expect.poll(() => page.evaluate(() => window.__game.summons.length),
+    { timeout: 20_000 }).toBe(1);
+  expect(await page.evaluate(() => window.__game.summons[0].turnsLeft)).toBeGreaterThan(0);
 });
 
 test('a party WIPE is the only way to lose the run', async ({ page }) => {

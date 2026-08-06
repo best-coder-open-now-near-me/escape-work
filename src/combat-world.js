@@ -202,7 +202,7 @@ export function createCombatWorld(d) {
     // Routed through the shared player-side step pipeline, using the temporary
     // ally lifecycle policy rather than opening a third rule path. The carrier
     // comes from combat so `notifyStep` can resolve it - a fresh literal could
-    // not. Narration remains the current temporary-ally policy, not doctrine.
+    // not. The shared stepper also gives this body a named narrator line.
     borrowedStep: (carrier, x, z, done, changed) => d.onTemporaryAllyStep(carrier, x, z, done, changed),
     // The tiles a summon aimed at (tx,tz) would actually land on - the
     // placement preview draws these rings, and spawnSummon fills them, so

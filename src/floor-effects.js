@@ -72,7 +72,10 @@ export function createFloorEffects(d) {
       d.applyStatus(ms, 'gum');
       d.vfx.impact(x, z, 'gum', { y: 0.12 });
       d.vfx.status(x, z, 'gum');
-      say(had ? 'More gum. You are building a collection.' : sfx.message);
+      say(
+        had ? 'More gum. You are building a collection.' : sfx.message,
+        had ? 'More gum. {name} is building a collection.' : sfx.namedMessage,
+      );
       d.syncHudFor(ms);
     }
     // A turn-clock status a surface applies (fire -> burning), in a fight or
@@ -94,17 +97,23 @@ export function createFloorEffects(d) {
       actor.flinch();
       d.vfx.impact(x, z, surfaceImpactKind(x, z), { y: 0.3 });
       d.vfx.damageText(x, z, `-${amount}`);
-      say(sfx.message);
+      say(sfx.message, sfx.namedMessage);
       d.syncHudFor(ms);
       return down;
     }
     if (sfx.amount) {
-      say(ms.talent?.effects?.shockImmune && d.grid.isElectrified(x, z)
-        ? 'The water crackles. Your ESD soles rate this a non-event. 0 damage.'
-        : 'You glide across the drift; the edges respect a master. Not a scratch.');
+      const immune = ms.talent?.effects?.shockImmune && d.grid.isElectrified(x, z);
+      say(
+        immune
+          ? 'The water crackles. Your ESD soles rate this a non-event. 0 damage.'
+          : 'You glide across the drift; the edges respect a master. Not a scratch.',
+        immune
+          ? `The water crackles. {name}'s ESD soles rate this a non-event. 0 damage.`
+          : '{name} glides across the drift; the edges respect a master. Not a scratch.',
+      );
       d.syncHudFor(ms);
     } else if (sfx.message && !sfx.applies) {
-      say(sfx.message);
+      say(sfx.message, sfx.namedMessage);
     }
     return false;
   }
@@ -122,11 +131,12 @@ export function createFloorEffects(d) {
       const drip = actor.entity ? actor.entity.getPosition() : { x, z };
       d.vfx.splat(drip.x, drip.z, { scale: 0.5 });
       d.vfx.damageText(x, z, `-${damage}`);
-      say('You drip on the carpet. -1 HP.');
+      say('You drip on the carpet. -1 HP.', '{name} drips on the carpet. -1 HP.');
       d.syncHudFor(ms);
     }
     if (expired.includes('gum')) {
-      say('The gum finally lets go of your sole. Freedom.');
+      say('The gum finally lets go of your sole. Freedom.',
+        `The gum finally lets go of {name}'s sole. Freedom.`);
       d.syncHudFor(ms);
     }
     return down;
@@ -185,7 +195,7 @@ export function createFloorEffects(d) {
     });
   }
 
-  function maybeSlip(ms, actor, x, z, wasSlipProof, say) {
+  function maybeSlip(ms, actor, x, z, wasSlipProof, say, speaker = null) {
     if (d.gameOver) return;
     if (!d.slips({
       chance: d.slipChanceAt(x, z),
@@ -197,8 +207,9 @@ export function createFloorEffects(d) {
     actor.flinch();
     d.vfx.impact(x, z, 'slip', { y: 0.12 });
     d.vfx.damageText(x, z, 'slip!', '#8ad4df');
-    if (d.inCombat) d.combat?.notifySlip();
-    else say('The floor was, in fact, wet. You go down. Gracefully? No.');
+    if (d.inCombat) d.combat?.notifySlip(speaker);
+    else say('The floor was, in fact, wet. You go down. Gracefully? No.',
+      'The floor was, in fact, wet. {name} goes down. Gracefully? No.');
   }
 
   return {

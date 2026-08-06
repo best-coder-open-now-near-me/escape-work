@@ -12,7 +12,7 @@ import { STARTING_TALENT_BY_CLASS } from './data/talents.js';
 import { CUSTOM_RIGS } from './data/looks.js';
 
 export const PARTY_CAP = 3; // leader + 2 companions - see PARTY_PLAN.md
-export const SAVE_VERSION = 9; // v9 records which talents a character HOLDS (TALENT_PLAN.md)
+export const SAVE_VERSION = 10; // v10 carries unexpired player-side temporary allies between floors
 
 // Petty Cash is PARTY state, not sheet state (ECONOMY_PLAN #2): one purse the
 // whole roster spends from, so buying a sandwich never means switching leaders
@@ -67,7 +67,10 @@ export function createCompanionSheet(def, id, level = 1) {
 }
 
 // --- campaign progress -------------------------------------------------------
-// current (SAVE_VERSION): { version, levelId, party: [sheet, ...], active, cash }
+// current (SAVE_VERSION):
+//   { version, levelId, party: [sheet, ...], active, cash, temporaryAllies }
+//   - v10 added compact temporary-ally records. Older saves simply read an
+//     empty list; recreating an ally that did not exist would invent state.
 //   - v6 added the shared purse. It is NEW state rather than migrated state,
 //     so an older save simply reads 0 - no invents-state-on-every-load hazard
 //     of the kind the v5 auto-equip needed a version gate for.
@@ -93,7 +96,7 @@ const HELD_STATUSES = ['sneaking', 'covered'];
 // and a save without one loads exactly as before. The desk uses it to tell two
 // runs apart when it offers both (a local Continue beside a cloud one), which
 // is the whole reason a player can be asked to choose between them.
-export function serializeProgress(party, levelId, now = Date.now()) {
+export function serializeProgress(party, levelId, now = Date.now(), temporaryAllies = []) {
   return {
     version: SAVE_VERSION,
     levelId,
@@ -101,7 +104,31 @@ export function serializeProgress(party, levelId, now = Date.now()) {
     party: party.members.map((m) => strippedForSave(m.sheet)),
     active: party.active,
     cash: party.cash || 0,
+    temporaryAllies: temporaryAlliesForSave(party, temporaryAllies),
   };
+}
+
+// Temporary allies are recreated from their archetype on the next floor. Only
+// the state that cannot be derived again crosses the stairwell: wounds, active
+// statuses, assignment time, and which real party member owns their live cap.
+function temporaryAlliesForSave(party, records) {
+  const out = [];
+  for (const rec of records || []) {
+    const archetypeId = rec.actor?.typeId;
+    const turnsLeft = rec.actor?.summonTurns ?? null;
+    if (typeof archetypeId !== 'string' || !archetypeId || !Number.isFinite(rec.sheet?.hp) || rec.sheet.hp <= 0) continue;
+    if (turnsLeft !== null && (!Number.isFinite(turnsLeft) || turnsLeft <= 0)) continue;
+    const owner = party.members.findIndex((m) => m.actor === rec.summonedBy);
+    const savedSheet = strippedForSave(rec.sheet);
+    out.push({
+      archetypeId,
+      hp: rec.sheet.hp,
+      statuses: { ...(savedSheet.statuses || {}) },
+      turnsLeft,
+      summonedBy: owner >= 0 ? owner : party.active,
+    });
+  }
+  return out;
 }
 
 // A copy of the sheet with the held-mode statuses dropped. A COPY, deliberately:
@@ -233,10 +260,28 @@ export function parseProgress(raw) {
   if (Array.isArray(raw.party) && raw.party.length) {
     const active = Number.isInteger(raw.active) && raw.active >= 0 && raw.active < raw.party.length
       ? raw.active : 0;
-    return { levelId: raw.levelId, sheets: raw.party.map((s) => normalizeSheet(s, version)), active, cash, savedAt };
+    const temporaryAllies = parseTemporaryAllies(raw.temporaryAllies, raw.party.length, active);
+    return { levelId: raw.levelId, sheets: raw.party.map((s) => normalizeSheet(s, version)), active, cash, savedAt, temporaryAllies };
   }
   if (raw.sheet && typeof raw.sheet === 'object') {
-    return { levelId: raw.levelId, sheets: [normalizeSheet(raw.sheet, version)], active: 0, cash, savedAt };
+    return { levelId: raw.levelId, sheets: [normalizeSheet(raw.sheet, version)], active: 0, cash, savedAt, temporaryAllies: [] };
   }
   return null;
+}
+
+function parseTemporaryAllies(raw, partySize, active) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const rec of raw) {
+    if (!rec || typeof rec.archetypeId !== 'string' || !rec.archetypeId) continue;
+    if (!Number.isFinite(rec.hp) || rec.hp <= 0) continue;
+    const turnsLeft = rec.turnsLeft ?? null;
+    if (turnsLeft !== null && (!Number.isFinite(turnsLeft) || turnsLeft <= 0)) continue;
+    const summonedBy = Number.isInteger(rec.summonedBy)
+      && rec.summonedBy >= 0 && rec.summonedBy < partySize ? rec.summonedBy : active;
+    const statuses = rec.statuses && typeof rec.statuses === 'object' && !Array.isArray(rec.statuses)
+      ? { ...rec.statuses } : {};
+    out.push({ archetypeId: rec.archetypeId, hp: rec.hp, statuses, turnsLeft, summonedBy });
+  }
+  return out;
 }

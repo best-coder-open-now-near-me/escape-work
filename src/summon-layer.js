@@ -95,6 +95,25 @@ export function createSummonLayer(d) {
     return out;
   }
 
+  // Rebuild the compact records party.js carried across a floor. Placement is
+  // anchored at the party entry; freeTilesNear fans each arrival onto the next
+  // open neighbouring tile. The archetype supplies all static sheet data again.
+  function restoreSummons(saved, party, at) {
+    const out = [];
+    for (const state of saved || []) {
+      const summoner = party?.members[state.summonedBy]?.actor
+        || party?.members[party.active]?.actor;
+      if (!summoner) continue;
+      const [rec] = spawnSummonUnits(state.archetypeId, 'player', summoner, 1, at);
+      if (!rec) continue; // unknown archetype or no safe entry tile
+      rec.sheet.hp = Math.min(rec.sheet.maxHp, state.hp);
+      rec.sheet.statuses = { ...(state.statuses || {}) };
+      rec.actor.summonTurns = state.turnsLeft;
+      out.push(rec);
+    }
+    return out;
+  }
+
   const liveSummonsOf = (summoner) => d.summons.filter((s) =>
     s.sheet.hp > 0 && s.actor && s.summonedBy === summoner).length;
   const roomFor = (a) => d.summonRoom(a, liveSummonsOf(d.player));
@@ -120,6 +139,7 @@ export function createSummonLayer(d) {
     ageSummons,
     summonAt,
     spawnSummonUnits,
+    restoreSummons,
     liveSummonsOf,
     roomFor,
     summonDropProblem,

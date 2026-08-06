@@ -7,7 +7,8 @@
 //   conducts  - joins conduction pools (can be electrified)
 //   powers    - energizes adjacent conduction pools
 //   slow      - movement speed multiplier while standing on it
-//   onEnter   - { amount?, message } applied when stepping on (amount = damage)
+//   onEnter   - { amount?, message, namedMessage? } applied when stepping on;
+//               namedMessage uses {name} for a controlled temporary ally
 //   pathCost  - extra pathfinding cost (characters route around expensive
 //               surfaces unless told otherwise); electrified pools use
 //               ELECTRIFIED.pathCost regardless
@@ -25,7 +26,10 @@ export const SURFACES = {
     style: 'puddle',
     color: [0.42, 0.68, 0.84],
     pathCost: 2,
-    onEnter: { message: 'Your socks are instantly soaked. HP intact. Dignity, less so.' },
+    onEnter: {
+      message: 'Your socks are instantly soaked. HP intact. Dignity, less so.',
+      namedMessage: "{name}'s socks are instantly soaked. HP intact. Dignity, less so.",
+    },
     examine: 'Standing water, slick as a resignation letter. Facilities has been notified. Allegedly.',
   },
   coffee: {
@@ -33,7 +37,10 @@ export const SURFACES = {
     color: [0.34, 0.22, 0.14],
     slow: 0.5,
     pathCost: 2,
-    onEnter: { message: 'Sticky coffee floor. Your shoes protest. (Slowed.)' },
+    onEnter: {
+      message: 'Sticky coffee floor. Your shoes protest. (Slowed.)',
+      namedMessage: "Sticky coffee floor. {name}'s shoes protest. (Slowed.)",
+    },
     examine: 'The 3pm incident. Nobody speaks of it.',
   },
   cable: {
@@ -42,14 +49,22 @@ export const SURFACES = {
     style: 'cable',
     color: [0.14, 0.14, 0.18],
     pathCost: 5,
-    onEnter: { amount: 2, message: 'You step on a frayed power cable. -2 HP.' },
+    onEnter: {
+      amount: 2,
+      message: 'You step on a frayed power cable. -2 HP.',
+      namedMessage: '{name} steps on a frayed power cable. -2 HP.',
+    },
     examine: 'A frayed power strip, daisy-chained six deep. OSHA would like a word.',
   },
   gum: {
     style: 'gum',
     color: [0.93, 0.5, 0.65],
     pathCost: 0, // nobody routes around gum - that's what makes it a mine
-    onEnter: { applies: 'gum', message: 'Squish. That was gum. It is yours now.' },
+    onEnter: {
+      applies: 'gum',
+      message: 'Squish. That was gum. It is yours now.',
+      namedMessage: 'Squish. That was gum. It belongs to {name} now.',
+    },
     examine: 'A wad of gum, pre-owned. Possibly load-bearing.',
   },
   // What a toppled prop leaves underfoot (POWERS_PLAN M6). It exists as a
@@ -77,7 +92,11 @@ export const SURFACES = {
     // Cuts on every step (bleed: keep losing 1 HP for the next N tiles). The
     // ammo isn't picked up by walking - you gather a drift once via the Alt
     // loot overlay, so a Mail Room can't farm their own cone for endless paper.
-    onEnter: { amount: 1, bleed: 2, message: 'Paper cuts! -1 HP. The edges keep biting.' },
+    onEnter: {
+      amount: 1, bleed: 2,
+      message: 'Paper cuts! -1 HP. The edges keep biting.',
+      namedMessage: 'Paper cuts catch {name}. -1 HP. The edges keep biting.',
+    },
     examine: 'A drift of shredded TPS reports. Sharp edges. Gather it (Alt) for ammo.',
   },
 };
@@ -93,7 +112,11 @@ export const SURFACES = {
 // directly.
 export const ELECTRIFIED = {
   pathCost: 9,
-  onEnter: { amount: 6, message: 'ZAP! The water is LIVE! -6 HP.' },
+  onEnter: {
+    amount: 6,
+    message: 'ZAP! The water is LIVE! -6 HP.',
+    namedMessage: 'ZAP! Live water catches {name}. -6 HP.',
+  },
   examine: 'The water is humming faintly. That seems bad.',
   color: [0.55, 0.85, 1.0],
 };
@@ -105,7 +128,11 @@ export const FIRE = {
   // In combat, striding through flame also sets you alight (the 'burning'
   // status, statuses.js): a dot on each of your turns until it burns out. Out
   // of combat there are no turns to tick, so only the instant damage lands.
-  onEnter: { amount: 4, applies: 'burning', message: 'You stride through open flame. Bold. -4 HP.' },
+  onEnter: {
+    amount: 4, applies: 'burning',
+    message: 'You stride through open flame. Bold. -4 HP.',
+    namedMessage: '{name} strides through open flame. Bold. -4 HP.',
+  },
   examine: 'That is on fire. This is fine.',
   color: [1.0, 0.45, 0.1],
 };

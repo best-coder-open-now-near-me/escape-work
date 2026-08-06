@@ -68,7 +68,7 @@ test('livingMembers filters the downed', () => {
   assert.deepEqual(livingMembers(party), [leader(party)]);
 });
 
-test('serializeProgress writes the v2 shape and parseProgress round-trips it', () => {
+test('serializeProgress writes the current shape and parseProgress round-trips it', () => {
   const party = createParty(createSheet('office-drone'));
   addMember(party, createSheet('it-support'));
   const saved = serializeProgress(party, 'level2');
@@ -81,6 +81,41 @@ test('serializeProgress writes the v2 shape and parseProgress round-trips it', (
   assert.equal(parsed.sheets.length, 2);
   assert.equal(parsed.active, 0);
   assert.equal(parsed.sheets[0].className, 'Office Drone');
+});
+
+test('a save carries only the state needed to reconstruct temporary allies', () => {
+  const ownerActor = { id: 'owner' };
+  const party = createParty(createSheet('middle-manager'), ownerActor);
+  const sheet = createSheet('employee');
+  sheet.hp = 3;
+  sheet.statuses = { gum: { left: 4 }, covered: { left: 2 } };
+  const actor = { typeId: 'employee', summonTurns: 7 };
+  const saved = serializeProgress(party, 'level2', 123, [
+    { sheet, actor, summonedBy: ownerActor },
+  ]);
+
+  assert.deepEqual(saved.temporaryAllies, [{
+    archetypeId: 'employee', hp: 3, statuses: { gum: { left: 4 } },
+    turnsLeft: 7, summonedBy: 0,
+  }]);
+  const parsed = parseProgress(JSON.parse(JSON.stringify(saved)));
+  assert.deepEqual(parsed.temporaryAllies, saved.temporaryAllies);
+});
+
+test('old and malformed temporary-ally records load as an empty or safe roster', () => {
+  const party = createParty(createSheet('office-drone'));
+  const base = serializeProgress(party, 'level1');
+  delete base.temporaryAllies;
+  assert.deepEqual(parseProgress(base).temporaryAllies, []);
+
+  const malformed = serializeProgress(party, 'level1');
+  malformed.temporaryAllies = [
+    null,
+    { archetypeId: '', hp: 2, turnsLeft: 3 },
+    { archetypeId: 'employee', hp: 0, turnsLeft: 3 },
+    { archetypeId: 'employee', hp: 2, turnsLeft: 0 },
+  ];
+  assert.deepEqual(parseProgress(malformed).temporaryAllies, []);
 });
 
 // --- the purse (ECONOMY_PLAN.md) ---------------------------------------------

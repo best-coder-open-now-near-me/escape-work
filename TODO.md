@@ -14,8 +14,8 @@ same thing, the queue is authoritative; the Phase entry is history.
 
 ## Questions for the designer
 
-The two questions raised on 2026-08-03 are ANSWERED (designer, 2026-08-03)
-and closed out below. Four implementation questions remain open.
+All six questions below are answered; their ratified choices are implemented
+and linked to the completed queue entries where applicable.
 
 **1. Two saves, one desk: which run wins? (Q017) — ANSWERED: option A.**
 
@@ -49,28 +49,25 @@ walls also counted as shelter, is rejected for this overlay.
 
 `[ratified]` - designer, 2026-08-05: "that all seems good, lets do it", approving
 the recommended resolution order and its three stated design recommendations.
-Q904 ratified capacity as an admission rule for pickup and stow,
-but party hand-offs still remove the item from the sender and push it directly
-into the recipient's bag. Refuse a hand-off to a full recipient and leave the
-item with its sender, so every added inventory item obeys the same capacity rule.
+Q904 ratified capacity as an admission rule for pickup and stow. Q910 now
+applies that same rule to party hand-offs: a full recipient refuses the item
+and it remains with its sender.
 
 **5. Should temporary player-side allies cross floor exits while their assignment lasts? - ANSWERED: option A.**
 
 `[ratified]` - designer, 2026-08-05: "that all seems good, lets do it", approving
 the recommended resolution order and its three stated design recommendations.
-A summon now survives a fight, but is omitted from
-`serializeProgress`, so a floor transition silently drops it even with turns
-left. Carry player-side temporary allies into the next
-floor with their remaining duration, placing them at the party's entry and
-serializing only the state needed to reconstruct them.
+Q912 carries player-side temporary allies into the next floor with their
+remaining duration, placing them at the party's entry and serializing only the
+state needed to reconstruct them.
 
 **6. Should temporary player-side ally movement be narrated? - ANSWERED: option A.**
 
 `[ratified]` - designer, 2026-08-05: "that all seems good, lets do it", approving
 the recommended resolution order and its three stated design recommendations.
-Current floor messages say "You ...", so temporary allies pass a no-op and their
-floor effects are silent. Make messages body-aware (for example, "Employee slips
-in the water"), so the player can see what happened to a controlled ally.
+Q913 gives floor messages second-person and named variants (for example,
+"Employee slips in the water"), so the player can see what happened to a
+controlled temporary ally.
 
 ## The 20 remaining HIGH findings — superseded
 
@@ -251,16 +248,22 @@ quoting it: `rg -c '^- \[x\] \*\*Q' TODO.md`.*
   DONE — removed the tracked 2,868-line backup. It was not imported, built, or
   tested; Git history is the owner of that obsolete copy.
 
-- [ ] **Q912** `src/party.js`, `src/main.js` [design] **(new 2026-08-05, Q907 follow-up)**
+- [x] **Q912** `src/party.js`, `src/main.js` [design] **(new 2026-08-05, Q907 follow-up)**
   Player-side temporary allies survive a fight but disappear at a floor
   transition because progress saves serialize only the party. Question 5 owns
   whether an unexpired ally travels, is reconstructed from saved state, or is
   explicitly dismissed at the exit.
+  DONE — v10 saves compact archetype/HP/status/duration/summoner records and
+  the summon layer reconstructs them on free tiles around the next floor's
+  party entry. Unit and campaign-transition coverage pin the round trip.
 
-- [ ] **Q913** `src/player-side-step.js`, `src/main.js` [design] **(new 2026-08-05, Q907 follow-up)**
+- [x] **Q913** `src/player-side-step.js`, `src/main.js` [design] **(new 2026-08-05, Q907 follow-up)**
   The shared player-side step pipeline preserves temporary-ally silence because
   its messages use second-person prose. Question 6 owns whether the narrator
   becomes body-aware or temporary ally effects remain silent.
+  DONE — the shared stepper selects second-person or named variants, surface
+  content supplies those variants, and temporary allies now narrate instead
+  of receiving the old no-op callback (including named combat slips).
 
 - [x] **Q914** `tests/e2e/run-playwright.mjs` [test-gap] **(new 2026-08-05, review)**
   Green Playwright runs left the invoking Windows shell attached indefinitely.
