@@ -9,6 +9,7 @@ import { makeMaterial, makeSpriteMaterial } from './shading.js';
 import { placeModel } from './models.js';
 import { burst } from './fx.js';
 import { CARDINAL_DIRS } from './directions.js';
+import { tileArt } from './data/art-profiles.js';
 
 const pc = globalThis.window?.pc;
 
@@ -32,7 +33,8 @@ export function createTileRenderer(app, { root = null, baseY = 0 } = {}) {
   // their own set, everything else shares the base floor's.
   const carpetMats = new Map();
   function floorMatsFor(type) {
-    const def = TILE_TYPES[type];
+    const baseDef = TILE_TYPES[type];
+    const def = baseDef && tileArt(type, baseDef);
     const key = def?.carpet ? type : 'floor';
     if (!carpetMats.has(key)) {
       const base = def?.carpet || TILE_TYPES.floor.color;

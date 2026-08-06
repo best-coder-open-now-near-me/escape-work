@@ -6,7 +6,9 @@
   "description": "Escape Work - a turn-based RPG about escaping the office. Code-first PlayCanvas.",
   "scripts": {
     "build": "node build.mjs",
+    "build:synty": "node build.mjs --profile=synty",
     "serve": "node build.mjs && node serve.mjs --port 8000",
+    "serve:synty": "node build.mjs --profile=synty && node serve.mjs --port 8000",
     "test": "node --test tests/unit/*.test.js",
     "test:e2e": "node tests/e2e/run-playwright.mjs",
     "test:e2e:smoke": "node tests/e2e/run-playwright.mjs smoke.spec.js editor.spec.js",

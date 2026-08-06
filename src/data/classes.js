@@ -1,3 +1,5 @@
+import { characterArt } from './art-profiles.js';
+
 // Player class registry. A class is starting stats, a character model
 // (assets/characters/<model>.glb), and the combat actions it brings (ids into
 // data/actions.js). Weapons/perks later modify or extend the same action list.
@@ -104,7 +106,7 @@ export const CLASSES = {
   'office-drone': {
     name: 'Office Drone',
     primary: 'attack', // the baseline the other five read against
-    model: 'worker',
+    model: characterArt('worker'),
     tagline: 'Seen everything. Feels nothing. Balanced stats.',
     experience: 'Cubicle Occupant, 2019–present. Duties: unclear.',
     maxHp: 22,
@@ -277,7 +279,7 @@ export const CLASSES = {
     // Deliberately the office-worker rig: an employee is meant to read as
     // anonymous, and the wash-out below is the point, not a workaround. It is
     // the one character type that shares a model, by choice.
-    model: 'worker',
+    model: characterArt('worker'),
     look: { tint: [0.82, 0.86, 0.95], build: { legs: 1.7, torso: 1.2 } },
     playable: false,
     maxHp: 5,

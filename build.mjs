@@ -3,12 +3,21 @@
 // copies the HTML shell alongside it. No PlayCanvas cloud involved: everything
 // that makes the game is in this repo.
 import * as esbuild from 'esbuild';
-import { cpSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
-import { relative, sep } from 'node:path';
+import { cpSync, copyFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
 
 const OUT = 'build/web';
 const ASSET_SOURCE = process.env.ESCAPE_WORK_ASSET_SOURCE || 'assets';
 const ASSET_MANIFEST = process.env.ESCAPE_WORK_ASSET_MANIFEST || 'assets.runtime.json';
+const profileArg = process.argv.find((arg) => arg.startsWith('--profile='));
+const ART_PROFILE = profileArg?.slice('--profile='.length)
+  || process.env.ESCAPE_WORK_ART_PROFILE
+  || 'default';
+const { ART_PROFILES } = await import('./src/data/art-profiles.js');
+const artProfile = ART_PROFILES[ART_PROFILE];
+if (!artProfile) {
+  throw new Error(`Unknown art profile "${ART_PROFILE}". Expected one of: ${Object.keys(ART_PROFILES).join(', ')}`);
+}
 // PlayCanvas's prebuilt UMD engine build. We ship it as-is (a <script> tag in
 // index.html loads it and exposes a global `pc`) rather than bundling it - its
 // internals reference Node worker modules that a browser bundler can't resolve.
@@ -25,6 +34,7 @@ await esbuild.build({
   format: 'iife',
   target: 'es2020',
   outfile: `${OUT}/bundle.js`,
+  define: { __ESCAPE_WORK_ART_PROFILE__: JSON.stringify(ART_PROFILE) },
   // (No `loader` entry for '.json': esbuild bundles JSON with the json loader
   // by default, so spelling it out only looked like it was load-bearing. The
   // level JSON imported by data/levels.js rides that default.)
@@ -95,6 +105,39 @@ cpSync(ASSET_SOURCE, `${OUT}/assets`, {
   },
 });
 
+const cleanRelativeAssetPath = (value, label) => {
+  const clean = String(value).replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/$/, '');
+  if (!clean || clean.startsWith('/') || /^[A-Za-z]:/.test(clean) || clean.split('/').includes('..')) {
+    throw new Error(`${label} contains an unsafe asset path: ${value}`);
+  }
+  return clean;
+};
+
+// An opt-in profile overlays only its explicit runtime allowlist. The raw pack
+// remains outside build/web, and the default/public build never reads it.
+let profileAssets = 0;
+if (artProfile.assets.length) {
+  const profileSource = process.env[artProfile.sourceEnv] || artProfile.defaultSource;
+  if (!profileSource || !existsSync(profileSource)) {
+    throw new Error(
+      `Art profile "${ART_PROFILE}" needs its private asset source at ${profileSource || '(unset)'}.`,
+    );
+  }
+  const targets = new Set();
+  for (const mapping of artProfile.assets) {
+    const from = cleanRelativeAssetPath(mapping.from, `${ART_PROFILE}.assets.from`);
+    const to = cleanRelativeAssetPath(mapping.to, `${ART_PROFILE}.assets.to`);
+    if (targets.has(to)) throw new Error(`Art profile "${ART_PROFILE}" writes ${to} more than once.`);
+    targets.add(to);
+    const sourceFile = join(profileSource, ...from.split('/'));
+    if (!existsSync(sourceFile)) throw new Error(`Art profile source asset is missing: ${sourceFile}`);
+    const targetFile = join(OUT, 'assets', ...to.split('/'));
+    mkdirSync(dirname(targetFile), { recursive: true });
+    copyFileSync(sourceFile, targetFile);
+    profileAssets += 1;
+  }
+}
+
 // If the sweep drops a prop a tile type names, the build has just shipped a
 // guaranteed 404 - fail here rather than at someone's first playthrough. (The
 // unit suite checks the same relation from the other side: every registry model
@@ -109,6 +152,7 @@ cpSync(ASSET_SOURCE, `${OUT}/assets`, {
 }
 
 console.log(
-  `Build complete -> ${OUT}/  (${shipped} prop models + all character rigs shipped, `
-  + `${skipped} unreferenced props skipped, ${excludedRoots.size} unapproved asset root(s) excluded)`,
+  `Build complete -> ${OUT}/ [art=${ART_PROFILE}]  (${shipped} prop models + all character rigs shipped, `
+  + `${profileAssets} profile asset(s), ${skipped} unreferenced props skipped, `
+  + `${excludedRoots.size} unapproved asset root(s) excluded)`,
 );
