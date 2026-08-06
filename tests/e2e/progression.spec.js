@@ -90,8 +90,12 @@ test('a prereq-gated node stays Locked until its prereq is paid', async ({ page 
   // timed out" - which looks like a hung UI rather than a working gate.
   expect(await page.evaluate(() => window.__god.player.actions.includes('all-hands'))).toBe(false);
   const gated = page.locator('#lvlup-node-mgr-all-hands');
+  const unlockRow = page.locator('[data-unlock-action="all-hands"]');
   await expect(gated).toBeDisabled();
   await expect(gated).toHaveText('Locked');
+  const unlockTip = await unlockRow.getAttribute('title');
+  expect(unlockTip).toContain('Call the room into a meeting.');
+  expect(unlockTip).toContain('Cone - 4 tiles');
 
   // Pay the prereq, and now it takes.
   await page.click('#lvlup-node-mgr-stonewall');
@@ -101,6 +105,10 @@ test('a prereq-gated node stays Locked until its prereq is paid', async ({ page 
 
   await page.click('#lvlup-done');
   await expect(page.locator('#levelup-screen')).toHaveCount(0);
+  // Learning adds the slot, and its hover begins with the exact same shared
+  // description the unlock row used. Only the hotbar's assignment hint is
+  // appended after it.
+  await expect(page.locator('#hotbar-act-all-hands')).toHaveAttribute('title', new RegExp(`^${unlockTip.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
 });
 
 // INVERTED 2026-08-02. This spec used to assert the floor curve: a Manager on a

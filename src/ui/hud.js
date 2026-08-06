@@ -346,11 +346,12 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
       // blocking the click that would explain the refusal.
       b.dataset.affordable = usable ? 'true' : 'false';
       b.style.opacity = usable ? '1' : '.4';
-      // In a fight the tip comes from combat (damage, range, uses left against
-      // THIS member's sheet); out of one the bar writes its own.
-      b.title = slot.tip || (slot.unavailable
-        ? `${slot.label} · ${slot.ap}AP · ${slot.unavailable}`
-        : `${slot.label} · ${slot.ap}AP · right-click to reassign`);
+      // Both halves receive the same shared power description, with their own
+      // live values folded in. Availability is a separate runtime fact and is
+      // appended rather than replacing the description the player was trying
+      // to read.
+      const tip = slot.tip || `${slot.label} - ${slot.ap} AP`;
+      b.title = `${tip}${slot.unavailable ? `\nUnavailable: ${slot.unavailable}` : ''}\nRight-click to reassign`;
       // The live one pulses - a static border was too easy to miss mid-fight.
       b.style.borderColor = live ? (live === 'confirm' ? '#ffd76b' : '#8adf76') : '#3a3a52';
       b.style.animation = live ? 'act-pulse 1.1s ease-in-out infinite' : '';

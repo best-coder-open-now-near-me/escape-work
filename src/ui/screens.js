@@ -132,6 +132,8 @@ export function showLevelUpScreen(sheet, { onSpend, onLearn, nodesFor, onDone } 
     if (track) {
       for (const n of nodes) {
         const row = document.createElement('div');
+        if (n.actionId) row.dataset.unlockAction = n.actionId;
+        if (n.tooltip) row.title = n.tooltip;
         Object.assign(row.style, {
           display: 'flex', alignItems: 'center', gap: '10px',
           padding: '6px 9px', borderRadius: '7px', background: '#2a2a3e',

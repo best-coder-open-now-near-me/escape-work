@@ -18,6 +18,8 @@
 // renders a pip per companion off a gate key, and a spend has to force it to
 // re-render. The bar itself stays in the frame loop, so the key stays there
 // too, and this writes it through a named setter rather than owning it.
+import { actionTooltip } from './action-tooltip.js';
+
 export function createProgressionUi(d) {
   // A short human blurb for a track node's effect, for the screen.
   function describeNode(effect = {}) {
@@ -29,12 +31,19 @@ export function createProgressionUi(d) {
   }
   // The sheet's track as screen view-models (taken / locked / affordable).
   function trackNodesFor(sheet_) {
-    return d.classTrack(sheet_).map((n) => ({
-      id: n.id, name: n.name, cost: n.cost || 1, desc: describeNode(n.effect),
-      taken: (sheet_.perks || []).includes(n.id),
-      locked: !!(n.requires && !n.requires.every((r) => (sheet_.perks || []).includes(r))),
-      affordable: (sheet_.classPoints || 0) >= (n.cost || 1),
-    }));
+    return d.classTrack(sheet_).map((n) => {
+      const actionId = n.effect?.grantsAction || null;
+      return {
+        id: n.id, name: n.name, cost: n.cost || 1, desc: describeNode(n.effect),
+        actionId,
+        // The exact presentation the new hotbar slot will use after learning.
+        // `desc` remains authored once, on ACTIONS; this screen never copies it.
+        tooltip: actionId ? actionTooltip(actionId, { sheet: sheet_ }) : null,
+        taken: (sheet_.perks || []).includes(n.id),
+        locked: !!(n.requires && !n.requires.every((r) => (sheet_.perks || []).includes(r))),
+        affordable: (sheet_.classPoints || 0) >= (n.cost || 1),
+      };
+    });
   }
   // Read-only character sheet (press C). A plain view-model - this owns the
   // derived math (damageBonus/deflect) and the perk names.

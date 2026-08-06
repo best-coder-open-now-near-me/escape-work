@@ -6,81 +6,37 @@
 // moments and must not disagree - a tip that promises a reach the press then
 // refuses is worse than no tip.
 //
-// `actionTip` assembles from the action's own data, so a new action documents
-// itself and `desc` in data/actions.js only adds the hand-written line on top.
-// The live numbers - your damage bonus, paper on hand, uses left - come from the
-// ACTING member, so the tip answers "what happens if I press this, now" rather
-// than quoting the registry.
+// `actionTip` binds the shared action-tooltip.js presentation to the acting
+// member. The unlock screen, exploration hotbar and combat bar therefore read
+// the same authored `desc`; only live numbers (damage bonus, paper, uses left)
+// vary with the character who would press it.
 //
 // The second click is the interesting rule: an instant that lands on YOU has no
 // target to pick, so pressing it once arms it and pressing it again commits.
 // That is what stops a stance or a self-buff from firing on the press that was
 // meant to read its tooltip.
-import { ACTIONS } from './data/actions.js';
+import { ACTIONS, arrivalLine } from './data/actions.js';
+import { actionTooltip } from './action-tooltip.js';
 import { aimsAtAlly, isControl, isFriendly, isMobility, isPull, isPurge, isStance, isZone } from './powers.js';
-import { damageBonus, rangeOf, roundAp } from './stats.js';
+import { roundAp } from './stats.js';
 import { applyStatus, hasStatus } from './statuses.js';
 import { summonSpotProblem as spotProblem } from './summon-rules.js';
 import { dist } from './tactics.js';
 
-import { arrivalLine } from './data/actions.js';
-import { STATUSES } from './data/statuses.js';
-import { buffRangeOf, dashDistanceOf, mobilityRangeOf, watchRadiusOf, zoneRadiusOf, zoneRangeOf } from './powers.js';
-
 export function createActionBar(d) {
-  // Hover text for a power. Assembled from the action's own data so a new
-  // action documents itself; `desc` in data/actions.js adds the hand-written
-  // line on top. Live numbers (your damage bonus, paper on hand, uses left)
-  // come from the acting member, so the tip answers "what happens if I press
-  // this, now" rather than quoting the registry.
-  function actionTip(id, a) {
-    const out = [`${a.label} - ${a.ap} AP`];
-    if (a.desc) out.push(a.desc);
-    if (a.min != null && a.max != null) {
-      const bonus = damageBonus(d.active.sheet);
-      out.push(`Damage ${a.min}-${a.max}${bonus ? ` +${bonus}` : ''}`);
-    }
-    if (a.amount) out.push(`Restores ${a.amount} HP`);
-    if (a.cone) out.push(`Cone - ${a.cone.range} tiles, ${a.cone.halfAngle * 2} degrees wide`);
-    // Range is the whole reason to hold a ranged weapon, so the tip says it -
-    // otherwise the only way to learn a staple gun outreaches a straw by two
-    // tiles is to stand somewhere and be refused.
-    if (rangeOf(id) && !a.cone) out.push(`Range ${rangeOf(id)} tiles - needs a clear line`);
-    if (a.ammoCost) out.push(`Costs ${d.ammoCostOf(id)} paper (you have ${d.active.sheet.paper})`);
-    if (a.uses) out.push(`${d.active.usesLeft[id]} of ${a.uses} uses left this fight`);
-    if (a.applies) out.push(`Applies ${STATUSES[a.applies]?.name || a.applies}`);
-    if (a.purge) out.push('Clears every status - the good ones too');
-    // The one line that says which HALF of the board a verb points at. Without
-    // it a buff is indistinguishable from an attack on the bar, and the first
-    // thing a player does with an unlabelled armed action is click an enemy.
-    if (isFriendly(a)) out.push(`Aim at a teammate or yourself - range ${buffRangeOf(a)}, never misses`);
-    if (isControl(a)) out.push('No damage - it takes their turn or their ground, not their HP');
-    if (a.type === 'cover') {
-      out.push('Aim at furniture, a tile against a partition, or a teammate; you walk over and tuck in (the walk bills as movement)');
-      out.push('Ranged attacks from the shielded side cannot touch you - melee and flanking still can');
-      out.push('Moving breaks it; attacking does not');
-    }
-    if (isPull(a)) {
-      out.push('Aim at an enemy dug in behind cover, from its far side - you reach over and haul them past you, clear of what they were tucked behind');
-      out.push(`Grit save: pass lands them on their feet, fail is ${a.crush[0]}-${a.crush[1]} damage, a skipped turn (${STATUSES.stunned.name}) and pinned`);
-      out.push('Their cover stays standing');
-    }
-    if (isStance(a)) {
-      out.push(`Watches ${watchRadiusOf(a)} tiles until your next turn`);
-      out.push('Spends your reaction when it fires - one per round, shared with opportunity attacks');
-    }
-    if (isMobility(a)) {
-      out.push(aimsAtAlly(a)
-        ? `Trade places with a teammate - range ${mobilityRangeOf(a)}`
-        : `Move up to ${dashDistanceOf(a)} tiles for a flat ${a.ap} AP`);
-      out.push('Provokes no opportunity attacks');
-    }
-    if (isZone(a)) {
-      out.push(`Covers a ${zoneRadiusOf(a) * 2}-tile area with ${a.leaves} - range ${zoneRangeOf(a)}`);
-    }
-    if (a.footwork) out.push('Footwork - gum on your shoe prevents it');
-    return out.join('\n');
-  }
+  // Bind the shared presentation to the acting member's live resources. The
+  // unlock screen and exploration hotbar call the same formatter with their
+  // own context; only this thin adapter is combat-specific.
+  const actionTip = (id) => {
+    const a = ACTIONS[id];
+    if (!a) return '';
+    return actionTooltip(id, {
+      sheet: d.active.sheet,
+      ammoCost: a.ammoCost ? d.ammoCostOf(id) : null,
+      ammoRemaining: d.active.sheet.paper,
+      usesLeft: a.uses ? d.active.usesLeft[id] : null,
+    });
+  };
 
   function pressAction(id) {
     if (d.phase !== 'player') return;

@@ -11,6 +11,7 @@ import {
   slotViewModel, combatSlotViewModel, throwablesFor, outOfCombatActionState,
 } from '../../src/hotbar-model.js';
 import { ACTIONS } from '../../src/data/actions.js';
+import { actionTooltip } from '../../src/action-tooltip.js';
 import { ammoCostOf, createSheet, spendClassPoint, grantTalent } from '../../src/stats.js';
 
 const ROW = 10;
@@ -109,6 +110,9 @@ test('a slot carries THIS character\'s ammo cost, not the raw data one', () => {
   assert.equal(vm.ammoCost, ammoCostOf(s, throwId));
   assert.equal(vm.ammoRemaining, s.paper);
   assert.equal(vm.affordable, true);
+  assert.equal(vm.tip, actionTooltip(throwId, {
+    sheet: s, ammoCost: vm.ammoCost, ammoRemaining: vm.ammoRemaining,
+  }));
 });
 
 test('one out-of-combat state owns ammo dimming and the spoken refusal', () => {

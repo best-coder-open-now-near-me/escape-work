@@ -15,6 +15,7 @@
 // Same slot, same fields, two rule-owners.
 
 import { ACTIONS, UNIVERSAL_ACTIONS } from './data/actions.js';
+import { actionTooltip } from './action-tooltip.js';
 import { ITEMS } from './data/items.js';
 import { orderedActionIds, equippedAction, ammoCostOf } from './stats.js';
 
@@ -220,6 +221,11 @@ export function slotViewModel(entry, s) {
     affordable: state.affordable,
     resourceAvailable: state.resourceAvailable,
     unavailable: state.reason,
+    tip: actionTooltip(entry.id, {
+      sheet: s,
+      ammoCost: state.ammoCost,
+      ammoRemaining: state.ammoRemaining,
+    }),
   };
 }
 
@@ -243,7 +249,7 @@ export function combatSlotViewModel(entry, state, actingName) {
     // Armed (aiming) or awaiting its confirm click - the bar rings them
     // differently, as combat's own bar used to.
     live: state?.live || null,
-    tip: state?.tip || null,
+    tip: state?.tip || actionTooltip(entry.id),
     affordable: !!state && (state.affordable || !!state.live),
     resourceAvailable: state?.resourceAvailable ?? true,
     unavailable: !state
