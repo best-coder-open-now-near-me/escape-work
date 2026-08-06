@@ -88,6 +88,7 @@ import { createDialogue, shopKeyForNpc, sayRecruited } from './dialogue.js';
 import {
   summonRange, summonRoom, dropCount, summonSpotProblem, summonLandingPoints,
 } from './summon-rules.js';
+import { areaIntersectsBody, bodyPoint } from './area-geometry.js';
 import { outOfCombatActionState } from './hotbar-model.js';
 import { startCombat } from './combat.js';
 import { verbSides } from './combat-targeting.js';
@@ -371,7 +372,6 @@ function startGame(level) {
 
   // --- gameplay tuning --------------------------------------------------------
   const ENGAGE_RADIUS = 4; // Chebyshev tiles within which enemies join a fight
-  const EXPLOSION_DAMAGE = 8; // shrapnel to the player standing beside a printer
   const OOC_TURN_SECONDS = 1.6; // out-of-combat seconds that count as one fire/smoke turn
 
   // Merchants (ECONOMY_PLAN.md). Built before looting because the Alt overlay
@@ -1142,16 +1142,26 @@ function startGame(level) {
     paintHud(sheet);
   }
 
-  // Blowing up a printer: flash, clear the tile, flatten anyone beside it.
-  function handleExplosion(x, z) {
+  // Blowing up a printer: the prop descriptor supplies area and damage policy;
+  // this resolver supplies the live bodies and their team-specific lifecycle.
+  function handleExplosion(x, z, explosion) {
+    const centre = { x, z };
+    const area = explosion?.area;
+    const playerDamage = explosion?.damage?.player ?? 0;
     scene.explosionFlash(x, z);
     vfx.impact(x, z, 'toner', { y: 0.5, scale: 1.4 });
     vfx.shake(0.16, 0.45); // the one moment in the office that earns a jolt
     grid.setType(x, z, 'floor');
     scene.removePropVisual(x, z);
-    const slain = enemies.filter((en) =>
-      en.alive && Math.abs(en.x - x) <= 1 && Math.abs(en.z - z) <= 1);
-    for (const en of slain) en.die();
+    const enemyDamage = explosion?.damage?.enemy;
+    const hitEnemies = enemies.filter((en) => en.alive && areaIntersectsBody(area, centre, en));
+    const slain = [];
+    for (const en of hitEnemies) {
+      const died = enemyDamage === 'lethal'
+        ? (en.die(), true)
+        : Number.isFinite(enemyDamage) && en.takeDamage(enemyDamage);
+      if (died) slain.push(en);
+    }
     let msg = 'The printer detonates in a cloud of toner.';
     if (slain.length) msg += ` ${slain.length} coworker${slain.length === 1 ? '' : 's'} caught in the blast (+XP).`;
     // Shrapnel hits every party member beside the printer, not just the leader.
@@ -1162,15 +1172,15 @@ function startGame(level) {
     // the shrapnel for everyone else or the XP for the coworkers it killed.
     const downed = [];
     for (const m of party ? party.members : []) {
-      if (!m.actor?.entity || m.sheet.hp <= 0) continue;
-      if (Math.abs(m.actor.x - x) > 1 || Math.abs(m.actor.z - z) > 1) continue;
-      const dead = applyDamage(m.sheet, EXPLOSION_DAMAGE);
+      if (!m.actor || m.sheet.hp <= 0 || !areaIntersectsBody(area, centre, m)) continue;
+      const p = bodyPoint(m);
+      const dead = applyDamage(m.sheet, playerDamage);
       m.actor.flinch();
-      vfx.impact(m.actor.x, m.actor.z, 'slam');
-      vfx.damageText(m.actor.x, m.actor.z, `-${EXPLOSION_DAMAGE}`);
+      vfx.impact(p.x, p.z, 'slam');
+      vfx.damageText(p.x, p.z, `-${playerDamage}`);
       msg += m === partyLeader(party)
-        ? ` You catch shrapnel. -${EXPLOSION_DAMAGE} HP.`
-        : ` ${m.sheet.name} catches shrapnel. -${EXPLOSION_DAMAGE} HP.`;
+        ? ` You catch shrapnel. -${playerDamage} HP.`
+        : ` ${m.sheet.name} catches shrapnel. -${playerDamage} HP.`;
       if (dead) downed.push(m);
     }
     // Summons stand beside a printer like anyone else. They were invisible to
@@ -1182,13 +1192,13 @@ function startGame(level) {
     // run can be lost with (dismissSummon).
     const spent = [];
     for (const s of summons) {
-      if (!s.actor?.entity || s.sheet.hp <= 0) continue;
-      if (Math.abs(s.actor.x - x) > 1 || Math.abs(s.actor.z - z) > 1) continue;
-      const gone = applyDamage(s.sheet, EXPLOSION_DAMAGE);
+      if (!s.actor || s.sheet.hp <= 0 || !areaIntersectsBody(area, centre, s)) continue;
+      const p = bodyPoint(s);
+      const gone = applyDamage(s.sheet, playerDamage);
       s.actor.flinch();
-      vfx.impact(s.actor.x, s.actor.z, 'slam');
-      vfx.damageText(s.actor.x, s.actor.z, `-${EXPLOSION_DAMAGE}`);
-      msg += ` ${s.sheet.name} catches shrapnel. -${EXPLOSION_DAMAGE} HP.`;
+      vfx.impact(p.x, p.z, 'slam');
+      vfx.damageText(p.x, p.z, `-${playerDamage}`);
+      msg += ` ${s.sheet.name} catches shrapnel. -${playerDamage} HP.`;
       if (gone) spent.push(s);
     }
     ui.say(msg);

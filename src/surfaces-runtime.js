@@ -15,7 +15,6 @@ const FIRE_TURNS = 3;       // paper burns for three turns
 const PROP_FIRE_TURNS = 4;  // a trash can smoulders a little longer (no smoke)
 const SMOKE_TURNS = 2;      // smoke lingers two turns
 const OVERLAP = 1;          // smoke begins one turn before the fire dies
-const PRINTER_FUSE_TURNS = 1;
 
 export function createSurfaceRuntime({ grid, hooks, onExplosion }) {
   // hooks: { addFlame(x,z,lift), spendFuel(x,z), addSmoke(x,z), removeSmoke(x,z) }
@@ -99,8 +98,9 @@ export function createSurfaceRuntime({ grid, hooks, onExplosion }) {
 
   const armFuse = (x, z) => {
     const k = propKeyAt(x, z);
-    if (grid.defAt(x, z).explosive && !exploded.has(k) && !fuses.has(k)) {
-      fuses.set(k, { x, z, turnsLeft: PRINTER_FUSE_TURNS });
+    const explosion = grid.defAt(x, z).explosive;
+    if (explosion && typeof explosion === 'object' && !exploded.has(k) && !fuses.has(k)) {
+      fuses.set(k, { x, z, turnsLeft: explosion.fuseTurns ?? 1, explosion });
     }
   };
 
@@ -186,7 +186,11 @@ export function createSurfaceRuntime({ grid, hooks, onExplosion }) {
       if (f.turnsLeft <= 0) {
         fuses.delete(k);
         exploded.add(k);
-        onExplosion(f.x, f.z);
+        // Preserve the prop's complete policy through the runtime seam. The
+        // world decides who is hit; this state machine only owns fuse timing
+        // and the optional secondary ignition declared by the prop.
+        onExplosion(f.x, f.z, f.explosion);
+        if (f.explosion.ignitesSurfaces === false) continue;
         if (fine) {
           for (const cell of fine.entries()) {
             const tx = Math.floor(cell.ix / fine.cellsPerTile);

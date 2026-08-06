@@ -46,6 +46,11 @@
 //              cover and a pull leaves it standing, so destruction is the
 //              one verb that deletes it. Only the cover-grade set carries
 //              this - the props whose job is to be hidden behind.
+//   explosive - descriptor for a fire-triggered prop explosion:
+//                { fuseTurns, area: { shape, radius },
+//                  damage: { player, enemy }, ignitesSurfaces }
+//              The complete descriptor reaches the resolver. Area and damage
+//              are content policy; body intersection and lifecycle are systems.
 //   onFloor  - draw the marker box ON the floor's top face rather than from
 //              ground level up: a flat remnant (the toppled partition) thinner
 //              than the floor slab would otherwise render inside the carpet
@@ -247,7 +252,12 @@ export const TILE_TYPES = {
     height: 0.5,
     color: [0.56, 0.56, 0.6],
     primitive: 'printer',
-    explosive: true,
+    explosive: {
+      fuseTurns: 1,
+      area: { shape: 'circle', radius: 1.25 },
+      damage: { player: 8, enemy: 'lethal' },
+      ignitesSurfaces: true,
+    },
     label: 'Printer',
     loot: 'printer',
     lootIcon: '🖨️',
