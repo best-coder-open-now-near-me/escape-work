@@ -15,7 +15,8 @@
 // `lastClickOutcome` is written on every path through here, and it is the only
 // thing that lets the e2e suite tell "refused because X" apart from "the click
 // did nothing" - which is why the refusals set it before they log.
-import { AROUND, hasSwingSpot as hasSwingSpotFor, posOf, swingPointAt as swingPointFrom, verbReaches as verbReachesAt } from './combat-geometry.js';
+import { hasSwingSpot as hasSwingSpotFor, posOf, swingPointAt as swingPointFrom, verbReaches as verbReachesAt } from './combat-geometry.js';
+import { NEIGHBOR_DIRS } from './directions.js';
 import { verbKind, verbSides } from './combat-targeting.js';
 import { ACTIONS } from './data/actions.js';
 import { routeToFiringPosition, trimToFirst, truncateByBudget } from './pathfinding.js';
@@ -58,7 +59,7 @@ export function createClickVerbs(d) {
       if (d.performPartitionTopple(en.x, en.z)) return;
       // ...or furniture beside you whose fall lands exactly on them. One
       // gesture: click the coworker behind the cabinet, wear the cabinet.
-      for (const [dx, dz] of AROUND) {
+      for (const [dx, dz] of NEIGHBOR_DIRS) {
         const plan = d.topplePlan(d.active, d.active.actor.x + dx, d.active.actor.z + dz);
         if (!plan || plan.lx !== en.x || plan.lz !== en.z) continue;
         if (d.active.ap < a.ap) { refuse('Not enough AP.'); return; }
@@ -329,7 +330,7 @@ export function createClickVerbs(d) {
   // zero-length walk, reported (falsely) as an AP shortage.
   function routeBeside(en) {
     let best = null;
-    for (const [dx, dz] of AROUND) {
+    for (const [dx, dz] of NEIGHBOR_DIRS) {
       const gx = en.x + dx;
       const gz = en.z + dz;
       const point = swingPointAt(en, gx, gz);

@@ -31,6 +31,7 @@ import {
   shiftEditorStorey, resizeEditorStorey, paintDocumentCell,
   setDocumentEdge, stampDocumentEdges,
 } from './editor-document.js';
+import { CARDINAL_DIRS } from './directions.js';
 
 const pc = globalThis.window?.pc;
 
@@ -1098,7 +1099,7 @@ export function startEditor(app, levelData, stashKey) {
     while (stack.length) {
       const c = stack.pop();
       cells.push(c);
-      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      for (const [dx, dz] of CARDINAL_DIRS) {
         const nx = c.x + dx;
         const nz = c.z + dz;
         const k = nx + ',' + nz;

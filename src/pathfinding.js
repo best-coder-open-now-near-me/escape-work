@@ -1,8 +1,5 @@
 // Grid pathfinding. Pure logic - no PlayCanvas, no DOM.
-export const DIRS8 = [
-  [1, 0], [-1, 0], [0, 1], [0, -1],
-  [1, 1], [1, -1], [-1, 1], [-1, -1],
-];
+import { DIAGONAL_DIRS, NEIGHBOR_DIRS } from './directions.js';
 
 // Shortest 8-directional path (Dijkstra: diagonals cost sqrt(2)). A diagonal
 // step is only allowed when both adjacent orthogonal tiles are open, so actors
@@ -42,7 +39,7 @@ export function findPath(isWalkable, sx, sz, tx, tz, extraCost = null, stepOpen 
     const [d, x, z] = open.shift();
     if (x === tx && z === tz) break;
     if (d > dist.get(key(x, z))) continue; // stale queue entry
-    for (const [dx, dz] of DIRS8) {
+    for (const [dx, dz] of NEIGHBOR_DIRS) {
       const nx = x + dx;
       const nz = z + dz;
       if (!isWalkable(nx, nz)) continue;
@@ -194,7 +191,7 @@ export function clampToClearance(isOpen, edgeOpen, px, pz, radius = BODY_RADIUS)
   const postSolid = (dx, dz) => !isOpen(cx + dx, cz + dz)
     || (edgeOpen && (!edgeOpen(cx + dx, cz, cx + dx, cz + dz)
       || !edgeOpen(cx, cz + dz, cx + dx, cz + dz)));
-  for (const [dx, dz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+  for (const [dx, dz] of DIAGONAL_DIRS) {
     if (!postSolid(dx, dz)) continue;
     const kx = cx + dx * 0.5;
     const kz = cz + dz * 0.5;

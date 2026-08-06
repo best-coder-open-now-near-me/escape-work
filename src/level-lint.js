@@ -18,6 +18,7 @@
 // here means reachable in the game rather than reachable in a second opinion.
 import { parseLevel } from './grid.js';
 import { findPath } from './pathfinding.js';
+import { CARDINAL_DIRS } from './directions.js';
 
 // A finding is { level: 'error' | 'warn', rule, message, target? }. `target`
 // is optional because some format failures have no honest map location; when
@@ -160,7 +161,7 @@ export function lintLevel(data) {
     seen.add(g.playerSpawn.x + ',' + g.playerSpawn.z);
     while (stack.length) {
       const [x, z] = stack.pop();
-      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      for (const [dx, dz] of CARDINAL_DIRS) {
         const nx = x + dx;
         const nz = z + dz;
         const k = nx + ',' + nz;

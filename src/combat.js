@@ -29,7 +29,7 @@ import {
   applyStatus, hasStatus, statusFx, clearStatuses, removeStatus, statusList, blockedBy,
   statusSeverity, tickStep,
 } from './statuses.js';
-import { toHitTerms, provokedBy, positionMods, inReach, dist, dirOctant, shieldedFaces, TACTICS, shieldingFace,
+import { cheb, toHitTerms, provokedBy, positionMods, inReach, dist, dirOctant, shieldedFaces, TACTICS, shieldingFace,
   crouchProblem,
 } from './tactics.js';
 import {
@@ -61,13 +61,15 @@ import {
 import {
   enemyRingOk, verbKind, verbSides, toppleRings, partitionRings, breakRings,
 } from './combat-targeting.js';
-import { summonSpotProblem as spotProblem, summonRoom as capRoom, dropCount } from './summon-rules.js';
+import { summonSpotProblem as spotProblem, summonRoom as capRoom, dropCount, countLiveSummons } from './summon-rules.js';
 import {
-  cheb, TARGET_R, SURPRISE_RADIUS, AROUND, ORTHO, reachOfUnit, posOf, withinReach,
+  TARGET_R, SURPRISE_RADIUS, reachOfUnit, posOf, withinReach,
   canReach as canReachAt, reachSpecOf, actRangeOf, verbReaches as verbReachesAt,
   swingPointAt as swingPointFrom, hasSwingSpot as hasSwingSpotFor, zoneCellsFor,
 } from './combat-geometry.js';
 import { createGroundMarks } from './ground-marks.js';
+import { NEIGHBOR_DIRS } from './directions.js';
+import { mulberry32Uint } from './rng.js';
 
 const pc = globalThis.window?.pc;
 // The narration when a landed hit applies a status: an explicit per-attack/
@@ -991,13 +993,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // running, which is a reorg that keeps giving you back your two landmarks.
   function scrambled(ids) {
     const out = [...ids];
-    let seed = scrambleTurn >>> 0;
-    const next = () => {
-      seed = (seed + 0x6d2b79f5) >>> 0;
-      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return (t ^ (t >>> 14)) >>> 0;
-    };
+    const next = mulberry32Uint(scrambleTurn);
     for (let i = out.length - 1; i > 0; i--) {
       const j = next() % (i + 1);
       [out[i], out[j]] = [out[j], out[i]];
@@ -1553,7 +1549,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     const me = posOf(active);
     let best = null;
     let bestD = Infinity;
-    for (const [dx, dz] of AROUND) {
+    for (const [dx, dz] of NEIGHBOR_DIRS) {
       const sx = tx + dx;
       const sz = tz + dz;
       if (coverSpotProblem(sx, sz)) continue;
@@ -1994,7 +1990,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     losToTile: (...a) => losToTile(...a),
     actionState: (...a) => actionState(...a),
     ammoCostOf: (...a) => ammoCostOf(...a),
-    liveSummonsOf: (...a) => liveSummonsOf(...a),
+    summonRoomFor: (...a) => summonRoomFor(...a),
     resolveSummon: (...a) => resolveSummon(...a),
     setArmed: (v) => intent.arm(v),
     setPendingConfirm: (v) => intent.confirm(v),
@@ -2044,13 +2040,14 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // summons are temporary MEMBERS (below), tagged with who conjured them.
   // The temp desk in a fight (summon-desk.js): the per-summoner cap, posting a
   // req, and taking a temp off the board without killing it.
-  const { liveSummonsOf, dismissSummon, postableNow, resolveSummon } = createSummonDesk({
+  const { roomFor: summonRoomFor, dismissSummon, postableNow, resolveSummon } = createSummonDesk({
     world,
     members,
     engaged,
     fx,
     dropCount,
     capRoom,
+    countLiveSummons,
     get active() { return active; },
     makeActive: (...a) => makeActive(...a),
     livingParty: (...a) => livingParty(...a),

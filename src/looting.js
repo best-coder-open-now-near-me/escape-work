@@ -11,6 +11,7 @@ import { ITEMS, LOOT_TABLES, rollLoot } from './data/items.js';
 import { PAPER_CAP, equipItem, unequipItem, inventoryCapOf } from './stats.js';
 import { placeDroppedItem } from './tile-renderer.js';
 import * as ui from './ui.js';
+import { CARDINAL_DIRS } from './directions.js';
 
 // The carry limit is effective Grit [ratified] (designer, 2026-08-05), so it is
 // asked of the sheet at every guard site rather than read from a constant here -
@@ -92,7 +93,7 @@ export function paperPatches({ width, height }, inWindow, harvestable) {
         tiles.push([cx, cz]);
         sx += cx;
         sz += cz;
-        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        for (const [dx, dz] of CARDINAL_DIRS) {
           const nx = cx + dx;
           const nz = cz + dz;
           if (!visited.has(key(nx, nz)) && inWindow(nx, nz) && harvestable(nx, nz)) {

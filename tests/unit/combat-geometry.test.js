@@ -6,12 +6,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  cheb, AROUND, ORTHO, reachOfUnit, posOf, withinReach, canReach,
+  reachOfUnit, posOf, withinReach, canReach,
   reachSpecOf, actRangeOf, verbReaches, swingPointAt, hasSwingSpot,
   zoneCellsFor, playerSideAt, TARGET_R, SURPRISE_RADIUS,
 } from '../../src/combat-geometry.js';
 import { REACH, THROW_RANGE } from '../../src/stats.js';
 import { ACTIONS } from '../../src/data/actions.js';
+import { CARDINAL_DIRS, DIAGONAL_DIRS, NEIGHBOR_DIRS } from '../../src/directions.js';
 
 // A body is just a tile. An AI unit carries `combat`; a member carries `sheet`.
 const at = (x, z, extra = {}) => ({ x, z, ...extra });
@@ -32,17 +33,12 @@ const walled = {
     !((ax === 1 && az === 0 && bx === 2 && bz === 0) || (ax === 2 && az === 0 && bx === 1 && bz === 0)),
 };
 
-test('cheb is the tile metric: a diagonal costs what an orthogonal does', () => {
-  assert.equal(cheb(0, 0, 3, 0), 3);
-  assert.equal(cheb(0, 0, 3, 3), 3);
-  assert.equal(cheb(0, 0, -2, 1), 2);
-});
-
-test('the neighbour sets are the eight and the four faces', () => {
-  assert.equal(AROUND.length, 8);
-  assert.equal(ORTHO.length, 4);
-  // Cover is a face relationship, so no diagonal may sneak into ORTHO.
-  assert.ok(ORTHO.every(([dx, dz]) => Math.abs(dx) + Math.abs(dz) === 1));
+test('the canonical neighbour sets compose eight from four faces and four diagonals', () => {
+  assert.equal(NEIGHBOR_DIRS.length, 8);
+  assert.equal(CARDINAL_DIRS.length, 4);
+  assert.equal(DIAGONAL_DIRS.length, 4);
+  assert.deepEqual(NEIGHBOR_DIRS, [...CARDINAL_DIRS, ...DIAGONAL_DIRS]);
+  assert.ok(CARDINAL_DIRS.every(([dx, dz]) => Math.abs(dx) + Math.abs(dz) === 1));
 });
 
 test('reachOfUnit reads a unit\'s def and falls back to the floor', () => {

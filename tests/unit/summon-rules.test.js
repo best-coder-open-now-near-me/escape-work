@@ -7,7 +7,7 @@
 // documented as a copy of another rule is a rule waiting to drift.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { summonRange, summonRoom, dropCount, summonSpotProblem } from '../../src/summon-rules.js';
+import { countLiveSummons, summonRange, summonRoom, dropCount, summonSpotProblem } from '../../src/summon-rules.js';
 
 const POST = { ap: 2, count: 2, cap: 3, uses: 1 };
 
@@ -31,6 +31,21 @@ test('the cap is per-summoner and counts who is still standing', () => {
   assert.equal(summonRoom(POST, 9), 0);
   // No declared cap means the count IS the cap.
   assert.equal(summonRoom({ count: 2 }, 0), 2);
+});
+
+test('one cap counter understands map, fight, and borrowed record shapes', () => {
+  const owner = {};
+  const other = {};
+  const records = [
+    { summonedBy: owner, alive: true, hp: 4 },
+    { summonedBy: owner, alive: false, hp: 4 },
+    { summonedBy: owner, sheet: { hp: 3 }, actor: {} },
+    { summonedBy: owner, sheet: { hp: 0 }, actor: {} },
+    { unit: { summonedBy: owner }, sheet: { hp: 2 }, actor: {} },
+    { summonedBy: other, alive: true, hp: 4 },
+  ];
+  assert.equal(countLiveSummons(owner, records), 3);
+  assert.equal(countLiveSummons(other, records), 1);
 });
 
 test('how many arrive is what the action posts, bounded by the cap', () => {

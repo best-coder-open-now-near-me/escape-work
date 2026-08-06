@@ -8,6 +8,7 @@ import { SURFACES, ELECTRIFIED, FIRE } from './data/surfaces.js';
 import { makeMaterial, makeSpriteMaterial } from './shading.js';
 import { placeModel } from './models.js';
 import { burst } from './fx.js';
+import { CARDINAL_DIRS } from './directions.js';
 
 const pc = globalThis.window?.pc;
 
@@ -692,7 +693,7 @@ export function computeCarpetZones(typeAt, width, height) {
         const t = typeAt(x, z);
         if (t === null || t === 'floor' || carpetAt.has(key)) continue;
         const counts = new Map();
-        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        for (const [dx, dz] of CARDINAL_DIRS) {
           const n = carpetAt.get((x + dx) + ',' + (z + dz));
           if (n) counts.set(n, (counts.get(n) || 0) + 1);
         }

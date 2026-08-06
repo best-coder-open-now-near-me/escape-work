@@ -110,7 +110,7 @@ export function createHitResolution(d) {
     // backstab used to flip when a body drifted across a tile's invisible
     // midline; the octants now bucket the real angle between the stances
     // (tactics.dirOctant), so they flip where the model visibly changes
-    // sides. The cover FACES still belong to the defender's tile - the
+    // sides. The cover faces still belong to the defender's tile - the
     // furniture is genuinely grid-shaped (positionMods rounds internally).
     const A = plan ? { x: plan.x, z: plan.z } : d.posOf(attacker);
     const D = d.posOf(defender);

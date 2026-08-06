@@ -21,6 +21,18 @@ export const summonRange = (a) => a.range ?? 5;
 // them is what lets the cap see it (SUMMON_PLAN #7).
 export const summonRoom = (a, liveCount) => Math.max(0, (a.cap ?? a.count) - liveCount);
 
+// Count one explicit population against a summoner's cap. Map-side temps,
+// fight-side AI units, player-side members and borrowed units use different
+// record shapes, but ownership and liveness are the same two questions.
+export function countLiveSummons(summoner, records) {
+  return (records || []).filter((record) => {
+    const owner = record?.summonedBy ?? record?.unit?.summonedBy;
+    if (owner !== summoner) return false;
+    if (record.sheet) return record.sheet.hp > 0 && !!record.actor;
+    return record.alive !== false && (record.hp == null || record.hp > 0);
+  }).length;
+}
+
 // How many actually arrive: what the action posts, bounded by what the cap has
 // left.
 export const dropCount = (a, room) => Math.max(0, Math.min(a.count, room));

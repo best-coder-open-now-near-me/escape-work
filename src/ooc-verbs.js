@@ -13,6 +13,7 @@
 import { topplePlan } from './combat-plans.js';
 import { engagedAround } from './combat-geometry.js';
 import { crouchProblem } from './tactics.js';
+import { CARDINAL_DIRS } from './directions.js';
 
 export function createOocVerbs(d) {
   // The map half of tactics.crouchProblem - same ladder, same words, the other
@@ -234,7 +235,7 @@ export function createOocVerbs(d) {
   // that promises a verb the click will not perform is worse than no ring.
   function oocShoveSide(tx, tz) {
     let side = null;
-    for (const [dx, dz] of d.ORTHO4) {
+    for (const [dx, dz] of CARDINAL_DIRS) {
       const sx = tx + dx;
       const sz = tz + dz;
       if (!d.grid.wallEdgeBetween(sx, sz, tx, tz)) continue;

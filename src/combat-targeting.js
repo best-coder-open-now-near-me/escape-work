@@ -17,7 +17,7 @@ import {
   isControl, controlIsRanged, isPull, isPurge, isZone, aimsAtProps, isBreakable,
   isStance, isMobility, aimsAtAlly, aimsAtAnyone,
 } from './powers.js';
-import { ORTHO } from './combat-geometry.js';
+import { CARDINAL_DIRS } from './directions.js';
 
 // WHICH branch a verb aimed at a body takes. One classifier, read by the rings
 // and by the click, so the two cannot pick different branches for the same
@@ -176,7 +176,7 @@ export function toppleRings(bx, bz, { isToppleableAt, planAt, reaches = null }) 
 // (TACTICS_PLAN M6). An adjacent partition rings the tile it would fall ONTO.
 export function partitionRings(bx, bz, { wallEdgeBetween, terrainOpen }) {
   const out = [];
-  for (const [dx, dz] of ORTHO) {
+  for (const [dx, dz] of CARDINAL_DIRS) {
     const px = bx + dx;
     const pz = bz + dz;
     if (!wallEdgeBetween(bx, bz, px, pz)) continue;
@@ -207,7 +207,7 @@ export function breakRings(a, bx, bz, range, { tileDefAt, planAt, edgeHpBetween 
     }
   }
   const edges = [];
-  for (const [dx, dz] of ORTHO) {
+  for (const [dx, dz] of CARDINAL_DIRS) {
     const px = bx + dx;
     const pz = bz + dz;
     if (edgeHpBetween(bx, bz, px, pz) === null) continue;

@@ -19,23 +19,12 @@ import { reachOf, rangeOf, REACH } from './stats.js';
 import { inReach, dist } from './tactics.js';
 import { aimRangeOf, isControl, controlIsRanged, zoneTiles, zoneRadiusOf } from './powers.js';
 
-// Chebyshev tile distance - THE metric this game measures range in (a diagonal
-// step costs what an orthogonal one does), as distinct from `tactics.dist`,
-// which is the continuous Euclidean distance reach measures against.
-export const cheb = (ax, az, bx, bz) => Math.max(Math.abs(ax - bx), Math.abs(az - bz));
-
 // Radius of a target's ring marker. Cone tests use it so a body counts when
 // the wedge CLIPS it, matching what the ring shows.
 export const TARGET_R = 0.5;
 
 // Engaged from beyond this = loses the first turn.
 export const SURPRISE_RADIUS = 2;
-
-// The eight neighbours, and the four that sit on a FACE. Cover is a
-// face-relationship (a shield on a diagonal shields nothing), which is why the
-// crouch scans ORTHO while a swing scans AROUND.
-export const AROUND = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
-export const ORTHO = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
 // A member's reach comes from their weapon, an AI unit's from its def (like
 // attackAp). REACH.DEFAULT is the floor for both.
@@ -158,7 +147,8 @@ export function hasSwingSpot(attacker, en, { isWalkable, approach, stepOpen }) {
   const world = { isWalkable, approach, stepOpen };
   // Out to the attacker's REACH, not the eight neighbours. A long handle
   // (the reach-grabber puts a swing at 2.2 tile-units) can hit from a tile
-  // further out, and scanning only AROUND told it there was no melee option
+  // further out, and scanning only the immediate neighbour ring told it there
+  // was no melee option
   // whenever the ring was full - a coworker boxed in by their own colleagues,
   // or one the far side of a partition whose neighbours cannot be walked to.
   // That is the same mistake `routeToFiringPosition` was written to fix for

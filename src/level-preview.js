@@ -22,6 +22,7 @@ import { shieldedFaces } from './tactics.js';
 import { segmentClear } from './pathfinding.js';
 import { SURPRISE_RADIUS } from './combat-geometry.js';
 import { STEALTH } from './stats.js';
+import { CARDINAL_DIRS } from './directions.js';
 
 const key = (x, z) => x + ',' + z;
 
@@ -34,7 +35,7 @@ export function reachable(g) {
   seen.add(key(g.playerSpawn.x, g.playerSpawn.z));
   while (stack.length) {
     const [x, z] = stack.pop();
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    for (const [dx, dz] of CARDINAL_DIRS) {
       const nx = x + dx;
       const nz = z + dz;
       if (seen.has(key(nx, nz)) || !g.terrainOpen(nx, nz) || !step(x, z, nx, nz)) continue;
@@ -187,7 +188,7 @@ export function fireSpread(g, from) {
   while (stack.length) {
     const [x, z] = stack.pop();
     if (explosiveAt(x, z)) blasts.add(key(x, z));
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    for (const [dx, dz] of CARDINAL_DIRS) {
       const nx = x + dx;
       const nz = z + dz;
       const k = key(nx, nz);

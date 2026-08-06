@@ -4,13 +4,9 @@
 // A slice off `startCombat` (Q037). Two rules live here and nowhere else, and
 // both are easy to break from the outside:
 //
-//   - the live cap is per-SUMMONER and outlives the fight, so `liveSummonsOf`
-//     counts three ways: the summoner's AI units, its player-side member
-//     summons, and its BORROWED ones. That third leg is the subtle one - a
-//     charmed body is in neither of the first two counts (`liveEnemies` drops
-//     charmed bodies, which is what puts them on your side, and a charmed
-//     member is `isCharmed`, never `isSummon`), so without it charming an HR
-//     employee frees the slot that posted it and HR reinforces over its own cap.
+//   - the live cap is per-SUMMONER and outlives the fight. The explicit fight
+//     population includes AI units and member records, including borrowed
+//     units, then summon-rules owns the shared liveness/ownership predicate.
 //   - dismissal is NOT death. No topple, no corpse, no loot, no XP - the temp
 //     just leaves. A member drops its body (a null `actor` is already what
 //     `slotAlive`, `livingMembers` and the initiative strip read as "not in
@@ -24,20 +20,9 @@
 // they take `spec` now. That shadow is a documented trap in
 // tools/check-extractions.mjs and it was in the code before this cut.
 export function createSummonDesk(d) {
-  function liveSummonsOf(summoner) {
-    const enemySummons = d.world.liveEnemies().filter((e) => e.summonedBy === summoner).length;
-    const playerSummons = d.members.filter((m) =>
-      m.isSummon && m.sheet.hp > 0 && m.actor && m.summonedBy === summoner).length;
-    // A BORROWED minion is still on its summoner's books. It is in neither
-    // count above: `liveEnemies` drops charmed bodies (that is what puts them
-    // on your side), and a charmed member is `isCharmed`, never `isSummon`.
-    // Without this leg, charming an HR employee frees the slot that posted it
-    // and HR reinforces over its own cap - the cap being per-SUMMONER and
-    // outliving the fight is the whole point of counting this way.
-    const borrowed = d.members.filter((m) =>
-      m.isCharmed && m.sheet.hp > 0 && m.unit?.summonedBy === summoner).length;
-    return enemySummons + playerSummons + borrowed;
-  }
+  const roomFor = (summoner, spec) => d.capRoom(spec, d.countLiveSummons(
+    summoner, [...d.world.liveEnemies(), ...d.members],
+  ));
   // A summon's assignment ran out (or the fight it was called for is over and
   // main.js is sweeping): take it off the board WITHOUT killing it. This is not
   // a death - no topple, no corpse, no loot, no XP - the temp just leaves.
@@ -88,7 +73,7 @@ export function createSummonDesk(d) {
   // in the first place; the cap math itself is the module's, composed here
   // rather than repeated.
   function postableNow(summoner, spec) {
-    return d.dropCount(spec, d.capRoom(spec, liveSummonsOf(summoner)));
+    return d.dropCount(spec, roomFor(summoner, spec));
   }
 
   function resolveSummon(summoner, team, spec, at = null) {
@@ -118,5 +103,5 @@ export function createSummonDesk(d) {
     return spawned.length;
   }
 
-  return { liveSummonsOf, dismissSummon, postableNow, resolveSummon };
+  return { roomFor, dismissSummon, postableNow, resolveSummon };
 }

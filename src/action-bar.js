@@ -20,7 +20,7 @@ import { ACTIONS } from './data/actions.js';
 import { aimsAtAlly, isControl, isFriendly, isMobility, isPull, isPurge, isStance, isZone } from './powers.js';
 import { damageBonus, rangeOf, roundAp } from './stats.js';
 import { applyStatus, hasStatus } from './statuses.js';
-import { summonRoom as capRoom, summonSpotProblem as spotProblem } from './summon-rules.js';
+import { summonSpotProblem as spotProblem } from './summon-rules.js';
 import { dist } from './tactics.js';
 
 import { arrivalLine } from './data/actions.js';
@@ -212,7 +212,7 @@ export function createActionBar(d) {
     // `resolveSummon` acts on. The two go to zero together, so the ring says
     // the same thing either way; they are asked separately because they are
     // separate questions.
-    room: capRoom(a, d.liveSummonsOf(d.active.actor)),
+    room: d.summonRoomFor(d.active.actor, a),
   });
   function placeSummon(tx, tz) {
     const a = ACTIONS[d.armed];

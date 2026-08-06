@@ -17,6 +17,7 @@ import { NPCS } from './data/npcs.js';
 import { ENEMY_TYPES } from './data/enemies.js';
 import { COMPANIONS } from './data/companions.js';
 import { parseActorRef } from './data/actor-registries.js';
+import { CARDINAL_DIRS } from './directions.js';
 
 // Old saves/exports may reference renamed tile types. Exported so the editor
 // can upgrade them when loading a level for editing.
@@ -298,7 +299,6 @@ export function parseLevel(level) {
     const seen = new Set();
     const conducts = (x, z) => SURFACES[surfaceAt(x, z)]?.conducts;
     const powers = (x, z) => SURFACES[surfaceAt(x, z)]?.powers;
-    const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
     for (let z = 0; z < height; z++) {
       for (let x = 0; x < width; x++) {
         if (!conducts(x, z) || seen.has(x + ',' + z)) continue;
@@ -309,7 +309,7 @@ export function parseLevel(level) {
         while (queue.length) {
           const [cx, cz] = queue.pop();
           pool.push(cx + ',' + cz);
-          for (const [dx, dz] of N4) {
+          for (const [dx, dz] of CARDINAL_DIRS) {
             const nx = cx + dx;
             const nz = cz + dz;
             if (!wallEdgeOpen(cx, cz, nx, nz)) continue; // doors don't dam pools

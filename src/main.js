@@ -15,7 +15,8 @@ import { CLASSES } from './data/classes.js';
 import { ACTIONS, arrivalLine } from './data/actions.js';
 import { parseLevel } from './grid.js';
 import { parseFloors, layeredGrid, planCrossLayerRoute } from './floors.js';
-import { findPath, smoothPath, routeOpen, segmentClear, clampToClearance, approachPoint, routeToFiringPosition, DIRS8 } from './pathfinding.js';
+import { findPath, smoothPath, routeOpen, segmentClear, clampToClearance, approachPoint, routeToFiringPosition } from './pathfinding.js';
+import { NEIGHBOR_DIRS as DIRS8 } from './directions.js';
 import { seesBody, coneBoundary, deriveFacing } from './stealth.js';
 import {
   createSheetFrom, applyDamage, spendAttrPoint, spendClassPoint, grantTalent, classTrack,
@@ -32,7 +33,7 @@ import { createDraft, createCharacter, draftModel, draftLook } from './creation.
 import { CUSTOM_RIGS } from './data/looks.js';
 import { aimsAtAlly, coneFrom, conePolyline, isToppleable } from './powers.js';
 import { PARTITION_TOPPLE, blocksSight, shieldsCell } from './data/tiles.js';
-import { shieldedFaces } from './tactics.js';
+import { cheb as chebOf, shieldedFaces } from './tactics.js';
 import { PlayerActor, EnemyActor, NpcActor, CompanionActor } from './actors.js';
 import { COMPANIONS } from './data/companions.js';
 import { createApp, buildLevel, buildLayeredLevel } from './scene.js';
@@ -53,6 +54,7 @@ import { createSummonLayer } from './summon-layer.js';
 import { createProgressionUi } from './progression-ui.js';
 import { createSneakLayer } from './sneak-layer.js';
 import { createPartyControl } from './party-control.js';
+import { mulberry32 } from './rng.js';
 
 import { loadRemoteStore, SAVE_KEY_STORAGE } from './remote-store.js';
 import { placeModel, applyCharacterProportions, cloneMaterials, tintMaterials } from './models.js';
@@ -80,9 +82,7 @@ import {
 } from './hotbar-model.js';
 import { startCombat } from './combat.js';
 import { verbSides } from './combat-targeting.js';
-import {
-  cheb as chebOf, canReach as canReachAt, engagedAround, playerSideAt,
-} from './combat-geometry.js';
+import { canReach as canReachAt, engagedAround, playerSideAt } from './combat-geometry.js';
 import { startEditor } from './editor.js';
 import { NPCS } from './data/npcs.js';
 import { installGodMode } from './god.js';
@@ -213,13 +213,7 @@ let combatRng = Math.random;
 try {
   const s = new URLSearchParams(location.search).get('seed');
   if (s) {
-    let a = (Number(s) >>> 0) || 1;
-    combatRng = () => {
-      a = (a + 0x6d2b79f5) >>> 0;
-      let t = Math.imul(a ^ (a >>> 15), 1 | a);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
+    combatRng = mulberry32((Number(s) >>> 0) || 1);
   }
 } catch { /* no URL machinery - unseeded like always */ }
 
@@ -487,7 +481,7 @@ function startGame(level) {
   });
   const {
     dismissSummon, despawnSummons, ageSummons, summonAt, spawnSummonUnits, restoreSummons,
-    liveSummonsOf, roomFor, summonDropProblem, summonDropSpots,
+    roomFor, summonDropProblem, summonDropSpots,
   } = summonLayer;
 
   const enemyAt = (x, z) => enemies.find((e) => e.alive && e.x === x && e.z === z) || null;
@@ -759,7 +753,6 @@ function startGame(level) {
     // Three consts declared BELOW this wiring, so they go in behind getters
     // and wrappers - by-reference would read them in their dead zone.
     get vfx() { return vfx; },
-    get ORTHO4() { return ORTHO4; },
     get hotbarHost() { return hotbarHost; },
     approachTo: (...a) => approachTo(...a),
     beginCombat: (...a) => beginCombat(...a),
@@ -1779,7 +1772,6 @@ function startGame(level) {
   // --- the office topples out of combat too (TACTICS_PLAN M6 OOC) -------------
   // The same furniture-topple rule combat runs, evaluated from the leader's
   // spot: sign-derived landing, open ground, no free demolition into a wall.
-  const ORTHO4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
   // An armed SHOVE aimed at the office with no fight on (designer,
   // 2026-07-30): furniture and partitions topple out here too. With a
   // coworker standing where it lands, the topple IS the opener - the fight

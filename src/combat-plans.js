@@ -20,9 +20,10 @@
 
 import { ACTIONS } from './data/actions.js';
 import { rangeOf, REACH } from './stats.js';
-import { inReach, dist, dirOctant } from './tactics.js';
+import { cheb, inReach, dist, dirOctant } from './tactics.js';
 import { isToppleable, toppleLanding, isBreakable, aimsAtProps, pullLanding } from './powers.js';
-import { cheb, posOf, reachOfUnit, ORTHO, AROUND } from './combat-geometry.js';
+import { posOf, reachOfUnit } from './combat-geometry.js';
+import { CARDINAL_DIRS, NEIGHBOR_DIRS } from './directions.js';
 
 // --- toppling (POWERS_PLAN M6) -----------------------------------------------
 
@@ -53,7 +54,7 @@ export function topplePlan(bx, bz, px, pz, { tileDefAt, terrainOpen, stepOpen })
 // combat knows which side a body is on.
 export function aiTopplePlan(bx, bz, { tileDefAt, terrainOpen, stepOpen }, victimAt) {
   const world = { tileDefAt, terrainOpen, stepOpen };
-  for (const [dx, dz] of AROUND) {
+  for (const [dx, dz] of NEIGHBOR_DIRS) {
     const plan = topplePlan(bx, bz, bx + dx, bz + dz, world);
     if (plan && victimAt(plan.lx, plan.lz)) return plan;
   }
@@ -77,7 +78,7 @@ export function aiTopplePlan(bx, bz, { tileDefAt, terrainOpen, stepOpen }, victi
 export function aiShovePlan(bx, bz, { isWalkable, stepOpen, occupied }, victimAt,
   { hazardAt = null, disengage = false, reaches = null } = {}) {
   const world = { isWalkable, stepOpen, occupied };
-  for (const [dx, dz] of AROUND) {
+  for (const [dx, dz] of NEIGHBOR_DIRS) {
     const vx = bx + dx;
     const vz = bz + dz;
     const victim = victimAt(vx, vz);
@@ -85,7 +86,7 @@ export function aiShovePlan(bx, bz, { isWalkable, stepOpen, occupied }, victimAt
     // The PLAYER's shove gate, applied to the AI's (`canReach` at REACH.SHOVE)
     // [ratified] (designer, 2026-08-05: "a for both q096 and q097"). Tile
     // adjacency alone let a coworker shove from a diagonal the player could not
-    // and straight across a partition edge, because `AROUND` asks only "is that
+    // and straight across a partition edge, because `NEIGHBOR_DIRS` asks only "is that
     // tile next to mine" while the player's gate measures body to body and
     // honours the corner rule. Doctrine #9 - forced movement never provokes,
     // so shove is the safe disengage - is a rule about the VERB; it should not
@@ -107,7 +108,7 @@ export function aiShovePlan(bx, bz, { isWalkable, stepOpen, occupied }, victimAt
 // follow-up" in that plan's landed notes. Square-on like the player's aim;
 // the panel falls AWAY from the shover, so the victim test is the far tile.
 export function aiEdgeTopplePlan(bx, bz, { wallEdgeBetween, terrainOpen }, victimAt) {
-  for (const [dx, dz] of ORTHO) {
+  for (const [dx, dz] of CARDINAL_DIRS) {
     const tx = bx + dx;
     const tz = bz + dz;
     if (!wallEdgeBetween(bx, bz, tx, tz)) continue;

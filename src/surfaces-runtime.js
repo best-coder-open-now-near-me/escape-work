@@ -10,8 +10,7 @@
 // turn it starts smoking (the OVERLAP) - smoke then lingers SMOKE_TURNS total,
 // so a sheet's whole arc is FIRE_TURNS + SMOKE_TURNS - OVERLAP turns.
 import { SURFACES } from './data/surfaces.js';
-
-const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+import { CARDINAL_DIRS } from './directions.js';
 const FIRE_TURNS = 3;       // paper burns for three turns
 const PROP_FIRE_TURNS = 4;  // a trash can smoulders a little longer (no smoke)
 const SMOKE_TURNS = 2;      // smoke lingers two turns
@@ -85,7 +84,7 @@ export function createSurfaceRuntime({ grid, hooks, onExplosion }) {
     for (const b of active) {
       if (b.spread) continue;
       b.spread = true;
-      for (const [dx, dz] of N4) {
+      for (const [dx, dz] of CARDINAL_DIRS) {
         const nx = b.x + dx;
         const nz = b.z + dz;
         if (!grid.edgeOpen(b.x, b.z, nx, nz)) continue; // partitions stop fire
@@ -126,7 +125,7 @@ export function createSurfaceRuntime({ grid, hooks, onExplosion }) {
         fuses.delete(k);
         exploded.add(k);
         onExplosion(f.x, f.z);
-        for (const [dx, dz] of N4) {
+        for (const [dx, dz] of CARDINAL_DIRS) {
           const nx = f.x + dx;
           const nz = f.z + dz;
           // Partitions stop fire - the blast's ignition included. Spread checks

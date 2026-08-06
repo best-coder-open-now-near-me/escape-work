@@ -21,6 +21,8 @@
 //   - who summoned whom outlives the fight it happened in. A summon with turns
 //     left walks out with you and into the next fight (SUMMON_PLAN #7), and the
 //     per-summoner live cap can only count it if that link survives the trip.
+import { countLiveSummons } from './summon-rules.js';
+
 export function createSummonLayer(d) {
   function dismissSummon(body) {
     if (!body) return;
@@ -114,9 +116,7 @@ export function createSummonLayer(d) {
     return out;
   }
 
-  const liveSummonsOf = (summoner) => d.summons.filter((s) =>
-    s.sheet.hp > 0 && s.actor && s.summonedBy === summoner).length;
-  const roomFor = (a) => d.summonRoom(a, liveSummonsOf(d.player));
+  const roomFor = (a) => d.summonRoom(a, countLiveSummons(d.player, d.summons));
   // The same ladder combat runs, minus the two legs a FIGHT owns - there is no
   // AP pool to spend out here and no per-fight `uses` to ration, so those
   // fields simply are not supplied.
@@ -140,7 +140,6 @@ export function createSummonLayer(d) {
     summonAt,
     spawnSummonUnits,
     restoreSummons,
-    liveSummonsOf,
     roomFor,
     summonDropProblem,
     summonDropSpots,

@@ -12,6 +12,7 @@
 // `positional` is the seam the later milestones fill in (cover, flanking,
 // backstab). It is 0 everywhere today, so this milestone changes no number.
 import { HIT, REACH } from './stats.js';
+import { CARDINAL_DIRS } from './directions.js';
 
 // The to-hit terms for one attacker/defender pair, in the shape
 // stats.hitChance consumes: { acc, dodge, mods }.
@@ -212,10 +213,6 @@ export function hasCover(ax, az, dx, dz, edgeOpen, coverCell = null) {
     ax, az, dx, dz);
 }
 
-// The four orthogonal faces, in a fixed order so a UI drawing them gets the
-// same list twice running.
-export const FACES = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-
 // WHICH faces of (dx, dz) have something shielding them - a wall, partition or
 // closed door on the edge, or a cell-shaped shield (a solid prop, a fallen
 // one, a BODY) standing on the neighbour. Returns the offsets, not a boolean.
@@ -238,7 +235,7 @@ export function shieldedFaces(dx, dz, { edgeOpen = null, coverCell = null } = {}
   const cells = typeof coverCell === 'function';
   if (!edges && !cells) return [];
   const out = [];
-  for (const [ox, oz] of FACES) {
+  for (const [ox, oz] of CARDINAL_DIRS) {
     const nx = dx + ox;
     const nz = dz + oz;
     if ((edges && !edgeOpen(dx, dz, nx, nz)) || (cells && coverCell(nx, nz))) {

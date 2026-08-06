@@ -11,11 +11,12 @@
 //
 // The world arrives as small query callbacks, as everywhere else in the carve.
 
-import { cheb, posOf, reachOfUnit, AROUND, ORTHO } from './combat-geometry.js';
+import { posOf, reachOfUnit } from './combat-geometry.js';
 import {
-  inReach, dist, shieldedFaces, facesShieldFrom, isFlanked, isBackstab, provokedBy,
+  cheb, inReach, dist, shieldedFaces, facesShieldFrom, isFlanked, isBackstab, provokedBy,
 } from './tactics.js';
 import { shieldsCell } from './data/tiles.js';
+import { NEIGHBOR_DIRS } from './directions.js';
 
 // The AI's tunables, one block (AI_PLAN A7): every magnitude a difficulty
 // pass - or someday a selector - would turn lives here, beside the rules
@@ -110,7 +111,7 @@ export function aiSupportPlan(bx, bz, spec, allies, { healAt = AI.HEAL_AT, canSu
 export function standTilePath(ux, uz, tx, tz, { isWalkable, findEnemyPath, canSwingFrom = null }) {
   const swingable = (gx, gz) => !canSwingFrom || canSwingFrom(gx, gz);
   let best = null;
-  for (const [dx, dz] of AROUND) {
+  for (const [dx, dz] of NEIGHBOR_DIRS) {
     const gx = tx + dx;
     const gz = tz + dz;
     if (ux === gx && uz === gz) {
@@ -133,11 +134,11 @@ export function standTilePath(ux, uz, tx, tz, { isWalkable, findEnemyPath, canSw
 // pacing bug's fix, so it returns alone, a field of one.
 export function standTileRoutes(ux, uz, tx, tz, { isWalkable, findEnemyPath, canSwingFrom = null }) {
   const swingable = (gx, gz) => !canSwingFrom || canSwingFrom(gx, gz);
-  for (const [dx, dz] of AROUND) {
+  for (const [dx, dz] of NEIGHBOR_DIRS) {
     if (ux === tx + dx && uz === tz + dz && swingable(ux, uz)) return [[[ux, uz], [ux, uz]]];
   }
   const out = [];
-  for (const [dx, dz] of AROUND) {
+  for (const [dx, dz] of NEIGHBOR_DIRS) {
     const gx = tx + dx;
     const gz = tz + dz;
     if (!isWalkable(gx, gz)) continue;
@@ -221,7 +222,7 @@ export function firingTileRoutes(ux, uz, tx, tz, range,
 //
 // Weights, not vetoes - eating one free swing to reach the kill can be
 // right, and the tuning block owns the exchange rates. Deterministic: ties
-// fall to route order, which follows AROUND's fixed order.
+// fall to route order, which follows NEIGHBOR_DIRS' fixed order.
 export function scoreDestination(routes, q = {}) {
   const {
     target, approach = null, allies = [], facing = null, threats = [],
