@@ -30,6 +30,43 @@ export const BUTTON_CHROME = {
 // created and removed per fight, so neither can be a child of the other. The
 // dock outlives both and is created on demand by whichever arrives first.
 let dockEl = null;
+const DOCK_EDGE_GAP = 10;
+let dockLayoutBound = false;
+
+// Keep the action dock centered when there is room, then nudge it into the
+// live strip between the bottom-left profile card and bottom-right narrator.
+// Both neighbours have content-driven widths, so a fixed left offset only
+// trades one overlap for another as names, filters, or the viewport change.
+export function layoutActionDock() {
+  if (!dockEl?.isConnected || dockEl.style.display === 'none') return;
+  const width = dockEl.getBoundingClientRect().width;
+  if (!width) return;
+
+  const dockRect = dockEl.getBoundingClientRect();
+  const overlapsVertically = (rect) => rect.height
+    && rect.bottom > dockRect.top && rect.top < dockRect.bottom;
+  const stats = document.getElementById('stats')?.getBoundingClientRect();
+  const narrator = document.getElementById('narration-box')?.getBoundingClientRect();
+  const viewportRight = window.innerWidth - DOCK_EDGE_GAP;
+  const minLeft = stats && overlapsVertically(stats)
+    ? stats.right + DOCK_EDGE_GAP
+    : DOCK_EDGE_GAP;
+  const rightEdge = narrator && overlapsVertically(narrator)
+    ? narrator.left - DOCK_EDGE_GAP
+    : viewportRight;
+  const maxLeft = Math.min(viewportRight - width, rightEdge - width);
+  const centered = (window.innerWidth - width) / 2;
+
+  // On very narrow screens the two neighbours can leave less room than the
+  // dock needs. Preserve the actionable dock and narrator in that case; the
+  // passive profile card is the safer surface to overlap.
+  const left = maxLeft >= minLeft
+    ? Math.min(Math.max(centered, minLeft), maxLeft)
+    : Math.max(DOCK_EDGE_GAP, maxLeft);
+  dockEl.style.left = `${Math.round(left)}px`;
+  dockEl.style.transform = 'none';
+}
+
 export function actionDock() {
   if (dockEl && dockEl.isConnected) return dockEl;
   dockEl = document.createElement('div');
@@ -40,6 +77,10 @@ export function actionDock() {
     gap: '8px', padding: '8px 10px', borderRadius: '10px', userSelect: 'none',
   });
   document.body.appendChild(dockEl);
+  if (!dockLayoutBound) {
+    dockLayoutBound = true;
+    window.addEventListener('resize', layoutActionDock);
+  }
   return dockEl;
 }
 // Shown only when it has something to show. Both regions call this after they
@@ -49,6 +90,7 @@ export function refreshDockVisibility() {
   if (!dockEl) return;
   const showing = [...dockEl.children].some((c) => c.style.display !== 'none');
   dockEl.style.display = showing ? 'flex' : 'none';
+  if (showing) layoutActionDock();
 }
 
 // --- the HUD rail -------------------------------------------------------------

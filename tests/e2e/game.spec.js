@@ -8,7 +8,7 @@
 // stays slower than local. Every wait here is therefore generous, and boot
 // helpers gate on frames actually ticking before any projection is trusted.
 import { test, expect } from '@playwright/test';
-import { waitForSmoothFrames, onScreen, bootAndPick, combatOrWalkDone, enterCombat, endTurnUntilPlayer, waitForPlayerTurn, clickAction, stableProject } from './helpers.js';
+import { waitForSmoothFrames, bootAndPick, combatOrWalkDone, enterCombat, endTurnUntilPlayer, waitForPlayerTurn, clickAction, stableProject, clickDoorPanel } from './helpers.js';
 
 test('the class carousel browses every resume and hires one', async ({ page }) => {
   // This test renders EVERY class's .glb, one per slide, and under CI's
@@ -79,14 +79,7 @@ test('clicking a closed door walks up and swings it open', async ({ page }) => {
   expect(doors.every((d) => !d.open)).toBe(true); // all start closed
   // Click the visible cubicle-row door panel itself. The threshold is ordinary
   // walkable floor and deliberately is not a ghost interaction target.
-  const p = await page.evaluate(() => window.__game.project3(8, 0.55, 4.5));
-  expect(onScreen(p)).toBe(true);
-  await page.mouse.move(p.x, p.y);
-  await expect.poll(
-    () => page.evaluate(() => window.__game.hoverKind),
-    { timeout: 15_000 },
-  ).toBe('door');
-  await page.mouse.click(p.x, p.y);
+  await clickDoorPanel(page, 8, 0.55, 4.5);
   await expect.poll(
     () => page.evaluate(() => window.__game.doors.find((d) => d.key === 'h:8,5')?.open),
     { timeout: 60_000 },

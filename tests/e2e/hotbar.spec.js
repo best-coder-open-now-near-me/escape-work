@@ -66,7 +66,10 @@ test('the kit is in canonical order, on one row, with room to grow', async ({ pa
   // Slots are numbered from 1 within the row, which is what the keys address
   // ('0' answers for the tenth), and the tooltip is where the name lives.
   expect(all[0].text).toMatch(/^1/);
-  expect(all[0].title).toMatch(/^Passive-Aggressive Email · 2AP/);
+  // The unlock card and hotbar share actionTooltip(), so hold the browser
+  // surface to that full description rather than the retired label-only title.
+  expect(all[0].title).toMatch(/^Passive-Aggressive Email - 2 AP\nYour basic swing\./);
+  expect(all[0].title).toMatch(/Damage 3-5/);
   expect(all[9].text).toMatch(/^0—$/);
   expect(all[9].title).toMatch(/Empty slot/);
 

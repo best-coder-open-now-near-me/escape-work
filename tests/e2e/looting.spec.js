@@ -2,14 +2,14 @@
 // pockets panel, dropping to the floor, Alt-label pickup, consumables - and
 // a full fight so a body can be looted.
 import { test, expect } from '@playwright/test';
-import { bootAndPick, clickWorld, enterCombat } from './helpers.js';
+import { bootAndPick, clickWorld, enterCombat, clickDoorPanel } from './helpers.js';
 
 test('desk rummage, drop, Alt pickup, and consumable use', async ({ page }) => {
   test.setTimeout(300_000);
   await bootAndPick(page);
 
   // The desk at (8,2) sits in a doored cubicle - open the door on the way.
-  expect(await clickWorld(page, 8, 4.58)).toBe(true);
+  await clickDoorPanel(page, 8, 0.55, 4.5);
   await expect.poll(
     () => page.evaluate(() => window.__game.doors.find((d) => d.key === 'h:8,5')?.open),
     { timeout: 60_000 },

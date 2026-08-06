@@ -1,3 +1,5 @@
+import { layoutActionDock } from './chrome.js';
+
 // The passive readouts: things the game SAYS, with nothing to click. The
 // narrator box, the focus banner naming whatever the cursor is over, and the
 // loot toast. Their CONTENT is pointer-events:none so narration never swallows
@@ -123,6 +125,10 @@ function ensureNarrator() {
   advanced.appendChild(controls);
   narratorEl.append(narratorListEl, advanced);
   document.body.appendChild(narratorEl);
+  // The narrator and action dock share the bottom edge. Its content-driven
+  // width is only measurable after insertion, so give the dock its final
+  // available strip now rather than waiting for a browser resize.
+  layoutActionDock();
   return narratorEl;
 }
 

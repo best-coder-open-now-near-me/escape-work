@@ -164,6 +164,29 @@ export async function combatOrWalkDone(page, capMs) {
 export const onCanvas = (page, p) => page.evaluate(
   ([x, y]) => document.elementFromPoint(x, y)?.id === 'app', [p.x, p.y]);
 
+// Resolve a door through the same visible-mesh pick the player uses. Ground
+// and threshold coordinates are deliberately not accepted: a doorway remains
+// ordinary walkable floor, with no invisible interaction target around it.
+export async function hoverDoorPanel(page, x, y, z, timeout = 20_000) {
+  let p = null;
+  await expect.poll(async () => {
+    p = await page.evaluate(
+      ([wx, wy, wz]) => window.__game.project3(wx, wy, wz),
+      [x, y, z],
+    );
+    if (!onScreen(p) || !(await onCanvas(page, p))) return 'off-canvas';
+    await page.mouse.move(p.x, p.y);
+    return page.evaluate(() => window.__game.hoverKind);
+  }, { timeout, intervals: [200] }).toBe('door');
+  return p;
+}
+
+export async function clickDoorPanel(page, x, y, z, timeout = 20_000) {
+  const p = await hoverDoorPanel(page, x, y, z, timeout);
+  await page.mouse.click(p.x, p.y);
+  return p;
+}
+
 // Click live enemies until a fight starts. Two things make a naive round-robin
 // flaky: some coworkers spawn SEALED behind walls + a closed door (no walk-up
 // route ever exists - clicking them silently does nothing and wastes the

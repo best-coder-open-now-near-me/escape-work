@@ -1,7 +1,7 @@
 // Equipment verbs (EQUIPMENT_PLAN M2): equip a weapon from the pockets into
 // its slot and stow it back, driven through the real inventory-panel DOM.
 import { test, expect } from '@playwright/test';
-import { bootAndPick } from './helpers.js';
+import { bootAndPick, withWorldStill } from './helpers.js';
 
 test('equip a weapon from the pockets, then stow it back', async ({ page }) => {
   test.setTimeout(300_000);
@@ -107,32 +107,34 @@ test('the shoes slot equips footwear', async ({ page }) => {
 test('the Send button refuses a full recipient, then hands over after space opens', async ({ page }) => {
   test.setTimeout(300_000);
   await bootAndPick(page, 'office-drone');
-  // Alone, there is nobody to hand anything to - so no button at all.
-  await page.evaluate(() => { window.__god.player.inventory = ['cold-coffee']; });
-  await page.keyboard.press('i');
-  await expect(page.locator('#inventory-panel')).toBeVisible();
-  await expect(page.locator('#inv-row-0')).toBeVisible();
-  expect(await page.locator('#inv-send-0').count()).toBe(0);
+  await withWorldStill(page, async () => {
+    // Alone, there is nobody to hand anything to - so no button at all.
+    await page.evaluate(() => { window.__god.player.inventory = ['cold-coffee']; });
+    await page.keyboard.press('i');
+    await expect(page.locator('#inventory-panel')).toBeVisible();
+    await expect(page.locator('#inv-row-0')).toBeVisible();
+    expect(await page.locator('#inv-send-0').count()).toBe(0);
 
-  // Recruit the intern and fill his bag past any legitimate cap. A refused
-  // hand-off must be atomic: the coffee remains with its sender.
-  expect(await page.evaluate(() => window.__god.recruit('it-support'))).toBe(true);
-  await page.evaluate(() => {
-    const recipient = window.__god.party.members[1].sheet;
-    recipient.inventory = new Array(100).fill('paper-wad');
-    window.__god.player.inventory = ['cold-coffee'];
-    window.__god.refreshHud();
+    // Recruit the intern and fill his bag past any legitimate cap. A refused
+    // hand-off must be atomic: the coffee remains with its sender.
+    expect(await page.evaluate(() => window.__god.recruit('it-support'))).toBe(true);
+    await page.evaluate(() => {
+      const recipient = window.__god.party.members[1].sheet;
+      recipient.inventory = new Array(100).fill('paper-wad');
+      window.__god.player.inventory = ['cold-coffee'];
+      window.__god.refreshHud();
+    });
+    await page.click('#inv-send-0');
+    await page.click('#context-menu >> text=Give to');
+    expect(await page.evaluate(() => window.__god.player.inventory)).toEqual(['cold-coffee']);
+    expect(await page.evaluate(() => window.__god.party.members[1].sheet.inventory.includes('cold-coffee'))).toBe(false);
+    expect(await page.evaluate(() => window.__game.narration.at(-1))).toMatch(/pockets are full/i);
+
+    // Drain the recipient below capacity and retry through the same UI.
+    await page.evaluate(() => { window.__god.party.members[1].sheet.inventory = []; });
+    await page.click('#inv-send-0');
+    await page.click('#context-menu >> text=Give to');
+    expect(await page.evaluate(() => window.__god.player.inventory)).toEqual([]);
+    expect(await page.evaluate(() => window.__god.party.members[1].sheet.inventory)).toEqual(['cold-coffee']);
   });
-  await page.click('#inv-send-0');
-  await page.click('#context-menu >> text=Give to');
-  expect(await page.evaluate(() => window.__god.player.inventory)).toEqual(['cold-coffee']);
-  expect(await page.evaluate(() => window.__god.party.members[1].sheet.inventory.includes('cold-coffee'))).toBe(false);
-  expect(await page.evaluate(() => window.__game.narration.at(-1))).toMatch(/pockets are full/i);
-
-  // Drain the recipient below capacity and retry through the same UI.
-  await page.evaluate(() => { window.__god.party.members[1].sheet.inventory = []; });
-  await page.click('#inv-send-0');
-  await page.click('#context-menu >> text=Give to');
-  expect(await page.evaluate(() => window.__god.player.inventory)).toEqual([]);
-  expect(await page.evaluate(() => window.__god.party.members[1].sheet.inventory)).toEqual(['cold-coffee']);
 });
