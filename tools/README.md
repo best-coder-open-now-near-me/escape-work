@@ -34,6 +34,22 @@ blender -b --factory-startup -noaudio --python tools/fbx-to-glb.py -- \
 Flags: `--only <substring>` converts a single model; `--no-ground` keeps the
 authored origin instead of re-basing the model at y=0.
 
+For licensed packs that must stay outside this public repository, use a
+checked-in source-relative selection manifest. `tools/synty-assets.json`
+defines the first office waves while `assets/Synty/` and
+`assets/licensed/` remain ignored:
+
+```sh
+blender -b --factory-startup -noaudio --python tools/fbx-to-glb.py -- \
+    --manifest tools/synty-assets.json \
+    --wave office-core \
+    --report tools/reports/synty-office-core.json
+```
+
+`--src` and `--out` override a manifest's roots for a licensed private CI
+workspace. The newer Synty packs use `_Albedo_Map` GUID references instead of
+the older pack's single `_MainTex` atlas; `unity_materials.py` resolves both.
+
 ### Why it reads the Unity metadata
 
 A Unity package's `.fbx` files are only half the asset - scale and materials

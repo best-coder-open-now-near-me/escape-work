@@ -4,6 +4,13 @@
 #   blender -b --factory-startup -noaudio --python tools/fbx-to-glb.py -- \
 #       --src <unity-package-dir> --out assets/office
 #
+# A licensed pack kept outside version control can instead use the checked-in
+# selection manifest (paths are relative to the current working directory):
+#
+#   blender -b --factory-startup -noaudio --python tools/fbx-to-glb.py -- \
+#       --manifest tools/synty-assets.json --wave office-core \
+#       --report tools/reports/synty-office-core.json
+#
 # PlayCanvas has no runtime FBX loader - the `container` asset type is
 # glTF/GLB only, and FBX->glTF conversion normally happens in the PlayCanvas
 # Editor, which this project doesn't use ("No PlayCanvas cloud involved" -
@@ -25,12 +32,18 @@
 #
 # Blender's FBX importer only sees the .fbx, so this script reads the sidecars
 # itself and rebuilds each material before exporting.
-import bpy
 import sys
 import os
 import re
 import json
 import argparse
+
+try:
+    import bpy
+except ModuleNotFoundError:  # Pure manifest/material tests run without Blender.
+    bpy = None
+
+from unity_materials import read_materials
 
 # Mirrors SIGHT_BLOCK_HEIGHT in src/data/tiles.js. Duplicated rather than
 # imported because this script runs inside Blender's Python, which has no view
@@ -61,36 +74,6 @@ def read_global_scale(fbx_path):
     return float(m.group(1)) if m else 1.0
 
 
-def read_materials(pack_dir):
-    """Build {material name -> {'color': (r,g,b,a), 'atlas': bool}} from .mat files.
-
-    Unity serialises _Color in LINEAR space, which is exactly what glTF's
-    baseColorFactor wants, so the values pass straight through with no
-    sRGB conversion. `atlas` is true when _MainTex actually points at a
-    texture (m_Texture fileID 2800000); an empty _MainTex is fileID 0.
-    """
-    mats = {}
-    for root, _dirs, files in os.walk(pack_dir):
-        for fn in files:
-            if not fn.endswith('.mat'):
-                continue
-            path = os.path.join(root, fn)
-            text = open(path, encoding='utf8', errors='replace').read()
-            color = (1.0, 1.0, 1.0, 1.0)
-            m = re.search(
-                r'-\s+_Color:\s*\{r:\s*([\d.eE+-]+),\s*g:\s*([\d.eE+-]+),'
-                r'\s*b:\s*([\d.eE+-]+),\s*a:\s*([\d.eE+-]+)\}', text)
-            if m:
-                color = tuple(float(v) for v in m.groups())
-            atlas = bool(re.search(r'_MainTex:\s*\n\s*m_Texture:\s*\{fileID:\s*2800000', text))
-            # Keyed lower-case: the FBX material names and the .mat filenames
-            # disagree on case (meshes ask for `wood`, the library ships
-            # `Wood.mat`), and an exact match silently drops those slots back
-            # to the FBX's own default colour.
-            mats[os.path.splitext(fn)[0].lower()] = {'color': color, 'atlas': atlas}
-    return mats
-
-
 def find_atlas(pack_dir):
     """The pack's shared texture atlas. Props/ and Characters/ ship byte-identical
     copies of texture_01.png, so the first one found serves both."""
@@ -118,9 +101,11 @@ def build_material(name, spec, atlas_path, cache):
     bsdf.inputs['Base Color'].default_value = (r, g, b, 1.0)
     bsdf.inputs['Roughness'].default_value = 0.9
     bsdf.inputs['Metallic'].default_value = 0.0
-    if spec['atlas'] and atlas_path:
-        img = bpy.data.images.get('atlas') or bpy.data.images.load(atlas_path)
-        img.name = 'atlas'
+    texture_path = spec.get('texture') or (atlas_path if spec.get('uses_texture') else None)
+    if texture_path:
+        image_name = os.path.basename(texture_path)
+        img = bpy.data.images.get(image_name) or bpy.data.images.load(texture_path)
+        img.name = image_name
         tex = mat.node_tree.nodes.new('ShaderNodeTexImage')
         tex.image = img
         # The atlas is a palette: flat colour patches packed edge to edge, so
@@ -145,9 +130,41 @@ def clean_stem(stem):
     return re.sub(r'[^A-Za-z0-9_-]+', '-', stem).strip('-')
 
 
+def manifest_jobs(path, selected_wave=None, src_override=None, out_override=None):
+    """Resolve a checked-in selection manifest into concrete conversion jobs.
+
+    Source and output roots intentionally remain overridable: licensed assets
+    may live outside the repository in CI or on another developer's machine.
+    """
+    with open(path, encoding='utf8') as stream:
+        manifest = json.load(stream)
+    src_root = os.path.abspath(src_override or manifest['sourceRoot'])
+    out_root = os.path.abspath(out_override or manifest['outputRoot'])
+    jobs = []
+    wave_ids = {wave['id'] for wave in manifest.get('waves', [])}
+    if selected_wave and selected_wave not in wave_ids:
+        raise ValueError(
+            f'Unknown wave {selected_wave!r}; choose one of: {", ".join(sorted(wave_ids))}'
+        )
+    for wave in manifest.get('waves', []):
+        if selected_wave and wave['id'] != selected_wave:
+            continue
+        for asset in wave.get('assets', []):
+            jobs.append({
+                'id': asset['id'],
+                'wave': wave['id'],
+                'src': os.path.join(src_root, *asset['source'].split('/')),
+                'out': os.path.join(out_root, *asset['output'].split('/')),
+                'ground': asset.get('ground', True),
+            })
+    return src_root, out_root, jobs
+
+
 # --- conversion ---------------------------------------------------------------
 
 def convert(fbx_path, out_path, mats, atlas_path, cache, ground=True):
+    if bpy is None:
+        raise RuntimeError('FBX conversion must run under Blender')
     import mathutils
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scale = read_global_scale(fbx_path)
@@ -249,53 +266,91 @@ def convert(fbx_path, out_path, mats, atlas_path, cache, ground=True):
 def main():
     argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
     ap = argparse.ArgumentParser()
-    ap.add_argument('--src', required=True, help='Unity package directory to walk')
-    ap.add_argument('--out', required=True, help='output directory for .glb files')
+    ap.add_argument('--src', default=None,
+                    help='Unity package directory to walk (or override manifest sourceRoot)')
+    ap.add_argument('--out', default=None,
+                    help='output directory for .glb files (or override manifest outputRoot)')
+    ap.add_argument('--manifest', default=None,
+                    help='selection manifest; converts only its named assets')
+    ap.add_argument('--wave', default=None,
+                    help='manifest wave id to convert (default: every wave)')
     ap.add_argument('--only', default=None, help='substring filter on the .fbx path')
     ap.add_argument('--report', default=None, help='write a JSON size report here')
     ap.add_argument('--no-ground', action='store_true',
                     help='keep the authored origin instead of basing the model at y=0')
     args = ap.parse_args(argv)
 
-    mats = read_materials(args.src)
-    atlas = find_atlas(args.src)
+    if args.manifest:
+        src_root, out_root, jobs = manifest_jobs(
+            args.manifest, args.wave, args.src, args.out
+        )
+    else:
+        if not args.src or not args.out:
+            ap.error('--src and --out are required without --manifest')
+        src_root = os.path.abspath(args.src)
+        out_root = os.path.abspath(args.out)
+        jobs = None
+
+    mats = read_materials(src_root)
+    atlas = find_atlas(src_root)
     print(f'[fbx-to-glb] {len(mats)} materials, atlas={atlas}')
 
     cache = {}
     report = {}
     print(f'[fbx-to-glb] sight-block threshold is {SIGHT_BLOCK_HEIGHT} '
           f'(src/data/tiles.js) - a prop at or above it stops thrown attacks')
-    for root, _dirs, files in os.walk(args.src):
-        for fn in sorted(files):
-            if not fn.lower().endswith('.fbx'):
-                continue
-            src = os.path.join(root, fn)
-            if args.only and args.only not in src:
-                continue
-            stem = clean_stem(os.path.splitext(fn)[0])
-            out = os.path.join(args.out, stem + '.glb')
-            cache.clear()  # materials are per-file; the .blend is reset each time
-            info = convert(src, out, mats, atlas, cache, ground=not args.no_ground)
-            if info is None:
-                print(f'[fbx-to-glb] SKIP (no mesh) {fn}')
-                continue
-            # The `height` a tile type declares is not decoration: at or above
-            # SIGHT_BLOCK_HEIGHT the prop stops thrown attacks and blocks the
-            # line a fight is decided on (data/tiles.js blocksSight). That
-            # threshold was invisible at conversion time, so whether a new
-            # bookcase was cover or a wall was discovered in play. The script
-            # already measures the model; say what the measurement implies.
-            info['blocks_sight'] = info['height'] >= SIGHT_BLOCK_HEIGHT
-            report[stem] = info
-            sight = 'BLOCKS SIGHT' if info['blocks_sight'] else 'shoot over'
-            print(f'[fbx-to-glb] OK {stem:40s} '
-                  f'W={info["width"]:.3f} D={info["depth"]:.3f} H={info["height"]:.3f} '
-                  f'tris={info["tris"]:6d}  -> {sight}')
+    if jobs is None:
+        jobs = []
+        for root, _dirs, files in os.walk(src_root):
+            for fn in sorted(files):
+                if not fn.lower().endswith('.fbx'):
+                    continue
+                src = os.path.join(root, fn)
+                if args.only and args.only not in src:
+                    continue
+                stem = clean_stem(os.path.splitext(fn)[0])
+                jobs.append({
+                    'id': stem,
+                    'wave': None,
+                    'src': src,
+                    'out': os.path.join(out_root, stem + '.glb'),
+                    'ground': not args.no_ground,
+                })
+
+    for job in jobs:
+        src = job['src']
+        out = job['out']
+        stem = job['id']
+        if not os.path.isfile(src):
+            raise FileNotFoundError(f'Manifest source does not exist: {src}')
+        cache.clear()  # materials are per-file; the .blend is reset each time
+        info = convert(
+            src, out, mats, atlas, cache,
+            ground=job['ground'] and not args.no_ground,
+        )
+        if info is None:
+            print(f'[fbx-to-glb] SKIP (no mesh) {os.path.basename(src)}')
+            continue
+        # The `height` a tile type declares is not decoration: at or above
+        # SIGHT_BLOCK_HEIGHT the prop stops thrown attacks and blocks the
+        # line a fight is decided on (data/tiles.js blocksSight). That
+        # threshold was invisible at conversion time, so whether a new
+        # bookcase was cover or a wall was discovered in play. The script
+        # already measures the model; say what the measurement implies.
+        info['blocks_sight'] = info['height'] >= SIGHT_BLOCK_HEIGHT
+        report[stem] = info
+        sight = 'BLOCKS SIGHT' if info['blocks_sight'] else 'shoot over'
+        print(f'[fbx-to-glb] OK {stem:40s} '
+              f'W={info["width"]:.3f} D={info["depth"]:.3f} H={info["height"]:.3f} '
+              f'tris={info["tris"]:6d}  -> {sight}')
 
     if args.report:
+        report_dir = os.path.dirname(os.path.abspath(args.report))
+        os.makedirs(report_dir, exist_ok=True)
         with open(args.report, 'w') as fh:
             json.dump(report, fh, indent=2, sort_keys=True)
         print(f'[fbx-to-glb] report -> {args.report}')
 
 
-main()
+if __name__ == '__main__':
+    main()

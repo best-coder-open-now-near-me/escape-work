@@ -1,0 +1,110 @@
+{
+  "schema": 1,
+  "sourceRoot": "assets/Synty",
+  "outputRoot": "assets/licensed/synty",
+  "licenseBoundary": {
+    "commitSource": false,
+    "commitConvertedModels": false,
+    "note": "Unity Asset Store content is injected only in licensed local or private build environments; this public repository stores tooling and source-relative manifests only."
+  },
+  "waves": [
+    {
+      "id": "office-core",
+      "pack": "PolygonShops",
+      "goal": "First-pass floor props that can replace or enrich the existing office vocabulary without prefab composition.",
+      "assets": [
+        {
+          "id": "desk",
+          "source": "PolygonShops/Models/SM_Prop_Shop_Desk_01.fbx",
+          "output": "office/desk.glb",
+          "role": "workstation furniture",
+          "ground": true
+        },
+        {
+          "id": "chair",
+          "source": "PolygonShops/Models/SM_Prop_Shop_Chair_01.fbx",
+          "output": "office/chair.glb",
+          "role": "workstation furniture",
+          "ground": true
+        },
+        {
+          "id": "printer",
+          "source": "PolygonShops/Models/SM_Prop_Computer_Printer_01.fbx",
+          "output": "office/printer.glb",
+          "role": "printer prop",
+          "ground": true
+        },
+        {
+          "id": "drinks-machine",
+          "source": "PolygonShops/Models/SM_Prop_Kitchen_Drinks_Machine_01.fbx",
+          "output": "office/drinks-machine.glb",
+          "role": "break-room machine",
+          "ground": true
+        },
+        {
+          "id": "coffee-machine",
+          "source": "PolygonShops/Models/SM_Prop_Cafe_Machine_01.fbx",
+          "output": "office/coffee-machine.glb",
+          "role": "break-room machine",
+          "ground": true
+        },
+        {
+          "id": "waste-bin",
+          "source": "PolygonShops/Models/SM_Prop_Rubbish_Bin_01.fbx",
+          "output": "office/waste-bin.glb",
+          "role": "office clutter",
+          "ground": true
+        },
+        {
+          "id": "cardboard-box",
+          "source": "PolygonShops/Models/SM_Prop_Cardboard_Box_01.fbx",
+          "output": "office/cardboard-box.glb",
+          "role": "mail-room storage",
+          "ground": true
+        },
+        {
+          "id": "plant",
+          "source": "PolygonShops/Models/SM_Env_Plant_01.fbx",
+          "output": "office/plant.glb",
+          "role": "office decoration",
+          "ground": true
+        },
+        {
+          "id": "paper-pile",
+          "source": "PolygonShops/Models/SM_Props_Papers_01.fbx",
+          "output": "office/paper-pile.glb",
+          "role": "mail-room and paper-surface dressing",
+          "ground": true
+        },
+        {
+          "id": "door",
+          "source": "PolygonShops/Models/SM_Bld_Door_01.fbx",
+          "output": "office/door.glb",
+          "role": "door visual candidate",
+          "ground": true
+        }
+      ]
+    },
+    {
+      "id": "workstation-clutter",
+      "pack": "PolygonShops",
+      "goal": "Second-pass pieces that need composition or authored offsets instead of being placed directly as floor tiles.",
+      "assets": [
+        {
+          "id": "monitor",
+          "source": "PolygonShops/Models/SM_Prop_Computer_Monitor_01.fbx",
+          "output": "office/monitor.glb",
+          "role": "desk attachment",
+          "ground": false
+        },
+        {
+          "id": "computer-tower",
+          "source": "PolygonShops/Models/SM_Prop_Computer_Tower_01.fbx",
+          "output": "office/computer-tower.glb",
+          "role": "desk attachment",
+          "ground": false
+        }
+      ]
+    }
+  ]
+}

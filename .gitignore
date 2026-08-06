@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+__pycache__/
+*.pyc
 
 # Build outputs (CI runs `npm run build` into build/web)
 build/
@@ -21,3 +23,11 @@ Thumbs.db
 
 # Container-local playwright shim (browser build differs from the pin)
 pw.local.config.js
+
+# Licensed Unity Asset Store source and standalone conversions. The public
+# repository may carry import tooling/manifests, but not redistributable FBX,
+# textures, Unity metadata, or converted model files. A licensed local or CI
+# environment injects these into the build separately.
+assets/Synty/
+assets/licensed/
+tools/reports/synty-*.json
