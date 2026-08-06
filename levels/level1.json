@@ -24,7 +24,9 @@
     "k": "break-floor",
     "i": "it-floor",
     "!": "rug",
-    "9": "plant-tiny"
+    "9": "plant-tiny",
+    "F": "fridge",
+    "f": "filing-cabinet"
   },
   "actors": {
     "@": "player",
@@ -44,12 +46,12 @@
     "..Pk$kk..........kkkkkB.",
     ".kkkgkk.....H....kkkk%k.",
     ".kgkkkk..........kkk%%k.",
-    ".kCkkkk..........kkgkkT.",
+    ".kFkkkk..........kkgkkT.",
     ".kLkkkk.................",
     ".iiiii.......*~~~.......",
     ".iiRppM.#......~........",
     ".iTipi..................",
-    ".iiiii...BB.S.......P.>.",
+    ".iiiii...Bf.S.......P.>.",
     "........................"
   ],
   "doors": [

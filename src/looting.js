@@ -440,9 +440,10 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
         const rolled = def.loot ? containerLoot.get(x + ',' + z) : null;
         if (def.loot && !(rolled && !rolled.length)) {
           containers.push({
-            // Keyed by loot table, so a new table needs an entry here or its
-            // Alt label renders with no icon at all.
-            icon: { trash: '🗑️', printer: '🖨️', desk: '🗄️', 'filing-cabinet': '📁' }[def.loot],
+            // The container owns its face. Two props may draw the same loot
+            // table without being the same object (a fridge and coffee
+            // machine both source break-room supplies).
+            icon: def.lootIcon,
             text: def.label,
             world: { x, y: def.height + 0.8, z },
             onClick: () => approachAndDo(cx, cz, () => lootContainer(cx, cz)),

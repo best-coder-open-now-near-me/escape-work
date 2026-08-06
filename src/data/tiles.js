@@ -239,6 +239,7 @@ export const TILE_TYPES = {
     ignitable: true,
     label: 'Trash Can',
     loot: 'trash',
+    lootIcon: '🗑️',
   },
   printer: {
     char: 'R',
@@ -249,6 +250,7 @@ export const TILE_TYPES = {
     explosive: true,
     label: 'Printer',
     loot: 'printer',
+    lootIcon: '🖨️',
   },
 
   // Furniture props: solid (they block movement and pathfinding) and rendered
@@ -262,6 +264,7 @@ export const TILE_TYPES = {
     scale: 0.5,
     label: 'Desk',
     loot: 'desk',
+    lootIcon: '🗄️',
   },
   chair: {
     char: 'c',
@@ -510,12 +513,14 @@ export const TILE_TYPES = {
     // The break room is where a floor's healing lives now that the class bars
     // stopped carrying it (POWERS_PLAN M9).
     loot: 'break-room',
+    lootIcon: '🧊',
   },
   'mini-fridge': {
     char: '0', category: 'breakroom', solid: true,
     height: 0.6, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/kitchenFridgeSmall', label: 'Mini Fridge',
     loot: 'break-room',
+    lootIcon: '🧊',
   },
   'microwave': {
     char: '1', category: 'breakroom', solid: true,
@@ -527,6 +532,7 @@ export const TILE_TYPES = {
     height: 0.3, scale: 1.0, color: [0.55, 0.5, 0.45],
     model: 'furniture/kit/kitchenCoffeeMachine', label: 'Coffee Machine',
     loot: 'break-room',
+    lootIcon: '☕',
   },
   'kitchen-sink': {
     char: '3', category: 'breakroom', solid: true,
@@ -723,6 +729,7 @@ export const TILE_TYPES = {
     height: 0.62, scale: 0.5, color: [0.2, 0.42, 0.58],
     model: 'office/cabinets', label: 'Filing Cabinet',
     loot: 'filing-cabinet',
+    lootIcon: '📁',
   },
   'water-cooler': {
     char: '`', category: 'breakroom', solid: true,

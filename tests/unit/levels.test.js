@@ -28,6 +28,26 @@ import { SURFACES, ELECTRIFIED, FIRE } from '../../src/data/surfaces.js';
 const files = readdirSync('levels').filter((f) => f.endsWith('.json'));
 const load = (f) => JSON.parse(readFileSync(`levels/${f}`, 'utf8'));
 
+function campaignLootTables() {
+  const used = new Set();
+  const seen = new Set();
+  let id = FIRST_LEVEL;
+  while (id && LEVELS[id] && !seen.has(id)) {
+    seen.add(id);
+    const level = LEVELS[id];
+    const maps = level.map ? [level.map] : (level.layers || []).map((layer) => layer.map);
+    for (const map of maps) {
+      for (const ch of map.flatMap((row) => row.split(''))) {
+        const type = level.tiles?.[ch];
+        const table = TILE_TYPES[type]?.loot;
+        if (table) used.add(table);
+      }
+    }
+    id = level.next;
+  }
+  return used;
+}
+
 // B5: levels/dev/ was outside this file's reach purely by directory, so a
 // second dev level would have got no validation at all. They are not campaign
 // floors - no `next`, not on the chain, and the layered one has actors the flat
@@ -263,7 +283,10 @@ test('every registry cross-reference resolves', () => {
   }
   // Tile loot tables exist, and every table entry names a real item.
   for (const [id, def] of Object.entries(TILE_TYPES)) {
-    if (def.loot) assert.ok(LOOT_TABLES[def.loot], `tile "${id}" loot table "${def.loot}" exists`);
+    if (def.loot) {
+      assert.ok(LOOT_TABLES[def.loot], `tile "${id}" loot table "${def.loot}" exists`);
+      assert.ok(def.lootIcon, `lootable tile "${id}" owns an Alt-overlay icon`);
+    }
   }
   // Merchants (ECONOMY_PLAN.md). Anything that can open a shop names a real
   // one, and a shop only stocks things a merchant could actually price - an
@@ -296,7 +319,14 @@ test('every registry cross-reference resolves', () => {
   // it prices, it just never reaches a player. (This caught a `coin-return`
   // authored for a machine-shaking verb that was then deliberately not built.)
   const obtainable = new Set();
-  for (const entries of Object.values(LOOT_TABLES)) for (const e of entries) obtainable.add(e.item);
+  const reachableTables = campaignLootTables();
+  for (const table of Object.keys(LOOT_TABLES)) {
+    assert.ok(reachableTables.has(table),
+      `loot table "${table}" is never placed on the campaign chain`);
+  }
+  for (const table of reachableTables) {
+    for (const e of LOOT_TABLES[table]) obtainable.add(e.item);
+  }
   for (const def of Object.values(ENEMY_TYPES)) for (const e of def.loot || []) obtainable.add(e.item);
   for (const shop of Object.values(SHOPS)) for (const r of shop.stock || []) obtainable.add(r.item);
   for (const reg of [CLASSES, COMPANIONS]) {
