@@ -3,6 +3,7 @@
 // view-model and callbacks, and it renders and reports clicks. None of them
 // knows a rule.
 import { EQUIP_SLOTS, pendingPoints } from '../stats.js';
+import { ATTRIBUTES } from '../data/attributes.js';
 import { PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, registerHudButton, layoutHudRail, railHooks, esc,
 } from './chrome.js';
 
@@ -229,8 +230,6 @@ export function createInventoryPanel(ITEMS, capOf, { onUse, onDrop, onExamine, o
   };
 }
 
-const CHARSHEET_ATTRS = [['grit', 'Grit'], ['hustle', 'Hustle'], ['savvy', 'Savvy'], ['composure', 'Composure']];
-
 export function createCharacterSheet({ onLevelUp } = {}) {
   const host = document.createElement('div');
   host.id = 'character-sheet';
@@ -249,9 +248,9 @@ export function createCharacterSheet({ onLevelUp } = {}) {
   function render(vm) {
     const pending = pendingPoints(vm);
     const xpPct = Math.max(0, Math.min(100, Math.round((vm.xp / vm.xpNext) * 100)));
-    const attrRows = CHARSHEET_ATTRS.map(([k, l]) =>
+    const attrRows = ATTRIBUTES.map(({ key, label: attrLabel }) =>
       `<div style="display:flex; justify-content:space-between; padding:1px 0;">
-        <span style="opacity:.85;">${l}</span><b id="charsheet-attr-${k}">${vm.attr[k] ?? 0}</b></div>`).join('');
+        <span style="opacity:.85;">${attrLabel}</span><b id="charsheet-attr-${key}">${vm.attr[key] ?? 0}</b></div>`).join('');
     const perks = vm.perks.length
       ? vm.perks.map((n) => `<div style="opacity:.82;">• ${n}</div>`).join('')
       : '<div style="opacity:.45;">None yet</div>';

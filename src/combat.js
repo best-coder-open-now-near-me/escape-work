@@ -70,6 +70,7 @@ import {
 import { createGroundMarks } from './ground-marks.js';
 import { NEIGHBOR_DIRS } from './directions.js';
 import { mulberry32Uint } from './rng.js';
+import { isLivingMember } from './member-rules.js';
 
 const pc = globalThis.window?.pc;
 // The narration when a landed hit applies a status: an explicit per-attack/
@@ -107,6 +108,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     return { sheet: rec.sheet, actor: rec.actor, ap: rec.sheet.maxAp, usesLeft, ...extra };
   };
   const members = party.members.map((m) => asMember(m));
+  const livingMembers = () => members.filter(isLivingMember);
   // Summons still standing from an EARLIER fight (they outlive it now - main.js
   // keeps them until their assignment runs out) walk back in as the temporary
   // members they already were: same sheet, same body, whatever turns they have
@@ -116,7 +118,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     // across fights: counted as summonedBy: null, two employees who survived
     // the last fight were invisible to the cap check and their summoner could
     // post a full new batch on top of them.
-    if (s.sheet.hp > 0 && s.actor) {
+    if (isLivingMember(s)) {
       members.push(asMember(s, { isSummon: true, summonedBy: s.summonedBy || null }));
     }
   }
@@ -131,7 +133,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // a summon falling never is, and a lone summon can't stave off defeat.
   // Every damage roll in this fight, bound to the injected rng.
   const rand = (lo, hi) => rollInt(rng, lo, hi);
-  const livingMembers = () => members.filter((m) => m.sheet.hp > 0 && m.actor);
   // Hoisted to the TOP of this closure on purpose. `canEngage` reads `canReach`
   // and `pickTarget` runs during the startCombat surprise sweep below - before
   // any turn exists - so anything the sweep can reach has to be initialised
@@ -277,7 +278,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // is still going - the run has ended, you are just driving somebody else for
   // another turn or two.
   const livingParty = () =>
-    members.filter((m) => m.sheet.hp > 0 && m.actor && !m.isSummon && !m.isCharmed);
+    livingMembers().filter((m) => !m.isSummon && !m.isCharmed);
   // The AI enemies hunt the whole player side - members and summons alike, all
   // members now. A target wraps { actor, member }; combat reads `member` to take
   // the hit on its sheet (deflect, gum, the downed rules).
@@ -508,7 +509,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // both sides mutate the one object and setters would be ceremony.
   const {
     guardStandingAt, nameOf, carrierOf, breakCrouch, coverCellFor,
-    crouchFacesOf, crouchStateOf, shotOutcome, shotOutcomeFrom, crouchLabel,
+    crouchFacesOf, crouchStateOf, shotOutcome, shotOutcomeFrom, crouchLabel, coverNames,
   } = createCrouch({
     crouched,
     watching,
@@ -599,7 +600,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   // AP used to stand in for it on this side only.
   const unitSlot = (u) => ({ unit: u, team: 'enemy', initMod: u.combat.hustle || 0 });
   const slotActor = (s) => (s.member ? s.member.actor : s.unit);
-  const slotAlive = (s) => (s.member ? s.member.sheet.hp > 0 && !!s.member.actor : !!s.unit.alive);
+  const slotAlive = (s) => (s.member ? isLivingMember(s.member) : !!s.unit.alive);
   const slotName = (s) => (s.member ? s.member.sheet.name : s.unit.def.name);
   const slotCarrier = (s) => (s.member ? s.member.sheet : s.unit);
   // The traversal, the round wrap and the fixed sequence a turn opens with live
@@ -1015,6 +1016,9 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
       ap: a.ap,
       uses: a.uses ? active.usesLeft[id] : null,
       ammoCost: a.ammoCost ? ammoCostOf(id) : 0,
+      ammoRemaining: active.sheet.paper,
+      resourceAvailable: (!a.uses || active.usesLeft[id] > 0)
+        && (!a.ammoCost || active.sheet.paper >= ammoCostOf(id)),
       affordable,
       // WHY it can't be pressed, in the slot's own tooltip. A dimmed button
       // that doesn't say what it wants teaches nothing, and out of combat the
@@ -1405,6 +1409,7 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
   } = createCoverDenialPlans({
     world,
     members,
+    livingMembers: (...a) => livingMembers(...a),
     toppleplanAt,
     aiToppleplanFor,
     aiEdgeTopplePlanShared,
@@ -1480,25 +1485,6 @@ export function startCombat({ app, party, engaged, world, fx, callbacks, opening
     log(`${nameOf(unit)} tucks in behind ${coverNames(b.x, b.z, faces)}.`);
     return true;
   }
-  // What is covering you, in words: "the partition", "the filing cabinet and
-  // Dave". Named from the faces rather than a mode, so a corner reads as the
-  // two things it actually is instead of a singular "the partition" that was
-  // wrong the moment there was more than one.
-  function coverNames(x, z, faces) {
-    const seen = [];
-    for (const [ox, oz] of faces) {
-      const body = unitStandingAt(x + ox, z + oz);
-      if (body) { if (!seen.includes(nameOf(body))) seen.push(nameOf(body)); continue; }
-      const d = world.tileDefAt(x + ox, z + oz);
-      const label = d && (d.cover || d.solid)
-        ? `the ${(d.label || 'cover').toLowerCase()}` : 'the partition';
-      if (!seen.includes(label)) seen.push(label);
-    }
-    if (!seen.length) return 'cover';
-    if (seen.length === 1) return seen[0];
-    return `${seen.slice(0, -1).join(', ')} and ${seen[seen.length - 1]}`;
-  }
-
   // The player's verb: walk to the shield and crouch. Priced as "the walk,
   // plus 1 AP" (designer: distance cost + 1) - the walk is billed by the same
   // movement engine as every other step, the +1 is the action's own `ap`, and

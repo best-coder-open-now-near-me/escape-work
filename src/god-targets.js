@@ -1,5 +1,7 @@
 // View-models for the reflective god panel. They describe what each tab may
 // edit and which operations sit beside it; DOM construction stays in god.js.
+import { isLivingMember } from './member-rules.js';
+
 export function createGodTargets(api, { render, armPlace, rigInternals }) {
   function playerTargets() {
     const out = [];
@@ -19,7 +21,7 @@ export function createGodTargets(api, { render, armPlace, rigInternals }) {
     party.members.forEach((member, i) => {
       const active = i === party.active;
       const actions = [];
-      if (!active && member.sheet.hp > 0 && member.actor) {
+      if (!active && isLivingMember(member)) {
         actions.push({ label: 'Control', run: () => { api.switchTo(i); render(); } });
       }
       if (member.sheet.hp <= 0) {

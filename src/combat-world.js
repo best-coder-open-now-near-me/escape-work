@@ -19,6 +19,7 @@
 // somebody had when combat opened would answer every question about the wrong
 // character.
 import { createWorldEdits } from './world-edits.js';
+import { livingMemberAt } from './member-rules.js';
 
 export function createCombatWorld(d) {
   const edits = createWorldEdits(d.grid, d.scene);
@@ -45,8 +46,9 @@ export function createCombatWorld(d) {
       const ms = walker?.sheet
         || (d.combat?.actingActor === self ? d.combat.actingSheet : null)
         || d.sheet;
-      const blocked = (x, z) => [...d.party.members, ...d.summons].some((m) =>
-        m.actor && m.actor !== self && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z);
+      const blocked = (x, z) => !!livingMemberAt(
+        [...d.party.members, ...d.summons], x, z, walker,
+      );
       const open = (x, z) => d.isWalkable(x, z) && !blocked(x, z);
       return d.findPath(open, sx, sz, tx, tz, d.hazardCostFor(ms), d.grid.stepOpen);
   },
@@ -75,8 +77,9 @@ export function createCombatWorld(d) {
       const ms = walker?.sheet
         || (d.combat?.actingActor === actor ? d.combat.actingSheet : null)
         || d.sheet;
-      const blocked = (x, z) => [...d.party.members, ...d.summons].some((m) =>
-        m.actor && m.actor !== actor && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z);
+      const blocked = (x, z) => !!livingMemberAt(
+        [...d.party.members, ...d.summons], x, z, walker,
+      );
       return d.smoothFromBody(p, actor,
         (x, z) => !blocked(x, z) && d.effectiveSurfDamage(x, z, ms) <= 0);
   },

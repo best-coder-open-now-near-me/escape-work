@@ -169,9 +169,9 @@ export function createTacticalButton({ onToggle, isOn }) {
 // borrowing from. `unavailable` is why a slot can't act with no fight on
 // (Deflect Blame, a heal): it dims the slot and titles it with the reason, but
 // leaves it CLICKABLE - the host answers a press with that reason, and a listed
-// power you can ask about beats a power that isn't there. An unaffordable throw
-// (no paper) is the one thing actually disabled: that one is about to change on
-// its own the moment you pick up a sheet.
+// power you can ask about beats a power that isn't there. Resource exhaustion
+// is exposed through aria-disabled but remains mouse-addressable, so the slot
+// can explain itself and still be right-clicked for reassignment.
 // Slots per ROW. The bar holds one row at a time and pages through the rest,
 // which is what lets a kit grow - perks, a talent, a weapon swing, whatever the
 // player assigns - without the row growing until it spans the screen and the
@@ -191,8 +191,9 @@ export function createTacticalButton({ onToggle, isOn }) {
 export const HOTBAR_ROW_SLOTS = 10;
 
 // `slots` is the whole layout, in order, as view-models the host builds:
-//   { kind: 'action', id, label, icon, ap, ammoCost, unavailable }
-//   { kind: 'item',   id, label, icon, count }
+//   { kind: 'action', id, label, icon, ap, ammoCost, ammoRemaining,
+//     affordable, resourceAvailable, unavailable }
+//   { kind: 'item', id, label, icon, count, affordable, resourceAvailable }
 //   null                                   an empty slot, right-clickable
 // The bar shows HOTBAR_ROW_SLOTS of them at a time; `startRow` restores which
 // row was showing across a rebuild. onPress(i) is a left click on slot i (the
@@ -285,14 +286,13 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
   // the one slot you could not reassign. That also contradicted the bar's own
   // rule (see the note above the layout): an unusable slot stays clickable and
   // ANSWERS, because a power you can ask about beats a power that isn't there.
-  // The press handler already says "none left in your pockets" on its own.
+  // The view-model and press path share the same availability owner.
   const setInert = (b, inert) => {
     b.disabled = false;
     b.setAttribute('aria-disabled', inert ? 'true' : 'false');
   };
 
   let armed = null;
-  let sheet = null;
   function render() {
     const many = rowCount > 1;
     prev.style.display = many ? '' : 'none';
@@ -316,8 +316,9 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
         const count = slot.count ?? 0;
         face.textContent = slot.icon || '❔';
         countTag.textContent = count > 1 ? `×${count}` : '';
-        setInert(b, count <= 0);
-        b.style.opacity = count > 0 ? '1' : '.4';
+        setInert(b, !slot.resourceAvailable);
+        b.dataset.affordable = slot.affordable ? 'true' : 'false';
+        b.style.opacity = slot.affordable ? '1' : '.4';
         b.title = count > 0
           ? `${slot.label} ×${count} · from your pockets · right-click to reassign`
           : `${slot.label} · none left`;
@@ -329,18 +330,17 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
       // uses (combat supplies them); a throw counts the sheets it has to spend,
       // where an item counts itself.
       if (slot.uses != null) countTag.textContent = String(slot.uses);
-      else if (slot.ammoCost) countTag.textContent = String(sheet?.paper ?? 0);
-      const fed = !slot.ammoCost || (sheet?.paper ?? 0) >= slot.ammoCost;
+      else if (slot.ammoCost) countTag.textContent = String(slot.ammoRemaining ?? 0);
       // Armed, or awaiting its confirm click. Either way the slot stays live
       // however unaffordable it has become - that press is the way to lower it.
       const live = slot.live || (slot.id === armed ? 'armed' : null);
-      const usable = (fed && !slot.unavailable) || !!live;
+      const usable = slot.affordable || !!live;
       // `aria-disabled` stays exactly what it always meant: there is nothing
       // left to spend. It must NOT be made to track affordability, because an
       // unusable slot deliberately stays PRESSABLE and answers (see setInert),
       // and drivers treat aria-disabled as not-clickable - which would take
       // that away silently, including the right-click that reassigns it.
-      setInert(b, !fed);
+      setInert(b, !slot.resourceAvailable);
       // So "can this be pressed right now" gets its own signal instead: it
       // dims the slot and tells the suite what to wait on, without ever
       // blocking the click that would explain the refusal.
@@ -374,7 +374,6 @@ export function createHotbar(slots, { onPress, onAssign, startRow = 0 }) {
       refreshDockVisibility();
     },
     setArmed: (id) => { armed = id; render(); },
-    refresh: (s) => { sheet = s; render(); },
     flip,
     get armed() { return armed; },
     get row() { return row; },

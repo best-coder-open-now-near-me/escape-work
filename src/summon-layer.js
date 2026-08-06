@@ -22,6 +22,7 @@
 //     left walks out with you and into the next fight (SUMMON_PLAN #7), and the
 //     per-summoner live cap can only count it if that link survives the trip.
 import { countLiveSummons } from './summon-rules.js';
+import { livingMemberAt } from './member-rules.js';
 
 export function createSummonLayer(d) {
   function dismissSummon(body) {
@@ -62,7 +63,7 @@ export function createSummonLayer(d) {
   // A living player-team summon on this tile. Summons block enemies (folded
   // into enemy pathing/occupancy in main) but stay pass-through for the party -
   // isWalkable deliberately ignores them, so members walk right through.
-  const summonAt = (x, z) => d.summons.some((s) => s.sheet.hp > 0 && s.actor.x === x && s.actor.z === z);
+  const summonAt = (x, z) => !!livingMemberAt(d.summons, x, z);
 
   function spawnSummonUnits(archetypeId, team, summoner, n, at = null) {
     const def = d.CLASSES[archetypeId] || d.ENEMY_TYPES[archetypeId];

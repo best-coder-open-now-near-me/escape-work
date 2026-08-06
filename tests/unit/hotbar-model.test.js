@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   actionIdsFor, itemCountsFor, combatOnlyReason, padLayout, layoutFor, assignInto,
-  slotViewModel, combatSlotViewModel, throwablesFor,
+  slotViewModel, combatSlotViewModel, throwablesFor, outOfCombatActionState,
 } from '../../src/hotbar-model.js';
 import { ACTIONS } from '../../src/data/actions.js';
 import { ammoCostOf, createSheet, spendClassPoint, grantTalent } from '../../src/stats.js';
@@ -107,6 +107,21 @@ test('a slot carries THIS character\'s ammo cost, not the raw data one', () => {
   const s = sheetOf({ actions: ['attack', throwId] });
   const vm = slotViewModel({ kind: 'action', id: throwId }, s);
   assert.equal(vm.ammoCost, ammoCostOf(s, throwId));
+  assert.equal(vm.ammoRemaining, s.paper);
+  assert.equal(vm.affordable, true);
+});
+
+test('one out-of-combat state owns ammo dimming and the spoken refusal', () => {
+  const throwId = Object.keys(ACTIONS).find((id) => ACTIONS[id].ammoCost && !ACTIONS[id].needsTalent);
+  const s = sheetOf({ actions: ['attack', throwId], paper: 0 });
+  const state = outOfCombatActionState(throwId, s);
+  const vm = slotViewModel({ kind: 'action', id: throwId }, s);
+  assert.equal(state.affordable, false);
+  assert.equal(state.resourceAvailable, false);
+  assert.match(state.reason, /Needs .* paper/);
+  assert.equal(vm.affordable, state.affordable);
+  assert.equal(vm.resourceAvailable, state.resourceAvailable);
+  assert.equal(vm.unavailable, state.reason);
 });
 
 test('a power the character no longer has still renders - greyed, with the reason', () => {
@@ -126,10 +141,13 @@ test('an unknown id renders nothing at all', () => {
 test('in a fight the numbers come from combat, and the slot keeps its shape', () => {
   const entry = { kind: 'action', id: 'attack' };
   const live = combatSlotViewModel(entry, {
-    ammoCost: 2, uses: 1, live: 'armed', tip: 'a tip', affordable: true,
+    ammoCost: 2, ammoRemaining: 6, uses: 1, live: 'armed', tip: 'a tip',
+    affordable: true, resourceAvailable: true,
   }, 'Dana');
   assert.equal(live.ammoCost, 2);
   assert.equal(live.uses, 1);
+  assert.equal(live.ammoRemaining, 6);
+  assert.equal(live.resourceAvailable, true);
   assert.equal(live.live, 'armed');
   assert.equal(live.unavailable, null);
   // Same fields either way - the point of the bar being one widget.

@@ -29,6 +29,7 @@ import { aimsAtAlly, buffOutcome, buffProblem, controlIsRanged, controlOutcome, 
 import { damageBonus, roundAp, soakHit } from './stats.js';
 import { applyStatus, blockedBy, clearStatuses, statusList } from './statuses.js';
 import { dist, inReach } from './tactics.js';
+import { livingMemberAt } from './member-rules.js';
 
 export function createVerbs(d) {
   // Repositioning that the AP economy cannot buy. A dash carries you a fixed
@@ -127,7 +128,7 @@ export function createVerbs(d) {
   const zoneCells = (a, tx, tz) => zoneCellsFor(a, posOf(d.active), tx, tz, {
     canTakeSurface: d.world.canTakeSurface,
     hasLos: d.world.hasLos,
-    occupied: (x, z) => d.members.some((m) => m.sheet.hp > 0 && m.actor?.x === x && m.actor?.z === z)
+    occupied: (x, z) => !!livingMemberAt(d.members, x, z)
       || d.world.liveEnemies().some((e) => e.x === x && e.z === z),
   });
 

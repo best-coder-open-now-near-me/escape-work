@@ -14,6 +14,7 @@ import { topplePlan } from './combat-plans.js';
 import { engagedAround } from './combat-geometry.js';
 import { crouchProblem } from './tactics.js';
 import { CARDINAL_DIRS } from './directions.js';
+import { coverNames } from './cover-names.js';
 
 export function createOocVerbs(d) {
   // The map half of tactics.crouchProblem - same ladder, same words, the other
@@ -44,26 +45,11 @@ export function createOocVerbs(d) {
   });
 
   function oocCoverNames(x, z) {
-    const seen = [];
-    for (const [ox, oz] of d.oocCoverFaces(x, z)) {
-      const cx = x + ox;
-      const cz = z + oz;
-      const body = d.enemyAt(cx, cz) || d.npcAt(cx, cz) || d.memberBodyAt(cx, cz);
-      if (body) {
-        const name = body.sheet?.name || body.def?.name || 'them';
-        if (!seen.includes(name)) seen.push(name);
-        continue;
-      }
-      // `def`, not `d` - the deps bag owns that name in this module now, and
-      // the original's one-letter local would have shadowed it.
-      const def = d.grid.defAt(cx, cz);
-      const label = def && (def.cover || def.solid)
-        ? `the ${(def.label || 'cover').toLowerCase()}` : 'the partition';
-      if (!seen.includes(label)) seen.push(label);
-    }
-    if (!seen.length) return 'cover';
-    if (seen.length === 1) return seen[0];
-    return `${seen.slice(0, -1).join(', ')} and ${seen[seen.length - 1]}`;
+    return coverNames(x, z, d.oocCoverFaces(x, z), {
+      bodyAt: (cx, cz) => d.enemyAt(cx, cz) || d.npcAt(cx, cz) || d.memberBodyAt(cx, cz),
+      nameOf: (body) => body.sheet?.name || body.def?.name || 'them',
+      tileDefAt: (cx, cz) => d.grid.defAt(cx, cz),
+    });
   }
 
   function oocFriendlyOn(id, m) {
@@ -109,7 +95,7 @@ export function createOocVerbs(d) {
     // A slot a fight owns still ARMS nothing, but it says why. Listed-but-inert
     // was the old behavior of every non-attack (they weren't listed at all),
     // and a button that does nothing at all is indistinguishable from a bug.
-    const blocked = d.combatOnlyReason(id);
+    const blocked = d.outOfCombatActionState(id, d.sheet)?.reason;
     if (blocked) { d.ui.say(blocked); return; }
     // ONE live slot at a time, out of a fight exactly as in one (designer,
     // 2026-07-31): pressing a different slot lowers the armed one and does
@@ -310,7 +296,6 @@ export function createOocVerbs(d) {
   return {
     oocCoverProblem,
     oocTopplePlanAt,
-    oocCoverNames,
     oocFriendlyOn,
     postSummonAt,
     toggleOocArm,

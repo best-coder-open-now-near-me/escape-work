@@ -20,6 +20,7 @@ import { ACTIONS } from './data/actions.js';
 import { PARTITION_TOPPLE } from './data/tiles.js';
 import { applyDamage, damageBonus, effectiveAttr, gritSaveChance, rangeOf, rollHit, roundAp, statusResist } from './stats.js';
 import { applyStatus, blockedBy } from './statuses.js';
+import { livingMemberAt } from './member-rules.js';
 
 export function createDemolition(d) {
   // Put it over. `by` is whoever caused it (for the narration and the facing).
@@ -79,8 +80,7 @@ export function createDemolition(d) {
 
   function dropOnto(by, lx, lz, range) {
     const victimUnit = d.world.liveEnemies().find((e) => e.x === lx && e.z === lz);
-    const victimMember = d.members.find((m) => m.sheet.hp > 0 && m.actor
-      && m.actor.x === lx && m.actor.z === lz);
+    const victimMember = livingMemberAt(d.members, lx, lz);
     const dmg = d.rand(range[0], range[1]);
     const saved = (grit) => (d.hits.forceHit !== null ? !d.hits.forceHit : rollHit(gritSaveChance(grit), d.rng));
     let msg = '';

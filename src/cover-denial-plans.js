@@ -29,6 +29,7 @@
 // site in combat.js; these arrows only ever run at decide time, so the lookup
 // happens long after. That was true before the cut and is why it was safe then.
 import { REACH } from './stats.js';
+import { livingMemberAt } from './member-rules.js';
 
 export function createCoverDenialPlans(d) {
   const topplePlan = (from, px, pz) => {
@@ -38,8 +39,7 @@ export function createCoverDenialPlans(d) {
 
   // The AI's version of the same question - the victim test is combat's,
   // because only combat knows which side a body is on.
-  const memberAt = (x, z) => d.members.find((m) => m.sheet.hp > 0 && m.actor
-    && m.actor.x === x && m.actor.z === z) || null;
+  const memberAt = (x, z) => livingMemberAt(d.livingMembers(), x, z);
   const aiTopplePlan = (unit) => d.aiToppleplanFor(unit.x, unit.z, d.world,
     (x, z) => !!memberAt(x, z));
   // The rest of the cover-denial plans (AI_PLAN M4), each the shared pure

@@ -24,6 +24,7 @@
 // and it was sitting in the code before the cut began.
 import { shieldingFace } from './tactics.js';
 import { shieldsCell } from './data/tiles.js';
+import { coverNameAt, coverNames as namesOfCover } from './cover-names.js';
 
 export function createCrouch(d) {
   // Is somebody holding a `guard` stance on this exact tile? Read by the cover
@@ -72,6 +73,12 @@ export function createCrouch(d) {
   // area attacks (cones, zones) deliberately ignore it: flushing entrenched
   // targets is their job.
   const nameOf = (u) => (u.sheet ? u.sheet.name : u.def.name);
+  const coverWorld = {
+    bodyAt: (x, z) => d.unitStandingAt(x, z),
+    nameOf,
+    tileDefAt: (x, z) => d.world.tileDefAt(x, z),
+  };
+  const coverNames = (x, z, faces) => namesOfCover(x, z, faces, coverWorld);
   const carrierOf = (u) => u.sheet || u;
   function breakCrouch(unit, quiet = false) {
     if (!d.crouched.delete(unit)) return;
@@ -178,11 +185,7 @@ export function createCrouch(d) {
     const [ox, oz] = s.face;
     const cx = (s.at?.x ?? 0) + ox;
     const cz = (s.at?.z ?? 0) + oz;
-    const body = d.unitStandingAt(cx, cz);
-    if (body) return nameOf(body);
-    const def = d.world.tileDefAt(cx, cz);
-    if (def && (def.cover || def.solid)) return (def.label || 'cover').toLowerCase();
-    return 'partition'; // nothing on the cell, so the face itself is the wall
+    return coverNameAt(cx, cz, coverWorld);
   };
 
   return {
@@ -196,5 +199,6 @@ export function createCrouch(d) {
     shotOutcome,
     shotOutcomeFrom,
     crouchLabel,
+    coverNames,
   };
 }

@@ -9,6 +9,8 @@
 // are the last cluster in this file that writes those two. Both arrive as
 // setters for that reason: a leader switch is a thing that HAPPENS, and it
 // should look like one at the call site.
+import { isLivingMember } from './member-rules.js';
+
 export function createPartyControl(d) {
   // How fast this member's body actually walks.
   //
@@ -89,7 +91,7 @@ export function createPartyControl(d) {
   }
 
   function forceLeader() {
-    const i = d.party.members.findIndex((m) => m.sheet.hp > 0 && m.actor);
+    const i = d.party.members.findIndex(isLivingMember);
     if (i < 0 || i === d.party.active) return;
     const m = d.party.members[i];
     d.clearOocCrouch(true); // the crouch belongs to the sheet that took it

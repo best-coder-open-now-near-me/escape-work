@@ -119,6 +119,29 @@ export function combatOnlyReason(id) {
   return reason ? reason(a) : `${a.label} is for a fight.`;
 }
 
+// The complete out-of-combat answer for one action. The hotbar renders this
+// state and the press handler consults the same state, so resource counts,
+// dimming, and the spoken refusal cannot disagree.
+export function outOfCombatActionState(id, s) {
+  const a = ACTIONS[id];
+  if (!a) return null;
+  const ammoCost = ammoCostOf(s, id);
+  const ammoRemaining = s?.paper ?? 0;
+  const resourceAvailable = !ammoCost || ammoRemaining >= ammoCost;
+  const known = actionIdsFor(s).includes(id);
+  const reason = !known
+    ? `${a.label} is not something you can do right now.`
+    : combatOnlyReason(id)
+      || (!resourceAvailable ? `Needs ${ammoCost} paper - you have ${ammoRemaining}.` : null);
+  return {
+    affordable: !reason,
+    reason,
+    ammoCost,
+    ammoRemaining,
+    resourceAvailable,
+  };
+}
+
 // The layout the BAR shows: what the character has, plus at least one empty
 // slot, padded out to whole rows. The spare slot is the whole discoverability
 // story - a bar with no free space has nowhere to put the coffee, and a player
@@ -175,24 +198,28 @@ export function slotViewModel(entry, s) {
   if (entry.kind === 'item') {
     const def = ITEMS[entry.id];
     if (!def) return null;
+    const count = itemCountsFor(s).get(entry.id) || 0;
     return {
       kind: 'item', id: entry.id, label: def.name, icon: def.icon,
-      count: itemCountsFor(s).get(entry.id) || 0,
+      count,
+      affordable: count > 0,
+      resourceAvailable: count > 0,
     };
   }
   const a = ACTIONS[entry.id];
   if (!a) return null;
-  const available = actionIdsFor(s).includes(entry.id);
+  const state = outOfCombatActionState(entry.id, s);
   return {
     kind: 'action',
     id: entry.id,
     label: a.label,
     icon: a.icon, // the face it wears on the bar (data/actions.js)
     ap: a.ap,
-    ammoCost: ammoCostOf(s, entry.id),
-    unavailable: available
-      ? combatOnlyReason(entry.id)
-      : `${a.label} is not something you can do right now.`,
+    ammoCost: state.ammoCost,
+    ammoRemaining: state.ammoRemaining,
+    affordable: state.affordable,
+    resourceAvailable: state.resourceAvailable,
+    unavailable: state.reason,
   };
 }
 
@@ -211,11 +238,14 @@ export function combatSlotViewModel(entry, state, actingName) {
     icon: a.icon,
     ap: a.ap,
     ammoCost: state?.ammoCost || 0,
+    ammoRemaining: state?.ammoRemaining ?? null,
     uses: state?.uses ?? null,
     // Armed (aiming) or awaiting its confirm click - the bar rings them
     // differently, as combat's own bar used to.
     live: state?.live || null,
     tip: state?.tip || null,
+    affordable: !!state && (state.affordable || !!state.live),
+    resourceAvailable: state?.resourceAvailable ?? true,
     unavailable: !state
       ? `${a.label} is not something ${actingName} can do.`
       : (state.affordable || state.live) ? null : state.reason,

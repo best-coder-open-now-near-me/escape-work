@@ -2,6 +2,8 @@
 // exposes a few mutation doors used by god mode and e2e, but keeps their
 // invariants beside the projections they affect instead of embedding another
 // large API object inside startCombat.
+import { isLivingMember } from './member-rules.js';
+
 export function createCombatDebug(d) {
   return {
     get phase() { return d.phase; },
@@ -131,7 +133,7 @@ export function createCombatDebug(d) {
     },
     get turn() { return d.turns.current ? d.slotName(d.turns.current) : null; },
     get summons() {
-      return d.members.filter((m) => m.isSummon && m.sheet.hp > 0 && m.actor)
+      return d.members.filter((m) => m.isSummon && isLivingMember(m))
         .map((m) => ({
           name: m.sheet.name,
           x: m.actor.x,

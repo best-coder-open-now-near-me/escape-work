@@ -5,6 +5,7 @@
 import { BUTTON_CHROME, esc,
 } from './chrome.js';
 import { TALENTS, STARTING_TALENT_BY_CLASS } from '../data/talents.js';
+import { ATTRIBUTES } from '../data/attributes.js';
 import { pendingPoints } from '../stats.js';
 
 // --- end-of-game overlays ----------------------------------------------------
@@ -62,13 +63,6 @@ export function showLoseScreen(message) {
   div.querySelector('#restart').onclick = () => location.reload();
 }
 
-const LEVELUP_ATTRS = [
-  { key: 'grit', label: 'Grit', blurb: 'Toughness — raises max HP.' },
-  { key: 'hustle', label: 'Hustle', blurb: 'Tempo — raises max AP (move + actions).' },
-  { key: 'savvy', label: 'Savvy', blurb: 'Precision — raises attack damage.' },
-  { key: 'composure', label: 'Composure', blurb: 'Poise — softens incoming hits.' },
-];
-
 export function showLevelUpScreen(sheet, { onSpend, onLearn, nodesFor, onDone } = {}) {
   document.getElementById('levelup-screen')?.remove();
   const host = document.createElement('div');
@@ -108,7 +102,7 @@ export function showLevelUpScreen(sheet, { onSpend, onLearn, nodesFor, onDone } 
           ${button('lvlup-done', pending > 0 ? 'Spend later' : 'Done')}</div>
       </div>`;
     const rows = host.querySelector('#lvlup-rows');
-    for (const info of LEVELUP_ATTRS) {
+    for (const info of ATTRIBUTES) {
       const row = document.createElement('div');
       Object.assign(row.style, {
         display: 'flex', alignItems: 'center', gap: '12px',

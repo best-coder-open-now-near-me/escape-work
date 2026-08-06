@@ -4,6 +4,7 @@ import { COMPANIONS } from './data/companions.js';
 import { ITEMS } from './data/items.js';
 import { ACTIONS } from './data/actions.js';
 import { TALENTS, STARTING_TALENT_BY_CLASS } from './data/talents.js';
+import { ATTR_KEYS } from './data/attributes.js';
 
 // Thrown-weapon ammo: paper picked up from spills, spent on throws. There is
 // no longer a carry limit - hoarding sheets is the whole fantasy, and the cap
@@ -189,7 +190,9 @@ export const REACH = {
 // keep private copies held together by a `// must match combat.js` comment.
 export const THROW_RANGE = 5;
 
-export const ATTR_KEYS = ['grit', 'hustle', 'savvy', 'composure'];
+// Kept as a stats export for callers that consume the numeric model; the
+// authored order, labels, and blurbs live together in data/attributes.js.
+export { ATTR_KEYS };
 
 // Equipment slots (EQUIPMENT_PLAN.md): a damage choice, a defense choice, a
 // wildcard, and footwear (the floor is a hazard). Rendered as In Hand / Dress

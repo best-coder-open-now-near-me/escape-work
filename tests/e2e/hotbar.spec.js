@@ -40,21 +40,21 @@ test('the kit is in canonical order, on one row, with room to grow', async ({ pa
   await bootStash(page, QUIET, 'office-drone');
   await expect(page.locator('#hotbar')).toBeVisible();
 
-  // Basic swing, shove, the throws, then the class powers, then the universal
-  // cover verbs - Take Cover (TACTICS_PLAN M6) and Pull Over (M8) - and the
-  // bare-handed swing that stands in for a weapon (data/actions.js,
+  // Basic swing, then the universal bucket (shove plus the cover verbs), the
+  // throws, the class powers, and the bare-handed swing that stands in for a
+  // weapon (data/actions.js,
   // stats.orderedActionIds). The trailing empty slot is deliberate: it is
   // where the zone goes, and the reason a player ever right-clicks a slot.
   const all = await slots(page);
   expect(all.map((s) => s.id)).toEqual([
     'hotbar-act-attack',
     'hotbar-act-shove',
+    'hotbar-act-take-cover',
+    'hotbar-act-pull',
     'hotbar-act-paper-ball',
     'hotbar-act-paper-airplane',
     'hotbar-act-defend',
     'hotbar-act-paper-storm',
-    'hotbar-act-take-cover',
-    'hotbar-act-pull',
     'hotbar-act-punch',
     'hotbar-slot-9',
   ]);
@@ -110,12 +110,12 @@ test('right-click a slot to reassign it; assigning swaps rather than duplicates'
   await expect.poll(async () => (await slots(page)).map((s) => s.id)).toEqual([
     'hotbar-act-paper-storm',
     'hotbar-act-shove',
+    'hotbar-act-take-cover',
+    'hotbar-act-pull',
     'hotbar-act-paper-ball',
     'hotbar-act-paper-airplane',
     'hotbar-act-defend',
     'hotbar-act-attack',
-    'hotbar-act-take-cover',
-    'hotbar-act-pull',
     'hotbar-act-punch',
     'hotbar-slot-9',
   ]);

@@ -11,6 +11,7 @@
 // One ladder now, with the two fight-only legs (AP, per-fight uses) simply
 // absent out of combat: `ap` and `usesLeft` are omitted there, and the ladder
 // skips what it was not given.
+import { isLivingMember } from './member-rules.js';
 
 // How far a summon can be posted from the summoner, in tiles.
 export const summonRange = (a) => a.range ?? 5;
@@ -28,7 +29,7 @@ export function countLiveSummons(summoner, records) {
   return (records || []).filter((record) => {
     const owner = record?.summonedBy ?? record?.unit?.summonedBy;
     if (owner !== summoner) return false;
-    if (record.sheet) return record.sheet.hp > 0 && !!record.actor;
+    if (record.sheet) return isLivingMember(record);
     return record.alive !== false && (record.hp == null || record.hp > 0);
   }).length;
 }

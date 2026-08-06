@@ -8,9 +8,9 @@
 // `hotbarRow`, `hotbarBagKey` and `hotbarPaper` in a scope shared with 87 other
 // functions, and all four are written by exactly one of them.
 //
-// Everything else arrives on `d`. The mutable bindings - `sheet`, `combat`,
-// `inCombat`, `armedOoc` - are getters, because the bar is rebuilt across
-// leader switches and turn handoffs and must always read the live one.
+// Everything else arrives on `d`. The mutable bindings are getters because the
+// bar is rebuilt across leader switches and turn handoffs; main.js supplies
+// its one steering-aware sheet accessor rather than this host re-deriving it.
 import {
   actionIdsFor, itemCountsFor, layoutFor, assignInto,
   slotViewModel, combatSlotViewModel,
@@ -26,7 +26,7 @@ export function createHotbarHost(d) {
   let hotbarBagKey = '';
   let hotbarPaper = 0;
 
-  const barSheet = () => ((d.inCombat && d.combat) ? d.combat.actingSheet : d.sheet);
+  const barSheet = () => d.steeredSheet();
   // The bar's rules live in hotbar-model.js; these bind them to whoever's bar
   // is on screen. The DOM, the arming and the pager stay here.
   const hotbarActionIds = () => actionIdsFor(barSheet());
@@ -37,7 +37,7 @@ export function createHotbarHost(d) {
   // rule-owners, which is the point of the bar being one widget instead of two
   // that drift.
   const slotVm = (entry) => ((d.inCombat && d.combat && entry?.kind === 'action')
-    ? combatSlotViewModel(entry, d.combat.actionState(entry.id), d.combat.actingSheet.name)
+    ? combatSlotViewModel(entry, d.combat.actionState(entry.id), barSheet().name)
     : slotViewModel(entry, barSheet()));
 
   // What the bar's item slots are counting, as one string - the gate that keeps
@@ -76,7 +76,6 @@ export function createHotbarHost(d) {
       onAssign: openAssignMenu,
       startRow: hotbarRow, // the row you were on survives the rebuild
     });
-    hotbar.refresh(barSheet());
     // A rebuild starts with no slot lit, but `armedOoc` survives it - spending
     // a level-up point mid-aim left the bar looking unarmed while the rings,
     // the crosshair and the next click all still acted on the armed action.
@@ -163,7 +162,7 @@ export function createHotbarHost(d) {
     if (!hotbar) return;
     hotbar.setVisible(show);
     const bs = barSheet();
-    if (show && bs && bs.paper !== hotbarPaper) { hotbarPaper = bs.paper; hotbar.refresh(bs); }
+    if (show && bs && bs.paper !== hotbarPaper) buildHotbar();
     // Item slots count the pockets, and the pockets change from places that do
     // not route through onBagChange (god mode, a shop, an overflow drop).
     if (show && bagKey() !== hotbarBagKey) refreshHotbarSlots();

@@ -55,6 +55,7 @@ import { createProgressionUi } from './progression-ui.js';
 import { createSneakLayer } from './sneak-layer.js';
 import { createPartyControl } from './party-control.js';
 import { mulberry32 } from './rng.js';
+import { isLivingMember, livingMemberAt } from './member-rules.js';
 
 import { loadRemoteStore, SAVE_KEY_STORAGE } from './remote-store.js';
 import { placeModel, applyCharacterProportions, cloneMaterials, tintMaterials } from './models.js';
@@ -76,10 +77,7 @@ import {
 import { createDoors, atDoor, COMBAT_DOOR_AP, doorMidpoint } from './doors.js';
 import { createDialogue, shopKeyForNpc, sayRecruited } from './dialogue.js';
 import { summonRange, summonRoom, dropCount, summonSpotProblem } from './summon-rules.js';
-import {
-  actionIdsFor, itemCountsFor, layoutFor, assignInto, slotViewModel, combatSlotViewModel,
-  combatOnlyReason,
-} from './hotbar-model.js';
+import { outOfCombatActionState } from './hotbar-model.js';
 import { startCombat } from './combat.js';
 import { verbSides } from './combat-targeting.js';
 import { canReach as canReachAt, engagedAround, playerSideAt } from './combat-geometry.js';
@@ -350,6 +348,10 @@ function startGame(level) {
 
   let inCombat = false;
   let combat = null; // active tactical-combat controller
+  // The sheet whose decisions the player is making right now. Out of combat
+  // that is the leader; initiative owns it during a fight. HUD, pockets, and
+  // any later steering-aware surface ask this one question.
+  const steeredSheet = () => (inCombat && combat?.actingSheet) || sheet;
   let gameOver = false;
   let lastPath = null; // kept for debugging/tests
   // Cross-storey walking (layered levels): queued route legs, and the climb
@@ -408,7 +410,7 @@ function startGame(level) {
     // In a fight "you" is whoever's turn it is, not the leader: initiative
     // decides who acts, so a snack out of the pockets has to come out of THEIR
     // pockets and heal THEIR sheet.
-    getSheet: () => (inCombat && combat ? combat.actingSheet : sheet),
+    getSheet: steeredSheet,
     isInCombat: () => inCombat,
     // A consumable is billed against the acting member's pool (looting.js).
     spendCombatAp: (n) => combat?.spendAp(n) ?? false,
@@ -490,7 +492,7 @@ function startGame(level) {
   // targets, combat routing) treat every member the way they treated the
   // player. Pre-pick (no party yet) the lone spawn tile still counts.
   const partyAt = (x, z) => (party
-    ? party.members.some((m) => m.actor && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z)
+    ? !!livingMemberAt(party.members, x, z)
     : (x === player.x && z === player.z));
   // NPCs stand on their tile and block movement like any body.
   const isWalkable = (x, z) => grid.terrainOpen(x, z) && !enemyAt(x, z) && !npcAt(x, z);
@@ -625,7 +627,6 @@ function startGame(level) {
   // the session, since nothing else ever wrote it again.
   // Whose sheet the card is reflecting right now: the member whose combat turn
   // it is, else the leader.
-  const hudSheetNow = () => (inCombat && combat?.actingSheet) || sheet;
   const actorForSheet = (s) => (
     party?.members.find((m) => m.sheet === s)?.actor
     || summons.find((x) => x.sheet === s)?.actor
@@ -638,7 +639,7 @@ function startGame(level) {
   // A portrait finishing is the only reason to repaint for it: refresh the
   // corner readout and the in-fight initiative strip.
   const onPortraitReady = () => {
-    paintHud(hudSheetNow());
+    paintHud(steeredSheet());
     if (inCombat) combat?.refresh?.();
   };
   // Put a look ON a body. One order, always: proportions BEFORE the materials
@@ -783,7 +784,7 @@ function startGame(level) {
     summonDropProblem: (...a) => summonDropProblem(...a),
     applyStatus: (...a) => applyStatus(...a),
     approachAndDo: (...a) => approachAndDo(...a),
-    combatOnlyReason: (...a) => combatOnlyReason(...a),
+    outOfCombatActionState: (...a) => outOfCombatActionState(...a),
     coneFrom: (...a) => coneFrom(...a),
     dropCount: (...a) => dropCount(...a),
     findPath: (...a) => findPath(...a),
@@ -797,7 +798,6 @@ function startGame(level) {
   const {
     oocCoverProblem,
     oocTopplePlanAt,
-    oocCoverNames,
     oocFriendlyOn,
     postSummonAt,
     toggleOocArm,
@@ -1013,7 +1013,7 @@ function startGame(level) {
   // WIPE: if the fallen member was the one being controlled, a survivor
   // takes over on the spot (in combat, combat.js owns that handoff).
   function downOrLose(member, message) {
-    const others = party.members.some((m) => m !== member && m.sheet.hp > 0 && m.actor);
+    const others = party.members.some((m) => m !== member && isLivingMember(m));
     if (!others) {
       loseGame(message);
       return;
@@ -1539,9 +1539,10 @@ function startGame(level) {
     ui,
     loot,
     modalOpen,
+    steeredSheet: (...a) => steeredSheet(...a),
     toggleOocArm: (id) => toggleOocArm(id),
   });
-  const { buildHotbar, refreshHotbarSlots, barLayout, barSheet, layoutOf } = hotbarHost;
+  const { buildHotbar, refreshHotbarSlots } = hotbarHost;
 
   // --- leader switching --------------------------------------------------------
   // A portrait click hands control to another member. Everything leader-keyed
@@ -1597,7 +1598,7 @@ function startGame(level) {
     for (let step = 1; step < party.members.length; step++) {
       const i = (party.active + step) % party.members.length;
       const m = party.members[i];
-      if (m.sheet.hp > 0 && m.actor) { switchLeader(i); return; }
+      if (isLivingMember(m)) { switchLeader(i); return; }
     }
   }
   // --- posting the role with no fight on ----------------------------------------
@@ -1795,10 +1796,9 @@ function startGame(level) {
   // A member's or summon's record standing on a cell, for naming who is
   // covering you. `partyAt`/`summonAt` answer "is anyone there"; this answers
   // "who", which the narration needs and they do not carry.
-  const memberBodyAt = (x, z) => (party?.members || []).find((m) =>
-    m.actor && m.sheet.hp > 0 && m.actor.x === x && m.actor.z === z)
-    || summons.find((sm) => sm.sheet.hp > 0 && sm.actor.x === x && sm.actor.z === z)
-    || null;
+  const memberBodyAt = (x, z) => livingMemberAt(
+    [...(party?.members || []), ...summons], x, z,
+  );
   const oocCoverCell = (x, z) => {
     const d = grid.defAt(x, z);
     if (shieldsCell(d)) return true;
@@ -1826,7 +1826,7 @@ function startGame(level) {
   // the leader. A stepping member repaints the card only when it's their own -
   // otherwise a member taking surface damage on their combat turn redrew the
   // pre-combat LEADER's card, so the damage appeared to hit nobody.
-  const syncHudFor = (s) => { if (s && s === hudSheetNow()) paintHud(s); };
+  const syncHudFor = (s) => { if (s && s === steeredSheet()) paintHud(s); };
 
   // Player-side bodies share one step pipeline: tile effects, opportunity
   // attacks, step-clock statuses, surfaces, slips, and footprints. The caller
