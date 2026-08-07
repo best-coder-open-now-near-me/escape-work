@@ -143,15 +143,20 @@ export function buildAimGeometry(cells, quantum, clipShape = null) {
 export function createAimPaint(app) {
   const holder = new pc.Entity('aim-paint');
   app.root.addChild(holder);
-  const mat = makeMaterial([0.3, 0.52, 0.92], {
-    opacity: 0.3,
-    emissive: [0.16, 0.3, 0.6],
-  });
-  mat.opacityVertexColor = true;
-  mat.opacityVertexColorChannel = 'a';
-  mat.update();
+  const paintMaterial = (color, emissive) => {
+    const material = makeMaterial(color, { opacity: 0.3, emissive });
+    material.opacityVertexColor = true;
+    material.opacityVertexColorChannel = 'a';
+    material.update();
+    return material;
+  };
+  const materials = {
+    valid: paintMaterial([0.3, 0.52, 0.92], [0.16, 0.3, 0.6]),
+    invalid: paintMaterial([0.78, 0.2, 0.18], [0.5, 0.08, 0.06]),
+  };
 
   let key = null;
+  let tone = null;
   let entity = null;
   let mesh = null;
   let shownCells = [];
@@ -169,9 +174,10 @@ export function createAimPaint(app) {
   return {
     // `cellsFn` returns fine-cell world centres as [x,z]. `newKey` names the
     // verb/origin/world epoch; unchanged aims do no geometry work per frame.
-    show(newKey, cellsFn, quantum = 1, clipShape = null) {
-      if (newKey === key) return;
+    show(newKey, cellsFn, quantum = 1, clipShape = null, nextTone = 'valid') {
+      if (newKey === key && nextTone === tone) return;
       key = newKey;
+      tone = nextTone;
       shownCells = cellsFn();
       clearMesh();
       if (!shownCells.length) return;
@@ -183,19 +189,23 @@ export function createAimPaint(app) {
       mesh.setIndices(geo.indices);
       mesh.update(pc.PRIMITIVE_TRIANGLES);
       entity = new pc.Entity('aim-region');
-      entity.addComponent('render', { meshInstances: [new pc.MeshInstance(mesh, mat)] });
+      entity.addComponent('render', {
+        meshInstances: [new pc.MeshInstance(mesh, materials[nextTone] || materials.valid)],
+      });
       entity.render.castShadows = false;
       holder.addChild(entity);
     },
     hide() {
       if (key === null && !entity) return;
       key = null;
+      tone = null;
       shownCells = [];
       clearMesh();
     },
     destroy() {
       clearMesh();
-      mat.destroy();
+      materials.valid.destroy();
+      materials.invalid.destroy();
       holder.destroy();
     },
     // Preserve the debug contract's movement-tile projection while exposing
@@ -209,7 +219,7 @@ export function createAimPaint(app) {
         seen.add(k);
         tiles.push(k.split(',').map(Number));
       }
-      return { key, count: shownCells.length, tiles, cells: shownCells.map((p) => [...p]) };
+      return { key, tone, count: shownCells.length, tiles, cells: shownCells.map((p) => [...p]) };
     },
   };
 }

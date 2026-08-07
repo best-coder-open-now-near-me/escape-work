@@ -326,7 +326,8 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
       const aim = queries.zoneAim?.();
       if (!aim) { aimPaint?.hide(); return; }
       aimPaint?.show(`ooc-zone:${aim.key}`, () => aim.cells, aim.quantum,
-        { kind: 'circle', x: aim.x, z: aim.z, radius: aim.radius });
+        { kind: 'circle', x: aim.x, z: aim.z, radius: aim.radius },
+        aim.problem ? 'invalid' : 'valid');
       if (aim.problem) ring(aim.x, aim.z, 0.42, RING_FAR);
       else ring(aim.x, aim.z, aim.radius, RING_OK);
     },

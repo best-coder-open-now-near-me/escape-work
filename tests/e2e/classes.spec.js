@@ -173,6 +173,39 @@ test('Office Drone: TPS Form Storm uses the same fine-cell aim outside combat', 
     { timeout: 10_000 }).toBe('paper');
 });
 
+test('Office Drone: TPS Form Storm preview and click share continuous range', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, QUIET_PAPER_ARENA, 'office-drone', { seed: 4 });
+  await page.evaluate(() => {
+    const actor = window.__god.playerActor;
+    const y = actor.entity.getPosition().y;
+    actor.clearPath();
+    actor.slideTo = null;
+    actor.entity.setPosition(2.2, y, 2);
+    actor.x = 2;
+    actor.z = 2;
+  });
+  await page.click('#hotbar-act-paper-storm');
+
+  // Both points round to ordinary movement tiles; power range is measured
+  // from the live body to the exact aim point instead. The prominent mask must
+  // carry the same verdict the click will enforce.
+  const tooFar = await stableProject(page, 7.4, 2);
+  await page.mouse.move(tooFar.x, tooFar.y);
+  await expect.poll(() => page.evaluate(() => window.__game.aimPaint.tone),
+    { timeout: 10_000 }).toBe('invalid');
+  await page.mouse.click(tooFar.x, tooFar.y);
+  expect(await page.evaluate(() => window.__game.armed)).toBe('paper-storm');
+
+  const inRange = await stableProject(page, 7.1, 2);
+  await page.mouse.move(inRange.x, inRange.y);
+  await expect.poll(() => page.evaluate(() => window.__game.aimPaint.tone),
+    { timeout: 10_000 }).toBe('valid');
+  await page.mouse.click(inRange.x, inRange.y);
+  await expect.poll(() => page.evaluate(() => window.__game.armed),
+    { timeout: 10_000 }).toBe(null);
+});
+
 test('Office Drone: TPS Form Storm keeps its zone aim and lands above coloured carpet', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, COLOURED_CARPET_ARENA, 'office-drone', { seed: 4 });

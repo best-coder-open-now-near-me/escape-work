@@ -94,7 +94,8 @@ export function createOocVerbs(d) {
     if (!a || a.exploration?.mode !== 'zone') return null;
     const origin = d.leadBody();
     const problem = zoneProblem(a, {
-      dist: Math.hypot(origin.x - tx, origin.z - tz),
+      origin,
+      target: { x: tx, z: tz },
       los: d.hasLos(origin, { x: tx, z: tz }),
       ap: Infinity,
       usesLeft: null,

@@ -188,12 +188,21 @@ test('isZone, and the zone defaults', () => {
 });
 
 test('a zone is gated by AP, uses, range and line', () => {
-  const t = (over = {}) => ({ dist: 1, los: true, ap: 10, usesLeft: 2, ...over });
+  const t = (over = {}) => ({
+    origin: { x: 0.25, z: 0.25 },
+    target: { x: 1.25, z: 0.25 },
+    los: true,
+    ap: 10,
+    usesLeft: 2,
+    ...over,
+  });
   assert.equal(zoneProblem(ZONE, t()), null);
   assert.match(zoneProblem(ZONE, t({ ap: 1 })), /AP/);
   assert.match(zoneProblem(ZONE, t({ usesLeft: 0 })), /left this fight/);
-  assert.equal(zoneProblem(ZONE, t({ dist: 5 })), null);
-  assert.match(zoneProblem(ZONE, t({ dist: 6 })), /Too far/);
+  assert.equal(zoneProblem(ZONE, t({ target: { x: 5.25, z: 0.25 } })), null,
+    'the exact continuous range boundary is legal');
+  assert.match(zoneProblem(ZONE, t({ target: { x: 5.26, z: 0.25 } })), /Too far/,
+    'the rule measures the authored points rather than their rounded tiles');
   assert.match(zoneProblem(ZONE, t({ los: false })), /No clear line/);
 });
 

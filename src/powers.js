@@ -272,14 +272,24 @@ export const isZone = (a) => !!a && a.type === 'zone';
 export const zoneRangeOf = (a) => a.range ?? 5;
 export const zoneRadiusOf = (a) => a.radius ?? 1;
 
+// One distance owner for the zone's point-placed power gate. Callers hand over
+// the live body and exact aim point, never a precomputed scalar whose meaning
+// could be tile-centre, Chebyshev, or stale hover geometry. Missing coordinates
+// fail closed: an absent aim is not zero tiles away.
+export function powerPointDistance(origin, target) {
+  if (!Number.isFinite(origin?.x) || !Number.isFinite(origin?.z)
+    || !Number.isFinite(target?.x) || !Number.isFinite(target?.z)) return Infinity;
+  return Math.hypot(origin.x - target.x, origin.z - target.z);
+}
+
 // Why this zone cannot be placed there, or null. Placement legality per TILE
 // (is it plain floor? is somebody standing on it?) stays with the caller -
 // that needs the grid - but the spend rules and the aim rules live here.
 export function zoneProblem(a, t = {}) {
-  const { dist = 0, los = true, ap = 0, usesLeft = null } = t;
+  const { origin, target, los = true, ap = 0, usesLeft = null } = t;
   if (ap < a.ap) return 'Not enough AP.';
   if (usesLeft !== null && usesLeft <= 0) return `No ${(a.label || 'uses').toLowerCase()} left this fight.`;
-  if (dist > zoneRangeOf(a)) return 'Too far to reach with it.';
+  if (powerPointDistance(origin, target) > zoneRangeOf(a)) return 'Too far to reach with it.';
   if (!los) return 'No clear line to there.';
   return null;
 }

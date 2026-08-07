@@ -147,7 +147,8 @@ export function createVerbs(d) {
   function performZone(id, tx, tz) {
     const a = ACTIONS[id];
     const problem = zoneProblem(a, {
-      dist: d.distToTile(d.active, tx, tz),
+      origin: posOf(d.active),
+      target: { x: tx, z: tz },
       los: d.losToTile(d.active, tx, tz),
       ap: d.active.ap,
       usesLeft: a.uses ? d.active.usesLeft[id] ?? 0 : null,

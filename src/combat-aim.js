@@ -66,6 +66,22 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
     get hoverFoe() { return hoverFoe; },
   });
 
+  // One zone verdict for every combat preview surface and for the click's
+  // sibling in verbs.js: live body -> exact aim point, through zoneProblem.
+  // Keeping this assembly here prevents the large paint, boundary ring and
+  // cursor label from handing that shared rule three differently measured
+  // `dist` numbers.
+  function zoneProblemAt(a, id, tx, tz) {
+    const active = view.active;
+    return ask.zoneProblem(a, {
+      origin: ask.posOf(active),
+      target: { x: tx, z: tz },
+      los: ask.losToTile(active, tx, tz),
+      ap: active.ap,
+      usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
+    });
+  }
+
   // The ground wash while a ranged verb is armed: one merged fine-cell region
   // for generic range, or the exact committed surface mask for a cone/zone.
   function drawAimWash() {
@@ -97,9 +113,11 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
     }
     if (ask.isZone(action)) {
       if (!aimPoint) { aimPaint.hide(); return; }
+      const problem = zoneProblemAt(action, armed, aimPoint.x, aimPoint.z);
       aimPaint.show(`zone:${armed}:${aimPoint.x},${aimPoint.z}:${paintEpoch}`,
         () => ask.zoneCells(action, aimPoint.x, aimPoint.z), quantum,
-        { kind: 'circle', x: aimPoint.x, z: aimPoint.z, radius: action.radius ?? 1 });
+        { kind: 'circle', x: aimPoint.x, z: aimPoint.z, radius: action.radius ?? 1 },
+        problem ? 'invalid' : 'valid');
       return;
     }
     const spec = ask.reachSpec(armed);
@@ -172,13 +190,7 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
     // (DEGRID M6).
     const tx = aimPoint.x;
     const tz = aimPoint.z;
-    const active = view.active;
-    const problem = ask.zoneProblem(a, {
-      dist: ask.distToTile(active, tx, tz),
-      los: ask.losToTile(active, tx, tz),
-      ap: active.ap,
-      usesLeft: a.uses ? active.usesLeft[id] ?? 0 : null,
-    });
+    const problem = zoneProblemAt(a, id, tx, tz);
     if (problem) { drawRing(tx, tz, 0.42, FAR); return undefined; }
     // One boundary names the true disc. The merged fill carries its clipped
     // terrain and body holes; storage cells never receive individual rings.
@@ -412,12 +424,7 @@ export function createAimView({ app, pc, marks, aimPaint, actions, world, costTa
     // not the tile it rounds to.
     const tx = point.x;
     const tz = point.z;
-    const problem = ask.zoneProblem(a, {
-      dist: ask.distToTile(view.active, tx, tz),
-      los: ask.losToTile(view.active, tx, tz),
-      ap: view.active.ap,
-      usesLeft: a.uses ? view.active.usesLeft[view.armed] ?? 0 : null,
-    });
+    const problem = zoneProblemAt(a, view.armed, tx, tz);
     costTag.textContent = problem || `Cover the highlighted floor · ${a.ap} AP`;
     costTag.style.left = `${sx + 14}px`;
     costTag.style.top = `${sy + 14}px`;
