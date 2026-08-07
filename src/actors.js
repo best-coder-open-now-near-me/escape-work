@@ -44,6 +44,11 @@ export class GridActor {
     this.entity = null;
     this.visual = null; // the model child that animation moves
     this.visualLift = 0; // baseline y of the visual (proportion foot lift)
+    // The imported model node can carry a unit-conversion scale. The original
+    // mini rigs happened to arrive at 1x, but licensed rigs commonly encode
+    // metres-vs-centimetres here. Procedural animation must compose onto that
+    // authored baseline rather than replacing it with the old rigs' 1x.
+    this.visualScale = { x: 1, y: 1, z: 1 };
     this.path = null; // waypoints [[x, z], ...] - free points, not just centres
     this.pathIndex = 0;
     this.slideTo = null; // straight-line glide target (shoves) - {x, z}
@@ -70,6 +75,8 @@ export class GridActor {
     // frame, so capture that lift as the baseline it composes onto - zeroing
     // it would sink the feet through the floor.
     this.visualLift = this.visual.getLocalPosition().y;
+    const importedScale = this.visual.getLocalScale();
+    this.visualScale = { x: importedScale.x, y: importedScale.y, z: importedScale.z };
     this.animC = entity.findComponent('anim') || null;
     // The idle clip animates only torso/arms/head - it has NO leg channels,
     // so nothing ever writes the legs back after a walk stops mid-stride.
@@ -253,7 +260,15 @@ export class GridActor {
     }
     this.visual.setLocalPosition(0, this.visualLift + bobY, forward);
     this.visual.setLocalEulerAngles(pitch, 0, 0);
-    this.visual.setLocalScale(sx, sy, sx);
+    // Preserve the model's imported unit scale. Writing raw 1x here was
+    // invisible on the original rigs, but blew a centimetre-authored Synty
+    // body up to kaiju size on the first gameplay frame. Flinch/crouch remain
+    // multipliers, exactly as they read above.
+    this.visual.setLocalScale(
+      this.visualScale.x * sx,
+      this.visualScale.y * sy,
+      this.visualScale.z * sx,
+    );
   }
 
   // PRECONDITION: path[0] is this body's TRUE continuous position - every

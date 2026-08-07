@@ -45,6 +45,31 @@ test('a slide counts as moving, so a shove cannot be interrupted as if idle', ()
   assert.deepEqual([a.x, a.z], [2, 0], 'the LOGICAL tile teleports; the body catches up');
 });
 
+test('procedural animation composes onto a model imported below 1x', () => {
+  // The original character rigs imported at 1x, so replacing the visual
+  // node's scale with (1,1,1) every frame looked harmless. Licensed GLBs carry
+  // their unit conversion on that node; erasing it turns the actor into a
+  // kaiju the instant gameplay starts, while the unattached picker preview
+  // remains correctly sized.
+  const a = new GridActor(0, 0);
+  a.visualScale = { x: 0.01, y: 0.02, z: 0.03 };
+  let applied = null;
+  a.visual = {
+    setLocalPosition: () => {},
+    setLocalEulerAngles: () => {},
+    setLocalScale: (x, y, z) => { applied = [x, y, z]; },
+  };
+
+  a.updateAnim(0, 0);
+  assert.deepEqual(applied, [0.01, 0.02, 0.03], 'idle preserves the imported scale exactly');
+
+  a.fx = { kind: 'flinch', t: 0 };
+  a.updateAnim(0.1, 0);
+  assert.ok(applied[0] > 0.01, 'the flinch widens relative to the imported X scale');
+  assert.ok(applied[1] < 0.02, 'the flinch squashes relative to the imported Y scale');
+  assert.ok(applied[2] > 0.03, 'the flinch widens relative to the imported Z scale');
+});
+
 // --- takeDamage: the Phase 0 soft-lock guard, finally covered ---------------
 test('takeDamage reports death exactly at zero, and not before', () => {
   const a = foe(5);
