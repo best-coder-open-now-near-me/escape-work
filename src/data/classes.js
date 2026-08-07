@@ -1,4 +1,4 @@
-import { characterArt } from './art-profiles.js';
+import { ACTIVE_ART_PROFILE, characterArt } from './art-profiles.js';
 
 // Player class registry. A class is starting stats, a character model
 // (assets/characters/<model>.glb), and the combat actions it brings (ids into
@@ -77,8 +77,13 @@ const PICKER_ONLY = ['tagline', 'experience', 'startGear', 'playable'];
  * registries spell max HP differently and `unitCombat` prefers `maxHp` over
  * `hp`, so an inherited `maxHp` would silently outrank the enemy's own `hp`.
  */
-export function fromClass({ classId, ...over }, { drop = [] } = {}) {
-  const base = CLASSES[classId];
+export function fromClass(
+  { classId, ...over },
+  { drop = [], profileId = ACTIVE_ART_PROFILE } = {},
+) {
+  const base = profileId === ACTIVE_ART_PROFILE
+    ? CLASSES[classId]
+    : classesForProfile(profileId)[classId];
   if (!base) throw new Error(`archetype references unknown class "${classId}"`);
   const kit = { ...base };
   for (const key of [...PICKER_ONLY, ...drop]) delete kit[key];
@@ -86,6 +91,11 @@ export function fromClass({ classId, ...over }, { drop = [] } = {}) {
   for (const key of MERGED_PER_KEY) {
     if (over[key] && kit[key]) out[key] = { ...kit[key], ...over[key] };
   }
+  // An override is assembled AFTER the base class, so it must cross the art
+  // boundary after that merge as well. Otherwise `{ classId, model }` silently
+  // bypasses the active profile even though an inherited model does not—the
+  // exact split that left the enemy Manager on the legacy rig.
+  if (out.model) out.model = characterArt(out.model, profileId);
   return out;
 }
 

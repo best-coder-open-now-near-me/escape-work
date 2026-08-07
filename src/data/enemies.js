@@ -70,13 +70,11 @@ const KITS = {
     // the Security class.
     name: 'The Manager',
     // Where the Guard and HR depart from their class by BUILD on a shared rig,
-    // he departs by wearing a different body outright - `manager.glb` is his,
-    // `midmanager.glb` is the player's. That makes the build override below
-    // load-bearing rather than decorative: `look` is replaced whole, never
-    // merged (classes.js MERGED_PER_KEY), and the class's 1.68 legs are a
-    // stretch tuned against the OTHER rig. These are the engine defaults
-    // (models.js PROPORTIONS) - what he has always been - written out so that
-    // inheriting somebody else's silhouette can't happen by omission.
+    // he departs by owning a different stable body id outright. The built-in
+    // profile serves manager.glb; installed art profiles resolve `manager`
+    // through the same characterArt seam as an inherited class model. The
+    // build below remains his legacy-rig silhouette and is harmless on rigs
+    // without the mini character's named proportion bones.
     model: 'manager',
     look: { build: { legs: 1.9, torso: 1.3 } },
     level: 1, // native tier; only an explicit placement tier scales him up

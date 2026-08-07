@@ -7,7 +7,8 @@ import {
   characterArt,
   tileArt,
 } from '../../src/data/art-profiles.js';
-import { classesForProfile } from '../../src/data/classes.js';
+import { classesForProfile, fromClass } from '../../src/data/classes.js';
+import { ENEMY_KITS } from '../../src/data/enemies.js';
 
 test('ordinary source and test runs stay on built-in art', () => {
   assert.equal(ACTIVE_ART_PROFILE, 'default');
@@ -16,6 +17,7 @@ test('ordinary source and test runs stay on built-in art', () => {
 
 test('the Synty profile remaps presentation without changing gameplay data', () => {
   assert.equal(characterArt('worker', 'synty'), 'synty/generic-business-male');
+  assert.equal(characterArt('manager', 'synty'), 'synty/generic-business-male');
   assert.deepEqual(
     Object.fromEntries(['worker', 'midmanager', 'mailroom', 'itsupport', 'hrrep', 'security']
       .map((model) => [model, characterArt(model, 'synty')])),
@@ -59,8 +61,13 @@ test('every class-backed actor resolves its model through the active art profile
   );
 });
 
+test('a class-backed enemy model override still crosses the art-profile seam', () => {
+  const manager = fromClass(ENEMY_KITS.manager, { profileId: 'synty' });
+  assert.equal(manager.model, 'synty/generic-business-male');
+});
+
 test('the six Synty roles have distinct modular hairstyles', () => {
-  const models = Object.values(ART_PROFILES.synty.characters);
+  const models = [...new Set(Object.values(ART_PROFILES.synty.characters))];
   const hair = models.map((model) => characterAccessory(model, 'synty'));
   assert.equal(hair.length, 6);
   assert.equal(new Set(hair.map((accessory) => accessory.model)).size, 6);

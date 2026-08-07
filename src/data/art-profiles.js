@@ -39,6 +39,10 @@ export const ART_PROFILES = Object.freeze({
     ]),
     characters: Object.freeze({
       worker: 'synty/generic-business-male',
+      // The enemy Manager intentionally owns a distinct stable body id from
+      // the playable Middle Manager. It still resolves through this one
+      // presentation table instead of pinning the built-in manager.glb.
+      manager: 'synty/generic-business-male',
       midmanager: 'synty/generic-business-female',
       mailroom: 'synty/shops-worker-male',
       itsupport: 'synty/shops-clerk-male',
