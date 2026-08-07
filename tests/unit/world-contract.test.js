@@ -56,8 +56,13 @@ const RULES = [
   },
   {
     name: 'hasSwingSpot',
-    needs: ['isWalkable', 'approach', 'stepOpen'],
-    bag: { isWalkable: () => true, approach: (x, z) => [x, z], stepOpen: () => false },
+    needs: ['isWalkable', 'approach', 'stepOpen', 'bodyClear'],
+    bag: {
+      isWalkable: () => true,
+      approach: (x, z) => [x, z],
+      stepOpen: () => false,
+      bodyClear: () => true,
+    },
     call: (w) => hasSwingSpot(body(0, 0), body(1, 1), w),
   },
 ];

@@ -131,12 +131,28 @@ test('hasSwingSpot runs against the real facade', () => {
   assert.doesNotThrow(() => hasSwingSpot(body(0, 0), body(1, 1), world));
 });
 
+test('the facade rejects physical overlap across distinct movement tiles', () => {
+  const d = deps();
+  const mover = { x: 0, z: 0, entity: { getPosition: () => ({ x: 0, z: 0 }) } };
+  d.party.members.push({ sheet: { hp: 10 }, actor: mover });
+  d.enemies.push({
+    alive: true,
+    x: 1,
+    z: 0,
+    entity: { getPosition: () => ({ x: 0.55, z: 0 }) },
+  });
+  const world = createCombatWorld(d);
+  assert.equal(world.bodyClear(0, 0, mover), false,
+    'a neighbour tile does not make overlapping continuous bodies legal');
+  assert.equal(world.bodyClear(-0.1, 0, mover), true);
+});
+
 // The keys the pure rules name in their own signatures. Dropping one from
 // `combat-world.js` is the failure this file exists for, and it is worth
 // asserting directly as well as through the rules above: a rule can stop
 // reading a key without anyone noticing, and then the facade can drop it, and
 // the two mistakes cancel out into a silent hole.
-const READ_BY_RULES = ['tileDefAt', 'terrainOpen', 'stepOpen', 'isWalkable', 'approach'];
+const READ_BY_RULES = ['tileDefAt', 'terrainOpen', 'stepOpen', 'isWalkable', 'approach', 'bodyClear'];
 
 test('the facade carries every key the pure rules read', () => {
   const world = createCombatWorld(deps());

@@ -236,6 +236,7 @@ test('a shooter prefers a shielded firing tile and keeps its distance', () => {
 const moveWorld = (over = {}) => ({
   approach: (gx, gz) => [gx, gz],
   stepOpen: () => true,
+  bodyClear: () => true,
   ...over,
 });
 
@@ -265,6 +266,15 @@ test('no route and not adjacent means there is nothing to spend on', () => {
   }));
   assert.equal(out, null);
   assert.equal(approached, 0, 'a non-adjacent target never reaches the shuffle fallback');
+});
+
+test('an advance refuses an exact rest point occupied by another body', () => {
+  const blocked = moveWorld({
+    approach: () => [4.4, 5],
+    bodyClear: () => false,
+  });
+  assert.equal(advanceRoute(unit(0, 0), member(5, 5), [[0, 0], [4, 5]], blocked), null);
+  assert.equal(advanceRoute(unit(4, 5), member(5, 5), null, blocked), null);
 });
 
 test('the in-place shuffle is refused when it would not earn a swing', () => {

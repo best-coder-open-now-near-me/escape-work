@@ -4,7 +4,7 @@
 // tile behind a tall mesh - the same fix that makes a click on the raised door
 // panel actually open the door.
 import { test, expect } from '@playwright/test';
-import { bootAndPick, bootStash, onScreen, onCanvas, waitStill, combatOrWalkDone, stableProject, enterCombat, hoverDoorPanel, clickDoorPanel } from './helpers.js';
+import { bootAndPick, bootStash, clickWorld, onScreen, onCanvas, waitStill, combatOrWalkDone, stableProject, enterCombat, hoverDoorPanel, clickDoorPanel } from './helpers.js';
 
 // Hover the on-screen position of a world point (a tall mesh, y > 0). Returns
 // false if it projects off-screen so the caller can bail.
@@ -55,8 +55,49 @@ const HOVER_ARENA = {
   ],
 };
 
+const EMAIL_ARENA = {
+  name: 'Email Range Lab',
+  tiles: { '#': 'wall', '.': 'floor' },
+  actors: { '@': 'player', 'M': 'manager' },
+  map: [
+    '############',
+    '#..........#',
+    '#@.....M...#',
+    '#..........#',
+    '############',
+  ],
+};
+
+test('Passive-Aggressive Email fires at the six-tile maximum without walking in', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, EMAIL_ARENA, 'office-drone', { seed: 4 });
+  await page.evaluate(() => {
+    const foe = window.__god.enemies.find((enemy) => enemy.alive);
+    foe.clearPath();
+    foe.slideTo = null;
+    const y = foe.entity.getPosition().y;
+    foe.entity.setPosition(7, y, 2);
+    foe.x = 7;
+    foe.z = 2;
+    foe.wanderTimer = Infinity;
+  });
+  const before = await page.evaluate(() => window.__game.playerPos);
+  const foe = await page.evaluate(() => window.__game.enemies.find((enemy) => enemy.alive));
+  expect(Math.hypot(foe.px - before.x, foe.pz - before.z)).toBeCloseTo(6, 1);
+
+  await page.click('#hotbar-act-attack');
+  expect(await page.evaluate(() => window.__game.armed)).toBe('attack');
+  expect(await clickWorld(page, foe.x, foe.z)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.__game.inCombat),
+    { timeout: 20_000 }).toBe(true);
+
+  const after = await page.evaluate(() => window.__game.playerPos);
+  expect(Math.hypot(after.x - before.x, after.z - before.z)).toBeLessThan(0.1);
+});
+
 test('hovering a coworker shows the attack cursor and enemy highlight', async ({ page }) => {
   await bootStash(page, HOVER_ARENA);
+  await page.evaluate(() => window.__game.debugStillEnemies());
   // Hover the body (~0.8 up) rather than its tile, and re-read the live position
   // each attempt: a coworker caught mid-step is still under the cursor that way.
   // NB `__game.enemies` is a projection, not the live actors: it exposes px/pz
@@ -79,6 +120,17 @@ test('hovering a coworker shows the attack cursor and enemy highlight', async ({
   expect(await page.evaluate(() => window.__game.hoverGlow)).toBe(true);
   await page.keyboard.up('Alt');
   expect(await page.evaluate(() => window.__game.hoverGlow)).toBe(false);
+
+  // Damage can land while the cursor remains perfectly still. The focus
+  // banner must follow live HP on the next frame, without a leave/re-enter
+  // dance to provoke another pointer event.
+  const health = await page.evaluate(() => {
+    const en = window.__god.enemies.find((enemy) => enemy.alive);
+    return { before: en.hp, max: en.maxHp };
+  });
+  await expect(page.locator('#focus-banner')).toContainText(`HP ${health.before}/${health.max}`);
+  await page.evaluate(() => window.__god.enemies.find((enemy) => enemy.alive).takeDamage(1));
+  await expect(page.locator('#focus-banner')).toContainText(`HP ${health.before - 1}/${health.max}`);
 });
 
 test('the persistent hotbar shows attacks and arming targets a coworker', async ({ page }) => {

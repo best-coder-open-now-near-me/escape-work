@@ -95,6 +95,8 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
   let hoverEntity = null;
   let hoverShell = null;
   let hoverKind = null; // exposed for tests
+  let focusHit = null;
+  let focusPoint = null;
 
   function shellFor(holder) {
     if (!hlShells.has(holder)) hlShells.set(holder, addHighlight(holder));
@@ -252,6 +254,8 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
     hover(point, sx, sy) {
       const hit = picking.pick(controls.cameraEntity, sx, sy);
       hoverKind = hit ? hit.kind : null;
+      focusHit = hit;
+      focusPoint = point;
       track(hit); // lit only while Ctrl/Alt is held
       setCursor(cursorFor(hit, point));
       ui.setFocusBanner(focusInfoFor(hit, point));
@@ -262,6 +266,8 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
     // is the glow and banner alone. Pass null to show nothing.
     showCombatTarget(hit, point) {
       hoverKind = hit ? hit.kind : null;
+      focusHit = hit;
+      focusPoint = point;
       track(hit);
       ui.setFocusBanner(hit ? focusInfoFor(hit, point) : null);
     },
@@ -270,6 +276,8 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
     // opened, or the fight started. Leaves nothing glowing behind a panel.
     clear() {
       hoverKind = null;
+      focusHit = null;
+      focusPoint = null;
       // ...and forget WHAT was under the cursor, not just that something was.
       // `applyGlow` re-lights from `hoverTarget` the moment Ctrl or Alt goes
       // down, so leaving it set meant a body could come back glowing after the
@@ -281,6 +289,12 @@ export function createHoverLayer({ app, canvas, picking, controls, ui, queries, 
       aimPaint?.hide();
       setCursor(null);
       ui.setFocusBanner(null);
+    },
+    // HP and door state can change while the pointer is perfectly still. The
+    // banner memo already makes unchanged frames free; re-derive its content
+    // so live values do not wait for a synthetic mouse move.
+    refreshFocus() {
+      if (focusHit || focusPoint) ui.setFocusBanner(focusInfoFor(focusHit, focusPoint));
     },
 
     // --- the inspect modifiers --------------------------------------------

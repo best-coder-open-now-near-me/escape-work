@@ -341,12 +341,14 @@ export function pickTarget(ux, uz, candidates, canEngage, opts = {}) {
 // partition between the two bodies is not a distance problem, so closing the
 // gap cannot solve it, and spending AP to end up equally unable to swing is the
 // same stall wearing a different hat.
-export function advanceRoute(unit, target, route, { approach, stepOpen }) {
+export function advanceRoute(unit, target, route, { approach, stepOpen, bodyClear }) {
   const pp = posOf(target);
   if (route) {
     const out = route.slice();
     const [gx, gz] = out[out.length - 1];
-    out[out.length - 1] = approach(gx, gz, pp.x, pp.z);
+    const point = approach(gx, gz, pp.x, pp.z);
+    if (!bodyClear(point[0], point[1], unit)) return null;
+    out[out.length - 1] = point;
     return out;
   }
   const b = unit.actor || unit;
@@ -355,6 +357,7 @@ export function advanceRoute(unit, target, route, { approach, stepOpen }) {
   const here = posOf(unit);
   const step = approach(b.x, b.z, pp.x, pp.z);
   if (dist(here.x, here.z, step[0], step[1]) < 0.05) return null; // as close as this tile allows
+  if (!bodyClear(step[0], step[1], unit)) return null;
   if (!inReach(step[0], step[1], pp.x, pp.z, reachOfUnit(unit), stepOpen)) return null;
   return [[here.x, here.z], step];
 }

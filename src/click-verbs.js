@@ -152,7 +152,8 @@ export function createClickVerbs(d) {
     // tiles back is the "much closer than needed" complaint in its ranged
     // form.
     const shotWalk = walkActive(route, shotBudget, null,
-      (px, pz) => verbReaches(d.armed, en, px, pz));
+      (px, pz) => verbReaches(d.armed, en, px, pz)
+        && d.world.bodyClear(px, pz, d.active));
     // Same honest split as the melee walk-up: a degenerate route is not an
     // AP problem, and must not be narrated as one.
     if (!shotWalk) {
@@ -222,7 +223,8 @@ export function createClickVerbs(d) {
     // afford to reach and stood there instead of hitting anyone.
     const budget = d.moveBudget(d.active) - a.ap;
     const walk = walkActive(best.path, budget, best.point,
-      (px, pz) => verbReaches(d.armed, en, px, pz));
+      (px, pz) => verbReaches(d.armed, en, px, pz)
+        && d.world.bodyClear(px, pz, d.active));
     // A null walk has two honest readings, and only one is about AP: with
     // budget in hand it means the route degenerated to nothing (walkActive's
     // no-progress guard). Blaming AP for that was this bug's face: "Not

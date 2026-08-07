@@ -190,6 +190,10 @@ export function createFrame(d) {
     // Same deal for the out-of-combat reach ring: immediate-mode, so it has to
     // be reissued every frame it's meant to be visible.
     if (d.hover.glowHeld && d.sheet && !d.inCombat && !d.gameOver && !d.modalOpen()) d.hover.drawReachRing();
+    // A hovered body's HP may change without the mouse moving. hover.js keeps
+    // the last resolved hit and the banner view memoizes identical content,
+    // so this updates live values without rebuilding stable DOM every frame.
+    d.hover.refreshFocus();
     // Party bar: redraw only when the roster state changes (names/HP/active,
     // plus per-member AP mid-fight); visible only once there's an actual
     // party to show.

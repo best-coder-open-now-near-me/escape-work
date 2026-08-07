@@ -65,12 +65,12 @@ const breakWorld = (over = {}) => world({
 });
 
 test('a swing at a breakable prop in reach commits', () => {
-  const plan = breakPlan('attack', unit(1, 0), 2, 0, breakWorld());
+  const plan = breakPlan('punch', unit(1, 0), 2, 0, breakWorld());
   assert.deepEqual(plan, { kind: 'prop', tx: 2, tz: 0 });
 });
 
 test('a swing out of reach refuses in the melee\'s own words', () => {
-  const plan = breakPlan('attack', unit(0, 0), 2, 0, breakWorld());
+  const plan = breakPlan('punch', unit(0, 0), 2, 0, breakWorld());
   assert.match(plan.refusal, /swing/);
 });
 
@@ -93,9 +93,9 @@ test('a swing takes a partition square-on and never diagonally', () => {
     tileDefAt: () => ({ label: 'floor' }),
     edgeHpBetween: () => 4,
   });
-  assert.deepEqual(breakPlan('attack', unit(1, 0), 2, 0, w), { kind: 'edge', a: [1, 0], b: [2, 0] });
+  assert.deepEqual(breakPlan('punch', unit(1, 0), 2, 0, w), { kind: 'edge', a: [1, 0], b: [2, 0] });
   // Diagonal is not square-on - the topple's own aim, and this shares it.
-  assert.equal(breakPlan('attack', unit(1, 0), 2, 1, w), null);
+  assert.equal(breakPlan('punch', unit(1, 0), 2, 1, w), null);
 });
 
 // --- Pull Over --------------------------------------------------------------

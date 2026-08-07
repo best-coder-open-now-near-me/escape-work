@@ -132,20 +132,25 @@ export function verbReaches(id, attacker, en, px, pz, { hasLos, stepOpen }) {
 // It is the FURTHEST the walk can go, not where it stops: the route is trimmed
 // to the first point the verb reaches from (trimToFirst), so this only has to
 // prove the goal tile is worth walking to at all.
-export function swingPointAt(attacker, en, gx, gz, { isWalkable, approach, stepOpen }) {
+export function swingPointAt(attacker, en, gx, gz, {
+  isWalkable, approach, stepOpen, bodyClear,
+}) {
   const b = attacker.actor || attacker;
   const own = gx === b.x && gz === b.z;
   if (!own && !isWalkable(gx, gz)) return null;
   const ep = posOf(en);
   const p = approach(gx, gz, ep.x, ep.z);
+  if (!bodyClear(p[0], p[1], attacker)) return null;
   return inReach(p[0], p[1], ep.x, ep.z, reachOfUnit(attacker), stepOpen) ? p : null;
 }
 
 // Does ANY tile beside them offer a legal swing? The cheap read the target
 // rings use - pure geometry, no pathfinding, so it can run per frame. A route
 // to the spot is the click's own (more expensive) test.
-export function hasSwingSpot(attacker, en, { isWalkable, approach, stepOpen }) {
-  const world = { isWalkable, approach, stepOpen };
+export function hasSwingSpot(attacker, en, {
+  isWalkable, approach, stepOpen, bodyClear,
+}) {
+  const world = { isWalkable, approach, stepOpen, bodyClear };
   // Out to the attacker's REACH, not the eight neighbours. A long handle
   // (the reach-grabber puts a swing at 2.2 tile-units) can hit from a tile
   // further out, and scanning only the immediate neighbour ring told it there

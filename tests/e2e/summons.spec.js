@@ -147,6 +147,60 @@ test('a player summon is a controllable member, outlives the fight, then times o
   await page.evaluate(() => { window.__god.timeScale = 1; });
 });
 
+test('a player summon attacks HR without stacking on her position', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootStash(page, SUMMON_ARENA, 'office-drone', { seed: 4 });
+  await enterCombat(page);
+  // Use the same three-summon setup as the lifecycle coverage above so HR
+  // cannot remove the only test actor before its initiative slot arrives.
+  await page.evaluate(() => window.__combat.summonAlly('employee', 3, 12));
+
+  // Reach the employee's own controlled turn. Keep the real party standing so
+  // HR's turns cannot turn this positioning check into a wipe race.
+  let employeeTurn = false;
+  for (let i = 0; i < 30 && !employeeTurn; i++) {
+    if (!(await page.evaluate(() => !!window.__combat))) break;
+    await page.evaluate(() => {
+      if (window.__god.player) window.__god.player.hp = window.__god.player.maxHp;
+      const hr = window.__god.enemies.find((enemy) => enemy.def?.name === 'HR Representative');
+      if (hr) hr.hp = hr.maxHp;
+      // HR may post enemy Employees before our summons reach their shared
+      // turn. Remove those extra click targets; this regression is about the
+      // player summon approaching HR's body, not target selection in a pile.
+      window.__god.enemies
+        .filter((enemy) => enemy.alive && enemy.def?.name === 'Employee')
+        .forEach((enemy) => enemy.die());
+    });
+    const cur = await currentSlot(page);
+    if (cur?.phase === 'player' && cur.name === 'Employee' && cur.team === 'player') employeeTurn = true;
+    else if (cur?.phase === 'player') await page.click('#combat-end-turn').catch(() => {});
+    await page.waitForTimeout(350);
+  }
+  expect(employeeTurn).toBe(true);
+
+  await page.evaluate(() => { window.__combat.forceHit = true; });
+  const hpBefore = await page.evaluate(() =>
+    window.__game.enemies.find((enemy) => enemy.name === 'HR Representative' && enemy.alive).hp);
+  await clickAction(page, 'action-item');
+  const hr = await page.evaluate(() =>
+    window.__game.enemies.find((enemy) => enemy.name === 'HR Representative' && enemy.alive));
+  const screenPoint = await page.evaluate(({ px, pz }) => window.__game.project3(px, 0.8, pz), hr);
+  await page.mouse.click(screenPoint.x, screenPoint.y);
+  await expect.poll(() => page.evaluate(() => window.__combat?.armed),
+    { timeout: 20_000 }).toBe(null);
+  await expect.poll(() => page.evaluate(() =>
+    window.__game.enemies.find((enemy) => enemy.name === 'HR Representative' && enemy.alive)?.hp ?? 0),
+  { timeout: 20_000 }).toBeLessThan(hpBefore);
+
+  const gap = await page.evaluate(() => {
+    const employee = window.__combat.actingAt;
+    const target = window.__game.enemies.find((enemy) => enemy.name === 'HR Representative' && enemy.alive);
+    return employee && target ? Math.hypot(employee.x - target.px, employee.z - target.pz) : null;
+  });
+  expect(gap, 'both live body positions are available after the attack').not.toBeNull();
+  expect(gap).toBeGreaterThanOrEqual(0.64);
+});
+
 test('the Manager escalates AT a spot you pick', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, MELEE_ARENA, 'middle-manager');

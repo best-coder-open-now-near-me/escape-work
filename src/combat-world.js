@@ -21,6 +21,7 @@
 import { createWorldEdits } from './world-edits.js';
 import { livingMemberAt } from './member-rules.js';
 import { acceptsSurface } from './data/tiles.js';
+import { BODY_RADIUS } from './pathfinding.js';
 
 export function createCombatWorld(d) {
   const edits = createWorldEdits(d.grid, d.scene);
@@ -93,6 +94,29 @@ export function createCombatWorld(d) {
   },
     clampPoint: d.clampPoint,
     approach: d.approachTo,
+    // Movement tiles prevent logical stacking, but bodies rest at continuous
+    // points inside those tiles. Two different tiles can therefore still put
+    // their models on top of each other near a shared edge. Every combat
+    // approach asks this before accepting its exact endpoint.
+    bodyClear: (x, z, self = null) => {
+      const own = self?.actor || self;
+      const records = [
+        ...(d.party?.members || []),
+        ...(d.summons || []),
+        ...(d.enemies || []),
+        ...(d.npcs || []),
+      ];
+      const gap = BODY_RADIUS * 2 + 0.04;
+      return records.every((record) => {
+        const actor = record?.actor || record;
+        if (!actor || actor === own) return true;
+        if (record?.sheet && record.sheet.hp <= 0) return true;
+        if (!record?.sheet && record?.alive === false) return true;
+        const point = actor.entity?.getPosition?.() || actor.spawnPoint || actor;
+        if (!Number.isFinite(point?.x) || !Number.isFinite(point?.z)) return true;
+        return Math.hypot(point.x - x, point.z - z) >= gap;
+      });
+    },
     // Partitions (edge walls) are chest height: they block movement but
     // not throws - lob paper right over the cubicle wall. Closed doors go
     // floor to frame, so they DO stop throws (grid.sightOpen); so does smoke

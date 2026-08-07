@@ -915,6 +915,7 @@ test('ammoCostOf survives a missing sheet', () => {
 test('rangeOf is 0 for a swing, the declared range for a shot', () => {
   assert.equal(rangeOf('punch'), 0);
   assert.equal(rangeOf('staple-jab'), 0);
+  assert.equal(rangeOf('attack'), 6, 'Passive-Aggressive Email reaches the maximum authored range');
   assert.equal(rangeOf('staple-gun-fire'), ACTIONS['staple-gun-fire'].range);
   assert.equal(rangeOf('spitball-shot'), ACTIONS['spitball-shot'].range);
 });
@@ -995,7 +996,7 @@ const barIds = (sheet, extra = []) => orderedActionIds(
 test('the basic attack leads, then shove, then the throws', () => {
   const s = createSheet('office-drone');
   const ids = barIds(s, ['paper-ball', 'paper-airplane']);
-  assert.equal(ids[0], 'attack'); // the Drone's own swing, not its first listed action
+  assert.equal(ids[0], 'attack'); // the Drone's own basic attack, not its first listed action
   assert.equal(ids[1], 'shove');
   assert.equal(ids[2], 'paper-ball');
   assert.equal(ids[3], 'paper-airplane');

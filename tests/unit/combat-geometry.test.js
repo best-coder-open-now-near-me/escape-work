@@ -26,6 +26,7 @@ const open = {
   stepOpen: () => true,
   hasLos: () => true,
   approach: (gx, gz) => [gx, gz],
+  bodyClear: () => true,
 };
 // A world with one wall: the edge between (1,0) and (2,0) is solid.
 const walled = {
@@ -90,8 +91,10 @@ test('canReach adds the edge test - a partition is terrain, not decoration', () 
 test('actRangeOf is the CLICK\'s range: 0 means the click walks you in', () => {
   // A thrown attack with no declared range carries THROW_RANGE (stats.js).
   assert.equal(actRangeOf('paper-ball'), THROW_RANGE);
+  // Passive-Aggressive Email is the Drone's maximum-range basic power.
+  assert.equal(actRangeOf('attack'), 6);
   // A plain swing has none - the click walks into melee reach for it.
-  assert.equal(actRangeOf('attack'), 0);
+  assert.equal(actRangeOf('punch'), 0);
   assert.equal(actRangeOf('nonsense-id'), 0);
 });
 
@@ -110,8 +113,8 @@ test('verbReaches asks the armed verb\'s OWN range, not a borrowed one', () => {
   // ...but not without a line.
   assert.equal(verbReaches('paper-ball', me, en, 0, 0, { ...open, hasLos: () => false }), false);
   // A swing is not - it has no declared range, so it is measured by reach.
-  assert.equal(verbReaches('attack', me, en, 0, 0, open), false);
-  assert.equal(verbReaches('attack', me, en, 3, 0, open), true);
+  assert.equal(verbReaches('punch', me, en, 0, 0, open), false);
+  assert.equal(verbReaches('punch', me, en, 3, 0, open), true);
 });
 
 test('verbReaches measures a circle from the unrounded stand point (DEGRID D4/D6)', () => {
@@ -199,6 +202,18 @@ test('zoneCellsFor drops fine cells that are unseen, unusable, or under a body f
   assert.deepEqual(zoneCellsFor(a, origin, 3, 3, {
     surfaceField, canTakeSurface: () => false, hasLos: () => true,
   }), []);
+});
+
+test('swingPointAt refuses a physically occupied point even when its tile is free', () => {
+  const me = unit(0, 0, REACH.DEFAULT);
+  const en = at(3, 0);
+  const occupiedEdge = {
+    ...open,
+    approach: () => [2.4, 0],
+    bodyClear: (x, z, self) => self !== me || x !== 2.4 || z !== 0,
+  };
+  assert.equal(swingPointAt(me, en, 2, 0, occupiedEdge), null,
+    'continuous body clearance wins over two distinct logical tiles');
 });
 
 test('the shared constants keep the numbers they are documented with', () => {

@@ -84,9 +84,13 @@ export const ACTIONS = {
     type: 'attack',
     ap: 2,
     exploration: { mode: 'opener' },
+    // Email is the Drone's across-the-office basic, not a reason to walk into
+    // punching distance. Six is the game's maximum authored target range (the
+    // same whole-floor reach as the spitball below).
+    range: 6,
     label: 'Passive-Aggressive Email',
     icon: '✉️',
-    desc: 'Your basic swing. No frills, no cost beyond the AP.',
+    desc: 'Your basic attack, delivered from across the floor. No cost beyond the AP.',
     min: 3,
     max: 5,
     log: 'You send a passive-aggressive email.',

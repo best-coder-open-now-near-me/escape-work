@@ -68,8 +68,9 @@ test('the kit is in canonical order, on one row, with room to grow', async ({ pa
   expect(all[0].text).toMatch(/^1/);
   // The unlock card and hotbar share actionTooltip(), so hold the browser
   // surface to that full description rather than the retired label-only title.
-  expect(all[0].title).toMatch(/^Passive-Aggressive Email - 2 AP\nYour basic swing\./);
+  expect(all[0].title).toMatch(/^Passive-Aggressive Email - 2 AP\nYour basic attack, delivered from across the floor\./);
   expect(all[0].title).toMatch(/Damage 3-5/);
+  expect(all[0].title).toMatch(/Range 6 tiles/);
   expect(all[9].text).toMatch(/^0—$/);
   expect(all[9].title).toMatch(/Empty slot/);
 
