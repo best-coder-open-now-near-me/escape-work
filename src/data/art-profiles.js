@@ -7,6 +7,7 @@ export const ART_PROFILES = Object.freeze({
     label: 'Built-in art',
     assets: Object.freeze([]),
     characters: Object.freeze({}),
+    characterAccessories: Object.freeze({}),
     tiles: Object.freeze({}),
   }),
 
@@ -24,6 +25,12 @@ export const ART_PROFILES = Object.freeze({
       { from: 'characters/shops-clerk-male.glb', to: 'characters/synty/shops-clerk-male.glb' },
       { from: 'characters/shops-worker-female.glb', to: 'characters/synty/shops-worker-female.glb' },
       { from: 'characters/shops-worker-male.glb', to: 'characters/synty/shops-worker-male.glb' },
+      { from: 'characters/hair/generic-short-04.glb', to: 'characters/synty/hair/generic-short-04.glb' },
+      { from: 'characters/hair/generic-side-06.glb', to: 'characters/synty/hair/generic-side-06.glb' },
+      { from: 'characters/hair/shops-short-01.glb', to: 'characters/synty/hair/shops-short-01.glb' },
+      { from: 'characters/hair/shops-messy-01.glb', to: 'characters/synty/hair/shops-messy-01.glb' },
+      { from: 'characters/hair/shops-long-01.glb', to: 'characters/synty/hair/shops-long-01.glb' },
+      { from: 'characters/hair/shops-ponytail-01.glb', to: 'characters/synty/hair/shops-ponytail-01.glb' },
       { from: 'office/chair.glb', to: 'synty/office/chair.glb' },
       { from: 'office/desk.glb', to: 'synty/office/desk.glb' },
       { from: 'office/plant.glb', to: 'synty/office/plant.glb' },
@@ -37,6 +44,19 @@ export const ART_PROFILES = Object.freeze({
       itsupport: 'synty/shops-clerk-male',
       hrrep: 'synty/shops-clerk-female',
       security: 'synty/shops-worker-female',
+    }),
+    // Synty bodies and hairstyles are separate meshes. The hair GLBs are
+    // deliberately tiny and attach to the animated Head bone at runtime, so
+    // one body can keep its full clip set without baking six duplicate wigs
+    // into it. `scale: 100` bridges the FBX's metre-sized attachment geometry
+    // into the centimetre-authored bone hierarchy inside the exported rigs.
+    characterAccessories: Object.freeze({
+      'synty/generic-business-male': Object.freeze({ model: 'synty/hair/generic-short-04', color: [0.08, 0.035, 0.018], scale: 100 }),
+      'synty/generic-business-female': Object.freeze({ model: 'synty/hair/generic-side-06', color: [0.34, 0.30, 0.26], scale: 100 }),
+      'synty/shops-worker-male': Object.freeze({ model: 'synty/hair/shops-short-01', color: [0.20, 0.09, 0.035], scale: 100 }),
+      'synty/shops-clerk-male': Object.freeze({ model: 'synty/hair/shops-messy-01', color: [0.055, 0.025, 0.015], scale: 100 }),
+      'synty/shops-clerk-female': Object.freeze({ model: 'synty/hair/shops-long-01', color: [0.30, 0.10, 0.035], scale: 100 }),
+      'synty/shops-worker-female': Object.freeze({ model: 'synty/hair/shops-ponytail-01', color: [0.70, 0.48, 0.13], scale: 100 }),
     }),
     tiles: Object.freeze({
       chair: Object.freeze({ model: 'synty/office/chair', scale: 0.9, rotY: 0 }),
@@ -58,6 +78,10 @@ export const ACTIVE_ART_PROFILE = (
 
 export function characterArt(model, profileId = ACTIVE_ART_PROFILE) {
   return ART_PROFILES[profileId]?.characters?.[model] || model;
+}
+
+export function characterAccessory(model, profileId = ACTIVE_ART_PROFILE) {
+  return ART_PROFILES[profileId]?.characterAccessories?.[model] || null;
 }
 
 // Only presentation keys cross this seam. An art profile cannot accidentally

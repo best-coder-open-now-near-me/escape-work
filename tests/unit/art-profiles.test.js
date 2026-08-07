@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   ACTIVE_ART_PROFILE,
   ART_PROFILES,
+  characterAccessory,
   characterArt,
   tileArt,
 } from '../../src/data/art-profiles.js';
@@ -58,6 +59,18 @@ test('every class-backed actor resolves its model through the active art profile
   );
 });
 
+test('the six Synty roles have distinct modular hairstyles', () => {
+  const models = Object.values(ART_PROFILES.synty.characters);
+  const hair = models.map((model) => characterAccessory(model, 'synty'));
+  assert.equal(hair.length, 6);
+  assert.equal(new Set(hair.map((accessory) => accessory.model)).size, 6);
+  for (const accessory of hair) {
+    assert.match(accessory.model, /^synty\/hair\//);
+    assert.equal(accessory.scale, 100);
+    assert.equal(accessory.color.length, 3);
+  }
+});
+
 test('profile asset mappings are unique, relative, and GLB-only', () => {
   for (const [id, profile] of Object.entries(ART_PROFILES)) {
     const targets = new Set();
@@ -77,5 +90,13 @@ test('every Synty character override has a build-time asset mapping', () => {
     .map(({ to }) => to.replace(/^characters\//, '').replace(/\.glb$/, '')));
   for (const model of Object.values(ART_PROFILES.synty.characters)) {
     assert.ok(shipped.has(model), `${model} is copied into the build`);
+  }
+});
+
+test('every Synty hairstyle has a build-time asset mapping', () => {
+  const shipped = new Set(ART_PROFILES.synty.assets
+    .map(({ to }) => to.replace(/^characters\//, '').replace(/\.glb$/, '')));
+  for (const accessory of Object.values(ART_PROFILES.synty.characterAccessories)) {
+    assert.ok(shipped.has(accessory.model), `${accessory.model} is copied into the build`);
   }
 });

@@ -8,14 +8,31 @@ arrives.
 ## Optional licensed art profile
 
 Licensed source and converted files stay under ignored `assets/licensed/`.
-The opt-in Synty profile copies only the eleven runtime GLBs allowlisted in
-`src/data/art-profiles.js` (six characters and five office props); normal
-builds copy none of them.
+The opt-in Synty profile copies only the seventeen runtime GLBs allowlisted in
+`src/data/art-profiles.js` (six characters, six modular hairstyles, and five
+office props); normal builds copy none of them.
 
 ```sh
 npm run build:synty
 npm run serve:synty
 ```
+
+### Modular character hair
+
+Synty character bodies do not contain their modular hair meshes. Export the
+six role-specific attachments from the local licensed FBXs into the prepared
+private runtime package with the installed Unity editor:
+
+```powershell
+npm run export:synty-hair
+```
+
+The exporter copies no licensed source into this repository. Unity imports six
+selected FBXs in a disposable project, the tool writes small geometry-only
+GLBs under `build/private-assets-synty/characters/hair/`, and refreshes the
+private package manifest. `models.js` attaches them to each animated `Head`
+bone; the same loading seam serves gameplay, character selection, and
+portraits.
 
 The default source is `assets/licensed/synty`. Set
 `ESCAPE_WORK_SYNTY_SOURCE` to a different private checkout before running the

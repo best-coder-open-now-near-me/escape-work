@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "attachments": [
+    {
+      "id": "generic-short-04",
+      "source": "PolygonGeneric/Models/SM_Gen_Chr_Attach_Hair_04.fbx"
+    },
+    {
+      "id": "generic-side-06",
+      "source": "PolygonGeneric/Models/SM_Gen_Chr_Attach_Hair_06.fbx"
+    },
+    {
+      "id": "shops-short-01",
+      "source": "PolygonShops/Models/SM_Chr_Hair_Short_01.fbx"
+    },
+    {
+      "id": "shops-messy-01",
+      "source": "PolygonShops/Models/SM_Chr_Hair_Messy_01.fbx"
+    },
+    {
+      "id": "shops-long-01",
+      "source": "PolygonShops/Models/SM_Chr_Hair_Long_01.fbx"
+    },
+    {
+      "id": "shops-ponytail-01",
+      "source": "PolygonShops/Models/SM_Chr_Hair_Ponytail_01.fbx"
+    }
+  ]
+}

@@ -7,6 +7,7 @@
   "scripts": {
     "build": "node build.mjs",
     "build:synty": "node build.mjs --profile=synty",
+    "export:synty-hair": "node tools/export-synty-hair.mjs",
     "bundle:private-assets": "node tools/bundle-private-assets.mjs",
     "publish:private-assets": "node tools/publish-private-assets.mjs --source build/private-assets-synty --repo build/private-assets-repo --expect-remote https://github.com/best-coder-open-now-near-me/private-assets --branch main",
     "serve": "node build.mjs && node serve.mjs --port 8000",

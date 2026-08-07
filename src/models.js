@@ -1,6 +1,7 @@
 // Loading and tuning .glb models: asset reuse, the anim state graph for
 // characters, and the proportion retune that de-chibis the Kenney rigs.
 import { toonifyEntity, addOutlines } from './shading.js';
+import { characterAccessory } from './data/art-profiles.js';
 
 // Resolved LAZILY, not read at import. `const pc = window.pc` made this module
 // - and everything importing it, which includes actors.js - impossible to load
@@ -24,6 +25,60 @@ function setupAnim(inst, asset) {
   for (const name of ACTOR_CLIPS) {
     if (tracks[name]) inst.anim.assignAnimation(name, tracks[name]);
   }
+}
+
+// Licensed character packs commonly keep hair/headwear as modular meshes.
+// Attach the active profile's selection to the animated Head bone before the
+// caller sees the model, so gameplay, the picker, and one-shot portraits all
+// receive the same finished character through the same placement seam.
+function attachCharacterAccessory(app, holder, characterModel, onReady) {
+  const spec = characterAccessory(characterModel);
+  if (!spec) { onReady(); return; }
+  const bone = holder.findByName(spec.bone || 'Head') || holder.findByName('head');
+  if (!bone) {
+    console.warn('character accessory bone missing:', characterModel, spec.bone || 'Head');
+    onReady();
+    return;
+  }
+  const url = `assets/characters/${spec.model}.glb`;
+  let asset = app.assets.find(url);
+  if (!asset) {
+    asset = new (pc().Asset)(url, 'container', { url });
+    asset.on('error', (err) => {
+      asset.loadFailed = true;
+      console.warn('character accessory load failed:', url, err);
+    });
+    app.assets.add(asset);
+  }
+  if (asset.loadFailed) { onReady(); return; }
+  let settled = false;
+  const finish = () => { if (settled) return; settled = true; onReady(); };
+  asset.once('error', finish);
+  asset.ready(() => {
+    if (settled) return;
+    asset.off('error', finish);
+    const accessory = new (pc().Entity)(`accessory:${spec.model}`);
+    accessory.addChild(asset.resource.instantiateRenderEntity());
+    bone.addChild(accessory);
+    const position = spec.position || [0, 0, 0];
+    const rotation = spec.rotation || [0, 0, 0];
+    const scale = spec.scale || 1;
+    accessory.setLocalPosition(position[0], position[1], position[2]);
+    accessory.setLocalEulerAngles(rotation[0], rotation[1], rotation[2]);
+    accessory.setLocalScale(scale, scale, scale);
+    for (const rc of accessory.findComponents('render')) {
+      for (const mi of rc.meshInstances) {
+        const material = mi.material.clone();
+        if (spec.color) material.diffuse.set(spec.color[0], spec.color[1], spec.color[2]);
+        material.specular.set(0.04, 0.04, 0.04);
+        material.gloss = 0.15;
+        material.update();
+        mi.material = material;
+      }
+    }
+    finish();
+  });
+  app.assets.load(asset);
 }
 
 // Load a .glb, wrap it in a holder (so scaling/rotating is predictable), and
@@ -101,14 +156,17 @@ export function placeModel(app, url, tileX, tileZ, { scale = 1, lift = 0.1, rotY
     const holder = new (pc().Entity)(url);
     const inst = asset.resource.instantiateRenderEntity();
     holder.addChild(inst);
-    toonifyEntity(holder);
-    addOutlines(holder);
     if (animate) setupAnim(inst, asset);
-    holder.setLocalScale(scale, scale, scale);
-    holder.setEulerAngles(tiltX, rotY, tiltZ);
-    holder.setPosition(tileX, lift, tileZ);
-    host().addChild(holder);
-    if (onReady) onReady(holder);
+    const characterMatch = url.match(/^assets\/characters\/(.+)\.glb$/);
+    attachCharacterAccessory(app, holder, characterMatch?.[1] || null, () => {
+      toonifyEntity(holder);
+      addOutlines(holder);
+      holder.setLocalScale(scale, scale, scale);
+      holder.setEulerAngles(tiltX, rotY, tiltZ);
+      holder.setPosition(tileX, lift, tileZ);
+      host().addChild(holder);
+      if (onReady) onReady(holder);
+    });
   });
   app.assets.load(asset);
 }
