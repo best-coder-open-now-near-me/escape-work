@@ -1,5 +1,25 @@
 # Equipment Slots Plan
 
+## 2026-08-07 — expanded equipment layout
+
+- `[stated]` The equipment layout now has **nine positions**: two weapons,
+  two jewelry attachments (one for each hand), Hat, Outfit, Pants, Shoes, and
+  the existing Flair. This records the designer's task wording and follow-up:
+  “two weapons, jewelry for each hand, pants, and hat need to be added,” with
+  “we have flair as well — that should be kept.”
+- `[proposed]` The original `weapon` and `trinket` keys remain Main Weapon and
+  Flair for save compatibility. New positional keys are additive; loading any
+  older save seeds the absent positions empty.
+- `[proposed]` Quick Equip fills the first empty compatible weapon/jewelry
+  position, then replaces the primary compatible position when both are full.
+  Main Weapon continues to choose the basic attack and on-hit proc; Second
+  Weapon is its fallback when Main Weapon is empty. All equipped stat blocks
+  continue to use the existing additive fold.
+
+This revision supersedes the old three/four-slot scope in decision #1. The
+milestones below retain their historical counts because that is what those
+milestones shipped at the time.
+
 Loot you *wear*, not just loot you eat. Today items are pocket consumables
 (`heal`/`ammo`), flavor archaeology (`examine`-only), and exactly one passive:
 `bonusDmg`, where the best stapler in your pockets silently counts
@@ -48,9 +68,10 @@ dependency on either — only the stretch content does.
   list. This is the one genuine systems addition in the plan; the rest is data
   folding through existing seams. It's also what makes a looted weapon *feel*
   like a weapon rather than a stat stick.
-- **Three slots** on every sheet: `weapon`, `outfit`, `trinket` — rendered in
-  the UI as **In Hand / Dress Code / Flair**. Small on purpose: one damage
-  choice, one defense choice, one wildcard.
+- **Nine positions** on every sheet: `weapon`, `weapon2`, `jewelryLeft`,
+  `jewelryRight`, `hat`, `outfit`, `pants`, `shoes`, and `trinket` — rendered
+  as Main Weapon / Second Weapon / Left-Hand Jewelry / Right-Hand Jewelry /
+  Hat / Outfit / Pants / Shoes / Flair.
 - **Equipment items** in `data/items.js`: an entry gains `slot` plus a
   `stats` block drawn from a small engine-understood vocabulary —
   `dmg`, `soak`, `maxHp`, `maxAp`, `attrBonus: { grit… }`, and (post
@@ -60,7 +81,7 @@ dependency on either — only the stretch content does.
   a DISTANCE, and weapons own it"), which holds the geometry and the reason the
   default is a floor rather than a midpoint; this doc owns only the slot and the
   fold through `equippedStats`.
-- **`sheet.equipped = { weapon, outfit, trinket }`**, folded into the derived
+- **`sheet.equipped` carries all nine positions**, folded into the derived
   numbers by `recomputeDerived`/`damageBonus`/`deflect` — the same one-seam
   pattern attributes used, so combat and the HUD pick equipment up with
   near-zero changes.
@@ -76,7 +97,7 @@ dependency on either — only the stretch content does.
 
 | # | Decision | Choice | Why / alternatives |
 |---|----------|--------|--------------------|
-| 1 | Slot set | **Three**: weapon / outfit / trinket | BG3's seven-slot paper doll is inventory management as a hobby; three slots keep every drop a legible either/or against exactly one incumbent. A fourth (shoes — on-theme with all the floor hazards) was seriously considered and deliberately parked: gum/slip interactions belong to talents and statuses today, and a shoes slot would immediately fight both. Revisit post-STATUS_PLAN. |
+| 1 | Slot set | **Nine positions**: two weapons, left/right jewelry, hat, outfit, pants, shoes, and Flair `[stated]` (designer task and follow-up, 2026-08-07) | Supersedes the original three-slot proposal and later four-slot implementation. Flair remains its own position; jewelry is a new item type with one attachment on each hand. |
 | 2 | Where equipped items live | **In the slot, out of the bag**: equipping removes the id from `sheet.inventory`; unequipping pushes it back (blocked politely when pockets are full) | Keeps `INV_CAP` meaning what it says and the pockets list honest. The alternative (a flag on an inventory index) survives `splice` badly — drop/use verbs would need equipped-index bookkeeping forever. |
 | 3 | Stats fold into the derived seam | `recomputeDerived` adds equipped `maxHp`/`maxAp`/`attrBonus`; `damageBonus` swaps its best-in-bag scan for the weapon's `dmg`; `deflect` adds outfit/trinket `soak`; `accuracy`/`dodge` (HIT_PLAN) add gear `acc`/`dodge` | One seam, already audited ("never assign maxHp directly"). Readers — combat, HUD, god — change zero lines. `attrBonus` on gear flows through *every* attribute derivation automatically (a +1 Savvy mug is damage AND accuracy), which is what makes trinkets interesting for free. |
 | 4 | Gear attributes are computed, not baked | Equipment `attrBonus` is applied **inside** `recomputeDerived` from the live `equipped` map — unlike class-track nodes, which bake permanently at spend | Bake-and-unbake on unequip is the classic drift bug (PROGRESSION chose baking precisely because perks are permanent; equipment isn't). Computing from the worn set makes equip/unequip trivially symmetric and save-safe. The one cost: `recomputeDerived` now reads `ITEMS` — stats.js already imports it. |
@@ -146,14 +167,19 @@ pieces (`executive`/`regional-executive` drop the blazer, `hr` the lanyard).
 ## The sheet & the math
 
 ```js
-// createSheetFrom adds:
-equipped: { weapon: null, outfit: null, trinket: null },   // item ids
+// createSheetFrom adds one item-id position for each entry in EQUIP_SLOTS:
+equipped: {
+  weapon: null, weapon2: null,
+  jewelryLeft: null, jewelryRight: null,
+  hat: null, outfit: null, pants: null, shoes: null,
+  trinket: null,
+},
 
 // stats.js — new pure helpers:
 equipItem(sheet, inventoryIndex)  // validates slot, swaps incumbent back to
                                   // the bag, recomputeDerived + creditNewHp
 unequipItem(sheet, slot)          // back to bag if room; recompute (hp clamps)
-equippedStats(sheet)              // summed stats view of the three slots
+equippedStats(sheet)              // summed stats view of all equipped positions
 ```
 
 `recomputeDerived` becomes: base + attr (own + gear `attrBonus`) + gear
@@ -375,7 +401,7 @@ untouched.
   with progression to matter) but the content pass must price it — gear
   bonuses should cap around 1–2 points and never stack past interesting.
   Watch the god panel numbers in M3.
-- **Pockets pressure.** Three slots effectively add three carried items
+- **Pockets pressure.** Nine positions effectively add nine carried items
   outside `INV_CAP`. That's strictly more room — fine — but unequip-when-full
   needs the polite refusal path tested, since it's the one place the verbs
   can dead-end.

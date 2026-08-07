@@ -16,6 +16,45 @@ const EQUIP_ARENA = {
   ],
 };
 
+test('the expanded equipment layout keeps Flair and adds both hands, hat, and pants', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootAndPick(page, 'office-drone');
+  await page.keyboard.press('i');
+  await expect(page.locator('#inventory-panel')).toBeVisible();
+
+  await expect(page.locator('#equip-slot-weapon')).toContainText('Main Weapon');
+  await expect(page.locator('#equip-slot-weapon2')).toContainText('Second Weapon');
+  await expect(page.locator('#equip-slot-jewelryLeft')).toContainText('Left-Hand Jewelry');
+  await expect(page.locator('#equip-slot-jewelryRight')).toContainText('Right-Hand Jewelry');
+  await expect(page.locator('#equip-slot-hat')).toContainText('Hat');
+  await expect(page.locator('#equip-slot-pants')).toContainText('Pants');
+  await expect(page.locator('#equip-slot-trinket')).toContainText('Flair');
+  await expect(page.locator('#equip-slot-trinket')).toContainText('Stress Ball');
+});
+
+test('successive weapons fill both positions and the main weapon owns the basic attack', async ({ page }) => {
+  test.setTimeout(300_000);
+  await bootAndPick(page, 'office-drone');
+  await page.evaluate(() => { window.__god.player.inventory = ['red-stapler', 'letter-opener']; });
+  await page.keyboard.press('i');
+  await expect(page.locator('#inventory-panel')).toBeVisible();
+
+  await page.click('#inv-equip-0');
+  await page.click('#inv-equip-0');
+  await expect.poll(() => page.evaluate(() => ({
+    main: window.__game.stats.equipped.weapon,
+    second: window.__game.stats.equipped.weapon2,
+  }))).toEqual({ main: 'red-stapler', second: 'letter-opener' });
+  await expect(page.locator('#hotbar-act-staple-jab')).toBeVisible();
+  expect(await page.locator('#hotbar-act-letter-opener-stab').count()).toBe(0);
+
+  // Emptying Main Weapon promotes the second position as the basic verb without
+  // moving either item between positions.
+  await page.click('#equip-unequip-weapon');
+  await expect(page.locator('#hotbar-act-letter-opener-stab')).toBeVisible();
+  expect(await page.locator('#hotbar-act-staple-jab').count()).toBe(0);
+});
+
 test('equip a weapon from the pockets, then stow it back', async ({ page }) => {
   test.setTimeout(300_000);
   await bootAndPick(page, 'office-drone');

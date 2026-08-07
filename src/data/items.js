@@ -22,9 +22,12 @@
 //                mark it up when selling to you (`markup`) and mark it down
 //                when buying from you (`sellRate`); the item just states worth.
 //                No `value` = nobody will take it, and it can't be stocked.
-//   slot       - equippable slot: 'weapon' | 'outfit' | 'trinket' | 'shoes'
-//                (the full set is EQUIP_SLOTS in stats.js). Equipping
-//                moves the item out of the bag into sheet.equipped[slot].
+//   slot       - equippable TYPE: weapon | jewelry | hat | outfit | pants |
+//                shoes | trinket. EQUIP_SLOT_TYPES in stats.js maps those
+//                types to the nine equipment positions; weapon and jewelry
+//                each have two, while trinket remains the single Flair slot.
+//                Equipping moves the item out of the bag into a compatible
+//                sheet.equipped position.
 //   stats      - equipped bonuses folded into derived numbers (stats.js
 //                equippedStats): dmg, soak, maxHp, maxAp, acc, dodge, reach,
 //                slipProof, moveCost, attrBonus:{grit,hustle,savvy,composure}

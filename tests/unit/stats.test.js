@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { COMPANIONS } from '../../src/data/companions.js';
 import {
-  createSheet, grantTalent, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, spendablePoints, pendingPoints, scaleEnemy, statusResist, accuracy, dodge, accFromSavvy, dodgeFromHustle, dmgFromSavvy, deflectFromComposure, soakHit, hitChance, rollHit, unitCombat, equipItem, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, inventoryCapOf, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, gritSaveChance, SAVE,
+  createSheet, grantTalent, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, spendablePoints, pendingPoints, scaleEnemy, statusResist, accuracy, dodge, accFromSavvy, dodgeFromHustle, dmgFromSavvy, deflectFromComposure, soakHit, hitChance, rollHit, unitCombat, equipItem, equipSlotsFor, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, inventoryCapOf, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, gritSaveChance, SAVE,
 } from '../../src/stats.js';
 import * as stats from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
@@ -576,25 +576,68 @@ test('unitCombat passes innate accuracy/dodge through, defaulting to 0', () => {
 
 // --- equipment (EQUIPMENT_PLAN.md milestone 1) ------------------------------
 
-test('a fresh sheet seeds all four slots, filling only its class startGear', () => {
+test('a fresh sheet seeds all nine positions, filling only its class startGear', () => {
   const s = createSheet('office-drone'); // the Drone ships a stress-ball trinket
-  assert.deepEqual(s.equipped, { weapon: null, outfit: null, trinket: 'stress-ball', shoes: null });
+  assert.deepEqual(s.equipped, {
+    weapon: null,
+    weapon2: null,
+    jewelryLeft: null,
+    jewelryRight: null,
+    hat: null,
+    outfit: null,
+    pants: null,
+    shoes: null,
+    trinket: 'stress-ball',
+  });
   assert.deepEqual(equippedStats(s).attrBonus, { composure: 1 }); // the trinket folds through
   assert.equal(equippedStats(s).dmg, 0); // a trinket, no weapon damage
 });
 
-test('equipItem validates the slot and swaps the incumbent back to the bag', () => {
+test('equipItem fills both weapon positions before replacing the primary', () => {
   const s = createSheet('office-drone');
-  s.inventory = ['stapler', 'red-stapler'];
+  s.inventory = ['stapler', 'red-stapler', 'letter-opener'];
   assert.equal(equipItem(s, 0), true);        // equip the plain stapler
   assert.equal(s.equipped.weapon, 'stapler');
   assert.ok(!s.inventory.includes('stapler')); // left the bag
-  // equipping into the same slot returns the old occupant to the bag
-  const i = s.inventory.indexOf('red-stapler');
-  assert.equal(equipItem(s, i), true);
-  assert.equal(s.equipped.weapon, 'red-stapler');
-  assert.ok(s.inventory.includes('stapler')); // the plain stapler came back
-  assert.equal(equippedStats(s).dmg, 2);
+  assert.equal(equipItem(s, s.inventory.indexOf('red-stapler')), true);
+  assert.equal(s.equipped.weapon, 'stapler');
+  assert.equal(s.equipped.weapon2, 'red-stapler');
+  // Once both positions are occupied, quick-equip replaces the primary and
+  // returns that incumbent to the bag.
+  assert.equal(equipItem(s, s.inventory.indexOf('letter-opener')), true);
+  assert.equal(s.equipped.weapon, 'letter-opener');
+  assert.equal(s.equipped.weapon2, 'red-stapler');
+  assert.ok(s.inventory.includes('stapler'));
+  assert.equal(equippedStats(s).dmg, 3); // both equipped weapons contribute
+});
+
+test('jewelry fills one attachment per hand while Flair stays separate', () => {
+  const left = '__test-left-ring';
+  const right = '__test-right-ring';
+  ITEMS[left] = { name: 'Test Left Ring', slot: 'jewelry', stats: { acc: 0.01 } };
+  ITEMS[right] = { name: 'Test Right Ring', slot: 'jewelry', stats: { dodge: 0.01 } };
+  try {
+    const s = createSheet('office-drone'); // starts with a stress-ball in Flair
+    s.inventory = [left, right];
+    assert.equal(equipItem(s, 0), true);
+    assert.equal(equipItem(s, 0), true);
+    assert.equal(s.equipped.jewelryLeft, left);
+    assert.equal(s.equipped.jewelryRight, right);
+    assert.equal(s.equipped.trinket, 'stress-ball');
+  } finally {
+    delete ITEMS[left];
+    delete ITEMS[right];
+  }
+});
+
+test('an explicit equipment position must accept the item type', () => {
+  const s = createSheet('office-drone');
+  s.inventory = ['stapler'];
+  assert.equal(equipItem(s, 0, 'hat'), false);
+  assert.deepEqual(s.inventory, ['stapler']);
+  assert.equal(equipItem(s, 0, 'weapon2'), true);
+  assert.equal(s.equipped.weapon, null);
+  assert.equal(s.equipped.weapon2, 'stapler');
 });
 
 test('equipItem refuses a non-equippable item', () => {
@@ -650,17 +693,28 @@ test('equipping a dmg-only weapon leaves maxHp and deflect untouched', () => {
   assert.equal(damageBonus(s) - (Math.floor((s.attr.savvy) / PROGRESSION.DMG_PER_SAVVY)), 2);
 });
 
-test('EQUIP_SLOTS is the four-slot set', () => {
-  assert.deepEqual(EQUIP_SLOTS, ['weapon', 'outfit', 'trinket', 'shoes']);
+test('EQUIP_SLOTS is the expanded nine-position set', () => {
+  assert.deepEqual(EQUIP_SLOTS, [
+    'weapon', 'weapon2', 'jewelryLeft', 'jewelryRight', 'hat', 'outfit', 'pants', 'shoes', 'trinket',
+  ]);
+  assert.deepEqual(equipSlotsFor('weapon'), ['weapon', 'weapon2']);
+  assert.deepEqual(equipSlotsFor('jewelry'), ['jewelryLeft', 'jewelryRight']);
+  assert.deepEqual(equipSlotsFor('trinket'), ['trinket']);
+  assert.deepEqual(equipSlotsFor('hat'), ['hat']);
+  assert.deepEqual(equipSlotsFor('pants'), ['pants']);
 });
 
-test('equippedAction is bare-hands punch unarmed, the weapon swing in hand', () => {
+test('equippedAction prefers the primary weapon, falls back to the second, then fists', () => {
   const s = createSheet('office-drone');
   assert.equal(equippedAction(s), 'punch'); // everyone always has a basic attack
-  s.inventory = ['red-stapler'];
-  equipItem(s, 0);
-  assert.equal(equippedAction(s), 'staple-jab'); // the equipped weapon's swing
+  s.inventory = ['red-stapler', 'letter-opener'];
+  equipItem(s, 0, 'weapon2');
+  assert.equal(equippedAction(s), 'staple-jab'); // second works while primary is empty
+  equipItem(s, 0, 'weapon');
+  assert.equal(equippedAction(s), 'letter-opener-stab'); // primary owns the basic verb
   unequipItem(s, 'weapon', 10);
+  assert.equal(equippedAction(s), 'staple-jab');
+  unequipItem(s, 'weapon2', 10);
   assert.equal(equippedAction(s), 'punch'); // back to bare hands
 });
 
@@ -713,7 +767,7 @@ test('every equippable item declares a valid slot, stat vocabulary, and weapon s
   const STAT_KEYS = new Set(['dmg', 'soak', 'maxHp', 'maxAp', 'acc', 'dodge', 'reach', 'slipProof', 'moveCost', 'attrBonus']);
   for (const [id, def] of Object.entries(ITEMS)) {
     if (!def.slot && !def.stats) continue; // not gear
-    assert.ok(EQUIP_SLOTS.includes(def.slot), `${id} has a valid slot`);
+    assert.ok(equipSlotsFor(def).length, `${id} has a valid equipment type`);
     for (const k of Object.keys(def.stats || {})) assert.ok(STAT_KEYS.has(k), `${id} stat key ${k}`);
     for (const k of Object.keys(def.stats?.attrBonus || {})) assert.ok(ATTR_KEYS.includes(k), `${id} attrBonus ${k}`);
     if (def.slot === 'weapon') assert.ok(ACTIONS[def.attack], `${id} weapon swing ${def.attack} exists`);
@@ -727,7 +781,7 @@ test('every playable class walks in wearing its startGear, curve-neutral', () =>
     const s = createSheet(id);
     for (const [slot, itemId] of Object.entries(cls.startGear)) {
       assert.ok(ITEMS[itemId], `${id} startGear item ${itemId} exists`);
-      assert.equal(ITEMS[itemId].slot, slot, `${id} startGear ${itemId} fits ${slot}`);
+      assert.ok(equipSlotsFor(ITEMS[itemId]).includes(slot), `${id} startGear ${itemId} fits ${slot}`);
       assert.equal(s.equipped[slot], itemId, `${id} starts with ${itemId} in ${slot}`);
     }
     // Curve-neutral: the signature piece never bends the headline HP/AP - those
@@ -757,7 +811,7 @@ test('weaponProc reads the equipped weapon on-hit proc, null otherwise', () => {
   equipItem(s, 0);
   assert.equal(weaponProc(s), null); // a plain stapler has no proc
   s.inventory = ['red-stapler'];
-  equipItem(s, 0);
+  equipItem(s, 0, 'weapon');
   assert.equal(weaponProc(s).applies, 'gum'); // THE red stapler flings gum
   assert.ok(weaponProc(s).chance > 0);
 });

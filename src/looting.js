@@ -9,7 +9,7 @@
 // so overlay clicks walk the leader in.
 import { ITEMS, LOOT_TABLES, rollLoot } from './data/items.js';
 import {
-  PAPER_CAP, EQUIP_SLOTS, equipItem, unequipItem, inventoryCapOf,
+  PAPER_CAP, equipSlotsFor, equipItem, unequipItem, inventoryCapOf,
 } from './stats.js';
 import { placeDroppedItem } from './tile-renderer.js';
 import * as ui from './ui.js';
@@ -365,7 +365,7 @@ export function createLooting({ app, grid, runtime, enemies, getActor, getSheet,
     const def = ITEMS[id];
     // Validate before charging so even a stale/malformed row is an atomic
     // refusal rather than two AP spent on an item that never moved.
-    if (!EQUIP_SLOTS.includes(def?.slot)) {
+    if (!equipSlotsFor(def).length) {
       ui.say('That is not something you can equip.'); return;
     }
     if (isInCombat()) {

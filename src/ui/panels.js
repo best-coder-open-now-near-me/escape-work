@@ -2,7 +2,7 @@
 // a conversation, a merchant's stock. Each is a dumb VIEW - the host hands it a
 // view-model and callbacks, and it renders and reports clicks. None of them
 // knows a rule.
-import { EQUIP_SLOTS, pendingPoints } from '../stats.js';
+import { EQUIP_SLOTS, equipSlotsFor, pendingPoints } from '../stats.js';
 import { ATTRIBUTES } from '../data/attributes.js';
 import { PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, registerHudButton, layoutHudRail, railHooks, esc,
 } from './chrome.js';
@@ -11,8 +11,19 @@ import { PANEL_CHROME, BUTTON_CHROME, HUD_BUTTON_CHROME, registerHudButton, layo
 // The pockets. Toggled with I or the bag button. Rows come straight from the
 // item registry; `usable` items get Use, flavor items get Examine, everything
 // can be dropped (dropping creates a loose floor item the Alt overlay sees).
-// Equip-slot display names (In Hand / Dress Code / Flair).
-const SLOT_LABELS = { weapon: 'In Hand', outfit: 'Dress Code', trinket: 'Flair', shoes: 'On Foot' };
+// Equip-position display names. Jewelry is a new two-position item type; the
+// legacy trinket position remains Flair, preserving existing items and saves.
+const SLOT_LABELS = {
+  weapon: 'Main Weapon',
+  weapon2: 'Second Weapon',
+  jewelryLeft: 'Left-Hand Jewelry',
+  jewelryRight: 'Right-Hand Jewelry',
+  hat: 'Hat',
+  outfit: 'Outfit',
+  pants: 'Pants',
+  shoes: 'Shoes',
+  trinket: 'Flair',
+};
 
 // `capOf` is asked per refresh, not captured: the carry limit is a stat, so it
 // moves with the character and with whoever is currently the leader. A panel
@@ -70,7 +81,7 @@ export function createInventoryPanel(ITEMS, capOf, { onUse, onDrop, onExamine, o
     return b;
   };
 
-  // The three equipped slots, above the pockets: each names its slot and shows
+  // The equipped positions, above the pockets: each names its position and shows
   // the worn item (or a dash), with an Unequip button when occupied. Stable ids
   // #equip-slot-<slot> / #equip-unequip-<slot> for the e2e suite.
   function renderEquipStrip(sheet) {
@@ -89,7 +100,7 @@ export function createInventoryPanel(ITEMS, capOf, { onUse, onDrop, onExamine, o
       });
       const label = document.createElement('div');
       label.textContent = SLOT_LABELS[slot];
-      Object.assign(label.style, { width: '70px', opacity: '.6', fontSize: '11px' });
+      Object.assign(label.style, { width: '104px', flexShrink: '0', opacity: '.6', fontSize: '11px' });
       row.appendChild(label);
       const item = document.createElement('div');
       item.style.flex = '1';
@@ -163,8 +174,10 @@ export function createInventoryPanel(ITEMS, capOf, { onUse, onDrop, onExamine, o
       row.appendChild(name);
       // Equippable gear gets Equip; a consumable gets Use; everything else,
       // Examine. Drop is always available.
-      if (def?.slot && onEquip) {
-        const eq = smallBtn('Equip', `Equip to ${SLOT_LABELS[def.slot] || def.slot}`);
+      const compatible = equipSlotsFor(def);
+      if (compatible.length && onEquip) {
+        const destinations = compatible.map((slot) => SLOT_LABELS[slot]).join(' or ');
+        const eq = smallBtn('Equip', `Equip to ${destinations}`);
         eq.id = `inv-equip-${i}`;
         eq.onclick = () => onEquip(i);
         row.appendChild(eq);

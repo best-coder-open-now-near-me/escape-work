@@ -194,11 +194,33 @@ export const THROW_RANGE = 5;
 // authored order, labels, and blurbs live together in data/attributes.js.
 export { ATTR_KEYS };
 
-// Equipment slots (EQUIPMENT_PLAN.md): a damage choice, a defense choice, a
-// wildcard, and footwear (the floor is a hazard). Rendered as In Hand / Dress
-// Code / Flair / On Foot. An item's `slot` (data/items.js) says where it goes;
-// `stats` fold into the derived numbers.
-export const EQUIP_SLOTS = ['weapon', 'outfit', 'trinket', 'shoes'];
+// Equipment positions (EQUIPMENT_PLAN.md). Item data still names a TYPE in its
+// `slot` field; this map says which equipment positions accept that type. The
+// distinction matters for duplicate positions: one `weapon` definition can go
+// into either weapon position, and one `jewelry` definition can go on either
+// hand. Keeping the original `weapon` and `trinket` keys lets old saves load
+// without renaming their main weapon or Flair.
+export const EQUIP_SLOT_TYPES = Object.freeze({
+  weapon: 'weapon',
+  weapon2: 'weapon',
+  jewelryLeft: 'jewelry',
+  jewelryRight: 'jewelry',
+  hat: 'hat',
+  outfit: 'outfit',
+  pants: 'pants',
+  shoes: 'shoes',
+  trinket: 'trinket',
+});
+export const EQUIP_SLOTS = Object.freeze(Object.keys(EQUIP_SLOT_TYPES));
+
+// Ordered compatible positions for an item definition or item-slot type.
+// Equip uses this order to fill an empty position before replacing the primary
+// one, so two successive weapons/jewelry pieces occupy both positions.
+export function equipSlotsFor(itemOrType) {
+  const type = typeof itemOrType === 'string' ? itemOrType : itemOrType?.slot;
+  if (!type) return [];
+  return EQUIP_SLOTS.filter((position) => EQUIP_SLOT_TYPES[position] === type);
+}
 
 // A clean {grit,hustle,savvy,composure} object from any partial source.
 export function normalizeAttr(src = {}) {
@@ -506,20 +528,24 @@ export function moveCostOf(sheet) {
   return equippedStats(sheet).moveCost * (sheet?.talent?.effects?.moveCost ?? 1);
 }
 
-// The equipped weapon's on-hit proc (EQUIPMENT_PLAN #8), or null. A proc is
+// The primary equipped weapon's on-hit proc (EQUIPMENT_PLAN #8), or null. A proc is
 // { applies: '<status>', chance, appliesLog? } - combat rolls it when you land
 // the weapon's own swing. (This block spent a while stranded above
 // `moveCostOf`, which left both functions describing the other one - Q192.)
 export function weaponProc(sheet) {
-  return ITEMS[sheet?.equipped?.weapon]?.proc || null;
+  const id = sheet?.equipped?.weapon || sheet?.equipped?.weapon2;
+  return ITEMS[id]?.proc || null;
 }
 
 // The basic weapon-attack action for a sheet (EQUIPMENT_PLAN decision #7):
-// the equipped weapon names its own swing; bare hands fall back to 'punch'.
+// the primary weapon names its swing, the second weapon is the fallback when
+// that position is empty, and bare hands fall back to 'punch'. Both weapons'
+// stats still participate in equippedStats; this only chooses the basic verb.
 // Always returns an action id, so everyone has a basic attack - the combat bar
 // and the hotbar splice it in beside the class powers.
 export function equippedAction(sheet) {
-  return ITEMS[sheet?.equipped?.weapon]?.attack || 'punch';
+  const id = sheet?.equipped?.weapon || sheet?.equipped?.weapon2;
+  return ITEMS[id]?.attack || 'punch';
 }
 
 // --- action order -------------------------------------------------------------
@@ -960,20 +986,26 @@ export function spendClassPoint(sheet, nodeId) {
 }
 
 // --- equipment (EQUIPMENT_PLAN.md) ------------------------------------------
-// Equip the inventory item at index `i` into its slot: the incumbent (if any)
-// returns to the bag, the item leaves the bag for the slot, derived numbers
+// Equip the inventory item at index `i` into the first empty compatible
+// position (or the primary compatible position when all are occupied): the
+// incumbent (if any) returns to the bag, the item leaves the bag, derived numbers
 // refresh, and any fresh max-HP capacity is credited (a Grit/maxHp piece
 // arrives undamaged). Returns false, changing nothing, for a non-equippable
-// item or a bad index.
-export function equipItem(sheet, i) {
+// item, a bad index, or an explicitly requested incompatible position.
+export function equipItem(sheet, i, targetPosition = null) {
   const id = sheet.inventory?.[i];
   const def = ITEMS[id];
-  if (!def || !EQUIP_SLOTS.includes(def.slot)) return false;
-  sheet.equipped = sheet.equipped || Object.fromEntries(EQUIP_SLOTS.map((s) => [s, null]));
+  const compatible = equipSlotsFor(def);
+  if (!compatible.length || (targetPosition && !compatible.includes(targetPosition))) return false;
+  sheet.equipped ||= {};
+  for (const position of EQUIP_SLOTS) sheet.equipped[position] ??= null;
+  const position = targetPosition
+    || compatible.find((candidate) => !sheet.equipped[candidate])
+    || compatible[0];
   const maxHpBefore = sheet.maxHp;
-  const prev = sheet.equipped[def.slot];
+  const prev = sheet.equipped[position];
   sheet.inventory.splice(i, 1);          // out of the bag...
-  sheet.equipped[def.slot] = id;         // ...into the slot
+  sheet.equipped[position] = id;         // ...into the position
   if (prev) sheet.inventory.push(prev);  // the displaced piece returns to the bag
   recomputeDerived(sheet);
   creditNewHp(sheet, maxHpBefore);
