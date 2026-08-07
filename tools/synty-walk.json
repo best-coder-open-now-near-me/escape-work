@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "sampleRate": 30,
+  "clipName": "HumanM@Walk01_Forward",
+  "animation": "assets/Kevin Iglesias/Human Animations/Animations/Male/Movement/Walk/HumanM@Walk01_Forward.fbx",
+  "sourceAvatar": "assets/Kevin Iglesias/Human Animations/Models/HumanM_Model.fbx",
+  "privatePackage": "build/private-assets-synty",
+  "targets": [
+    {
+      "id": "synty-shops",
+      "source": "assets/Synty/PolygonShops/Models/Characters.fbx",
+      "referenceBake": "assets/licensed/synty/animations/synty-shops-rpg-humanoid-bake.json",
+      "models": [
+        "characters/shops-worker-male.glb",
+        "characters/shops-worker-female.glb",
+        "characters/shops-clerk-male.glb",
+        "characters/shops-clerk-female.glb"
+      ]
+    },
+    {
+      "id": "synty-generic",
+      "source": "assets/Synty/PolygonGeneric/Models/Generic_Characters.fbx",
+      "referenceBake": "assets/licensed/synty/animations/synty-generic-rpg-humanoid-bake.json",
+      "models": [
+        "characters/generic-business-male.glb",
+        "characters/generic-business-female.glb"
+      ]
+    }
+  ]
+}

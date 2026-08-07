@@ -6,7 +6,7 @@
 // resolved lazily now, and everything below runs with no engine present.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { GridActor, EnemyActor } from '../../src/actors.js';
+import { GridActor, EnemyActor, walkPlaybackRate } from '../../src/actors.js';
 import { applyStatus, statusList, tickStep } from '../../src/statuses.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
 
@@ -43,6 +43,13 @@ test('a slide counts as moving, so a shove cannot be interrupted as if idle', ()
   a.pushTo(2, 0);
   assert.equal(a.moving, true, 'a glide is movement too');
   assert.deepEqual([a.x, a.z], [2, 0], 'the LOGICAL tile teleports; the body catches up');
+});
+
+test('Synty locomotion keeps the authored walk cadence without changing legacy rigs', () => {
+  assert.equal(walkPlaybackRate(4, 'default'), 1, 'legacy animation keeps its existing pacing');
+  assert.equal(walkPlaybackRate(2.2, 'synty'), 1, 'ordinary movement plays the walk as authored');
+  assert.equal(walkPlaybackRate(4, 'synty'), 1.6, 'fast movement remains a brisk walk');
+  assert.equal(walkPlaybackRate(0.2, 'synty'), 0.65, 'tiny approach paths do not animate in slow motion');
 });
 
 test('procedural animation composes onto a model imported below 1x and rotated upright', () => {

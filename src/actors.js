@@ -10,6 +10,7 @@
 import { rollLoot } from './data/items.js';
 import { unitCombat } from './stats.js';
 import { cloneMaterials, tintMaterials } from './models.js';
+import { ACTIVE_ART_PROFILE } from './data/art-profiles.js';
 
 // The engine handle, resolved LAZILY rather than read at module scope.
 //
@@ -31,6 +32,15 @@ const RAD_TO_DEG = 180 / Math.PI;
 const wrapAngle = (a) => (((a + 180) % 360) + 360) % 360 - 180;
 const TURN_RATE = 10; // how quickly facing eases toward the heading
 const FLASH_COLOR = [0.75, 0.09, 0.05];
+
+// The built-in mini rigs still use the deliberately slowed legacy cycle. The
+// Synty profile now carries a real 0.8s walk: play a normal cadence at the
+// ordinary 2.2 u/s amble and rise only to a restrained brisk walk for faster
+// party movement, instead of turning the clip back into a run.
+export function walkPlaybackRate(speed, profile = ACTIVE_ART_PROFILE) {
+  if (profile !== 'synty') return speed * 0.25;
+  return Math.min(1.6, Math.max(0.65, speed / 2.2));
+}
 // Built on first use for the same reason: a module-scope `new pc.Quat()` is an
 // engine call at import time.
 let _settleQuat = null;
@@ -182,11 +192,7 @@ export class GridActor {
       // hold whatever pose they landed in.
       this.legSettle = null;
     } else if (this.fx?.kind === 'lunge') this.setClip('attack-melee-right', 0.05, 1.3);
-    // 0.25 paces the 0.667s walk clip for the STRETCHED legs (models.js):
-    // the de-chibi'd stride covers roughly twice the ground, so the cycle
-    // runs at half the cadence the stubby rig wanted. Higher rates read as
-    // leg-whipping ("twitchy") - most visible on wandering NPCs' short hops.
-    else if (moved > 1e-5) this.setClip('walk', 0.15, this.speed * 0.25);
+    else if (moved > 1e-5) this.setClip('walk', 0.15, walkPlaybackRate(this.speed));
     else this.setClip('idle', 0.2);
     // Settle the legs into stance while idling - the idle clip has no leg
     // curves, so after a walk they'd otherwise be left mid-stride. The catch:

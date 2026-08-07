@@ -34,6 +34,24 @@ private package manifest. `models.js` attaches them to each animated `Head`
 bone; the same loading seam serves gameplay, character selection, and
 portraits.
 
+### Synty locomotion
+
+The Synty bodies share two Unity Humanoid skeleton families. Retarget the
+licensed forward walk from Human Basic Motions onto both families, replace only
+the named `walk` track in all six prepared character GLBs, and refresh the
+private package manifest with:
+
+```powershell
+npm run export:synty-walk
+```
+
+The public manifest records only source-relative selections. A disposable
+Unity project performs the Humanoid bake; `export-synty-walk.mjs` verifies its
+coordinate conversion against the prior Blender export before touching any
+asset, then preserves every non-walk animation and all mesh/material/skin data.
+Pass `--verify-only` to check that conversion contract without launching Unity,
+or `--bake <report.json>` to apply an already-produced bake report.
+
 The default source is `assets/licensed/synty`. Set
 `ESCAPE_WORK_SYNTY_SOURCE` to a different private checkout before running the
 profile if the converted tree lives elsewhere. Gameplay keeps its existing
