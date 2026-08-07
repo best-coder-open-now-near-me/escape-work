@@ -49,6 +49,9 @@ export class GridActor {
     // metres-vs-centimetres here. Procedural animation must compose onto that
     // authored baseline rather than replacing it with the old rigs' 1x.
     this.visualScale = { x: 1, y: 1, z: 1 };
+    // Same rule for orientation: an imported root may rotate its authoring
+    // axis upright. The original rigs used zeroes here, which hid the reset.
+    this.visualEuler = { x: 0, y: 0, z: 0 };
     this.path = null; // waypoints [[x, z], ...] - free points, not just centres
     this.pathIndex = 0;
     this.slideTo = null; // straight-line glide target (shoves) - {x, z}
@@ -77,6 +80,8 @@ export class GridActor {
     this.visualLift = this.visual.getLocalPosition().y;
     const importedScale = this.visual.getLocalScale();
     this.visualScale = { x: importedScale.x, y: importedScale.y, z: importedScale.z };
+    const importedEuler = this.visual.getLocalEulerAngles();
+    this.visualEuler = { x: importedEuler.x, y: importedEuler.y, z: importedEuler.z };
     this.animC = entity.findComponent('anim') || null;
     // The idle clip animates only torso/arms/head - it has NO leg channels,
     // so nothing ever writes the legs back after a walk stops mid-stride.
@@ -259,7 +264,15 @@ export class GridActor {
       bobY -= 0.03 * k;
     }
     this.visual.setLocalPosition(0, this.visualLift + bobY, forward);
-    this.visual.setLocalEulerAngles(pitch, 0, 0);
+    // `pitch` is a procedural offset from the standing pose, not an absolute
+    // model orientation. Synty roots use +90 degrees here to convert their
+    // authoring axis; replacing that with zero laid every living actor flat.
+    // Adding the death pitch still approaches the same on-the-back pose.
+    this.visual.setLocalEulerAngles(
+      this.visualEuler.x + pitch,
+      this.visualEuler.y,
+      this.visualEuler.z,
+    );
     // Preserve the model's imported unit scale. Writing raw 1x here was
     // invisible on the original rigs, but blew a centimetre-authored Synty
     // body up to kaiju size on the first gameplay frame. Flinch/crouch remain

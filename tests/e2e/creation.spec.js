@@ -12,12 +12,26 @@ test('one of the six is played as written - no form to decline', async ({ page }
   await page.click('#level-pick-level1'); // the floor-select desk comes first
   await expect(page.locator('#resume-card')).toBeVisible();
 
+  // The desk owns its framing: pulled back enough to read the silhouette, and
+  // immune to the gameplay wheel clamp until the character is committed.
+  const deskView = await page.evaluate(() => window.__game.cameraView);
+  expect(deskView.dist).toBe(5.5);
+  await page.mouse.move(100, 100); // bare canvas, outside the resume card
+  await page.mouse.wheel(0, -600);
+  expect((await page.evaluate(() => window.__game.cameraView)).dist).toBe(deskView.dist);
+
   // Hire the first candidate on the desk. Naming a class would mean paging the
   // carousel, which is the cost this spec refuses.
   await page.click('#pick-office-drone');
 
   const card = page.locator('#creation-badge');
   await expect(card).toBeVisible();
+
+  // The same body remains staged while the short form replaces the resume;
+  // zoom stays locked for the whole selection flow, not just its first card.
+  await page.mouse.move(100, 100);
+  await page.mouse.wheel(0, 600);
+  expect((await page.evaluate(() => window.__game.cameraView)).dist).toBe(deskView.dist);
 
   // A precut character is somebody already. There is no name field and no
   // wardrobe on this card: the job is the name and the class rig is the body,
@@ -40,6 +54,13 @@ test('one of the six is played as written - no form to decline', async ({ page }
   await page.click('#creation-attr-savvy');
   await page.click('#creation-commit');
   await expect(card).toBeHidden();
+
+  // Gameplay restores both its tactical framing and ordinary wheel zoom.
+  const runView = await page.evaluate(() => window.__game.cameraView);
+  await page.mouse.move(640, 400);
+  await page.mouse.wheel(0, -600);
+  await expect.poll(() => page.evaluate(() => window.__game.cameraView.dist))
+    .toBeLessThan(runView.dist);
 
   const who = await page.evaluate(() => ({
     name: window.__game.stats.name,

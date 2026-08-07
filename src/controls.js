@@ -85,6 +85,12 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
   const onCanvas = (e) => !e.event || e.event.target === canvas;
 
   let orbiting = false;
+  // Programmatic close-ups (the character desk) can sit inside the ordinary
+  // gameplay zoom floor. A wheel tick there used to clamp straight from that
+  // authored framing to CAM.minDist, which looked like a broken jump rather
+  // than a zoom. The host locks zoom for that modal flow and restores it when
+  // the run begins.
+  let zoomEnabled = true;
   let leftHeld = false; // for drag-painting in the editor
   let hoveringCanvas = false; // was the last hover over the world, not the UI?
   // Leaving the WINDOW ends the hover too. The mousemove transition further
@@ -176,7 +182,7 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     }
   });
   app.mouse.on(pc.EVENT_MOUSEWHEEL, (e) => {
-    if (!onCanvas(e)) return; // scrolling over a panel must not zoom
+    if (!onCanvas(e) || !zoomEnabled) return; // panels and locked modal framing do not zoom
     // Scroll up (away from you) zooms in - wheelDelta is negative for
     // scroll-up, so adding it pulls the camera closer.
     CAM.dist = pc.math.clamp(CAM.dist + e.wheelDelta * 2.4, CAM.minDist, CAM.maxDist);
@@ -390,6 +396,7 @@ export function createControls({ app, canvas, focus, onLeftClickTile, onRightCli
     get yaw() { return CAM.yaw; },
     get view() { return { dist: CAM.dist, pitch: CAM.pitch, yaw: CAM.yaw, tactical: !!tactical }; },
     setView,
+    setZoomEnabled: (enabled) => { zoomEnabled = !!enabled; },
     setTactical,
     toggleTactical: () => setTactical(!tactical),
     frameGroundBounds,

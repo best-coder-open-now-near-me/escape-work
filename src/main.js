@@ -1035,6 +1035,7 @@ function startGame(level) {
     if (previewEntity) { previewEntity.destroy(); previewEntity = null; }
     app.off('update', previewSpin);
     controls.setView({ dist: 26, pitch: 55, focusY: 0.3 }); // tactical camera
+    controls.setZoomEnabled(true);
   }
 
   // A playable class named by the URL (`#class=it-support`), or null. Only
@@ -1085,7 +1086,12 @@ function startGame(level) {
 
   // The résumé desk: six people you can be, plus a card for making somebody.
   function openDesk() {
-    controls.setView({ dist: 3, pitch: 14, focusY: 0.8 });
+    // Far enough back to read the whole silhouette beside the resume. This is
+    // deliberately inside the gameplay zoom floor, so freeze wheel zoom until
+    // beginRun restores the tactical camera; otherwise the first wheel tick
+    // clamps the close-up straight out to CAM.minDist.
+    controls.setView({ dist: 5.5, pitch: 14, focusY: 0.8 });
+    controls.setZoomEnabled(false);
     app.off('update', previewSpin); // backing out of the card lands here again
     app.on('update', previewSpin);
     ui.showClassPicker(CLASSES, ACTIONS, onDeskPick, () => {

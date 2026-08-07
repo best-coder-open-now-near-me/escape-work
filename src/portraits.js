@@ -135,7 +135,12 @@ export function createPortraits(app) {
         // model. 180 spun it to face -Z: dead away from the lens, which is why
         // every portrait was the back of somebody's head.
         rotY: 0,
-        animate: false,
+        // Stage the rig in its authored idle instead of photographing the
+        // bind pose. Licensed humanoids bind in a T, which made every HUD and
+        // initiative thumbnail look like a model-inspection screenshot rather
+        // than a character portrait. models.js makes `idle` the first state;
+        // the two postrender frames below let that pose land before readback.
+        animate: true,
         onReady: (e) => {
           // The timeout below may already have given up on this load - a .glb
           // that resolves afterwards has missed its render, and staging it

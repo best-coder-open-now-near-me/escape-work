@@ -37,6 +37,7 @@ export function createGameDebug(d) {
       const c = d.controls.cameraEntity.getPosition();
       return { x: c.x, y: c.y, z: c.z };
     },
+    get cameraView() { return { ...d.controls.view }; },
     get cameraFocus() { return d.controls.focus; },
     get cameraFree() { return d.controls.panning; },
     project(x, z) {
