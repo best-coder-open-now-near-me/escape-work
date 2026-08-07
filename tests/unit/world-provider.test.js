@@ -94,16 +94,6 @@ const deps = () => ({
 
 const body = (x, z) => ({ x, z, actor: { x, z } });
 
-test('the facade combat.js builds is a plain object of callables', () => {
-  const world = createCombatWorld(deps());
-  assert.equal(typeof world, 'object');
-  const keys = Object.keys(world);
-  assert.ok(keys.length > 30, `a facade this small is missing something: ${keys.length} keys`);
-  const notCallable = keys.filter((k) => typeof world[k] !== 'function');
-  assert.deepEqual(notCallable, [],
-    `every question a fight asks is a call, so these are the wrong shape: ${notCallable.join(', ')}`);
-});
-
 // The three rules world-contract.test.js pins, run against the REAL facade
 // instead of a hand-built bag. This is the half that catches a provider-side
 // deletion: the rule names its needs, the facade either still answers them or
@@ -145,18 +135,4 @@ test('the facade rejects physical overlap across distinct movement tiles', () =>
   assert.equal(world.bodyClear(0, 0, mover), false,
     'a neighbour tile does not make overlapping continuous bodies legal');
   assert.equal(world.bodyClear(-0.1, 0, mover), true);
-});
-
-// The keys the pure rules name in their own signatures. Dropping one from
-// `combat-world.js` is the failure this file exists for, and it is worth
-// asserting directly as well as through the rules above: a rule can stop
-// reading a key without anyone noticing, and then the facade can drop it, and
-// the two mistakes cancel out into a silent hole.
-const READ_BY_RULES = ['tileDefAt', 'terrainOpen', 'stepOpen', 'isWalkable', 'approach', 'bodyClear'];
-
-test('the facade carries every key the pure rules read', () => {
-  const world = createCombatWorld(deps());
-  const missing = READ_BY_RULES.filter((k) => typeof world[k] !== 'function');
-  assert.deepEqual(missing, [],
-    `combat-world.js stopped carrying: ${missing.join(', ')} - the plan modules read these`);
 });

@@ -183,15 +183,11 @@ test('a corrupted purse reads as zero rather than poisoning the arithmetic', () 
   assert.equal(parseProgress({ ...base, cash: 12.7 }).cash, 12);
 });
 
-test('a legacy single-sheet save also loads with an empty purse', () => {
-  const legacy = { levelId: 'level2', sheet: { classId: 'office-drone', className: 'Office Drone', hp: 9, maxHp: 22, level: 2 } };
-  assert.equal(parseProgress(legacy).cash, 0);
-});
-
 test('parseProgress migrates a legacy single-sheet save and backfills fields', () => {
   // A pre-party save: bare sheet, missing everything pockets/gum-era added.
   const legacy = { levelId: 'level2', sheet: { classId: 'office-drone', className: 'Office Drone', hp: 9, maxHp: 22, level: 2 } };
   const parsed = parseProgress(legacy);
+  assert.equal(parsed.cash, 0);
   assert.equal(parsed.sheets.length, 1);
   assert.equal(parsed.active, 0);
   const s = parsed.sheets[0];

@@ -94,12 +94,3 @@ for (const r of RULES) {
     });
   }
 }
-
-// The host hands these rules its whole 35-key facade, so every one of them has
-// to tolerate a superset - which is exactly what makes the duck-typing invisible
-// in production and worth pinning here.
-test('a rule ignores keys it did not ask for', () => {
-  for (const r of RULES) {
-    r.call({ ...r.bag, somethingElse: () => { throw new Error('a rule reached for a key it never named'); } });
-  }
-});

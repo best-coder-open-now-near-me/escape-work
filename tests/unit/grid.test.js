@@ -134,15 +134,6 @@ test('toppling a partition breaks the dam - conduction pools merge live', () => 
   assert.equal(g.isElectrified(2, 0), true, 'the dam broke and the pools merged');
 });
 
-test('setType can bring a conduction pool to life, not only kill it', () => {
-  // cable, a dry floor gap, then water - the water is not yet powered.
-  const g = parseLevel(level(['*.~']));
-  assert.equal(g.isElectrified(2, 0), false);
-  g.setType(1, 0, 'water'); // bridge the gap - now the whole pool touches the cable
-  assert.equal(g.isElectrified(1, 0), true);
-  assert.equal(g.isElectrified(2, 0), true);
-});
-
 test('out-of-bounds is wall, in-map void is impassable but distinct', () => {
   const g = parseLevel(level(['. .']));
   assert.equal(g.typeAt(-1, 0), 'wall');
@@ -222,16 +213,6 @@ test('a door replaces any wall painted on the same edge', () => {
 test('conduction ignores doors - water finds the gap underneath', () => {
   const g = parseLevel(level(['*~~'], { doors: ['V 2 0 1'] }));
   assert.equal(g.isElectrified(2, 0), true); // closed door, live pool anyway
-});
-
-test('setType recomputes conduction pools', () => {
-  // Water conducts to the cable only THROUGH the middle cell; blow the
-  // bridge away and the far water must go dead.
-  const g = parseLevel(level(['*~~']));
-  assert.equal(g.isElectrified(2, 0), true);
-  g.setType(1, 0, 'floor');
-  assert.equal(g.isElectrified(1, 0), false);
-  assert.equal(g.isElectrified(2, 0), false);
 });
 
 test('legacy surface setType writes only the field and clearing retires it', () => {

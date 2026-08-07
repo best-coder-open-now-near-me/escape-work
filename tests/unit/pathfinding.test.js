@@ -593,7 +593,7 @@ test('a search on an unbounded world gives up instead of hanging', () => {
   // of bounds, so every real world is sealed. This is the guard for when that
   // stops being true, and for a goal the frontier can never land on. Without
   // the cap this call never returns.
-  assert.equal(findPath(() => true, 0, 0, NaN, 3), null);
+  assert.equal(findPath(() => true, 0, 0, NaN, 3, null, null, 64), null);
 });
 
 test('the cap never fires on a search a real map could produce', () => {

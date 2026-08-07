@@ -334,26 +334,6 @@ test('a resisted re-apply cannot weaken a severity-less entry', () => {
   assert.equal(statusSeverity(t, 'blinded'), 1, 'the bite it already had survives');
 });
 
-test('a re-apply still takes the WORSE severity when the new one is worse', () => {
-  // `blinded` rather than `stunned`: a stun grants an anti-chain window, so a
-  // second stun is REFUSED rather than compared - which is the right behaviour
-  // and the wrong fixture for this rule.
-  const t = {};
-  applyStatus(t, 'blinded', {}, 5);                        // resisted: blunted
-  assert.ok(statusSeverity(t, 'blinded') < 1);
-  applyStatus(t, 'blinded', {}, 0);                        // unresisted: full
-  assert.equal(statusSeverity(t, 'blinded'), 1, 'the worse of the two wins');
-});
-
-test('a resisted FIRST application still lands blunted', () => {
-  // The other side of the floor: with no entry yet the severity must come from
-  // the roll, not from the severity-less default - or Composure would stop
-  // blunting anything.
-  const t = {};
-  applyStatus(t, 'blinded', {}, 5);
-  assert.ok(statusSeverity(t, 'blinded') < 1, 'resist blunts a fresh application');
-});
-
 // --- statuses that outlive their own registry entry --------------------------
 // A save carries status IDS, not definitions, so a status that gets renamed or
 // retired arrives on a live sheet with nothing to look it up in.

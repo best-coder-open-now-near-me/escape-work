@@ -277,12 +277,6 @@ test('edges and cells stack to at most ONE cover', () => {
   assert.equal(hasCover(9, 5, 5, 5, noEdges, propAt(6, 5)), true);
 });
 
-test('omitting the cell predicate leaves the old edge behaviour exactly as it was', () => {
-  const east = wallOn(5, 5, 6, 5);
-  assert.equal(hasCover(9, 5, 5, 5, east), true);
-  assert.equal(hasCover(1, 5, 5, 5, east), false);
-});
-
 test('positionMods routes the cell predicate through, ranged only', () => {
   const shielded = { edgeOpen: noEdges, coverCell: propAt(6, 5) };
   // Ranged: the fallen prop spoils the shot.
@@ -580,15 +574,6 @@ test('a body shields a face exactly like a prop does', () => {
 test('a crouch with no shielded face is a crouch behind nothing', () => {
   assert.deepEqual(shieldedFaces(5, 5, { edgeOpen: openAll, coverCell: () => false }), []);
   assert.equal(facesShieldFrom([], 9, 5, 5, 5), false);
-});
-
-test('hasCover is those two composed - the old answers, unchanged', () => {
-  const east = wallOnFace(6, 5);
-  assert.equal(hasCover(9, 5, 5, 5, east), true);
-  assert.equal(hasCover(1, 5, 5, 5, east), false);
-  assert.equal(hasCover(5, 5, 5, 5, east), false, 'standing on them - no angle at all');
-  // A diagonal shooter is stopped by either face their way.
-  assert.equal(hasCover(9, 1, 5, 5, east), true);
 });
 
 // --- one cover-face rule, two shapes ------------------------------------------

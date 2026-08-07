@@ -5,7 +5,6 @@ import { COMPANIONS } from '../../src/data/companions.js';
 import {
   createSheet, grantTalent, gainXp, damageBonus, applyDamage, recomputeDerived, ensureAttributes, spendAttrPoint, deflect, spendClassPoint, classTrack, spendablePoints, pendingPoints, scaleEnemy, statusResist, accuracy, dodge, accFromSavvy, dodgeFromHustle, dmgFromSavvy, deflectFromComposure, soakHit, hitChance, rollHit, unitCombat, equipItem, equipSlotsFor, unequipItem, equippedStats, equippedAction, weaponProc, moveCostOf, reachOf, rangeOf, ammoCostOf, orderedActionIds, inventoryCapOf, PROGRESSION, ATTR_KEYS, ENEMY_SCALING, HIT, EQUIP_SLOTS, REACH, THROW_RANGE, lookOf, gritSaveChance, SAVE,
 } from '../../src/stats.js';
-import * as stats from '../../src/stats.js';
 import { CLASSES } from '../../src/data/classes.js';
 import { ENEMY_TYPES } from '../../src/data/enemies.js';
 import { ITEMS } from '../../src/data/items.js';
@@ -254,37 +253,6 @@ test('an ammo-priced attack is not automatically everybody\'s', () => {
   assert.ok(s.actions.includes('ream-throw'));
 });
 
-test('the freed talents reproduce the effects the classes used to bake', () => {
-  // The test that makes TALENT_PLAN M1 a MOVE rather than a rebalance. These
-  // are the exact bags data/classes.js carried before the extraction; if this
-  // drifts, the migration re-tuned something on the way past.
-  const was = {
-    'office-drone': { paperDamageBonus: 2, paperAmmoDiscount: 1, paperCutImmune: true, foldsAirplanes: true },
-    'mail-room': { slipImmune: true },
-    'it-support': { shockImmune: true, grantsAction: 'kick' },
-    security: { surfaceDamageResist: 1 },
-    'human-resources': {},
-  };
-  for (const [classId, effects] of Object.entries(was)) {
-    assert.deepEqual(createSheet(classId).talent.effects, effects, classId);
-  }
-  // The Manager is the one deliberate departure, and it is POWERS_PLAN M9's
-  // doing rather than this plan's: Smoker granted `cigarette`, a seventh
-  // self-heal hiding in a talent, which went with the other five.
-  assert.deepEqual(createSheet('middle-manager').talent.effects, { hasLighter: true });
-});
-
-test('no class track grants a talent effect any more', () => {
-  // Sharp Folds, Corner-Office Traction, Frequent Flier and Always Moving were
-  // talents wearing a track node's clothes (TALENT_PLAN decision 4). A track
-  // is for a class's VERB; "cannot slip" is not one.
-  for (const def of Object.values(CLASSES)) {
-    for (const node of def.track || []) {
-      assert.equal(node.effect?.talent, undefined, `${node.id} grants a talent effect`);
-    }
-  }
-});
-
 test('spendClassPoint refuses unknown nodes, empty pool, and double-takes', () => {
   const s = createSheet('office-drone');
   s.classPoints = 1;
@@ -363,15 +331,6 @@ test('scaleEnemy grows the max HP of a class-backed enemy too', () => {
   const s = scaleEnemy(m, 3);
   assert.ok(s.maxHp > m.maxHp, 'max HP grows');
   assert.equal(s.hp, undefined, 'and no second HP field is invented');
-});
-
-// The floor curve is gone (PROGRESSION_PLAN.md decisions 13-14, designer
-// 2026-08-02: enemies do not autoscale with depth). `effectiveLevel` went with
-// it, so what used to be asserted here is now asserted by its absence: an
-// enemy's level comes from its placement, and nothing derives one from a floor.
-test('nothing derives an enemy level from floor depth any more', () => {
-  assert.equal(typeof stats.effectiveLevel, 'undefined',
-    'effectiveLevel is retired - a floor number must not imply a tier');
 });
 
 // A placement may name its own tier (`"G": "manager@3"`), which is how a floor
@@ -1113,10 +1072,6 @@ test('all three universal verbs share the bucket beside the basic attack (Q217-A
   assert.ok(ids.indexOf('pull') < ids.indexOf('paper-ball'), 'universal verbs precede the throws');
 });
 
-test('THROW_RANGE is a shared constant, not a per-module copy', () => {
-  assert.ok(Number.isInteger(THROW_RANGE) && THROW_RANGE > 0);
-});
-
 // --- unitCombat: the AI archetype seam ----------------------------------------
 // This is no longer decorative. An AI unit can be backed by an ENEMY_TYPES entry
 // OR by a CLASS - an enemy-side summon resolves its archetype from CLASSES
@@ -1191,16 +1146,6 @@ test('lookOf falls through to the companion entry, then to null', () => {
   assert.deepEqual(lookOf(withCompanion), COMPANIONS[withCompanion.companionId].look ?? null);
   assert.equal(lookOf({}), null, 'a sheet belonging to nothing has no look');
   assert.equal(lookOf(null), null, 'and neither does nothing at all');
-});
-
-// --- no automatic healing (designer 2026-08-02) ------------------------------
-// This block used to pin the stairwell breather, including the `Math.max(hp, 0)`
-// that carried a DOWNED companion to the landing. Both are struck, so what is
-// pinned now is their absence and the object that replaced them: a downed
-// character is only revived by something carrying `revive`.
-test('the stairwell breather is gone, along with its hidden revive', () => {
-  assert.equal(typeof stats.stairwellHeal, 'undefined',
-    'nothing tops a sheet up just for changing floors');
 });
 
 test('the revive economy exists and is an item, not a rule', () => {

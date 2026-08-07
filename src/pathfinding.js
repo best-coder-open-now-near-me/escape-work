@@ -26,7 +26,7 @@ import { DIAGONAL_DIRS, NEIGHBOR_DIRS } from './directions.js';
 // ("no route") is the honest thing to hand back.
 const MAX_EXPLORED = 200_000;
 
-export function findPath(isWalkable, sx, sz, tx, tz, extraCost = null, stepOpen = null) {
+export function findPath(isWalkable, sx, sz, tx, tz, extraCost = null, stepOpen = null, maxExplored = MAX_EXPLORED) {
   if (!isWalkable(tx, tz)) return null;
   const key = (x, z) => x + ',' + z;
   const dist = new Map([[key(sx, sz), 0]]);
@@ -34,7 +34,7 @@ export function findPath(isWalkable, sx, sz, tx, tz, extraCost = null, stepOpen 
   const open = [[0, sx, sz]];
   let explored = 0;
   while (open.length) {
-    if (++explored > MAX_EXPLORED) return null;
+    if (++explored > maxExplored) return null;
     open.sort((a, b) => a[0] - b[0]); // tiny grids; a heap would be overkill
     const [d, x, z] = open.shift();
     if (x === tx && z === tz) break;

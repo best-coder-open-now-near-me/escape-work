@@ -57,11 +57,17 @@ const devFiles = existsSync('levels/dev')
   ? readdirSync('levels/dev').filter((f) => f.endsWith('.json'))
   : [];
 
-test('there are shipped levels', () => {
-  assert.ok(files.length >= 1);
-});
+const ARCHETYPE_KITS = [
+  ['COMPANIONS', COMPANION_KITS],
+  ['ENEMY_TYPES', ENEMY_KITS],
+];
 
-test('every registry cross-reference resolves', () => {
+const ARCHETYPE_IDENTITY = new Set([
+  'classId', 'char', 'examine', 'dialogue', 'recruitedDialogue',
+  'level', 'xp', 'loot', 'attacks', 'attackAp', 'aggression', 'summon',
+]);
+
+test('class and archetype registry references resolve', () => {
   // Class/companion action ids and their track grants must exist in ACTIONS.
   for (const [regName, reg] of [['CLASSES', CLASSES], ['COMPANIONS', COMPANIONS]]) {
     for (const [id, def] of Object.entries(reg)) {
@@ -74,16 +80,15 @@ test('every registry cross-reference resolves', () => {
   }
   // A companion or an enemy that IS one of the classes names it and inherits
   // it. The class must resolve...
-  const ARCHETYPE_KITS = [
-    ['COMPANIONS', COMPANION_KITS],
-    ['ENEMY_TYPES', ENEMY_KITS],
-  ];
   for (const [regName, kits] of ARCHETYPE_KITS) {
     for (const [id, kit] of Object.entries(kits)) {
       if (!kit.classId) continue; // a standalone archetype with no class twin
       assert.ok(CLASSES[kit.classId], `${regName}.${id} classId "${kit.classId}" is a real class`);
     }
   }
+});
+
+test('class-backed kits only declare meaningful overrides', () => {
   // ...and must never re-state something the class already says. That
   // restatement is what let the mail room companion keep the old rig and the old
   // kit after the Mail Room class moved on - a silent copy that drifts. An
@@ -102,10 +107,6 @@ test('every registry cross-reference resolves', () => {
   // bounty, a body's loot, the AI's damage rolls and how it reads on the focus
   // banner. Those aren't a second implementation of a shared stat - a party
   // member has no `xp` reward because nobody kills him for it.
-  const IDENTITY = new Set([
-    'classId', 'char', 'examine', 'dialogue', 'recruitedDialogue',
-    'level', 'xp', 'loot', 'attacks', 'attackAp', 'aggression', 'summon',
-  ]);
   // The check's granularity follows the MERGE's: a field merged per key (attr)
   // is checked per key, or three verbatim attributes hide behind one that
   // differs - which is exactly how the intern kept copying IT Support's grit,
@@ -115,7 +116,7 @@ test('every registry cross-reference resolves', () => {
       if (!kit.classId) continue;
       const base = CLASSES[kit.classId];
       for (const [key, val] of Object.entries(kit)) {
-        if (IDENTITY.has(key) || !(key in base)) continue;
+        if (ARCHETYPE_IDENTITY.has(key) || !(key in base)) continue;
         if (MERGED_PER_KEY.includes(key)) {
           for (const [sub, v] of Object.entries(val)) {
             assert.notDeepEqual(v, base[key]?.[sub],
@@ -128,7 +129,9 @@ test('every registry cross-reference resolves', () => {
       }
     }
   }
+});
 
+test('status and summon references resolve', () => {
   // One stat, one spelling. The check above can only compare keys the class
   // ALSO has, so a kit writing `hp` where the class writes `maxHp` slips past
   // it untouched however far the two values diverge - which is precisely how
@@ -204,6 +207,9 @@ test('every registry cross-reference resolves', () => {
   for (const [id, a] of Object.entries(ACTIONS)) {
     if (a.type === 'summon') assert.ok(CLASSES[a.archetype] || ENEMY_TYPES[a.archetype], `action "${id}" summons a real archetype`);
   }
+});
+
+test('playable class verbs and registered actions are reachable', () => {
   // Every playable class is FOR something, and no two are for the same thing
   // (POWERS_PLAN M8). This is the lint that stops the roster converging back
   // into six vocabularies over one character - which is exactly what it was
@@ -248,6 +254,9 @@ test('every registry cross-reference resolves', () => {
   for (const id of Object.keys(ACTIONS)) {
     assert.ok(reachable.has(id), `action "${id}" is reachable by somebody`);
   }
+});
+
+test('action and enemy combat data is valid', () => {
   // Anything that paints the floor names a real tile type - the cone's
   // `leaves` and the zone verb's alike (POWERS_PLAN M3). A typo here is
   // invisible until someone fires the power in a real fight and the surface
@@ -281,6 +290,9 @@ test('every registry cross-reference resolves', () => {
         `enemy "${id}" support cooldown is a non-negative integer`);
     }
   }
+});
+
+test('loot, shops, and items are reachable and valid', () => {
   // Tile loot tables exist, and every table entry names a real item.
   for (const [id, def] of Object.entries(TILE_TYPES)) {
     if (def.loot) {
@@ -352,6 +364,9 @@ test('every registry cross-reference resolves', () => {
       assert.ok(!it.slot && !it.heal && !it.ammo, `cash item "${id}" is only money`);
     }
   }
+});
+
+test('tile and actor presentation data is internally consistent', () => {
   // A level's map is one CHARACTER per cell and the editor exports canonical
   // registry chars, so a duplicate `char` silently makes one prop unpaintable
   // and corrupts the load -> export round trip. With a large furniture kit

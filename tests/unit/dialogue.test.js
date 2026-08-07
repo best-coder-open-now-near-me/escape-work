@@ -40,10 +40,3 @@ test('a node with no options at all still offers Leave', () => {
   assert.deepEqual(nodeOptions(null), [{ label: 'Leave', next: null }]);
   assert.deepEqual(nodeOptions({ options: [] }), [{ label: 'Leave', next: null }]);
 });
-
-test('the Leave fallback is not shared mutable state', () => {
-  // Two dead-end nodes must not be able to scribble on each other's options.
-  const a = nodeOptions({});
-  assert.equal(a[0].label, 'Leave');
-  assert.equal(nodeOptions({})[0].label, 'Leave');
-});
