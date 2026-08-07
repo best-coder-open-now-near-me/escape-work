@@ -43,6 +43,34 @@ fit below the ceiling, the command stops and names it instead of producing an
 invalid partial bundle. Use `--force` to replace an existing output directory,
 or `--max-mb` / `--max-bytes` to choose a different exclusive ceiling.
 
+### Publish changed assets to the private repository
+
+The private repository stores the unpacked runtime tree, not the transfer ZIPs.
+Clone it once into the ignored build workspace:
+
+```sh
+git clone https://github.com/best-coder-open-now-near-me/private-assets.git \
+  build/private-assets-repo
+```
+
+The normal command is a read-only comparison:
+
+```sh
+npm run publish:private-assets
+```
+
+When that report is correct, opt into the external write explicitly:
+
+```sh
+npm run publish:private-assets -- --push
+```
+
+The push path refuses a dirty private checkout, verifies the configured remote
+and branch, validates `build:synty` against the prepared source, stages only
+paths owned by `asset-publish-index.json`, commits only when bytes changed, and
+uses an ordinary non-force push. An unchanged package exits without building,
+committing, or contacting the remote.
+
 ## fbx-to-glb.py — Unity `.fbx` → game `.glb`
 
 ### Why this exists
