@@ -22,6 +22,55 @@ profile if the converted tree lives elsewhere. Gameplay keeps its existing
 class and tile ids: the profile changes presentation only, so removing it or
 replacing the art does not migrate saves or levels.
 
+### Split a private runtime package for transfer
+
+`bundle-private-assets.mjs` packages any prepared private-asset tree as a set
+of deterministic ZIP volumes. The default ceiling is an exclusive 24,000,000
+bytes, leaving a full decimal megabyte of margin below a 25 MB upload limit.
+It uses only Node built-ins, preserves relative paths, and writes a JSON index
+containing the size, SHA-256 hash, and owning volume for every source file.
+
+```sh
+npm run bundle:private-assets -- \
+  --source build/private-assets-synty \
+  --out build/private-assets-synty-split \
+  --name escape-work-synty-runtime
+```
+
+Extract every volume into the same private-repository root. Files never span
+volumes, so ordinary ZIP tools are sufficient. If one individual file cannot
+fit below the ceiling, the command stops and names it instead of producing an
+invalid partial bundle. Use `--force` to replace an existing output directory,
+or `--max-mb` / `--max-bytes` to choose a different exclusive ceiling.
+
+### Publish changed assets to the private repository
+
+The private repository stores the unpacked runtime tree, not the transfer ZIPs.
+Clone it once into the ignored build workspace:
+
+```sh
+git clone https://github.com/best-coder-open-now-near-me/private-assets.git \
+  build/private-assets-repo
+```
+
+The normal command is a read-only comparison:
+
+```sh
+npm run publish:private-assets
+```
+
+When that report is correct, opt into the external write explicitly:
+
+```sh
+npm run publish:private-assets -- --push
+```
+
+The push path refuses a dirty private checkout, verifies the configured remote
+and branch, validates `build:synty` against the prepared source, stages only
+paths owned by `asset-publish-index.json`, commits only when bytes changed, and
+uses an ordinary non-force push. An unchanged package exits without building,
+committing, or contacting the remote.
+
 ## fbx-to-glb.py — Unity `.fbx` → game `.glb`
 
 ### Why this exists
