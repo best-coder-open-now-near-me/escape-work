@@ -14,6 +14,18 @@ test('ordinary source and test runs stay on built-in art', () => {
 
 test('the Synty profile remaps presentation without changing gameplay data', () => {
   assert.equal(characterArt('worker', 'synty'), 'synty/generic-business-male');
+  assert.deepEqual(
+    Object.fromEntries(['worker', 'midmanager', 'mailroom', 'itsupport', 'hrrep', 'security']
+      .map((model) => [model, characterArt(model, 'synty')])),
+    {
+      worker: 'synty/generic-business-male',
+      midmanager: 'synty/generic-business-female',
+      mailroom: 'synty/shops-worker-male',
+      itsupport: 'synty/shops-clerk-male',
+      hrrep: 'synty/shops-clerk-female',
+      security: 'synty/shops-worker-female',
+    },
+  );
   const base = { solid: true, height: 0.5, primitive: 'printer', explosive: { damage: 8 } };
   const visual = tileArt('printer', base, 'synty');
   assert.equal(visual.model, 'synty/office/printer');
@@ -40,5 +52,13 @@ test('profile asset mappings are unique, relative, and GLB-only', () => {
       assert.ok(!targets.has(asset.to), `${id}: ${asset.to} is written once`);
       targets.add(asset.to);
     }
+  }
+});
+
+test('every Synty character override has a build-time asset mapping', () => {
+  const shipped = new Set(ART_PROFILES.synty.assets
+    .map(({ to }) => to.replace(/^characters\//, '').replace(/\.glb$/, '')));
+  for (const model of Object.values(ART_PROFILES.synty.characters)) {
+    assert.ok(shipped.has(model), `${model} is copied into the build`);
   }
 });

@@ -8,8 +8,9 @@ arrives.
 ## Optional licensed art profile
 
 Licensed source and converted files stay under ignored `assets/licensed/`.
-The opt-in Synty profile copies only the six runtime GLBs allowlisted in
-`src/data/art-profiles.js`; normal builds copy none of them.
+The opt-in Synty profile copies only the eleven runtime GLBs allowlisted in
+`src/data/art-profiles.js` (six characters and five office props); normal
+builds copy none of them.
 
 ```sh
 npm run build:synty
@@ -21,6 +22,11 @@ The default source is `assets/licensed/synty`. Set
 profile if the converted tree lives elsewhere. Gameplay keeps its existing
 class and tile ids: the profile changes presentation only, so removing it or
 replacing the art does not migrate saves or levels.
+
+GitHub previews and releases check out the private runtime repository with the
+`SYNTY_ASSETS_TOKEN` Actions secret, then run this profile build. The token
+should be fine-grained, limited to the private-assets repository, with read-only
+Contents access.
 
 ### Split a private runtime package for transfer
 

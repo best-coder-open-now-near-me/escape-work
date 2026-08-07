@@ -18,7 +18,12 @@ export const ART_PROFILES = Object.freeze({
     // private source tree into build/web; previews and ordinary builds select
     // the default profile and copy none of them.
     assets: Object.freeze([
+      { from: 'characters/generic-business-female.glb', to: 'characters/synty/generic-business-female.glb' },
       { from: 'characters/generic-business-male.glb', to: 'characters/synty/generic-business-male.glb' },
+      { from: 'characters/shops-clerk-female.glb', to: 'characters/synty/shops-clerk-female.glb' },
+      { from: 'characters/shops-clerk-male.glb', to: 'characters/synty/shops-clerk-male.glb' },
+      { from: 'characters/shops-worker-female.glb', to: 'characters/synty/shops-worker-female.glb' },
+      { from: 'characters/shops-worker-male.glb', to: 'characters/synty/shops-worker-male.glb' },
       { from: 'office/chair.glb', to: 'synty/office/chair.glb' },
       { from: 'office/desk.glb', to: 'synty/office/desk.glb' },
       { from: 'office/plant.glb', to: 'synty/office/plant.glb' },
@@ -27,6 +32,11 @@ export const ART_PROFILES = Object.freeze({
     ]),
     characters: Object.freeze({
       worker: 'synty/generic-business-male',
+      midmanager: 'synty/generic-business-female',
+      mailroom: 'synty/shops-worker-male',
+      itsupport: 'synty/shops-clerk-male',
+      hrrep: 'synty/shops-clerk-female',
+      security: 'synty/shops-worker-female',
     }),
     tiles: Object.freeze({
       chair: Object.freeze({ model: 'synty/office/chair', scale: 0.9, rotY: 0 }),

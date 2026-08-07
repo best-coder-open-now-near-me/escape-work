@@ -16,8 +16,9 @@ export function createPicker() {
   // instances are captured once at registration; their world AABBs update
   // live as the holder moves, so a wandering enemy stays pickable.
   const items = new Map();
+  const BODY_KINDS = new Set(['party', 'enemy', 'npc', 'summon']);
 
-  function register(entity, kind, ref, { precise = false } = {}) {
+  function register(entity, kind, ref, options = {}) {
     if (!entity || items.has(entity)) return;
     const instances = [];
     for (const rc of entity.findComponents('render')) {
@@ -27,6 +28,13 @@ export function createPicker() {
       for (const mi of rc.meshInstances) instances.push(mi);
     }
     if (!instances.length) return;
+    // Animated GLBs can report a deliberately conservative WORLD aabb large
+    // enough for every pose in the clip. That is useful for rendering culls
+    // but poisonous for interaction: a Synty character several tiles away can
+    // then intercept a door click. Bodies default to their per-mesh oriented
+    // bounds; callers may still override the policy explicitly, and doors use
+    // the same precise path to avoid empty corners around a swung panel.
+    const precise = options.precise ?? BODY_KINDS.has(kind);
     items.set(entity, { kind, ref, instances, precise });
     // Auto-forget when the entity is destroyed (doors re-render on every
     // toggle; loose items vanish when picked up).
