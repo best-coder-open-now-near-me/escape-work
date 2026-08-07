@@ -6,6 +6,7 @@ import {
   characterArt,
   tileArt,
 } from '../../src/data/art-profiles.js';
+import { classesForProfile } from '../../src/data/classes.js';
 
 test('ordinary source and test runs stay on built-in art', () => {
   assert.equal(ACTIVE_ART_PROFILE, 'default');
@@ -39,6 +40,22 @@ test('the Synty profile remaps presentation without changing gameplay data', () 
     primitive: 'printer',
     explosive: { damage: 8 },
   });
+});
+
+test('every class-backed actor resolves its model through the active art profile', () => {
+  const classes = classesForProfile('synty');
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(classes).map(([id, def]) => [id, def.model])),
+    {
+      'office-drone': 'synty/generic-business-male',
+      'middle-manager': 'synty/generic-business-female',
+      'mail-room': 'synty/shops-worker-male',
+      'it-support': 'synty/shops-clerk-male',
+      'human-resources': 'synty/shops-clerk-female',
+      security: 'synty/shops-worker-female',
+      employee: 'synty/generic-business-male',
+    },
+  );
 });
 
 test('profile asset mappings are unique, relative, and GLB-only', () => {

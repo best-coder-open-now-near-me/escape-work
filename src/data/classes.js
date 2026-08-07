@@ -102,11 +102,11 @@ export function fromClass({ classId, ...over }, { drop = [] } = {}) {
 // key, a whole-value replace is checked whole.
 export const MERGED_PER_KEY = ['attr'];
 
-export const CLASSES = {
+const CLASS_DEFS = {
   'office-drone': {
     name: 'Office Drone',
     primary: 'attack', // the baseline the other five read against
-    model: characterArt('worker'),
+    model: 'worker',
     tagline: 'Seen everything. Feels nothing. Balanced stats.',
     experience: 'Cubicle Occupant, 2019–present. Duties: unclear.',
     maxHp: 22,
@@ -279,7 +279,7 @@ export const CLASSES = {
     // Deliberately the office-worker rig: an employee is meant to read as
     // anonymous, and the wash-out below is the point, not a workaround. It is
     // the one character type that shares a model, by choice.
-    model: characterArt('worker'),
+    model: 'worker',
     look: { tint: [0.82, 0.86, 0.95], build: { legs: 1.7, torso: 1.2 } },
     playable: false,
     maxHp: 5,
@@ -307,3 +307,18 @@ export const CLASSES = {
     ],
   },
 };
+
+// Resolve every class's stable rig id through the active presentation profile
+// in one place. Class-backed companions, enemies and summons inherit the
+// resolved model automatically, and a newly added class cannot accidentally
+// bypass an installed art pack by forgetting to call characterArt itself.
+export function classesForProfile(profileId) {
+  return Object.fromEntries(
+    Object.entries(CLASS_DEFS).map(([id, def]) => [
+      id,
+      { ...def, model: characterArt(def.model, profileId) },
+    ]),
+  );
+}
+
+export const CLASSES = classesForProfile();
