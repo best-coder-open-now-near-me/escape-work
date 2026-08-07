@@ -83,8 +83,8 @@ test.describe('smoke', () => {
     // At the file's 120s default it timed out twice on CI's software GL while
     // passing locally - a runner-speed cliff, not a behaviour change.
     test.setTimeout(300_000);
-    // The core loop. Pinned to always hit once combat exists, so this step
-    // tests "can a fight start and resolve a swing", not the dice.
+    // This owns the transition into combat and the live turn-order surface;
+    // attack resolution is covered by the dedicated combat specs.
     const { enterCombat } = await import('./helpers.js');
     await enterCombat(page);
     await expect(page.locator('#combat-panel')).toBeVisible();

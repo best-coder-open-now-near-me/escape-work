@@ -148,8 +148,11 @@ jobs:
         if: steps.pw-cache.outputs.cache-hit == 'true'
         run: npx playwright install-deps chromium
 
-      - name: Full E2E suite
-        run: npm run test:e2e
+      # Smoke and editor already passed in the required fast job. Together that
+      # gate and this remainder still cover the full suite without paying for
+      # those model-heavy specs twice.
+      - name: Remaining E2E tests
+        run: node tests/e2e/run-playwright.mjs --after-fast
 
       - name: Upload Playwright report on failure
         if: failure()

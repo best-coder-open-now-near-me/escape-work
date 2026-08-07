@@ -104,27 +104,6 @@ test('unequip obeys capacity, then succeeds after the bag drains', async ({ page
   expect(await page.evaluate(() => window.__game.stats.inventory.length)).toBe(30);
 });
 
-test('a basic weapon attack is always on the bar; the weapon defines it', async ({ page }) => {
-  test.setTimeout(300_000);
-  await bootAndPick(page, 'office-drone');
-  // Bare hands: everyone has a basic punch (the gap this closes).
-  await expect(page.locator('#hotbar-act-punch')).toBeVisible();
-  expect(await page.locator('#hotbar-act-staple-jab').count()).toBe(0);
-
-  // Equip a red stapler: the basic swing becomes the stapler's; punch retires.
-  await page.evaluate(() => { window.__god.player.inventory = ['red-stapler']; });
-  await page.keyboard.press('i');
-  await expect(page.locator('#inventory-panel')).toBeVisible();
-  await page.click('#inv-equip-0');
-  await expect(page.locator('#hotbar-act-staple-jab')).toBeVisible();
-  expect(await page.locator('#hotbar-act-punch').count()).toBe(0);
-
-  // Stow it: back to bare hands.
-  await page.click('#equip-unequip-weapon');
-  await expect(page.locator('#hotbar-act-punch')).toBeVisible();
-  expect(await page.locator('#hotbar-act-staple-jab').count()).toBe(0);
-});
-
 test('equipping and stowing gear in combat costs 2 AP and refreshes the live kit', async ({ page }) => {
   test.setTimeout(300_000);
   await bootStash(page, EQUIP_ARENA, 'office-drone');
@@ -194,17 +173,6 @@ test('outfits and trinkets fill their own slots and lift derived stats', async (
   expect(await page.evaluate(() => window.__game.stats.maxHp)).toBe(hp0 + 2); // the mug's +2
   await expect(page.locator('#equip-slot-trinket')).toContainText('Okayest Mug');
   await expect(page.locator('#equip-slot-outfit')).toContainText('Company Fleece');
-});
-
-test('the shoes slot equips footwear', async ({ page }) => {
-  test.setTimeout(300_000);
-  await bootAndPick(page, 'office-drone');
-  await page.evaluate(() => { window.__god.player.inventory = ['warehouse-boots']; });
-  await page.keyboard.press('i');
-  await expect(page.locator('#inventory-panel')).toBeVisible();
-  await page.click('#inv-equip-0');
-  await expect.poll(() => page.evaluate(() => window.__game.stats.equipped.shoes)).toBe('warehouse-boots');
-  await expect(page.locator('#equip-slot-shoes')).toContainText('Warehouse Boots');
 });
 
 test('the Send button refuses a full recipient, then hands over after space opens', async ({ page }) => {

@@ -4,13 +4,23 @@
 // short-lived parent process instead.
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, open, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, open, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const requestedArgs = process.argv.slice(2);
+const afterFast = requestedArgs.includes('--after-fast');
+const playwrightArgs = requestedArgs.filter((arg) => arg !== '--after-fast');
+const fastSpecs = new Set(['editor.spec.js', 'smoke.spec.js']);
+const selectedSpecs = afterFast
+  ? (await readdir(resolve(root, 'tests/e2e'), { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.spec.js') && !fastSpecs.has(entry.name))
+    .map((entry) => entry.name)
+    .sort()
+  : [];
 
 // Playwright's `webServer.command` is launched through a shell. On Windows the
 // tests finish but Playwright can wait forever for that shell to observe the
@@ -61,7 +71,8 @@ const stderr = await open(stderrPath, 'w');
 const child = spawn(process.execPath, [
   resolve(root, 'node_modules/@playwright/test/cli.js'),
   'test',
-  ...process.argv.slice(2),
+  ...selectedSpecs,
+  ...playwrightArgs,
 ], {
   cwd: root,
   stdio: ['ignore', stdout.fd, stderr.fd],
