@@ -7,6 +7,7 @@
   "scripts": {
     "build": "node build.mjs",
     "build:synty": "node build.mjs --profile=synty",
+    "bundle:private-assets": "node tools/bundle-private-assets.mjs",
     "serve": "node build.mjs && node serve.mjs --port 8000",
     "serve:synty": "node build.mjs --profile=synty && node serve.mjs --port 8000",
     "test": "node --test tests/unit/*.test.js",

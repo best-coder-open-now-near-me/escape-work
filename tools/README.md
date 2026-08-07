@@ -22,6 +22,27 @@ profile if the converted tree lives elsewhere. Gameplay keeps its existing
 class and tile ids: the profile changes presentation only, so removing it or
 replacing the art does not migrate saves or levels.
 
+### Split a private runtime package for transfer
+
+`bundle-private-assets.mjs` packages any prepared private-asset tree as a set
+of deterministic ZIP volumes. The default ceiling is an exclusive 24,000,000
+bytes, leaving a full decimal megabyte of margin below a 25 MB upload limit.
+It uses only Node built-ins, preserves relative paths, and writes a JSON index
+containing the size, SHA-256 hash, and owning volume for every source file.
+
+```sh
+npm run bundle:private-assets -- \
+  --source build/private-assets-synty \
+  --out build/private-assets-synty-split \
+  --name escape-work-synty-runtime
+```
+
+Extract every volume into the same private-repository root. Files never span
+volumes, so ordinary ZIP tools are sufficient. If one individual file cannot
+fit below the ceiling, the command stops and names it instead of producing an
+invalid partial bundle. Use `--force` to replace an existing output directory,
+or `--max-mb` / `--max-bytes` to choose a different exclusive ceiling.
+
 ## fbx-to-glb.py — Unity `.fbx` → game `.glb`
 
 ### Why this exists
